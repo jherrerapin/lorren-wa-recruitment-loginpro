@@ -26,6 +26,8 @@ enum CandidateStatus {
   RECHAZADO
   /// Estado para candidatos que ya fueron contactados por el equipo.
   CONTACTADO
+  /// Estado final cuando el candidato decide no continuar.
+  NO_INTERESADO
 }
 
 /// Enumera cada paso del flujo conversacional simplificado.

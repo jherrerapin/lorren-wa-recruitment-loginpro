@@ -58,7 +58,11 @@ function isAffirmativeInterest(text) {
 
 function isNegativeInterest(text) {
   const n = normalizeText(text).toLowerCase();
-  return /^(no+|nop+|negativo)$|no gracias|no me interesa|no estoy interesad|no deseo|paso|ya no|prefiero no/i.test(n);
+  return /^(no+|nop+|negativo)$|no gracias|no me interesa|no estoy interesad|no deseo|paso|ya no|prefiero no|no quiero continuar|no quiero seguir|no contin[uú]o|no continuar/i.test(n);
+}
+
+function isReopenCommand(text) {
+  return normalizeText(text) === 'QUIERO CONTINUAR';
 }
 
 function shouldRejectByRequirements(text, parsed = {}) {
@@ -158,6 +162,68 @@ function parseNaturalData(text) {
     }
   }
 
+  const commaParts = text
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (commaParts.length >= 3) {
+    const tokenTypeMap = {
+      cc: 'CC', cédula: 'CC', cedula: 'CC',
+      ti: 'TI',
+      ce: 'CE',
+      pasaporte: 'Pasaporte',
+      ppt: 'PPT'
+    };
+
+    for (const token of commaParts) {
+      const lowered = token.toLowerCase();
+
+      if (!result.documentType && tokenTypeMap[lowered]) {
+        result.documentType = tokenTypeMap[lowered];
+        continue;
+      }
+
+      if (!result.documentNumber && /^\d{6,12}$/.test(token)) {
+        result.documentNumber = token;
+        continue;
+      }
+
+      if (!result.age && /^\d{1,2}$/.test(token)) {
+        const age = Number(token);
+        if (age >= 14 && age <= 99) {
+          result.age = age;
+          continue;
+        }
+      }
+
+      if (!result.transportMode && /\b(moto|bicicleta|bici|carro|bus)\b/i.test(token)) {
+        result.transportMode = capitalizeWords(token.replace(/bici/i, 'bicicleta'));
+        continue;
+      }
+
+      if (!result.medicalRestrictions && /(no\s+tengo\s+restricciones?|sin\s+restricciones?|ninguna)/i.test(token)) {
+        result.medicalRestrictions = 'Sin restricciones médicas';
+        continue;
+      }
+
+      if (!result.experienceInfo && /\b(no\s+tengo\s+experiencia|sin\s+experiencia)\b/i.test(token)) {
+        result.experienceInfo = 'No';
+        continue;
+      }
+
+      if (!result.experienceTime && (/^\d+$/.test(token) || /(\d+)\s*(a[ñn]os?|mes(?:es)?|semana(?:s)?)/i.test(token))) {
+        result.experienceTime = token;
+        if (!result.experienceInfo) result.experienceInfo = Number(token) > 0 ? 'Sí' : 'No';
+        continue;
+      }
+
+      if (!result.neighborhood && /^[a-záéíóúñ\s]{2,40}$/i.test(token) && !/\b(no|si|sí)\b/i.test(token)) {
+        result.neighborhood = capitalizeWords(token);
+      }
+    }
+  }
+
   return result;
 }
 
@@ -184,6 +250,27 @@ function getNaturalDelayMs(inputText = '', outputText = '') {
   const referenceLength = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1);
   const delayByLength = 1500 + Math.min(1000, Math.round(referenceLength * 8));
   return Math.max(1500, Math.min(2500, delayByLength));
+}
+
+function buildCapturedSummary(parsedData) {
+  const labels = {
+    fullName: 'nombre completo',
+    documentType: 'tipo de documento',
+    documentNumber: 'número de documento',
+    age: 'edad',
+    neighborhood: 'barrio',
+    experienceInfo: 'experiencia',
+    experienceTime: 'tiempo de experiencia',
+    medicalRestrictions: 'restricciones médicas',
+    transportMode: 'medio de transporte'
+  };
+
+  const entries = Object.entries(parsedData)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${labels[key] || key}: ${value}`);
+
+  if (!entries.length) return '';
+  return `Esto fue lo que entendí: ${entries.join(', ')}.`;
 }
 
 async function saveInboundMessage(prisma, candidateId, message, body, type) {
@@ -235,6 +322,34 @@ async function processText(prisma, candidate, from, text) {
   const cleanText = normalizeText(text);
   const hasDataIntent = containsCandidateData(cleanText);
 
+  if (candidate.status === CandidateStatus.NO_INTERESADO && isReopenCommand(cleanText)) {
+    const missing = getMissingFields(candidate);
+    if (missing.length === 0) {
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: { status: CandidateStatus.REGISTRADO, currentStep: ConversationStep.DONE }
+      });
+      await reply(prisma, candidate.id, from, MENSAJE_FINAL);
+      return;
+    }
+
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: { status: CandidateStatus.NUEVO, currentStep: ConversationStep.COLLECTING_DATA }
+    });
+    await reply(prisma, candidate.id, from, `Perfecto, reactivamos tu postulación. Conservé tus datos y solo faltan: ${missing.join(', ')}.`);
+    return;
+  }
+
+  if (isNegativeInterest(cleanText) && candidate.status !== CandidateStatus.RECHAZADO) {
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: { status: CandidateStatus.NO_INTERESADO, currentStep: ConversationStep.DONE }
+    });
+    await reply(prisma, candidate.id, from, CIERRE_NO_INTERES);
+    return;
+  }
+
   if (isFAQ(cleanText)) {
     await reply(prisma, candidate.id, from, FAQ_RESPONSE);
     return;
@@ -257,12 +372,6 @@ async function processText(prisma, candidate, from, text) {
   }
 
   if (candidate.currentStep === ConversationStep.GREETING_SENT) {
-    if (isNegativeInterest(cleanText)) {
-      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-      await reply(prisma, candidate.id, from, CIERRE_NO_INTERES);
-      return;
-    }
-
     if (isAffirmativeInterest(cleanText) || hasDataIntent) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       if (hasDataIntent) {
@@ -279,7 +388,8 @@ async function processText(prisma, candidate, from, text) {
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
           await reply(prisma, candidate.id, from, MENSAJE_FINAL);
         } else {
-          await reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+          const summary = buildCapturedSummary(parsedData);
+          await reply(prisma, candidate.id, from, `${summary} Para continuar solo me falta: ${missing.join(', ')}`);
         }
         return;
       }
@@ -301,7 +411,8 @@ async function processText(prisma, candidate, from, text) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
         await reply(prisma, candidate.id, from, MENSAJE_FINAL);
       } else {
-        await reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+        const summary = buildCapturedSummary(parsedData);
+        await reply(prisma, candidate.id, from, `${summary} Para continuar solo me falta: ${missing.join(', ')}`);
       }
       return;
     }
@@ -339,7 +450,11 @@ async function processText(prisma, candidate, from, text) {
       return;
     }
 
-    await reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+    const summary = buildCapturedSummary(parsedData);
+    const response = summary
+      ? `${summary} Para continuar solo me falta: ${missing.join(', ')}`
+      : `Gracias. Para continuar solo me falta: ${missing.join(', ')}`;
+    await reply(prisma, candidate.id, from, response);
     return;
   }
 }
