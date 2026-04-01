@@ -6,7 +6,12 @@
   <title>Panel de Reclutamiento</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 24px; background: #f8f9fa; color: #333; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color: #333; }
+    .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
+    .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
+    .navbar a:hover { color: #3498db; }
+    .navbar .brand { font-weight: 700; font-size: 16px; margin-right: 12px; }
+    .container { margin: 24px; }
     h1 { margin-bottom: 16px; color: #2c3e50; }
     .summary { margin-bottom: 16px; color: #666; font-size: 14px; }
     table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -22,58 +27,67 @@
     .badge-aprobado { background: #2ecc71; }
     .badge-rechazado { background: #e74c3c; }
     .badge-contactado { background: #3498db; }
+    .wa-link { color: #25d366; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>Panel de Reclutamiento</h1>
-  <p class="summary"><%= candidates.length %> candidato(s) registrado(s)</p>
-  <table>
-    <thead>
-      <tr>
-        <th>Fecha registro</th>
-        <th>Nombre</th>
-        <th>Teléfono</th>
-        <th>Documento</th>
-        <th>Edad</th>
-        <th>Ciudad</th>
-        <th>Barrio/Zona</th>
-        <th>Estado</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      <% for (const c of candidates) { %>
+  <nav class="navbar">
+    <span class="brand">LoginPro</span>
+    <a href="/admin">Candidatos</a>
+    <a href="/admin/monitor">Monitor</a>
+    <a href="/admin/export">Descargar Excel</a>
+  </nav>
+  <div class="container">
+    <h1>Panel de Reclutamiento</h1>
+    <p class="summary"><%= candidates.length %> candidato(s) registrado(s)</p>
+    <table>
+      <thead>
         <tr>
-          <td><%= formatDateTimeCO(c.createdAt) %></td>
-          <td><%= c.fullName || '—' %></td>
-          <td><%= c.phone %></td>
-          <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
-          <td><%= c.age || '—' %></td>
-          <td><%= c.city || '—' %></td>
-          <td><%= c.zone || '—' %></td>
-          <td>
-            <% const statusClass = {
-              'NUEVO': 'badge-nuevo',
-              'REGISTRADO': 'badge-registrado',
-              'VALIDANDO': 'badge-validando',
-              'APROBADO': 'badge-aprobado',
-              'RECHAZADO': 'badge-rechazado',
-              'CONTACTADO': 'badge-contactado'
-            }; %>
-            <% const statusLabel = {
-              'NUEVO': 'Nuevo',
-              'REGISTRADO': 'Registrado',
-              'VALIDANDO': 'En revisión',
-              'APROBADO': 'Aprobado',
-              'RECHAZADO': 'Rechazado',
-              'CONTACTADO': 'Contactado'
-            }; %>
-            <span class="badge <%= statusClass[c.status] || 'badge-nuevo' %>"><%= statusLabel[c.status] || c.status %></span>
-          </td>
-          <td><a href="/admin/candidates/<%= c.id %>">Ver detalle</a></td>
+          <th>Fecha registro</th>
+          <th>Nombre</th>
+          <th>Teléfono</th>
+          <th>Documento</th>
+          <th>Edad</th>
+          <th>Ciudad</th>
+          <th>Barrio/Zona</th>
+          <th>Estado</th>
+          <th></th>
         </tr>
-      <% } %>
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        <% for (const c of candidates) { %>
+          <tr>
+            <td><%= formatDateTimeCO(c.createdAt) %></td>
+            <td><%= c.fullName || '—' %></td>
+            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
+            <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
+            <td><%= c.age || '—' %></td>
+            <td><%= c.city || '—' %></td>
+            <td><%= c.zone || '—' %></td>
+            <td>
+              <% const statusClass = {
+                'NUEVO': 'badge-nuevo',
+                'REGISTRADO': 'badge-registrado',
+                'VALIDANDO': 'badge-validando',
+                'APROBADO': 'badge-aprobado',
+                'RECHAZADO': 'badge-rechazado',
+                'CONTACTADO': 'badge-contactado'
+              }; %>
+              <% const statusLabel = {
+                'NUEVO': 'Nuevo',
+                'REGISTRADO': 'Registrado',
+                'VALIDANDO': 'En revisión',
+                'APROBADO': 'Aprobado',
+                'RECHAZADO': 'Rechazado',
+                'CONTACTADO': 'Contactado'
+              }; %>
+              <span class="badge <%= statusClass[c.status] || 'badge-nuevo' %>"><%= statusLabel[c.status] || c.status %></span>
+            </td>
+            <td><a href="/admin/candidates/<%= c.id %>">Ver detalle</a></td>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
 </body>
 </html>

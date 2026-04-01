@@ -6,7 +6,12 @@
   <title>Detalle candidato</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 24px; background: #f8f9fa; color: #333; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color: #333; }
+    .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
+    .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
+    .navbar a:hover { color: #3498db; }
+    .navbar .brand { font-weight: 700; font-size: 16px; margin-right: 12px; }
+    .container { margin: 24px; }
     a { color: #3498db; text-decoration: none; }
     a:hover { text-decoration: underline; }
     .back-link { display: inline-block; margin-bottom: 16px; font-size: 14px; }
@@ -26,70 +31,86 @@
     .msg-candidato { background: #e3f2fd; margin-left: auto; }
     .msg-header { font-size: 11px; color: #888; margin-bottom: 4px; }
     .msg-body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+    .btn-wa { display: inline-block; padding: 8px 18px; background: #25d366; color: #fff; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 14px; margin-top: 12px; }
+    .btn-wa:hover { background: #1ebe57; color: #fff; text-decoration: none; }
+    .btn-cv { display: inline-block; padding: 8px 18px; background: #e67e22; color: #fff; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 14px; margin-top: 12px; margin-left: 8px; }
+    .btn-cv:hover { background: #cf6d17; color: #fff; text-decoration: none; }
   </style>
 </head>
 <body>
-  <a href="/admin" class="back-link">&larr; Volver al listado</a>
-  <h1><%= candidate.fullName || 'Candidato sin nombre' %></h1>
+  <nav class="navbar">
+    <span class="brand">LoginPro</span>
+    <a href="/admin">Candidatos</a>
+    <a href="/admin/monitor">Monitor</a>
+    <a href="/admin/export">Descargar Excel</a>
+  </nav>
+  <div class="container">
+    <a href="/admin" class="back-link">&larr; Volver al listado</a>
+    <h1><%= candidate.fullName || 'Candidato sin nombre' %></h1>
 
-  <div class="card">
-    <h2>Datos del candidato</h2>
-    <div class="info-grid">
-      <div class="info-item">
-        <label>Teléfono</label>
-        <span><%= candidate.phone %></span>
-      </div>
-      <div class="info-item">
-        <label>Documento</label>
-        <span><%= candidate.documentType && candidate.documentNumber ? candidate.documentType + ' ' + candidate.documentNumber : (candidate.documentNumber || '—') %></span>
-      </div>
-      <div class="info-item">
-        <label>Edad</label>
-        <span><%= candidate.age ? candidate.age + ' años' : '—' %></span>
-      </div>
-      <div class="info-item">
-        <label>Ciudad</label>
-        <span><%= candidate.city || '—' %></span>
-      </div>
-      <div class="info-item">
-        <label>Barrio/Zona</label>
-        <span><%= candidate.zone || '—' %></span>
-      </div>
-      <div class="info-item">
-        <label>Fecha de registro</label>
-        <span><%= formatDateTimeCO(candidate.createdAt) %></span>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Estado del candidato</h2>
-    <form method="post" action="/admin/candidates/<%= candidate.id %>/status" class="status-form">
-      <select name="status">
-        <option value="NUEVO" <%= candidate.status === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
-        <option value="REGISTRADO" <%= candidate.status === 'REGISTRADO' ? 'selected' : '' %>>Registrado</option>
-        <option value="VALIDANDO" <%= candidate.status === 'VALIDANDO' ? 'selected' : '' %>>En revisión</option>
-        <option value="APROBADO" <%= candidate.status === 'APROBADO' ? 'selected' : '' %>>Aprobado</option>
-        <option value="RECHAZADO" <%= candidate.status === 'RECHAZADO' ? 'selected' : '' %>>Rechazado</option>
-        <option value="CONTACTADO" <%= candidate.status === 'CONTACTADO' ? 'selected' : '' %>>Contactado</option>
-      </select>
-      <button type="submit">Guardar</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>Historial de conversación</h2>
-    <div class="messages-list">
-      <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
-      <% for (const m of sorted) { %>
-        <% const isBot = m.direction === 'OUTBOUND'; %>
-        <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
-          <div class="msg-header">
-            <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
-          </div>
-          <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
+    <div class="card">
+      <h2>Datos del candidato</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <label>Teléfono</label>
+          <span><%= candidate.phone %></span>
         </div>
+        <div class="info-item">
+          <label>Documento</label>
+          <span><%= candidate.documentType && candidate.documentNumber ? candidate.documentType + ' ' + candidate.documentNumber : (candidate.documentNumber || '—') %></span>
+        </div>
+        <div class="info-item">
+          <label>Edad</label>
+          <span><%= candidate.age ? candidate.age + ' años' : '—' %></span>
+        </div>
+        <div class="info-item">
+          <label>Ciudad</label>
+          <span><%= candidate.city || '—' %></span>
+        </div>
+        <div class="info-item">
+          <label>Barrio/Zona</label>
+          <span><%= candidate.zone || '—' %></span>
+        </div>
+        <div class="info-item">
+          <label>Fecha de registro</label>
+          <span><%= formatDateTimeCO(candidate.createdAt) %></span>
+        </div>
+      </div>
+      <a href="https://wa.me/<%= candidate.phone %>" target="_blank" class="btn-wa">Escribir por WhatsApp</a>
+      <% if (candidate.cvData) { %>
+        <a href="/admin/candidates/<%= candidate.id %>/cv" class="btn-cv">Descargar Hoja de Vida</a>
       <% } %>
+    </div>
+
+    <div class="card">
+      <h2>Estado del candidato</h2>
+      <form method="post" action="/admin/candidates/<%= candidate.id %>/status" class="status-form">
+        <select name="status">
+          <option value="NUEVO" <%= candidate.status === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
+          <option value="REGISTRADO" <%= candidate.status === 'REGISTRADO' ? 'selected' : '' %>>Registrado</option>
+          <option value="VALIDANDO" <%= candidate.status === 'VALIDANDO' ? 'selected' : '' %>>En revisión</option>
+          <option value="APROBADO" <%= candidate.status === 'APROBADO' ? 'selected' : '' %>>Aprobado</option>
+          <option value="RECHAZADO" <%= candidate.status === 'RECHAZADO' ? 'selected' : '' %>>Rechazado</option>
+          <option value="CONTACTADO" <%= candidate.status === 'CONTACTADO' ? 'selected' : '' %>>Contactado</option>
+        </select>
+        <button type="submit">Guardar</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Historial de conversación</h2>
+      <div class="messages-list">
+        <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
+        <% for (const m of sorted) { %>
+          <% const isBot = m.direction === 'OUTBOUND'; %>
+          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
+            <div class="msg-header">
+              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
+            </div>
+            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
+          </div>
+        <% } %>
+      </div>
     </div>
   </div>
 </body>

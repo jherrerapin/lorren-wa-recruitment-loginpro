@@ -7,6 +7,9 @@ import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from
 // Importa utilidades para extraer mensajes del payload y responder por WhatsApp.
 import { extractMessages, sendTextMessage } from '../services/whatsapp.js';
 
+// Importa utilidades para descargar medios adjuntos desde WhatsApp.
+import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
+
 // ─────────────────────────────────────────────────────────
 // Información de la vacante (fuente única de verdad para FAQ y saludo)
 // ─────────────────────────────────────────────────────────
@@ -59,6 +62,10 @@ const SOLICITAR_DATOS = `¡Perfecto! Para registrarte necesito los siguientes da
 - Barrio o zona donde vives
 
 Puedes enviarlos como prefieras, en un solo mensaje o por partes.`;
+
+const MENSAJE_PREGUNTAR_CV = `¿Tienes hoja de vida en PDF o Word para enviarnos? Si la tienes, envíala por este chat. Si no la tienes en este momento, no te preocupes, puedes enviarla después.`;
+
+const MENSAJE_CV_RECIBIDO = `¡Perfecto! Tu hoja de vida ha sido recibida correctamente.`;
 
 const MENSAJE_YA_REGISTRADO = `Ya te encuentras registrado/a en nuestro sistema. Recuerda que la entrevista se realizará el *8 de abril*. Está atento/a al llamado con el lugar y hora exacta. ¡Éxitos!`;
 
@@ -413,6 +420,29 @@ async function processText(prisma, candidate, from, text) {
     return;
   }
 
+  // ── ASK_CV: Esperando hoja de vida o respuesta negativa ──
+  if (candidate.currentStep === ConversationStep.ASK_CV) {
+    const n = cleanText.toLowerCase();
+    // Si dice que no tiene CV, cerrar el flujo
+    if (/\bno\b/.test(n) || /no tengo|no la tengo|no cuento|después|despues|luego|ahora no/i.test(n)) {
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: { currentStep: ConversationStep.DONE }
+      });
+      await reply(
+        prisma, candidate.id, from,
+        `No hay problema. Recuerda que la entrevista se realizará el *8 de abril*. Debes estar atento/a al llamado o aviso donde te confirmaremos el lugar y la hora exacta.\n\n¡Mucho éxito en el proceso!`
+      );
+      return;
+    }
+    // Cualquier otro texto — recordar que puede enviar CV o continuar
+    await reply(
+      prisma, candidate.id, from,
+      'Si tienes tu hoja de vida en PDF o Word, envíala por este chat. Si no la tienes ahora, escribe *no* y continuamos.'
+    );
+    return;
+  }
+
   // ── DONE: Candidato ya registrado ──
   if (candidate.currentStep === ConversationStep.DONE) {
     await reply(prisma, candidate.id, from, MENSAJE_YA_REGISTRADO);
@@ -558,7 +588,7 @@ async function processText(prisma, candidate, from, text) {
       await prisma.candidate.update({
         where: { id: candidate.id },
         data: {
-          currentStep: ConversationStep.DONE,
+          currentStep: ConversationStep.ASK_CV,
           status: CandidateStatus.REGISTRADO
         }
       });
@@ -566,7 +596,7 @@ async function processText(prisma, candidate, from, text) {
       const nombre = candidate.fullName ? candidate.fullName.split(' ')[0] : '';
       await reply(
         prisma, candidate.id, from,
-        `¡Listo${nombre ? ' ' + nombre : ''}! Tu información ha sido registrada correctamente.\n\nLa entrevista se realizará el *8 de abril*. Debes estar atento/a al llamado o aviso donde te confirmaremos el lugar y la hora exacta.\n\n¡Mucho éxito en el proceso!`
+        `¡Listo${nombre ? ' ' + nombre : ''}! Tu información ha sido registrada correctamente.\n\n${MENSAJE_PREGUNTAR_CV}`
       );
       return;
     }
@@ -663,8 +693,44 @@ export function webhookRouter(prisma) {
         const wasNew = await saveInboundMessage(prisma, candidate.id, message, bodyForLog, typeForLog);
         if (!wasNew) continue;
 
+        // Refrescar el candidato para tener el step actualizado.
+        const freshCandidateForDoc = await prisma.candidate.findUnique({
+          where: { id: candidate.id }
+        });
+
+        // Si el candidato está en ASK_CV y envía un documento, descargar y guardar CV.
+        if (freshCandidateForDoc.currentStep === ConversationStep.ASK_CV && message.type === 'document') {
+          try {
+            const mediaId = message.document.id;
+            const metadata = await fetchMediaMetadata(mediaId);
+            const buffer = await downloadMedia(metadata.url);
+
+            await prisma.candidate.update({
+              where: { id: candidate.id },
+              data: {
+                cvOriginalName: message.document.filename || 'documento',
+                cvMimeType: message.document.mime_type || 'application/octet-stream',
+                cvData: buffer,
+                currentStep: ConversationStep.DONE
+              }
+            });
+
+            await reply(
+              prisma, candidate.id, from,
+              `${MENSAJE_CV_RECIBIDO}\n\nRecuerda que la entrevista se realizará el *8 de abril*. Debes estar atento/a al llamado o aviso donde te confirmaremos el lugar y la hora exacta.\n\n¡Mucho éxito en el proceso!`
+            );
+          } catch (err) {
+            console.error('Error descargando CV:', err.message);
+            await reply(
+              prisma, candidate.id, from,
+              'Hubo un problema al recibir tu archivo. ¿Podrías intentar enviarlo de nuevo?'
+            );
+          }
+          continue;
+        }
+
         // Responder según el estado del candidato.
-        if (candidate.currentStep === ConversationStep.DONE) {
+        if (freshCandidateForDoc.currentStep === ConversationStep.DONE) {
           await reply(prisma, candidate.id, from, MENSAJE_YA_REGISTRADO);
         } else {
           await reply(

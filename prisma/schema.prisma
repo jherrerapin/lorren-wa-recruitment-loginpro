@@ -38,6 +38,8 @@ enum ConversationStep {
   COLLECTING_DATA
   /// Se están confirmando los datos con el candidato antes de guardar.
   CONFIRMING_DATA
+  /// Se pregunta opcionalmente por hoja de vida después de registrar.
+  ASK_CV
   /// Flujo completado — el candidato ya está registrado.
   DONE
 }
