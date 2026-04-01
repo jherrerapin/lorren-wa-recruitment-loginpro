@@ -50,8 +50,11 @@
           <th>Teléfono</th>
           <th>Documento</th>
           <th>Edad</th>
-          <th>Ciudad</th>
-          <th>Barrio/Zona</th>
+          <th>Barrio</th>
+          <th>Experiencia</th>
+          <th>Tiempo exp.</th>
+          <th>Restricciones médicas</th>
+          <th>Transporte</th>
           <th>Estado</th>
           <th></th>
         </tr>
@@ -64,8 +67,11 @@
             <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
             <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
             <td><%= c.age || '—' %></td>
-            <td><%= c.city || '—' %></td>
-            <td><%= c.zone || '—' %></td>
+            <td><%= c.neighborhood || c.zone || '—' %></td>
+            <td><%= c.experienceInfo || '—' %></td>
+            <td><%= c.experienceTime || '—' %></td>
+            <td><%= c.medicalRestrictions || '—' %></td>
+            <td><%= c.transportMode || '—' %></td>
             <td>
               <% const statusClass = {
                 'NUEVO': 'badge-nuevo',

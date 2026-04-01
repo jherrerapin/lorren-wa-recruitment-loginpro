@@ -66,12 +66,24 @@
           <span><%= candidate.age ? candidate.age + ' años' : '—' %></span>
         </div>
         <div class="info-item">
-          <label>Ciudad</label>
-          <span><%= candidate.city || '—' %></span>
+          <label>Barrio</label>
+          <span><%= candidate.neighborhood || candidate.zone || '—' %></span>
         </div>
         <div class="info-item">
-          <label>Barrio/Zona</label>
-          <span><%= candidate.zone || '—' %></span>
+          <label>Experiencia en el cargo</label>
+          <span><%= candidate.experienceInfo || '—' %></span>
+        </div>
+        <div class="info-item">
+          <label>Tiempo de experiencia</label>
+          <span><%= candidate.experienceTime || '—' %></span>
+        </div>
+        <div class="info-item">
+          <label>Restricciones médicas</label>
+          <span><%= candidate.medicalRestrictions || '—' %></span>
+        </div>
+        <div class="info-item">
+          <label>Medio de transporte</label>
+          <span><%= candidate.transportMode || '—' %></span>
         </div>
         <div class="info-item">
           <label>Fecha de registro</label>

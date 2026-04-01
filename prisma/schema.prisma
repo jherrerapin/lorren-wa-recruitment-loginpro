@@ -80,8 +80,18 @@ model Candidate {
   age               Int?
   /// Ciudad del candidato.
   city              String?
-  /// Barrio o localidad del candidato.
+  /// Barrio del candidato en el flujo actual.
+  neighborhood      String?
+  /// Barrio o localidad del candidato (campo legado).
   zone              String?
+  /// Indica si cuenta con experiencia en el cargo.
+  experienceInfo    String?
+  /// Tiempo de experiencia reportado por el candidato.
+  experienceTime    String?
+  /// Restricciones médicas reportadas por el candidato.
+  medicalRestrictions String?
+  /// Medio de transporte del candidato.
+  transportMode     String?
   /// Resumen de experiencia del candidato (campo legado, no se usa en el flujo actual).
   experienceSummary String?
   /// Disponibilidad horaria del candidato (campo legado, no se usa en el flujo actual).

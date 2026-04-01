@@ -134,11 +134,13 @@ export function adminRouter(prisma) {
       { header: 'Tipo documento', key: 'documentType', width: 15 },
       { header: 'Número documento', key: 'documentNumber', width: 18 },
       { header: 'Edad', key: 'age', width: 8 },
-      { header: 'Ciudad', key: 'city', width: 15 },
-      { header: 'Barrio/Zona', key: 'zone', width: 20 },
+      { header: 'Barrio', key: 'neighborhood', width: 20 },
+      { header: 'Experiencia', key: 'experienceInfo', width: 15 },
+      { header: 'Tiempo de experiencia', key: 'experienceTime', width: 20 },
+      { header: 'Restricciones médicas', key: 'medicalRestrictions', width: 25 },
+      { header: 'Medio de transporte', key: 'transportMode', width: 20 },
       { header: 'Estado', key: 'status', width: 15 },
-      { header: 'WhatsApp', key: 'whatsapp', width: 15 },
-      { header: 'Tiene CV', key: 'hasCV', width: 10 }
+      { header: 'WhatsApp', key: 'whatsapp', width: 15 }
     ];
 
     // Estilo del encabezado
@@ -152,11 +154,13 @@ export function adminRouter(prisma) {
         documentType: c.documentType || '',
         documentNumber: c.documentNumber || '',
         age: c.age || '',
-        city: c.city || '',
-        zone: c.zone || '',
+        neighborhood: c.neighborhood || c.zone || '',
+        experienceInfo: c.experienceInfo || '',
+        experienceTime: c.experienceTime || '',
+        medicalRestrictions: c.medicalRestrictions || '',
+        transportMode: c.transportMode || '',
         status: STATUS_LABELS[c.status] || c.status,
-        whatsapp: 'Escribir',
-        hasCV: c.cvData ? 'Sí' : 'No'
+        whatsapp: 'Escribir'
       });
 
       // Teléfono como texto
