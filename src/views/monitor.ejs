@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitor en tiempo real</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #eee; }
+    .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
+    .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
+    .navbar a:hover { color: #3498db; }
+    .navbar .brand { font-weight: 700; font-size: 16px; margin-right: 12px; }
+    .container { margin: 24px; }
+    h1 { margin-bottom: 8px; color: #eee; font-size: 22px; }
+    .subtitle { margin-bottom: 20px; color: #888; font-size: 13px; }
+    .feed { display: flex; flex-direction: column; gap: 6px; }
+    .msg-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; border-radius: 6px; background: #16213e; font-size: 13px; line-height: 1.5; }
+    .msg-row:hover { background: #1a2745; }
+    .msg-time { color: #888; white-space: nowrap; min-width: 110px; font-family: monospace; font-size: 12px; }
+    .msg-phone { min-width: 120px; }
+    .msg-phone a { color: #25d366; text-decoration: none; font-weight: 600; }
+    .msg-phone a:hover { text-decoration: underline; }
+    .msg-dir { min-width: 30px; text-align: center; font-size: 16px; }
+    .dir-in { color: #3498db; }
+    .dir-out { color: #2ecc71; }
+    .msg-body { flex: 1; color: #ddd; word-break: break-word; white-space: pre-wrap; }
+    .msg-step { color: #f39c12; font-size: 11px; min-width: 120px; text-align: right; font-family: monospace; }
+    .refresh-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .refresh-bar span { color: #888; font-size: 12px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <span class="brand">LoginPro</span>
+    <a href="/admin">Candidatos</a>
+    <a href="/admin/monitor">Monitor</a>
+    <a href="/admin/export">Descargar Excel</a>
+  </nav>
+  <div class="container">
+    <h1>Monitor en tiempo real</h1>
+    <div class="refresh-bar">
+      <span class="dot"></span>
+      <span>Auto-refresh cada 10s &mdash; Últimos 100 mensajes</span>
+    </div>
+    <div class="feed" id="feed">
+      <% for (const m of messages) { %>
+        <% const isOut = m.direction === 'OUTBOUND'; %>
+        <div class="msg-row">
+          <span class="msg-time"><%= formatDateTimeCO(m.createdAt) %></span>
+          <span class="msg-phone"><a href="https://wa.me/<%= m.candidate.phone %>" target="_blank"><%= m.candidate.phone %></a></span>
+          <span class="msg-dir <%= isOut ? 'dir-out' : 'dir-in' %>"><%= isOut ? '&#8594;' : '&#8592;' %></span>
+          <span class="msg-body"><%= m.body || '(archivo)' %></span>
+          <span class="msg-step"><%= m.candidate.currentStep %></span>
+        </div>
+      <% } %>
+    </div>
+  </div>
+  <script>
+    setInterval(() => {
+      fetch('/admin/monitor/api')
+        .then(r => r.json())
+        .then(data => {
+          const feed = document.getElementById('feed');
+          feed.innerHTML = data.map(m => {
+            const isOut = m.direction === 'OUTBOUND';
+            const dirClass = isOut ? 'dir-out' : 'dir-in';
+            const arrow = isOut ? '&#8594;' : '&#8592;';
+            const ts = m.timestamp ? new Date(m.timestamp).toLocaleString('es-CO', { timeZone: 'America/Bogota', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false }) : '';
+            const body = (m.body || '(archivo)').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return '<div class="msg-row">'
+              + '<span class="msg-time">' + ts + '</span>'
+              + '<span class="msg-phone"><a href="https://wa.me/' + m.phone + '" target="_blank">' + m.phone + '</a></span>'
+              + '<span class="msg-dir ' + dirClass + '">' + arrow + '</span>'
+              + '<span class="msg-body">' + body + '</span>'
+              + '<span class="msg-step">' + (m.currentStep || '') + '</span>'
+              + '</div>';
+          }).join('');
+        })
+        .catch(() => {});
+    }, 10000);
+  </script>
+</body>
+</html>

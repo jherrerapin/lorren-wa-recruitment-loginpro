@@ -2,44 +2,94 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Candidatos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel de Reclutamiento</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background: #f4f4f4; }
-    a { text-decoration: none; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color: #333; }
+    .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
+    .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
+    .navbar a:hover { color: #3498db; }
+    .navbar .brand { font-weight: 700; font-size: 16px; margin-right: 12px; }
+    .container { margin: 24px; }
+    h1 { margin-bottom: 16px; color: #2c3e50; }
+    .summary { margin-bottom: 16px; color: #666; font-size: 14px; }
+    table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    th, td { border-bottom: 1px solid #eee; padding: 10px 12px; text-align: left; font-size: 14px; }
+    th { background: #2c3e50; color: #fff; font-weight: 600; }
+    tr:hover { background: #f5f5f5; }
+    a { color: #3498db; text-decoration: none; font-weight: 500; }
+    a:hover { text-decoration: underline; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
+    .badge-nuevo { background: #95a5a6; }
+    .badge-registrado { background: #27ae60; }
+    .badge-validando { background: #f39c12; }
+    .badge-aprobado { background: #2ecc71; }
+    .badge-rechazado { background: #e74c3c; }
+    .badge-contactado { background: #3498db; }
+    .wa-link { color: #25d366; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>Candidatos</h1>
-  <table>
-    <thead>
-      <tr>
-        <th>Fecha</th>
-        <th>Teléfono</th>
-        <th>Nombre</th>
-        <th>Documento</th>
-        <th>Ciudad</th>
-        <th>Estado</th>
-        <th>CV</th>
-        <th>Detalle</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% for (const c of candidates) { %>
+  <nav class="navbar">
+    <span class="brand">LoginPro</span>
+    <a href="/admin">Candidatos</a>
+    <% if (role === 'dev') { %>
+      <a href="/admin/monitor">Monitor</a>
+    <% } %>
+    <a href="/admin/export">Descargar Excel</a>
+  </nav>
+  <div class="container">
+    <h1>Panel de Reclutamiento</h1>
+    <p class="summary"><%= candidates.length %> candidato(s) registrado(s)</p>
+    <table>
+      <thead>
         <tr>
-          <td><%= formatDateTimeCO(c.createdAt) %></td>
-          <td><%= c.phone %></td>
-          <td><%= c.fullName || '' %></td>
-          <td><%= c.documentNumber || '' %></td>
-          <td><%= c.city || '' %></td>
-          <td><%= c.status %></td>
-          <td><%= c.cvData ? 'Sí' : 'No' %></td>
-          <td><a href="/admin/candidates/<%= c.id %>">Ver</a></td>
+          <th>Fecha registro</th>
+          <th>Nombre</th>
+          <th>Teléfono</th>
+          <th>Documento</th>
+          <th>Edad</th>
+          <th>Ciudad</th>
+          <th>Barrio/Zona</th>
+          <th>Estado</th>
+          <th></th>
         </tr>
-      <% } %>
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        <% for (const c of candidates) { %>
+          <tr>
+            <td><%= formatDateTimeCO(c.createdAt) %></td>
+            <td><%= c.fullName || '—' %></td>
+            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
+            <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
+            <td><%= c.age || '—' %></td>
+            <td><%= c.city || '—' %></td>
+            <td><%= c.zone || '—' %></td>
+            <td>
+              <% const statusClass = {
+                'NUEVO': 'badge-nuevo',
+                'REGISTRADO': 'badge-registrado',
+                'VALIDANDO': 'badge-validando',
+                'APROBADO': 'badge-aprobado',
+                'RECHAZADO': 'badge-rechazado',
+                'CONTACTADO': 'badge-contactado'
+              }; %>
+              <% const statusLabel = {
+                'NUEVO': 'Nuevo',
+                'REGISTRADO': 'Registrado',
+                'VALIDANDO': 'En revisión',
+                'APROBADO': 'Aprobado',
+                'RECHAZADO': 'Rechazado',
+                'CONTACTADO': 'Contactado'
+              }; %>
+              <span class="badge <%= statusClass[c.status] || 'badge-nuevo' %>"><%= statusLabel[c.status] || c.status %></span>
+            </td>
+            <td><a href="/admin/candidates/<%= c.id %>">Ver detalle</a></td>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
 </body>
 </html>

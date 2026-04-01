@@ -16,10 +16,8 @@ datasource db {
 enum CandidateStatus {
   /// Estado inicial cuando el candidato apenas entra al flujo.
   NUEVO
-  /// Estado intermedio cuando ya diligenció datos pero aún no envía la hoja de vida.
-  PENDIENTE_CV
-  /// Estado cuando el candidato ya completó datos y envió hoja de vida.
-  POSTULACION_COMPLETA
+  /// Estado cuando el candidato completó registro de datos.
+  REGISTRADO
   /// Estado operativo para revisión interna del reclutador.
   VALIDANDO
   /// Estado final positivo del flujo.
@@ -30,27 +28,19 @@ enum CandidateStatus {
   CONTACTADO
 }
 
-/// Enumera cada paso del flujo conversacional controlado por backend.
+/// Enumera cada paso del flujo conversacional simplificado.
 enum ConversationStep {
-  /// Menú principal del chatbot.
+  /// Menú principal — el candidato aún no ha escrito.
   MENU
-  /// Paso donde se solicita nombre completo.
-  ASK_FULL_NAME
-  /// Paso donde se solicita número de documento.
-  ASK_DOCUMENT
-  /// Paso donde se solicita edad.
-  ASK_AGE
-  /// Paso donde se solicita ciudad.
-  ASK_CITY
-  /// Paso donde se solicita barrio o localidad.
-  ASK_ZONE
-  /// Paso donde se solicita resumen de experiencia.
-  ASK_EXPERIENCE
-  /// Paso donde se solicita disponibilidad.
-  ASK_AVAILABILITY
-  /// Paso donde se solicita la hoja de vida.
+  /// Se envió el saludo con la información de la vacante.
+  GREETING_SENT
+  /// Se están capturando los datos del candidato de forma natural.
+  COLLECTING_DATA
+  /// Se están confirmando los datos con el candidato antes de guardar.
+  CONFIRMING_DATA
+  /// Se pregunta opcionalmente por hoja de vida después de registrar.
   ASK_CV
-  /// Paso final cuando el flujo queda cerrado.
+  /// Flujo completado — el candidato ya está registrado.
   DONE
 }
 
@@ -82,7 +72,9 @@ model Candidate {
   phone             String            @unique
   /// Nombre completo capturado por el bot.
   fullName          String?
-  /// Documento del candidato.
+  /// Tipo de documento del candidato (CC, TI, CE, pasaporte, etc.).
+  documentType      String?
+  /// Número de documento del candidato.
   documentNumber    String?
   /// Edad del candidato.
   age               Int?
@@ -90,19 +82,19 @@ model Candidate {
   city              String?
   /// Barrio o localidad del candidato.
   zone              String?
-  /// Resumen de experiencia del candidato.
+  /// Resumen de experiencia del candidato (campo legado, no se usa en el flujo actual).
   experienceSummary String?
-  /// Disponibilidad horaria del candidato.
+  /// Disponibilidad horaria del candidato (campo legado, no se usa en el flujo actual).
   availability      String?
   /// Estado actual del candidato en el proceso.
   status            CandidateStatus   @default(NUEVO)
   /// Paso actual del flujo conversacional.
   currentStep       ConversationStep  @default(MENU)
-  /// Nombre original del archivo de hoja de vida.
+  /// Nombre original del archivo de hoja de vida (campo legado, no se usa en el flujo actual).
   cvOriginalName    String?
-  /// Tipo MIME del archivo de hoja de vida.
+  /// Tipo MIME del archivo de hoja de vida (campo legado, no se usa en el flujo actual).
   cvMimeType        String?
-  /// Binario de la hoja de vida almacenado directamente en PostgreSQL para esta contingencia.
+  /// Binario de la hoja de vida (campo legado, no se usa en el flujo actual).
   cvData            Bytes?
   /// Fecha de creación automática del registro.
   createdAt         DateTime          @default(now())
