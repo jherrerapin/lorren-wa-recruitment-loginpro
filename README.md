@@ -31,6 +31,23 @@ Chatbot de reclutamiento por WhatsApp para captar candidatos de pautas publicada
 - `/webhook` — Webhook de WhatsApp (GET verificación, POST mensajes)
 - `/admin` — Panel administrativo (protegido con Basic Auth)
 
+## Roles de acceso al panel
+
+El panel administrativo tiene dos roles con diferentes niveles de acceso:
+
+### Reclutador (`ADMIN_USER` / `ADMIN_PASS`)
+- Listado de candidatos
+- Detalle del candidato (sin historial de conversación)
+- Descargar Excel con candidatos
+- Botón de WhatsApp para contactar candidatos
+- Descargar hoja de vida del candidato
+- **No tiene acceso** al Monitor en tiempo real
+
+### Desarrollador (`DEV_USER` / `DEV_PASS`)
+- Todo lo del reclutador
+- Historial de conversación en el detalle del candidato
+- Monitor en tiempo real de mensajes (`/admin/monitor`)
+
 ## Variables de entorno
 | Variable | Descripción |
 |---|---|
@@ -39,8 +56,10 @@ Chatbot de reclutamiento por WhatsApp para captar candidatos de pautas publicada
 | `META_VERIFY_TOKEN` | Token de verificación del webhook en Meta |
 | `META_ACCESS_TOKEN` | Token de acceso permanente de WhatsApp Cloud API |
 | `META_PHONE_NUMBER_ID` | ID del número de teléfono en Meta |
-| `ADMIN_USER` | Usuario para el panel administrativo |
-| `ADMIN_PASS` | Contraseña para el panel administrativo |
+| `ADMIN_USER` | Usuario del reclutador para el panel administrativo |
+| `ADMIN_PASS` | Contraseña del reclutador para el panel administrativo |
+| `DEV_USER` | Usuario del desarrollador para el panel administrativo |
+| `DEV_PASS` | Contraseña del desarrollador para el panel administrativo |
 
 ## Obtener un token de acceso permanente de Meta (System User Access Token)
 

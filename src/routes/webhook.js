@@ -63,7 +63,7 @@ const SOLICITAR_DATOS = `¡Perfecto! Para registrarte necesito los siguientes da
 
 Puedes enviarlos como prefieras, en un solo mensaje o por partes.`;
 
-const MENSAJE_PREGUNTAR_CV = `¿Tienes hoja de vida en PDF o Word para enviarnos? Si la tienes, envíala por este chat. Si no la tienes en este momento, no te preocupes, puedes enviarla después.`;
+const MENSAJE_PREGUNTAR_CV = `Ahora necesito que me envíes tu hoja de vida en formato PDF o Word por este chat.`;
 
 const MENSAJE_CV_RECIBIDO = `¡Perfecto! Tu hoja de vida ha sido recibida correctamente.`;
 
@@ -420,25 +420,21 @@ async function processText(prisma, candidate, from, text) {
     return;
   }
 
-  // ── ASK_CV: Esperando hoja de vida o respuesta negativa ──
+  // ── ASK_CV: Esperando hoja de vida (obligatoria) ──
   if (candidate.currentStep === ConversationStep.ASK_CV) {
     const n = cleanText.toLowerCase();
-    // Si dice que no tiene CV, cerrar el flujo
-    if (/\bno\b/.test(n) || /no tengo|no la tengo|no cuento|después|despues|luego|ahora no/i.test(n)) {
-      await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: { currentStep: ConversationStep.DONE }
-      });
+    // Si dice que no tiene CV, informar que queda pendiente (NO avanza)
+    if (/no tengo|no la tengo|no cuento|después|despues|luego|ahora no|no puedo/i.test(n)) {
       await reply(
         prisma, candidate.id, from,
-        `No hay problema. Recuerda que la entrevista se realizará el *8 de abril*. Debes estar atento/a al llamado o aviso donde te confirmaremos el lugar y la hora exacta.\n\n¡Mucho éxito en el proceso!`
+        'Para completar tu registro necesitamos tu hoja de vida. Si no la tienes en este momento, puedes enviarla cuando la tengas. Estaremos atentos.'
       );
       return;
     }
-    // Cualquier otro texto — recordar que puede enviar CV o continuar
+    // Cualquier otro texto — recordar que necesita enviar el documento
     await reply(
       prisma, candidate.id, from,
-      'Si tienes tu hoja de vida en PDF o Word, envíala por este chat. Si no la tienes ahora, escribe *no* y continuamos.'
+      'Necesito tu hoja de vida en formato PDF o Word. Por favor envíala como archivo adjunto en este chat.'
     );
     return;
   }
@@ -698,8 +694,21 @@ export function webhookRouter(prisma) {
           where: { id: candidate.id }
         });
 
-        // Si el candidato está en ASK_CV y envía un documento, descargar y guardar CV.
+        // Si el candidato está en ASK_CV y envía un documento, validar formato y guardar CV.
         if (freshCandidateForDoc.currentStep === ConversationStep.ASK_CV && message.type === 'document') {
+          const mime = (message.document.mime_type || '').toLowerCase();
+          const validCV = mime === 'application/pdf'
+            || mime === 'application/msword'
+            || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+          if (!validCV) {
+            await reply(
+              prisma, candidate.id, from,
+              'El archivo debe ser en formato PDF o Word. Por favor envíalo nuevamente.'
+            );
+            continue;
+          }
+
           try {
             const mediaId = message.document.id;
             const metadata = await fetchMediaMetadata(mediaId);
@@ -726,6 +735,15 @@ export function webhookRouter(prisma) {
               'Hubo un problema al recibir tu archivo. ¿Podrías intentar enviarlo de nuevo?'
             );
           }
+          continue;
+        }
+
+        // Si el candidato está en ASK_CV y envía media no-documento (imagen, audio, etc.)
+        if (freshCandidateForDoc.currentStep === ConversationStep.ASK_CV && message.type !== 'document') {
+          await reply(
+            prisma, candidate.id, from,
+            'El archivo debe ser en formato PDF o Word. Por favor envíalo nuevamente.'
+          );
           continue;
         }
 

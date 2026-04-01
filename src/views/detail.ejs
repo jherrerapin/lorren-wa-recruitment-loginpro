@@ -41,7 +41,9 @@
   <nav class="navbar">
     <span class="brand">LoginPro</span>
     <a href="/admin">Candidatos</a>
-    <a href="/admin/monitor">Monitor</a>
+    <% if (role === 'dev') { %>
+      <a href="/admin/monitor">Monitor</a>
+    <% } %>
     <a href="/admin/export">Descargar Excel</a>
   </nav>
   <div class="container">
@@ -97,6 +99,7 @@
       </form>
     </div>
 
+    <% if (role === 'dev') { %>
     <div class="card">
       <h2>Historial de conversación</h2>
       <div class="messages-list">
@@ -112,6 +115,7 @@
         <% } %>
       </div>
     </div>
+    <% } %>
   </div>
 </body>
 </html>

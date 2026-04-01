@@ -3,6 +3,7 @@ import express from 'express';
 import ExcelJS from 'exceljs';
 
 // Middleware de autenticación básica para proteger el dashboard.
+// Detecta si el usuario es admin (reclutador) o dev (desarrollador) y asigna el rol.
 function basicAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const [type, token] = header.split(' ');
@@ -14,12 +15,18 @@ function basicAuth(req, res, next) {
 
   const [user, pass] = Buffer.from(token, 'base64').toString('utf8').split(':');
 
-  if (user !== process.env.ADMIN_USER || pass !== process.env.ADMIN_PASS) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
-    return res.status(401).send('Invalid credentials');
+  if (user === process.env.DEV_USER && pass === process.env.DEV_PASS) {
+    req.userRole = 'dev';
+    return next();
   }
 
-  next();
+  if (user === process.env.ADMIN_USER && pass === process.env.ADMIN_PASS) {
+    req.userRole = 'admin';
+    return next();
+  }
+
+  res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
+  return res.status(401).send('Invalid credentials');
 }
 
 // Formatea fechas para el dashboard en zona horaria de Colombia (Bogotá).
@@ -58,31 +65,32 @@ export function adminRouter(prisma) {
   router.use(basicAuth);
 
   // Ruta principal: listado de candidatos.
-  router.get('/', async (_req, res) => {
+  router.get('/', async (req, res) => {
     const candidates = await prisma.candidate.findMany({
       orderBy: { createdAt: 'desc' },
       take: 200
     });
-    res.render('list', { candidates, formatDateTimeCO });
+    res.render('list', { candidates, formatDateTimeCO, role: req.userRole });
   });
 
   // Ruta de detalle de un candidato con historial de mensajes.
   router.get('/candidates/:id', async (req, res) => {
+    const includeMessages = req.userRole === 'dev';
     const candidate = await prisma.candidate.findUnique({
       where: { id: req.params.id },
-      include: {
+      include: includeMessages ? {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 50
         }
-      }
+      } : undefined
     });
 
     if (!candidate) {
       return res.status(404).send('Candidato no encontrado');
     }
 
-    res.render('detail', { candidate, formatDateTimeCO });
+    res.render('detail', { candidate, formatDateTimeCO, role: req.userRole });
   });
 
   // Ruta para actualizar el estado del candidato desde el panel.
@@ -171,8 +179,11 @@ export function adminRouter(prisma) {
     res.end();
   });
 
-  // Vista de monitor en tiempo real.
-  router.get('/monitor', async (_req, res) => {
+  // Vista de monitor en tiempo real (solo dev).
+  router.get('/monitor', async (req, res) => {
+    if (req.userRole !== 'dev') {
+      return res.status(403).send('Acceso restringido a desarrolladores');
+    }
     const messages = await prisma.message.findMany({
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -182,11 +193,14 @@ export function adminRouter(prisma) {
         }
       }
     });
-    res.render('monitor', { messages, formatDateTimeCO });
+    res.render('monitor', { messages, formatDateTimeCO, role: req.userRole });
   });
 
-  // API JSON del monitor.
+  // API JSON del monitor (solo dev).
   router.get('/monitor/api', async (req, res) => {
+    if (req.userRole !== 'dev') {
+      return res.status(403).json({ error: 'Acceso restringido a desarrolladores' });
+    }
     const limit = Math.min(parseInt(req.query.limit) || 100, 500);
     const messages = await prisma.message.findMany({
       orderBy: { createdAt: 'desc' },
