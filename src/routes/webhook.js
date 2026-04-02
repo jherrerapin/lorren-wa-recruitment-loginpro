@@ -5,6 +5,7 @@ import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { tryOpenAIParse } from '../services/aiParser.js';
 import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
 import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
+import { isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData } from '../services/candidateData.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
 
@@ -52,40 +53,6 @@ function shouldRejectByRequirements(text, parsed = {}) {
   if (/(soy\s+extranjero|soy\s+venezolan|extranjera?)/.test(n) && /(no\s+tengo\s+ppt|sin\s+ppt|ppt\s+vencido)/.test(n)) return true;
   return false;
 }
-function capitalizeWords(str) { return str.toLowerCase().replace(/(^|\s)(\S)/g, (_m, space, char) => space + char.toUpperCase()); }
-
-function parseNaturalData(text) {
-  const result = {}; let remaining = text;
-  const docRegex = /\b(c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|\.|\s)\s*(\d{6,12})\b/i;
-  const docMatch = remaining.match(docRegex);
-  if (docMatch) {
-    const tipoRaw = docMatch[1].toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
-    const tipoMap = { cc: 'CC', cedula: 'CC', cédula: 'CC', ti: 'TI', tarjetadeidentidad: 'TI', ce: 'CE', ceduladeextranjería: 'CE', ceduladeextranjeria: 'CE', pasaporte: 'Pasaporte', ppt: 'PPT' };
-    result.documentType = tipoMap[tipoRaw] || tipoRaw.toUpperCase(); result.documentNumber = docMatch[2]; remaining = remaining.replace(docMatch[0], ' ');
-  }
-  if (!result.documentNumber) { const docNum = remaining.match(/(?:^|\s)(\d{7,12})(?:\s|$)/); if (docNum) { result.documentNumber = docNum[1]; remaining = remaining.replace(docNum[1], ' '); } }
-  const ageMatch = remaining.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)?(\d{1,2})\s*(?:a[ñn]os?)?\b/i);
-  if (ageMatch) { const age = parseInt(ageMatch[1], 10); if (age >= 14 && age <= 99) { result.age = age; remaining = remaining.replace(ageMatch[0], ' '); } }
-  const barrioMatch = remaining.match(/\b(?:barrio|zona|sector|localidad|vereda)\s*[:\-]?\s*([^,.\n]{2,60})/i);
-  if (barrioMatch) { result.neighborhood = capitalizeWords(barrioMatch[1].trim()); remaining = remaining.replace(barrioMatch[0], ' '); }
-  const negativeExperience = /\b(no\s+tengo\s+experiencia|sin\s+experiencia)\b/i.test(remaining);
-  const positiveExperience = /\b(s[ií],?\s*tengo\s+experiencia|tengo\s+experiencia|cuento\s+con\s+experiencia|experiencia\s*[:\-]?\s*s[ií])\b/i.test(remaining);
-  if (negativeExperience) result.experienceInfo = 'No'; else if (positiveExperience) result.experienceInfo = 'Sí';
-  const expTime = remaining.match(/\b(?:tengo|llevo|cuento\s+con|experiencia\s+de)?\s*(\d+\s*(?:a[ñn]os?|mes(?:es)?|semana(?:s)?))\b/i);
-  if (expTime) { result.experienceTime = expTime[1]; result.experienceInfo = 'Sí'; }
-  const medicalNegative = /\b(no\s+tengo\s+ninguna\s+restricci[oó]n|no\s+tengo\s+restricciones?\s+m[ée]dicas?|no\s+presento\s+restricciones?\s+m[ée]dicas?|no\s+cuento\s+con\s+restricciones?\s+m[ée]dicas?|ninguna\s+restricci[oó]n\s+m[ée]dica|sin\s+restricciones?\s+m[ée]dicas?)\b/i.test(remaining) || /^(no|ninguna|ninguno)$/i.test(remaining);
-  const medicalAffirmative = /\b(s[ií]\s+tengo\s+restricciones?\s+m[ée]dicas?|tengo\s+restricci[oó]n(?:\s+m[ée]dica)?|no\s+puedo\s+cargar|problema\s+de\s+columna|restricci[oó]n\s+en\s+la\s+espalda)\b/i.test(remaining);
-  const medicalMatch = remaining.match(/(?:restricciones?\s+m[ée]dicas?\s*[:\-]?\s*)([^,.\n]{2,100})/i);
-  if (medicalNegative) result.medicalRestrictions = 'Sin restricciones médicas';
-  else if (medicalMatch) { const medicalValue = medicalMatch[1].trim(); result.medicalRestrictions = /^no$/i.test(medicalValue) ? 'Sin restricciones médicas' : capitalizeWords(medicalValue); }
-  else if (medicalAffirmative) { const snippet = remaining.match(/(tengo\s+[^,.\n]{5,80}|no\s+puedo\s+[^,.\n]{5,80}|problema\s+de\s+[^,.\n]{3,80})/i); result.medicalRestrictions = snippet ? capitalizeWords(snippet[1].trim()) : 'Sí, reporta restricciones médicas'; }
-  const transportMatch = remaining.match(/\b(moto|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i);
-  if (transportMatch) result.transportMode = capitalizeWords(transportMatch[1].replace('bici', 'bicicleta'));
-  const namePref = text.match(/(?:me\s+llamo|soy|mi\s+nombre\s+es|nombre\s*[:\-]?)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ][A-ZÁÉÍÓÚÑa-záéíóúñ ]{4,60})/i);
-  if (namePref) result.fullName = capitalizeWords(namePref[1].trim());
-  else { const first = text.split(/[\n,]/)[0]?.trim() || ''; if (/^[A-ZÁÉÍÓÚÑa-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+){1,4}$/.test(first)) result.fullName = capitalizeWords(first); }
-  return result;
-}
 function getMissingFields(candidate) { const m = []; if (!candidate.fullName) m.push('nombre completo'); if (!candidate.documentType) m.push('tipo de documento'); if (!candidate.documentNumber) m.push('número de documento'); if (!candidate.age) m.push('edad'); if (!candidate.neighborhood) m.push('barrio'); if (!candidate.experienceInfo) m.push('experiencia en el cargo'); if (!candidate.experienceTime) m.push('tiempo de experiencia'); if (!candidate.medicalRestrictions) m.push('restricciones médicas'); if (!candidate.transportMode) m.push('medio de transporte'); return m; }
 function containsCandidateData(text) { return Object.keys(parseNaturalData(text)).length > 0; }
 function hasCv(candidate) { return Boolean(candidate?.cvData); }
@@ -115,9 +82,24 @@ async function processText(prisma, candidate, from, text, debugTrace) {
   debugTrace.openai_intent = inferIntent(cleanText);
 
   const aiResult = await tryOpenAIParse(cleanText);
-  const parsedData = parseNaturalData(cleanText);
+  const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
-  const mergedData = { ...parsedData, ...aiFields };
+  const sourceByField = {};
+  const mergedData = {};
+
+  for (const [field, value] of Object.entries(localParsedData)) {
+    if (value === undefined || value === null || value === '') continue;
+    if (isHighConfidenceLocalField(field, value)) {
+      mergedData[field] = value;
+      sourceByField[field] = 'local';
+    }
+  }
+  for (const [field, value] of Object.entries(aiFields)) {
+    if (value === undefined || value === null || value === '') continue;
+    mergedData[field] = value;
+    sourceByField[field] = sourceByField[field] ? 'merged' : 'openai';
+  }
+  const normalizedData = normalizeCandidateFields(mergedData);
 
   debugTrace.openai_used = aiResult.used;
   debugTrace.openai_status = aiResult.status === 'error' ? 'fallback' : aiResult.status;
@@ -126,7 +108,9 @@ async function processText(prisma, candidate, from, text, debugTrace) {
     ? aiResult.temperature_omitted
     : debugTrace.openai_temperature_omitted;
   if (aiResult.intent) debugTrace.openai_intent = aiResult.intent;
-  debugTrace.openai_detected_fields = Object.keys(aiFields).filter((k) => mergedData[k] !== undefined);
+  debugTrace.openai_detected_fields = Object.keys(aiFields).filter((k) => normalizedData[k] !== undefined);
+  debugTrace.source_by_field = sourceByField;
+  debugTrace.normalized_fields = normalizedData;
 
   if (aiResult.status === 'error') {
     debugTrace.error_summary = summarizeError(aiResult.error);
@@ -146,12 +130,13 @@ async function processText(prisma, candidate, from, text, debugTrace) {
 
   const applyDecisionsAndUpdate = async () => {
     const current = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-    const decisions = splitFieldDecisions(mergedData, current);
+    const decisions = splitFieldDecisions(normalizedData, current, { sourceByField });
     debugTrace.persisted_fields.push(...decisions.persistedFields);
     debugTrace.rejected_fields.push(...decisions.rejectedFields);
     debugTrace.ignored_low_confidence_fields.push(...decisions.ignoredLowConfidenceFields);
     debugTrace.suspicious_full_name_rejected = decisions.suspiciousFullNameRejected;
-    if (decisions.suspiciousFullNameRejected) console.warn('[AI_REJECTED_NAME]', JSON.stringify({ phone: candidate.phone, fullName: mergedData.fullName || null }));
+    debugTrace.rejected_name_reason = decisions.rejectedNameReason;
+    if (decisions.suspiciousFullNameRejected) console.warn('[AI_REJECTED_NAME]', JSON.stringify({ phone: candidate.phone, fullName: normalizedData.fullName || null, reason: decisions.rejectedNameReason || 'suspicious_name' }));
     if (Object.keys(decisions.persistedData).length) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: decisions.persistedData });
     }

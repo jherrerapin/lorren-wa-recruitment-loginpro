@@ -35,6 +35,8 @@ test('isSuspiciousFullName rejects intention/question phrases as names', () => {
   assert.equal(isSuspiciousFullName('quiero continuar'), true);
   assert.equal(isSuspiciousFullName('qué datos necesitas'), true);
   assert.equal(isSuspiciousFullName('tengo moto'), true);
+  assert.equal(isSuspiciousFullName('poseo vehículo'), true);
+  assert.equal(isSuspiciousFullName('ok'), true);
 });
 
 test('isSuspiciousFullName keeps real names valid', () => {
