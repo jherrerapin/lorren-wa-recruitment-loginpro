@@ -1,6 +1,9 @@
 import express from 'express';
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage } from '../services/whatsapp.js';
+import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
+import { tryOpenAIParse } from '../services/aiParser.js';
+import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
 
@@ -29,38 +32,16 @@ const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la p
 const MENSAJE_FINAL = 'Tu información ya fue recibida correctamente. Por favor espera a que el equipo de reclutamiento se comunique contigo.';
 const GUIA_CONTINUAR = 'Puedo ayudarte a continuar con la postulación. Si deseas seguir, envíame tus datos y te voy guiando.';
 
-function normalizeText(text = '') {
-  return text.trim();
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isFAQ(text) {
-  const n = normalizeText(text).toLowerCase();
-  return /(cu[aá]ndo\s+(empiezan|me llaman|inicia|arranca|se comunican)|para\s+cu[aá]ndo)/i.test(n);
-}
-
+function normalizeText(text = '') { return text.trim(); }
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function isFAQ(text) { const n = normalizeText(text).toLowerCase(); return /(cu[aá]ndo\s+(empiezan|me llaman|inicia|arranca|se comunican)|para\s+cu[aá]ndo)/i.test(n); }
 function isAffirmativeInterest(text) {
-  const n = normalizeText(text).toLowerCase();
-  if (!n) return false;
-
-  const patterns = [
-    'si', 'sí', 'claro', 'listo', 'ok', 'okay', 'dale', 'de una', 'hagámosle', 'vamos',
-    'estoy interesado', 'estoy interesada', 'me interesa', 'quiero aplicar', 'quiero postularme',
-    'quiero participar', 'deseo continuar', 'me gustaría postularme', 'quiero seguir', 'continuar'
-  ];
+  const n = normalizeText(text).toLowerCase(); if (!n) return false;
+  const patterns = ['si', 'sí', 'claro', 'listo', 'ok', 'okay', 'dale', 'de una', 'hagámosle', 'vamos', 'estoy interesado', 'estoy interesada', 'me interesa', 'quiero aplicar', 'quiero postularme', 'quiero participar', 'deseo continuar', 'me gustaría postularme', 'quiero seguir', 'continuar'];
   if (patterns.some((p) => n === p || n.includes(p))) return true;
-
   return /(quiero|deseo|me gustar[ií]a|vamos|listo|claro).*(aplicar|postular|continuar|seguir|participar)/i.test(n);
 }
-
-function isNegativeInterest(text) {
-  const n = normalizeText(text).toLowerCase();
-  return /^(no+|nop+|negativo)$|no gracias|no me interesa|no estoy interesad|no deseo|paso|ya no|prefiero no/i.test(n);
-}
-
+function isNegativeInterest(text) { const n = normalizeText(text).toLowerCase(); return /^(no+|nop+|negativo)$|no gracias|no me interesa|no estoy interesad|no deseo|paso|ya no|prefiero no/i.test(n); }
 function shouldRejectByRequirements(text, parsed = {}) {
   const n = normalizeText(text).toLowerCase();
   if (parsed.age && (parsed.age < 18 || parsed.age > 50)) return true;
@@ -68,279 +49,146 @@ function shouldRejectByRequirements(text, parsed = {}) {
   if (/(soy\s+extranjero|soy\s+venezolan|extranjera?)/.test(n) && /(no\s+tengo\s+ppt|sin\s+ppt|ppt\s+vencido)/.test(n)) return true;
   return false;
 }
-
-function capitalizeWords(str) {
-  return str.toLowerCase().replace(/(^|\s)(\S)/g, (_m, space, char) => space + char.toUpperCase());
-}
+function capitalizeWords(str) { return str.toLowerCase().replace(/(^|\s)(\S)/g, (_m, space, char) => space + char.toUpperCase()); }
 
 function parseNaturalData(text) {
-  const result = {};
-  let remaining = text;
-
+  const result = {}; let remaining = text;
   const docRegex = /\b(c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|\.|\s)\s*(\d{6,12})\b/i;
   const docMatch = remaining.match(docRegex);
   if (docMatch) {
     const tipoRaw = docMatch[1].toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
-    const tipoMap = {
-      cc: 'CC', cedula: 'CC', cédula: 'CC',
-      ti: 'TI', tarjetadeidentidad: 'TI',
-      ce: 'CE', ceduladeextranjería: 'CE', ceduladeextranjeria: 'CE',
-      pasaporte: 'Pasaporte', ppt: 'PPT'
-    };
-    result.documentType = tipoMap[tipoRaw] || tipoRaw.toUpperCase();
-    result.documentNumber = docMatch[2];
-    remaining = remaining.replace(docMatch[0], ' ');
+    const tipoMap = { cc: 'CC', cedula: 'CC', cédula: 'CC', ti: 'TI', tarjetadeidentidad: 'TI', ce: 'CE', ceduladeextranjería: 'CE', ceduladeextranjeria: 'CE', pasaporte: 'Pasaporte', ppt: 'PPT' };
+    result.documentType = tipoMap[tipoRaw] || tipoRaw.toUpperCase(); result.documentNumber = docMatch[2]; remaining = remaining.replace(docMatch[0], ' ');
   }
-
-  if (!result.documentNumber) {
-    const docNum = remaining.match(/(?:^|\s)(\d{7,12})(?:\s|$)/);
-    if (docNum) {
-      result.documentNumber = docNum[1];
-      remaining = remaining.replace(docNum[1], ' ');
-    }
-  }
-
+  if (!result.documentNumber) { const docNum = remaining.match(/(?:^|\s)(\d{7,12})(?:\s|$)/); if (docNum) { result.documentNumber = docNum[1]; remaining = remaining.replace(docNum[1], ' '); } }
   const ageMatch = remaining.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)?(\d{1,2})\s*(?:a[ñn]os?)?\b/i);
-  if (ageMatch) {
-    const age = parseInt(ageMatch[1], 10);
-    if (age >= 14 && age <= 99) {
-      result.age = age;
-      remaining = remaining.replace(ageMatch[0], ' ');
-    }
-  }
-
+  if (ageMatch) { const age = parseInt(ageMatch[1], 10); if (age >= 14 && age <= 99) { result.age = age; remaining = remaining.replace(ageMatch[0], ' '); } }
   const barrioMatch = remaining.match(/\b(?:barrio|zona|sector|localidad|vereda)\s*[:\-]?\s*([^,.\n]{2,60})/i);
-  if (barrioMatch) {
-    result.neighborhood = capitalizeWords(barrioMatch[1].trim());
-    remaining = remaining.replace(barrioMatch[0], ' ');
-  }
-
+  if (barrioMatch) { result.neighborhood = capitalizeWords(barrioMatch[1].trim()); remaining = remaining.replace(barrioMatch[0], ' '); }
   const negativeExperience = /\b(no\s+tengo\s+experiencia|sin\s+experiencia)\b/i.test(remaining);
   const positiveExperience = /\b(s[ií],?\s*tengo\s+experiencia|tengo\s+experiencia|cuento\s+con\s+experiencia|experiencia\s*[:\-]?\s*s[ií])\b/i.test(remaining);
-  if (negativeExperience) {
-    result.experienceInfo = 'No';
-  } else if (positiveExperience) {
-    result.experienceInfo = 'Sí';
-  }
-
+  if (negativeExperience) result.experienceInfo = 'No'; else if (positiveExperience) result.experienceInfo = 'Sí';
   const expTime = remaining.match(/\b(?:tengo|llevo|cuento\s+con|experiencia\s+de)?\s*(\d+\s*(?:a[ñn]os?|mes(?:es)?|semana(?:s)?))\b/i);
-  if (expTime) {
-    result.experienceTime = expTime[1];
-    result.experienceInfo = 'Sí';
-  }
-
-  const medicalNegative = /\b(no\s+tengo\s+ninguna\s+restricci[oó]n|no\s+tengo\s+restricciones?\s+m[ée]dicas?|no\s+presento\s+restricciones?\s+m[ée]dicas?|no\s+cuento\s+con\s+restricciones?\s+m[ée]dicas?|ninguna\s+restricci[oó]n\s+m[ée]dica|sin\s+restricciones?\s+m[ée]dicas?)\b/i.test(remaining)
-    || /^(no|ninguna|ninguno)$/i.test(remaining);
+  if (expTime) { result.experienceTime = expTime[1]; result.experienceInfo = 'Sí'; }
+  const medicalNegative = /\b(no\s+tengo\s+ninguna\s+restricci[oó]n|no\s+tengo\s+restricciones?\s+m[ée]dicas?|no\s+presento\s+restricciones?\s+m[ée]dicas?|no\s+cuento\s+con\s+restricciones?\s+m[ée]dicas?|ninguna\s+restricci[oó]n\s+m[ée]dica|sin\s+restricciones?\s+m[ée]dicas?)\b/i.test(remaining) || /^(no|ninguna|ninguno)$/i.test(remaining);
   const medicalAffirmative = /\b(s[ií]\s+tengo\s+restricciones?\s+m[ée]dicas?|tengo\s+restricci[oó]n(?:\s+m[ée]dica)?|no\s+puedo\s+cargar|problema\s+de\s+columna|restricci[oó]n\s+en\s+la\s+espalda)\b/i.test(remaining);
   const medicalMatch = remaining.match(/(?:restricciones?\s+m[ée]dicas?\s*[:\-]?\s*)([^,.\n]{2,100})/i);
-  if (medicalNegative) {
-    result.medicalRestrictions = 'Sin restricciones médicas';
-  } else if (medicalMatch) {
-    const medicalValue = medicalMatch[1].trim();
-    result.medicalRestrictions = /^no$/i.test(medicalValue) ? 'Sin restricciones médicas' : capitalizeWords(medicalValue);
-  } else if (medicalAffirmative) {
-    const snippet = remaining.match(/(tengo\s+[^,.\n]{5,80}|no\s+puedo\s+[^,.\n]{5,80}|problema\s+de\s+[^,.\n]{3,80})/i);
-    result.medicalRestrictions = snippet ? capitalizeWords(snippet[1].trim()) : 'Sí, reporta restricciones médicas';
-  }
-
+  if (medicalNegative) result.medicalRestrictions = 'Sin restricciones médicas';
+  else if (medicalMatch) { const medicalValue = medicalMatch[1].trim(); result.medicalRestrictions = /^no$/i.test(medicalValue) ? 'Sin restricciones médicas' : capitalizeWords(medicalValue); }
+  else if (medicalAffirmative) { const snippet = remaining.match(/(tengo\s+[^,.\n]{5,80}|no\s+puedo\s+[^,.\n]{5,80}|problema\s+de\s+[^,.\n]{3,80})/i); result.medicalRestrictions = snippet ? capitalizeWords(snippet[1].trim()) : 'Sí, reporta restricciones médicas'; }
   const transportMatch = remaining.match(/\b(moto|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i);
-  if (transportMatch) {
-    result.transportMode = capitalizeWords(transportMatch[1].replace('bici', 'bicicleta'));
-  }
-
+  if (transportMatch) result.transportMode = capitalizeWords(transportMatch[1].replace('bici', 'bicicleta'));
   const namePref = text.match(/(?:me\s+llamo|soy|mi\s+nombre\s+es|nombre\s*[:\-]?)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ][A-ZÁÉÍÓÚÑa-záéíóúñ ]{4,60})/i);
-  if (namePref) {
-    result.fullName = capitalizeWords(namePref[1].trim());
-  } else {
-    const first = text.split(/[\n,]/)[0]?.trim() || '';
-    if (/^[A-ZÁÉÍÓÚÑa-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+){1,4}$/.test(first)) {
-      result.fullName = capitalizeWords(first);
-    }
-  }
-
+  if (namePref) result.fullName = capitalizeWords(namePref[1].trim());
+  else { const first = text.split(/[\n,]/)[0]?.trim() || ''; if (/^[A-ZÁÉÍÓÚÑa-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+){1,4}$/.test(first)) result.fullName = capitalizeWords(first); }
   return result;
 }
-
-function getMissingFields(candidate) {
-  const missing = [];
-  if (!candidate.fullName) missing.push('nombre completo');
-  if (!candidate.documentType) missing.push('tipo de documento');
-  if (!candidate.documentNumber) missing.push('número de documento');
-  if (!candidate.age) missing.push('edad');
-  if (!candidate.neighborhood) missing.push('barrio');
-  if (!candidate.experienceInfo) missing.push('experiencia en el cargo');
-  if (!candidate.experienceTime) missing.push('tiempo de experiencia');
-  if (!candidate.medicalRestrictions) missing.push('restricciones médicas');
-  if (!candidate.transportMode) missing.push('medio de transporte');
-  return missing;
-}
-
-function containsCandidateData(text) {
-  const parsed = parseNaturalData(text);
-  return Object.keys(parsed).length > 0;
-}
-
-function getNaturalDelayMs(inputText = '', outputText = '') {
-  const referenceLength = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1);
-  const delayByLength = 1500 + Math.min(1000, Math.round(referenceLength * 8));
-  return Math.max(1500, Math.min(2500, delayByLength));
-}
+function getMissingFields(candidate) { const m = []; if (!candidate.fullName) m.push('nombre completo'); if (!candidate.documentType) m.push('tipo de documento'); if (!candidate.documentNumber) m.push('número de documento'); if (!candidate.age) m.push('edad'); if (!candidate.neighborhood) m.push('barrio'); if (!candidate.experienceInfo) m.push('experiencia en el cargo'); if (!candidate.experienceTime) m.push('tiempo de experiencia'); if (!candidate.medicalRestrictions) m.push('restricciones médicas'); if (!candidate.transportMode) m.push('medio de transporte'); return m; }
+function containsCandidateData(text) { return Object.keys(parseNaturalData(text)).length > 0; }
+function getNaturalDelayMs(inputText = '', outputText = '') { const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
 
 async function saveInboundMessage(prisma, candidateId, message, body, type) {
   try {
-    await prisma.message.create({
-      data: {
-        candidateId,
-        waMessageId: message.id,
-        direction: MessageDirection.INBOUND,
-        messageType: type,
-        body,
-        rawPayload: message
-      }
-    });
-    return true;
+    const created = await prisma.message.create({ data: { candidateId, waMessageId: message.id, direction: MessageDirection.INBOUND, messageType: type, body, rawPayload: sanitizeForRawPayload(message) } });
+    return { isNew: true, id: created.id };
   } catch (error) {
-    if (String(error?.message || '').includes('Unique constraint')) return false;
+    if (String(error?.message || '').includes('Unique constraint')) return { isNew: false, id: null };
     throw error;
   }
 }
-
-async function saveOutboundMessage(prisma, candidateId, body) {
-  await prisma.message.create({
-    data: {
-      candidateId,
-      direction: MessageDirection.OUTBOUND,
-      messageType: MessageType.TEXT,
-      body,
-      rawPayload: { body }
-    }
-  });
+async function attachDebugTrace(prisma, messageId, debugTrace) {
+  if (!messageId) return;
+  const current = await prisma.message.findUnique({ where: { id: messageId }, select: { rawPayload: true } });
+  await prisma.message.update({ where: { id: messageId }, data: { rawPayload: { ...(current?.rawPayload || {}), debugTrace } } });
 }
+async function saveOutboundMessage(prisma, candidateId, body) { await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload: { body } } }); }
+async function reply(prisma, candidateId, to, body, inboundText = '') { await sleep(getNaturalDelayMs(inboundText, body)); await sendTextMessage(to, body); await saveOutboundMessage(prisma, candidateId, body); }
+async function rejectCandidate(prisma, candidateId, from) { await prisma.candidate.update({ where: { id: candidateId }, data: { status: CandidateStatus.RECHAZADO, currentStep: ConversationStep.DONE } }); await reply(prisma, candidateId, from, DESCARTE_MSG); }
 
-async function reply(prisma, candidateId, to, body, inboundText = '') {
-  await sleep(getNaturalDelayMs(inboundText, body));
-  await sendTextMessage(to, body);
-  await saveOutboundMessage(prisma, candidateId, body);
-}
-
-async function rejectCandidate(prisma, candidateId, from) {
-  await prisma.candidate.update({
-    where: { id: candidateId },
-    data: { status: CandidateStatus.RECHAZADO, currentStep: ConversationStep.DONE }
-  });
-  await reply(prisma, candidateId, from, DESCARTE_MSG);
-}
-
-async function processText(prisma, candidate, from, text) {
+async function processText(prisma, candidate, from, text, debugTrace) {
   const cleanText = normalizeText(text);
   const hasDataIntent = containsCandidateData(cleanText);
+  debugTrace.openai_intent = inferIntent(cleanText);
 
-  if (isFAQ(cleanText)) {
-    await reply(prisma, candidate.id, from, FAQ_RESPONSE);
-    return;
+  const aiResult = await tryOpenAIParse(cleanText);
+  const parsedData = parseNaturalData(cleanText);
+  const aiFields = aiResult.parsedFields || {};
+  const mergedData = { ...parsedData, ...aiFields };
+
+  debugTrace.openai_used = aiResult.used;
+  debugTrace.openai_status = aiResult.status === 'error' ? 'fallback' : aiResult.status;
+  if (aiResult.intent) debugTrace.openai_intent = aiResult.intent;
+  debugTrace.openai_detected_fields = Object.keys(aiFields).filter((k) => mergedData[k] !== undefined);
+
+  if (aiResult.status === 'error') {
+    debugTrace.error_summary = summarizeError(aiResult.error);
+    console.warn('[AI_FALLBACK]', JSON.stringify({ phone: candidate.phone, error: debugTrace.error_summary }));
+  } else if (aiResult.status === 'disabled') {
+    console.log('[AI_FALLBACK]', JSON.stringify({ phone: candidate.phone, reason: 'openai_disabled' }));
   }
 
-  if (candidate.status === CandidateStatus.RECHAZADO) {
-    await reply(prisma, candidate.id, from, DESCARTE_MSG);
-    return;
-  }
-
+  if (isFAQ(cleanText)) return reply(prisma, candidate.id, from, FAQ_RESPONSE);
+  if (candidate.status === CandidateStatus.RECHAZADO) return reply(prisma, candidate.id, from, DESCARTE_MSG);
   if (candidate.currentStep === ConversationStep.MENU) {
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-    await reply(prisma, candidate.id, from, SALUDO_INICIAL);
-    return;
+    return reply(prisma, candidate.id, from, SALUDO_INICIAL);
   }
+  if (candidate.currentStep === ConversationStep.DONE) return reply(prisma, candidate.id, from, MENSAJE_FINAL);
 
-  if (candidate.currentStep === ConversationStep.DONE) {
-    await reply(prisma, candidate.id, from, MENSAJE_FINAL);
-    return;
-  }
+  const applyDecisionsAndUpdate = async () => {
+    const current = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+    const decisions = splitFieldDecisions(mergedData, current);
+    debugTrace.persisted_fields.push(...decisions.persistedFields);
+    debugTrace.rejected_fields.push(...decisions.rejectedFields);
+    debugTrace.ignored_low_confidence_fields.push(...decisions.ignoredLowConfidenceFields);
+    debugTrace.suspicious_full_name_rejected = decisions.suspiciousFullNameRejected;
+    if (decisions.suspiciousFullNameRejected) console.warn('[AI_REJECTED_NAME]', JSON.stringify({ phone: candidate.phone, fullName: mergedData.fullName || null }));
+    if (Object.keys(decisions.persistedData).length) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: decisions.persistedData });
+    }
+    return prisma.candidate.findUnique({ where: { id: candidate.id } });
+  };
 
   if (candidate.currentStep === ConversationStep.GREETING_SENT) {
-    if (isNegativeInterest(cleanText)) {
-      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-      await reply(prisma, candidate.id, from, CIERRE_NO_INTERES);
-      return;
-    }
-
+    if (isNegativeInterest(cleanText)) { await reply(prisma, candidate.id, from, CIERRE_NO_INTERES); return; }
     if (isAffirmativeInterest(cleanText) || hasDataIntent) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       if (hasDataIntent) {
-        const parsedData = parseNaturalData(cleanText);
-        if (shouldRejectByRequirements(cleanText, parsedData)) {
-          await rejectCandidate(prisma, candidate.id, from);
-          return;
-        }
-
-        await prisma.candidate.update({ where: { id: candidate.id }, data: { ...parsedData, currentStep: ConversationStep.COLLECTING_DATA } });
-        const updated = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+        if (shouldRejectByRequirements(cleanText, mergedData)) return rejectCandidate(prisma, candidate.id, from);
+        const updated = await applyDecisionsAndUpdate();
         const missing = getMissingFields(updated);
-        if (missing.length === 0) {
+        if (!missing.length) {
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-          await reply(prisma, candidate.id, from, MENSAJE_FINAL);
-        } else {
-          await reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+          return reply(prisma, candidate.id, from, MENSAJE_FINAL);
         }
-        return;
+        return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
       }
-      await reply(prisma, candidate.id, from, SOLICITAR_DATOS);
-      return;
+      return reply(prisma, candidate.id, from, SOLICITAR_DATOS);
     }
 
-    const parsedData = parseNaturalData(cleanText);
-    if (shouldRejectByRequirements(cleanText, parsedData)) {
-      await rejectCandidate(prisma, candidate.id, from);
-      return;
-    }
-
-    if (Object.keys(parsedData).length >= 1) {
-      await prisma.candidate.update({ where: { id: candidate.id }, data: { ...parsedData, currentStep: ConversationStep.COLLECTING_DATA } });
-      const updated = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+    if (shouldRejectByRequirements(cleanText, mergedData)) return rejectCandidate(prisma, candidate.id, from);
+    if (Object.keys(mergedData).length >= 1) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
+      const updated = await applyDecisionsAndUpdate();
       const missing = getMissingFields(updated);
-      if (missing.length === 0) {
+      if (!missing.length) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-        await reply(prisma, candidate.id, from, MENSAJE_FINAL);
-      } else {
-        await reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+        return reply(prisma, candidate.id, from, MENSAJE_FINAL);
       }
-      return;
+      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
     }
-
-    await reply(prisma, candidate.id, from, GUIA_CONTINUAR);
-    return;
+    return reply(prisma, candidate.id, from, GUIA_CONTINUAR);
   }
 
   if (candidate.currentStep === ConversationStep.COLLECTING_DATA) {
-    const parsedData = parseNaturalData(cleanText);
-    if (shouldRejectByRequirements(cleanText, parsedData)) {
-      await rejectCandidate(prisma, candidate.id, from);
-      return;
-    }
-
-    const updatedData = {};
-    const fillableFields = ['fullName', 'documentType', 'documentNumber', 'age', 'neighborhood', 'experienceInfo', 'experienceTime', 'medicalRestrictions', 'transportMode'];
-    for (const field of fillableFields) {
-      if (parsedData[field] && !candidate[field]) updatedData[field] = parsedData[field];
-    }
-
-    if (Object.keys(updatedData).length) {
-      await prisma.candidate.update({ where: { id: candidate.id }, data: updatedData });
-    }
-
-    const updated = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+    if (shouldRejectByRequirements(cleanText, mergedData)) return rejectCandidate(prisma, candidate.id, from);
+    const updated = await applyDecisionsAndUpdate();
     const missing = getMissingFields(updated);
-
-    if (missing.length === 0) {
-      await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO }
-      });
-      await reply(prisma, candidate.id, from, MENSAJE_FINAL);
-      return;
+    if (!missing.length) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
+      return reply(prisma, candidate.id, from, MENSAJE_FINAL);
     }
-
-    await reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
-    return;
+    return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
   }
 }
 
@@ -351,10 +199,7 @@ export function webhookRouter(prisma) {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-
-    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
-      return res.status(200).send(challenge);
-    }
+    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) return res.status(200).send(challenge);
     return res.sendStatus(403);
   });
 
@@ -371,22 +216,67 @@ export function webhookRouter(prisma) {
 
         if (message.type === 'text') {
           const body = message.text?.body || '';
-          const wasNew = await saveInboundMessage(prisma, candidate.id, message, body, MessageType.TEXT);
-          if (!wasNew) continue;
+          const inbound = await saveInboundMessage(prisma, candidate.id, message, body, MessageType.TEXT);
+          if (!inbound.isNew) continue;
 
           const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-          await processText(prisma, freshCandidate, from, body);
+          const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
+          try {
+            await processText(prisma, freshCandidate, from, body, debugTrace);
+          } catch (error) {
+            debugTrace.error_summary = summarizeError(error);
+            console.error('[AI_TRACE]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
+            throw error;
+          } finally {
+            const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });
+            debugTrace.currentStep_after = updatedCandidate?.currentStep || debugTrace.currentStep_before;
+            console.log('[AI_TRACE]', JSON.stringify(debugTrace));
+            await attachDebugTrace(prisma, inbound.id, debugTrace);
+          }
           continue;
         }
 
-        const wasNew = await saveInboundMessage(prisma, candidate.id, message, message.document?.filename || '', MessageType.UNKNOWN);
-        if (!wasNew) continue;
+        const inbound = await saveInboundMessage(prisma, candidate.id, message, message.document?.filename || '', MessageType.DOCUMENT);
+        if (!inbound.isNew) continue;
 
         const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-        if (freshCandidate.currentStep === ConversationStep.DONE) {
-          await reply(prisma, candidate.id, from, MENSAJE_FINAL);
-        } else {
-          await reply(prisma, candidate.id, from, 'Por ahora solo puedo procesar mensajes de texto para continuar con tu registro.');
+        const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
+        debugTrace.cv_detected = message.type === 'document';
+
+        try {
+          if (message.type === 'document') {
+            const mimeType = message.document?.mime_type || '';
+            const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+            if (!allowed.includes(mimeType)) {
+              debugTrace.cv_invalid_mime = true;
+              console.warn('[CV_ERROR]', JSON.stringify({ phone: from, mimeType, reason: 'invalid_mime' }));
+              await reply(prisma, candidate.id, from, 'Recibí tu archivo, pero por favor envíalo como PDF o Word (.doc/.docx).');
+            } else {
+              try {
+                const metadata = await fetchMediaMetadata(message.document.id);
+                const cvBuffer = await downloadMedia(metadata.url);
+                await prisma.candidate.update({ where: { id: candidate.id }, data: { cvData: cvBuffer, cvMimeType: mimeType, cvOriginalName: message.document?.filename || 'hoja_de_vida' } });
+                debugTrace.cv_saved = true;
+                console.log('[CV_TRACE]', JSON.stringify({ phone: from, filename: message.document?.filename || null, mimeType }));
+                if (freshCandidate.currentStep === ConversationStep.DONE) await reply(prisma, candidate.id, from, 'Hoja de vida recibida correctamente.');
+                else await reply(prisma, candidate.id, from, 'Hoja de vida recibida. Aún necesito tus datos en texto para completar el registro.');
+              } catch (error) {
+                debugTrace.cv_download_failed = true;
+                debugTrace.error_summary = summarizeError(error);
+                console.error('[CV_ERROR]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
+                await reply(prisma, candidate.id, from, 'No pude descargar tu hoja de vida en este momento. Inténtalo nuevamente en unos minutos.');
+              }
+            }
+          } else if (freshCandidate.currentStep === ConversationStep.DONE) {
+            await reply(prisma, candidate.id, from, MENSAJE_FINAL);
+          } else {
+            await reply(prisma, candidate.id, from, 'Por ahora solo puedo procesar mensajes de texto para continuar con tu registro.');
+          }
+        } finally {
+          const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });
+          debugTrace.currentStep_after = updatedCandidate?.currentStep || debugTrace.currentStep_before;
+          console.log('[CV_TRACE]', JSON.stringify(debugTrace));
+          await attachDebugTrace(prisma, inbound.id, debugTrace);
         }
       }
 

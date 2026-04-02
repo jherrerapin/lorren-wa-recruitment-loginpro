@@ -27,6 +27,7 @@
     .dir-out { color: #2ecc71; }
     .msg-body { flex: 1; color: #ddd; word-break: break-word; white-space: pre-wrap; }
     .msg-step { color: #f39c12; font-size: 11px; min-width: 120px; text-align: right; font-family: monospace; }
+    .msg-trace { min-width: 260px; font-size: 11px; color: #9bd1ff; font-family: monospace; white-space: pre-wrap; }
     .refresh-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
     .refresh-bar span { color: #888; font-size: 12px; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; animation: pulse 2s infinite; }
@@ -58,6 +59,9 @@
           <span class="msg-dir <%= isOut ? 'dir-out' : 'dir-in' %>"><%= isOut ? '&#8594;' : '&#8592;' %></span>
           <span class="msg-body"><%= m.body || '(archivo)' %></span>
           <span class="msg-step"><%= m.candidate.currentStep %></span>
+          <span class="msg-trace"><% if (m.rawPayload && m.rawPayload.debugTrace) { %>AI:<%= m.rawPayload.debugTrace.openai_status %>/<%= m.rawPayload.debugTrace.openai_intent || "-" %>
+P:<%= (m.rawPayload.debugTrace.persisted_fields || []).join(",") || "-" %>
+CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_detected ? "detected" : "-") %><% } else { %>-<% } %></span>
         </div>
       <% } %>
     </div>
@@ -74,12 +78,17 @@
             const arrow = isOut ? '&#8594;' : '&#8592;';
             const ts = m.timestamp ? new Date(m.timestamp).toLocaleString('es-CO', { timeZone: 'America/Bogota', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false }) : '';
             const body = (m.body || '(archivo)').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const trace = m.debugTrace;
+            const traceTxt = trace
+              ? ('AI:' + (trace.openai_status || '-') + '/' + (trace.openai_intent || '-') + '\nP:' + ((trace.persisted_fields || []).join(',') || '-') + '\nCV:' + (trace.cv_saved ? 'saved' : (trace.cv_detected ? 'detected' : '-'))).replace(/</g, '&lt;').replace(/>/g, '&gt;')
+              : '-';
             return '<div class="msg-row">'
               + '<span class="msg-time">' + ts + '</span>'
               + '<span class="msg-phone"><a href="https://wa.me/' + m.phone + '" target="_blank">' + m.phone + '</a></span>'
               + '<span class="msg-dir ' + dirClass + '">' + arrow + '</span>'
               + '<span class="msg-body">' + body + '</span>'
               + '<span class="msg-step">' + (m.currentStep || '') + '</span>'
+              + '<span class="msg-trace">' + traceTxt + '</span>'
               + '</div>';
           }).join('');
         })
