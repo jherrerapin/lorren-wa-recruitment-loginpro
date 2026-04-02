@@ -4,6 +4,7 @@ import { extractMessages, sendTextMessage } from '../services/whatsapp.js';
 import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { tryOpenAIParse } from '../services/aiParser.js';
 import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
+import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
 
@@ -29,7 +30,9 @@ Si estás interesado en continuar, respóndeme y te solicitaré tus datos.`;
 const SOLICITAR_DATOS = 'Perfecto. Envíame por favor estos datos para continuar: nombre completo, tipo de documento, número de documento, edad, barrio, si tienes experiencia en el cargo y cuánto tiempo, si tienes restricciones médicas y qué medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea más fácil.';
 const DESCARTE_MSG = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque no cumples con uno de los requisitos definidos para esta vacante.';
 const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
-const MENSAJE_FINAL = 'Tu información ya fue recibida correctamente. Por favor espera a que el equipo de reclutamiento se comunique contigo.';
+const SOLICITAR_CV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida en PDF o Word (.doc/.docx) para finalizar tu postulación.';
+const RECORDATORIO_CV = 'Para continuar necesito que adjuntes tu hoja de vida en PDF o Word (.doc/.docx). Cuando la envíes, finalizamos tu proceso.';
+const MENSAJE_FINAL = 'Tu información y hoja de vida fueron recibidas correctamente. Las entrevistas están previstas para el 8 de abril. Debes estar pendiente del mensaje o llamada del reclutador; por ese medio te confirmarán la hora y el lugar.';
 const GUIA_CONTINUAR = 'Puedo ayudarte a continuar con la postulación. Si deseas seguir, envíame tus datos y te voy guiando.';
 
 function normalizeText(text = '') { return text.trim(); }
@@ -85,7 +88,8 @@ function parseNaturalData(text) {
 }
 function getMissingFields(candidate) { const m = []; if (!candidate.fullName) m.push('nombre completo'); if (!candidate.documentType) m.push('tipo de documento'); if (!candidate.documentNumber) m.push('número de documento'); if (!candidate.age) m.push('edad'); if (!candidate.neighborhood) m.push('barrio'); if (!candidate.experienceInfo) m.push('experiencia en el cargo'); if (!candidate.experienceTime) m.push('tiempo de experiencia'); if (!candidate.medicalRestrictions) m.push('restricciones médicas'); if (!candidate.transportMode) m.push('medio de transporte'); return m; }
 function containsCandidateData(text) { return Object.keys(parseNaturalData(text)).length > 0; }
-function getNaturalDelayMs(inputText = '', outputText = '') { const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
+function hasCv(candidate) { return Boolean(candidate?.cvData); }
+function getNaturalDelayMs(inputText = '', outputText = '') { if (process.env.NODE_ENV === 'test') return 0; const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
 
 async function saveInboundMessage(prisma, candidateId, message, body, type) {
   try {
@@ -137,6 +141,7 @@ async function processText(prisma, candidate, from, text, debugTrace) {
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
     return reply(prisma, candidate.id, from, SALUDO_INICIAL);
   }
+  if (candidate.currentStep === ConversationStep.ASK_CV) return reply(prisma, candidate.id, from, RECORDATORIO_CV);
   if (candidate.currentStep === ConversationStep.DONE) return reply(prisma, candidate.id, from, MENSAJE_FINAL);
 
   const applyDecisionsAndUpdate = async () => {
@@ -162,8 +167,12 @@ async function processText(prisma, candidate, from, text, debugTrace) {
         const updated = await applyDecisionsAndUpdate();
         const missing = getMissingFields(updated);
         if (!missing.length) {
-          await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-          return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+          if (resolveStepAfterDataCompletion({ hasCv: hasCv(updated) }) === ConversationStep.DONE) {
+            await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
+            return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+          }
+          await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
+          return reply(prisma, candidate.id, from, SOLICITAR_CV);
         }
         return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
       }
@@ -176,8 +185,12 @@ async function processText(prisma, candidate, from, text, debugTrace) {
       const updated = await applyDecisionsAndUpdate();
       const missing = getMissingFields(updated);
       if (!missing.length) {
-        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-        return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+        if (resolveStepAfterDataCompletion({ hasCv: hasCv(updated) }) === ConversationStep.DONE) {
+          await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
+          return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+        }
+        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
+        return reply(prisma, candidate.id, from, SOLICITAR_CV);
       }
       return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
     }
@@ -189,8 +202,12 @@ async function processText(prisma, candidate, from, text, debugTrace) {
     const updated = await applyDecisionsAndUpdate();
     const missing = getMissingFields(updated);
     if (!missing.length) {
-      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-      return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+      if (resolveStepAfterDataCompletion({ hasCv: hasCv(updated) }) === ConversationStep.DONE) {
+        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
+        return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+      }
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
+      return reply(prisma, candidate.id, from, SOLICITAR_CV);
     }
     return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
   }
@@ -250,8 +267,7 @@ export function webhookRouter(prisma) {
         try {
           if (message.type === 'document') {
             const mimeType = message.document?.mime_type || '';
-            const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-            if (!allowed.includes(mimeType)) {
+            if (!isCvMimeTypeAllowed(mimeType)) {
               debugTrace.cv_invalid_mime = true;
               console.warn('[CV_ERROR]', JSON.stringify({ phone: from, mimeType, reason: 'invalid_mime' }));
               await reply(prisma, candidate.id, from, 'Recibí tu archivo, pero por favor envíalo como PDF o Word (.doc/.docx).');
@@ -262,8 +278,17 @@ export function webhookRouter(prisma) {
                 await prisma.candidate.update({ where: { id: candidate.id }, data: { cvData: cvBuffer, cvMimeType: mimeType, cvOriginalName: message.document?.filename || 'hoja_de_vida' } });
                 debugTrace.cv_saved = true;
                 console.log('[CV_TRACE]', JSON.stringify({ phone: from, filename: message.document?.filename || null, mimeType }));
-                if (freshCandidate.currentStep === ConversationStep.DONE) await reply(prisma, candidate.id, from, 'Hoja de vida recibida correctamente.');
-                else await reply(prisma, candidate.id, from, 'Hoja de vida recibida. Aún necesito tus datos en texto para completar el registro.');
+                const afterCvSave = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+                const missing = getMissingFields(afterCvSave);
+                if (shouldFinalizeAfterCv({ missingFields: missing })) {
+                  await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
+                  await reply(prisma, candidate.id, from, MENSAJE_FINAL);
+                } else {
+                  if (afterCvSave.currentStep !== ConversationStep.COLLECTING_DATA) {
+                    await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
+                  }
+                  await reply(prisma, candidate.id, from, `Hoja de vida recibida. Aún necesito estos datos para completar tu registro: ${missing.join(', ')}`);
+                }
               } catch (error) {
                 debugTrace.cv_download_failed = true;
                 debugTrace.error_summary = summarizeError(error);

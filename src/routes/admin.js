@@ -74,6 +74,29 @@ function isAllowedCvFile(file) {
   return mimeMissingOrGeneric && ALLOWED_CV_EXTENSIONS.has(extension);
 }
 
+function normalizeBinaryData(value) {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  return Buffer.from(value);
+}
+
+function toHexPreview(buffer, maxBytes = 16) {
+  if (!buffer || !buffer.length) return '';
+  return buffer.subarray(0, maxBytes).toString('hex');
+}
+
+function shouldValidatePdfSignature(filename = '', mimeType = '') {
+  return mimeType === 'application/pdf' || path.extname(filename || '').toLowerCase() === '.pdf';
+}
+
+function hasPdfSignature(buffer) {
+  if (!buffer || buffer.length < 5) return false;
+  return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
+}
+
 // Expone el router administrativo.
 export function adminRouter(prisma) {
   const router = express.Router();
@@ -112,9 +135,17 @@ export function adminRouter(prisma) {
       return res.status(404).send('Candidato no encontrado');
     }
 
+    const cvBuffer = normalizeBinaryData(candidate.cvData);
     const cvError = normalizeString(req.query.cvError);
     const cvSuccess = normalizeString(req.query.cvSuccess);
-    res.render('detail', { candidate, formatDateTimeCO, role: req.userRole, cvError, cvSuccess });
+    res.render('detail', {
+      candidate,
+      formatDateTimeCO,
+      role: req.userRole,
+      cvError,
+      cvSuccess,
+      cvSizeBytes: cvBuffer?.byteLength || 0
+    });
   });
 
   // Ruta para edición manual de datos del candidato desde el panel.
@@ -184,9 +215,33 @@ export function adminRouter(prisma) {
       return res.status(404).send('Hoja de vida no encontrada');
     }
 
-    res.setHeader('Content-Disposition', `attachment; filename="${candidate.cvOriginalName || 'hoja_de_vida'}"`);
-    res.setHeader('Content-Type', candidate.cvMimeType || 'application/octet-stream');
-    res.send(candidate.cvData);
+    const filename = candidate.cvOriginalName || 'hoja_de_vida';
+    const mimeType = candidate.cvMimeType || 'application/octet-stream';
+    const cvBuffer = normalizeBinaryData(candidate.cvData);
+    const hexPreview = toHexPreview(cvBuffer);
+    console.log('[CV_DOWNLOAD_TRACE]', JSON.stringify({
+      candidateId: req.params.id,
+      role: req.userRole,
+      filename,
+      mime: mimeType,
+      byteLength: cvBuffer.byteLength,
+      hexHead: hexPreview
+    }));
+
+    if (shouldValidatePdfSignature(filename, mimeType) && !hasPdfSignature(cvBuffer)) {
+      console.warn('[CV_DOWNLOAD_TRACE]', JSON.stringify({
+        candidateId: req.params.id,
+        warning: 'pdf_signature_mismatch',
+        filename,
+        mime: mimeType
+      }));
+    }
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', String(cvBuffer.byteLength));
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(cvBuffer);
   });
 
   // Ruta para carga/reemplazo manual de hoja de vida desde el dashboard.
@@ -234,14 +289,38 @@ export function adminRouter(prisma) {
           return res.redirect(`/admin/candidates/${candidateId}?${query}`);
         }
 
-        await prisma.candidate.update({
+        const uploadBuffer = normalizeBinaryData(req.file.buffer);
+        const uploadHexPreview = toHexPreview(uploadBuffer);
+        console.log('[CV_MANUAL_UPLOAD]', JSON.stringify({
+          candidateId,
+          role: req.userRole,
+          filename: file.originalname,
+          mime: file.mimetype,
+          byteLength: uploadBuffer.byteLength,
+          hexHead: uploadHexPreview
+        }));
+
+        if (shouldValidatePdfSignature(file.originalname, file.mimetype) && !hasPdfSignature(uploadBuffer)) {
+          console.warn('[CV_MANUAL_UPLOAD]', JSON.stringify({
+            candidateId,
+            warning: 'pdf_signature_mismatch',
+            filename: file.originalname,
+            mime: file.mimetype
+          }));
+        }
+
+        const updatedCandidate = await prisma.candidate.update({
           where: { id: candidateId },
           data: {
-            cvData: file.buffer,
+            cvData: uploadBuffer,
             cvOriginalName: file.originalname,
             cvMimeType: file.mimetype
+          },
+          select: {
+            cvData: true
           }
         });
+        const storedCvBuffer = normalizeBinaryData(updatedCandidate.cvData);
 
         const action = candidate.cvData ? '[CV_MANUAL_REPLACE]' : '[CV_MANUAL_UPLOAD]';
         console.log(action, JSON.stringify({
@@ -249,7 +328,8 @@ export function adminRouter(prisma) {
           role: req.userRole,
           filename: file.originalname,
           mimeType: file.mimetype,
-          size: file.size
+          byteLength: storedCvBuffer.byteLength,
+          hexHead: toHexPreview(storedCvBuffer)
         }));
 
         const successMessage = candidate.cvData

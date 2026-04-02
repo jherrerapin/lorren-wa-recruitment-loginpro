@@ -106,6 +106,9 @@ test('sube PDF válido y descarga posterior funciona', async () => {
     });
     assert.equal(downloadResponse.status, 200);
     assert.equal(downloadResponse.headers.get('content-type'), 'application/pdf');
+    assert.equal(downloadResponse.headers.get('cache-control'), 'no-store');
+    assert.equal(downloadResponse.headers.get('content-length'), String(SAMPLE_PDF_BYTES.length));
+    assert.match(downloadResponse.headers.get('content-disposition') || '', /filename="cv\.pdf"/);
     const downloadedBytes = Buffer.from(await downloadResponse.arrayBuffer());
     assert.deepEqual(downloadedBytes, SAMPLE_PDF_BYTES);
   } finally {
@@ -148,6 +151,8 @@ test('sube DOCX válido, reemplaza existente y luego permite eliminar', async ()
       headers: { Cookie: cookie }
     });
     assert.equal(downloadResponse.status, 200);
+    assert.equal(downloadResponse.headers.get('cache-control'), 'no-store');
+    assert.equal(downloadResponse.headers.get('content-length'), String(replacementBytes.length));
     const downloadedBytes = Buffer.from(await downloadResponse.arrayBuffer());
     assert.deepEqual(downloadedBytes, replacementBytes);
 
@@ -160,6 +165,33 @@ test('sube DOCX válido, reemplaza existente y luego permite eliminar', async ()
     assert.equal(prisma.state.candidate.cvData, null);
     assert.equal(prisma.state.candidate.cvOriginalName, null);
     assert.equal(prisma.state.candidate.cvMimeType, null);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('descarga normaliza Uint8Array a Buffer conservando bytes exactos', async () => {
+  const uintBytes = new Uint8Array(SAMPLE_PDF_BYTES);
+  const { server } = await createServer({
+    id: 'cand-5',
+    cvData: uintBytes,
+    cvOriginalName: 'uint.pdf',
+    cvMimeType: 'application/pdf'
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl, 'admin');
+    const downloadResponse = await fetch(`${baseUrl}/admin/candidates/cand-5/cv`, {
+      headers: { Cookie: cookie }
+    });
+
+    assert.equal(downloadResponse.status, 200);
+    assert.equal(downloadResponse.headers.get('content-type'), 'application/pdf');
+    assert.equal(downloadResponse.headers.get('cache-control'), 'no-store');
+    assert.equal(downloadResponse.headers.get('content-length'), String(SAMPLE_PDF_BYTES.length));
+    const downloadedBytes = Buffer.from(await downloadResponse.arrayBuffer());
+    assert.deepEqual(downloadedBytes, SAMPLE_PDF_BYTES);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

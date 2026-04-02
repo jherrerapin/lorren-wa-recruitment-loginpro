@@ -139,6 +139,22 @@
 
     <div class="card">
       <h2>Hoja de vida</h2>
+      <% if (role === 'dev' || role === 'admin') { %>
+        <div class="info-grid" style="margin-bottom: 10px;">
+          <div class="info-item">
+            <label>Diagnóstico CV (nombre)</label>
+            <span><%= candidate.cvOriginalName || '—' %></span>
+          </div>
+          <div class="info-item">
+            <label>Diagnóstico CV (MIME)</label>
+            <span><%= candidate.cvMimeType || '—' %></span>
+          </div>
+          <div class="info-item">
+            <label>Diagnóstico CV (bytes)</label>
+            <span><%= cvSizeBytes || 0 %></span>
+          </div>
+        </div>
+      <% } %>
       <% if (!candidate.cvData) { %>
         <p style="margin-bottom:10px;">Este candidato no tiene hoja de vida cargada.</p>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/cv/upload" enctype="multipart/form-data" class="inline-upload">
