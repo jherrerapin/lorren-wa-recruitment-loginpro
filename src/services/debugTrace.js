@@ -45,12 +45,46 @@ export function inferIntent(text = '') {
 
 export function isSuspiciousFullName(value = '') {
   const name = String(value || '').trim();
+  const normalized = name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
   if (!name) return false;
   if (/\d/.test(name)) return true;
   if (!/^[A-Za-zÁÉÍÓÚÑáéíóúñ\s'.-]+$/.test(name)) return true;
+
+  if (/[?¿]/.test(name)) return true;
+
+  const explicitNonNamePatterns = [
+    /\b(me interesa|estoy interesado|estoy interesada|quiero continuar|deseo continuar|quiero seguir|quiero aplicar|quiero postularme|ok|okay)\b/,
+    /\b(me|interesa|quiero|deseo|estoy|tengo|poseo|busco|necesito|puedo|continuar)\b/,
+    /\b(que|cuales|como|cuando|donde|datos|necesitas)\b/
+  ];
+  if (explicitNonNamePatterns.some((pattern) => pattern.test(normalized))) return true;
+
+  const commonIntentPhrases = [
+    'si estoy interesado',
+    'si estoy interesada',
+    'que datos necesitas',
+    'tengo moto',
+    'me interesa',
+    'quiero continuar'
+  ];
+  if (commonIntentPhrases.some((phrase) => normalized.includes(phrase))) return true;
+
   const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return true;
   if (parts.some((p) => p.length < 2)) return true;
+
+  if (parts.length > 4) return true;
+
+  const connectors = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
+  const lexicalParts = parts.filter((p) => !connectors.has(p.toLowerCase()));
+  if (lexicalParts.length < 2) return true;
+
   return false;
 }
 
