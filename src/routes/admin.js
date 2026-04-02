@@ -256,14 +256,29 @@ export function adminRouter(prisma) {
       }
     });
 
-    const result = messages.map(m => ({
-      timestamp: m.createdAt,
-      phone: m.candidate.phone,
-      candidateName: m.candidate.fullName || '',
-      direction: m.direction,
-      body: m.body || '',
-      currentStep: m.candidate.currentStep
-    }));
+    const result = messages.map(m => {
+      const trace = m.rawPayload?.debugTrace || null;
+      return {
+        timestamp: m.createdAt,
+        phone: m.candidate.phone,
+        candidateName: m.candidate.fullName || '',
+        direction: m.direction,
+        body: m.body || '',
+        currentStep: m.candidate.currentStep,
+        debugTrace: trace ? {
+          openai_status: trace.openai_status,
+          openai_intent: trace.openai_intent,
+          openai_detected_fields: trace.openai_detected_fields || [],
+          persisted_fields: trace.persisted_fields || [],
+          rejected_fields: trace.rejected_fields || [],
+          cv_detected: Boolean(trace.cv_detected),
+          cv_saved: Boolean(trace.cv_saved),
+          cv_invalid_mime: Boolean(trace.cv_invalid_mime),
+          cv_download_failed: Boolean(trace.cv_download_failed),
+          error_summary: trace.error_summary || null
+        } : null
+      };
+    });
 
     res.json(result);
   });

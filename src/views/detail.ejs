@@ -188,6 +188,32 @@
 
     <% if (role === 'dev') { %>
     <div class="card">
+      <h2>Traza AI/CV (últimos mensajes inbound)</h2>
+      <div class="messages-list">
+        <% const traces = candidate.messages.filter((m) => m.direction === 'INBOUND' && m.rawPayload && m.rawPayload.debugTrace).slice(0, 20); %>
+        <% if (!traces.length) { %>
+          <div class="msg msg-bot"><div class="msg-body">Sin trazas disponibles.</div></div>
+        <% } %>
+        <% for (const m of traces) { const t = m.rawPayload.debugTrace; %>
+          <div class="msg msg-candidato">
+            <div class="msg-header"><strong>Inbound</strong> &middot; <%= formatDateTimeCO(m.createdAt) %></div>
+            <div class="msg-body">
+              Step: <%= t.currentStep_before %> → <%= t.currentStep_after %><br/>
+              AI: <%= t.openai_status %> / <%= t.openai_intent || '-' %><br/>
+              Detectados: <%= (t.openai_detected_fields || []).join(', ') || '—' %><br/>
+              Persistidos: <%= (t.persisted_fields || []).join(', ') || '—' %><br/>
+              Rechazados: <%= (t.rejected_fields || []).join(', ') || '—' %><br/>
+              Ignorados(low-confidence): <%= (t.ignored_low_confidence_fields || []).join(', ') || '—' %><br/>
+              Nombre sospechoso rechazado: <%= t.suspicious_full_name_rejected ? 'Sí' : 'No' %><br/>
+              CV: detectado=<%= t.cv_detected ? 'Sí' : 'No' %>, guardado=<%= t.cv_saved ? 'Sí' : 'No' %>, mime inválido=<%= t.cv_invalid_mime ? 'Sí' : 'No' %>, descarga fallida=<%= t.cv_download_failed ? 'Sí' : 'No' %><br/>
+              Error: <%= t.error_summary || '—' %>
+            </div>
+          </div>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Historial de conversación</h2>
       <div class="messages-list">
         <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
