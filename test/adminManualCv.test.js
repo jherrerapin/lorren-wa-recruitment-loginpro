@@ -15,14 +15,14 @@ const SAMPLE_PDF_BYTES = Buffer.from(
 );
 
 function createPrismaMock(initialCandidate) {
-  const state = { candidate: { ...initialCandidate } };
+  const state = { candidate: { messages: [], ...initialCandidate } };
 
   return {
     state,
     candidate: {
       async findUnique({ where }) {
         if (where.id !== state.candidate.id) return null;
-        return { ...state.candidate };
+        return { ...state.candidate, messages: Array.isArray(state.candidate.messages) ? [...state.candidate.messages] : [] };
       },
       async update({ where, data }) {
         if (where.id !== state.candidate.id) throw new Error('Candidate not found');
@@ -253,6 +253,59 @@ test('acepta extensión permitida cuando llega mimetype genérico', async () => 
     assert.deepEqual(prisma.state.candidate.cvData, fallbackBytes);
     assert.equal(prisma.state.candidate.cvOriginalName, 'cv.docx');
     assert.equal(prisma.state.candidate.cvMimeType, 'application/octet-stream');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('admin no ve diagnósticos técnicos de CV en detalle', async () => {
+  const { server } = await createServer({
+    id: 'cand-6',
+    phone: '573001112233',
+    cvData: Buffer.from('pdf'),
+    cvOriginalName: 'hv.pdf',
+    cvMimeType: 'application/pdf'
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl, 'admin');
+    const response = await fetch(`${baseUrl}/admin/candidates/cand-6`, {
+      headers: { Cookie: cookie }
+    });
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.doesNotMatch(html, /Diagnóstico CV \\(nombre\\)/);
+    assert.match(html, /Archivo actual/);
+    assert.match(html, /Descargar/);
+    assert.match(html, /Reemplazar/);
+    assert.match(html, /Eliminar/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('dev sí ve diagnósticos técnicos de CV en detalle', async () => {
+  const { server } = await createServer({
+    id: 'cand-7',
+    phone: '573001112244',
+    cvData: Buffer.from('pdf'),
+    cvOriginalName: 'hv_dev.pdf',
+    cvMimeType: 'application/pdf',
+    messages: []
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl, 'dev');
+    const response = await fetch(`${baseUrl}/admin/candidates/cand-7`, {
+      headers: { Cookie: cookie }
+    });
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(html, /Diagnóstico CV \\(nombre\\)/);
+    assert.match(html, /Diagnóstico CV \\(MIME\\)/);
+    assert.match(html, /Diagnóstico CV \\(bytes\\)/);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

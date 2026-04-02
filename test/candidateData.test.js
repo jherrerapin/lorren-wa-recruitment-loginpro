@@ -68,3 +68,17 @@ test('normaliza ausencia de restricciones médicas', () => {
   const normalized = normalizeCandidateFields(parsed);
   assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
 });
+
+test('captura datos en orden libre con transporte al inicio y nombre al final', () => {
+  const parsed = parseNaturalData('Transporte: moto, edad 28, barrio Jordán, CC 10203040, tengo 2 años de experiencia, sin restricciones, mi nombre es ana sofia perez');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.transportMode, 'Moto');
+  assert.equal(normalized.age, 28);
+  assert.equal(normalized.neighborhood, 'Jordán');
+  assert.equal(normalized.documentType, 'CC');
+  assert.equal(normalized.documentNumber, '10203040');
+  assert.equal(normalized.experienceInfo, 'Sí');
+  assert.equal(normalized.experienceTime, '2 años');
+  assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
+  assert.equal(normalized.fullName, 'Ana Sofia Perez');
+});

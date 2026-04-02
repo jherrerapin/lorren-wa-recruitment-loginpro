@@ -6,6 +6,7 @@ import { tryOpenAIParse } from '../services/aiParser.js';
 import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
 import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
 import { isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData } from '../services/candidateData.js';
+import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
 
@@ -58,6 +59,7 @@ function containsCandidateData(text) { return Object.keys(parseNaturalData(text)
 function hasCv(candidate) { return Boolean(candidate?.cvData); }
 function getNaturalDelayMs(inputText = '', outputText = '') { if (process.env.NODE_ENV === 'test') return 0; const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
 
+
 async function saveInboundMessage(prisma, candidateId, message, body, type) {
   try {
     const created = await prisma.message.create({ data: { candidateId, waMessageId: message.id, direction: MessageDirection.INBOUND, messageType: type, body, rawPayload: sanitizeForRawPayload(message) } });
@@ -76,10 +78,13 @@ async function saveOutboundMessage(prisma, candidateId, body) { await prisma.mes
 async function reply(prisma, candidateId, to, body, inboundText = '') { await sleep(getNaturalDelayMs(inboundText, body)); await sendTextMessage(to, body); await saveOutboundMessage(prisma, candidateId, body); }
 async function rejectCandidate(prisma, candidateId, from) { await prisma.candidate.update({ where: { id: candidateId }, data: { status: CandidateStatus.RECHAZADO, currentStep: ConversationStep.DONE } }); await reply(prisma, candidateId, from, DESCARTE_MSG); }
 
-async function processText(prisma, candidate, from, text, debugTrace) {
+async function processText(prisma, candidate, from, text, debugTrace, options = {}) {
   const cleanText = normalizeText(text);
   const hasDataIntent = containsCandidateData(cleanText);
   debugTrace.openai_intent = inferIntent(cleanText);
+  debugTrace.batched_message_count = options.batchedMessageCount || 1;
+  debugTrace.used_multiline_context = Boolean(options.usedMultilineContext);
+  debugTrace.consolidated_input_summary = options.consolidatedInputSummary || null;
 
   const aiResult = await tryOpenAIParse(cleanText);
   const localParsedData = parseNaturalData(cleanText);
@@ -198,6 +203,49 @@ async function processText(prisma, candidate, from, text, debugTrace) {
   }
 }
 
+async function scheduleMultilineWindow(prisma, candidateId) {
+  const windowMs = getMultilineWindowMs();
+  const windowUntil = new Date(Date.now() + windowMs);
+  const updated = await prisma.candidate.update({
+    where: { id: candidateId },
+    data: {
+      multilineWindowUntil: windowUntil,
+      multilineBatchVersion: { increment: 1 }
+    },
+    select: { multilineBatchVersion: true }
+  });
+
+  return { windowMs, batchVersion: updated.multilineBatchVersion };
+}
+
+async function fetchPendingTextBatch(prisma, candidateId) {
+  return prisma.message.findMany({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND,
+      messageType: MessageType.TEXT,
+      respondedAt: null
+    },
+    orderBy: { createdAt: 'asc' },
+    take: 12
+  });
+}
+
+async function tryAcquireMultilineProcessing(prisma, candidateId, batchVersion) {
+  const acquired = await prisma.candidate.updateMany({
+    where: {
+      id: candidateId,
+      multilineBatchVersion: batchVersion,
+      multilineWindowUntil: { lte: new Date() }
+    },
+    data: {
+      multilineWindowUntil: null,
+      multilineBatchVersion: { increment: 1 }
+    }
+  });
+  return acquired.count === 1;
+}
+
 export function webhookRouter(prisma) {
   const router = express.Router();
 
@@ -226,9 +274,52 @@ export function webhookRouter(prisma) {
           if (!inbound.isNew) continue;
 
           const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-          const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
+
+          if (isFAQ(body)) {
+            const faqDebugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
+            try {
+              await processText(prisma, freshCandidate, from, body, faqDebugTrace, {
+                batchedMessageCount: 1,
+                usedMultilineContext: false,
+                consolidatedInputSummary: summarizeConsolidatedInput(body)
+              });
+              await prisma.message.update({ where: { id: inbound.id }, data: { respondedAt: new Date() } });
+            } catch (error) {
+              faqDebugTrace.error_summary = summarizeError(error);
+              throw error;
+            } finally {
+              const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });
+              faqDebugTrace.currentStep_after = updatedCandidate?.currentStep || faqDebugTrace.currentStep_before;
+              console.log('[AI_TRACE]', JSON.stringify(faqDebugTrace));
+              await attachDebugTrace(prisma, inbound.id, faqDebugTrace);
+            }
+            continue;
+          }
+
+          const scheduling = await scheduleMultilineWindow(prisma, candidate.id);
+          await sleep(scheduling.windowMs);
+
+          const stillOwner = await tryAcquireMultilineProcessing(prisma, candidate.id, scheduling.batchVersion);
+          if (!stillOwner) continue;
+
+          const pendingBatch = await fetchPendingTextBatch(prisma, candidate.id);
+          if (!pendingBatch.length) continue;
+
+          const consolidatedText = consolidateTextMessages(pendingBatch);
+          const anchorMessage = pendingBatch[pendingBatch.length - 1];
+          const candidateForBatch = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+          const debugTrace = createDebugTrace({ phone: from, currentStepBefore: candidateForBatch.currentStep });
+
           try {
-            await processText(prisma, freshCandidate, from, body, debugTrace);
+            await processText(prisma, candidateForBatch, from, consolidatedText, debugTrace, {
+              batchedMessageCount: pendingBatch.length,
+              usedMultilineContext: pendingBatch.length > 1,
+              consolidatedInputSummary: summarizeConsolidatedInput(consolidatedText)
+            });
+            await prisma.message.updateMany({
+              where: { id: { in: pendingBatch.map((item) => item.id) } },
+              data: { respondedAt: new Date() }
+            });
           } catch (error) {
             debugTrace.error_summary = summarizeError(error);
             console.error('[AI_TRACE]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
@@ -237,7 +328,7 @@ export function webhookRouter(prisma) {
             const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });
             debugTrace.currentStep_after = updatedCandidate?.currentStep || debugTrace.currentStep_before;
             console.log('[AI_TRACE]', JSON.stringify(debugTrace));
-            await attachDebugTrace(prisma, inbound.id, debugTrace);
+            await attachDebugTrace(prisma, anchorMessage.id, debugTrace);
           }
           continue;
         }
