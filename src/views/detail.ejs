@@ -44,6 +44,13 @@
     .btn-wa:hover { background: #1ebe57; color: #fff; text-decoration: none; }
     .btn-cv { display: inline-block; padding: 8px 18px; background: #e67e22; color: #fff; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 14px; margin-top: 12px; margin-left: 8px; }
     .btn-cv:hover { background: #cf6d17; color: #fff; text-decoration: none; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .alert-success { background: #e8f5e9; color: #1f7a38; border: 1px solid #b7e1c0; }
+    .alert-error { background: #fdecea; color: #b8322b; border: 1px solid #f3b3ad; }
+    .cv-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+    .inline-upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn-danger { padding: 8px 16px; background: #c0392b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .btn-danger:hover { background: #a93226; }
   </style>
 </head>
 <body>
@@ -61,6 +68,13 @@
   <div class="container">
     <a href="/admin" class="back-link">&larr; Volver al listado</a>
     <h1><%= candidate.fullName || 'Candidato sin nombre' %></h1>
+
+    <% if (cvSuccess) { %>
+      <div class="alert alert-success"><%= cvSuccess %></div>
+    <% } %>
+    <% if (cvError) { %>
+      <div class="alert alert-error"><%= cvError %></div>
+    <% } %>
 
     <div class="card">
       <h2>Datos del candidato</h2>
@@ -121,6 +135,32 @@
         </select>
         <button type="submit">Guardar</button>
       </form>
+    </div>
+
+    <div class="card">
+      <h2>Hoja de vida</h2>
+      <% if (!candidate.cvData) { %>
+        <p style="margin-bottom:10px;">Este candidato no tiene hoja de vida cargada.</p>
+        <form method="post" action="/admin/candidates/<%= candidate.id %>/cv/upload" enctype="multipart/form-data" class="inline-upload">
+          <input type="file" name="cvFile" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
+          <button type="submit" class="btn-primary">Subir hoja de vida</button>
+        </form>
+      <% } else { %>
+        <div class="info-item">
+          <label>Archivo actual</label>
+          <span><%= candidate.cvOriginalName || 'hoja_de_vida' %></span>
+        </div>
+        <div class="cv-actions">
+          <a href="/admin/candidates/<%= candidate.id %>/cv" class="btn-cv" style="margin:0;">Descargar</a>
+          <form method="post" action="/admin/candidates/<%= candidate.id %>/cv/upload" enctype="multipart/form-data" class="inline-upload">
+            <input type="file" name="cvFile" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
+            <button type="submit" class="btn-primary">Reemplazar</button>
+          </form>
+          <form method="post" action="/admin/candidates/<%= candidate.id %>/cv/delete">
+            <button type="submit" class="btn-danger">Eliminar</button>
+          </form>
+        </div>
+      <% } %>
     </div>
 
     <div class="card">
