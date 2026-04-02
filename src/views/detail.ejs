@@ -192,6 +192,18 @@
     <% if (role === 'dev') { %>
       <div class="card">
         <h2>Mensajes salientes (solo desarrollo)</h2>
+        <% if (outboundWindow) { %>
+          <div class="info-grid" style="margin-bottom: 14px;">
+            <div class="info-item">
+              <label>Último mensaje del candidato</label>
+              <span><%= outboundWindow.lastInboundAt ? formatDateTimeCO(outboundWindow.lastInboundAt) : 'Sin mensajes inbound' %></span>
+            </div>
+            <div class="info-item">
+              <label>Estado ventana WhatsApp (24h)</label>
+              <span><%= outboundWindow.isOpen ? 'Abierta' : 'Vencida' %></span>
+            </div>
+          </div>
+        <% } %>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
           <input type="hidden" name="action" value="request_missing_data" />
           <button type="submit">Solicitar datos faltantes</button>

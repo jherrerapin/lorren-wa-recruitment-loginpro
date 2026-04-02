@@ -6,7 +6,6 @@ import multer from 'multer';
 import { normalizeCandidateFields } from '../services/candidateData.js';
 import { exportFilenameByScope, filterCandidatesByScope } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
-import { isWithinWhatsappWindow } from '../services/reminder.js';
 import { MessageDirection, MessageType } from '@prisma/client';
 
 // Middleware de autenticación por sesión para proteger el dashboard.
@@ -95,6 +94,28 @@ function ensureDevRole(req, res, next) {
   return next();
 }
 
+const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+async function getOutboundWindowStatus(prisma, candidateId, now = new Date()) {
+  const lastInbound = await prisma.message.findFirst({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true }
+  });
+
+  const lastInboundAt = lastInbound?.createdAt || null;
+  const isOpen = Boolean(lastInboundAt) && (now.getTime() - new Date(lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS;
+
+  return {
+    hasInbound: Boolean(lastInboundAt),
+    lastInboundAt,
+    isOpen
+  };
+}
+
 function outboundTemplates(candidate) {
   return {
     request_missing_data: 'Hola 👋 Para continuar con tu postulación, por favor envíame los datos faltantes que aún no has compartido.',
@@ -160,6 +181,9 @@ export function adminRouter(prisma) {
     const cvSuccess = normalizeString(req.query.cvSuccess);
     const outboundError = normalizeString(req.query.outboundError);
     const outboundSuccess = normalizeString(req.query.outboundSuccess);
+    const outboundWindow = includeMessages
+      ? await getOutboundWindowStatus(prisma, candidate.id)
+      : null;
     res.render('detail', {
       candidate,
       formatDateTimeCO,
@@ -168,6 +192,7 @@ export function adminRouter(prisma) {
       cvSuccess,
       outboundError,
       outboundSuccess,
+      outboundWindow,
       cvSizeBytes: cvBuffer?.byteLength || 0
     });
   });
@@ -543,13 +568,19 @@ export function adminRouter(prisma) {
     const customBody = normalizeString(req.body.customBody);
     const candidate = await prisma.candidate.findUnique({
       where: { id: candidateId },
-      select: { id: true, phone: true, lastInboundAt: true }
+      select: { id: true, phone: true }
     });
 
     if (!candidate) return res.status(404).send('Candidato no encontrado');
 
-    if (!isWithinWhatsappWindow(candidate.lastInboundAt)) {
-      const query = buildCvStatusQuery('outboundError', 'No se puede enviar: la conversación está fuera de la ventana de WhatsApp (24h).');
+    const outboundWindow = await getOutboundWindowStatus(prisma, candidateId);
+
+    if (!outboundWindow.isOpen) {
+      const lastInboundLabel = outboundWindow.lastInboundAt
+        ? formatDateTimeCO(outboundWindow.lastInboundAt)
+        : 'sin mensajes inbound del candidato';
+      const windowLabel = outboundWindow.hasInbound ? 'vencida' : 'sin iniciar';
+      const query = buildCvStatusQuery('outboundError', `No se puede enviar: la conversación está fuera de la ventana de WhatsApp (24h). Último mensaje del candidato: ${lastInboundLabel}. Estado de ventana: ${windowLabel}.`);
       return res.redirect(`/admin/candidates/${candidateId}?${query}`);
     }
 
