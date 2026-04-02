@@ -17,6 +17,9 @@ export function createDebugTrace({ phone, currentStepBefore }) {
     rejected_fields: [],
     ignored_low_confidence_fields: [],
     suspicious_full_name_rejected: false,
+    rejected_name_reason: null,
+    normalized_fields: {},
+    source_by_field: {},
     cv_detected: false,
     cv_saved: false,
     cv_invalid_mime: false,
@@ -59,9 +62,9 @@ export function isSuspiciousFullName(value = '') {
   if (/[?¿]/.test(name)) return true;
 
   const explicitNonNamePatterns = [
-    /\b(me interesa|estoy interesado|estoy interesada|quiero continuar|deseo continuar|quiero seguir|quiero aplicar|quiero postularme|ok|okay)\b/,
+    /\b(me interesa|estoy interesado|estoy interesada|quiero continuar|deseo continuar|quiero seguir|quiero aplicar|quiero postularme|ok|okay|si estoy interesado|si estoy interesada)\b/,
     /\b(me|interesa|quiero|deseo|estoy|tengo|poseo|busco|necesito|puedo|continuar)\b/,
-    /\b(que|cuales|como|cuando|donde|datos|necesitas)\b/
+    /\b(que|cuales|como|cuando|donde|datos|necesitas|vehiculo|vehículo|moto)\b/
   ];
   if (explicitNonNamePatterns.some((pattern) => pattern.test(normalized))) return true;
 
@@ -70,8 +73,12 @@ export function isSuspiciousFullName(value = '') {
     'si estoy interesada',
     'que datos necesitas',
     'tengo moto',
+    'poseo vehiculo',
+    'poseo vehículo',
     'me interesa',
-    'quiero continuar'
+    'quiero continuar',
+    'deseo continuar',
+    'ok'
   ];
   if (commonIntentPhrases.some((phrase) => normalized.includes(phrase))) return true;
 
@@ -88,13 +95,15 @@ export function isSuspiciousFullName(value = '') {
   return false;
 }
 
-export function splitFieldDecisions(parsedData = {}, candidate = {}) {
+export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {}) {
+  const sourceByField = options.sourceByField || {};
   const decisions = {
     persistedData: {},
     persistedFields: [],
     rejectedFields: [],
     ignoredLowConfidenceFields: [],
-    suspiciousFullNameRejected: false
+    suspiciousFullNameRejected: false,
+    rejectedNameReason: null
   };
 
   for (const field of CANDIDATE_FIELDS) {
@@ -104,6 +113,7 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}) {
     if (field === 'fullName' && isSuspiciousFullName(value)) {
       decisions.rejectedFields.push('fullName');
       decisions.suspiciousFullNameRejected = true;
+      decisions.rejectedNameReason = sourceByField.fullName ? `suspicious_${sourceByField.fullName}` : 'suspicious_name_pattern';
       continue;
     }
 
