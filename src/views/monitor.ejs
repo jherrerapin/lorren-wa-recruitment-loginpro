@@ -10,6 +10,7 @@
     .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
     .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
     .navbar a:hover { color: #3498db; }
+    .navbar form button:hover { border-color: #3498db !important; color: #3498db !important; }
     .navbar .brand { font-weight: 700; font-size: 16px; margin-right: 12px; }
     .container { margin: 24px; }
     h1 { margin-bottom: 8px; color: #eee; font-size: 22px; }
@@ -38,7 +39,9 @@
     <a href="/admin">Candidatos</a>
     <a href="/admin/monitor">Monitor</a>
     <a href="/admin/export">Descargar Excel</a>
-    <a href="/admin/logout">Cerrar sesión</a>
+    <form method="post" action="/logout" style="margin-left:auto;">
+      <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
+    </form>
   </nav>
   <div class="container">
     <h1>Monitor en tiempo real</h1>

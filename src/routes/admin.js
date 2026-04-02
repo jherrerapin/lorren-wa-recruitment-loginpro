@@ -2,31 +2,16 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
 
-// Middleware de autenticación básica para proteger el dashboard.
-// Detecta si el usuario es admin (reclutador) o dev (desarrollador) y asigna el rol.
-function basicAuth(req, res, next) {
-  const header = req.headers.authorization || '';
-  const [type, token] = header.split(' ');
+// Middleware de autenticación por sesión para proteger el dashboard.
+function sessionAuth(req, res, next) {
+  const role = req.session?.userRole;
 
-  if (type !== 'Basic' || !token) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
-    return res.status(401).send('Authentication required');
+  if (!role) {
+    return res.redirect('/login');
   }
 
-  const [user, pass] = Buffer.from(token, 'base64').toString('utf8').split(':');
-
-  if (user === process.env.DEV_USER && pass === process.env.DEV_PASS) {
-    req.userRole = 'dev';
-    return next();
-  }
-
-  if (user === process.env.ADMIN_USER && pass === process.env.ADMIN_PASS) {
-    req.userRole = 'admin';
-    return next();
-  }
-
-  res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
-  return res.status(401).send('Invalid credentials');
+  req.userRole = role;
+  return next();
 }
 
 // Normaliza strings de formularios: trim y null si queda vacío.
@@ -68,14 +53,9 @@ const STATUS_LABELS = {
 export function adminRouter(prisma) {
   const router = express.Router();
 
-  // Protege todas las rutas del dashboard con autenticación básica.
-  router.use(basicAuth);
+  // Protege todas las rutas del dashboard con autenticación por sesión.
+  router.use(sessionAuth);
 
-  // Permite "cerrar sesión" de Basic Auth forzando nuevo reto de credenciales.
-  router.get('/logout', (_req, res) => {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Admin", charset="UTF-8"');
-    return res.status(401).send('Sesión cerrada. Vuelve a ingresar con otro usuario.');
-  });
 
   // Ruta principal: listado de candidatos.
   router.get('/', async (req, res) => {
