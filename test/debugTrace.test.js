@@ -7,6 +7,8 @@ test('createDebugTrace starts with secure defaults', () => {
   assert.equal(trace.phone, '573001112233');
   assert.equal(trace.currentStep_before, 'MENU');
   assert.equal(trace.cv_saved, false);
+  assert.equal(trace.batched_message_count, 1);
+  assert.equal(trace.used_multiline_context, false);
   assert.ok(['disabled', 'fallback'].includes(trace.openai_status));
   assert.equal(typeof trace.openai_model, 'string');
   assert.equal(typeof trace.openai_temperature_omitted, 'boolean');

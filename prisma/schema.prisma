@@ -110,6 +110,10 @@ model Candidate {
   createdAt         DateTime          @default(now())
   /// Fecha de actualización automática del registro.
   updatedAt         DateTime          @updatedAt
+  /// Fin de la ventana de silencio para consolidar mensajes de texto.
+  multilineWindowUntil DateTime?
+  /// Versión incremental para controlar carreras del batching multilinea.
+  multilineBatchVersion Int          @default(0)
   /// Relación uno a muchos con los mensajes del candidato.
   messages          Message[]
 }
@@ -132,6 +136,8 @@ model Message {
   body        String?
   /// Payload crudo completo recibido o generado.
   rawPayload  Json?
+  /// Fecha en la que este inbound fue consolidado y respondido.
+  respondedAt DateTime?
   /// Fecha de creación automática del mensaje.
   createdAt   DateTime         @default(now())
 

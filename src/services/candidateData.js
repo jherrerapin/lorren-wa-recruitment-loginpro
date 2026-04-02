@@ -90,6 +90,12 @@ function detectLeadingName(text = '') {
   const prefixed = compact.match(/(?:me\s+llamo|soy|mi\s+nombre\s+es|nombre\s*[:\-]?)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.\s]{3,60})/i);
   if (prefixed?.[1]) return capitalizeWords(prefixed[1]);
 
+  const trailing = compact.match(/(?:nombre\s+(?:completo\s+)?(?:es|:)?|mi\s+nombre\s+es)\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.\s]{3,60})\s*$/i);
+  if (trailing?.[1]) {
+    const candidate = capitalizeWords(trailing[1]);
+    if (!isSuspiciousFullName(candidate) && hasNameTokens(candidate)) return candidate;
+  }
+
   const leading = compact.match(/^\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*){1,3})(?=\s+(?:c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|c\.?\s*e\.?|pasaporte|ppt|\d))/i);
   if (leading?.[1]) {
     const cleaned = leading[1].replace(/\b(cc|ti|ce|ppt|pasaporte)\b$/i, '').trim();
@@ -110,9 +116,13 @@ function detectLeadingName(text = '') {
 export function parseNaturalData(text = '') {
   const result = {};
   let remaining = String(text || '');
+  const compact = String(text || '')
+    .replace(/\n/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   const docRegex = /\b(c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|\.|\s)\s*(\d{6,12})\b/i;
-  const docMatch = remaining.match(docRegex);
+  const docMatch = compact.match(docRegex) || remaining.match(docRegex);
   if (docMatch) {
     result.documentType = normalizeDocumentType(docMatch[1]) || docMatch[1].toUpperCase();
     result.documentNumber = docMatch[2];
@@ -127,7 +137,7 @@ export function parseNaturalData(text = '') {
     }
   }
 
-  const ageMatch = remaining.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)?(\d{1,2})\s*(?:a[ñn]os?)?\b/i);
+  const ageMatch = compact.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)?(\d{1,2})\s*(?:a[ñn]os?)?\b/i) || remaining.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)?(\d{1,2})\s*(?:a[ñn]os?)?\b/i);
   if (ageMatch) {
     const age = Number.parseInt(ageMatch[1], 10);
     if (age >= 14 && age <= 99) {
@@ -136,7 +146,7 @@ export function parseNaturalData(text = '') {
     }
   }
 
-  const barrioMatch = remaining.match(/\b(?:barrio|zona|sector|localidad|vereda)\s*[:\-]?\s*([^,.\n]{2,60})/i);
+  const barrioMatch = compact.match(/\b(?:barrio|zona|sector|localidad|vereda)\s*[:\-]?\s*([^,.\n]{2,60})/i) || remaining.match(/\b(?:barrio|zona|sector|localidad|vereda)\s*[:\-]?\s*([^,.\n]{2,60})/i);
   if (barrioMatch) {
     result.neighborhood = capitalizeWords(barrioMatch[1].trim());
     remaining = remaining.replace(barrioMatch[0], ' ');
@@ -154,21 +164,21 @@ export function parseNaturalData(text = '') {
     if (implicit) result.neighborhood = capitalizeWords(implicit);
   }
 
-  const negativeExperience = /\b(no\s+tengo\s+experiencia|sin\s+experiencia)\b/i.test(remaining);
-  const positiveExperience = /\b(s[ií],?\s*tengo\s+experiencia|tengo\s+experiencia|cuento\s+con\s+experiencia|experiencia\s*[:\-]?\s*s[ií])\b/i.test(remaining);
+  const negativeExperience = /\b(no\s+tengo\s+experiencia|sin\s+experiencia)\b/i.test(compact);
+  const positiveExperience = /\b(s[ií],?\s*tengo\s+experiencia|tengo\s+experiencia|cuento\s+con\s+experiencia|experiencia\s*[:\-]?\s*s[ií])\b/i.test(compact);
   if (negativeExperience) result.experienceInfo = 'No';
   else if (positiveExperience) result.experienceInfo = 'Sí';
 
-  const expTime = remaining.match(/\b(?:tengo|llevo|cuento\s+con|experiencia\s+de)?\s*(\d+\s*(?:a[ñn]os?|mes(?:e|es)?|semana(?:s)?))\b/i);
+  const expTime = compact.match(/\b(?:tengo|llevo|cuento\s+con|experiencia\s+de)?\s*(\d+\s*(?:a[ñn]os?|mes(?:e|es)?|semana(?:s)?))\b/i) || remaining.match(/\b(?:tengo|llevo|cuento\s+con|experiencia\s+de)?\s*(\d+\s*(?:a[ñn]os?|mes(?:e|es)?|semana(?:s)?))\b/i);
   if (expTime) {
     result.experienceTime = expTime[1];
     result.experienceInfo = 'Sí';
   }
 
-  const medicalNegative = /\b(no\s+tengo\s+restricciones?(\s+m[ée]dicas?)?|sin\s+restricciones?(\s+m[ée]dicas?)?|ninguna\s+restricci[oó]n)\b/i.test(remaining)
-    || /^(no|ninguna|ninguno)$/i.test(remaining.trim());
-  const medicalAffirmative = /\b(s[ií]\s+tengo\s+restricciones?\s+m[ée]dicas?|tengo\s+restricci[oó]n(?:\s+m[ée]dica)?|no\s+puedo\s+cargar|problema\s+de\s+columna|restricci[oó]n\s+en\s+la\s+espalda)\b/i.test(remaining);
-  const medicalMatch = remaining.match(/(?:restricciones?\s+m[ée]dicas?\s*[:\-]?\s*)([^,.\n]{2,100})/i);
+  const medicalNegative = /\b(no\s+tengo\s+restricciones?(\s+m[ée]dicas?)?|sin\s+restricciones?(\s+m[ée]dicas?)?|ninguna\s+restricci[oó]n)\b/i.test(compact)
+    || /^(no|ninguna|ninguno)$/i.test(compact.trim());
+  const medicalAffirmative = /\b(s[ií]\s+tengo\s+restricciones?\s+m[ée]dicas?|tengo\s+restricci[oó]n(?:\s+m[ée]dica)?|no\s+puedo\s+cargar|problema\s+de\s+columna|restricci[oó]n\s+en\s+la\s+espalda)\b/i.test(compact);
+  const medicalMatch = compact.match(/(?:restricciones?\s+m[ée]dicas?\s*[:\-]?\s*)([^,.\n]{2,100})/i) || remaining.match(/(?:restricciones?\s+m[ée]dicas?\s*[:\-]?\s*)([^,.\n]{2,100})/i);
   if (medicalNegative) result.medicalRestrictions = 'Sin restricciones médicas';
   else if (medicalMatch) {
     const medicalValue = medicalMatch[1].trim();
@@ -178,7 +188,8 @@ export function parseNaturalData(text = '') {
     result.medicalRestrictions = snippet ? capitalizeWords(snippet[1].trim()) : 'Sí, reporta restricciones médicas';
   }
 
-  const transportMatch = remaining.match(/\b(moto|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i);
+  const transportMatch = compact.match(/\b(?:transporte|movilidad|me\s+muevo\s+en)?\s*[:\-]?\s*(moto|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i)
+    || remaining.match(/\b(moto|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i);
   if (transportMatch) result.transportMode = normalizeTransportMode(transportMatch[1]);
 
   const detectedName = detectLeadingName(text);
