@@ -60,14 +60,30 @@ function hasCv(candidate) { return Boolean(candidate?.cvData); }
 function getNaturalDelayMs(inputText = '', outputText = '') { if (process.env.NODE_ENV === 'test') return 0; const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
 
 
-async function saveInboundMessage(prisma, candidateId, message, body, type) {
-  try {
-    const created = await prisma.message.create({ data: { candidateId, waMessageId: message.id, direction: MessageDirection.INBOUND, messageType: type, body, rawPayload: sanitizeForRawPayload(message) } });
-    return { isNew: true, id: created.id };
-  } catch (error) {
-    if (String(error?.message || '').includes('Unique constraint')) return { isNew: false, id: null };
-    throw error;
+export async function saveInboundMessage(prisma, candidateId, message, body, type, phone) {
+  const waMessageId = message?.id || null;
+  const insertResult = await prisma.message.createMany({
+    data: [{ candidateId, waMessageId, direction: MessageDirection.INBOUND, messageType: type, body, rawPayload: sanitizeForRawPayload(message) }],
+    skipDuplicates: true
+  });
+
+  if (insertResult.count === 0) {
+    console.log('[INBOUND_DUPLICATE_IGNORED]', JSON.stringify({
+      phone: phone || null,
+      waMessageId,
+      duplicate_ignored: true
+    }));
+    return { isNew: false, id: null };
   }
+
+  if (!waMessageId) return { isNew: true, id: null };
+
+  const created = await prisma.message.findUnique({
+    where: { waMessageId },
+    select: { id: true }
+  });
+
+  return { isNew: true, id: created?.id || null };
 }
 async function attachDebugTrace(prisma, messageId, debugTrace) {
   if (!messageId) return;
@@ -270,7 +286,7 @@ export function webhookRouter(prisma) {
 
         if (message.type === 'text') {
           const body = message.text?.body || '';
-          const inbound = await saveInboundMessage(prisma, candidate.id, message, body, MessageType.TEXT);
+          const inbound = await saveInboundMessage(prisma, candidate.id, message, body, MessageType.TEXT, from);
           if (!inbound.isNew) continue;
 
           const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
@@ -333,7 +349,7 @@ export function webhookRouter(prisma) {
           continue;
         }
 
-        const inbound = await saveInboundMessage(prisma, candidate.id, message, message.document?.filename || '', MessageType.DOCUMENT);
+        const inbound = await saveInboundMessage(prisma, candidate.id, message, message.document?.filename || '', MessageType.DOCUMENT, from);
         if (!inbound.isNew) continue;
 
         const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
