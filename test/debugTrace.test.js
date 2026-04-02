@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDebugTrace, splitFieldDecisions, summarizeError } from '../src/services/debugTrace.js';
+import { createDebugTrace, isSuspiciousFullName, splitFieldDecisions, summarizeError } from '../src/services/debugTrace.js';
 
 test('createDebugTrace starts with secure defaults', () => {
   const trace = createDebugTrace({ phone: '573001112233', currentStepBefore: 'MENU' });
@@ -27,4 +27,19 @@ test('summarizeError does not leak nested payloads', () => {
   assert.match(summary, /AxiosError/);
   assert.match(summary, /HTTP 500/);
   assert.doesNotMatch(summary, /secret/);
+});
+
+test('isSuspiciousFullName rejects intention/question phrases as names', () => {
+  assert.equal(isSuspiciousFullName('me interesa'), true);
+  assert.equal(isSuspiciousFullName('si estoy interesado'), true);
+  assert.equal(isSuspiciousFullName('quiero continuar'), true);
+  assert.equal(isSuspiciousFullName('qué datos necesitas'), true);
+  assert.equal(isSuspiciousFullName('tengo moto'), true);
+});
+
+test('isSuspiciousFullName keeps real names valid', () => {
+  assert.equal(isSuspiciousFullName('Carlos Lara'), false);
+  assert.equal(isSuspiciousFullName('Me llamo Carlos Lara'), true);
+  const decisions = splitFieldDecisions({ fullName: 'Carlos Lara' }, { fullName: null });
+  assert.deepEqual(decisions.persistedFields, ['fullName']);
 });
