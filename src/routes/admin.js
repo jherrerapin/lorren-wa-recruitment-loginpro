@@ -2,6 +2,7 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
 import path from 'node:path';
+import multer from 'multer';
 
 // Middleware de autenticación por sesión para proteger el dashboard.
 function sessionAuth(req, res, next) {
@@ -66,97 +67,20 @@ function buildCvStatusQuery(type, message) {
 
 function isAllowedCvFile(file) {
   const extension = path.extname(file.originalname || '').toLowerCase();
-  return ALLOWED_CV_MIMES.has(file.mimetype) && ALLOWED_CV_EXTENSIONS.has(extension);
-}
-
-function parseContentDisposition(disposition) {
-  const nameMatch = disposition.match(/name="([^"]+)"/i);
-  const filenameMatch = disposition.match(/filename="([^"]*)"/i);
-  return {
-    fieldName: nameMatch?.[1] || null,
-    filename: filenameMatch?.[1] || null
-  };
-}
-
-async function readRawBody(req, maxBytes = 10 * 1024 * 1024) {
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > maxBytes) {
-      const error = new Error('Archivo demasiado grande');
-      error.statusCode = 413;
-      throw error;
-    }
-    chunks.push(chunk);
+  if (ALLOWED_CV_MIMES.has(file.mimetype)) {
+    return true;
   }
-  return Buffer.concat(chunks);
-}
-
-async function parseSingleMultipartFile(req, fieldName) {
-  const contentType = req.headers['content-type'] || '';
-  const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
-  if (!boundaryMatch) return null;
-
-  const boundary = Buffer.from(`--${boundaryMatch[1]}`);
-  const body = await readRawBody(req);
-  const segments = [];
-  let start = body.indexOf(boundary);
-
-  while (start !== -1) {
-    const next = body.indexOf(boundary, start + boundary.length);
-    if (next === -1) break;
-    segments.push(body.subarray(start + boundary.length, next));
-    start = next;
-  }
-
-  for (const rawSegment of segments) {
-    let segment = rawSegment;
-    if (segment.subarray(0, 2).equals(Buffer.from('\r\n'))) {
-      segment = segment.subarray(2);
-    }
-    if (!segment.length || segment.equals(Buffer.from('--\r\n'))) continue;
-
-    const headersEnd = segment.indexOf(Buffer.from('\r\n\r\n'));
-    if (headersEnd === -1) continue;
-
-    const headersRaw = segment.subarray(0, headersEnd).toString('utf8');
-    const contentStart = headersEnd + 4;
-    let contentEnd = segment.length;
-    if (segment.subarray(contentEnd - 2, contentEnd).equals(Buffer.from('\r\n'))) {
-      contentEnd -= 2;
-    }
-    const fileBuffer = segment.subarray(contentStart, contentEnd);
-    const headerLines = headersRaw.split('\r\n');
-    const headers = {};
-    for (const line of headerLines) {
-      const separatorIndex = line.indexOf(':');
-      if (separatorIndex === -1) continue;
-      const key = line.slice(0, separatorIndex).trim().toLowerCase();
-      const value = line.slice(separatorIndex + 1).trim();
-      headers[key] = value;
-    }
-
-    const disposition = headers['content-disposition'];
-    if (!disposition) continue;
-    const parsedDisposition = parseContentDisposition(disposition);
-    if (parsedDisposition.fieldName !== fieldName || !parsedDisposition.filename) continue;
-
-    return {
-      fieldname: fieldName,
-      originalname: parsedDisposition.filename,
-      mimetype: headers['content-type'] || 'application/octet-stream',
-      buffer: fileBuffer,
-      size: fileBuffer.length
-    };
-  }
-
-  return null;
+  const mimeMissingOrGeneric = !file.mimetype || file.mimetype === 'application/octet-stream';
+  return mimeMissingOrGeneric && ALLOWED_CV_EXTENSIONS.has(extension);
 }
 
 // Expone el router administrativo.
 export function adminRouter(prisma) {
   const router = express.Router();
+  const cvUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 }
+  }).single('cvFile');
 
   // Protege todas las rutas del dashboard con autenticación por sesión.
   router.use(sessionAuth);
@@ -266,67 +190,77 @@ export function adminRouter(prisma) {
   });
 
   // Ruta para carga/reemplazo manual de hoja de vida desde el dashboard.
-  router.post('/candidates/:id/cv/upload', async (req, res) => {
-    const candidateId = req.params.id;
-    const candidate = await prisma.candidate.findUnique({
-      where: { id: candidateId },
-      select: { id: true, cvData: true }
-    });
+  router.post('/candidates/:id/cv/upload', (req, res) => {
+    cvUpload(req, res, async error => {
+      try {
+        const candidateId = req.params.id;
+        const candidate = await prisma.candidate.findUnique({
+          where: { id: candidateId },
+          select: { id: true, cvData: true }
+        });
 
-    if (!candidate) {
-      return res.status(404).send('Candidato no encontrado');
-    }
+        if (!candidate) {
+          return res.status(404).send('Candidato no encontrado');
+        }
 
-    let file = null;
-    try {
-      file = await parseSingleMultipartFile(req, 'cvFile');
-    } catch (error) {
-      console.warn('[CV_MANUAL_INVALID]', JSON.stringify({ candidateId, role: req.userRole, reason: 'file_too_large' }));
-      const query = buildCvStatusQuery('cvError', 'El archivo supera el tamaño máximo permitido (10MB).');
-      return res.redirect(`/admin/candidates/${candidateId}?${query}`);
-    }
+        if (error) {
+          if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+            console.warn('[CV_MANUAL_INVALID]', JSON.stringify({ candidateId, role: req.userRole, reason: 'file_too_large' }));
+            const query = buildCvStatusQuery('cvError', 'El archivo supera el tamaño máximo permitido (10MB).');
+            return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+          }
 
-    if (!file) {
-      console.warn('[CV_MANUAL_INVALID]', JSON.stringify({ candidateId, role: req.userRole, reason: 'missing_file' }));
-      const query = buildCvStatusQuery('cvError', 'Debes seleccionar un archivo PDF, DOC o DOCX.');
-      return res.redirect(`/admin/candidates/${candidateId}?${query}`);
-    }
+          console.warn('[CV_MANUAL_INVALID]', JSON.stringify({ candidateId, role: req.userRole, reason: 'upload_parse_error' }));
+          const query = buildCvStatusQuery('cvError', 'No se pudo procesar el archivo adjunto.');
+          return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+        }
 
-    if (!isAllowedCvFile(file)) {
-      console.warn('[CV_MANUAL_INVALID]', JSON.stringify({
-        candidateId,
-        role: req.userRole,
-        reason: 'invalid_type',
-        mimeType: file.mimetype,
-        filename: file.originalname
-      }));
-      const query = buildCvStatusQuery('cvError', 'Archivo inválido. Solo se permiten PDF, DOC o DOCX.');
-      return res.redirect(`/admin/candidates/${candidateId}?${query}`);
-    }
+        const file = req.file;
+        if (!file) {
+          console.warn('[CV_MANUAL_INVALID]', JSON.stringify({ candidateId, role: req.userRole, reason: 'missing_file' }));
+          const query = buildCvStatusQuery('cvError', 'Debes seleccionar un archivo PDF, DOC o DOCX.');
+          return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+        }
 
-    await prisma.candidate.update({
-      where: { id: candidateId },
-      data: {
-        cvData: file.buffer,
-        cvOriginalName: file.originalname,
-        cvMimeType: file.mimetype
+        if (!isAllowedCvFile(file)) {
+          console.warn('[CV_MANUAL_INVALID]', JSON.stringify({
+            candidateId,
+            role: req.userRole,
+            reason: 'invalid_type',
+            mimeType: file.mimetype,
+            filename: file.originalname
+          }));
+          const query = buildCvStatusQuery('cvError', 'Archivo inválido. Solo se permiten PDF, DOC o DOCX.');
+          return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+        }
+
+        await prisma.candidate.update({
+          where: { id: candidateId },
+          data: {
+            cvData: file.buffer,
+            cvOriginalName: file.originalname,
+            cvMimeType: file.mimetype
+          }
+        });
+
+        const action = candidate.cvData ? '[CV_MANUAL_REPLACE]' : '[CV_MANUAL_UPLOAD]';
+        console.log(action, JSON.stringify({
+          candidateId,
+          role: req.userRole,
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          size: file.size
+        }));
+
+        const successMessage = candidate.cvData
+          ? 'Hoja de vida reemplazada correctamente.'
+          : 'Hoja de vida cargada correctamente.';
+        const query = buildCvStatusQuery('cvSuccess', successMessage);
+        return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+      } catch (_unexpectedError) {
+        return res.status(500).send('Error interno al procesar la hoja de vida');
       }
     });
-
-    const action = candidate.cvData ? '[CV_MANUAL_REPLACE]' : '[CV_MANUAL_UPLOAD]';
-    console.log(action, JSON.stringify({
-      candidateId,
-      role: req.userRole,
-      filename: file.originalname,
-      mimeType: file.mimetype,
-      size: file.size
-    }));
-
-    const successMessage = candidate.cvData
-      ? 'Hoja de vida reemplazada correctamente.'
-      : 'Hoja de vida cargada correctamente.';
-    const query = buildCvStatusQuery('cvSuccess', successMessage);
-    return res.redirect(`/admin/candidates/${candidateId}?${query}`);
   });
 
   // Ruta para eliminar hoja de vida manualmente desde el dashboard.
