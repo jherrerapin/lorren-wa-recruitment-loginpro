@@ -64,6 +64,20 @@ enum MessageType {
   UNKNOWN
 }
 
+/// Enumera el estado del recordatorio automático por inactividad.
+enum ReminderState {
+  /// No hay recordatorio aplicado.
+  NONE
+  /// Recordatorio programado pendiente de envío.
+  SCHEDULED
+  /// Recordatorio enviado al candidato.
+  SENT
+  /// Recordatorio cancelado por nueva actividad inbound.
+  CANCELLED
+  /// Recordatorio omitido por política/ventana/estado.
+  SKIPPED
+}
+
 /// Modelo principal de candidato.
 model Candidate {
   /// Identificador único interno del candidato.
@@ -92,6 +106,10 @@ model Candidate {
   medicalRestrictions String?
   /// Medio de transporte del candidato.
   transportMode     String?
+  /// Último motivo de rechazo aplicado al candidato.
+  rejectionReason   String?
+  /// Detalles adicionales del rechazo para trazabilidad.
+  rejectionDetails  String?
   /// Resumen de experiencia del candidato (campo legado, no se usa en el flujo actual).
   experienceSummary String?
   /// Disponibilidad horaria del candidato (campo legado, no se usa en el flujo actual).
@@ -114,6 +132,16 @@ model Candidate {
   multilineWindowUntil DateTime?
   /// Versión incremental para controlar carreras del batching multilinea.
   multilineBatchVersion Int          @default(0)
+  /// Fecha del último inbound recibido para control de ventana y recordatorios.
+  lastInboundAt     DateTime?
+  /// Fecha del último outbound enviado para trazabilidad.
+  lastOutboundAt    DateTime?
+  /// Fecha del último recordatorio enviado.
+  lastReminderAt    DateTime?
+  /// Fecha objetivo para envío del recordatorio automático.
+  reminderScheduledFor DateTime?
+  /// Estado del ciclo de recordatorio de inactividad.
+  reminderState     ReminderState    @default(NONE)
   /// Relación uno a muchos con los mensajes del candidato.
   messages          Message[]
 }

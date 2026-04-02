@@ -7,6 +7,7 @@ import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisio
 import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
 import { isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData } from '../services/candidateData.js';
 import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
+import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
 
@@ -32,10 +33,23 @@ Si estás interesado en continuar, respóndeme y te solicitaré tus datos.`;
 const SOLICITAR_DATOS = 'Perfecto. Envíame por favor estos datos para continuar: nombre completo, tipo de documento, número de documento, edad, barrio, si tienes experiencia en el cargo y cuánto tiempo, si tienes restricciones médicas y qué medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea más fácil.';
 const DESCARTE_MSG = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque no cumples con uno de los requisitos definidos para esta vacante.';
 const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
-const SOLICITAR_CV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida en PDF o Word (.doc/.docx) para finalizar tu postulación.';
-const RECORDATORIO_CV = 'Para continuar necesito que adjuntes tu hoja de vida en PDF o Word (.doc/.docx). Cuando la envíes, finalizamos tu proceso.';
-const MENSAJE_FINAL = 'Tu información y hoja de vida fueron recibidas correctamente. Las entrevistas están previstas para el 8 de abril. Debes estar pendiente del mensaje o llamada del reclutador; por ese medio te confirmarán la hora y el lugar.';
+const SOLICITAR_HV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida (HV) en PDF o Word (.doc/.docx) para finalizar tu postulación.';
+const RECORDATORIO_HV = 'Para continuar necesito que adjuntes tu Hoja de vida (HV) en PDF o Word (.doc/.docx). Cuando la envíes, finalizamos tu proceso.';
+const MENSAJE_FINAL = 'Tu información y Hoja de vida (HV) fueron recibidas correctamente. Las entrevistas están previstas para el 8 de abril. Debes estar pendiente del mensaje o llamada del reclutador; por ese medio te confirmarán la hora y el lugar.';
 const GUIA_CONTINUAR = 'Puedo ayudarte a continuar con la postulación. Si deseas seguir, envíame tus datos y te voy guiando.';
+const CONFIRMACION_PROMPT = '¿Está correcto? Responde Sí para continuar o envíame la corrección.';
+
+const REQUIRED_FIELDS = [
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'neighborhood',
+  'experienceInfo',
+  'experienceTime',
+  'medicalRestrictions',
+  'transportMode'
+];
 
 function normalizeText(text = '') { return text.trim(); }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -46,19 +60,75 @@ function isAffirmativeInterest(text) {
   if (patterns.some((p) => n === p || n.includes(p))) return true;
   return /(quiero|deseo|me gustar[ií]a|vamos|listo|claro).*(aplicar|postular|continuar|seguir|participar)/i.test(n);
 }
+function isAffirmativeConfirmation(text) {
+  const n = normalizeText(text).toLowerCase();
+  return /^(si|sí|correcto|esta bien|está bien|todo bien|confirmo|de acuerdo|ok|listo)\b/.test(n);
+}
 function isNegativeInterest(text) { const n = normalizeText(text).toLowerCase(); return /^(no+|nop+|negativo)$|no gracias|no me interesa|no estoy interesad|no deseo|paso|ya no|prefiero no/i.test(n); }
 function shouldRejectByRequirements(text, parsed = {}) {
   const n = normalizeText(text).toLowerCase();
-  if (parsed.age && (parsed.age < 18 || parsed.age > 50)) return true;
-  if (/no\s+tengo\s+documento\s+vigente|documento\s+vencido|sin\s+documento\s+vigente/.test(n)) return true;
-  if (/(soy\s+extranjero|soy\s+venezolan|extranjera?)/.test(n) && /(no\s+tengo\s+ppt|sin\s+ppt|ppt\s+vencido)/.test(n)) return true;
-  return false;
+  if (parsed.age && (parsed.age < 18 || parsed.age > 50)) return { reject: true, reason: 'Edad fuera del rango permitido', details: `Edad detectada: ${parsed.age}` };
+  if (/no\s+tengo\s+documento\s+vigente|documento\s+vencido|sin\s+documento\s+vigente/.test(n)) {
+    return { reject: true, reason: 'Documento no vigente', details: 'El candidato indicó no tener documento vigente.' };
+  }
+  if (/(soy\s+extranjero|soy\s+venezolan|extranjera?|no\s+soy\s+colombian)/.test(n)) {
+    const type = parsed.documentType || '';
+    if (!['CE', 'PPT', 'Pasaporte'].includes(type)) {
+      return {
+        reject: true,
+        reason: 'Extranjero sin documento válido',
+        details: 'Para candidatos extranjeros solo son válidos CE, PPT o Pasaporte.'
+      };
+    }
+  }
+  return { reject: false };
 }
-function getMissingFields(candidate) { const m = []; if (!candidate.fullName) m.push('nombre completo'); if (!candidate.documentType) m.push('tipo de documento'); if (!candidate.documentNumber) m.push('número de documento'); if (!candidate.age) m.push('edad'); if (!candidate.neighborhood) m.push('barrio'); if (!candidate.experienceInfo) m.push('experiencia en el cargo'); if (!candidate.experienceTime) m.push('tiempo de experiencia'); if (!candidate.medicalRestrictions) m.push('restricciones médicas'); if (!candidate.transportMode) m.push('medio de transporte'); return m; }
+function getMissingFields(candidate) {
+  const m = [];
+  if (!candidate.fullName) m.push('nombre completo');
+  if (!candidate.documentType) m.push('tipo de documento');
+  if (!candidate.documentNumber) m.push('número de documento');
+  if (!candidate.age) m.push('edad');
+  if (!candidate.neighborhood) m.push('barrio');
+  if (!candidate.experienceInfo) m.push('experiencia en el cargo');
+  if (!candidate.experienceTime) m.push('tiempo de experiencia');
+  if (!candidate.medicalRestrictions) m.push('restricciones médicas');
+  if (!candidate.transportMode) m.push('medio de transporte');
+  return m;
+}
 function containsCandidateData(text) { return Object.keys(parseNaturalData(text)).length > 0; }
-function hasCv(candidate) { return Boolean(candidate?.cvData); }
+function hasHv(candidate) { return Boolean(candidate?.cvData); }
 function getNaturalDelayMs(inputText = '', outputText = '') { if (process.env.NODE_ENV === 'test') return 0; const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
 
+function buildConfirmationSummary(candidate) {
+  const documentLabel = candidate.documentType && candidate.documentNumber
+    ? `${candidate.documentType} ${candidate.documentNumber}`
+    : 'Pendiente';
+  return [
+    'Perfecto, por favor confirma estos datos:',
+    `• Nombre completo: ${candidate.fullName || 'Pendiente'}`,
+    `• Documento: ${documentLabel}`,
+    `• Edad: ${candidate.age ? `${candidate.age} años` : 'Pendiente'}`,
+    `• Barrio: ${candidate.neighborhood || 'Pendiente'}`,
+    `• Experiencia: ${candidate.experienceInfo || 'Pendiente'}`,
+    `• Tiempo de experiencia: ${candidate.experienceTime || 'Pendiente'}`,
+    `• Restricciones médicas: ${candidate.medicalRestrictions || 'Pendiente'}`,
+    `• Medio de transporte: ${candidate.transportMode || 'Pendiente'}`,
+    CONFIRMACION_PROMPT
+  ].join('\n');
+}
+
+function shouldAskForConfirmation(candidate, normalizedData) {
+  if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) return true;
+  const missing = getMissingFields(candidate);
+  const hasMainBlock = REQUIRED_FIELDS.every((field) => candidate[field] !== null && candidate[field] !== undefined && candidate[field] !== '');
+  if (hasMainBlock) return true;
+  if (!missing.length) return true;
+
+  const correctedFields = Object.keys(normalizedData || {});
+  const requiresReconfirm = correctedFields.some((field) => REQUIRED_FIELDS.includes(field));
+  return requiresReconfirm && correctedFields.length >= 2 && missing.length <= 2;
+}
 
 export async function saveInboundMessage(prisma, candidateId, message, body, type, phone) {
   const waMessageId = message?.id || null;
@@ -76,6 +146,10 @@ export async function saveInboundMessage(prisma, candidateId, message, body, typ
     return { isNew: false, id: null };
   }
 
+  if (prisma.candidate?.update) {
+    await prisma.candidate.update({ where: { id: candidateId }, data: { lastInboundAt: new Date() } });
+  }
+
   if (!waMessageId) return { isNew: true, id: null };
 
   const created = await prisma.message.findUnique({
@@ -90,9 +164,30 @@ async function attachDebugTrace(prisma, messageId, debugTrace) {
   const current = await prisma.message.findUnique({ where: { id: messageId }, select: { rawPayload: true } });
   await prisma.message.update({ where: { id: messageId }, data: { rawPayload: { ...(current?.rawPayload || {}), debugTrace } } });
 }
-async function saveOutboundMessage(prisma, candidateId, body) { await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload: { body } } }); }
-async function reply(prisma, candidateId, to, body, inboundText = '') { await sleep(getNaturalDelayMs(inboundText, body)); await sendTextMessage(to, body); await saveOutboundMessage(prisma, candidateId, body); }
-async function rejectCandidate(prisma, candidateId, from) { await prisma.candidate.update({ where: { id: candidateId }, data: { status: CandidateStatus.RECHAZADO, currentStep: ConversationStep.DONE } }); await reply(prisma, candidateId, from, DESCARTE_MSG); }
+async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
+  await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload } });
+  await prisma.candidate.update({ where: { id: candidateId }, data: { lastOutboundAt: new Date() } });
+}
+async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload = { body }) {
+  await sleep(getNaturalDelayMs(inboundText, body));
+  await sendTextMessage(to, body);
+  await saveOutboundMessage(prisma, candidateId, body, rawPayload);
+  await scheduleReminderForCandidate(prisma, candidateId);
+}
+async function rejectCandidate(prisma, candidateId, from, rejection = {}) {
+  await prisma.candidate.update({
+    where: { id: candidateId },
+    data: {
+      status: CandidateStatus.RECHAZADO,
+      currentStep: ConversationStep.DONE,
+      rejectionReason: rejection.reason || 'No cumple requisitos',
+      rejectionDetails: rejection.details || null,
+      reminderScheduledFor: null,
+      reminderState: 'SKIPPED'
+    }
+  });
+  await reply(prisma, candidateId, from, DESCARTE_MSG);
+}
 
 async function processText(prisma, candidate, from, text, debugTrace, options = {}) {
   const cleanText = normalizeText(text);
@@ -146,7 +241,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
     return reply(prisma, candidate.id, from, SALUDO_INICIAL);
   }
-  if (candidate.currentStep === ConversationStep.ASK_CV) return reply(prisma, candidate.id, from, RECORDATORIO_CV);
+  if (candidate.currentStep === ConversationStep.ASK_CV && !hasDataIntent) return reply(prisma, candidate.id, from, RECORDATORIO_HV);
   if (candidate.currentStep === ConversationStep.DONE) return reply(prisma, candidate.id, from, MENSAJE_FINAL);
 
   const applyDecisionsAndUpdate = async () => {
@@ -164,57 +259,77 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     return prisma.candidate.findUnique({ where: { id: candidate.id } });
   };
 
+  const routeAfterConfirmation = async (updatedCandidate) => {
+    const missing = getMissingFields(updatedCandidate);
+    if (missing.length) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
+      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+    }
+
+    if (resolveStepAfterDataCompletion({ hasCv: hasHv(updatedCandidate) }) === ConversationStep.DONE) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
+      return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+    }
+    await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
+    return reply(prisma, candidate.id, from, SOLICITAR_HV);
+  };
+
+  if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
+    if (isAffirmativeConfirmation(cleanText)) {
+      const updated = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+      return routeAfterConfirmation(updated);
+    }
+
+    const updated = await applyDecisionsAndUpdate();
+    const latest = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+    return reply(prisma, candidate.id, from, buildConfirmationSummary(latest));
+  }
+
   if (candidate.currentStep === ConversationStep.GREETING_SENT) {
     if (isNegativeInterest(cleanText)) { await reply(prisma, candidate.id, from, CIERRE_NO_INTERES); return; }
     if (isAffirmativeInterest(cleanText) || hasDataIntent) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       if (hasDataIntent) {
-        if (shouldRejectByRequirements(cleanText, mergedData)) return rejectCandidate(prisma, candidate.id, from);
+        const rejection = shouldRejectByRequirements(cleanText, normalizedData);
+        if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
         const updated = await applyDecisionsAndUpdate();
-        const missing = getMissingFields(updated);
-        if (!missing.length) {
-          if (resolveStepAfterDataCompletion({ hasCv: hasCv(updated) }) === ConversationStep.DONE) {
-            await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-            return reply(prisma, candidate.id, from, MENSAJE_FINAL);
-          }
-          await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
-          return reply(prisma, candidate.id, from, SOLICITAR_CV);
+        if (shouldAskForConfirmation(updated, normalizedData)) {
+          await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
+          return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
         }
+        const missing = getMissingFields(updated);
         return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
       }
       return reply(prisma, candidate.id, from, SOLICITAR_DATOS);
     }
 
-    if (shouldRejectByRequirements(cleanText, mergedData)) return rejectCandidate(prisma, candidate.id, from);
-    if (Object.keys(mergedData).length >= 1) {
+    const rejection = shouldRejectByRequirements(cleanText, normalizedData);
+    if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
+
+    if (Object.keys(normalizedData).length >= 1) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       const updated = await applyDecisionsAndUpdate();
-      const missing = getMissingFields(updated);
-      if (!missing.length) {
-        if (resolveStepAfterDataCompletion({ hasCv: hasCv(updated) }) === ConversationStep.DONE) {
-          await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-          return reply(prisma, candidate.id, from, MENSAJE_FINAL);
-        }
-        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
-        return reply(prisma, candidate.id, from, SOLICITAR_CV);
+      if (shouldAskForConfirmation(updated, normalizedData)) {
+        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
+        return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
       }
+      const missing = getMissingFields(updated);
       return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
     }
     return reply(prisma, candidate.id, from, GUIA_CONTINUAR);
   }
 
-  if (candidate.currentStep === ConversationStep.COLLECTING_DATA) {
-    if (shouldRejectByRequirements(cleanText, mergedData)) return rejectCandidate(prisma, candidate.id, from);
+  if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.ASK_CV) {
+    const rejection = shouldRejectByRequirements(cleanText, normalizedData);
+    if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
     const updated = await applyDecisionsAndUpdate();
-    const missing = getMissingFields(updated);
-    if (!missing.length) {
-      if (resolveStepAfterDataCompletion({ hasCv: hasCv(updated) }) === ConversationStep.DONE) {
-        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-        return reply(prisma, candidate.id, from, MENSAJE_FINAL);
-      }
-      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
-      return reply(prisma, candidate.id, from, SOLICITAR_CV);
+
+    if (shouldAskForConfirmation(updated, normalizedData)) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
+      return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
     }
+
+    const missing = getMissingFields(updated);
     return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
   }
 }
@@ -289,6 +404,8 @@ export function webhookRouter(prisma) {
           const inbound = await saveInboundMessage(prisma, candidate.id, message, body, MessageType.TEXT, from);
           if (!inbound.isNew) continue;
 
+          await cancelReminderOnInbound(prisma, candidate.id);
+
           const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
 
           if (isFAQ(body)) {
@@ -352,6 +469,8 @@ export function webhookRouter(prisma) {
         const inbound = await saveInboundMessage(prisma, candidate.id, message, message.document?.filename || '', MessageType.DOCUMENT, from);
         if (!inbound.isNew) continue;
 
+        await cancelReminderOnInbound(prisma, candidate.id);
+
         const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
         const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
         debugTrace.cv_detected = message.type === 'document';
@@ -376,7 +495,7 @@ export function webhookRouter(prisma) {
                   await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
                   await reply(prisma, candidate.id, from, MENSAJE_FINAL);
                 } else {
-                  if (afterCvSave.currentStep !== ConversationStep.COLLECTING_DATA) {
+                  if (afterCvSave.currentStep !== ConversationStep.COLLECTING_DATA && afterCvSave.currentStep !== ConversationStep.CONFIRMING_DATA) {
                     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
                   }
                   await reply(prisma, candidate.id, from, `Hoja de vida recibida. Aún necesito estos datos para completar tu registro: ${missing.join(', ')}`);

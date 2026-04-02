@@ -82,3 +82,16 @@ test('captura datos en orden libre con transporte al inicio y nombre al final', 
   assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
   assert.equal(normalized.fullName, 'Ana Sofia Perez');
 });
+
+test('normaliza tipo documental cédula de ciudadanía a CC', () => {
+  const parsed = parseNaturalData('tipo Cédula ciudadanía 1122334455');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.documentType, 'CC');
+  assert.equal(normalized.documentNumber, '1122334455');
+});
+
+test('captura barrio ciudadela simon bolívar en title case', () => {
+  const parsed = parseNaturalData('vivo en ciudadela simon bolivar y tengo moto');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.neighborhood, 'Ciudadela Simon Bolivar');
+});

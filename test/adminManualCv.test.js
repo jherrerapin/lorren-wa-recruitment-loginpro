@@ -275,7 +275,7 @@ test('admin no ve diagnósticos técnicos de CV en detalle', async () => {
     });
     const html = await response.text();
     assert.equal(response.status, 200);
-    assert.doesNotMatch(html, /Diagnóstico CV \\(nombre\\)/);
+    assert.doesNotMatch(html, /Diagnóstico HV \\(nombre\\)/);
     assert.match(html, /Archivo actual/);
     assert.match(html, /Descargar/);
     assert.match(html, /Reemplazar/);
@@ -303,10 +303,41 @@ test('dev sí ve diagnósticos técnicos de CV en detalle', async () => {
     });
     const html = await response.text();
     assert.equal(response.status, 200);
-    assert.match(html, /Diagnóstico CV \\(nombre\\)/);
-    assert.match(html, /Diagnóstico CV \\(MIME\\)/);
-    assert.match(html, /Diagnóstico CV \\(bytes\\)/);
+    assert.match(html, /Diagnóstico HV \\(nombre\\)/);
+    assert.match(html, /Diagnóstico HV \\(MIME\\)/);
+    assert.match(html, /Diagnóstico HV \\(bytes\\)/);
   } finally {
     await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('acciones de mensajes salientes solo aparecen para dev', async () => {
+  const candidate = {
+    id: 'cand-8',
+    phone: '573001000111',
+    cvData: null,
+    cvOriginalName: null,
+    cvMimeType: null,
+    messages: []
+  };
+  const adminCtx = await createServer(candidate);
+  const devCtx = await createServer({ ...candidate, id: 'cand-9', phone: '573001000222' });
+
+  try {
+    const adminBase = `http://127.0.0.1:${adminCtx.server.address().port}`;
+    const adminCookie = await loginAndGetCookie(adminBase, 'admin');
+    const adminRes = await fetch(`${adminBase}/admin/candidates/cand-8`, { headers: { Cookie: adminCookie } });
+    const adminHtml = await adminRes.text();
+    assert.doesNotMatch(adminHtml, /Mensajes salientes/);
+
+    const devBase = `http://127.0.0.1:${devCtx.server.address().port}`;
+    const devCookie = await loginAndGetCookie(devBase, 'dev');
+    const devRes = await fetch(`${devBase}/admin/candidates/cand-9`, { headers: { Cookie: devCookie } });
+    const devHtml = await devRes.text();
+    assert.match(devHtml, /Mensajes salientes/);
+    assert.match(devHtml, /Solicitar Hoja de vida/);
+  } finally {
+    await new Promise(resolve => adminCtx.server.close(resolve));
+    await new Promise(resolve => devCtx.server.close(resolve));
   }
 });

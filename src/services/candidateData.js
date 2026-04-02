@@ -2,7 +2,7 @@ import { isSuspiciousFullName } from './debugTrace.js';
 
 const NAME_TOKEN_REGEX = /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/;
 const IMPLICIT_NEIGHBORHOODS = new Set([
-  'picalena', 'picaleña', 'boqueron', 'boquerón', 'jordán', 'jordan', 'salado', 'gaitan', 'gaitan', 'combeima', 'modelia', 'centro'
+  'picalena', 'picaleña', 'boqueron', 'boquerón', 'jordán', 'jordan', 'salado', 'gaitan', 'gaitan', 'combeima', 'modelia', 'centro', 'ciudadela', 'bolivar', 'simon'
 ]);
 
 function capitalizeWords(str = '') {
@@ -22,6 +22,9 @@ function normalizeDocumentType(value = '') {
   const map = {
     cc: 'CC',
     cedula: 'CC',
+    ceduladeciudadania: 'CC',
+    cedulaciudadania: 'CC',
+    ccceduladeciudadania: 'CC',
     ti: 'TI',
     tarjetadeidentidad: 'TI',
     ce: 'CE',
@@ -121,7 +124,7 @@ export function parseNaturalData(text = '') {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const docRegex = /\b(c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|\.|\s)\s*(\d{6,12})\b/i;
+  const docRegex = /\b(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|\.|\s)\s*(\d{6,12})\b/i;
   const docMatch = compact.match(docRegex) || remaining.match(docRegex);
   if (docMatch) {
     result.documentType = normalizeDocumentType(docMatch[1]) || docMatch[1].toUpperCase();
@@ -146,10 +149,25 @@ export function parseNaturalData(text = '') {
     }
   }
 
-  const barrioMatch = compact.match(/\b(?:barrio|zona|sector|localidad|vereda)\s*[:\-]?\s*([^,.\n]{2,60})/i) || remaining.match(/\b(?:barrio|zona|sector|localidad|vereda)\s*[:\-]?\s*([^,.\n]{2,60})/i);
+  const barrioMatch = compact.match(/\b(?:barrio|zona|sector|localidad|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i) || remaining.match(/\b(?:barrio|zona|sector|localidad|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i);
   if (barrioMatch) {
-    result.neighborhood = capitalizeWords(barrioMatch[1].trim());
+    const cleanedNeighborhood = barrioMatch[1]
+      .replace(/\b(y\s+tengo|tengo|con|y)\b.*$/i, '')
+      .trim();
+    const normalizedNeighborhood = capitalizeWords(cleanedNeighborhood);
+    if (/^ciudadela/i.test(barrioMatch[0]) && !/^ciudadela\s+/i.test(normalizedNeighborhood)) {
+      result.neighborhood = `Ciudadela ${normalizedNeighborhood}`.trim();
+    } else {
+      result.neighborhood = normalizedNeighborhood;
+    }
     remaining = remaining.replace(barrioMatch[0], ' ');
+  }
+
+  if (!result.neighborhood) {
+    const ciudadelaSimonBolivar = compact.match(/\bciudadela\s+simon\s+bolivar\b/i) || compact.match(/\bsimon\s+bolivar\b/i);
+    if (ciudadelaSimonBolivar) {
+      result.neighborhood = 'Ciudadela Simon Bolivar';
+    }
   }
 
   if (!result.neighborhood) {

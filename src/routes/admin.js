@@ -5,6 +5,9 @@ import path from 'node:path';
 import multer from 'multer';
 import { normalizeCandidateFields } from '../services/candidateData.js';
 import { exportFilenameByScope, filterCandidatesByScope } from '../services/candidateExport.js';
+import { sendTextMessage } from '../services/whatsapp.js';
+import { isWithinWhatsappWindow } from '../services/reminder.js';
+import { MessageDirection, MessageType } from '@prisma/client';
 
 // Middleware de autenticación por sesión para proteger el dashboard.
 function sessionAuth(req, res, next) {
@@ -85,6 +88,21 @@ function normalizeBinaryData(value) {
   return Buffer.from(value);
 }
 
+function ensureDevRole(req, res, next) {
+  if (req.userRole !== 'dev') {
+    return res.status(403).send('Acceso restringido a desarrolladores');
+  }
+  return next();
+}
+
+function outboundTemplates(candidate) {
+  return {
+    request_missing_data: 'Hola 👋 Para continuar con tu postulación, por favor envíame los datos faltantes que aún no has compartido.',
+    request_hv: 'Hola 👋 Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).',
+    reminder: 'Te recuerdo que tu proceso sigue activo. Si deseas continuar, comparte la información faltante o tu Hoja de vida (HV).'
+  };
+}
+
 function toHexPreview(buffer, maxBytes = 16) {
   if (!buffer || !buffer.length) return '';
   return buffer.subarray(0, maxBytes).toString('hex');
@@ -140,12 +158,16 @@ export function adminRouter(prisma) {
     const cvBuffer = normalizeBinaryData(candidate.cvData);
     const cvError = normalizeString(req.query.cvError);
     const cvSuccess = normalizeString(req.query.cvSuccess);
+    const outboundError = normalizeString(req.query.outboundError);
+    const outboundSuccess = normalizeString(req.query.outboundSuccess);
     res.render('detail', {
       candidate,
       formatDateTimeCO,
       role: req.userRole,
       cvError,
       cvSuccess,
+      outboundError,
+      outboundSuccess,
       cvSizeBytes: cvBuffer?.byteLength || 0
     });
   });
@@ -159,6 +181,8 @@ export function adminRouter(prisma) {
     const experienceInfo = normalizeString(req.body.experienceInfo);
     const transportMode = normalizeString(req.body.transportMode);
     const status = normalizeString(req.body.status);
+    const rejectionReason = normalizeString(req.body.rejectionReason);
+    const rejectionDetails = normalizeString(req.body.rejectionDetails);
 
     const experienceTime = normalizeString(req.body.experienceTime);
     const medicalRestrictions = normalizeString(req.body.medicalRestrictions);
@@ -193,7 +217,9 @@ export function adminRouter(prisma) {
         experienceTime: normalizedFields.experienceTime ?? experienceTime,
         medicalRestrictions: normalizedFields.medicalRestrictions ?? medicalRestrictions,
         transportMode: normalizedFields.transportMode ?? transportMode,
-        status
+        status,
+        rejectionReason,
+        rejectionDetails
       }
     });
 
@@ -402,8 +428,10 @@ export function adminRouter(prisma) {
       { header: 'Tiempo de experiencia', key: 'experienceTime', width: 20 },
       { header: 'Restricciones médicas', key: 'medicalRestrictions', width: 25 },
       { header: 'Medio de transporte', key: 'transportMode', width: 20 },
-      { header: 'CV adjunto', key: 'cvAttached', width: 12 },
+      { header: 'Hoja de vida adjunta', key: 'cvAttached', width: 18 },
       { header: 'Estado', key: 'status', width: 15 },
+      { header: 'Motivo rechazo', key: 'rejectionReason', width: 24 },
+      { header: 'Detalle rechazo', key: 'rejectionDetails', width: 32 },
       { header: 'WhatsApp', key: 'whatsapp', width: 15 }
     ];
 
@@ -425,6 +453,8 @@ export function adminRouter(prisma) {
         transportMode: c.transportMode || '',
         cvAttached: c.cvData ? 'Sí' : 'No',
         status: STATUS_LABELS[c.status] || c.status,
+        rejectionReason: c.rejectionReason || '',
+        rejectionDetails: c.rejectionDetails || '',
         whatsapp: 'Escribir'
       });
 
@@ -505,6 +535,46 @@ export function adminRouter(prisma) {
     });
 
     res.json(result);
+  });
+
+  router.post('/candidates/:id/outbound', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const candidateId = req.params.id;
+    const action = normalizeString(req.body.action);
+    const customBody = normalizeString(req.body.customBody);
+    const candidate = await prisma.candidate.findUnique({
+      where: { id: candidateId },
+      select: { id: true, phone: true, lastInboundAt: true }
+    });
+
+    if (!candidate) return res.status(404).send('Candidato no encontrado');
+
+    if (!isWithinWhatsappWindow(candidate.lastInboundAt)) {
+      const query = buildCvStatusQuery('outboundError', 'No se puede enviar: la conversación está fuera de la ventana de WhatsApp (24h).');
+      return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+    }
+
+    const templates = outboundTemplates(candidate);
+    let body = templates[action];
+    if (action === 'free_text') body = customBody;
+
+    if (!body) {
+      const query = buildCvStatusQuery('outboundError', 'No se pudo enviar el mensaje saliente por contenido inválido.');
+      return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+    }
+
+    await sendTextMessage(candidate.phone, body);
+    await prisma.message.create({
+      data: {
+        candidateId,
+        direction: MessageDirection.OUTBOUND,
+        messageType: MessageType.TEXT,
+        body,
+        rawPayload: { source: 'dev_dashboard', action }
+      }
+    });
+    await prisma.candidate.update({ where: { id: candidateId }, data: { lastOutboundAt: new Date() } });
+    const query = buildCvStatusQuery('outboundSuccess', 'Mensaje saliente enviado correctamente.');
+    return res.redirect(`/admin/candidates/${candidateId}?${query}`);
   });
 
   return router;

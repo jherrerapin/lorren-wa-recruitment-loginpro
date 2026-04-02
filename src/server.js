@@ -6,6 +6,7 @@ import session from 'express-session';
 import { PrismaClient } from '@prisma/client';
 import { webhookRouter } from './routes/webhook.js';
 import { adminRouter } from './routes/admin.js';
+import { runReminderDispatcher } from './services/reminder.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -130,3 +131,12 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server listening on ${port}`);
 });
+
+const reminderIntervalMs = 60_000;
+setInterval(async () => {
+  try {
+    await runReminderDispatcher(prisma);
+  } catch (error) {
+    console.error('[REMINDER_DISPATCHER_ERROR]', error);
+  }
+}, reminderIntervalMs);
