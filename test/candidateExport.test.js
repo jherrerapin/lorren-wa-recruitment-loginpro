@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   exportFilenameByScope,
   filterCandidatesByScope,
+  isOperationallyCompleteWithoutCv,
   isOperationallyRegistered,
   normalizeCandidateStatusForUI
 } from '../src/services/candidateExport.js';
@@ -57,5 +59,55 @@ test('scope registered incluye estados legacy cuando cumplen criterio operativo'
 
 test('nombre de archivo de exportación usa scopes operativos', () => {
   assert.match(exportFilenameByScope('contacted'), /^candidatos_contacted_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  assert.match(exportFilenameByScope('missing_cv_complete'), /^candidatos_missing_cv_complete_\d{4}-\d{2}-\d{2}\.xlsx$/);
   assert.match(exportFilenameByScope('invalid-scope'), /^candidatos_all_\d{4}-\d{2}-\d{2}\.xlsx$/);
+});
+
+test('isOperationallyCompleteWithoutCv devuelve true cuando está completo y sin HV', () => {
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null }), true);
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: '' }), true);
+});
+
+test('isOperationallyCompleteWithoutCv devuelve false si falta un dato clave', () => {
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, fullName: '' }), false);
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, experienceTime: null }), false);
+});
+
+test('isOperationallyCompleteWithoutCv devuelve false si está rechazado', () => {
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'RECHAZADO' }), false);
+});
+
+test('isOperationallyCompleteWithoutCv permite CONTACTADO si cumple criterio y sin HV', () => {
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'CONTACTADO' }), true);
+});
+
+test('scope missing_cv_complete filtra candidatos completos sin HV', () => {
+  const candidates = [
+    { ...baseCandidate, id: 'ok', cvData: null, status: 'REGISTRADO' },
+    { ...baseCandidate, id: 'ok-contacted', cvData: null, status: 'CONTACTADO' },
+    { ...baseCandidate, id: 'has-cv', cvData: Buffer.from('cv') },
+    { ...baseCandidate, id: 'rejected', cvData: null, status: 'RECHAZADO' },
+    { ...baseCandidate, id: 'missing-data', cvData: null, neighborhood: '' }
+  ];
+
+  assert.deepEqual(
+    filterCandidatesByScope(candidates, 'missing_cv_complete').map((c) => c.id),
+    ['ok', 'ok-contacted']
+  );
+});
+
+test('vistas principales reemplazan branding de texto y referencian favicon', () => {
+  const templates = ['src/views/list.ejs', 'src/views/detail.ejs', 'src/views/monitor.ejs', 'src/views/login.ejs'];
+  for (const templatePath of templates) {
+    const view = fs.readFileSync(templatePath, 'utf8');
+    assert.match(view, /favicon-loginpro\.svg/);
+    assert.match(view, /logo-loginpro\.svg/);
+  }
+
+  const navViews = ['src/views/list.ejs', 'src/views/detail.ejs', 'src/views/monitor.ejs'];
+  for (const templatePath of navViews) {
+    const view = fs.readFileSync(templatePath, 'utf8');
+    assert.doesNotMatch(view, />LoginPro<\/span>/);
+    assert.doesNotMatch(view, /Descargar Excel/);
+  }
 });

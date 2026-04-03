@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Monitor en tiempo real</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #eee; }
@@ -11,7 +12,8 @@
     .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
     .navbar a:hover { color: #3498db; }
     .navbar form button:hover { border-color: #3498db !important; color: #3498db !important; }
-    .navbar .brand { font-weight: 700; font-size: 16px; margin-right: 12px; }
+    .navbar .brand { display: inline-flex; align-items: center; margin-right: 12px; }
+    .navbar .brand img { height: 30px; width: auto; display: block; object-fit: contain; }
     .container { margin: 24px; }
     h1 { margin-bottom: 8px; color: #eee; font-size: 22px; }
     .subtitle { margin-bottom: 20px; color: #888; font-size: 13px; }
@@ -36,10 +38,11 @@
 </head>
 <body>
   <nav class="navbar">
-    <span class="brand">LoginPro</span>
+    <a class="brand" href="/admin" aria-label="Inicio LoginPro">
+      <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+    </a>
     <a href="/admin">Candidatos</a>
     <a href="/admin/monitor">Monitor</a>
-    <a href="/admin/export">Descargar Excel</a>
     <form method="post" action="/logout" style="margin-left:auto;">
       <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
     </form>

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Detalle candidato</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color: #333; }
@@ -11,7 +12,8 @@
     .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
     .navbar a:hover { color: #3498db; }
     .navbar form button:hover { border-color: #3498db !important; color: #3498db !important; }
-    .navbar .brand { font-weight: 700; font-size: 16px; margin-right: 12px; }
+    .navbar .brand { display: inline-flex; align-items: center; margin-right: 12px; }
+    .navbar .brand img { height: 30px; width: auto; display: block; object-fit: contain; }
     .container { margin: 24px; }
     a { color: #3498db; text-decoration: none; }
     a:hover { text-decoration: underline; }
@@ -55,12 +57,13 @@
 </head>
 <body>
   <nav class="navbar">
-    <span class="brand">LoginPro</span>
+    <a class="brand" href="/admin" aria-label="Inicio LoginPro">
+      <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+    </a>
     <a href="/admin">Candidatos</a>
     <% if (role === 'dev') { %>
       <a href="/admin/monitor">Monitor</a>
     <% } %>
-    <a href="/admin/export?scope=all">Descargar Excel</a>
     <form method="post" action="/logout" style="margin-left:auto;">
       <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
     </form>
