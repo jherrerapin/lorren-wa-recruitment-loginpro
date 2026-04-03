@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {
   exportFilenameByScope,
   filterCandidatesByScope,
+  formatDateForFilenameCO,
   isOperationallyCompleteWithoutCv,
   isOperationallyRegistered,
   normalizeCandidateStatusForUI
@@ -58,9 +59,14 @@ test('scope registered incluye estados legacy cuando cumplen criterio operativo'
 });
 
 test('nombre de archivo de exportación usa scopes operativos', () => {
-  assert.match(exportFilenameByScope('contacted'), /^candidatos_contacted_\d{4}-\d{2}-\d{2}\.xlsx$/);
-  assert.match(exportFilenameByScope('missing_cv_complete'), /^candidatos_missing_cv_complete_\d{4}-\d{2}-\d{2}\.xlsx$/);
-  assert.match(exportFilenameByScope('invalid-scope'), /^candidatos_all_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  assert.match(exportFilenameByScope('contacted'), /^candidatos_contactados_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  assert.match(exportFilenameByScope('missing_cv_complete'), /^candidatos_pendientes_hv_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  assert.match(exportFilenameByScope('invalid-scope'), /^candidatos_todos_\d{4}-\d{2}-\d{2}\.xlsx$/);
+});
+
+test('formatDateForFilenameCO usa fecha de Colombia aunque UTC esté en otro día', () => {
+  const fixedDate = new Date('2026-04-03T02:30:00.000Z');
+  assert.equal(formatDateForFilenameCO(fixedDate), '2026-04-02');
 });
 
 test('isOperationallyCompleteWithoutCv devuelve true cuando está completo y sin HV', () => {
@@ -94,6 +100,12 @@ test('scope missing_cv_complete filtra candidatos completos sin HV', () => {
     filterCandidatesByScope(candidates, 'missing_cv_complete').map((c) => c.id),
     ['ok', 'ok-contacted']
   );
+});
+
+test('ruta /admin/export acepta missing_cv_complete como scope válido', () => {
+  const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
+  assert.match(adminRouteSource, /const EXPORT_SCOPES = new Set\(\['registered', 'missing_cv_complete', 'new', 'contacted', 'rejected', 'all'\]\)/);
+  assert.match(adminRouteSource, /const scope = EXPORT_SCOPES\.has\(requestedScope\) \? requestedScope : 'all';/);
 });
 
 test('vistas principales reemplazan branding de texto y referencian favicon', () => {

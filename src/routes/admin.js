@@ -56,6 +56,7 @@ const STATUS_LABELS = {
 };
 
 const ADMIN_STATUS_SCOPES = new Set(['registered', 'new', 'contacted', 'rejected', 'all']);
+const EXPORT_SCOPES = new Set(['registered', 'missing_cv_complete', 'new', 'contacted', 'rejected', 'all']);
 
 const STATUS_SCOPE_SUMMARY_LABELS = {
   registered: 'registrados',
@@ -459,7 +460,7 @@ export function adminRouter(prisma) {
   // Ruta para exportar candidatos a Excel.
   router.get('/export', async (req, res) => {
     const requestedScope = normalizeString(req.query.scope);
-    const scope = ADMIN_STATUS_SCOPES.has(requestedScope) ? requestedScope : 'all';
+    const scope = EXPORT_SCOPES.has(requestedScope) ? requestedScope : 'all';
     const allCandidates = await prisma.candidate.findMany({
       orderBy: { createdAt: 'desc' }
     });

@@ -49,10 +49,29 @@ export function filterCandidatesByScope(candidates, scope = 'all') {
   return candidates;
 }
 
+export function formatDateForFilenameCO(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+
+  return formatter.format(date);
+}
+
 export function exportFilenameByScope(scope = 'all') {
   const safeScope = ['all', 'registered', 'missing_cv_complete', 'new', 'contacted', 'rejected'].includes(scope)
     ? scope
     : 'all';
-  const today = new Date().toISOString().slice(0, 10);
-  return `candidatos_${safeScope}_${today}.xlsx`;
+  const scopeLabelByKey = {
+    registered: 'registrados',
+    missing_cv_complete: 'pendientes_hv',
+    new: 'nuevos',
+    contacted: 'contactados',
+    rejected: 'rechazados',
+    all: 'todos'
+  };
+  const today = formatDateForFilenameCO();
+  return `candidatos_${scopeLabelByKey[safeScope]}_${today}.xlsx`;
 }
