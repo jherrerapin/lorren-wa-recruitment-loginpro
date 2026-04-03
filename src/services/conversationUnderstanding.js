@@ -1,9 +1,10 @@
 import { normalizeCandidateFields, parseNaturalData } from './candidateData.js';
+import { detectVacancyAndCity } from './vacancyCatalog.js';
 
 const EMPTY_UNDERSTANDING = Object.freeze({
   intent: 'unknown',
-  vacancyDetection: { detected: false, value: null, confidence: 0 },
-  cityDetection: { detected: false, value: null, confidence: 0 },
+  vacancyDetection: { detected: false, vacancyKey: null, confidence: 0, source: 'none', alternatives: [] },
+  cityDetection: { detected: false, cityKey: null, confidence: 0, source: 'none' },
   candidateFields: {},
   corrections: [],
   contradictions: [],
@@ -62,6 +63,23 @@ export async function conversationUnderstanding(text, options = {}) {
 
   for (const field of Object.keys(normalized)) {
     understanding.fieldConfidence[field] = 0.9;
+  }
+
+  const vacancyContext = detectVacancyAndCity({
+    text: input,
+    activeVacancies: options.activeVacancies || [],
+    currentVacancyKey: options.currentVacancyKey || null
+  });
+
+  understanding.vacancyDetection = vacancyContext.vacancyDetection;
+  understanding.cityDetection = {
+    ...vacancyContext.cityDetection,
+    detected: Boolean(vacancyContext.cityDetection?.cityKey)
+  };
+
+  if (!understanding.vacancyDetection.detected && vacancyContext.suggestedNextAction === 'ask_which_vacancy') {
+    understanding.suggestedNextAction = 'ask_which_vacancy';
+    understanding.replyGuidance.goal = 'resolve_vacancy';
   }
 
   if (typeof options.aiParser === 'function') {

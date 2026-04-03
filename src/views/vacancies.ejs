@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vacantes</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color:#333; margin:0; }
+    .navbar { background: #2c3e50; padding: 12px 24px; display:flex; align-items:center; gap:20px; }
+    .navbar a { color:#ecf0f1; text-decoration:none; font-size:14px; }
+    .container { margin: 24px; }
+    .actions { margin-bottom: 14px; }
+    .btn { display:inline-block; padding:8px 12px; border-radius:6px; text-decoration:none; border:1px solid #d0d7de; background:#fff; color:#2c3e50; }
+    table { width:100%; border-collapse: collapse; background:#fff; }
+    th, td { padding:10px 12px; border-bottom:1px solid #eee; font-size:14px; }
+    th { background:#2c3e50; color:#fff; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/admin">Candidatos</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <form method="post" action="/logout" style="margin-left:auto;">
+      <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
+    </form>
+  </nav>
+
+  <div class="container">
+    <h1>Vacantes</h1>
+    <div class="actions">
+      <a class="btn" href="/admin/vacancies/new">+ Crear vacante</a>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Orden</th>
+          <th>Título</th>
+          <th>Ciudad</th>
+          <th>Key</th>
+          <th>Estado</th>
+          <th>Publicidad</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% for (const vacancy of vacancies) { %>
+          <tr>
+            <td><%= vacancy.displayOrder %></td>
+            <td><%= vacancy.title %></td>
+            <td><%= vacancy.city %></td>
+            <td><code><%= vacancy.key %></code></td>
+            <td><%= vacancy.isActive ? 'Activa' : 'Inactiva' %></td>
+            <td><%= vacancy.adImageData ? 'Con imagen' : 'Sin imagen' %></td>
+            <td style="display:flex; gap:8px;">
+              <a class="btn" href="/admin/vacancies/<%= vacancy.id %>/edit">Editar</a>
+              <form method="post" action="/admin/vacancies/<%= vacancy.id %>/toggle">
+                <button class="btn" type="submit"><%= vacancy.isActive ? 'Desactivar' : 'Activar' %></button>
+              </form>
+            </td>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

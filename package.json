@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "test": "node --test"
+    "test": "node --test",
+    "prisma:seed": "node prisma/seed.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.866.0",

@@ -9,6 +9,7 @@ import { sendTextMessage } from '../services/whatsapp.js';
 import { MessageDirection, MessageType } from '@prisma/client';
 import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
+import { isAllowedAdImageFile, normalizeAdTextHints } from '../services/vacancyAdmin.js';
 
 // Middleware de autenticación por sesión para proteger el dashboard.
 function sessionAuth(req, res, next) {
@@ -27,6 +28,18 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function parseAliasesInput(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return [];
+  try {
+    const parsed = JSON.parse(normalized);
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item || '').trim()).filter(Boolean);
+  } catch {
+    return normalized.split(',').map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 // Formatea fechas para el dashboard en zona horaria de Colombia (Bogotá).
@@ -158,10 +171,157 @@ export function adminRouter(prisma) {
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 }
   }).single('cvFile');
+  const adImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 }
+  }).single('adImageFile');
 
   // Protege todas las rutas del dashboard con autenticación por sesión.
   router.use(sessionAuth);
 
+  // Listado simple de vacantes.
+  router.get('/vacancies', async (req, res) => {
+    const vacancies = typeof prisma.vacancy?.findMany === 'function'
+      ? await prisma.vacancy.findMany({ orderBy: [{ displayOrder: 'asc' }, { createdAt: 'desc' }] })
+      : [];
+
+    res.render('vacancies', {
+      vacancies,
+      role: req.userRole
+    });
+  });
+
+  // Formulario de creación de vacantes.
+  router.get('/vacancies/new', async (req, res) => {
+    res.render('vacancy-form', {
+      vacancy: null,
+      role: req.userRole,
+      mode: 'create'
+    });
+  });
+
+  // Formulario de edición de vacantes.
+  router.get('/vacancies/:id/edit', async (req, res) => {
+    if (typeof prisma.vacancy?.findUnique !== 'function') return res.status(404).send('Vacante no encontrada');
+    const vacancy = await prisma.vacancy.findUnique({ where: { id: req.params.id } });
+    if (!vacancy) return res.status(404).send('Vacante no encontrada');
+    res.render('vacancy-form', {
+      vacancy: {
+        ...vacancy,
+        aliasesText: Array.isArray(vacancy.aliases) ? vacancy.aliases.join(', ') : '',
+        hasAdImage: Boolean(vacancy.adImageData)
+      },
+      role: req.userRole,
+      mode: 'edit'
+    });
+  });
+
+  // Crear vacante.
+  router.post('/vacancies', express.urlencoded({ extended: true }), async (req, res) => {
+    if (typeof prisma.vacancy?.create !== 'function') return res.status(500).send('Módulo de vacantes no disponible');
+
+    await prisma.vacancy.create({
+      data: {
+        key: normalizeString(req.body.key),
+        title: normalizeString(req.body.title),
+        city: normalizeString(req.body.city),
+        description: normalizeString(req.body.description),
+        profile: normalizeString(req.body.profile),
+        botIntroText: normalizeString(req.body.botIntroText),
+        requirementsSummary: normalizeString(req.body.requirementsSummary),
+        adTextHints: normalizeAdTextHints(req.body.adTextHints),
+        aliases: parseAliasesInput(req.body.aliases),
+        isActive: req.body.isActive === 'on',
+        displayOrder: Number.parseInt(req.body.displayOrder || '0', 10) || 0
+      }
+    });
+
+    res.redirect('/admin/vacancies');
+  });
+
+  // Editar vacante.
+  router.post('/vacancies/:id', express.urlencoded({ extended: true }), async (req, res) => {
+    if (typeof prisma.vacancy?.update !== 'function') return res.status(500).send('Módulo de vacantes no disponible');
+
+    await prisma.vacancy.update({
+      where: { id: req.params.id },
+      data: {
+        title: normalizeString(req.body.title),
+        city: normalizeString(req.body.city),
+        description: normalizeString(req.body.description),
+        profile: normalizeString(req.body.profile),
+        botIntroText: normalizeString(req.body.botIntroText),
+        requirementsSummary: normalizeString(req.body.requirementsSummary),
+        adTextHints: normalizeAdTextHints(req.body.adTextHints),
+        aliases: parseAliasesInput(req.body.aliases),
+        isActive: req.body.isActive === 'on',
+        displayOrder: Number.parseInt(req.body.displayOrder || '0', 10) || 0
+      }
+    });
+
+    res.redirect('/admin/vacancies');
+  });
+
+  // Activar/desactivar vacante.
+  router.post('/vacancies/:id/toggle', async (req, res) => {
+    if (typeof prisma.vacancy?.findUnique !== 'function' || typeof prisma.vacancy?.update !== 'function') {
+      return res.status(500).send('Módulo de vacantes no disponible');
+    }
+    const vacancy = await prisma.vacancy.findUnique({ where: { id: req.params.id }, select: { id: true, isActive: true } });
+    if (!vacancy) return res.status(404).send('Vacante no encontrada');
+    await prisma.vacancy.update({
+      where: { id: req.params.id },
+      data: { isActive: !vacancy.isActive }
+    });
+    res.redirect('/admin/vacancies');
+  });
+
+  router.get('/vacancies/:id/ad-image', async (req, res) => {
+    if (typeof prisma.vacancy?.findUnique !== 'function') return res.status(404).send('Vacante no encontrada');
+    const vacancy = await prisma.vacancy.findUnique({
+      where: { id: req.params.id },
+      select: { adImageData: true, adImageMimeType: true }
+    });
+    if (!vacancy?.adImageData) return res.status(404).send('Imagen no encontrada');
+    const buffer = normalizeBinaryData(vacancy.adImageData);
+    res.setHeader('Content-Type', vacancy.adImageMimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(buffer.byteLength));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buffer);
+  });
+
+  router.post('/vacancies/:id/ad-image/upload', (req, res) => {
+    adImageUpload(req, res, async (error) => {
+      const vacancyId = req.params.id;
+      if (error) return res.status(400).send('No se pudo procesar la imagen publicitaria.');
+      if (!req.file || !isAllowedAdImageFile(req.file)) {
+        return res.status(400).send('Archivo inválido. Solo se permiten imágenes JPG, PNG o WEBP.');
+      }
+      if (typeof prisma.vacancy?.update !== 'function') return res.status(500).send('Módulo de vacantes no disponible');
+      await prisma.vacancy.update({
+        where: { id: vacancyId },
+        data: {
+          adImageData: normalizeBinaryData(req.file.buffer),
+          adImageMimeType: req.file.mimetype || null,
+          adImageOriginalName: req.file.originalname || null
+        }
+      });
+      return res.redirect(`/admin/vacancies/${vacancyId}/edit`);
+    });
+  });
+
+  router.post('/vacancies/:id/ad-image/delete', async (req, res) => {
+    if (typeof prisma.vacancy?.update !== 'function') return res.status(500).send('Módulo de vacantes no disponible');
+    await prisma.vacancy.update({
+      where: { id: req.params.id },
+      data: {
+        adImageData: null,
+        adImageMimeType: null,
+        adImageOriginalName: null
+      }
+    });
+    return res.redirect(`/admin/vacancies/${req.params.id}/edit`);
+  });
 
   // Ruta principal: listado de candidatos.
   router.get('/', async (req, res) => {

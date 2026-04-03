@@ -4,7 +4,10 @@ import { conversationUnderstanding } from '../src/services/conversationUnderstan
 
 test('conversationUnderstanding devuelve estructura consistente requerida', async () => {
   const result = await conversationUnderstanding('corrijo: tengo moto, sin experiencia, cc 10203040', {
-    aiParser: async () => ({ intent: 'provide_correction' })
+    aiParser: async () => ({ intent: 'provide_correction' }),
+    activeVacancies: [
+      { key: 'auxiliar_cargue_descargue_ibague', title: 'Auxiliar de Cargue y Descargue', city: 'Ibagué', aliases: ['auxiliar'], isActive: true, displayOrder: 1 }
+    ]
   });
 
   assert.equal(typeof result.intent, 'string');
@@ -19,4 +22,6 @@ test('conversationUnderstanding devuelve estructura consistente requerida', asyn
   assert.equal(typeof result.replyGuidance, 'object');
   assert.equal(result.intent, 'provide_correction');
   assert.equal(result.candidateFields.transportMode, 'Moto');
+  assert.equal(typeof result.vacancyDetection.vacancyKey, 'object');
+  assert.ok(Array.isArray(result.vacancyDetection.alternatives));
 });

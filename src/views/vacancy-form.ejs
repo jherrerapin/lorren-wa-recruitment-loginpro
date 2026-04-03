@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= mode === 'create' ? 'Crear vacante' : 'Editar vacante' %></title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color:#333; margin:0; }
+    .container { margin: 24px auto; max-width: 800px; background:#fff; border:1px solid #eee; padding:20px; border-radius:8px; }
+    h1 { margin-top:0; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .field { display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+    input, textarea { padding:8px 10px; border:1px solid #ddd; border-radius:4px; font:inherit; }
+    textarea { min-height: 80px; }
+    .full { grid-column: 1 / -1; }
+    .actions { margin-top: 12px; display:flex; gap:8px; }
+    .btn { padding:8px 12px; border-radius:4px; border:1px solid #ddd; background:#fff; text-decoration:none; color:#333; }
+    .btn-primary { background:#3498db; color:#fff; border-color:#3498db; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1><%= mode === 'create' ? 'Crear vacante' : 'Editar vacante' %></h1>
+    <form method="post" action="<%= mode === 'create' ? '/admin/vacancies' : '/admin/vacancies/' + vacancy.id %>">
+      <div class="grid">
+        <% if (mode === 'create') { %>
+          <div class="field"><label>Key</label><input name="key" required placeholder="auxiliar_cargue_descargue_ibague" /></div>
+        <% } %>
+        <div class="field"><label>Título</label><input name="title" required value="<%= vacancy?.title || '' %>" /></div>
+        <div class="field"><label>Ciudad</label><input name="city" required value="<%= vacancy?.city || '' %>" /></div>
+        <div class="field"><label>Orden</label><input name="displayOrder" type="number" value="<%= vacancy?.displayOrder ?? 0 %>" /></div>
+        <div class="field"><label><input type="checkbox" name="isActive" <%= vacancy?.isActive !== false ? 'checked' : '' %> /> Activa</label></div>
+        <div class="field full"><label>Descripción</label><textarea name="description"><%= vacancy?.description || '' %></textarea></div>
+        <div class="field full"><label>Perfil</label><textarea name="profile"><%= vacancy?.profile || '' %></textarea></div>
+        <div class="field full"><label>Texto intro bot</label><textarea name="botIntroText"><%= vacancy?.botIntroText || '' %></textarea></div>
+        <div class="field full"><label>Resumen requisitos</label><textarea name="requirementsSummary"><%= vacancy?.requirementsSummary || '' %></textarea></div>
+        <div class="field full"><label>Ad text hints (keywords/resumen anuncio)</label><textarea name="adTextHints"><%= vacancy?.adTextHints || '' %></textarea></div>
+        <div class="field full"><label>Aliases (JSON array o coma separada)</label><textarea name="aliases"><%= vacancy?.aliasesText || '' %></textarea></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" type="submit">Guardar</button>
+        <a class="btn" href="/admin/vacancies">Cancelar</a>
+      </div>
+    </form>
+
+    <% if (mode === 'edit') { %>
+      <hr style="margin:18px 0;" />
+      <h2 style="margin-bottom:10px;">Imagen publicitaria</h2>
+      <% if (vacancy?.hasAdImage) { %>
+        <div style="margin-bottom:10px;">
+          <img src="/admin/vacancies/<%= vacancy.id %>/ad-image" alt="Imagen anuncio" style="max-width: 260px; border:1px solid #ddd; border-radius:6px;" />
+          <p style="font-size:12px;color:#666;margin-top:6px;"><%= vacancy.adImageOriginalName || 'imagen_publicitaria' %> (<%= vacancy.adImageMimeType || 'mime desconocido' %>)</p>
+        </div>
+      <% } else { %>
+        <p style="margin-bottom:10px;">Sin imagen publicitaria cargada.</p>
+      <% } %>
+
+      <form method="post" action="/admin/vacancies/<%= vacancy.id %>/ad-image/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="file" name="adImageFile" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required />
+        <button class="btn btn-primary" type="submit"><%= vacancy?.hasAdImage ? 'Reemplazar imagen' : 'Subir imagen' %></button>
+      </form>
+
+      <% if (vacancy?.hasAdImage) { %>
+        <form method="post" action="/admin/vacancies/<%= vacancy.id %>/ad-image/delete" style="margin-top:8px;">
+          <button class="btn" type="submit">Eliminar imagen</button>
+        </form>
+      <% } %>
+    <% } %>
+  </div>
+</body>
+</html>
