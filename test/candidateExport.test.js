@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { exportFilenameByScope, filterCandidatesByScope, isReadyForReview } from '../src/services/candidateExport.js';
+import {
+  exportFilenameByScope,
+  filterCandidatesByScope,
+  isOperationallyRegistered,
+  normalizeCandidateStatusForUI
+} from '../src/services/candidateExport.js';
 
 const baseCandidate = {
-  id: 'ready-1',
+  id: 'cand-1',
   fullName: 'Ana Perez',
   documentType: 'CC',
   documentNumber: '123',
@@ -17,27 +22,40 @@ const baseCandidate = {
   cvData: Buffer.from('cv')
 };
 
-test('ready_review exige campos operativos completos y CV', () => {
-  assert.equal(isReadyForReview(baseCandidate), true);
-  assert.equal(isReadyForReview({ ...baseCandidate, cvData: null }), false);
-  assert.equal(isReadyForReview({ ...baseCandidate, status: 'RECHAZADO' }), false);
-  assert.equal(isReadyForReview({ ...baseCandidate, experienceTime: '' }), false);
+test('registered operativo exige campos completos + CV + no rechazado + no contactado', () => {
+  assert.equal(isOperationallyRegistered(baseCandidate), true);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, cvData: null }), false);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'RECHAZADO' }), false);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'CONTACTADO' }), false);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, experienceTime: '' }), false);
 });
 
-test('filtra candidatos por scopes operativos', () => {
+test('legacy VALIDANDO/APROBADO se normalizan visualmente a REGISTRADO', () => {
+  assert.equal(normalizeCandidateStatusForUI('VALIDANDO'), 'REGISTRADO');
+  assert.equal(normalizeCandidateStatusForUI('APROBADO'), 'REGISTRADO');
+  assert.equal(normalizeCandidateStatusForUI('CONTACTADO'), 'CONTACTADO');
+});
+
+test('scope registered incluye estados legacy cuando cumplen criterio operativo', () => {
   const candidates = [
-    baseCandidate,
-    { ...baseCandidate, id: 'missing-cv', cvData: null },
+    { ...baseCandidate, id: 'reg', status: 'REGISTRADO' },
+    { ...baseCandidate, id: 'legacy-validando', status: 'VALIDANDO' },
+    { ...baseCandidate, id: 'legacy-aprobado', status: 'APROBADO' },
+    { ...baseCandidate, id: 'contacted', status: 'CONTACTADO' },
+    { ...baseCandidate, id: 'new-incomplete', status: 'NUEVO', cvData: null },
     { ...baseCandidate, id: 'rejected', status: 'RECHAZADO' }
   ];
 
-  assert.deepEqual(filterCandidatesByScope(candidates, 'ready_review').map((c) => c.id), ['ready-1']);
-  assert.deepEqual(filterCandidatesByScope(candidates, 'missing_cv').map((c) => c.id), ['missing-cv']);
+  assert.deepEqual(
+    filterCandidatesByScope(candidates, 'registered').map((c) => c.id),
+    ['reg', 'legacy-validando', 'legacy-aprobado']
+  );
+  assert.deepEqual(filterCandidatesByScope(candidates, 'new').map((c) => c.id), ['new-incomplete']);
+  assert.deepEqual(filterCandidatesByScope(candidates, 'contacted').map((c) => c.id), ['contacted']);
   assert.deepEqual(filterCandidatesByScope(candidates, 'rejected').map((c) => c.id), ['rejected']);
-  assert.deepEqual(filterCandidatesByScope(candidates, 'registered').map((c) => c.id), ['ready-1', 'missing-cv']);
 });
 
-test('nombre de archivo de exportación incluye scope solicitado', () => {
-  assert.match(exportFilenameByScope('ready_review'), /^candidatos_ready_review_\d{4}-\d{2}-\d{2}\.xlsx$/);
+test('nombre de archivo de exportación usa scopes operativos', () => {
+  assert.match(exportFilenameByScope('contacted'), /^candidatos_contacted_\d{4}-\d{2}-\d{2}\.xlsx$/);
   assert.match(exportFilenameByScope('invalid-scope'), /^candidatos_all_\d{4}-\d{2}-\d{2}\.xlsx$/);
 });

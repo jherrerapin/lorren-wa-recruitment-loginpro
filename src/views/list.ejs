@@ -15,6 +15,9 @@
     .container { margin: 24px; }
     h1 { margin-bottom: 16px; color: #2c3e50; }
     .summary { margin-bottom: 16px; color: #666; font-size: 14px; }
+    .status-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .status-tabs a { border: 1px solid #d0d7de; background: #fff; color: #2c3e50; padding: 7px 12px; border-radius: 20px; font-size: 13px; text-decoration: none; }
+    .status-tabs a.active { background: #2c3e50; border-color: #2c3e50; color: #fff; }
     .export-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
     .export-actions a { border: 1px solid #d0d7de; background: #fff; color: #2c3e50; padding: 7px 10px; border-radius: 6px; font-size: 13px; text-decoration: none; }
     .export-actions a:hover { background: #f1f5f9; text-decoration: none; }
@@ -27,8 +30,6 @@
     .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
     .badge-nuevo { background: #95a5a6; }
     .badge-registrado { background: #27ae60; }
-    .badge-validando { background: #f39c12; }
-    .badge-aprobado { background: #2ecc71; }
     .badge-rechazado { background: #e74c3c; }
     .badge-contactado { background: #3498db; }
     .wa-link { color: #25d366; font-weight: 600; }
@@ -48,13 +49,25 @@
   </nav>
   <div class="container">
     <h1>Panel de Reclutamiento</h1>
-    <p class="summary"><%= candidates.length %> candidato(s) registrado(s)</p>
+    <div class="status-tabs">
+      <% const tabs = [
+        { scope: 'registered', label: 'Registrados' },
+        { scope: 'new', label: 'Nuevos' },
+        { scope: 'contacted', label: 'Contactados' },
+        { scope: 'rejected', label: 'Rechazados' },
+        { scope: 'all', label: 'Todos' }
+      ]; %>
+      <% for (const tab of tabs) { %>
+        <a href="/admin?status=<%= tab.scope %>" class="<%= activeStatusScope === tab.scope ? 'active' : '' %>"><%= tab.label %></a>
+      <% } %>
+    </div>
+    <p class="summary">Mostrando <%= candidates.length %> candidato(s) <%= summaryLabel %></p>
     <div class="export-actions">
-      <a href="/admin/export?scope=all">Descargar todos</a>
       <a href="/admin/export?scope=registered">Descargar registrados</a>
-      <a href="/admin/export?scope=ready_review">Descargar listos para revisión</a>
-      <a href="/admin/export?scope=missing_cv">Descargar pendientes sin Hoja de vida</a>
+      <a href="/admin/export?scope=new">Descargar nuevos</a>
+      <a href="/admin/export?scope=contacted">Descargar contactados</a>
       <a href="/admin/export?scope=rejected">Descargar rechazados</a>
+      <a href="/admin/export?scope=all">Descargar todos</a>
     </div>
     <table>
       <thead>
@@ -76,6 +89,7 @@
       </thead>
       <tbody>
         <% for (const c of candidates) { %>
+          <% const uiStatus = normalizeCandidateStatusForUI(c.status); %>
           <tr>
             <td><%= formatDateTimeCO(c.createdAt) %></td>
             <td><%= c.fullName || '—' %></td>
@@ -91,20 +105,16 @@
               <% const statusClass = {
                 'NUEVO': 'badge-nuevo',
                 'REGISTRADO': 'badge-registrado',
-                'VALIDANDO': 'badge-validando',
-                'APROBADO': 'badge-aprobado',
                 'RECHAZADO': 'badge-rechazado',
                 'CONTACTADO': 'badge-contactado'
               }; %>
               <% const statusLabel = {
                 'NUEVO': 'Nuevo',
                 'REGISTRADO': 'Registrado',
-                'VALIDANDO': 'En revisión',
-                'APROBADO': 'Aprobado',
                 'RECHAZADO': 'Rechazado',
                 'CONTACTADO': 'Contactado'
               }; %>
-              <span class="badge <%= statusClass[c.status] || 'badge-nuevo' %>"><%= statusLabel[c.status] || c.status %></span>
+              <span class="badge <%= statusClass[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span>
             </td>
             <td><%= c.rejectionReason || '—' %></td>
             <td><a href="/admin/candidates/<%= c.id %>">Ver detalle</a></td>
