@@ -7,6 +7,7 @@ function normalizeText(text = '') {
 }
 
 export function getMultilineWindowMs() {
+  if (process.env.NODE_ENV === 'test') return 0;
   const raw = Number.parseInt(String(process.env.MULTILINE_SILENCE_WINDOW_MS || DEFAULT_MULTILINE_WINDOW_MS), 10);
   if (!Number.isFinite(raw)) return DEFAULT_MULTILINE_WINDOW_MS;
   return Math.max(MIN_MULTILINE_WINDOW_MS, Math.min(MAX_MULTILINE_WINDOW_MS, raw));

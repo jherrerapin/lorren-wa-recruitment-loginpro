@@ -10,7 +10,16 @@ const MODELS_WITH_CUSTOM_TEMPERATURE_SUPPORT = [
 ];
 
 function buildPrompt() {
-  return 'Extrae datos de candidato desde texto libre y responde solo JSON válido con claves: intent, fullName, documentType, documentNumber, age, neighborhood, experienceInfo, experienceTime, medicalRestrictions, transportMode.';
+  return [
+    'Extrae datos de candidato desde texto libre y responde solo JSON válido.',
+    'Claves permitidas: intent, fullName, documentType, documentNumber, age, neighborhood, experienceInfo, experienceTime, medicalRestrictions, transportMode.',
+    'Diferencia edad de experiencia laboral: "22 años" sin contexto laboral es edad, NO experienceTime.',
+    'Solo usa experienceTime cuando exista contexto explícito de experiencia laboral (ej. "5 meses de experiencia").',
+    'Si detectas "sin experiencia", "no tengo experiencia", "poca experiencia", marca experienceInfo="No" y NO inventes experiencia positiva.',
+    'Transporte: detecta afirmativo (Moto/Bicicleta) y negativo ("Sin medio de transporte"). Nunca conviertas negaciones en Moto o Bicicleta.',
+    'Si hay restricciones médicas negativas, usa "Sin restricciones médicas".',
+    'intent debe ser una de: greeting, apply_intent, confirmation_yes, confirmation_no_or_correction, thanks, farewell, cv_intent, faq, provide_data, provide_correction, post_completion_ack, unsupported_file_or_message.'
+  ].join(' ');
 }
 
 function extractTextFromChatCompletion(data = {}) {

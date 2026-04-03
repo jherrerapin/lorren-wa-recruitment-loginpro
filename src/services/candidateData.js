@@ -74,8 +74,17 @@ function normalizeMedicalRestrictions(value = '') {
 }
 
 function normalizeTransportMode(value = '') {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'moto') return 'Moto';
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+  if (!normalized) return null;
+  if (['sin medio de transporte', 'sin transporte', 'ninguno', 'ninguna', 'no tengo transporte', 'no tengo medio de transporte'].includes(normalized)) {
+    return 'Sin medio de transporte';
+  }
+  if (['moto', 'motocicleta', 'motocicleta propia'].includes(normalized)) return 'Moto';
   if (['bicicleta', 'bici'].includes(normalized)) return 'Bicicleta';
   return capitalizeWords(normalized);
 }
@@ -182,12 +191,17 @@ export function parseNaturalData(text = '') {
     if (implicit) result.neighborhood = capitalizeWords(implicit);
   }
 
-  const negativeExperience = /\b(no\s+tengo\s+experiencia|sin\s+experiencia)\b/i.test(compact);
+  const negativeExperience = /\b(no\s+tengo\s+(mucha\s+)?experiencia|sin\s+experiencia|poca\s+experiencia)\b/i.test(compact);
   const positiveExperience = /\b(s[ií],?\s*tengo\s+experiencia|tengo\s+experiencia|cuento\s+con\s+experiencia|experiencia\s*[:\-]?\s*s[ií])\b/i.test(compact);
   if (negativeExperience) result.experienceInfo = 'No';
   else if (positiveExperience) result.experienceInfo = 'Sí';
 
-  const expTime = compact.match(/\b(?:tengo|llevo|cuento\s+con|experiencia\s+de)?\s*(\d+\s*(?:a[ñn]os?|mes(?:e|es)?|semana(?:s)?))\b/i) || remaining.match(/\b(?:tengo|llevo|cuento\s+con|experiencia\s+de)?\s*(\d+\s*(?:a[ñn]os?|mes(?:e|es)?|semana(?:s)?))\b/i);
+  const experienceContextRegex = /\b(?:tengo|cuento\s+con|llevo|aproximadamente|casi)?\s*(\d+\s*(?:a[ñn]os?|mes(?:e|es)?|semana(?:s)?))\s*(?:de\s+)?experiencia\b/i;
+  const positiveInlineRegex = /\b(?:s[ií]\s+tengo)\s*(\d+\s*(?:a[ñn]os?|mes(?:e|es)?|semana(?:s)?))\b/i;
+  const expTime = compact.match(experienceContextRegex)
+    || compact.match(positiveInlineRegex)
+    || remaining.match(experienceContextRegex)
+    || remaining.match(positiveInlineRegex);
   if (expTime) {
     result.experienceTime = expTime[1];
     result.experienceInfo = 'Sí';
@@ -206,9 +220,15 @@ export function parseNaturalData(text = '') {
     result.medicalRestrictions = snippet ? capitalizeWords(snippet[1].trim()) : 'Sí, reporta restricciones médicas';
   }
 
-  const transportMatch = compact.match(/\b(?:transporte|movilidad|me\s+muevo\s+en)?\s*[:\-]?\s*(moto|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i)
-    || remaining.match(/\b(moto|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i);
-  if (transportMatch) result.transportMode = normalizeTransportMode(transportMatch[1]);
+  const transportNegative = compact.match(/\b(?:no\s+(?:tengo|cuento\s+con)\s+(?:medio\s+de\s+transporte|transporte|moto|bicicleta|bici)|sin\s+medio\s+de\s+transporte)\b/i);
+  if (transportNegative) {
+    result.transportMode = 'Sin medio de transporte';
+  } else {
+    const transportMatch = compact.match(/\b(?:transporte|movilidad|me\s+muevo\s+en)?\s*[:\-]?\s*(moto|motocicleta|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i)
+      || compact.match(/\b(motocicleta\s+propia)\b/i)
+      || remaining.match(/\b(moto|motocicleta|bicicleta|bici|carro|bus|ninguno|ninguna)\b/i);
+    if (transportMatch) result.transportMode = normalizeTransportMode(transportMatch[1]);
+  }
 
   const detectedName = detectLeadingName(text);
   if (detectedName) result.fullName = detectedName;
@@ -252,6 +272,9 @@ export function normalizeCandidateFields(fields = {}) {
   if (normalized.experienceInfo === 'No' && !normalized.experienceTime) {
     normalized.experienceTime = '0';
   }
+  if (normalized.experienceInfo === 'No') {
+    normalized.experienceTime = normalized.experienceTime || '0';
+  }
   if (fields.medicalRestrictions) {
     normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
   }
@@ -268,6 +291,6 @@ export function isHighConfidenceLocalField(field, value) {
   if (field === 'fullName') return !isSuspiciousFullName(raw) && hasNameTokens(raw);
   if (field === 'neighborhood') return raw.length >= 3;
   if (field === 'medicalRestrictions') return /sin restricciones|no tengo restricciones|ninguna restriccion/i.test(raw) || raw.length >= 8;
-  if (field === 'transportMode') return /^(moto|bicicleta|bici)$/i.test(raw);
+  if (field === 'transportMode') return /^(moto|bicicleta|bici|sin medio de transporte)$/i.test(raw);
   return true;
 }
