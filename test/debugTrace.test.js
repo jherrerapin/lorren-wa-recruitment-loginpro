@@ -47,3 +47,13 @@ test('isSuspiciousFullName keeps real names valid', () => {
   const decisions = splitFieldDecisions({ fullName: 'Carlos Lara' }, { fullName: null });
   assert.deepEqual(decisions.persistedFields, ['fullName']);
 });
+
+test('permite sobrescritura explícita de transporte en corrección', () => {
+  const decisions = splitFieldDecisions(
+    { transportMode: 'Moto' },
+    { transportMode: 'Sin medio de transporte' },
+    { allowOverwriteFields: ['transportMode'] }
+  );
+  assert.deepEqual(decisions.persistedFields, ['transportMode']);
+  assert.equal(decisions.persistedData.transportMode, 'Moto');
+});

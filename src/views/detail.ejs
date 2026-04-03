@@ -85,6 +85,12 @@
     <% if (outboundError) { %>
       <div class="alert alert-error"><%= outboundError %></div>
     <% } %>
+    <% if (botPauseSuccess) { %>
+      <div class="alert alert-success"><%= botPauseSuccess %></div>
+    <% } %>
+    <% if (botPauseError) { %>
+      <div class="alert alert-error"><%= botPauseError %></div>
+    <% } %>
 
     <div class="card">
       <h2>Datos del candidato</h2>
@@ -138,6 +144,15 @@
 
     <div class="card">
       <h2>Estado del candidato</h2>
+      <div style="margin-bottom:12px;font-size:14px;">
+        <strong>Bot:</strong>
+        <% if (candidate.botPaused) { %>
+          <span style="color:#b8322b;">Pausado</span>
+          <span>— <%= candidate.botPauseReason || 'Sin motivo registrado' %></span>
+        <% } else { %>
+          <span style="color:#1f7a38;">Activo</span>
+        <% } %>
+      </div>
       <form method="post" action="/admin/candidates/<%= candidate.id %>/status" class="status-form">
         <select name="status">
           <option value="NUEVO" <%= uiStatus === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
@@ -147,6 +162,18 @@
         </select>
         <button type="submit">Guardar</button>
       </form>
+      <% if (role === 'dev') { %>
+        <% if (!candidate.botPaused) { %>
+          <form method="post" action="/admin/candidates/<%= candidate.id %>/bot-pause" class="status-form" style="margin-top:10px;flex-wrap:wrap;">
+            <input type="text" name="reason" placeholder="Motivo de pausa manual" style="min-width: 280px;padding: 8px 10px;border: 1px solid #ddd;border-radius: 4px;" />
+            <button type="submit" class="btn-danger" style="padding:6px 12px;">Pausar bot</button>
+          </form>
+        <% } else { %>
+          <form method="post" action="/admin/candidates/<%= candidate.id %>/bot-resume" class="status-form" style="margin-top:10px;">
+            <button type="submit" class="btn-primary" style="padding:6px 12px;">Reanudar bot</button>
+          </form>
+        <% } %>
+      <% } %>
     </div>
 
     <div class="card">

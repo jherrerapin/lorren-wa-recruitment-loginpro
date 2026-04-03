@@ -7,6 +7,8 @@ import { normalizeCandidateFields } from '../services/candidateData.js';
 import { exportFilenameByScope, filterCandidatesByScope, normalizeCandidateStatusForUI } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
 import { MessageDirection, MessageType } from '@prisma/client';
+import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
+import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
 
 // Middleware de autenticación por sesión para proteger el dashboard.
 function sessionAuth(req, res, next) {
@@ -207,6 +209,8 @@ export function adminRouter(prisma) {
     const cvSuccess = normalizeString(req.query.cvSuccess);
     const outboundError = normalizeString(req.query.outboundError);
     const outboundSuccess = normalizeString(req.query.outboundSuccess);
+    const botPauseSuccess = normalizeString(req.query.botPauseSuccess);
+    const botPauseError = normalizeString(req.query.botPauseError);
     const outboundWindow = includeMessages
       ? await getOutboundWindowStatus(prisma, candidate.id)
       : null;
@@ -218,6 +222,8 @@ export function adminRouter(prisma) {
       cvSuccess,
       outboundError,
       outboundSuccess,
+      botPauseSuccess,
+      botPauseError,
       outboundWindow,
       cvSizeBytes: cvBuffer?.byteLength || 0,
       normalizeCandidateStatusForUI
@@ -631,12 +637,58 @@ export function adminRouter(prisma) {
         rawPayload: { source: 'dev_dashboard', action }
       }
     });
-    const updateData = { lastOutboundAt: new Date() };
-    if (candidate.status !== 'RECHAZADO') {
-      updateData.status = 'CONTACTADO';
-    }
-    await prisma.candidate.update({ where: { id: candidateId }, data: updateData });
+    await prisma.candidate.update({ where: { id: candidateId }, data: buildTechnicalOutboundCandidateUpdate(new Date()) });
     const query = buildCvStatusQuery('outboundSuccess', 'Mensaje saliente enviado correctamente.');
+    return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+  });
+
+  router.post('/candidates/:id/bot-pause', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const candidateId = req.params.id;
+    const reason = normalizeString(req.body.reason) || 'Pausa manual desde dashboard';
+    const candidate = await prisma.candidate.findUnique({ where: { id: candidateId }, select: { id: true } });
+    if (!candidate) return res.status(404).send('Candidato no encontrado');
+
+    await prisma.candidate.update({
+      where: { id: candidateId },
+      data: {
+        botPaused: true,
+        botPausedAt: new Date(),
+        botPausedBy: req.userRole || 'admin',
+        botPauseReason: reason
+      }
+    });
+
+    const query = buildCvStatusQuery('botPauseSuccess', 'Bot pausado manualmente.');
+    return res.redirect(`/admin/candidates/${candidateId}?${query}`);
+  });
+
+  router.post('/candidates/:id/bot-resume', ensureDevRole, async (req, res) => {
+    const candidateId = req.params.id;
+    const candidate = await prisma.candidate.findUnique({ where: { id: candidateId }, select: { id: true } });
+    if (!candidate) return res.status(404).send('Candidato no encontrado');
+
+    let pendingInboundCount = 0;
+    if (typeof prisma.message?.count === 'function') {
+      pendingInboundCount = await prisma.message.count({
+        where: { candidateId, direction: MessageDirection.INBOUND, messageType: MessageType.TEXT, respondedAt: null }
+      });
+    } else if (typeof prisma.message?.findMany === 'function') {
+      const pending = await prisma.message.findMany({
+        where: { candidateId, direction: MessageDirection.INBOUND, messageType: MessageType.TEXT, respondedAt: null }
+      });
+      pendingInboundCount = pending.length;
+    }
+    const resumeBehavior = describeResumeBehavior({ pendingInboundCount, supportsImmediateReplay: false });
+
+    await prisma.candidate.update({
+      where: { id: candidateId },
+      data: {
+        botPaused: false,
+        botResumeMode: resumeBehavior.resumeMode
+      }
+    });
+
+    const query = buildCvStatusQuery('botPauseSuccess', 'Bot reanudado manualmente.');
     return res.redirect(`/admin/candidates/${candidateId}?${query}`);
   });
 

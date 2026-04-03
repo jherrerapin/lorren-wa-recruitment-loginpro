@@ -115,3 +115,16 @@ test('normaliza negación de transporte sin convertirla en moto', () => {
   const normalized = normalizeCandidateFields(parsed);
   assert.equal(normalized.transportMode, 'Sin medio de transporte');
 });
+
+test('documento con puntos o prefijo no contamina edad', () => {
+  const parsed = parseNaturalData('CC.1022333444 tengo 19 años');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.documentNumber, '1022333444');
+  assert.equal(normalized.age, 19);
+});
+
+test('negación compuesta de transporte termina en sin medio de transporte', () => {
+  const parsed = parseNaturalData('no tengo moto ni bicicleta');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.transportMode, 'Sin medio de transporte');
+});

@@ -9,6 +9,8 @@ import { isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData 
 import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
+import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
+import { shouldBlockAutomation } from '../services/botAutomationPolicy.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
 
@@ -213,6 +215,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   debugTrace.used_multiline_context = Boolean(options.usedMultilineContext);
   debugTrace.consolidated_input_summary = options.consolidatedInputSummary || null;
 
+  const understanding = await conversationUnderstanding(cleanText);
   const aiResult = await tryOpenAIParse(cleanText);
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
@@ -239,7 +242,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   debugTrace.openai_temperature_omitted = typeof aiResult.temperature_omitted === 'boolean'
     ? aiResult.temperature_omitted
     : debugTrace.openai_temperature_omitted;
-  const resolvedIntent = aiResult.intent || fallbackIntent;
+  const resolvedIntent = aiResult.intent || understanding.intent || fallbackIntent;
   if (resolvedIntent) debugTrace.openai_intent = resolvedIntent;
   debugTrace.openai_detected_fields = Object.keys(aiFields).filter((k) => normalizedData[k] !== undefined);
   debugTrace.source_by_field = sourceByField;
@@ -271,7 +274,19 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
 
   const applyDecisionsAndUpdate = async () => {
     const current = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-    const decisions = splitFieldDecisions(normalizedData, current, { sourceByField });
+    const explicitCorrection = /\b(corrijo|correccion|quise decir|actualizo|de hecho|mejor|perd[oó]n)\b/i.test(cleanText);
+    const allowOverwriteFields = [];
+    if (explicitCorrection) {
+      allowOverwriteFields.push(...Object.keys(normalizedData));
+    } else if (
+      current?.transportMode === 'Sin medio de transporte'
+      && normalizedData.transportMode
+      && normalizedData.transportMode !== 'Sin medio de transporte'
+      && /\b(tengo|cuento con|si tengo|sí tengo)\s+(moto|motocicleta|bicicleta|bici)\b/i.test(cleanText)
+    ) {
+      allowOverwriteFields.push('transportMode');
+    }
+    const decisions = splitFieldDecisions(normalizedData, current, { sourceByField, allowOverwriteFields });
     debugTrace.persisted_fields.push(...decisions.persistedFields);
     debugTrace.rejected_fields.push(...decisions.rejectedFields);
     debugTrace.ignored_low_confidence_fields.push(...decisions.ignoredLowConfidenceFields);
@@ -405,6 +420,36 @@ async function tryAcquireMultilineProcessing(prisma, candidateId, batchVersion) 
   return acquired.count === 1;
 }
 
+async function markPotentialDuplicateByDocument(prisma, candidateId) {
+  if (typeof prisma.candidate.findFirst !== 'function') return;
+  const candidate = await prisma.candidate.findUnique({
+    where: { id: candidateId },
+    select: { id: true, phone: true, documentType: true, documentNumber: true }
+  });
+  if (!candidate?.documentType || !candidate?.documentNumber) return;
+
+  const duplicate = await prisma.candidate.findFirst({
+    where: {
+      id: { not: candidate.id },
+      documentType: candidate.documentType,
+      documentNumber: candidate.documentNumber,
+      phone: { not: candidate.phone }
+    },
+    select: { id: true, phone: true }
+  });
+
+  if (!duplicate) return;
+
+  await prisma.candidate.update({
+    where: { id: candidate.id },
+    data: {
+      potentialDuplicate: true,
+      potentialDuplicateAt: new Date(),
+      potentialDuplicateNote: `Documento coincide con ${duplicate.phone}`
+    }
+  });
+}
+
 export function webhookRouter(prisma) {
   const router = express.Router();
 
@@ -435,6 +480,7 @@ export function webhookRouter(prisma) {
           await cancelReminderOnInbound(prisma, candidate.id);
 
           const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+          if (shouldBlockAutomation(freshCandidate)) continue;
 
           const scheduling = await scheduleMultilineWindow(prisma, candidate.id);
           await sleep(scheduling.windowMs);
@@ -456,6 +502,7 @@ export function webhookRouter(prisma) {
               usedMultilineContext: pendingBatch.length > 1,
               consolidatedInputSummary: summarizeConsolidatedInput(consolidatedText)
             });
+            await markPotentialDuplicateByDocument(prisma, candidate.id);
             await prisma.message.updateMany({
               where: { id: { in: pendingBatch.map((item) => item.id) } },
               data: { respondedAt: new Date() }
@@ -479,6 +526,7 @@ export function webhookRouter(prisma) {
         await cancelReminderOnInbound(prisma, candidate.id);
 
         const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+        if (shouldBlockAutomation(freshCandidate)) continue;
         const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
         debugTrace.cv_detected = message.type === 'document';
 

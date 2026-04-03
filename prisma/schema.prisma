@@ -142,6 +142,22 @@ model Candidate {
   reminderScheduledFor DateTime?
   /// Estado del ciclo de recordatorio de inactividad.
   reminderState     ReminderState    @default(NONE)
+  /// Permite pausar manualmente las respuestas automáticas del bot para este candidato.
+  botPaused         Boolean          @default(false)
+  /// Fecha y hora en la que se aplicó la pausa manual.
+  botPausedAt       DateTime?
+  /// Usuario/rol que aplicó la pausa manual.
+  botPausedBy       String?
+  /// Motivo opcional registrado para la pausa manual.
+  botPauseReason    String?
+  /// Modo de reanudación aplicado por operación humana.
+  botResumeMode     String?
+  /// Marca si existe potencial de duplicado documental con otro teléfono.
+  potentialDuplicate Boolean         @default(false)
+  /// Referencia textual del candidato potencialmente duplicado.
+  potentialDuplicateNote String?
+  /// Fecha en que se detectó el potencial duplicado documental.
+  potentialDuplicateAt DateTime?
   /// Relación uno a muchos con los mensajes del candidato.
   messages          Message[]
 }

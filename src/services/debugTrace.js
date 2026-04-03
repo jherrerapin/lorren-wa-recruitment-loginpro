@@ -100,6 +100,7 @@ export function isSuspiciousFullName(value = '') {
 
 export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {}) {
   const sourceByField = options.sourceByField || {};
+  const allowOverwriteFields = new Set(options.allowOverwriteFields || []);
   const decisions = {
     persistedData: {},
     persistedFields: [],
@@ -120,12 +121,15 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
       continue;
     }
 
-    if (field === 'experienceTime' && String(value).trim().length < 2) {
+    if (field === 'experienceTime' && String(value).trim().length < 2 && String(value).trim() !== '0') {
       decisions.ignoredLowConfidenceFields.push('experienceTime');
       continue;
     }
 
-    if (candidate[field]) {
+    const candidateHasValue = candidate[field] !== undefined && candidate[field] !== null && candidate[field] !== '';
+    const shouldForceOverwrite = allowOverwriteFields.has(field);
+
+    if (candidateHasValue && !shouldForceOverwrite) {
       decisions.rejectedFields.push(field);
       continue;
     }
