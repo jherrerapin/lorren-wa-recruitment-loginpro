@@ -8,6 +8,7 @@ import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfte
 import { isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData } from '../services/candidateData.js';
 import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
+import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
 
@@ -36,6 +37,8 @@ const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la p
 const SOLICITAR_HV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida (HV) en PDF o Word (.doc/.docx) para finalizar tu postulación.';
 const RECORDATORIO_HV = 'Para continuar necesito que adjuntes tu Hoja de vida (HV) en PDF o Word (.doc/.docx). Cuando la envíes, finalizamos tu proceso.';
 const MENSAJE_FINAL = 'Tu información y Hoja de vida (HV) fueron recibidas correctamente. Las entrevistas están previstas para el 8 de abril. Debes estar pendiente del mensaje o llamada del reclutador; por ese medio te confirmarán la hora y el lugar.';
+const MENSAJE_DONE_ACK = '¡Con gusto! Ya quedó tu registro completo. Si surge una novedad, te contactamos por este medio.';
+const MENSAJE_DONE_CV_REPEAT = 'Ya tenemos tu registro completo. Si deseas actualizar tu hoja de vida, puedes enviarla y la adjuntamos a tu postulación.';
 const GUIA_CONTINUAR = 'Puedo ayudarte a continuar con la postulación. Si deseas seguir, envíame tus datos y te voy guiando.';
 const CONFIRMACION_PROMPT = '¿Está correcto? Responde Sí para continuar o envíame la corrección.';
 
@@ -81,6 +84,8 @@ function shouldRejectByRequirements(text, parsed = {}) {
       };
     }
   }
+  // TODO(city+vacancy): cuando la vacante marque transporte como excluyente, aplicar descarte explícito
+  // con parsed.transportMode === 'Sin medio de transporte'.
   return { reject: false };
 }
 function getMissingFields(candidate) {
@@ -165,14 +170,24 @@ async function attachDebugTrace(prisma, messageId, debugTrace) {
   await prisma.message.update({ where: { id: messageId }, data: { rawPayload: { ...(current?.rawPayload || {}), debugTrace } } });
 }
 async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
-  await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload } });
+  const payload = { body, source: 'bot_flow', ...(rawPayload || {}) };
+  await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload: payload } });
   await prisma.candidate.update({ where: { id: candidateId }, data: { lastOutboundAt: new Date() } });
 }
-async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload = { body }) {
+async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload = { body, source: 'bot_flow' }) {
   await sleep(getNaturalDelayMs(inboundText, body));
   await sendTextMessage(to, body);
   await saveOutboundMessage(prisma, candidateId, body, rawPayload);
   await scheduleReminderForCandidate(prisma, candidateId);
+}
+
+async function wasDoneAckSent(prisma, candidateId) {
+  const latestOutbound = await prisma.message.findMany({
+    where: { candidateId, direction: MessageDirection.OUTBOUND },
+    orderBy: { createdAt: 'desc' },
+    take: 10
+  });
+  return latestOutbound.some((message) => message?.rawPayload?.source === 'bot_done_ack');
 }
 async function rejectCandidate(prisma, candidateId, from, rejection = {}) {
   await prisma.candidate.update({
@@ -186,12 +201,13 @@ async function rejectCandidate(prisma, candidateId, from, rejection = {}) {
       reminderState: 'SKIPPED'
     }
   });
-  await reply(prisma, candidateId, from, DESCARTE_MSG);
+  await reply(prisma, candidateId, from, DESCARTE_MSG, '', { body: DESCARTE_MSG, source: 'bot_flow' });
 }
 
 async function processText(prisma, candidate, from, text, debugTrace, options = {}) {
   const cleanText = normalizeText(text);
   const hasDataIntent = containsCandidateData(cleanText);
+  const fallbackIntent = detectConversationIntent(cleanText, { isDoneStep: candidate.currentStep === ConversationStep.DONE });
   debugTrace.openai_intent = inferIntent(cleanText);
   debugTrace.batched_message_count = options.batchedMessageCount || 1;
   debugTrace.used_multiline_context = Boolean(options.usedMultilineContext);
@@ -223,7 +239,8 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   debugTrace.openai_temperature_omitted = typeof aiResult.temperature_omitted === 'boolean'
     ? aiResult.temperature_omitted
     : debugTrace.openai_temperature_omitted;
-  if (aiResult.intent) debugTrace.openai_intent = aiResult.intent;
+  const resolvedIntent = aiResult.intent || fallbackIntent;
+  if (resolvedIntent) debugTrace.openai_intent = resolvedIntent;
   debugTrace.openai_detected_fields = Object.keys(aiFields).filter((k) => normalizedData[k] !== undefined);
   debugTrace.source_by_field = sourceByField;
   debugTrace.normalized_fields = normalizedData;
@@ -235,14 +252,22 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     console.log('[AI_FALLBACK]', JSON.stringify({ phone: candidate.phone, reason: 'openai_disabled' }));
   }
 
-  if (isFAQ(cleanText)) return reply(prisma, candidate.id, from, FAQ_RESPONSE);
+  if (resolvedIntent === 'faq' || isFAQ(cleanText)) return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_flow' });
   if (candidate.status === CandidateStatus.RECHAZADO) return reply(prisma, candidate.id, from, DESCARTE_MSG);
   if (candidate.currentStep === ConversationStep.MENU) {
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-    return reply(prisma, candidate.id, from, SALUDO_INICIAL);
+    return reply(prisma, candidate.id, from, SALUDO_INICIAL, cleanText, { body: SALUDO_INICIAL, source: 'bot_flow' });
   }
-  if (candidate.currentStep === ConversationStep.ASK_CV && !hasDataIntent) return reply(prisma, candidate.id, from, RECORDATORIO_HV);
-  if (candidate.currentStep === ConversationStep.DONE) return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+  if (candidate.currentStep === ConversationStep.ASK_CV && !hasDataIntent) return reply(prisma, candidate.id, from, RECORDATORIO_HV, cleanText, { body: RECORDATORIO_HV, source: 'bot_cv_request' });
+  if (candidate.currentStep === ConversationStep.DONE) {
+    if (resolvedIntent === 'cv_intent') return reply(prisma, candidate.id, from, MENSAJE_DONE_CV_REPEAT, cleanText, { body: MENSAJE_DONE_CV_REPEAT, source: 'bot_cv_request' });
+    if (resolvedIntent === 'post_completion_ack' || isPostCompletionAck(cleanText) || ['thanks', 'farewell'].includes(resolvedIntent)) {
+      const ackSent = await wasDoneAckSent(prisma, candidate.id);
+      if (ackSent) return;
+      return reply(prisma, candidate.id, from, MENSAJE_DONE_ACK, cleanText, { body: MENSAJE_DONE_ACK, source: 'bot_done_ack' });
+    }
+    return;
+  }
 
   const applyDecisionsAndUpdate = async () => {
     const current = await prisma.candidate.findUnique({ where: { id: candidate.id } });
@@ -263,15 +288,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     const missing = getMissingFields(updatedCandidate);
     if (missing.length) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
-      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
     }
 
     if (resolveStepAfterDataCompletion({ hasCv: hasHv(updatedCandidate) }) === ConversationStep.DONE) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-      return reply(prisma, candidate.id, from, MENSAJE_FINAL);
+      return reply(prisma, candidate.id, from, MENSAJE_FINAL, cleanText, { body: MENSAJE_FINAL, source: 'bot_flow' });
     }
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.ASK_CV } });
-    return reply(prisma, candidate.id, from, SOLICITAR_HV);
+    return reply(prisma, candidate.id, from, SOLICITAR_HV, cleanText, { body: SOLICITAR_HV, source: 'bot_cv_request' });
   };
 
   if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
@@ -281,12 +306,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     }
 
     const updated = await applyDecisionsAndUpdate();
+    if (resolvedIntent === 'confirmation_no_or_correction' && Object.keys(normalizedData).length === 0) {
+      return reply(prisma, candidate.id, from, 'Gracias por avisar. Indícame por favor el dato que deseas corregir y lo actualizo.');
+    }
     const latest = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     return reply(prisma, candidate.id, from, buildConfirmationSummary(latest));
   }
 
   if (candidate.currentStep === ConversationStep.GREETING_SENT) {
-    if (isNegativeInterest(cleanText)) { await reply(prisma, candidate.id, from, CIERRE_NO_INTERES); return; }
+      if (isNegativeInterest(cleanText)) { await reply(prisma, candidate.id, from, CIERRE_NO_INTERES, cleanText, { body: CIERRE_NO_INTERES, source: 'bot_flow' }); return; }
     if (isAffirmativeInterest(cleanText) || hasDataIntent) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       if (hasDataIntent) {
@@ -298,9 +326,9 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
           return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
         }
         const missing = getMissingFields(updated);
-        return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+        return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
       }
-      return reply(prisma, candidate.id, from, SOLICITAR_DATOS);
+      return reply(prisma, candidate.id, from, SOLICITAR_DATOS, cleanText, { body: SOLICITAR_DATOS, source: 'bot_flow' });
     }
 
     const rejection = shouldRejectByRequirements(cleanText, normalizedData);
@@ -314,9 +342,9 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
       }
       const missing = getMissingFields(updated);
-      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
     }
-    return reply(prisma, candidate.id, from, GUIA_CONTINUAR);
+    return reply(prisma, candidate.id, from, GUIA_CONTINUAR, cleanText, { body: GUIA_CONTINUAR, source: 'bot_flow' });
   }
 
   if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.ASK_CV) {
@@ -330,7 +358,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     }
 
     const missing = getMissingFields(updated);
-    return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`);
+    return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
   }
 }
 
@@ -408,27 +436,6 @@ export function webhookRouter(prisma) {
 
           const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
 
-          if (isFAQ(body)) {
-            const faqDebugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
-            try {
-              await processText(prisma, freshCandidate, from, body, faqDebugTrace, {
-                batchedMessageCount: 1,
-                usedMultilineContext: false,
-                consolidatedInputSummary: summarizeConsolidatedInput(body)
-              });
-              await prisma.message.update({ where: { id: inbound.id }, data: { respondedAt: new Date() } });
-            } catch (error) {
-              faqDebugTrace.error_summary = summarizeError(error);
-              throw error;
-            } finally {
-              const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });
-              faqDebugTrace.currentStep_after = updatedCandidate?.currentStep || faqDebugTrace.currentStep_before;
-              console.log('[AI_TRACE]', JSON.stringify(faqDebugTrace));
-              await attachDebugTrace(prisma, inbound.id, faqDebugTrace);
-            }
-            continue;
-          }
-
           const scheduling = await scheduleMultilineWindow(prisma, candidate.id);
           await sleep(scheduling.windowMs);
 
@@ -481,7 +488,7 @@ export function webhookRouter(prisma) {
             if (!isCvMimeTypeAllowed(mimeType)) {
               debugTrace.cv_invalid_mime = true;
               console.warn('[CV_ERROR]', JSON.stringify({ phone: from, mimeType, reason: 'invalid_mime' }));
-              await reply(prisma, candidate.id, from, 'Recibí tu archivo, pero por favor envíalo como PDF o Word (.doc/.docx).');
+              await reply(prisma, candidate.id, from, 'Recibí tu archivo, pero por favor envíalo como PDF o Word (.doc/.docx).', '', { source: 'bot_flow' });
             } else {
               try {
                 const metadata = await fetchMediaMetadata(message.document.id);
@@ -493,24 +500,24 @@ export function webhookRouter(prisma) {
                 const missing = getMissingFields(afterCvSave);
                 if (shouldFinalizeAfterCv({ missingFields: missing })) {
                   await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-                  await reply(prisma, candidate.id, from, MENSAJE_FINAL);
+                  await reply(prisma, candidate.id, from, MENSAJE_FINAL, '', { body: MENSAJE_FINAL, source: 'bot_flow' });
                 } else {
                   if (afterCvSave.currentStep !== ConversationStep.COLLECTING_DATA && afterCvSave.currentStep !== ConversationStep.CONFIRMING_DATA) {
                     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
                   }
-                  await reply(prisma, candidate.id, from, `Hoja de vida recibida. Aún necesito estos datos para completar tu registro: ${missing.join(', ')}`);
+                  await reply(prisma, candidate.id, from, `Hoja de vida recibida. Aún necesito estos datos para completar tu registro: ${missing.join(', ')}`, '', { source: 'bot_flow' });
                 }
               } catch (error) {
                 debugTrace.cv_download_failed = true;
                 debugTrace.error_summary = summarizeError(error);
                 console.error('[CV_ERROR]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
-                await reply(prisma, candidate.id, from, 'No pude descargar tu hoja de vida en este momento. Inténtalo nuevamente en unos minutos.');
+                await reply(prisma, candidate.id, from, 'No pude descargar tu hoja de vida en este momento. Inténtalo nuevamente en unos minutos.', '', { source: 'bot_flow' });
               }
             }
           } else if (freshCandidate.currentStep === ConversationStep.DONE) {
-            await reply(prisma, candidate.id, from, MENSAJE_FINAL);
+            await reply(prisma, candidate.id, from, MENSAJE_DONE_CV_REPEAT, '', { source: 'bot_cv_request' });
           } else {
-            await reply(prisma, candidate.id, from, 'Por ahora solo puedo procesar mensajes de texto para continuar con tu registro.');
+            await reply(prisma, candidate.id, from, 'Por ahora solo puedo procesar mensajes de texto para continuar con tu registro.', '', { source: 'bot_flow' });
           }
         } finally {
           const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });

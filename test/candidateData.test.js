@@ -95,3 +95,23 @@ test('captura barrio ciudadela simon bolívar en title case', () => {
   const normalized = normalizeCandidateFields(parsed);
   assert.equal(normalized.neighborhood, 'Ciudadela Simon Bolivar');
 });
+
+test('no confunde edad con tiempo de experiencia', () => {
+  const parsed = parseNaturalData('tengo 22 años');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.age, 22);
+  assert.equal(normalized.experienceTime, undefined);
+});
+
+test('extrae tiempo de experiencia solo con contexto laboral', () => {
+  const parsed = parseNaturalData('cuento con 2 años de experiencia');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.experienceInfo, 'Sí');
+  assert.equal(normalized.experienceTime, '2 años');
+});
+
+test('normaliza negación de transporte sin convertirla en moto', () => {
+  const parsed = parseNaturalData('no tengo moto');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.transportMode, 'Sin medio de transporte');
+});
