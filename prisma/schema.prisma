@@ -160,6 +160,10 @@ model Candidate {
   potentialDuplicateAt DateTime?
   /// Relación uno a muchos con los mensajes del candidato.
   messages          Message[]
+  /// Vacante asociada al candidato dentro del flujo de conversación.
+  vacancyId         String?
+  /// Relación opcional con la vacante detectada/asignada para el candidato.
+  vacancy           Vacancy?          @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
 }
 
 /// Modelo de auditoría de mensajes.
@@ -187,4 +191,46 @@ model Message {
 
   /// Índice para acelerar consultas por candidato y fecha.
   @@index([candidateId, createdAt])
+}
+
+/// Catálogo base de vacantes configurables para el flujo conversacional.
+model Vacancy {
+  /// Identificador único interno de la vacante.
+  id                  String      @id @default(cuid())
+  /// Clave técnica única de vacante usada por detección y automatización.
+  key                 String      @unique
+  /// Título comercial de la vacante.
+  title               String
+  /// Ciudad asociada a la vacante.
+  city                String
+  /// Descripción general de la vacante.
+  description         String?
+  /// Perfil buscado para la vacante.
+  profile             String?
+  /// Mensaje de introducción que usa el bot en el saludo dinámico.
+  botIntroText        String?
+  /// Resumen corto de requisitos para respuesta inicial del bot.
+  requirementsSummary String?
+  /// Imagen publicitaria principal asociada a la vacante.
+  adImageData         Bytes?
+  /// Tipo MIME de la imagen publicitaria.
+  adImageMimeType     String?
+  /// Nombre original del archivo de imagen publicitaria.
+  adImageOriginalName String?
+  /// Pistas textuales del anuncio para mejorar clasificación semántica.
+  adTextHints         String?
+  /// Alias semánticos para detección de cargo (JSON array o string simple).
+  aliases             Json?
+  /// Configuración de screening reservada para evolución futura.
+  screeningConfig     Json?
+  /// Define si la vacante está activa para selección automática.
+  isActive            Boolean     @default(true)
+  /// Orden de despliegue en dashboard y fallback operativo.
+  displayOrder        Int         @default(0)
+  /// Fecha de creación automática.
+  createdAt           DateTime    @default(now())
+  /// Fecha de actualización automática.
+  updatedAt           DateTime    @updatedAt
+  /// Relación inversa de candidatos asociados a esta vacante.
+  candidates          Candidate[]
 }
