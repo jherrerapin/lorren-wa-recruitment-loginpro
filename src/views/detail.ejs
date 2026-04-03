@@ -68,6 +68,7 @@
   <div class="container">
     <a href="/admin" class="back-link">&larr; Volver al listado</a>
     <h1><%= candidate.fullName || 'Candidato sin nombre' %></h1>
+    <% const uiStatus = normalizeCandidateStatusForUI(candidate.status); %>
 
     <% if (cvSuccess) { %>
       <div class="alert alert-success"><%= cvSuccess %></div>
@@ -136,12 +137,10 @@
       <h2>Estado del candidato</h2>
       <form method="post" action="/admin/candidates/<%= candidate.id %>/status" class="status-form">
         <select name="status">
-          <option value="NUEVO" <%= candidate.status === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
-          <option value="REGISTRADO" <%= candidate.status === 'REGISTRADO' ? 'selected' : '' %>>Registrado</option>
-          <option value="VALIDANDO" <%= candidate.status === 'VALIDANDO' ? 'selected' : '' %>>En revisión</option>
-          <option value="APROBADO" <%= candidate.status === 'APROBADO' ? 'selected' : '' %>>Aprobado</option>
-          <option value="RECHAZADO" <%= candidate.status === 'RECHAZADO' ? 'selected' : '' %>>Rechazado</option>
-          <option value="CONTACTADO" <%= candidate.status === 'CONTACTADO' ? 'selected' : '' %>>Contactado</option>
+          <option value="NUEVO" <%= uiStatus === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
+          <option value="REGISTRADO" <%= uiStatus === 'REGISTRADO' ? 'selected' : '' %>>Registrado</option>
+          <option value="CONTACTADO" <%= uiStatus === 'CONTACTADO' ? 'selected' : '' %>>Contactado</option>
+          <option value="RECHAZADO" <%= uiStatus === 'RECHAZADO' ? 'selected' : '' %>>Rechazado</option>
         </select>
         <button type="submit">Guardar</button>
       </form>
@@ -271,12 +270,10 @@
           <div class="field-group">
             <label for="statusEdit">Estado</label>
             <select id="statusEdit" name="status">
-              <option value="NUEVO" <%= candidate.status === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
-              <option value="REGISTRADO" <%= candidate.status === 'REGISTRADO' ? 'selected' : '' %>>Registrado</option>
-              <option value="VALIDANDO" <%= candidate.status === 'VALIDANDO' ? 'selected' : '' %>>En revisión</option>
-              <option value="APROBADO" <%= candidate.status === 'APROBADO' ? 'selected' : '' %>>Aprobado</option>
-              <option value="RECHAZADO" <%= candidate.status === 'RECHAZADO' ? 'selected' : '' %>>Rechazado</option>
-              <option value="CONTACTADO" <%= candidate.status === 'CONTACTADO' ? 'selected' : '' %>>Contactado</option>
+              <option value="NUEVO" <%= uiStatus === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
+              <option value="REGISTRADO" <%= uiStatus === 'REGISTRADO' ? 'selected' : '' %>>Registrado</option>
+              <option value="CONTACTADO" <%= uiStatus === 'CONTACTADO' ? 'selected' : '' %>>Contactado</option>
+              <option value="RECHAZADO" <%= uiStatus === 'RECHAZADO' ? 'selected' : '' %>>Rechazado</option>
             </select>
           </div>
           <div class="field-group">
