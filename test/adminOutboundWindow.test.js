@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import express from 'express';
 import axios from 'axios';
 import { MessageDirection } from '@prisma/client';
 import { adminRouter } from '../src/routes/admin.js';
 
-function createPrismaMock({ candidate, messages = [] }) {
+function createPrismaMock({ candidate, messages = [], listCandidates = null }) {
   const state = {
     candidate: { ...candidate },
     messages: [...messages],
+    listCandidates: listCandidates ? listCandidates.map((c) => ({ ...c })) : [{ ...candidate }],
     outboundCreates: []
   };
 
@@ -17,11 +19,17 @@ function createPrismaMock({ candidate, messages = [] }) {
     candidate: {
       async findUnique({ where }) {
         if (where.id !== state.candidate.id) return null;
-        return { ...state.candidate };
+        return { ...state.candidate, messages: [] };
+      },
+      async findMany() {
+        return state.listCandidates.map((c) => ({ ...c }));
       },
       async update({ where, data }) {
         if (where.id !== state.candidate.id) throw new Error('Candidate not found');
         state.candidate = { ...state.candidate, ...data };
+        state.listCandidates = state.listCandidates.map((item) => (
+          item.id === where.id ? { ...item, ...data } : item
+        ));
         return { ...state.candidate };
       }
     },
@@ -49,6 +57,9 @@ async function createServer(initialState) {
   const prisma = createPrismaMock(initialState);
   const app = express();
   const sessions = new Map();
+
+  app.set('view engine', 'ejs');
+  app.set('views', path.resolve(process.cwd(), 'src/views'));
 
   app.use((req, _res, next) => {
     const cookieHeader = req.headers.cookie || '';
@@ -90,12 +101,12 @@ function getOutboundError(location = '') {
   return parsed.searchParams.get('outboundError');
 }
 
-test('inbound dentro de 24h => permite envío', async () => {
+test('inbound dentro de 24h => permite envío y marca CONTACTADO', async () => {
   const originalPost = axios.post;
   axios.post = async () => ({ data: { ok: true } });
 
   const { prisma, server } = await createServer({
-    candidate: { id: 'cand-1', phone: '573001112233', createdAt: minusHours(2) },
+    candidate: { id: 'cand-1', status: 'REGISTRADO', phone: '573001112233', createdAt: minusHours(2) },
     messages: [
       { candidateId: 'cand-1', direction: MessageDirection.INBOUND, createdAt: minusHours(1) }
     ]
@@ -114,6 +125,38 @@ test('inbound dentro de 24h => permite envío', async () => {
     assert.equal(response.status, 302);
     assert.match(response.headers.get('location') || '', /outboundSuccess=/);
     assert.equal(prisma.state.outboundCreates.length, 1);
+    assert.equal(prisma.state.candidate.status, 'CONTACTADO');
+    assert.ok(prisma.state.candidate.lastOutboundAt instanceof Date);
+  } finally {
+    axios.post = originalPost;
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('si candidato está RECHAZADO, outbound no sobreescribe estado', async () => {
+  const originalPost = axios.post;
+  axios.post = async () => ({ data: { ok: true } });
+
+  const { prisma, server } = await createServer({
+    candidate: { id: 'cand-r', status: 'RECHAZADO', phone: '573001118888', createdAt: minusHours(2) },
+    messages: [
+      { candidateId: 'cand-r', direction: MessageDirection.INBOUND, createdAt: minusHours(1) }
+    ]
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl);
+    const response = await fetch(`${baseUrl}/admin/candidates/cand-r/outbound`, {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=reminder',
+      redirect: 'manual'
+    });
+
+    assert.equal(response.status, 302);
+    assert.equal(prisma.state.candidate.status, 'RECHAZADO');
+    assert.ok(prisma.state.candidate.lastOutboundAt instanceof Date);
   } finally {
     axios.post = originalPost;
     await new Promise(resolve => server.close(resolve));
@@ -129,7 +172,7 @@ test('inbound fuera de 24h => bloquea envío', async () => {
   };
 
   const { prisma, server } = await createServer({
-    candidate: { id: 'cand-2', phone: '573001112244', createdAt: minusHours(2) },
+    candidate: { id: 'cand-2', status: 'REGISTRADO', phone: '573001112244', createdAt: minusHours(2) },
     messages: [
       { candidateId: 'cand-2', direction: MessageDirection.INBOUND, createdAt: minusHours(30) }
     ]
@@ -161,7 +204,7 @@ test('solo outbound => bloquea envío', async () => {
   axios.post = async () => ({ data: { ok: true } });
 
   const { prisma, server } = await createServer({
-    candidate: { id: 'cand-3', phone: '573001112255', createdAt: minusHours(2) },
+    candidate: { id: 'cand-3', status: 'REGISTRADO', phone: '573001112255', createdAt: minusHours(2) },
     messages: [
       { candidateId: 'cand-3', direction: MessageDirection.OUTBOUND, createdAt: minusHours(1) }
     ]
@@ -192,7 +235,7 @@ test('candidate.createdAt reciente pero inbound viejo => bloquea', async () => {
   axios.post = async () => ({ data: { ok: true } });
 
   const { prisma, server } = await createServer({
-    candidate: { id: 'cand-4', phone: '573001112266', createdAt: minusHours(1) },
+    candidate: { id: 'cand-4', status: 'REGISTRADO', phone: '573001112266', createdAt: minusHours(1) },
     messages: [
       { candidateId: 'cand-4', direction: MessageDirection.INBOUND, createdAt: minusHours(48) }
     ]
@@ -222,7 +265,7 @@ test('candidate.createdAt viejo pero inbound reciente => permite', async () => {
   axios.post = async () => ({ data: { ok: true } });
 
   const { prisma, server } = await createServer({
-    candidate: { id: 'cand-5', phone: '573001112277', createdAt: minusHours(24 * 90) },
+    candidate: { id: 'cand-5', status: 'REGISTRADO', phone: '573001112277', createdAt: minusHours(24 * 90) },
     messages: [
       { candidateId: 'cand-5', direction: MessageDirection.INBOUND, createdAt: minusHours(2) }
     ]
@@ -243,6 +286,29 @@ test('candidate.createdAt viejo pero inbound reciente => permite', async () => {
     assert.equal(prisma.state.outboundCreates.length, 1);
   } finally {
     axios.post = originalPost;
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('link externo wa.me no dispara automatización de estado', async () => {
+  const { prisma, server } = await createServer({
+    candidate: { id: 'cand-link', status: 'REGISTRADO', phone: '573009999999', createdAt: minusHours(2) },
+    messages: []
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl, 'admin');
+    const response = await fetch(`${baseUrl}/admin/candidates/cand-link`, {
+      headers: { Cookie: cookie }
+    });
+
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(html, /https:\/\/wa\.me\/573009999999/);
+    assert.equal(prisma.state.candidate.status, 'REGISTRADO');
+    assert.equal(prisma.state.outboundCreates.length, 0);
+  } finally {
     await new Promise(resolve => server.close(resolve));
   }
 });

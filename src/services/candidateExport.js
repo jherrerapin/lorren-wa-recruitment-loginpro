@@ -2,7 +2,12 @@ function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
 
-export function isReadyForReview(candidate) {
+export function normalizeCandidateStatusForUI(status) {
+  if (status === 'VALIDANDO' || status === 'APROBADO') return 'REGISTRADO';
+  return status;
+}
+
+export function isOperationallyRegistered(candidate) {
   return hasValue(candidate.fullName)
     && hasValue(candidate.documentType)
     && hasValue(candidate.documentNumber)
@@ -18,15 +23,15 @@ export function isReadyForReview(candidate) {
 }
 
 export function filterCandidatesByScope(candidates, scope = 'all') {
-  if (scope === 'registered') return candidates.filter((c) => c.status === 'REGISTRADO');
-  if (scope === 'ready_review') return candidates.filter((c) => isReadyForReview(c));
-  if (scope === 'missing_cv') return candidates.filter((c) => !c.cvData && c.status !== 'RECHAZADO');
-  if (scope === 'rejected') return candidates.filter((c) => c.status === 'RECHAZADO');
+  if (scope === 'registered') return candidates.filter((c) => isOperationallyRegistered(c));
+  if (scope === 'new') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'NUEVO');
+  if (scope === 'contacted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTACTADO');
+  if (scope === 'rejected') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'RECHAZADO');
   return candidates;
 }
 
 export function exportFilenameByScope(scope = 'all') {
-  const safeScope = ['all', 'registered', 'ready_review', 'missing_cv', 'rejected'].includes(scope)
+  const safeScope = ['all', 'registered', 'new', 'contacted', 'rejected'].includes(scope)
     ? scope
     : 'all';
   const today = new Date().toISOString().slice(0, 10);

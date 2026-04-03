@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import path from 'node:path';
 import multer from 'multer';
 import { normalizeCandidateFields } from '../services/candidateData.js';
-import { exportFilenameByScope, filterCandidatesByScope } from '../services/candidateExport.js';
+import { exportFilenameByScope, filterCandidatesByScope, normalizeCandidateStatusForUI } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
 import { MessageDirection, MessageType } from '@prisma/client';
 
@@ -49,10 +49,20 @@ function formatDateTimeCO(value) {
 const STATUS_LABELS = {
   'NUEVO': 'Nuevo',
   'REGISTRADO': 'Registrado',
-  'VALIDANDO': 'En revisión',
-  'APROBADO': 'Aprobado',
+  'VALIDANDO': 'Registrado',
+  'APROBADO': 'Registrado',
   'RECHAZADO': 'Rechazado',
   'CONTACTADO': 'Contactado'
+};
+
+const ADMIN_STATUS_SCOPES = new Set(['registered', 'new', 'contacted', 'rejected', 'all']);
+
+const STATUS_SCOPE_SUMMARY_LABELS = {
+  registered: 'registrados',
+  new: 'nuevos',
+  contacted: 'contactados',
+  rejected: 'rechazados',
+  all: 'totales'
 };
 
 const ALLOWED_CV_MIMES = new Set([
@@ -152,11 +162,26 @@ export function adminRouter(prisma) {
 
   // Ruta principal: listado de candidatos.
   router.get('/', async (req, res) => {
-    const candidates = await prisma.candidate.findMany({
+    const requestedStatus = normalizeString(req.query.status);
+    const statusScope = ADMIN_STATUS_SCOPES.has(requestedStatus) ? requestedStatus : 'registered';
+
+    const allCandidates = await prisma.candidate.findMany({
       orderBy: { createdAt: 'desc' },
       take: 200
     });
-    res.render('list', { candidates, formatDateTimeCO, role: req.userRole });
+
+    const candidates = filterCandidatesByScope(allCandidates, statusScope);
+
+    res.render('list', {
+      candidates,
+      formatDateTimeCO,
+      role: req.userRole,
+      activeStatusScope: statusScope,
+      summaryLabel: STATUS_SCOPE_SUMMARY_LABELS[statusScope] || STATUS_SCOPE_SUMMARY_LABELS.all,
+      // Preparado para extender filtros operativos por cityId/vacancyId sin romper la interfaz actual.
+      futureFilters: { cityId: null, vacancyId: null },
+      normalizeCandidateStatusForUI
+    });
   });
 
   // Ruta de detalle de un candidato con historial de mensajes.
@@ -193,7 +218,8 @@ export function adminRouter(prisma) {
       outboundError,
       outboundSuccess,
       outboundWindow,
-      cvSizeBytes: cvBuffer?.byteLength || 0
+      cvSizeBytes: cvBuffer?.byteLength || 0,
+      normalizeCandidateStatusForUI
     });
   });
 
@@ -432,7 +458,8 @@ export function adminRouter(prisma) {
 
   // Ruta para exportar candidatos a Excel.
   router.get('/export', async (req, res) => {
-    const scope = normalizeString(req.query.scope) || 'all';
+    const requestedScope = normalizeString(req.query.scope);
+    const scope = ADMIN_STATUS_SCOPES.has(requestedScope) ? requestedScope : 'all';
     const allCandidates = await prisma.candidate.findMany({
       orderBy: { createdAt: 'desc' }
     });
@@ -477,7 +504,7 @@ export function adminRouter(prisma) {
         medicalRestrictions: c.medicalRestrictions || '',
         transportMode: c.transportMode || '',
         cvAttached: c.cvData ? 'Sí' : 'No',
-        status: STATUS_LABELS[c.status] || c.status,
+        status: STATUS_LABELS[normalizeCandidateStatusForUI(c.status)] || normalizeCandidateStatusForUI(c.status),
         rejectionReason: c.rejectionReason || '',
         rejectionDetails: c.rejectionDetails || '',
         whatsapp: 'Escribir'
@@ -568,7 +595,7 @@ export function adminRouter(prisma) {
     const customBody = normalizeString(req.body.customBody);
     const candidate = await prisma.candidate.findUnique({
       where: { id: candidateId },
-      select: { id: true, phone: true }
+      select: { id: true, phone: true, status: true }
     });
 
     if (!candidate) return res.status(404).send('Candidato no encontrado');
@@ -603,7 +630,11 @@ export function adminRouter(prisma) {
         rawPayload: { source: 'dev_dashboard', action }
       }
     });
-    await prisma.candidate.update({ where: { id: candidateId }, data: { lastOutboundAt: new Date() } });
+    const updateData = { lastOutboundAt: new Date() };
+    if (candidate.status !== 'RECHAZADO') {
+      updateData.status = 'CONTACTADO';
+    }
+    await prisma.candidate.update({ where: { id: candidateId }, data: updateData });
     const query = buildCvStatusQuery('outboundSuccess', 'Mensaje saliente enviado correctamente.');
     return res.redirect(`/admin/candidates/${candidateId}?${query}`);
   });
