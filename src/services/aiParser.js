@@ -1,33 +1,66 @@
+/**
+ * aiParser.js
+ * ──────────────────────────────────────────────────────────────────────
+ *
+ * Fuente de verdad para extracción de campos ambiguos:
+ *   - edad (en números, palabras, con errores de tipeo, "veintiocho", etc.)
+ *   - nombre completo (cuando no hay prefijo explícito)
+ *   - experiencia ("sí tengo", "no tengo", "poca", "bastante")
+ *   - tiempo de experiencia ("dos años", "6 mesecitos", "un añito")
+ *   - intent conversacional
+ *
+ * Principio:
+ *   OpenAI recibe el texto completo, con todo el contexto, y decide.
+ *   No se le imponen restricciones de patrón. Se le dan instrucciones
+ *   de semántica (qué es una edad vs. qué es un número de documento)
+ *   para que razone como un humano que lee el mensaje.
+ */
+
 import axios from 'axios';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 
 /**
- * Modelos que NO soportan temperature (o1, o3, razonamiento).
- * Para todos los demás se aplica si está configurado.
+ * Modelos de razonamiento de OpenAI que no soportan el parámetro temperature.
  */
-const MODELS_WITHOUT_TEMPERATURE_SUPPORT = [
-  'o1',
-  'o1-mini',
-  'o1-preview',
-  'o3',
-  'o3-mini'
-];
+const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini'];
 
 function buildPrompt() {
   return [
-    'Extrae datos de candidato desde texto libre y responde solo JSON válido.',
-    'Claves permitidas: intent, fullName, documentType, documentNumber, age, neighborhood, experienceInfo, experienceTime, medicalRestrictions, transportMode.',
-    'REGLA CRÍTICA DE EDAD: Solo extrae edad si el texto tiene explícitamente la palabra "años" o "año" junto al número, O el prefijo "tengo X años" / "edad: X".',
-    'Nunca extraigas edad de un número de cédula o documento. Si ves "14396104" o "14\'396.104", ese es el número de documento, NO la edad.',
-    'Diferencia edad de experiencia laboral: "22 años" sin contexto laboral es edad, NO experienceTime.',
-    'Solo usa experienceTime cuando exista contexto explícito de experiencia laboral (ej. "5 meses de experiencia").',
-    'La experiencia puede venir en palabras: "dos años", "tres meses" → conviértela a número.',
-    'Si detectas "sin experiencia", "no tengo experiencia", "poca experiencia", marca experienceInfo="No" y NO inventes experiencia positiva.',
-    'Transporte: detecta afirmativo (Moto/Bicicleta) y negativo ("Sin medio de transporte"). Nunca conviertas negaciones en Moto o Bicicleta.',
-    'Si hay restricciones médicas negativas, usa "Sin restricciones médicas".',
-    'intent debe ser una de: greeting, apply_intent, confirmation_yes, confirmation_no_or_correction, thanks, farewell, cv_intent, faq, provide_data, provide_correction, post_completion_ack, unsupported_file_or_message.'
-  ].join(' ');
+    'Eres un extractor de datos de candidatos para empleo. Recibes texto libre en español y devuelves SOLO JSON válido.',
+    '',
+    'CAMPOS PERMITIDOS EN EL JSON:',
+    'intent, fullName, documentType, documentNumber, age, neighborhood, experienceInfo, experienceTime, medicalRestrictions, transportMode',
+    '',
+    'INSTRUCCIONES POR CAMPO:',
+    '',
+    'EDAD (age):',
+    '- Extrae la edad como número entero.',
+    '- El candidato puede escribirla de cualquier forma: "28", "tengo 28", "28 años", "veintiocho años", "veintiocho", "28 añitos", "28 años de edad", con tilde o sin tilde, con errores de tipeo ("annos", "añoz", "tengo 28 añitos").',
+    '- Un número de cédula tiene 6 a 12 dígitos. Un número como "14396104" o "1.073.432.987" es un documento, NO una edad.',
+    '- Si en el texto aparece tanto un número de documento como un número de edad, distingue por contexto semántico.',
+    '- Rango válido de edad: 15 a 70 años. Si calculas algo fuera de ese rango con poca certeza, omite el campo.',
+    '',
+    'EXPERIENCIA (experienceInfo + experienceTime):',
+    '- experienceInfo: "Sí" o "No".',
+    '- experienceTime: normaliza a formato "N años" o "N meses" o "N semanas".',
+    '- El candidato puede decir: "dos años", "tres meses", "6 mesecitos", "un añito", "poca experiencia", "bastante experiencia".',
+    '- "poca experiencia" o "sin experiencia" = experienceInfo="No".',
+    '- Nunca inventes tiempo de experiencia si el candidato no lo mencionó.',
+    '',
+    'NOMBRE (fullName):',
+    '- El candidato puede presentarse como: "soy Juan Pérez", "mi nombre es", o simplemente escribir su nombre al inicio.',
+    '- Capitaliza correctamente.',
+    '',
+    'TRANSPORTE (transportMode):',
+    '- Detecta afirmativo (Moto, Bicicleta) y negativo ("Sin medio de transporte").',
+    '- Nunca conviertas una negación en Moto o Bicicleta.',
+    '',
+    'INTENT:',
+    'Uno de: greeting, apply_intent, confirmation_yes, confirmation_no_or_correction, thanks, farewell, cv_intent, faq, provide_data, provide_correction, post_completion_ack, unsupported_file_or_message.',
+    '',
+    'Omite los campos que no aparezcan en el texto. Devuelve SOLO JSON, sin explicaciones.'
+  ].join('\n');
 }
 
 function extractTextFromChatCompletion(data = {}) {
@@ -50,17 +83,12 @@ function extractTextFromChatCompletion(data = {}) {
 function parseModelJson(rawText = '{}') {
   const normalized = String(rawText || '').trim();
   if (!normalized) return {};
-
   try {
     return JSON.parse(normalized);
   } catch {
-    const fencedMatch = normalized.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fencedMatch?.[1]) {
-      try {
-        return JSON.parse(fencedMatch[1].trim());
-      } catch {
-        return {};
-      }
+    const fenced = normalized.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) {
+      try { return JSON.parse(fenced[1].trim()); } catch { return {}; }
     }
     return {};
   }
@@ -74,42 +102,27 @@ function summarizeOpenAIError(error) {
   const apiMessage = typeof error?.response?.data?.error?.message === 'string'
     ? error.response.data.error.message.slice(0, 220)
     : null;
-
   return [name, status, code, apiMessage || message || 'Unexpected error'].filter(Boolean).join(' | ');
 }
 
 function parseOptionalTemperature() {
   const raw = process.env.OPENAI_TEMPERATURE;
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
-    return { value: null, reason: 'missing' };
-  }
-
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: null, reason: 'missing' };
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    return { value: null, reason: 'invalid' };
-  }
-
-  if (parsed < 0 || parsed > 2) {
-    return { value: null, reason: 'out_of_range' };
-  }
-
-  if (parsed === 1) {
-    return { value: null, reason: 'default_value' };
-  }
-
+  if (!Number.isFinite(parsed)) return { value: null, reason: 'invalid' };
+  if (parsed < 0 || parsed > 2) return { value: null, reason: 'out_of_range' };
+  if (parsed === 1) return { value: null, reason: 'default_value' };
   return { value: parsed, reason: null };
 }
 
 /**
- * FIX: La lógica anterior solo permitía temperature en una lista blanca de modelos,
- * lo que excluía gpt-4.1-mini y cualquier modelo futuro.
- * Nueva lógica: se aplica temperature a TODOS los modelos EXCEPTO los de razonamiento
- * (o1, o3) que no lo soportan por la API de OpenAI.
+ * Temperature se aplica a todos los modelos EXCEPTO los de razonamiento
+ * (o1, o3 y variantes), que no lo soportan.
  */
 function modelSupportsTemperature(model = '') {
-  const normalized = String(model || '').trim().toLowerCase();
-  if (!normalized) return false;
-  return !MODELS_WITHOUT_TEMPERATURE_SUPPORT.some((blocked) => normalized.startsWith(blocked));
+  const n = String(model || '').trim().toLowerCase();
+  if (!n) return false;
+  return !REASONING_MODELS.some((blocked) => n.startsWith(blocked));
 }
 
 export async function tryOpenAIParse(text) {
@@ -118,8 +131,9 @@ export async function tryOpenAIParse(text) {
   }
 
   const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-  const requestedTemperature = parseOptionalTemperature();
-  const shouldIncludeTemperature = requestedTemperature.value !== null && modelSupportsTemperature(model);
+  const requestedTemp = parseOptionalTemperature();
+  const shouldIncludeTemp = requestedTemp.value !== null && modelSupportsTemperature(model);
+
   const payload = {
     model,
     response_format: { type: 'json_object' },
@@ -129,10 +143,7 @@ export async function tryOpenAIParse(text) {
     ],
     max_completion_tokens: 300
   };
-
-  if (shouldIncludeTemperature) {
-    payload.temperature = requestedTemperature.value;
-  }
+  if (shouldIncludeTemp) payload.temperature = requestedTemp.value;
 
   try {
     const response = await axios.post(
@@ -148,15 +159,14 @@ export async function tryOpenAIParse(text) {
     );
 
     const parsed = parseModelJson(extractTextFromChatCompletion(response.data));
-
     return {
       used: true,
       status: 'ok',
       intent: parsed.intent || null,
       parsedFields: parsed,
       model,
-      temperature_omitted: !shouldIncludeTemperature,
-      temperature_value: shouldIncludeTemperature ? requestedTemperature.value : null
+      temperature_omitted: !shouldIncludeTemp,
+      temperature_value: shouldIncludeTemp ? requestedTemp.value : null
     };
   } catch (error) {
     const summarized = summarizeOpenAIError(error);
@@ -171,11 +181,17 @@ export async function tryOpenAIParse(text) {
       intent: null,
       parsedFields: {},
       model,
-      temperature_omitted: !shouldIncludeTemperature,
-      temperature_value: shouldIncludeTemperature ? requestedTemperature.value : null,
+      temperature_omitted: !shouldIncludeTemp,
+      temperature_value: shouldIncludeTemp ? requestedTemp.value : null,
       error: wrappedError
     };
   }
 }
 
-export { extractTextFromChatCompletion, parseModelJson, summarizeOpenAIError, parseOptionalTemperature, modelSupportsTemperature };
+export {
+  extractTextFromChatCompletion,
+  parseModelJson,
+  summarizeOpenAIError,
+  parseOptionalTemperature,
+  modelSupportsTemperature
+};
