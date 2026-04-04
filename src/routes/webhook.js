@@ -20,7 +20,8 @@
  */
 
 import express from 'express';
-import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
+import pkg from '@prisma/client';
+const { CandidateStatus, ConversationStep, MessageDirection, MessageType } = pkg;
 import { extractMessages, sendTextMessage } from '../services/whatsapp.js';
 import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { runAITurn, tryOpenAIParse } from '../services/aiParser.js';
