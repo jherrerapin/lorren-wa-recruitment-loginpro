@@ -1,20 +1,28 @@
 import axios from 'axios';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
-const MODELS_WITH_CUSTOM_TEMPERATURE_SUPPORT = [
-  'gpt-3.5-turbo',
-  'gpt-4',
-  'gpt-4-turbo',
-  'gpt-4o',
-  'gpt-4o-mini'
+
+/**
+ * Modelos que NO soportan temperature (o1, o3, razonamiento).
+ * Para todos los demás se aplica si está configurado.
+ */
+const MODELS_WITHOUT_TEMPERATURE_SUPPORT = [
+  'o1',
+  'o1-mini',
+  'o1-preview',
+  'o3',
+  'o3-mini'
 ];
 
 function buildPrompt() {
   return [
     'Extrae datos de candidato desde texto libre y responde solo JSON válido.',
     'Claves permitidas: intent, fullName, documentType, documentNumber, age, neighborhood, experienceInfo, experienceTime, medicalRestrictions, transportMode.',
+    'REGLA CRÍTICA DE EDAD: Solo extrae edad si el texto tiene explícitamente la palabra "años" o "año" junto al número, O el prefijo "tengo X años" / "edad: X".',
+    'Nunca extraigas edad de un número de cédula o documento. Si ves "14396104" o "14\'396.104", ese es el número de documento, NO la edad.',
     'Diferencia edad de experiencia laboral: "22 años" sin contexto laboral es edad, NO experienceTime.',
     'Solo usa experienceTime cuando exista contexto explícito de experiencia laboral (ej. "5 meses de experiencia").',
+    'La experiencia puede venir en palabras: "dos años", "tres meses" → conviértela a número.',
     'Si detectas "sin experiencia", "no tengo experiencia", "poca experiencia", marca experienceInfo="No" y NO inventes experiencia positiva.',
     'Transporte: detecta afirmativo (Moto/Bicicleta) y negativo ("Sin medio de transporte"). Nunca conviertas negaciones en Moto o Bicicleta.',
     'Si hay restricciones médicas negativas, usa "Sin restricciones médicas".',
@@ -92,10 +100,16 @@ function parseOptionalTemperature() {
   return { value: parsed, reason: null };
 }
 
-function modelSupportsCustomTemperature(model = '') {
+/**
+ * FIX: La lógica anterior solo permitía temperature en una lista blanca de modelos,
+ * lo que excluía gpt-4.1-mini y cualquier modelo futuro.
+ * Nueva lógica: se aplica temperature a TODOS los modelos EXCEPTO los de razonamiento
+ * (o1, o3) que no lo soportan por la API de OpenAI.
+ */
+function modelSupportsTemperature(model = '') {
   const normalized = String(model || '').trim().toLowerCase();
   if (!normalized) return false;
-  return MODELS_WITH_CUSTOM_TEMPERATURE_SUPPORT.some((allowedModel) => normalized.startsWith(allowedModel));
+  return !MODELS_WITHOUT_TEMPERATURE_SUPPORT.some((blocked) => normalized.startsWith(blocked));
 }
 
 export async function tryOpenAIParse(text) {
@@ -105,7 +119,7 @@ export async function tryOpenAIParse(text) {
 
   const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
   const requestedTemperature = parseOptionalTemperature();
-  const shouldIncludeTemperature = requestedTemperature.value !== null && modelSupportsCustomTemperature(model);
+  const shouldIncludeTemperature = requestedTemperature.value !== null && modelSupportsTemperature(model);
   const payload = {
     model,
     response_format: { type: 'json_object' },
@@ -164,4 +178,4 @@ export async function tryOpenAIParse(text) {
   }
 }
 
-export { extractTextFromChatCompletion, parseModelJson, summarizeOpenAIError, parseOptionalTemperature, modelSupportsCustomTemperature };
+export { extractTextFromChatCompletion, parseModelJson, summarizeOpenAIError, parseOptionalTemperature, modelSupportsTemperature };

@@ -125,6 +125,16 @@ function detectLeadingName(text = '') {
   return null;
 }
 
+/**
+ * FIX: La detección de edad en el regex anterior capturaba partes del número
+ * de documento (ej: el "14" de "14'396.104") como edad=14 y disparaba descarte.
+ *
+ * Regla nueva: la edad SOLO se extrae si en el texto aparece explícitamente
+ * la palabra "año(s)" contigua al número, O aparece el prefijo "edad"/"tengo".
+ * Un número suelto sin contexto de edad NO se interpreta como edad.
+ *
+ * Además el rango válido es 15-70 (antes 14-99).
+ */
 export function parseNaturalData(text = '') {
   const result = {};
   let remaining = String(text || '');
@@ -133,6 +143,7 @@ export function parseNaturalData(text = '') {
     .replace(/\s+/g, ' ')
     .trim();
 
+  // Documento — igual que antes
   const docRegex = /\b(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|\.|\s)\s*(\d{6,12})\b/i;
   const docMatch = compact.match(docRegex) || remaining.match(docRegex);
   if (docMatch) {
@@ -149,12 +160,16 @@ export function parseNaturalData(text = '') {
     }
   }
 
-  const ageMatch = compact.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)?(\d{1,2})\s*(?:a[ñn]os?)?\b/i) || remaining.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)?(\d{1,2})\s*(?:a[ñn]os?)?\b/i);
-  if (ageMatch) {
-    const age = Number.parseInt(ageMatch[1], 10);
-    if (age >= 14 && age <= 99) {
+  // FIX CRÍTICO: edad solo si hay contexto explícito de edad.
+  // El número debe ir acompañado de "años"/"año" O precedido de "edad"/"tengo".
+  // Esto evita que partes del documento (ej: "14" en "14'396.104") sean capturadas como edad.
+  const ageWithWord = compact.match(/\b(?:edad\s*[:\-]?\s*|tengo\s+)(\d{1,2})\s*a[ñn]os?\b/i)
+    || compact.match(/\b(\d{1,2})\s+a[ñn]os?\b/i);
+  if (ageWithWord) {
+    const age = Number.parseInt(ageWithWord[1], 10);
+    if (age >= 15 && age <= 70) {
       result.age = age;
-      remaining = remaining.replace(ageMatch[0], ' ');
+      remaining = remaining.replace(ageWithWord[0], ' ');
     }
   }
 
