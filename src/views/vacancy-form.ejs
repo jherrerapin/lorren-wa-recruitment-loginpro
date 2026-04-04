@@ -4,68 +4,290 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title><%= mode === 'create' ? 'Crear vacante' : 'Editar vacante' %></title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color:#333; margin:0; }
-    .container { margin: 24px auto; max-width: 800px; background:#fff; border:1px solid #eee; padding:20px; border-radius:8px; }
-    h1 { margin-top:0; }
-    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    .field { display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
-    input, textarea { padding:8px 10px; border:1px solid #ddd; border-radius:4px; font:inherit; }
-    textarea { min-height: 80px; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color: #333; margin: 0; }
+
+    /* ── Navbar (idéntica a vacancies.ejs) ── */
+    .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
+    .navbar a { color: #ecf0f1; text-decoration: none; font-size: 14px; }
+    .navbar a:hover { text-decoration: underline; }
+    .navbar form { margin-left: auto; }
+    .btn-logout { background: transparent; border: 1px solid #ecf0f1; color: #ecf0f1; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+
+    /* ── Contenedor ── */
+    .container { margin: 24px auto; max-width: 860px; }
+
+    /* ── Breadcrumb / volver ── */
+    .breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 13px; color: #666; }
+    .breadcrumb a { color: #3498db; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+    .breadcrumb span { color: #999; }
+
+    /* ── Tarjeta ── */
+    .card { background: #fff; border: 1px solid #e1e4e8; border-radius: 8px; padding: 24px; }
+    .card h1 { margin: 0 0 20px; font-size: 20px; color: #2c3e50; }
+
+    /* ── Secciones del form ── */
+    .section { margin-bottom: 24px; }
+    .section-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: #888; border-bottom: 1px solid #eee;
+      padding-bottom: 6px; margin-bottom: 14px;
+    }
+
+    /* ── Grid ── */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .full { grid-column: 1 / -1; }
-    .actions { margin-top: 12px; display:flex; gap:8px; }
-    .btn { padding:8px 12px; border-radius:4px; border:1px solid #ddd; background:#fff; text-decoration:none; color:#333; }
-    .btn-primary { background:#3498db; color:#fff; border-color:#3498db; }
+
+    /* ── Campos ── */
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 13px; font-weight: 600; color: #444; }
+    .field .hint { font-size: 11px; color: #999; margin-top: 2px; }
+    input[type="text"], input[type="number"], textarea, select {
+      padding: 8px 10px; border: 1px solid #d0d7de; border-radius: 5px;
+      font: inherit; font-size: 13px; background: #fff; width: 100%;
+      transition: border-color .15s;
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: none; border-color: #3498db; box-shadow: 0 0 0 3px rgba(52,152,219,.15);
+    }
+    textarea { min-height: 80px; resize: vertical; }
+
+    /* ── Checkbox ── */
+    .check-field { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; }
+    .check-field input[type="checkbox"] { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; accent-color: #3498db; }
+    .check-field .check-label { display: flex; flex-direction: column; gap: 2px; }
+    .check-field .check-label strong { font-size: 13px; color: #333; }
+    .check-field .check-label span { font-size: 12px; color: #888; }
+
+    /* ── Zona condicional ── */
+    #zonesBlock { display: none; }
+    #zonesBlock.visible { display: block; }
+
+    /* ── Acciones ── */
+    .actions { display: flex; gap: 10px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; }
+    .btn { display: inline-block; padding: 8px 16px; border-radius: 5px; border: 1px solid #d0d7de; background: #fff; color: #333; font-size: 13px; text-decoration: none; cursor: pointer; font: inherit; }
+    .btn:hover { background: #f3f4f6; }
+    .btn-primary { background: #3498db; color: #fff; border-color: #2980b9; }
+    .btn-primary:hover { background: #2980b9; }
+
+    /* ── Imagen publicitaria ── */
+    .ad-image-section { margin-top: 28px; padding-top: 20px; border-top: 2px solid #eee; }
+    .ad-image-section h2 { font-size: 15px; margin-bottom: 12px; color: #2c3e50; }
+    .ad-preview img { max-width: 240px; border: 1px solid #ddd; border-radius: 6px; }
+    .ad-preview p { font-size: 11px; color: #888; margin-top: 4px; }
+    .ad-upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+
+    @media (max-width: 600px) {
+      .grid { grid-template-columns: 1fr; }
+      .container { margin: 12px; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1><%= mode === 'create' ? 'Crear vacante' : 'Editar vacante' %></h1>
-    <form method="post" action="<%= mode === 'create' ? '/admin/vacancies' : '/admin/vacancies/' + vacancy.id %>">
-      <div class="grid">
-        <% if (mode === 'create') { %>
-          <div class="field"><label>Key</label><input name="key" required placeholder="auxiliar_cargue_descargue_ibague" /></div>
-        <% } %>
-        <div class="field"><label>Título</label><input name="title" required value="<%= vacancy?.title || '' %>" /></div>
-        <div class="field"><label>Ciudad</label><input name="city" required value="<%= vacancy?.city || '' %>" /></div>
-        <div class="field"><label>Orden</label><input name="displayOrder" type="number" value="<%= vacancy?.displayOrder ?? 0 %>" /></div>
-        <div class="field"><label><input type="checkbox" name="isActive" <%= vacancy?.isActive !== false ? 'checked' : '' %> /> Activa</label></div>
-        <div class="field full"><label>Descripción</label><textarea name="description"><%= vacancy?.description || '' %></textarea></div>
-        <div class="field full"><label>Perfil</label><textarea name="profile"><%= vacancy?.profile || '' %></textarea></div>
-        <div class="field full"><label>Texto intro bot</label><textarea name="botIntroText"><%= vacancy?.botIntroText || '' %></textarea></div>
-        <div class="field full"><label>Resumen requisitos</label><textarea name="requirementsSummary"><%= vacancy?.requirementsSummary || '' %></textarea></div>
-        <div class="field full"><label>Ad text hints (keywords/resumen anuncio)</label><textarea name="adTextHints"><%= vacancy?.adTextHints || '' %></textarea></div>
-        <div class="field full"><label>Aliases (JSON array o coma separada)</label><textarea name="aliases"><%= vacancy?.aliasesText || '' %></textarea></div>
-      </div>
-      <div class="actions">
-        <button class="btn btn-primary" type="submit">Guardar</button>
-        <a class="btn" href="/admin/vacancies">Cancelar</a>
-      </div>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="/admin">Candidatos</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <form method="post" action="/logout">
+      <button type="submit" class="btn-logout">Cerrar sesión</button>
     </form>
+  </nav>
 
-    <% if (mode === 'edit') { %>
-      <hr style="margin:18px 0;" />
-      <h2 style="margin-bottom:10px;">Imagen publicitaria</h2>
-      <% if (vacancy?.hasAdImage) { %>
-        <div style="margin-bottom:10px;">
-          <img src="/admin/vacancies/<%= vacancy.id %>/ad-image" alt="Imagen anuncio" style="max-width: 260px; border:1px solid #ddd; border-radius:6px;" />
-          <p style="font-size:12px;color:#666;margin-top:6px;"><%= vacancy.adImageOriginalName || 'imagen_publicitaria' %> (<%= vacancy.adImageMimeType || 'mime desconocido' %>)</p>
+  <div class="container">
+
+    <!-- Breadcrumb / volver -->
+    <div class="breadcrumb">
+      <a href="/admin/vacancies">← Vacantes</a>
+      <span>/</span>
+      <span><%= mode === 'create' ? 'Nueva vacante' : (vacancy?.title || 'Editar vacante') %></span>
+    </div>
+
+    <div class="card">
+      <h1><%= mode === 'create' ? 'Crear vacante' : 'Editar vacante' %></h1>
+
+      <form method="post" action="<%= mode === 'create' ? '/admin/vacancies' : '/admin/vacancies/' + vacancy.id %>">
+
+        <!-- ── SECCIÓN 1: Identificación ── -->
+        <div class="section">
+          <div class="section-title">Identificación</div>
+          <div class="grid">
+            <% if (mode === 'create') { %>
+              <div class="field">
+                <label>Key <span style="color:#e74c3c">*</span></label>
+                <input type="text" name="key" required placeholder="auxiliar_cargue_ibague" />
+                <span class="hint">Identificador único, sin espacios ni tildes. Ej: auxiliar_cargue_descargue_bogota</span>
+              </div>
+            <% } %>
+            <div class="field">
+              <label>Título <span style="color:#e74c3c">*</span></label>
+              <input type="text" name="title" required value="<%= vacancy?.title || '' %>" placeholder="Auxiliar de Cargue y Descargue" />
+            </div>
+            <div class="field">
+              <label>Cargo</label>
+              <input type="text" name="cargo" value="<%= vacancy?.cargo || '' %>" placeholder="Auxiliar logístico" />
+              <span class="hint">Nombre específico del cargo si difiere del título</span>
+            </div>
+            <div class="field">
+              <label>Ciudad <span style="color:#e74c3c">*</span></label>
+              <input type="text" name="city" required value="<%= vacancy?.city || '' %>" placeholder="Bogotá" />
+            </div>
+            <div class="field">
+              <label>Dirección de operación</label>
+              <input type="text" name="operationAddress" value="<%= vacancy?.operationAddress || '' %>" placeholder="Cra. 80 # 12-34, Zona Industrial" />
+            </div>
+            <div class="field">
+              <label>Orden</label>
+              <input type="number" name="displayOrder" value="<%= vacancy?.displayOrder ?? 0 %>" />
+              <span class="hint">Menor número = aparece primero en el menú del bot</span>
+            </div>
+            <div class="field" style="justify-content:flex-end; padding-bottom:4px;">
+              <label class="check-field" style="cursor:pointer;">
+                <input type="checkbox" name="isActive" <%= vacancy?.isActive !== false ? 'checked' : '' %> />
+                <div class="check-label">
+                  <strong>Vacante activa</strong>
+                  <span>Si está inactiva el bot no la ofrece</span>
+                </div>
+              </label>
+            </div>
+          </div>
         </div>
-      <% } else { %>
-        <p style="margin-bottom:10px;">Sin imagen publicitaria cargada.</p>
-      <% } %>
 
-      <form method="post" action="/admin/vacancies/<%= vacancy.id %>/ad-image/upload" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="file" name="adImageFile" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required />
-        <button class="btn btn-primary" type="submit"><%= vacancy?.hasAdImage ? 'Reemplazar imagen' : 'Subir imagen' %></button>
+        <!-- ── SECCIÓN 2: Condiciones laborales ── -->
+        <div class="section">
+          <div class="section-title">Condiciones laborales</div>
+          <div class="grid">
+            <div class="field">
+              <label>Salario</label>
+              <input type="text" name="salary" value="<%= vacancy?.salary || '' %>" placeholder="$1.423.500 + prestaciones" />
+            </div>
+            <div class="field">
+              <label>Horario</label>
+              <input type="text" name="schedule" value="<%= vacancy?.schedule || '' %>" placeholder="Turnos rotativos 6am-2pm / 2pm-10pm" />
+            </div>
+            <div class="field">
+              <label>Tipo de contrato</label>
+              <input type="text" name="contractType" value="<%= vacancy?.contractType || '' %>" placeholder="Obra labor / Término fijo" />
+            </div>
+          </div>
+        </div>
+
+        <!-- ── SECCIÓN 3: Contenido del bot ── -->
+        <div class="section">
+          <div class="section-title">Contenido del bot</div>
+          <div class="grid">
+            <div class="field full">
+              <label>Texto intro del bot</label>
+              <textarea name="botIntroText"><%= vacancy?.botIntroText || '' %></textarea>
+              <span class="hint">Mensaje que el bot envía al candidato al presentar la vacante</span>
+            </div>
+            <div class="field full">
+              <label>Resumen de requisitos</label>
+              <textarea name="requirementsSummary"><%= vacancy?.requirementsSummary || '' %></textarea>
+              <span class="hint">El bot lo usa en la respuesta inicial cuando el candidato pregunta por requisitos</span>
+            </div>
+            <div class="field full">
+              <label>Descripción completa</label>
+              <textarea name="description"><%= vacancy?.description || '' %></textarea>
+            </div>
+            <div class="field full">
+              <label>Perfil buscado</label>
+              <textarea name="profile"><%= vacancy?.profile || '' %></textarea>
+            </div>
+            <div class="field full">
+              <label>Ad text hints <span style="color:#999;font-weight:400;">(keywords para clasificación semántica)</span></label>
+              <textarea name="adTextHints"><%= vacancy?.adTextHints || '' %></textarea>
+              <span class="hint">Palabras clave del anuncio que ayudan al bot a detectar la vacante correcta</span>
+            </div>
+            <div class="field full">
+              <label>Aliases <span style="color:#999;font-weight:400;">(separados por coma)</span></label>
+              <textarea name="aliases"><%= vacancy?.aliasesText || '' %></textarea>
+              <span class="hint">Ej: auxiliar bodega, operario logística, cargue descargue</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── SECCIÓN 4: Configuración del bot ── -->
+        <div class="section">
+          <div class="section-title">Configuración del bot</div>
+          <div class="grid">
+
+            <div class="check-field">
+              <input type="checkbox" name="requiresInterview" id="chkInterview" <%= vacancy?.requiresInterview ? 'checked' : '' %> />
+              <div class="check-label">
+                <strong>Requiere entrevista</strong>
+                <span>El bot agenda cita después de registrar datos y HV. Si está apagado, el bot cierra con "te contactaremos".</span>
+              </div>
+            </div>
+
+            <div class="check-field">
+              <input type="checkbox" name="requiresLocality" id="chkLocality" <%= vacancy?.requiresLocality ? 'checked' : '' %> />
+              <div class="check-label">
+                <strong>Requiere localidad</strong>
+                <span>El bot pregunta por barrio/municipio y evalúa proximidad con IA.</span>
+              </div>
+            </div>
+
+            <div class="field full" id="zonesBlock">
+              <label>Zonas viables <span style="color:#999;font-weight:400;">(una por línea)</span></label>
+              <textarea name="operationZones" rows="4" placeholder="Suba&#10;Engativá&#10;Funza&#10;Mosquera"><%= Array.isArray(vacancy?.operationZones) ? vacancy.operationZones.join('\n') : (vacancy?.operationZones || '') %></textarea>
+              <span class="hint">El bot usa esta lista para validar si el candidato vive en zona viable</span>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Acciones -->
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">
+            <%= mode === 'create' ? 'Crear vacante' : 'Guardar cambios' %>
+          </button>
+          <a class="btn" href="/admin/vacancies">Cancelar</a>
+        </div>
+
       </form>
 
-      <% if (vacancy?.hasAdImage) { %>
-        <form method="post" action="/admin/vacancies/<%= vacancy.id %>/ad-image/delete" style="margin-top:8px;">
-          <button class="btn" type="submit">Eliminar imagen</button>
-        </form>
+      <!-- ── Imagen publicitaria (solo en edición) ── -->
+      <% if (mode === 'edit') { %>
+        <div class="ad-image-section">
+          <h2>Imagen publicitaria</h2>
+          <% if (vacancy?.hasAdImage) { %>
+            <div class="ad-preview">
+              <img src="/admin/vacancies/<%= vacancy.id %>/ad-image" alt="Imagen anuncio" />
+              <p><%= vacancy.adImageOriginalName || 'imagen_publicitaria' %> &middot; <%= vacancy.adImageMimeType || '' %></p>
+            </div>
+          <% } else { %>
+            <p style="font-size:13px;color:#888;margin-bottom:10px;">Sin imagen publicitaria cargada.</p>
+          <% } %>
+          <form method="post" action="/admin/vacancies/<%= vacancy.id %>/ad-image/upload" enctype="multipart/form-data" class="ad-upload">
+            <input type="file" name="adImageFile" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required />
+            <button class="btn btn-primary" type="submit"><%= vacancy?.hasAdImage ? 'Reemplazar imagen' : 'Subir imagen' %></button>
+          </form>
+          <% if (vacancy?.hasAdImage) { %>
+            <form method="post" action="/admin/vacancies/<%= vacancy.id %>/ad-image/delete" style="margin-top:8px;">
+              <button class="btn" type="submit">Eliminar imagen</button>
+            </form>
+          <% } %>
+        </div>
       <% } %>
-    <% } %>
-  </div>
+
+    </div><!-- /card -->
+  </div><!-- /container -->
+
+  <script>
+    // Mostrar/ocultar zonas según checkbox requiresLocality
+    const chkLocality = document.getElementById('chkLocality');
+    const zonesBlock  = document.getElementById('zonesBlock');
+    function toggleZones() {
+      zonesBlock.classList.toggle('visible', chkLocality.checked);
+    }
+    chkLocality.addEventListener('change', toggleZones);
+    toggleZones(); // estado inicial
+  </script>
+
 </body>
 </html>
