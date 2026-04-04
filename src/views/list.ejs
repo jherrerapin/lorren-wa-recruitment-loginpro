@@ -3,128 +3,710 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Panel de Reclutamiento</title>
+  <title>Panel de Reclutamiento — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color: #333; }
-    .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
-    .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
-    .navbar a:hover { color: #3498db; }
-    .navbar form button:hover { border-color: #3498db !important; color: #3498db !important; }
-    .navbar .brand { display: inline-flex; align-items: center; margin-right: 12px; }
-    .navbar .brand img { height: 30px; width: auto; display: block; object-fit: contain; }
-    .container { margin: 24px; }
-    h1 { margin-bottom: 16px; color: #2c3e50; }
-    .summary { margin-bottom: 16px; color: #666; font-size: 14px; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #1a1a2e; font-size: 14px; }
+
+    /* ── Navbar ── */
+    .navbar {
+      background: #1a2942;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      height: 52px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    }
+    .navbar a { color: #c9d6e3; text-decoration: none; font-weight: 500; font-size: 13px; }
+    .navbar a:hover { color: #fff; }
+    .navbar .brand img { height: 28px; width: auto; display: block; }
+    .navbar form { margin-left: auto; }
+    .navbar form button {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.3);
+      color: #c9d6e3;
+      padding: 5px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .navbar form button:hover { border-color: #fff; color: #fff; }
+
+    /* ── Layout ── */
+    .page { max-width: 1400px; margin: 0 auto; padding: 20px 24px 48px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    .page-title { font-size: 18px; font-weight: 700; color: #1a2942; }
+
+    /* ── Date picker ── */
+    .date-filter-form { display: flex; align-items: center; gap: 8px; }
+    .date-filter-form label { font-size: 12px; color: #6b7280; font-weight: 500; }
+    .date-filter-form input[type="date"] {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 13px;
+      color: #1a2942;
+      background: #fff;
+      cursor: pointer;
+    }
+    .date-filter-form button {
+      background: #1a2942;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .date-filter-form button:hover { background: #243a57; }
+    .date-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #e8f0fe;
+      color: #1a56db;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .date-badge.today { background: #dcfce7; color: #15803d; }
+
+    /* ── City tabs ── */
+    .city-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 0; }
+    .city-tab {
+      padding: 8px 18px;
+      border-radius: 6px 6px 0 0;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      color: #6b7280;
+      border: 1px solid transparent;
+      border-bottom: none;
+      position: relative;
+      bottom: -2px;
+      transition: all 0.15s;
+    }
+    .city-tab:hover { color: #1a2942; background: #f9fafb; }
+    .city-tab.active {
+      background: #fff;
+      color: #1a2942;
+      border-color: #e5e7eb;
+      border-bottom-color: #fff;
+    }
+    .city-tab .count {
+      display: inline-block;
+      background: #e5e7eb;
+      color: #374151;
+      border-radius: 20px;
+      padding: 1px 7px;
+      font-size: 11px;
+      margin-left: 5px;
+    }
+    .city-tab.active .count { background: #1a2942; color: #fff; }
+
+    /* ── Vacancy card ── */
+    .vacancy-grid { display: grid; gap: 20px; }
+    .vacancy-card {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      overflow: hidden;
+    }
+    .vacancy-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid #f3f4f6;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .vacancy-title { font-size: 15px; font-weight: 700; color: #1a2942; }
+    .vacancy-meta { font-size: 12px; color: #9ca3af; margin-top: 2px; }
+    .vacancy-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+    /* ── Mode badge ── */
+    .mode-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .mode-scheduling { background: #dcfce7; color: #15803d; }
+    .mode-cvonly     { background: #fef9c3; color: #a16207; }
+    .mode-closed     { background: #fee2e2; color: #dc2626; }
+    .mode-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+    /* ── Section dentro de vacancy card ── */
+    .card-section { padding: 14px 18px; }
+    .card-section + .card-section { border-top: 1px solid #f3f4f6; }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title .pill {
+      background: #f3f4f6;
+      color: #374151;
+      border-radius: 20px;
+      padding: 1px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .section-empty {
+      color: #9ca3af;
+      font-size: 13px;
+      padding: 6px 0 2px;
+      font-style: italic;
+    }
+
+    /* ── Tabla de entrevistas ── */
+    .interviews-table { width: 100%; border-collapse: collapse; }
+    .interviews-table th {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 6px 10px;
+      text-align: left;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .interviews-table td {
+      padding: 9px 10px;
+      font-size: 13px;
+      border-bottom: 1px solid #f9fafb;
+      vertical-align: middle;
+    }
+    .interviews-table tr:last-child td { border-bottom: none; }
+    .interviews-table tr:hover td { background: #f9fafb; }
+    .time-chip {
+      display: inline-block;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-radius: 5px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    /* ── Tabla de candidatos registrados ── */
+    .candidates-table { width: 100%; border-collapse: collapse; }
+    .candidates-table th {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 6px 10px;
+      text-align: left;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .candidates-table td {
+      padding: 8px 10px;
+      font-size: 13px;
+      border-bottom: 1px solid #f9fafb;
+      vertical-align: middle;
+    }
+    .candidates-table tr:last-child td { border-bottom: none; }
+    .candidates-table tr:hover td { background: #f9fafb; }
+
+    /* ── Badges de estado ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .badge-nuevo      { background: #f3f4f6; color: #6b7280; }
+    .badge-registrado { background: #dcfce7; color: #15803d; }
+    .badge-rechazado  { background: #fee2e2; color: #dc2626; }
+    .badge-contactado { background: #dbeafe; color: #1d4ed8; }
+    .badge-validando  { background: #fef9c3; color: #a16207; }
+
+    /* ── Badges booking ── */
+    .booking-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .booking-scheduled  { background: #eff6ff; color: #1d4ed8; }
+    .booking-confirmed  { background: #dcfce7; color: #15803d; }
+    .booking-rescheduled{ background: #fef9c3; color: #a16207; }
+    .booking-noshow     { background: #fee2e2; color: #dc2626; }
+    .booking-cancelled  { background: #f3f4f6; color: #9ca3af; }
+
+    /* ── CV indicator ── */
+    .cv-yes { color: #15803d; font-weight: 600; font-size: 12px; }
+    .cv-no  { color: #d1d5db; font-size: 12px; }
+
+    /* ── WA link ── */
+    .wa-link { color: #16a34a; font-weight: 600; text-decoration: none; }
+    .wa-link:hover { text-decoration: underline; }
+
+    /* ── Detail link ── */
+    .detail-link { color: #2563eb; font-size: 12px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+    .detail-link:hover { text-decoration: underline; }
+
+    /* ── Banner modo solo-HV ── */
+    .cvonly-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 7px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: #92400e;
+    }
+    .cvonly-banner svg { flex-shrink: 0; margin-top: 1px; }
+
+    /* ── Legacy section ── */
+    .legacy-section {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      overflow: hidden;
+      margin-top: 24px;
+    }
+    .legacy-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid #f3f4f6;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .legacy-title { font-size: 13px; font-weight: 700; color: #6b7280; }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 32px 16px;
+      color: #9ca3af;
+    }
+    .empty-state svg { margin: 0 auto 8px; }
+    .empty-state p { font-size: 13px; }
+
+    /* ── Export bar ── */
+    .export-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .export-btn {
+      border: 1px solid #d1d5db;
+      background: #fff;
+      color: #374151;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .export-btn:hover { background: #f9fafb; }
+
+    /* ── Legacy table (modo ?status=) ── */
+    .legacy-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .legacy-table th { background: #1a2942; color: #fff; font-weight: 600; padding: 10px 12px; text-align: left; font-size: 13px; }
+    .legacy-table td { border-bottom: 1px solid #f3f4f6; padding: 9px 12px; font-size: 13px; }
+    .legacy-table tr:last-child td { border-bottom: none; }
+    .legacy-table tr:hover td { background: #f9fafb; }
+
     .status-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-    .status-tabs a { border: 1px solid #d0d7de; background: #fff; color: #2c3e50; padding: 7px 12px; border-radius: 20px; font-size: 13px; text-decoration: none; }
-    .status-tabs a.active { background: #2c3e50; border-color: #2c3e50; color: #fff; }
-    .export-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-    .export-actions a { border: 1px solid #d0d7de; background: #fff; color: #2c3e50; padding: 7px 10px; border-radius: 6px; font-size: 13px; text-decoration: none; }
-    .export-actions a:hover { background: #f1f5f9; text-decoration: none; }
-    table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    th, td { border-bottom: 1px solid #eee; padding: 10px 12px; text-align: left; font-size: 14px; }
-    th { background: #2c3e50; color: #fff; font-weight: 600; }
-    tr:hover { background: #f5f5f5; }
-    a { color: #3498db; text-decoration: none; font-weight: 500; }
-    a:hover { text-decoration: underline; }
-    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
-    .badge-nuevo { background: #95a5a6; }
-    .badge-registrado { background: #27ae60; }
-    .badge-rechazado { background: #e74c3c; }
-    .badge-contactado { background: #3498db; }
-    .wa-link { color: #25d366; font-weight: 600; }
+    .status-tabs a { border: 1px solid #d1d5db; background: #fff; color: #374151; padding: 6px 12px; border-radius: 20px; font-size: 13px; text-decoration: none; }
+    .status-tabs a.active { background: #1a2942; border-color: #1a2942; color: #fff; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .page { padding: 12px 12px 48px; }
+      .interviews-table th:nth-child(4),
+      .interviews-table td:nth-child(4),
+      .candidates-table th:nth-child(4),
+      .candidates-table td:nth-child(4) { display: none; }
+    }
   </style>
 </head>
 <body>
-  <nav class="navbar">
-    <a class="brand" href="/admin" aria-label="Inicio LoginPro">
-      <img src="/public/logo-loginpro.svg" alt="LoginPro" />
-    </a>
-    <a href="/admin">Candidatos</a>
-    <% if (role === 'dev') { %>
-      <a href="/admin/monitor">Monitor</a>
+
+<nav class="navbar">
+  <a class="brand" href="/admin" aria-label="Inicio LoginPro">
+    <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+  </a>
+  <a href="/admin">Dashboard</a>
+  <a href="/admin?status=all">Candidatos</a>
+  <% if (role === 'dev') { %>
+    <a href="/admin/monitor">Monitor</a>
+  <% } %>
+  <form method="post" action="/logout">
+    <button type="submit">Cerrar sesión</button>
+  </form>
+</nav>
+
+<div class="page">
+
+<% if (mode === 'legacy') { %>
+  <%/* ─── MODO LEGACY: tabla plana por ?status= ─── */%>
+  <div class="page-header">
+    <span class="page-title">Panel de Reclutamiento</span>
+  </div>
+  <div class="status-tabs">
+    <% const tabs = [
+      { scope: 'registered', label: 'Registrados' },
+      { scope: 'new', label: 'Nuevos' },
+      { scope: 'contacted', label: 'Contactados' },
+      { scope: 'rejected', label: 'Rechazados' },
+      { scope: 'all', label: 'Todos' }
+    ]; %>
+    <a href="/admin" class="">← Volver al dashboard</a>
+    <% for (const tab of tabs) { %>
+      <a href="/admin?status=<%= tab.scope %>" class="<%= activeStatusScope === tab.scope ? 'active' : '' %>"><%= tab.label %></a>
     <% } %>
-    <form method="post" action="/logout" style="margin-left:auto;">
-      <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
-    </form>
-  </nav>
-  <div class="container">
-    <h1>Panel de Reclutamiento</h1>
-    <div class="status-tabs">
-      <% const tabs = [
-        { scope: 'registered', label: 'Registrados' },
-        { scope: 'new', label: 'Nuevos' },
-        { scope: 'contacted', label: 'Contactados' },
-        { scope: 'rejected', label: 'Rechazados' },
-        { scope: 'all', label: 'Todos' }
-      ]; %>
-      <% for (const tab of tabs) { %>
-        <a href="/admin?status=<%= tab.scope %>" class="<%= activeStatusScope === tab.scope ? 'active' : '' %>"><%= tab.label %></a>
+  </div>
+  <div class="export-bar">
+    <a class="export-btn" href="/admin/export?scope=registered">⬇ Registrados</a>
+    <a class="export-btn" href="/admin/export?scope=missing_cv_complete">⬇ Pendientes HV</a>
+    <a class="export-btn" href="/admin/export?scope=contacted">⬇ Contactados</a>
+    <a class="export-btn" href="/admin/export?scope=rejected">⬇ Rechazados</a>
+    <a class="export-btn" href="/admin/export?scope=all">⬇ Todos</a>
+  </div>
+  <table class="legacy-table">
+    <thead>
+      <tr>
+        <th>Fecha registro</th><th>Nombre</th><th>Teléfono</th><th>Documento</th>
+        <th>Edad</th><th>Barrio</th><th>Experiencia</th><th>Tiempo exp.</th>
+        <th>Restricciones</th><th>Transporte</th><th>Estado</th><th>Motivo rechazo</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const c of candidates) { %>
+        <% const uiStatus = normalizeCandidateStatusForUI(c.status); %>
+        <% const statusClass = { NUEVO:'badge-nuevo', REGISTRADO:'badge-registrado', RECHAZADO:'badge-rechazado', CONTACTADO:'badge-contactado', VALIDANDO:'badge-validando' }; %>
+        <% const statusLabel = { NUEVO:'Nuevo', REGISTRADO:'Registrado', RECHAZADO:'Rechazado', CONTACTADO:'Contactado', VALIDANDO:'Validando' }; %>
+        <tr>
+          <td><%= formatDateTimeCO(c.createdAt) %></td>
+          <td><%= c.fullName || '—' %></td>
+          <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
+          <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
+          <td><%= c.age || '—' %></td>
+          <td><%= c.neighborhood || c.zone || '—' %></td>
+          <td><%= c.experienceInfo || '—' %></td>
+          <td><%= c.experienceTime || '—' %></td>
+          <td><%= c.medicalRestrictions || '—' %></td>
+          <td><%= c.transportMode || '—' %></td>
+          <td><span class="badge <%= statusClass[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span></td>
+          <td><%= c.rejectionReason || '—' %></td>
+          <td><a class="detail-link" href="/admin/candidates/<%= c.id %>">Ver detalle →</a></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+
+<% } else { %>
+  <%/* ─── MODO VACANTES: dashboard por ciudad/vacante ─── */%>
+
+  <div class="page-header">
+    <span class="page-title">Dashboard de Reclutamiento</span>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <%
+        const isToday = selectedDate === todayStr;
+        const dateLabel = isToday ? 'Hoy' : selectedDate;
+      %>
+      <span class="date-badge <%= isToday ? 'today' : '' %>">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        <%= dateLabel %>
+      </span>
+      <form class="date-filter-form" method="get" action="/admin">
+        <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
+        <label for="datepicker">Ver día:</label>
+        <input type="date" id="datepicker" name="date" value="<%= selectedDate %>" max="<%= todayStr %>" />
+        <button type="submit">Ir</button>
+      </form>
+    </div>
+  </div>
+
+  <% if (cities.length === 0) { %>
+    <div class="empty-state">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2z"/></svg>
+      <p>No hay vacantes activas configuradas.</p>
+      <p style="margin-top:6px;"><a href="/admin?status=all" style="color:#2563eb;">Ver todos los candidatos →</a></p>
+    </div>
+  <% } else { %>
+
+    <%/* ── Tabs de ciudades ── */%>
+    <div class="city-tabs">
+      <% for (const cityObj of cities) { %>
+        <%
+          const totalCity = cityObj.vacancies.reduce((sum, v) => {
+            return sum + v.bookingsToday.length + v.registeredNoBooking.length + v.cvOnlyPipeline.length;
+          }, 0);
+        %>
+        <a
+          href="/admin?city=<%= encodeURIComponent(cityObj.name) %>&date=<%= selectedDate %>"
+          class="city-tab <%= activeCity === cityObj.name ? 'active' : '' %>"
+        >
+          <%= cityObj.name %>
+          <span class="count"><%= totalCity %></span>
+        </a>
       <% } %>
     </div>
-    <p class="summary">Mostrando <%= candidates.length %> candidato(s) <%= summaryLabel %></p>
-    <div class="export-actions">
-      <a href="/admin/export?scope=registered">Descargar registrados</a>
-      <a href="/admin/export?scope=missing_cv_complete">Descargar pendientes de HV</a>
-      <a href="/admin/export?scope=contacted">Descargar contactados</a>
-      <a href="/admin/export?scope=rejected">Descargar rechazados</a>
-      <a href="/admin/export?scope=all">Descargar todos</a>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Fecha registro</th>
-          <th>Nombre</th>
-          <th>Teléfono</th>
-          <th>Documento</th>
-          <th>Edad</th>
-          <th>Barrio</th>
-          <th>Experiencia</th>
-          <th>Tiempo exp.</th>
-          <th>Restricciones médicas</th>
-          <th>Transporte</th>
-          <th>Estado</th>
-          <th>Motivo rechazo</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <% for (const c of candidates) { %>
-          <% const uiStatus = normalizeCandidateStatusForUI(c.status); %>
-          <tr>
-            <td><%= formatDateTimeCO(c.createdAt) %></td>
-            <td><%= c.fullName || '—' %></td>
-            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
-            <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
-            <td><%= c.age || '—' %></td>
-            <td><%= c.neighborhood || c.zone || '—' %></td>
-            <td><%= c.experienceInfo || '—' %></td>
-            <td><%= c.experienceTime || '—' %></td>
-            <td><%= c.medicalRestrictions || '—' %></td>
-            <td><%= c.transportMode || '—' %></td>
-            <td>
-              <% const statusClass = {
-                'NUEVO': 'badge-nuevo',
-                'REGISTRADO': 'badge-registrado',
-                'RECHAZADO': 'badge-rechazado',
-                'CONTACTADO': 'badge-contactado'
-              }; %>
-              <% const statusLabel = {
-                'NUEVO': 'Nuevo',
-                'REGISTRADO': 'Registrado',
-                'RECHAZADO': 'Rechazado',
-                'CONTACTADO': 'Contactado'
-              }; %>
-              <span class="badge <%= statusClass[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span>
-            </td>
-            <td><%= c.rejectionReason || '—' %></td>
-            <td><a href="/admin/candidates/<%= c.id %>">Ver detalle</a></td>
-          </tr>
-        <% } %>
-      </tbody>
-    </table>
-  </div>
+
+    <%/* ── Vacantes de la ciudad activa ── */%>
+    <% const activeCityObj = cities.find(c => c.name === activeCity); %>
+    <% if (activeCityObj) { %>
+      <% if (activeCityObj.vacancies.length === 0) { %>
+        <div class="empty-state"><p>No hay vacantes activas en esta ciudad.</p></div>
+      <% } else { %>
+        <div class="vacancy-grid">
+          <% for (const v of activeCityObj.vacancies) { %>
+            <div class="vacancy-card">
+
+              <%/* — Header de la vacante — */%>
+              <div class="vacancy-header">
+                <div>
+                  <div class="vacancy-title"><%= v.title || v.role %></div>
+                  <div class="vacancy-meta">
+                    📍 <%= v.city %>
+                    <% if (v.operationAddress) { %> · <%= v.operationAddress %><% } %>
+                  </div>
+                </div>
+                <div class="vacancy-badges">
+                  <% if (v.schedulingEnabled) { %>
+                    <span class="mode-badge mode-scheduling">
+                      <span class="mode-dot"></span> Agendando entrevistas
+                    </span>
+                  <% } else { %>
+                    <span class="mode-badge mode-cvonly">
+                      <span class="mode-dot"></span> Solo recepción de HV
+                    </span>
+                  <% } %>
+                  <%
+                    const totalVac = v.bookingsToday.length + v.registeredNoBooking.length + v.cvOnlyPipeline.length;
+                  %>
+                  <span style="font-size:12px;color:#9ca3af;"><%= totalVac %> candidato(s)</span>
+                </div>
+              </div>
+
+              <%/* — Sección A: Entrevistas del día (solo si schedulingEnabled) — */%>
+              <% if (v.schedulingEnabled) { %>
+                <div class="card-section">
+                  <div class="section-title">
+                    🗓️ Entrevistas del día
+                    <span class="pill"><%= v.bookingsToday.length %></span>
+                  </div>
+                  <% if (v.bookingsToday.length === 0) { %>
+                    <div class="section-empty">Sin entrevistas agendadas para este día.</div>
+                  <% } else { %>
+                    <table class="interviews-table">
+                      <thead>
+                        <tr>
+                          <th>Hora</th>
+                          <th>Nombre</th>
+                          <th>Teléfono</th>
+                          <th>Documento</th>
+                          <th>Estado</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <% for (const b of v.bookingsToday) { %>
+                          <%
+                            const bStatusMap = {
+                              SCHEDULED: ['booking-scheduled', 'Agendado'],
+                              CONFIRMED: ['booking-confirmed', 'Confirmado'],
+                              RESCHEDULED: ['booking-rescheduled', 'Reagendado'],
+                              NO_SHOW: ['booking-noshow', 'No se presentó'],
+                              CANCELLED: ['booking-cancelled', 'Cancelado']
+                            };
+                            const [bClass, bLabel] = bStatusMap[b.status] || ['booking-scheduled', b.status];
+                          %>
+                          <tr>
+                            <td><span class="time-chip"><%= b.formattedTime %></span></td>
+                            <td><strong><%= b.candidate.fullName || '—' %></strong></td>
+                            <td>
+                              <a href="https://wa.me/<%= b.candidate.phone %>" target="_blank" class="wa-link">
+                                <%= b.candidate.phone %>
+                              </a>
+                            </td>
+                            <td>
+                              <%= b.candidate.documentType && b.candidate.documentNumber
+                                ? b.candidate.documentType + ' ' + b.candidate.documentNumber
+                                : '—' %>
+                            </td>
+                            <td><span class="booking-badge <%= bClass %>"><%= bLabel %></span></td>
+                            <td><a class="detail-link" href="/admin/candidates/<%= b.candidate.id %>">Ver →</a></td>
+                          </tr>
+                        <% } %>
+                      </tbody>
+                    </table>
+                  <% } %>
+                </div>
+
+                <%/* — Sección B: Registrados sin agenda — */%>
+                <div class="card-section">
+                  <div class="section-title">
+                    📥 Registrados sin entrevista agendada
+                    <span class="pill"><%= v.registeredNoBooking.length %></span>
+                  </div>
+                  <% if (v.registeredNoBooking.length === 0) { %>
+                    <div class="section-empty">Todos los candidatos registrados ya tienen entrevista.</div>
+                  <% } else { %>
+                    <table class="candidates-table">
+                      <thead>
+                        <tr>
+                          <th>Nombre</th>
+                          <th>Teléfono</th>
+                          <th>Estado</th>
+                          <th>HV</th>
+                          <th>Registro</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <% for (const c of v.registeredNoBooking) { %>
+                          <%
+                            const uiSt = normalizeCandidateStatusForUI(c.status);
+                            const stClass = { NUEVO:'badge-nuevo', REGISTRADO:'badge-registrado', RECHAZADO:'badge-rechazado', CONTACTADO:'badge-contactado', VALIDANDO:'badge-validando' };
+                            const stLabel = { NUEVO:'Nuevo', REGISTRADO:'Registrado', RECHAZADO:'Rechazado', CONTACTADO:'Contactado', VALIDANDO:'Validando' };
+                          %>
+                          <tr>
+                            <td><%= c.fullName || '—' %></td>
+                            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
+                            <td><span class="badge <%= stClass[uiSt] || 'badge-nuevo' %>"><%= stLabel[uiSt] || uiSt %></span></td>
+                            <td>
+                              <% if (c.cvData) { %>
+                                <span class="cv-yes">✓ HV</span>
+                              <% } else { %>
+                                <span class="cv-no">Sin HV</span>
+                              <% } %>
+                            </td>
+                            <td style="color:#9ca3af;"><%= formatDateTimeCO(c.createdAt) %></td>
+                            <td><a class="detail-link" href="/admin/candidates/<%= c.id %>">Ver →</a></td>
+                          </tr>
+                        <% } %>
+                      </tbody>
+                    </table>
+                  <% } %>
+                </div>
+              <% } %>
+
+              <%/* — Sección C: Modo solo-HV — */%>
+              <% if (!v.schedulingEnabled) { %>
+                <div class="card-section">
+                  <div class="cvonly-banner">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                    <span>El agendamiento de entrevistas está deshabilitado para esta vacante. Los candidatos registrados quedan en cola para revisión humana del reclutador.</span>
+                  </div>
+                  <div class="section-title">
+                    📋 Candidatos en cola de revisión (solo HV)
+                    <span class="pill"><%= v.cvOnlyPipeline.length %></span>
+                  </div>
+                  <% if (v.cvOnlyPipeline.length === 0) { %>
+                    <div class="section-empty">Sin candidatos registrados aún.</div>
+                  <% } else { %>
+                    <table class="candidates-table">
+                      <thead>
+                        <tr>
+                          <th>Nombre</th>
+                          <th>Teléfono</th>
+                          <th>Estado</th>
+                          <th>HV</th>
+                          <th>Registro</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <% for (const c of v.cvOnlyPipeline) { %>
+                          <%
+                            const uiSt = normalizeCandidateStatusForUI(c.status);
+                            const stClass = { NUEVO:'badge-nuevo', REGISTRADO:'badge-registrado', RECHAZADO:'badge-rechazado', CONTACTADO:'badge-contactado', VALIDANDO:'badge-validando' };
+                            const stLabel = { NUEVO:'Nuevo', REGISTRADO:'Registrado', RECHAZADO:'Rechazado', CONTACTADO:'Contactado', VALIDANDO:'Validando' };
+                          %>
+                          <tr>
+                            <td><%= c.fullName || '—' %></td>
+                            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
+                            <td><span class="badge <%= stClass[uiSt] || 'badge-nuevo' %>"><%= stLabel[uiSt] || uiSt %></span></td>
+                            <td>
+                              <% if (c.cvData) { %>
+                                <span class="cv-yes">✓ HV</span>
+                              <% } else { %>
+                                <span class="cv-no">Sin HV</span>
+                              <% } %>
+                            </td>
+                            <td style="color:#9ca3af;"><%= formatDateTimeCO(c.createdAt) %></td>
+                            <td><a class="detail-link" href="/admin/candidates/<%= c.id %>">Ver →</a></td>
+                          </tr>
+                        <% } %>
+                      </tbody>
+                    </table>
+                  <% } %>
+                </div>
+              <% } %>
+
+            </div><%/* end .vacancy-card */%>
+          <% } %>
+        </div><%/* end .vacancy-grid */%>
+      <% } %>
+    <% } %>
+
+    <%/* ── Candidatos legacy (sin vacante asignada) ── */%>
+    <% if (legacyCandidates.length > 0) { %>
+      <div class="legacy-section">
+        <div class="legacy-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          <span class="legacy-title">Candidatos sin vacante asignada</span>
+          <span style="font-size:12px;color:#9ca3af;margin-left:4px;">(<%= legacyCandidates.length %>)</span>
+        </div>
+        <div style="padding:0 18px 14px;">
+          <table class="candidates-table">
+            <thead>
+              <tr>
+                <th>Nombre</th><th>Teléfono</th><th>Estado</th><th>HV</th><th>Registro</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <% for (const c of legacyCandidates) { %>
+                <%
+                  const uiSt = normalizeCandidateStatusForUI(c.status);
+                  const stClass = { NUEVO:'badge-nuevo', REGISTRADO:'badge-registrado', RECHAZADO:'badge-rechazado', CONTACTADO:'badge-contactado', VALIDANDO:'badge-validando' };
+                  const stLabel = { NUEVO:'Nuevo', REGISTRADO:'Registrado', RECHAZADO:'Rechazado', CONTACTADO:'Contactado', VALIDANDO:'Validando' };
+                %>
+                <tr>
+                  <td><%= c.fullName || '—' %></td>
+                  <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
+                  <td><span class="badge <%= stClass[uiSt] || 'badge-nuevo' %>"><%= stLabel[uiSt] || uiSt %></span></td>
+                  <td><% if (c.cvData) { %><span class="cv-yes">✓ HV</span><% } else { %><span class="cv-no">Sin HV</span><% } %></td>
+                  <td style="color:#9ca3af;"><%= formatDateTimeCO(c.createdAt) %></td>
+                  <td><a class="detail-link" href="/admin/candidates/<%= c.id %>">Ver →</a></td>
+                </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    <% } %>
+
+  <% } %><%/* end cities.length > 0 */%>
+
+<% } %><%/* end mode check */%>
+
+</div><%/* end .page */%>
 </body>
 </html>
