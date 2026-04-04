@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slots de entrevista — LoginPro</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; font-size: 14px; background: #f5f5f5; color: #1a1a1a; }
+    .topbar { background: #1a1a2e; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+    .topbar a { color: #a0c4ff; text-decoration: none; font-size: 13px; }
+    .topbar a:hover { text-decoration: underline; }
+    .topbar .sep { color: #555; }
+    h1 { font-size: 18px; font-weight: 600; color: #fff; }
+    .container { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
+    .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    .toolbar select { padding: 7px 10px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 13px; background: #fff; }
+    .toolbar form { display: flex; gap: 8px; align-items: center; }
+    .btn { padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; text-decoration: none; border: none; display: inline-block; }
+    .btn-primary { background: #1a1a2e; color: #fff; }
+    .btn-primary:hover { background: #2e2e4e; }
+    .btn-outline { background: transparent; color: #555; border: 1px solid #ccc; }
+    .btn-outline:hover { background: #f0f0f0; }
+    .btn-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .btn-danger:hover { background: #fecaca; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 18px 20px; }
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+    .card-title { font-size: 15px; font-weight: 700; color: #1a1a2e; }
+    .card-subtitle { font-size: 12px; color: #888; margin-top: 2px; }
+    .occupancy { display: flex; gap: 4px; align-items: center; font-size: 13px; margin-bottom: 10px; }
+    .occupancy-bar { flex: 1; height: 6px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
+    .occupancy-fill { height: 100%; border-radius: 999px; background: #2563eb; }
+    .occupancy-fill.full { background: #dc2626; }
+    .meta { font-size: 12px; color: #666; margin-bottom: 4px; }
+    .meta strong { color: #333; }
+    .actions { display: flex; gap: 8px; margin-top: 14px; }
+    .badge-expired { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .badge-active { background: #d1fae5; color: #065f46; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .empty { text-align: center; padding: 48px; color: #999; }
+    .filter-bar { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; display: flex; gap: 12px; align-items: flex-end; }
+    .filter-bar label { font-size: 12px; font-weight: 600; color: #555; display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>LoginPro · Slots</h1>
+    <span class="sep">|</span>
+    <a href="/admin">Candidatos</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/interviews">Agenda</a>
+    <a href="/admin/interview-slots">Slots</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <a href="/logout" style="margin-left:auto;">Salir</a>
+  </div>
+
+  <div class="container">
+    <form method="GET" action="/admin/interview-slots" class="filter-bar">
+      <div>
+        <label for="vacancyId">Filtrar por vacante</label>
+        <select name="vacancyId" id="vacancyId" onchange="this.form.submit()">
+          <option value="">Todas las vacantes</option>
+          <% vacancies.forEach(v => { %>
+            <option value="<%= v.id %>" <%= activeVacancyId === v.id ? 'selected' : '' %>><%= v.title %></option>
+          <% }); %>
+        </select>
+      </div>
+      <% if (role === 'dev') { %>
+        <a href="/admin/interview-slots/new<%= activeVacancyId ? '?vacancyId=' + encodeURIComponent(activeVacancyId) : '' %>" class="btn btn-primary" style="margin-left:auto;">+ Nuevo slot</a>
+      <% } %>
+    </form>
+
+    <% if (slots.length === 0) { %>
+      <div class="empty">
+        No hay slots configurados<%= activeVacancyId ? ' para esta vacante' : '' %>.
+        <% if (role === 'dev') { %>
+          <br><br>
+          <a href="/admin/interview-slots/new<%= activeVacancyId ? '?vacancyId=' + encodeURIComponent(activeVacancyId) : '' %>" class="btn btn-primary">Crear primer slot</a>
+        <% } %>
+      </div>
+    <% } else { %>
+      <div class="grid">
+        <% slots.forEach(slot => { %>
+          <% const now = new Date(); %>
+          <% const isExpired = slot.expiresAt && new Date(slot.expiresAt) < now; %>
+          <% const activeInterviews = slot._count?.interviews || 0; %>
+          <% const isFull = activeInterviews >= slot.capacity; %>
+          <% const fillPct = Math.min(100, Math.round((activeInterviews / slot.capacity) * 100)); %>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title"><%= buildSlotLabel(slot) %></div>
+                <div class="card-subtitle"><%= slot.vacancy?.title || '—' %></div>
+              </div>
+              <span class="<%= isExpired ? 'badge-expired' : 'badge-active' %>">
+                <%= isExpired ? 'Expirado' : 'Activo' %>
+              </span>
+            </div>
+
+            <div class="occupancy">
+              <span style="font-size:12px;color:#555;"><%= activeInterviews %>/<%= slot.capacity %></span>
+              <div class="occupancy-bar">
+                <div class="occupancy-fill <%= isFull ? 'full' : '' %>" style="width:<%= fillPct %>%"></div>
+              </div>
+              <span style="font-size:11px;color:#888;"><%= isFull ? 'Lleno' : 'Disponible' %></span>
+            </div>
+
+            <% if (slot.location) { %>
+              <div class="meta"><strong>Lugar:</strong> <%= slot.location %></div>
+            <% } %>
+            <% if (slot.notes) { %>
+              <div class="meta"><strong>Notas:</strong> <%= slot.notes %></div>
+            <% } %>
+            <div class="meta"><strong>Expira para agendar:</strong> <%= slot.expiresAt ? formatDateTimeCO(slot.expiresAt) : 'Sin límite' %></div>
+
+            <% if (role === 'dev' && activeInterviews === 0) { %>
+              <div class="actions">
+                <form method="POST" action="/admin/interview-slots/<%= slot.id %>/delete"
+                      onsubmit="return confirm('¿Eliminar este slot? Esta acción no se puede deshacer.')">
+                  <button type="submit" class="btn btn-danger">Eliminar</button>
+                </form>
+              </div>
+            <% } else if (activeInterviews > 0) { %>
+              <div style="margin-top:12px;font-size:12px;color:#888;">
+                <a href="/admin/interviews?vacancyId=<%= slot.vacancyId %>" style="color:#2563eb;">Ver entrevistas →</a>
+              </div>
+            <% } %>
+          </div>
+        <% }); %>
+      </div>
+    <% } %>
+  </div>
+</body>
+</html>

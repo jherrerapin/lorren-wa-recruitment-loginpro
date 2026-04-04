@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agenda de entrevistas — LoginPro</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; font-size: 14px; background: #f5f5f5; color: #1a1a1a; }
+    .topbar { background: #1a1a2e; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+    .topbar a { color: #a0c4ff; text-decoration: none; font-size: 13px; }
+    .topbar a:hover { text-decoration: underline; }
+    .topbar .sep { color: #555; }
+    h1 { font-size: 18px; font-weight: 600; color: #fff; }
+    .container { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
+    .filters { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+    .filters label { font-size: 12px; font-weight: 600; color: #555; display: block; margin-bottom: 4px; }
+    .filters select { padding: 7px 10px; border: 1px solid #d0d0d0; border-radius: 6px; font-size: 13px; background: #fafafa; }
+    .filters button { padding: 7px 16px; background: #1a1a2e; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
+    .filters button:hover { background: #2e2e4e; }
+    .filters .reset { background: transparent; color: #666; border: 1px solid #ccc; }
+    .filters .reset:hover { background: #f0f0f0; color: #333; }
+    .summary { font-size: 13px; color: #555; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    th { background: #f0f0f5; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #555; padding: 10px 14px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+    td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; font-size: 13px; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
+    .badge-yellow { background: #fef3c7; color: #92400e; }
+    .badge-green  { background: #d1fae5; color: #065f46; }
+    .badge-red    { background: #fee2e2; color: #991b1b; }
+    .badge-blue   { background: #dbeafe; color: #1e40af; }
+    .badge-gray   { background: #f3f4f6; color: #374151; }
+    .badge-orange { background: #ffedd5; color: #9a3412; }
+    .candidate-link { color: #2563eb; text-decoration: none; font-weight: 500; }
+    .candidate-link:hover { text-decoration: underline; }
+    .empty { text-align: center; padding: 48px; color: #999; font-size: 14px; }
+    .nav-secondary { display: flex; gap: 8px; margin-bottom: 20px; }
+    .nav-secondary a { padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; text-decoration: none; border: 1px solid #e0e0e0; background: #fff; color: #444; }
+    .nav-secondary a:hover { background: #f0f0f5; }
+    .nav-secondary a.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>LoginPro · Entrevistas</h1>
+    <span class="sep">|</span>
+    <a href="/admin">Candidatos</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/interviews" class="active">Agenda</a>
+    <a href="/admin/interview-slots">Slots</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <a href="/logout" style="margin-left:auto;">Salir</a>
+  </div>
+
+  <div class="container">
+    <div class="nav-secondary">
+      <a href="/admin/interviews" class="<%= !activeStatus ? 'active' : '' %>">Todas</a>
+      <% Object.entries(interviewStatusLabels).forEach(([key, meta]) => { %>
+        <a href="/admin/interviews?<%= activeVacancyId ? 'vacancyId=' + encodeURIComponent(activeVacancyId) + '&' : '' %>status=<%= key %>"
+           class="<%= activeStatus === key ? 'active' : '' %>">
+          <%= meta.label %>
+        </a>
+      <% }); %>
+    </div>
+
+    <form method="GET" action="/admin/interviews" class="filters">
+      <div>
+        <label for="vacancyId">Vacante</label>
+        <select name="vacancyId" id="vacancyId">
+          <option value="">Todas las vacantes</option>
+          <% vacancies.forEach(v => { %>
+            <option value="<%= v.id %>" <%= activeVacancyId === v.id ? 'selected' : '' %>><%= v.title %></option>
+          <% }); %>
+        </select>
+      </div>
+      <div>
+        <label for="status">Estado</label>
+        <select name="status" id="status">
+          <option value="">Todos los estados</option>
+          <% Object.entries(interviewStatusLabels).forEach(([key, meta]) => { %>
+            <option value="<%= key %>" <%= activeStatus === key ? 'selected' : '' %>><%= meta.label %></option>
+          <% }); %>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button type="submit">Filtrar</button>
+        <a href="/admin/interviews"><button type="button" class="reset">Limpiar</button></a>
+      </div>
+    </form>
+
+    <div class="summary">
+      <strong><%= interviews.length %></strong> entrevista<%= interviews.length !== 1 ? 's' : '' %>
+      <% if (activeVacancyId) { const v = vacancies.find(x => x.id === activeVacancyId); %>
+        · vacante: <strong><%= v ? v.title : activeVacancyId %></strong>
+      <% } %>
+      <% if (activeStatus) { %>
+        · estado: <strong><%= interviewStatusLabels[activeStatus]?.label || activeStatus %></strong>
+      <% } %>
+    </div>
+
+    <% if (interviews.length === 0) { %>
+      <div class="empty">No hay entrevistas que coincidan con los filtros seleccionados.</div>
+    <% } else { %>
+    <table>
+      <thead>
+        <tr>
+          <th>Candidato</th>
+          <th>Vacante</th>
+          <th>Fecha y hora</th>
+          <th>Lugar</th>
+          <th>Estado</th>
+          <th>Agendada</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% interviews.forEach(interview => { %>
+          <% const statusMeta = interviewStatusLabels[interview.status] || { label: interview.status, color: 'gray' }; %>
+          <tr>
+            <td>
+              <a class="candidate-link" href="/admin/candidates/<%= interview.candidate.id %>">
+                <%= interview.candidate.fullName || interview.candidate.phone %>
+              </a>
+              <div style="font-size:11px;color:#888;"><%= interview.candidate.phone %></div>
+            </td>
+            <td>
+              <% if (interview.slot?.vacancy) { %>
+                <span style="font-weight:500;"><%= interview.slot.vacancy.title %></span>
+                <div style="font-size:11px;color:#888;"><%= interview.slot.vacancy.key %></div>
+              <% } else { %>
+                <span style="color:#aaa;">—</span>
+              <% } %>
+            </td>
+            <td>
+              <% if (interview.slot) { %>
+                <strong><%= buildSlotLabel(interview.slot) %></strong>
+              <% } else { %>
+                <span style="color:#aaa;">Sin slot</span>
+              <% } %>
+            </td>
+            <td><%= interview.slot?.location || '—' %></td>
+            <td>
+              <span class="badge badge-<%= statusMeta.color %>">
+                <%= statusMeta.label %>
+              </span>
+            </td>
+            <td style="color:#888;"><%= formatDateTimeCO(interview.createdAt) %></td>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <% } %>
+  </div>
+</body>
+</html>
