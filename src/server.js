@@ -9,6 +9,7 @@ import { webhookRouter } from './routes/webhook.js';
 import { adminRouter } from './routes/admin.js';
 import { runReminderDispatcher } from './services/reminder.js';
 import { createRedisClient, buildSessionStore } from './services/redisClient.js';
+import { verifyPassword } from './services/authUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +24,18 @@ if (!process.env.SESSION_SECRET) {
   console.warn('[WARN] SESSION_SECRET no está configurada. Usa un valor robusto en producción.');
 }
 
+// Validación de hashes bcrypt al arranque (falla rápido si las vars están mal configuradas)
+const AUTH_HASHES = {
+  dev:   { user: process.env.DEV_USER,   hash: process.env.DEV_PASS },
+  admin: { user: process.env.ADMIN_USER, hash: process.env.ADMIN_PASS }
+};
+
+for (const [role, creds] of Object.entries(AUTH_HASHES)) {
+  if (creds.hash && !creds.hash.startsWith('$2')) {
+    console.warn(`[WARN] ${role.toUpperCase()}_PASS no parece ser un hash bcrypt. Ejecuta: npm run hash-password`);
+  }
+}
+
 if (isProduction) {
   app.set('trust proxy', 1);
 }
@@ -35,8 +48,6 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ─── REDIS + SESIONES ───────────────────────────────────────────────────────
-// Intenta conectar a Redis si REDIS_URL está presente.
-// Sin REDIS_URL cae a MemoryStore (solo para desarrollo local).
 const redisClient = await createRedisClient();
 const sessionStore = buildSessionStore(redisClient);
 
@@ -60,24 +71,22 @@ app.use((req, _res, next) => {
 });
 
 // ─── RATE LIMITING ───────────────────────────────────────────────────────────
-// /webhook: protege contra floods de Meta o actores externos.
 const webhookRateLimit = rateLimit({
-  windowMs: 60 * 1000,                                            // ventana de 1 minuto
-  max: Number(process.env.RATE_LIMIT_WEBHOOK_MAX) || 60,          // 60 req/min por IP
+  windowMs: 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_WEBHOOK_MAX) || 60,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'too_many_requests', retryAfter: 60 },
-  skip: (req) => req.method === 'GET'                             // GET es el verify de Meta, no throttlear
+  skip: (req) => req.method === 'GET'
 });
 
-// /login: previene fuerza bruta de credenciales.
 const loginRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000,                                       // ventana de 15 minutos
-  max: Number(process.env.RATE_LIMIT_LOGIN_MAX) || 10,            // 10 intentos por IP
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_LOGIN_MAX) || 10,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'too_many_requests', retryAfter: 900 },
-  skipSuccessfulRequests: true                                    // no cuenta logins exitosos
+  skipSuccessfulRequests: true
 });
 
 // ─── RUTAS PÚBLICAS ──────────────────────────────────────────────────────────
@@ -93,13 +102,24 @@ app.get('/login', (req, res) => {
   res.render('login', { error: null, username: '' });
 });
 
-app.post('/login', loginRateLimit, (req, res) => {
+app.post('/login', loginRateLimit, async (req, res) => {
   const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
 
+  // Tiempo de respuesta constante para evitar timing attacks:
+  // bcrypt.compare corre siempre con el mismo costo incluso si el usuario no existe.
   let role = null;
-  if (username === process.env.DEV_USER && password === process.env.DEV_PASS) role = 'dev';
-  else if (username === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) role = 'admin';
+
+  if (username === AUTH_HASHES.dev.user) {
+    const ok = await verifyPassword(password, AUTH_HASHES.dev.hash);
+    if (ok) role = 'dev';
+  } else if (username === AUTH_HASHES.admin.user) {
+    const ok = await verifyPassword(password, AUTH_HASHES.admin.hash);
+    if (ok) role = 'admin';
+  } else {
+    // Usuario no reconocido: correr un bcrypt dummy para igualar tiempo de respuesta
+    await verifyPassword(password, '$2b$12$invalidhashpaddingtomatchcostXXXXXXXXXXXXXXXXX');
+  }
 
   if (!role) {
     return res.status(401).render('login', { error: 'Usuario o contraseña inválidos.', username });
@@ -145,7 +165,6 @@ app.listen(port, () => {
 });
 
 // ─── REMINDER DISPATCHER ─────────────────────────────────────────────────────
-// Pasa el cliente Redis al dispatcher para el lock distribuido.
 const reminderIntervalMs = 60_000;
 setInterval(async () => {
   try {
