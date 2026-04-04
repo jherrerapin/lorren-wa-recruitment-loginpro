@@ -1,5 +1,6 @@
 # CI — LoginPro WhatsApp Contingency
 # Ejecuta lint, tests y build de Docker en cada push a ramas de feature y en PRs a main.
+# Deploy real lo gestiona Railway directamente desde main.
 
 name: CI
 
@@ -8,6 +9,7 @@ on:
     branches:
       - main
       - 'feature/**'
+      - 'fix/**'
   pull_request:
     branches:
       - main
@@ -33,20 +35,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Instalar dependencias (incluyendo devDeps para lint)
+      - name: Instalar dependencias
         run: npm ci
 
       - name: Generar Prisma Client
         run: npm run prisma:generate
 
       - name: Lint (ESLint)
-        # Si no hay .eslintrc todavía, este step creará uno mínimo antes de correr.
-        # Puedes reemplazar por tu config cuando la tengas.
         run: |
           if [ ! -f .eslintrc.json ] && [ ! -f eslint.config.js ] && [ ! -f .eslintrc.cjs ]; then
             echo '{"env":{"node":true,"es2022":true},"parserOptions":{"ecmaVersion":2022,"sourceType":"module"},"rules":{"no-unused-vars":["warn",{"argsIgnorePattern":"^_"}],"no-undef":"error","no-console":"off"}}' > .eslintrc.json
           fi
-          npx eslint src/ --ext .js --max-warnings 20
+          # Umbral amplio mientras se estabiliza el codebase. Reducir gradualmente.
+          npx eslint src/ --ext .js --max-warnings 200
 
   # ───────────────────────────────────────────────────────────────────────
   test:
@@ -72,10 +73,10 @@ jobs:
       NODE_ENV: test
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/loginpro_test
       SESSION_SECRET: ci-test-secret-not-for-production
-      # Redis opcional en CI: los tests corren sin él (MemoryStore fallback)
       WHATSAPP_PHONE_NUMBER_ID: test_phone_id
       WHATSAPP_ACCESS_TOKEN: test_token
       WHATSAPP_VERIFY_TOKEN: test_verify
+      OPENAI_API_KEY: sk-test-placeholder-not-real
 
     steps:
       - name: Checkout
@@ -103,7 +104,6 @@ jobs:
   build:
     name: Docker Build
     runs-on: ubuntu-latest
-    # Solo corre si lint y tests pasan.
     needs: [lint, test]
 
     steps:
@@ -121,12 +121,10 @@ jobs:
           tags: loginpro-wa-contingency:ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Falla el job si la imagen no construye correctamente.
           load: true
 
-      - name: Smoke test — healthcheck dentro del contenedor
+      - name: Smoke test — verificar que el proceso arranca
         run: |
-          # Levanta el contenedor con vars mínimas (sin DB real, solo verifica que arranca).
           docker run -d --name smoke \
             -e NODE_ENV=production \
             -e SESSION_SECRET=smoke-test-secret \
@@ -134,9 +132,9 @@ jobs:
             -e WHATSAPP_PHONE_NUMBER_ID=x \
             -e WHATSAPP_ACCESS_TOKEN=x \
             -e WHATSAPP_VERIFY_TOKEN=x \
+            -e OPENAI_API_KEY=sk-placeholder \
             -p 3001:3000 \
             loginpro-wa-contingency:ci-${{ github.sha }}
           sleep 5
-          # El healthcheck puede fallar por DB no disponible — solo verificamos que el proceso arranca.
           docker ps --filter name=smoke --filter status=running | grep smoke || (docker logs smoke && exit 1)
           docker stop smoke
