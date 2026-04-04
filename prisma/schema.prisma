@@ -1,190 +1,327 @@
-/// Genera el cliente de Prisma para que la aplicación pueda consultar y escribir en la base de datos.
 generator client {
-  /// Define el proveedor oficial del cliente Prisma para JavaScript/Node.js.
   provider = "prisma-client-js"
 }
 
-/// Define la conexión principal a la base de datos relacional.
 datasource db {
-  /// Indica que el motor de base de datos es PostgreSQL.
   provider = "postgresql"
-  /// Toma la cadena de conexión desde la variable de entorno DATABASE_URL.
   url      = env("DATABASE_URL")
 }
 
-/// Enumera los estados permitidos para cada candidato dentro del flujo operativo.
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
 enum CandidateStatus {
-  /// Estado inicial cuando el candidato apenas entra al flujo.
   NUEVO
-  /// Estado cuando el candidato completó registro de datos.
   REGISTRADO
-  /// Estado operativo para revisión interna del reclutador.
   VALIDANDO
-  /// Estado final positivo del flujo.
   APROBADO
-  /// Estado final negativo del flujo.
   RECHAZADO
-  /// Estado para candidatos que ya fueron contactados por el equipo.
   CONTACTADO
 }
 
-/// Enumera cada paso del flujo conversacional simplificado.
 enum ConversationStep {
   /// Menú principal — el candidato aún no ha escrito.
   MENU
   /// Se envió el saludo con la información de la vacante.
   GREETING_SENT
-  /// Se están capturando los datos del candidato de forma natural.
+  /// Se están capturando los datos del candidato.
   COLLECTING_DATA
-  /// Se están confirmando los datos con el candidato antes de guardar.
+  /// Se están confirmando los datos con el candidato.
   CONFIRMING_DATA
-  /// Se pregunta opcionalmente por hoja de vida después de registrar.
+  /// Se pregunta por hoja de vida.
   ASK_CV
-  /// Flujo completado — el candidato ya está registrado.
+  /// Flujo de datos completo — puede pasar a agendamiento si aplica.
   DONE
+  /// Esperando que el candidato confirme u ofrezca otro horario de entrevista.
+  SCHEDULING
+  /// Entrevista agendada — flujo completo.
+  SCHEDULED
 }
 
-/// Enumera la dirección de cada mensaje persistido.
 enum MessageDirection {
-  /// Mensaje entrante desde WhatsApp hacia el sistema.
   INBOUND
-  /// Mensaje saliente desde el sistema hacia WhatsApp.
   OUTBOUND
 }
 
-/// Enumera los tipos de mensaje que vamos a persistir para auditoría operativa.
 enum MessageType {
-  /// Mensaje de texto.
   TEXT
-  /// Mensaje con documento adjunto.
   DOCUMENT
-  /// Mensaje interactivo.
+  IMAGE
   INTERACTIVE
-  /// Mensaje no soportado por el flujo contingente.
   UNKNOWN
 }
 
-/// Enumera el estado del recordatorio automático por inactividad.
 enum ReminderState {
-  /// No hay recordatorio aplicado.
   NONE
-  /// Recordatorio programado pendiente de envío.
   SCHEDULED
-  /// Recordatorio enviado al candidato.
   SENT
-  /// Recordatorio cancelado por nueva actividad inbound.
   CANCELLED
-  /// Recordatorio omitido por política/ventana/estado.
   SKIPPED
 }
 
-/// Modelo principal de candidato.
-model Candidate {
-  /// Identificador único interno del candidato.
-  id                String            @id @default(cuid())
-  /// Número de teléfono del candidato, único por registro.
-  phone             String            @unique
-  /// Nombre completo capturado por el bot.
-  fullName          String?
-  /// Tipo de documento del candidato (CC, TI, CE, pasaporte, etc.).
-  documentType      String?
-  /// Número de documento del candidato.
-  documentNumber    String?
-  /// Edad del candidato.
-  age               Int?
-  /// Ciudad del candidato.
-  city              String?
-  /// Barrio del candidato en el flujo actual.
-  neighborhood      String?
-  /// Barrio o localidad del candidato (campo legado).
-  zone              String?
-  /// Indica si cuenta con experiencia en el cargo.
-  experienceInfo    String?
-  /// Tiempo de experiencia reportado por el candidato.
-  experienceTime    String?
-  /// Restricciones médicas reportadas por el candidato.
-  medicalRestrictions String?
-  /// Medio de transporte del candidato.
-  transportMode     String?
-  /// Último motivo de rechazo aplicado al candidato.
-  rejectionReason   String?
-  /// Detalles adicionales del rechazo para trazabilidad.
-  rejectionDetails  String?
-  /// Resumen de experiencia del candidato (campo legado, no se usa en el flujo actual).
-  experienceSummary String?
-  /// Disponibilidad horaria del candidato (campo legado, no se usa en el flujo actual).
-  availability      String?
-  /// Estado actual del candidato en el proceso.
-  status            CandidateStatus   @default(NUEVO)
-  /// Paso actual del flujo conversacional.
-  currentStep       ConversationStep  @default(MENU)
-  /// Nombre original del archivo de hoja de vida (campo legado, no se usa en el flujo actual).
-  cvOriginalName    String?
-  /// Tipo MIME del archivo de hoja de vida (campo legado, no se usa en el flujo actual).
-  cvMimeType        String?
-  /// Binario de la hoja de vida (campo legado, no se usa en el flujo actual).
-  cvData            Bytes?
-  /// Fecha de creación automática del registro.
-  createdAt         DateTime          @default(now())
-  /// Fecha de actualización automática del registro.
-  updatedAt         DateTime          @updatedAt
-  /// Fin de la ventana de silencio para consolidar mensajes de texto.
-  multilineWindowUntil DateTime?
-  /// Versión incremental para controlar carreras del batching multilinea.
-  multilineBatchVersion Int          @default(0)
-  /// Fecha del último inbound recibido para control de ventana y recordatorios.
-  lastInboundAt     DateTime?
-  /// Fecha del último outbound enviado para trazabilidad.
-  lastOutboundAt    DateTime?
-  /// Fecha del último recordatorio enviado.
-  lastReminderAt    DateTime?
-  /// Fecha objetivo para envío del recordatorio automático.
-  reminderScheduledFor DateTime?
-  /// Estado del ciclo de recordatorio de inactividad.
-  reminderState     ReminderState    @default(NONE)
-  /// Permite pausar manualmente las respuestas automáticas del bot para este candidato.
-  botPaused         Boolean          @default(false)
-  /// Fecha y hora en la que se aplicó la pausa manual.
-  botPausedAt       DateTime?
-  /// Usuario/rol que aplicó la pausa manual.
-  botPausedBy       String?
-  /// Motivo opcional registrado para la pausa manual.
-  botPauseReason    String?
-  /// Modo de reanudación aplicado por operación humana.
-  botResumeMode     String?
-  /// Marca si existe potencial de duplicado documental con otro teléfono.
-  potentialDuplicate Boolean         @default(false)
-  /// Referencia textual del candidato potencialmente duplicado.
-  potentialDuplicateNote String?
-  /// Fecha en que se detectó el potencial duplicado documental.
-  potentialDuplicateAt DateTime?
-  /// Relación uno a muchos con los mensajes del candidato.
-  messages          Message[]
+enum Gender {
+  /// Género masculino detectado con alta certeza.
+  MALE
+  /// Género femenino detectado con alta certeza.
+  FEMALE
+  /// Otro género o no binario.
+  OTHER
+  /// No se pudo determinar con certeza.
+  UNKNOWN
 }
 
-/// Modelo de auditoría de mensajes.
-model Message {
-  /// Identificador único interno del mensaje.
-  id          String           @id @default(cuid())
-  /// Llave foránea hacia el candidato dueño del mensaje.
-  candidateId String
-  /// Relación hacia el candidato asociado al mensaje.
-  candidate   Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  /// Identificador del mensaje en WhatsApp para idempotencia.
-  waMessageId String?          @unique
-  /// Dirección del mensaje.
-  direction   MessageDirection
-  /// Tipo del mensaje.
-  messageType MessageType
-  /// Cuerpo textual persistido del mensaje.
-  body        String?
-  /// Payload crudo completo recibido o generado.
-  rawPayload  Json?
-  /// Fecha en la que este inbound fue consolidado y respondido.
-  respondedAt DateTime?
-  /// Fecha de creación automática del mensaje.
-  createdAt   DateTime         @default(now())
+enum ExperienceRequirement {
+  /// Se requiere experiencia previa.
+  YES
+  /// No se requiere experiencia.
+  NO
+  /// La experiencia es indiferente.
+  INDIFFERENT
+}
 
-  /// Índice para acelerar consultas por candidato y fecha.
-  @@index([candidateId, createdAt])
+enum BookingStatus {
+  /// Entrevista agendada, esperando confirmación.
+  SCHEDULED
+  /// Candidato confirmó asistencia.
+  CONFIRMED
+  /// Candidato solicitó reagendar.
+  RESCHEDULED
+  /// Candidato no se presentó.
+  NO_SHOW
+  /// Entrevista cancelada.
+  CANCELLED
+}
+
+// ─────────────────────────────────────────────
+// VACANCY — vacante configurable desde el dashboard
+// ─────────────────────────────────────────────
+
+/// Vacante de reclutamiento configurable por el equipo de LoginPro.
+model Vacancy {
+  /// Identificador único interno.
+  id                     String                @id @default(cuid())
+  /// Nombre de la vacante (ej: "Auxiliar de Cargue y Descargue - Ibagué").
+  title                  String
+  /// Cargo específico (ej: "Auxiliar de Cargue y Descargue").
+  role                   String
+  /// Descripción del perfil del cargo para contexto del bot y del reclutador.
+  roleDescription        String?
+  /// Ciudad donde opera la vacante.
+  city                   String
+  /// Dirección exacta de la operación.
+  operationAddress       String
+  /// Requisitos del cargo (texto largo, usado por el bot para responder preguntas).
+  requirements           String
+  /// Condiciones: sueldo, horario, tipo de contrato, prestaciones, etc.
+  conditions             String
+  /// Documentación que debe traer el candidato a la entrevista.
+  requiredDocuments      String?
+  /// Edad mínima aceptada. Null = sin restricción.
+  minAge                 Int?
+  /// Edad máxima aceptada. Null = sin restricción.
+  maxAge                 Int?
+  /// Si se requiere experiencia previa en el cargo.
+  experienceRequired     ExperienceRequirement @default(INDIFFERENT)
+  /// Meses mínimos de experiencia aceptables. Null = sin restricción.
+  minExperienceMonths    Int?
+  /// Meses máximos de experiencia (tope). Null = sin restricción.
+  maxExperienceMonths    Int?
+  /// Imagen de la publicidad de la vacante (para que el bot la reconozca si el candidato la envía).
+  imageData              Bytes?
+  /// MIME type de la imagen.
+  imageMimeType          String?
+  /// Si está activo el filtro de zona/localidad para esta vacante.
+  zoneFilterEnabled      Boolean               @default(false)
+  /// Contexto de zonas en texto libre para que OpenAI evalúe viabilidad geográfica.
+  /// Ejemplo: "Localidades válidas: Suba, Engativá. Municipios válidos: Mosquera, Funza.
+  ///           Zonas no viables: Usme, Bosa, Ciudad Bolívar por distancia a la operación."
+  zoneContext            String?
+  /// Si el flujo incluye agendamiento de entrevistas.
+  schedulingEnabled      Boolean               @default(false)
+  /// Si la vacante está activa y recibiendo postulaciones.
+  acceptingApplications  Boolean               @default(true)
+  /// Fecha de creación.
+  createdAt              DateTime              @default(now())
+  /// Fecha de última actualización.
+  updatedAt              DateTime              @updatedAt
+
+  candidates             Candidate[]
+  interviewSlots         InterviewSlot[]
+  interviewBookings      InterviewBooking[]
+}
+
+// ─────────────────────────────────────────────
+// INTERVIEW SLOT — bloques horarios configurables
+// ─────────────────────────────────────────────
+
+/// Bloque horario de entrevista configurado por el reclutador para una vacante.
+model InterviewSlot {
+  /// Identificador único.
+  id                   String    @id @default(cuid())
+  /// Vacante a la que pertenece este bloque.
+  vacancyId            String
+  vacancy              Vacancy   @relation(fields: [vacancyId], references: [id])
+  /// Día de la semana recurrente (0=lunes, 1=martes … 6=domingo). Null si es fecha puntual.
+  dayOfWeek            Int?
+  /// Fecha puntual específica. Null si es recurrente por dayOfWeek.
+  specificDate         DateTime?
+  /// Hora de inicio del bloque ("HH:MM" en 24h, zona Colombia).
+  startTime            String
+  /// Hora de fin del bloque ("HH:MM" en 24h, zona Colombia).
+  endTime              String
+  /// Duración en minutos de cada cita dentro del bloque.
+  slotDurationMinutes  Int       @default(20)
+  /// Máximo de candidatos citados en este bloque.
+  maxCandidates        Int       @default(10)
+  /// Si el bloque está activo.
+  isActive             Boolean   @default(true)
+  /// Fecha de creación.
+  createdAt            DateTime  @default(now())
+
+  bookings             InterviewBooking[]
+}
+
+// ─────────────────────────────────────────────
+// INTERVIEW BOOKING — agendamiento de candidato
+// ─────────────────────────────────────────────
+
+/// Agendamiento de entrevista de un candidato para una vacante.
+model InterviewBooking {
+  /// Identificador único.
+  id                    String        @id @default(cuid())
+  /// Candidato agendado.
+  candidateId           String
+  candidate             Candidate     @relation(fields: [candidateId], references: [id])
+  /// Vacante para la que se agenda.
+  vacancyId             String
+  vacancy               Vacancy       @relation(fields: [vacancyId], references: [id])
+  /// Bloque horario de referencia.
+  slotId                String
+  slot                  InterviewSlot @relation(fields: [slotId], references: [id])
+  /// Fecha y hora exacta de la entrevista (zona Colombia).
+  scheduledAt           DateTime
+  /// Estado actual del agendamiento.
+  status                BookingStatus @default(SCHEDULED)
+  /// Si se envió el recordatorio 1h antes.
+  reminderSentAt        DateTime?
+  /// Si la ventana de 24h estaba cerrada cuando se intentó enviar el recordatorio.
+  reminderWindowClosed  Boolean       @default(false)
+  /// Respuesta del candidato al recordatorio.
+  reminderResponse      String?
+  /// Notas internas del reclutador sobre esta cita.
+  notes                 String?
+  /// Fecha de creación.
+  createdAt             DateTime      @default(now())
+  /// Fecha de última actualización.
+  updatedAt             DateTime      @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// CANDIDATE — modelo principal extendido
+// ─────────────────────────────────────────────
+
+/// Modelo principal de candidato.
+model Candidate {
+  id                       String            @id @default(cuid())
+  phone                    String            @unique
+
+  // ── Vacante asignada ──────────────────────
+  /// ID de la vacante a la que está aplicando. Null hasta que el bot la identifica.
+  vacancyId                String?
+  vacancy                  Vacancy?          @relation(fields: [vacancyId], references: [id])
+
+  // ── Datos personales ──────────────────────
+  fullName                 String?
+  documentType             String?
+  documentNumber           String?
+  age                      Int?
+  /// Género detectado por OpenAI a partir del nombre o el mensaje.
+  gender                   Gender            @default(UNKNOWN)
+  /// Barrio/localidad del candidato.
+  neighborhood             String?
+  /// Localidad o municipio (para vacantes con zoneFilterEnabled).
+  locality                 String?
+  /// Resultado de la evaluación de zona por OpenAI. Null = no evaluado aún.
+  zoneViable               Boolean?
+
+  // ── Experiencia y condiciones ─────────────
+  experienceInfo           String?
+  experienceTime           String?
+  medicalRestrictions      String?
+  transportMode            String?
+
+  // ── Rechazo ───────────────────────────────
+  rejectionReason          String?
+  rejectionDetails         String?
+
+  // ── Campos legados (no eliminar — datos históricos) ──
+  /// @deprecated usar neighborhood
+  zone                     String?
+  /// @deprecated no se usa en el flujo actual
+  experienceSummary        String?
+  /// @deprecated no se usa en el flujo actual
+  availability             String?
+
+  // ── Estado del flujo ──────────────────────
+  status                   CandidateStatus   @default(NUEVO)
+  currentStep              ConversationStep  @default(MENU)
+
+  // ── Hoja de vida ──────────────────────────
+  /// @deprecated migrar a Cloudflare R2
+  cvOriginalName           String?
+  /// @deprecated migrar a Cloudflare R2
+  cvMimeType               String?
+  /// @deprecated migrar a Cloudflare R2
+  cvData                   Bytes?
+
+  // ── Ventana multilinea ────────────────────
+  multilineWindowUntil     DateTime?
+  multilineBatchVersion    Int               @default(0)
+
+  // ── Actividad ─────────────────────────────
+  lastInboundAt            DateTime?
+  lastOutboundAt           DateTime?
+  lastReminderAt           DateTime?
+  reminderScheduledFor     DateTime?
+  reminderState            ReminderState     @default(NONE)
+
+  // ── Control del bot ───────────────────────
+  botPaused                Boolean           @default(false)
+  botPausedAt              DateTime?
+  botPausedBy              String?
+  botPauseReason           String?
+  botResumeMode            String?
+
+  // ── Duplicados documentales ───────────────
+  potentialDuplicate       Boolean           @default(false)
+  potentialDuplicateAt     DateTime?
+  potentialDuplicateNote   String?
+
+  // ── Notas del reclutador ──────────────────
+  interviewNotes           String?
+
+  // ── Timestamps ────────────────────────────
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+
+  messages                 Message[]
+  interviewBookings        InterviewBooking[]
+}
+
+// ─────────────────────────────────────────────
+// MESSAGE — historial de conversación
+// ─────────────────────────────────────────────
+
+model Message {
+  id           String           @id @default(cuid())
+  candidateId  String
+  candidate    Candidate        @relation(fields: [candidateId], references: [id])
+  waMessageId  String?          @unique
+  direction    MessageDirection
+  messageType  MessageType
+  body         String?
+  rawPayload   Json?
+  respondedAt  DateTime?
+  createdAt    DateTime         @default(now())
 }

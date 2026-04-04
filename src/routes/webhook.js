@@ -12,7 +12,7 @@ import { detectConversationIntent, isPostCompletionAck } from '../services/conve
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
 import { shouldBlockAutomation } from '../services/botAutomationPolicy.js';
 
-const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor mantente pendiente del llamado del equipo de reclutamiento.';
+const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor manténte pendiente del llamado del equipo de reclutamiento.';
 
 const SALUDO_INICIAL = `Hola, gracias por comunicarte con LoginPro.
 Te comparto la información de la vacante disponible:
@@ -33,7 +33,7 @@ Estamos en búsqueda de personal para trabajar en Ibagué, en el sector aeropuer
 
 Si estás interesado en continuar, respóndeme y te solicitaré tus datos.`;
 
-const SOLICITAR_DATOS = 'Perfecto. Envíame por favor estos datos para continuar: nombre completo, tipo de documento, número de documento, edad, barrio, si tienes experiencia en el cargo y cuánto tiempo, si tienes restricciones médicas y qué medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea más fácil.';
+const SOLICITAR_DATOS = 'Perfecto. Enviáme por favor estos datos para continuar: nombre completo, tipo de documento, número de documento, edad, barrio, si tienes experiencia en el cargo y cuánto tiempo, si tienes restricciones médicas y qué medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea más fácil.';
 const DESCARTE_MSG = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque no cumples con uno de los requisitos definidos para esta vacante.';
 const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
 const SOLICITAR_HV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida (HV) en PDF o Word (.doc/.docx) para finalizar tu postulación.';
@@ -55,6 +55,61 @@ const REQUIRED_FIELDS = [
   'medicalRestrictions',
   'transportMode'
 ];
+
+// ---------------------------------------------------------------------------
+// Rate limiting en memoria por número de teléfono.
+//
+// Objetivo: evitar que un número dispare llamadas ilimitadas a OpenAI
+// mediante mensajes rápidos o automatizados.
+//
+// Ventana deslizante simple (sliding window):
+//   - MAX_MESSAGES_PER_WINDOW mensajes como máximo en RATE_WINDOW_MS milisegundos.
+//   - Cuando se supera el límite, el mensaje se ignora (no se envía respuesta
+//     al candidato para no revelar el mecanismo).
+//   - El mapa se limpia de entradas expiradas cada CLEANUP_INTERVAL_MS para no
+//     acumular memoria indefinidamente.
+//
+// Consideración de escala: este store es in-memory. Si se corren múltiples
+// instancias en paralelo cada una tendrá su propio contador, lo que lo hace
+// menos efectivo. Para eso, reemplazar phoneTimestamps por Redis con
+// ZADD/ZREMRANGEBYSCORE. Por ahora es suficiente para una sola instancia.
+// ---------------------------------------------------------------------------
+const MAX_MESSAGES_PER_WINDOW = parseInt(process.env.RATE_LIMIT_MAX || '15', 10);
+const RATE_WINDOW_MS           = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(10 * 60 * 1000), 10); // 10 min
+const CLEANUP_INTERVAL_MS      = 30 * 60 * 1000; // 30 min
+
+/** @type {Map<string, number[]>} */
+const phoneTimestamps = new Map();
+
+/**
+ * Devuelve true si el número está dentro del límite permitido y registra
+ * el timestamp del intento. Devuelve false si lo supera (rate limited).
+ */
+function checkRateLimit(phone) {
+  const now = Date.now();
+  const windowStart = now - RATE_WINDOW_MS;
+  const timestamps = (phoneTimestamps.get(phone) || []).filter(t => t > windowStart);
+  if (timestamps.length >= MAX_MESSAGES_PER_WINDOW) {
+    console.warn('[RATE_LIMIT_HIT]', JSON.stringify({ phone, count: timestamps.length, windowMs: RATE_WINDOW_MS }));
+    return false;
+  }
+  timestamps.push(now);
+  phoneTimestamps.set(phone, timestamps);
+  return true;
+}
+
+// Limpieza periódica para no acumular entradas viejas en memoria.
+setInterval(() => {
+  const windowStart = Date.now() - RATE_WINDOW_MS;
+  for (const [phone, timestamps] of phoneTimestamps.entries()) {
+    const active = timestamps.filter(t => t > windowStart);
+    if (active.length === 0) {
+      phoneTimestamps.delete(phone);
+    } else {
+      phoneTimestamps.set(phone, active);
+    }
+  }
+}, CLEANUP_INTERVAL_MS);
 
 function normalizeText(text = '') { return text.trim(); }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -469,6 +524,10 @@ export function webhookRouter(prisma) {
       for (const message of messages) {
         const from = message.from;
         if (!from) continue;
+
+        // Rate limiting: ignora el mensaje si el número supera el límite.
+        // Se evalúa antes del upsert para no crear registros de candidatos spam.
+        if (!checkRateLimit(from)) continue;
 
         const candidate = await prisma.candidate.upsert({ where: { phone: from }, update: {}, create: { phone: from } });
 

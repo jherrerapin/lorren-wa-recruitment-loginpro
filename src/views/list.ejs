@@ -3,128 +3,716 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Panel de Reclutamiento</title>
+  <title>Panel de Reclutamiento — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8f9fa; color: #333; }
-    .navbar { background: #2c3e50; padding: 12px 24px; display: flex; align-items: center; gap: 20px; }
-    .navbar a { color: #ecf0f1; text-decoration: none; font-weight: 500; font-size: 14px; }
-    .navbar a:hover { color: #3498db; }
-    .navbar form button:hover { border-color: #3498db !important; color: #3498db !important; }
-    .navbar .brand { display: inline-flex; align-items: center; margin-right: 12px; }
-    .navbar .brand img { height: 30px; width: auto; display: block; object-fit: contain; }
-    .container { margin: 24px; }
-    h1 { margin-bottom: 16px; color: #2c3e50; }
-    .summary { margin-bottom: 16px; color: #666; font-size: 14px; }
-    .status-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-    .status-tabs a { border: 1px solid #d0d7de; background: #fff; color: #2c3e50; padding: 7px 12px; border-radius: 20px; font-size: 13px; text-decoration: none; }
-    .status-tabs a.active { background: #2c3e50; border-color: #2c3e50; color: #fff; }
-    .export-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-    .export-actions a { border: 1px solid #d0d7de; background: #fff; color: #2c3e50; padding: 7px 10px; border-radius: 6px; font-size: 13px; text-decoration: none; }
-    .export-actions a:hover { background: #f1f5f9; text-decoration: none; }
-    table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    th, td { border-bottom: 1px solid #eee; padding: 10px 12px; text-align: left; font-size: 14px; }
-    th { background: #2c3e50; color: #fff; font-weight: 600; }
-    tr:hover { background: #f5f5f5; }
-    a { color: #3498db; text-decoration: none; font-weight: 500; }
-    a:hover { text-decoration: underline; }
-    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
-    .badge-nuevo { background: #95a5a6; }
-    .badge-registrado { background: #27ae60; }
-    .badge-rechazado { background: #e74c3c; }
-    .badge-contactado { background: #3498db; }
-    .wa-link { color: #25d366; font-weight: 600; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #f4f5f7;
+      --surface:      #ffffff;
+      --surface-2:    #f9fafb;
+      --border:       #e1e4e8;
+      --border-soft:  #eaecef;
+      --text:         #1a1d23;
+      --text-muted:   #6b7280;
+      --text-faint:   #9ca3af;
+      --navy:         #1e2d3d;
+      --navy-hover:   #162330;
+      --teal:         #0d7a6b;
+      --teal-light:   #e6f4f1;
+      --teal-hover:   #0a5f53;
+      --amber:        #b45309;
+      --amber-light:  #fef3c7;
+      --red:          #dc2626;
+      --red-light:    #fee2e2;
+      --gray-light:   #f3f4f6;
+      --green:        #16a34a;
+      --green-light:  #dcfce7;
+      --blue:         #1d4ed8;
+      --blue-light:   #dbeafe;
+      --purple:       #7c3aed;
+      --purple-light: #ede9fe;
+      --shadow-sm:    0 1px 3px rgba(0,0,0,.08);
+      --shadow-md:    0 4px 12px rgba(0,0,0,.10);
+      --radius:       8px;
+      --radius-lg:    12px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+
+    /* ── Navbar ── */
+    .navbar {
+      background: var(--navy); padding: 0 24px; display: flex;
+      align-items: center; gap: 20px; height: 52px; position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    }
+    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 500; padding: 4px 2px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
+    .navbar a:hover { color: #fff; border-bottom-color: rgba(255,255,255,.3); }
+    .navbar .brand img { height: 28px; display: block; }
+    .navbar .spacer { flex: 1; }
+    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 5px 12px !important; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all .15s; }
+    .btn-logout:hover { border-color: rgba(255,255,255,.6) !important; color: #fff !important; }
+
+    /* ── Layout ── */
+    .page { max-width: 1280px; margin: 0 auto; padding: 24px 20px 48px; }
+
+    /* ── Page header ── */
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .page-header h1 { font-size: 20px; font-weight: 700; color: var(--navy); }
+    .page-header .sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Date picker strip ── */
+    .date-strip {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 8px 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .date-strip label { font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+    .date-strip input[type="date"] {
+      border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
+      font-size: 13px; font-family: var(--font); color: var(--text); background: var(--surface-2);
+      cursor: pointer; outline: none;
+    }
+    .date-strip input[type="date"]:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
+    .date-strip .btn-today {
+      background: var(--teal); color: #fff; border: none; border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: background .15s; white-space: nowrap;
+    }
+    .date-strip .btn-today:hover { background: var(--teal-hover); }
+    .date-strip .is-today { font-size: 12px; color: var(--teal); font-weight: 600; }
+
+    /* ── City tabs ── */
+    .city-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 2px solid var(--border); padding-bottom: 0; }
+    .city-tab {
+      padding: 9px 18px; font-size: 13px; font-weight: 600; text-decoration: none;
+      color: var(--text-muted); border-radius: 8px 8px 0 0; border: 1px solid transparent;
+      border-bottom: none; margin-bottom: -2px; transition: all .15s; background: transparent;
+    }
+    .city-tab:hover { color: var(--navy); background: var(--surface); border-color: var(--border); }
+    .city-tab.active {
+      color: var(--navy); background: var(--surface);
+      border-color: var(--border); border-bottom-color: var(--surface);
+    }
+    .city-tab .count {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--teal); color: #fff;
+      min-width: 18px; height: 18px; padding: 0 5px;
+      border-radius: 9px; font-size: 11px; font-weight: 700; margin-left: 6px;
+    }
+    .city-tab.active .count { background: var(--navy); }
+
+    /* ── Vacancy grid ── */
+    .vacancies-grid { display: flex; flex-direction: column; gap: 20px; }
+
+    /* ── Vacancy card ── */
+    .vacancy-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden;
+    }
+    .vacancy-header {
+      padding: 14px 18px; display: flex; align-items: center;
+      gap: 12px; border-bottom: 1px solid var(--border-soft);
+      background: var(--surface-2);
+    }
+    .vacancy-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .vacancy-icon.scheduling { background: var(--teal-light); }
+    .vacancy-icon.cv-only    { background: var(--amber-light); }
+    .vacancy-icon.closed     { background: var(--red-light); }
+    .vacancy-meta { flex: 1; min-width: 0; }
+    .vacancy-title { font-size: 15px; font-weight: 700; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vacancy-role  { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+    .vacancy-badges { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+    /* ── Status badges ── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 700;
+      white-space: nowrap; letter-spacing: .02em;
+    }
+    .badge-scheduling { background: var(--teal-light);   color: var(--teal); }
+    .badge-cv-only    { background: var(--amber-light);  color: var(--amber); }
+    .badge-closed     { background: var(--red-light);    color: var(--red); }
+    .badge-nuevo      { background: #f3f4f6;              color: #6b7280; }
+    .badge-registrado { background: var(--green-light);  color: var(--green); }
+    .badge-validando  { background: var(--blue-light);   color: var(--blue); }
+    .badge-contactado { background: var(--purple-light); color: var(--purple); }
+    .badge-rechazado  { background: var(--red-light);    color: var(--red); }
+
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+    .dot-green  { background: var(--green); }
+    .dot-amber  { background: var(--amber); }
+    .dot-red    { background: var(--red); }
+    .dot-gray   { background: var(--text-faint); }
+
+    /* ── Sections inside card ── */
+    .vacancy-body { padding: 0; }
+    .section {
+      border-top: 1px solid var(--border-soft);
+      padding: 14px 18px;
+    }
+    .section:first-child { border-top: none; }
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px; gap: 8px;
+    }
+    .section-title {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--text-muted);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .section-count {
+      font-size: 11px; font-weight: 700; color: var(--text-faint);
+      background: var(--gray-light); padding: 2px 8px; border-radius: 10px;
+    }
+
+    /* ── Bookings table (interviews today) ── */
+    .bookings-table { width: 100%; border-collapse: collapse; }
+    .bookings-table th {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--text-faint);
+      padding: 6px 10px; border-bottom: 1px solid var(--border-soft);
+      text-align: left; background: var(--surface-2);
+    }
+    .bookings-table td {
+      padding: 9px 10px; border-bottom: 1px solid var(--border-soft);
+      font-size: 13px; vertical-align: middle;
+    }
+    .bookings-table tr:last-child td { border-bottom: none; }
+    .bookings-table tr:hover td { background: #fafbfc; }
+    .time-pill {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--navy); color: #fff; font-size: 12px; font-weight: 700;
+      padding: 3px 10px; border-radius: 6px; min-width: 64px; letter-spacing: .02em;
+    }
+    .booking-status-confirmed  { color: var(--green);  font-weight: 600; }
+    .booking-status-scheduled  { color: var(--blue);   font-weight: 600; }
+    .booking-status-rescheduled{ color: var(--amber);  font-weight: 600; }
+    .booking-status-no_show    { color: var(--red);    font-weight: 600; }
+    .booking-status-cancelled  { color: var(--text-faint); font-weight: 500; text-decoration: line-through; }
+
+    /* ── Candidates list (registered / cv-only) ── */
+    .candidates-list { display: flex; flex-direction: column; gap: 1px; }
+    .candidate-row {
+      display: grid;
+      grid-template-columns: 1fr 120px 90px 90px auto;
+      gap: 8px; align-items: center;
+      padding: 8px 10px; border-radius: 6px;
+      transition: background .12s;
+    }
+    .candidate-row:hover { background: var(--surface-2); }
+    .candidate-name { font-weight: 600; color: var(--navy); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .candidate-doc  { font-size: 12px; color: var(--text-muted); }
+    .candidate-phone a { color: var(--teal); font-weight: 600; font-size: 12px; text-decoration: none; }
+    .candidate-phone a:hover { text-decoration: underline; }
+    .cv-pill {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+    }
+    .cv-yes  { background: var(--green-light);  color: var(--green); }
+    .cv-no   { background: var(--gray-light);   color: var(--text-faint); }
+    .link-detail { font-size: 12px; color: var(--teal); font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .link-detail:hover { text-decoration: underline; }
+
+    /* ── CV-Only notice ── */
+    .cv-only-notice {
+      display: flex; align-items: flex-start; gap: 10px;
+      background: var(--amber-light); border: 1px solid #fcd34d;
+      border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+    }
+    .cv-only-notice .icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .cv-only-notice p { font-size: 12px; color: var(--amber); font-weight: 600; line-height: 1.4; }
+    .cv-only-notice span { font-weight: 400; color: #92400e; }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center; padding: 24px 16px;
+      color: var(--text-faint); font-size: 13px;
+    }
+    .empty-state .empty-icon { font-size: 28px; margin-bottom: 6px; }
+
+    /* ── Legacy section (sin vacante) ── */
+    .legacy-section {
+      margin-top: 32px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm);
+    }
+    .legacy-header {
+      padding: 12px 18px; background: var(--surface-2);
+      border-bottom: 1px solid var(--border-soft);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .legacy-header h3 { font-size: 14px; font-weight: 700; color: var(--navy); }
+    .legacy-table { width: 100%; border-collapse: collapse; }
+    .legacy-table th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); text-align: left; }
+    .legacy-table td { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+    .legacy-table tr:last-child td { border-bottom: none; }
+    .legacy-table tr:hover td { background: var(--surface-2); }
+
+    /* ── Export bar ── */
+    .export-bar {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      padding: 12px 18px; background: var(--surface-2);
+      border-top: 1px solid var(--border-soft);
+    }
+    .export-btn {
+      font-size: 12px; font-weight: 600; color: var(--text-muted);
+      border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px;
+      background: var(--surface); text-decoration: none; transition: all .15s;
+    }
+    .export-btn:hover { background: var(--gray-light); color: var(--navy); }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .page { padding: 16px 12px 40px; }
+      .candidate-row { grid-template-columns: 1fr auto; }
+      .candidate-row .candidate-doc,
+      .candidate-row .candidate-phone { display: none; }
+      .bookings-table th:nth-child(3),
+      .bookings-table td:nth-child(3) { display: none; }
+      .page-header { flex-direction: column; align-items: flex-start; }
+    }
   </style>
 </head>
 <body>
-  <nav class="navbar">
-    <a class="brand" href="/admin" aria-label="Inicio LoginPro">
-      <img src="/public/logo-loginpro.svg" alt="LoginPro" />
-    </a>
-    <a href="/admin">Candidatos</a>
-    <% if (role === 'dev') { %>
-      <a href="/admin/monitor">Monitor</a>
+
+<nav class="navbar">
+  <a class="brand" href="/admin" aria-label="LoginPro">
+    <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+  </a>
+  <a href="/admin">Panel</a>
+  <% if (role === 'dev') { %>
+    <a href="/admin/monitor">Monitor</a>
+  <% } %>
+  <span class="spacer"></span>
+  <form method="post" action="/logout">
+    <button type="submit" class="btn-logout">Cerrar sesión</button>
+  </form>
+</nav>
+
+<% if (typeof mode === 'undefined' || mode === 'legacy') { %>
+<%# ═══════════════════════════════════════════════════════ %>
+<%# MODO LEGACY — tabla plana (compatible con ?status=)    %>
+<%# ═══════════════════════════════════════════════════════ %>
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>Panel de Reclutamiento</h1>
+      <p class="sub">Vista por estado de candidato</p>
+    </div>
+    <a href="/admin" style="font-size:13px;color:var(--teal);font-weight:600;text-decoration:none;">← Ver por vacante</a>
+  </div>
+
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+    <% const legacyTabs = [
+      { scope: 'registered', label: 'Registrados' },
+      { scope: 'new',        label: 'Nuevos' },
+      { scope: 'contacted',  label: 'Contactados' },
+      { scope: 'rejected',   label: 'Rechazados' },
+      { scope: 'all',        label: 'Todos' }
+    ];
+    for (const tab of legacyTabs) { %>
+      <a href="/admin?status=<%= tab.scope %>" style="border:1px solid var(--border);background:<%= activeStatusScope===tab.scope ? 'var(--navy)' : 'var(--surface)' %>;color:<%= activeStatusScope===tab.scope ? '#fff' : 'var(--navy)' %>;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;text-decoration:none;"><%= tab.label %></a>
     <% } %>
-    <form method="post" action="/logout" style="margin-left:auto;">
-      <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
-    </form>
-  </nav>
-  <div class="container">
-    <h1>Panel de Reclutamiento</h1>
-    <div class="status-tabs">
-      <% const tabs = [
-        { scope: 'registered', label: 'Registrados' },
-        { scope: 'new', label: 'Nuevos' },
-        { scope: 'contacted', label: 'Contactados' },
-        { scope: 'rejected', label: 'Rechazados' },
-        { scope: 'all', label: 'Todos' }
-      ]; %>
-      <% for (const tab of tabs) { %>
-        <a href="/admin?status=<%= tab.scope %>" class="<%= activeStatusScope === tab.scope ? 'active' : '' %>"><%= tab.label %></a>
+  </div>
+
+  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Mostrando <%= candidates.length %> candidato(s) <%= summaryLabel %></p>
+
+  <div class="export-bar" style="border-radius:8px 8px 0 0;border:1px solid var(--border);margin-bottom:-1px;">
+    <a href="/admin/export?scope=registered" class="export-btn">↓ Registrados</a>
+    <a href="/admin/export?scope=missing_cv_complete" class="export-btn">↓ Pendientes HV</a>
+    <a href="/admin/export?scope=contacted" class="export-btn">↓ Contactados</a>
+    <a href="/admin/export?scope=rejected" class="export-btn">↓ Rechazados</a>
+    <a href="/admin/export?scope=all" class="export-btn">↓ Todos</a>
+  </div>
+
+  <table class="legacy-table" style="background:var(--surface);box-shadow:var(--shadow-sm);border-radius:0 0 8px 8px;border:1px solid var(--border);overflow:hidden;">
+    <thead>
+      <tr>
+        <th>Fecha registro</th><th>Nombre</th><th>Teléfono</th><th>Documento</th>
+        <th>Edad</th><th>Barrio</th><th>Experiencia</th><th>Tiempo exp.</th>
+        <th>Restr. médicas</th><th>Transporte</th><th>Estado</th><th>Rechazo</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const c of candidates) { %>
+        <% const uiStatus = normalizeCandidateStatusForUI(c.status); %>
+        <% const statusBadge = { NUEVO:'badge-nuevo', REGISTRADO:'badge-registrado', RECHAZADO:'badge-rechazado', CONTACTADO:'badge-contactado' }; %>
+        <% const statusLabel = { NUEVO:'Nuevo', REGISTRADO:'Registrado', RECHAZADO:'Rechazado', CONTACTADO:'Contactado' }; %>
+        <tr>
+          <td><%= formatDateTimeCO(c.createdAt) %></td>
+          <td style="font-weight:600;"><%= c.fullName || '—' %></td>
+          <td><a href="https://wa.me/<%= c.phone %>" target="_blank" style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
+          <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
+          <td><%= c.age || '—' %></td>
+          <td><%= c.neighborhood || c.zone || '—' %></td>
+          <td><%= c.experienceInfo || '—' %></td>
+          <td><%= c.experienceTime || '—' %></td>
+          <td><%= c.medicalRestrictions || '—' %></td>
+          <td><%= c.transportMode || '—' %></td>
+          <td><span class="badge <%= statusBadge[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span></td>
+          <td><%= c.rejectionReason || '—' %></td>
+          <td><a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver</a></td>
+        </tr>
       <% } %>
+    </tbody>
+  </table>
+</div>
+
+<% } else { %>
+<%# ═══════════════════════════════════════════════════════ %>
+<%# MODO VACANTES — dashboard principal                    %>
+<%# ═══════════════════════════════════════════════════════ %>
+
+<%
+  // Helpers locales
+  const isToday = selectedDate === todayStr;
+
+  function fmtDate(d) {
+    if (!d) return '';
+    const dt = d instanceof Date ? d : new Date(d);
+    return new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota', weekday: 'long',
+      day: 'numeric', month: 'long', year: 'numeric'
+    }).format(dt);
+  }
+
+  const displayDate = fmtDate(new Date(selectedDate + 'T12:00:00'));
+
+  // Ciudad activa
+  const activeCityData = cities.find(c => c.name === activeCity) || cities[0] || null;
+
+  const bookingStatusLabel = {
+    SCHEDULED:   { cls: 'booking-status-scheduled',   icon: '🕐', text: 'Agendado' },
+    CONFIRMED:   { cls: 'booking-status-confirmed',   icon: '✅', text: 'Confirmado' },
+    RESCHEDULED: { cls: 'booking-status-rescheduled', icon: '🔄', text: 'Reagendado' },
+    NO_SHOW:     { cls: 'booking-status-no_show',     icon: '❌', text: 'No se presentó' },
+    CANCELLED:   { cls: 'booking-status-cancelled',   icon: '🚫', text: 'Cancelado' }
+  };
+
+  const candidateStatusBadge = {
+    NUEVO:      { cls: 'badge-nuevo',      label: 'Nuevo' },
+    REGISTRADO: { cls: 'badge-registrado', label: 'Registrado' },
+    VALIDANDO:  { cls: 'badge-validando',  label: 'Validando' },
+    APROBADO:   { cls: 'badge-registrado', label: 'Aprobado' },
+    CONTACTADO: { cls: 'badge-contactado', label: 'Contactado' },
+    RECHAZADO:  { cls: 'badge-rechazado',  label: 'Rechazado' }
+  };
+%>
+
+<div class="page">
+
+  <!-- Page header -->
+  <div class="page-header">
+    <div>
+      <h1>Panel de Reclutamiento</h1>
+      <p class="sub">Vista por ciudad y vacante</p>
     </div>
-    <p class="summary">Mostrando <%= candidates.length %> candidato(s) <%= summaryLabel %></p>
-    <div class="export-actions">
-      <a href="/admin/export?scope=registered">Descargar registrados</a>
-      <a href="/admin/export?scope=missing_cv_complete">Descargar pendientes de HV</a>
-      <a href="/admin/export?scope=contacted">Descargar contactados</a>
-      <a href="/admin/export?scope=rejected">Descargar rechazados</a>
-      <a href="/admin/export?scope=all">Descargar todos</a>
+
+    <!-- Date picker -->
+    <form method="get" action="/admin" id="dateForm" style="display:contents;">
+      <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
+      <div class="date-strip">
+        <label for="datePicker">📅 Fecha entrevistas:</label>
+        <input
+          type="date"
+          id="datePicker"
+          name="date"
+          value="<%= selectedDate %>"
+          max="<%= new Date(new Date().setFullYear(new Date().getFullYear()+1)).toISOString().split('T')[0] %>"
+          onchange="this.form.submit()"
+        />
+        <% if (!isToday) { %>
+          <a href="/admin<%= activeCity ? '?city=' + encodeURIComponent(activeCity) : '' %>" class="btn-today">Hoy</a>
+        <% } else { %>
+          <span class="is-today">✓ Hoy</span>
+        <% } %>
+      </div>
+    </form>
+  </div>
+
+  <!-- City tabs -->
+  <% if (cities.length > 0) { %>
+  <div class="city-tabs" role="tablist">
+    <% for (const city of cities) { %>
+      <%
+        // Total candidatos activos en esta ciudad
+        const cityTotal = city.vacancies.reduce((sum, v) => {
+          return sum + v.bookingsToday.length + v.registeredNoBooking.length + v.cvOnlyPipeline.length;
+        }, 0);
+        const cityUrl = '/admin?city=' + encodeURIComponent(city.name) + '&date=' + selectedDate;
+      %>
+      <a
+        href="<%= cityUrl %>"
+        class="city-tab <%= activeCity === city.name ? 'active' : '' %>"
+        role="tab"
+        aria-selected="<%= activeCity === city.name ? 'true' : 'false' %>"
+      >
+        📍 <%= city.name %>
+        <% if (cityTotal > 0) { %>
+          <span class="count"><%= cityTotal %></span>
+        <% } %>
+      </a>
+    <% } %>
+  </div>
+  <% } %>
+
+  <!-- Active city vacancies -->
+  <% if (!activeCityData || activeCityData.vacancies.length === 0) { %>
+    <div class="empty-state" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);">
+      <div class="empty-icon">🏙️</div>
+      <p>No hay vacantes activas registradas.</p>
+      <p style="margin-top:4px;font-size:12px;">Configura vacantes en la base de datos para verlas aquí.</p>
     </div>
-    <table>
+  <% } else { %>
+
+  <div class="vacancies-grid">
+    <% for (const v of activeCityData.vacancies) { %>
+      <%
+        const isScheduling = v.schedulingEnabled;
+        const isCvOnly     = !v.schedulingEnabled && v.acceptingApplications;
+        const isClosed     = !v.acceptingApplications;
+        const totalToday   = v.bookingsToday.length;
+        const totalPending = v.registeredNoBooking.length + v.cvOnlyPipeline.length;
+
+        let modeIcon  = isClosed ? '🔴' : (isScheduling ? '🗓️' : '📋');
+        let modeClass = isClosed ? 'closed' : (isScheduling ? 'scheduling' : 'cv-only');
+        let modeBadgeClass = isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only');
+        let modeBadgeText  = isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV');
+      %>
+
+      <div class="vacancy-card" id="vacancy-<%= v.id %>">
+
+        <!-- Card header -->
+        <div class="vacancy-header">
+          <div class="vacancy-icon <%= modeClass %>" aria-hidden="true"><%= modeIcon %></div>
+          <div class="vacancy-meta">
+            <div class="vacancy-title"><%= v.title || v.role %></div>
+            <div class="vacancy-role"><%= v.role %> &mdash; <%= v.city %></div>
+          </div>
+          <div class="vacancy-badges">
+            <span class="badge <%= modeBadgeClass %>">
+              <span class="dot dot-<%= isClosed ? 'red' : (isScheduling ? 'green' : 'amber') %>"></span>
+              <%= modeBadgeText %>
+            </span>
+            <% if (totalToday > 0) { %>
+              <span class="badge" style="background:var(--navy);color:#fff;">📅 <%= totalToday %> hoy</span>
+            <% } %>
+            <% if (totalPending > 0) { %>
+              <span class="badge badge-nuevo"><%= totalPending %> pendiente<%= totalPending > 1 ? 's' : '' %></span>
+            <% } %>
+          </div>
+        </div>
+
+        <div class="vacancy-body">
+
+          <!-- ── SECCIÓN 1: Entrevistas del día (solo si schedulingEnabled) ── -->
+          <% if (isScheduling) { %>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">
+                🗓️&nbsp; Entrevistas — <%= isToday ? 'Hoy' : displayDate %>
+              </span>
+              <span class="section-count"><%= v.bookingsToday.length %> cita<%= v.bookingsToday.length !== 1 ? 's' : '' %></span>
+            </div>
+
+            <% if (v.bookingsToday.length === 0) { %>
+              <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <p>Sin entrevistas agendadas para este día.</p>
+              </div>
+            <% } else { %>
+              <table class="bookings-table" role="table">
+                <thead>
+                  <tr>
+                    <th>Hora</th>
+                    <th>Candidato</th>
+                    <th>Documento</th>
+                    <th>Barrio</th>
+                    <th>Estado cita</th>
+                    <th>HV</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% for (const b of v.bookingsToday) { %>
+                    <% const bs = bookingStatusLabel[b.status] || { cls: '', icon: '•', text: b.status }; %>
+                    <tr>
+                      <td><span class="time-pill"><%= b.formattedTime %></span></td>
+                      <td>
+                        <div style="font-weight:600;color:var(--navy);"><%= b.candidate.fullName || '—' %></div>
+                        <% if (b.candidate.age) { %><div style="font-size:11px;color:var(--text-muted);"><%= b.candidate.age %> años</div><% } %>
+                      </td>
+                      <td style="font-size:12px;color:var(--text-muted);">
+                        <%= b.candidate.documentType && b.candidate.documentNumber ? b.candidate.documentType + ' ' + b.candidate.documentNumber : '—' %>
+                      </td>
+                      <td style="font-size:12px;color:var(--text-muted);"><%= b.candidate.neighborhood || '—' %></td>
+                      <td>
+                        <span class="<%= bs.cls %>" style="font-size:12px;">
+                          <%= bs.icon %> <%= bs.text %>
+                        </span>
+                      </td>
+                      <td>
+                        <span class="cv-pill <%= b.candidate.cvData ? 'cv-yes' : 'cv-no' %>">
+                          <%= b.candidate.cvData ? '✓ HV' : 'Sin HV' %>
+                        </span>
+                      </td>
+                      <td><a href="/admin/candidates/<%= b.candidate.id %>" class="link-detail">Ver →</a></td>
+                    </tr>
+                  <% } %>
+                </tbody>
+              </table>
+            <% } %>
+          </div>
+          <% } %>
+
+          <!-- ── SECCIÓN 2: Registrados sin agenda (vacante con scheduling) ── -->
+          <% if (isScheduling && v.registeredNoBooking.length > 0) { %>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">👤&nbsp; Registrados — pendientes de agendar</span>
+              <span class="section-count"><%= v.registeredNoBooking.length %></span>
+            </div>
+            <div class="candidates-list">
+              <% for (const c of v.registeredNoBooking.slice(0, 20)) { %>
+                <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
+                <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
+                <div class="candidate-row">
+                  <div>
+                    <div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div>
+                    <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></div>
+                  </div>
+                  <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                  <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
+                  <span class="cv-pill <%= c.cvData ? 'cv-yes' : 'cv-no' %>"><%= c.cvData ? '✓ HV' : 'Sin HV' %></span>
+                  <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                </div>
+              <% } %>
+              <% if (v.registeredNoBooking.length > 20) { %>
+                <div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.registeredNoBooking.length - 20 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div>
+              <% } %>
+            </div>
+          </div>
+          <% } %>
+
+          <!-- ── SECCIÓN 3: Solo HV (scheduling deshabilitado) ── -->
+          <% if (isCvOnly) { %>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">📥&nbsp; Candidatos registrados</span>
+              <span class="section-count"><%= v.cvOnlyPipeline.length %></span>
+            </div>
+
+            <div class="cv-only-notice">
+              <span class="icon">⚠️</span>
+              <p>Modo <strong>solo recepción de hojas de vida</strong>.<span> El agendamiento está deshabilitado para esta vacante. Los candidatos registrados quedan en cola para revisión humana.</span></p>
+            </div>
+
+            <% if (v.cvOnlyPipeline.length === 0) { %>
+              <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <p>Aún no hay candidatos registrados.</p>
+              </div>
+            <% } else { %>
+              <div class="candidates-list">
+                <% for (const c of v.cvOnlyPipeline.slice(0, 25)) { %>
+                  <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
+                  <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
+                  <div class="candidate-row">
+                    <div>
+                      <div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div>
+                      <div class="candidate-doc">
+                        <%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %>
+                        <% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %>
+                      </div>
+                    </div>
+                    <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                    <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
+                    <span class="cv-pill <%= c.cvData ? 'cv-yes' : 'cv-no' %>"><%= c.cvData ? '✓ HV' : 'Sin HV' %></span>
+                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  </div>
+                <% } %>
+                <% if (v.cvOnlyPipeline.length > 25) { %>
+                  <div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.cvOnlyPipeline.length - 25 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div>
+                <% } %>
+              </div>
+            <% } %>
+          </div>
+          <% } %>
+
+          <!-- ── Vacante cerrada ── -->
+          <% if (isClosed) { %>
+          <div class="section">
+            <div style="display:flex;align-items:center;gap:10px;background:var(--red-light);border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;">
+              <span style="font-size:20px;">🔴</span>
+              <div>
+                <p style="font-weight:700;color:var(--red);font-size:13px;">Vacante cerrada — no recibe nuevas postulaciones</p>
+                <p style="font-size:12px;color:#991b1b;margin-top:2px;">Los datos históricos siguen disponibles en la vista por estado.</p>
+              </div>
+            </div>
+          </div>
+          <% } %>
+
+        </div><!-- /vacancy-body -->
+
+        <!-- Export bar per vacancy -->
+        <div class="export-bar">
+          <a href="/admin/export?scope=registered" class="export-btn">↓ Exportar registrados</a>
+          <a href="/admin/export?scope=all" class="export-btn">↓ Exportar todos</a>
+          <a href="/admin?status=all" class="export-btn" style="margin-left:auto;">Ver tabla completa</a>
+        </div>
+
+      </div><!-- /vacancy-card -->
+    <% } %>
+  </div><!-- /vacancies-grid -->
+
+  <% } %>
+
+  <!-- ── Candidatos legacy (sin vacante asignada) ── -->
+  <% if (legacyCandidates && legacyCandidates.length > 0) { %>
+  <div class="legacy-section">
+    <div class="legacy-header">
+      <h3>⚙️ Candidatos sin vacante asignada <span style="font-weight:400;color:var(--text-muted);font-size:13px;">(<%= legacyCandidates.length %>)</span></h3>
+      <a href="/admin?status=all" style="font-size:12px;color:var(--teal);font-weight:600;text-decoration:none;">Ver todos →</a>
+    </div>
+    <table class="legacy-table">
       <thead>
         <tr>
-          <th>Fecha registro</th>
-          <th>Nombre</th>
-          <th>Teléfono</th>
-          <th>Documento</th>
-          <th>Edad</th>
-          <th>Barrio</th>
-          <th>Experiencia</th>
-          <th>Tiempo exp.</th>
-          <th>Restricciones médicas</th>
-          <th>Transporte</th>
-          <th>Estado</th>
-          <th>Motivo rechazo</th>
-          <th></th>
+          <th>Nombre</th><th>Teléfono</th><th>Documento</th>
+          <th>Estado</th><th>HV</th><th>Registro</th><th></th>
         </tr>
       </thead>
       <tbody>
-        <% for (const c of candidates) { %>
-          <% const uiStatus = normalizeCandidateStatusForUI(c.status); %>
+        <% for (const c of legacyCandidates.slice(0, 10)) { %>
+          <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
+          <% const stBadge = { NUEVO:{cls:'badge-nuevo',label:'Nuevo'}, REGISTRADO:{cls:'badge-registrado',label:'Registrado'}, RECHAZADO:{cls:'badge-rechazado',label:'Rechazado'}, CONTACTADO:{cls:'badge-contactado',label:'Contactado'} }; %>
           <tr>
-            <td><%= formatDateTimeCO(c.createdAt) %></td>
-            <td><%= c.fullName || '—' %></td>
-            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" class="wa-link"><%= c.phone %></a></td>
-            <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
-            <td><%= c.age || '—' %></td>
-            <td><%= c.neighborhood || c.zone || '—' %></td>
-            <td><%= c.experienceInfo || '—' %></td>
-            <td><%= c.experienceTime || '—' %></td>
-            <td><%= c.medicalRestrictions || '—' %></td>
-            <td><%= c.transportMode || '—' %></td>
-            <td>
-              <% const statusClass = {
-                'NUEVO': 'badge-nuevo',
-                'REGISTRADO': 'badge-registrado',
-                'RECHAZADO': 'badge-rechazado',
-                'CONTACTADO': 'badge-contactado'
-              }; %>
-              <% const statusLabel = {
-                'NUEVO': 'Nuevo',
-                'REGISTRADO': 'Registrado',
-                'RECHAZADO': 'Rechazado',
-                'CONTACTADO': 'Contactado'
-              }; %>
-              <span class="badge <%= statusClass[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span>
-            </td>
-            <td><%= c.rejectionReason || '—' %></td>
-            <td><a href="/admin/candidates/<%= c.id %>">Ver detalle</a></td>
+            <td style="font-weight:600;"><%= c.fullName || '—' %></td>
+            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
+            <td style="font-size:12px;color:var(--text-muted);"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></td>
+            <td><span class="badge <%= (stBadge[uiSt]||{cls:'badge-nuevo'}).cls %>"><%= (stBadge[uiSt]||{label:uiSt}).label %></span></td>
+            <td><span class="cv-pill <%= c.cvData ? 'cv-yes' : 'cv-no' %>"><%= c.cvData ? '✓ HV' : 'Sin HV' %></span></td>
+            <td style="font-size:12px;color:var(--text-muted);"><%= formatDateTimeCO(c.createdAt) %></td>
+            <td><a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a></td>
           </tr>
+        <% } %>
+        <% if (legacyCandidates.length > 10) { %>
+          <tr><td colspan="7" style="text-align:center;padding:10px;font-size:12px;color:var(--text-muted);">+ <%= legacyCandidates.length - 10 %> más — <a href="/admin?status=all" style="color:var(--teal);font-weight:600;">ver todos</a></td></tr>
         <% } %>
       </tbody>
     </table>
   </div>
+  <% } %>
+
+</div><!-- /page -->
+<% } %>
+
 </body>
 </html>

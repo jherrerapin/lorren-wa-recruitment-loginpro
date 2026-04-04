@@ -1,59 +1,90 @@
+/**
+ * aiParser.js
+ * ──────────────────────────────────────────────────────────────────────
+ *
+ * OpenAI como reclutador humano: lee el mensaje completo, entiende el
+ * contexto, extrae lo que puede con confianza, omite lo que no está claro.
+ * Sin reglas rígidas. Sin patrones de texto. Inteligencia pura.
+ */
+
 import axios from 'axios';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
-const MODELS_WITH_CUSTOM_TEMPERATURE_SUPPORT = [
-  'gpt-3.5-turbo',
-  'gpt-4',
-  'gpt-4-turbo',
-  'gpt-4o',
-  'gpt-4o-mini'
-];
+const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini'];
 
 function buildPrompt() {
-  return [
-    'Extrae datos de candidato desde texto libre y responde solo JSON válido.',
-    'Claves permitidas: intent, fullName, documentType, documentNumber, age, neighborhood, experienceInfo, experienceTime, medicalRestrictions, transportMode.',
-    'Diferencia edad de experiencia laboral: "22 años" sin contexto laboral es edad, NO experienceTime.',
-    'Solo usa experienceTime cuando exista contexto explícito de experiencia laboral (ej. "5 meses de experiencia").',
-    'Si detectas "sin experiencia", "no tengo experiencia", "poca experiencia", marca experienceInfo="No" y NO inventes experiencia positiva.',
-    'Transporte: detecta afirmativo (Moto/Bicicleta) y negativo ("Sin medio de transporte"). Nunca conviertas negaciones en Moto o Bicicleta.',
-    'Si hay restricciones médicas negativas, usa "Sin restricciones médicas".',
-    'intent debe ser una de: greeting, apply_intent, confirmation_yes, confirmation_no_or_correction, thanks, farewell, cv_intent, faq, provide_data, provide_correction, post_completion_ack, unsupported_file_or_message.'
-  ].join(' ');
+  return `Eres un reclutador humano experto leyendo mensajes de WhatsApp de candidatos a empleo en Colombia.
+
+Tu trabajo es entender lo que el candidato quiso decir, no lo que escribió literalmente.
+Los candidatos escriben rápido, con errores, abreviaciones, sin tildes, con jerga colombiana.
+Tú los entiendes como los entendería cualquier colombiano que trabaje en recursos humanos.
+
+De cada mensaje extrae los datos del candidato que puedas identificar con confianza.
+Devuelve SOLO un objeto JSON válido, sin explicaciones, sin texto adicional.
+
+Campos que puedes extraer (omite los que no estén presentes o no sean claros):
+
+{
+  "intent": string,           // Intención principal del mensaje
+  "fullName": string,         // Nombre completo — capitalizado correctamente
+  "documentType": string,     // CC | TI | CE | PPT | Pasaporte
+  "documentNumber": string,   // Solo los dígitos
+  "age": number,              // Edad en años — número entero
+  "neighborhood": string,     // Barrio, sector, localidad donde vive
+  "experienceInfo": string,   // "Sí" o "No"
+  "experienceTime": string,   // Ejemplo: "2 años", "6 meses", "0"
+  "medicalRestrictions": string, // Lo que diga el candidato sobre su condición física
+  "transportMode": string,    // Moto | Bicicleta | Sin medio de transporte | lo que diga
+}
+
+INTENT — usa uno de estos valores:
+greeting | apply_intent | confirmation_yes | confirmation_no_or_correction |
+thanks | farewell | cv_intent | faq | provide_data | provide_correction |
+post_completion_ack | unsupported_file_or_message
+
+Cómo pensar sobre los datos (no son reglas, son criterios de sentido común):
+
+• Los humanos escriben la edad de mil formas. "Tengo 28", "28 años", "veintiocho",
+  "28 añitos", "28 años de edad", "tengo 28 añitos", "soy de 28", incluso solo "28"
+  si el contexto del mensaje sugiere que está hablando de sí mismo.
+  Un número de cédula tiene muchos más dígitos que una edad — un humano jamás los confunde.
+
+• La experiencia también se expresa de mil formas: "dos años", "dos añitos",
+  "como 6 meses", "casi un año", "poquita experiencia", "llevo 3 meses",
+  "tengo bastante experiencia", "nunca he trabajado en eso". Tú entiendes todo eso.
+  Convierte tiempo a formato "N años" o "N meses".
+
+• El nombre puede aparecer al inicio del mensaje, después de "soy", "me llamo",
+  o simplemente escrito. Capitaliza bien: "MARIA PEREZ" → "Maria Perez".
+
+• El barrio puede mencionarse con o sin la palabra "barrio": "vivo en el Salado",
+  "del Jordan", "zona norte", "ciudadela Simón Bolívar".
+
+• El transporte puede ser implícito: "tengo moto", "me muevo en bici",
+  "no tengo cómo llegar", "sin vehículo". Tú entiendes si tiene o no tiene.
+
+• Si algo no está claro en el mensaje, simplemente no lo incluyas en el JSON.
+  Prefiere omitir a inventar.`;
 }
 
 function extractTextFromChatCompletion(data = {}) {
   const content = data?.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    const joined = content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part?.type === 'text' && typeof part?.text === 'string') return part.text;
-        return '';
-      })
+    return content
+      .map((p) => (typeof p === 'string' ? p : p?.type === 'text' ? p.text : ''))
       .join('')
       .trim();
-    if (joined) return joined;
   }
   return '{}';
 }
 
 function parseModelJson(rawText = '{}') {
-  const normalized = String(rawText || '').trim();
-  if (!normalized) return {};
-
-  try {
-    return JSON.parse(normalized);
-  } catch {
-    const fencedMatch = normalized.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fencedMatch?.[1]) {
-      try {
-        return JSON.parse(fencedMatch[1].trim());
-      } catch {
-        return {};
-      }
-    }
+  const t = String(rawText || '').trim();
+  if (!t) return {};
+  try { return JSON.parse(t); } catch {
+    const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) { try { return JSON.parse(fenced[1].trim()); } catch { return {}; } }
     return {};
   }
 }
@@ -64,38 +95,23 @@ function summarizeOpenAIError(error) {
   const name = error?.name || 'Error';
   const message = typeof error?.message === 'string' ? error.message.slice(0, 180) : null;
   const apiMessage = typeof error?.response?.data?.error?.message === 'string'
-    ? error.response.data.error.message.slice(0, 220)
-    : null;
-
+    ? error.response.data.error.message.slice(0, 220) : null;
   return [name, status, code, apiMessage || message || 'Unexpected error'].filter(Boolean).join(' | ');
 }
 
 function parseOptionalTemperature() {
   const raw = process.env.OPENAI_TEMPERATURE;
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
-    return { value: null, reason: 'missing' };
-  }
-
+  if (!raw?.trim()) return { value: null, reason: 'missing' };
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    return { value: null, reason: 'invalid' };
-  }
-
-  if (parsed < 0 || parsed > 2) {
-    return { value: null, reason: 'out_of_range' };
-  }
-
-  if (parsed === 1) {
-    return { value: null, reason: 'default_value' };
-  }
-
+  if (!Number.isFinite(parsed)) return { value: null, reason: 'invalid' };
+  if (parsed < 0 || parsed > 2) return { value: null, reason: 'out_of_range' };
+  if (parsed === 1) return { value: null, reason: 'default_value' };
   return { value: parsed, reason: null };
 }
 
-function modelSupportsCustomTemperature(model = '') {
-  const normalized = String(model || '').trim().toLowerCase();
-  if (!normalized) return false;
-  return MODELS_WITH_CUSTOM_TEMPERATURE_SUPPORT.some((allowedModel) => normalized.startsWith(allowedModel));
+function modelSupportsTemperature(model = '') {
+  const n = String(model || '').trim().toLowerCase();
+  return n ? !REASONING_MODELS.some((b) => n.startsWith(b)) : false;
 }
 
 export async function tryOpenAIParse(text) {
@@ -104,8 +120,9 @@ export async function tryOpenAIParse(text) {
   }
 
   const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-  const requestedTemperature = parseOptionalTemperature();
-  const shouldIncludeTemperature = requestedTemperature.value !== null && modelSupportsCustomTemperature(model);
+  const temp = parseOptionalTemperature();
+  const useTemp = temp.value !== null && modelSupportsTemperature(model);
+
   const payload = {
     model,
     response_format: { type: 'json_object' },
@@ -113,12 +130,9 @@ export async function tryOpenAIParse(text) {
       { role: 'system', content: buildPrompt() },
       { role: 'user', content: String(text || '') }
     ],
-    max_completion_tokens: 300
+    max_completion_tokens: 300,
+    ...(useTemp ? { temperature: temp.value } : {})
   };
-
-  if (shouldIncludeTemperature) {
-    payload.temperature = requestedTemperature.value;
-  }
 
   try {
     const response = await axios.post(
@@ -134,34 +148,28 @@ export async function tryOpenAIParse(text) {
     );
 
     const parsed = parseModelJson(extractTextFromChatCompletion(response.data));
-
     return {
-      used: true,
-      status: 'ok',
+      used: true, status: 'ok',
       intent: parsed.intent || null,
       parsedFields: parsed,
       model,
-      temperature_omitted: !shouldIncludeTemperature,
-      temperature_value: shouldIncludeTemperature ? requestedTemperature.value : null
+      temperature_omitted: !useTemp,
+      temperature_value: useTemp ? temp.value : null
     };
   } catch (error) {
     const summarized = summarizeOpenAIError(error);
-    const wrappedError = new Error(summarized);
-    wrappedError.name = error?.name || 'OpenAIError';
-    wrappedError.code = error?.code;
-    wrappedError.response = error?.response ? { status: error.response.status } : undefined;
-
+    const wrapped = new Error(summarized);
+    wrapped.name = error?.name || 'OpenAIError';
+    wrapped.code = error?.code;
+    wrapped.response = error?.response ? { status: error.response.status } : undefined;
     return {
-      used: true,
-      status: 'error',
-      intent: null,
-      parsedFields: {},
-      model,
-      temperature_omitted: !shouldIncludeTemperature,
-      temperature_value: shouldIncludeTemperature ? requestedTemperature.value : null,
-      error: wrappedError
+      used: true, status: 'error',
+      intent: null, parsedFields: {}, model,
+      temperature_omitted: !useTemp,
+      temperature_value: useTemp ? temp.value : null,
+      error: wrapped
     };
   }
 }
 
-export { extractTextFromChatCompletion, parseModelJson, summarizeOpenAIError, parseOptionalTemperature, modelSupportsCustomTemperature };
+export { extractTextFromChatCompletion, parseModelJson, summarizeOpenAIError, parseOptionalTemperature, modelSupportsTemperature };
