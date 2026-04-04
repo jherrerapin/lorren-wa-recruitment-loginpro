@@ -12,6 +12,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------------------------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------------------------
+
 /// Enumera los estados permitidos para cada candidato dentro del flujo operativo.
 enum CandidateStatus {
   /// Estado inicial cuando el candidato apenas entra al flujo.
@@ -40,6 +44,8 @@ enum ConversationStep {
   CONFIRMING_DATA
   /// Se pregunta opcionalmente por hoja de vida después de registrar.
   ASK_CV
+  /// Se está ofreciendo y agendando entrevista (solo cuando requiresInterview=true).
+  SCHEDULING_INTERVIEW
   /// Flujo completado — el candidato ya está registrado.
   DONE
 }
@@ -58,6 +64,8 @@ enum MessageType {
   TEXT
   /// Mensaje con documento adjunto.
   DOCUMENT
+  /// Mensaje de imagen.
+  IMAGE
   /// Mensaje interactivo.
   INTERACTIVE
   /// Mensaje no soportado por el flujo contingente.
@@ -78,92 +86,130 @@ enum ReminderState {
   SKIPPED
 }
 
+/// Enumera los estados posibles de una entrevista agendada.
+enum InterviewStatus {
+  /// Entrevista agendada, pendiente de confirmación.
+  SCHEDULED
+  /// Candidato confirmó asistencia vía WhatsApp.
+  CONFIRMED
+  /// Candidato canceló o indicó que no va a asistir.
+  CANCELLED
+  /// Candidato solicitó reprogramar.
+  RESCHEDULED
+  /// Candidato no se presentó (marcado manualmente por reclutador).
+  NO_SHOW
+  /// Candidato asistió a la entrevista (marcado manualmente).
+  ATTENDED
+}
+
+/// Respuesta del candidato al recordatorio 1h antes de la entrevista.
+enum ReminderResponse {
+  /// Candidato confirmó asistencia.
+  CONFIRMED
+  /// Candidato canceló.
+  CANCELLED
+  /// Candidato solicitó reprogramar.
+  RESCHEDULED
+  /// No hubo respuesta dentro de la ventana.
+  NO_RESPONSE
+}
+
+// ---------------------------------------------------------------------------
+// MODELOS PRINCIPALES
+// ---------------------------------------------------------------------------
+
 /// Modelo principal de candidato.
 model Candidate {
   /// Identificador único interno del candidato.
-  id                String            @id @default(cuid())
+  id                     String            @id @default(cuid())
   /// Número de teléfono del candidato, único por registro.
-  phone             String            @unique
+  phone                  String            @unique
   /// Nombre completo capturado por el bot.
-  fullName          String?
+  fullName               String?
   /// Tipo de documento del candidato (CC, TI, CE, pasaporte, etc.).
-  documentType      String?
+  documentType           String?
   /// Número de documento del candidato.
-  documentNumber    String?
+  documentNumber         String?
   /// Edad del candidato.
-  age               Int?
+  age                    Int?
   /// Ciudad del candidato.
-  city              String?
+  city                   String?
   /// Barrio del candidato en el flujo actual.
-  neighborhood      String?
+  neighborhood           String?
+  /// Localidad o municipio del candidato (aplica cuando la vacante tiene requiresLocality=true).
+  locality               String?
+  /// Resultado de la validación geográfica por IA: true=viable, false=no viable, null=no evaluado.
+  proximityOk            Boolean?
   /// Barrio o localidad del candidato (campo legado).
-  zone              String?
+  zone                   String?
   /// Indica si cuenta con experiencia en el cargo.
-  experienceInfo    String?
+  experienceInfo         String?
   /// Tiempo de experiencia reportado por el candidato.
-  experienceTime    String?
+  experienceTime         String?
   /// Restricciones médicas reportadas por el candidato.
-  medicalRestrictions String?
+  medicalRestrictions    String?
   /// Medio de transporte del candidato.
-  transportMode     String?
+  transportMode          String?
   /// Último motivo de rechazo aplicado al candidato.
-  rejectionReason   String?
+  rejectionReason        String?
   /// Detalles adicionales del rechazo para trazabilidad.
-  rejectionDetails  String?
+  rejectionDetails       String?
   /// Resumen de experiencia del candidato (campo legado, no se usa en el flujo actual).
-  experienceSummary String?
+  experienceSummary      String?
   /// Disponibilidad horaria del candidato (campo legado, no se usa en el flujo actual).
-  availability      String?
+  availability           String?
   /// Estado actual del candidato en el proceso.
-  status            CandidateStatus   @default(NUEVO)
+  status                 CandidateStatus   @default(NUEVO)
   /// Paso actual del flujo conversacional.
-  currentStep       ConversationStep  @default(MENU)
+  currentStep            ConversationStep  @default(MENU)
   /// Nombre original del archivo de hoja de vida (campo legado, no se usa en el flujo actual).
-  cvOriginalName    String?
+  cvOriginalName         String?
   /// Tipo MIME del archivo de hoja de vida (campo legado, no se usa en el flujo actual).
-  cvMimeType        String?
+  cvMimeType             String?
   /// Binario de la hoja de vida (campo legado, no se usa en el flujo actual).
-  cvData            Bytes?
+  cvData                 Bytes?
   /// Fecha de creación automática del registro.
-  createdAt         DateTime          @default(now())
+  createdAt              DateTime          @default(now())
   /// Fecha de actualización automática del registro.
-  updatedAt         DateTime          @updatedAt
+  updatedAt              DateTime          @updatedAt
   /// Fin de la ventana de silencio para consolidar mensajes de texto.
-  multilineWindowUntil DateTime?
+  multilineWindowUntil   DateTime?
   /// Versión incremental para controlar carreras del batching multilinea.
-  multilineBatchVersion Int          @default(0)
+  multilineBatchVersion  Int               @default(0)
   /// Fecha del último inbound recibido para control de ventana y recordatorios.
-  lastInboundAt     DateTime?
+  lastInboundAt          DateTime?
   /// Fecha del último outbound enviado para trazabilidad.
-  lastOutboundAt    DateTime?
-  /// Fecha del último recordatorio enviado.
-  lastReminderAt    DateTime?
-  /// Fecha objetivo para envío del recordatorio automático.
-  reminderScheduledFor DateTime?
+  lastOutboundAt         DateTime?
+  /// Fecha del último recordatorio de inactividad enviado.
+  lastReminderAt         DateTime?
+  /// Fecha objetivo para envío del recordatorio de inactividad.
+  reminderScheduledFor   DateTime?
   /// Estado del ciclo de recordatorio de inactividad.
-  reminderState     ReminderState    @default(NONE)
+  reminderState          ReminderState     @default(NONE)
   /// Permite pausar manualmente las respuestas automáticas del bot para este candidato.
-  botPaused         Boolean          @default(false)
+  botPaused              Boolean           @default(false)
   /// Fecha y hora en la que se aplicó la pausa manual.
-  botPausedAt       DateTime?
+  botPausedAt            DateTime?
   /// Usuario/rol que aplicó la pausa manual.
-  botPausedBy       String?
+  botPausedBy            String?
   /// Motivo opcional registrado para la pausa manual.
-  botPauseReason    String?
+  botPauseReason         String?
   /// Modo de reanudación aplicado por operación humana.
-  botResumeMode     String?
+  botResumeMode          String?
   /// Marca si existe potencial de duplicado documental con otro teléfono.
-  potentialDuplicate Boolean         @default(false)
+  potentialDuplicate     Boolean           @default(false)
   /// Referencia textual del candidato potencialmente duplicado.
   potentialDuplicateNote String?
   /// Fecha en que se detectó el potencial duplicado documental.
-  potentialDuplicateAt DateTime?
+  potentialDuplicateAt   DateTime?
   /// Relación uno a muchos con los mensajes del candidato.
-  messages          Message[]
+  messages               Message[]
   /// Vacante asociada al candidato dentro del flujo de conversación.
-  vacancyId         String?
+  vacancyId              String?
   /// Relación opcional con la vacante detectada/asignada para el candidato.
-  vacancy           Vacancy?          @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
+  vacancy                Vacancy?          @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
+  /// Entrevistas agendadas para este candidato.
+  interviews             Interview[]
 }
 
 /// Modelo de auditoría de mensajes.
@@ -196,41 +242,120 @@ model Message {
 /// Catálogo base de vacantes configurables para el flujo conversacional.
 model Vacancy {
   /// Identificador único interno de la vacante.
-  id                  String      @id @default(cuid())
+  id                   String          @id @default(cuid())
   /// Clave técnica única de vacante usada por detección y automatización.
-  key                 String      @unique
-  /// Título comercial de la vacante.
-  title               String
-  /// Ciudad asociada a la vacante.
-  city                String
+  key                  String          @unique
+  /// Título comercial de la vacante (ej. "Auxiliar de Cargue y Descargue").
+  title                String
+  /// Nombre del cargo específico (ej. "Auxiliar logístico").
+  cargo                String?
+  /// Ciudad principal de la operación.
+  city                 String
+  /// Dirección exacta del lugar de trabajo u operación.
+  operationAddress     String?
+  /// Zonas o localidades viables para candidatos (JSON array de strings).
+  /// Solo se usa cuando requiresLocality = true.
+  /// Ejemplo: ["Suba", "Engativá", "Funza", "Mosquera"]
+  operationZones       Json?
   /// Descripción general de la vacante.
-  description         String?
+  description          String?
   /// Perfil buscado para la vacante.
-  profile             String?
+  profile              String?
+  /// Salario o rango salarial de la vacante.
+  salary               String?
+  /// Horario de trabajo (ej. "Turnos rotativos 6am-2pm / 2pm-10pm").
+  schedule             String?
+  /// Tipo de contrato (ej. "Obra labor", "Término fijo", "Indefinido").
+  contractType         String?
   /// Mensaje de introducción que usa el bot en el saludo dinámico.
-  botIntroText        String?
+  botIntroText         String?
   /// Resumen corto de requisitos para respuesta inicial del bot.
-  requirementsSummary String?
+  requirementsSummary  String?
   /// Imagen publicitaria principal asociada a la vacante.
-  adImageData         Bytes?
+  adImageData          Bytes?
   /// Tipo MIME de la imagen publicitaria.
-  adImageMimeType     String?
+  adImageMimeType      String?
   /// Nombre original del archivo de imagen publicitaria.
-  adImageOriginalName String?
+  adImageOriginalName  String?
   /// Pistas textuales del anuncio para mejorar clasificación semántica.
-  adTextHints         String?
+  adTextHints          String?
   /// Alias semánticos para detección de cargo (JSON array o string simple).
-  aliases             Json?
+  aliases              Json?
   /// Configuración de screening reservada para evolución futura.
-  screeningConfig     Json?
+  screeningConfig      Json?
+  /// Switch: si true, el bot pedirá localidad/municipio al candidato y evaluará proximidad.
+  requiresLocality     Boolean         @default(false)
+  /// Switch: si true, el bot agendará entrevistas después de recolectar datos y HV.
+  /// Si false, el bot solo recibe datos y HV, y cierra con mensaje de "te contactaremos".
+  requiresInterview    Boolean         @default(false)
   /// Define si la vacante está activa para selección automática.
-  isActive            Boolean     @default(true)
+  isActive             Boolean         @default(true)
   /// Orden de despliegue en dashboard y fallback operativo.
-  displayOrder        Int         @default(0)
+  displayOrder         Int             @default(0)
   /// Fecha de creación automática.
-  createdAt           DateTime    @default(now())
+  createdAt            DateTime        @default(now())
   /// Fecha de actualización automática.
-  updatedAt           DateTime    @updatedAt
+  updatedAt            DateTime        @updatedAt
   /// Relación inversa de candidatos asociados a esta vacante.
-  candidates          Candidate[]
+  candidates           Candidate[]
+  /// Slots de entrevista configurados para esta vacante (solo cuando requiresInterview=true).
+  interviewSlots       InterviewSlot[]
+}
+
+// ---------------------------------------------------------------------------
+// MODELOS DE ENTREVISTAS
+// ---------------------------------------------------------------------------
+
+/// Bloque de tiempo disponible para entrevistas de una vacante.
+/// Configurado por el reclutador o dev desde el dashboard.
+model InterviewSlot {
+  /// Identificador único del slot.
+  id           String      @id @default(cuid())
+  /// Vacante a la que pertenece este slot.
+  vacancyId    String
+  vacancy      Vacancy     @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  /// Fecha y hora exacta del slot (ej. 2026-04-07T10:00:00).
+  /// Se usa fecha concreta, no día de semana, para mayor control operativo.
+  scheduledAt  DateTime
+  /// Capacidad máxima de candidatos para este slot.
+  maxCapacity  Int         @default(1)
+  /// Candidatos ya agendados en este slot (calculado vía relación).
+  interviews   Interview[]
+  /// Si el slot está disponible para agendamiento.
+  isActive     Boolean     @default(true)
+  /// Fecha de creación.
+  createdAt    DateTime    @default(now())
+
+  @@index([vacancyId, scheduledAt])
+}
+
+/// Entrevista agendada para un candidato en un slot específico.
+model Interview {
+  /// Identificador único de la entrevista.
+  id                 String           @id @default(cuid())
+  /// Candidato citado.
+  candidateId        String
+  candidate          Candidate        @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  /// Slot de entrevista asignado.
+  slotId             String
+  slot               InterviewSlot    @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  /// Estado actual de la entrevista.
+  status             InterviewStatus  @default(SCHEDULED)
+  /// Fecha y hora en que se confirmó o actualizó el estado.
+  statusUpdatedAt    DateTime?
+  /// Usuario o sistema que actualizó el estado.
+  statusUpdatedBy    String?
+  /// Fecha y hora en que se envió el recordatorio 1h antes.
+  reminderSentAt     DateTime?
+  /// Respuesta del candidato al recordatorio (si la hubo dentro de la ventana).
+  reminderResponse   ReminderResponse?
+  /// Notas internas del reclutador sobre esta entrevista.
+  notes              String?
+  /// Fecha de creación.
+  createdAt          DateTime         @default(now())
+  /// Fecha de actualización.
+  updatedAt          DateTime         @updatedAt
+
+  @@index([candidateId])
+  @@index([slotId])
 }
