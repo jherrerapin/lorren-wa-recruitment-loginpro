@@ -16,7 +16,11 @@
  * Este servicio solo persiste y formatea; no hace polling ni timers.
  */
 
-import { InterviewStatus, ReminderResponse, ConversationStep, CandidateStatus } from '@prisma/client';
+// Prisma con ESM: los enums solo están en el default export del módulo CJS.
+import pkg from '@prisma/client';
+const { InterviewStatus, ReminderResponse, ConversationStep, CandidateStatus } = pkg;
+
+export { CandidateStatus };
 
 // ---------------------------------------------------------------------------
 // Utilidades de formato
@@ -77,7 +81,6 @@ export async function getAvailableSlots(prisma, vacancyId, limit = 5) {
     }
   });
 
-  // Filtrar slots con cupo disponible
   return slots
     .filter((s) => s._count.interviews < s.maxCapacity)
     .map((s) => ({
@@ -113,7 +116,6 @@ export async function getActiveInterview(prisma, candidateId) {
  * Retorna { ok, interview, error }.
  */
 export async function bookInterview(prisma, candidateId, slotId) {
-  // Verificar que el slot existe y tiene cupo
   const slot = await prisma.interviewSlot.findUnique({
     where: { id: slotId },
     include: {
@@ -126,7 +128,6 @@ export async function bookInterview(prisma, candidateId, slotId) {
   if (slot._count.interviews >= slot.maxCapacity) return { ok: false, error: 'slot_full' };
   if (slot.scheduledAt <= new Date()) return { ok: false, error: 'slot_expired' };
 
-  // Cancelar entrevistas anteriores activas del candidato
   await prisma.interview.updateMany({
     where: {
       candidateId,
@@ -146,7 +147,6 @@ export async function bookInterview(prisma, candidateId, slotId) {
     include: { slot: true }
   });
 
-  // Avanzar el step del candidato a SCHEDULING_INTERVIEW
   await prisma.candidate.update({
     where: { id: candidateId },
     data: { currentStep: ConversationStep.SCHEDULING_INTERVIEW }
@@ -190,7 +190,6 @@ export async function cancelInterview(prisma, candidateId) {
     }
   });
 
-  // Regresar candidato a ASK_CV para ofrecerle otro slot
   await prisma.candidate.update({
     where: { id: candidateId },
     data: { currentStep: ConversationStep.ASK_CV }
@@ -201,7 +200,6 @@ export async function cancelInterview(prisma, candidateId) {
 
 /**
  * Marca la entrevista como RESCHEDULED.
- * El bot ofrecerá nuevos slots en el siguiente turno.
  */
 export async function rescheduleInterview(prisma, candidateId) {
   const active = await getActiveInterview(prisma, candidateId);
@@ -216,7 +214,6 @@ export async function rescheduleInterview(prisma, candidateId) {
     }
   });
 
-  // Volver a SCHEDULING_INTERVIEW para que la IA ofrezca otros slots
   await prisma.candidate.update({
     where: { id: candidateId },
     data: { currentStep: ConversationStep.SCHEDULING_INTERVIEW }
@@ -231,9 +228,9 @@ export async function rescheduleInterview(prisma, candidateId) {
 
 /**
  * Construye el mensaje de recordatorio de entrevista.
- * @param {string} candidateName  Nombre del candidato (o null)
- * @param {Date}   scheduledAt    Fecha/hora del slot
- * @param {string} address        Dirección del lugar de entrevista (o null)
+ * @param {string|null} candidateName  Nombre completo del candidato (o null)
+ * @param {Date}        scheduledAt    Fecha/hora del slot
+ * @param {string|null} address        Dirección del lugar de entrevista (o null)
  */
 export function buildReminderMessage(candidateName, scheduledAt, address = null) {
   const nombre = candidateName ? `, ${candidateName.split(' ')[0]}` : '';
@@ -254,19 +251,15 @@ export async function markReminderSent(prisma, interviewId) {
 
 /**
  * Procesa la respuesta del candidato al recordatorio de entrevista.
- * Detecta afirmación, negación o reprogramación.
- * Retorna { action: 'confirmed' | 'cancelled' | 'rescheduled' | 'unknown', interview }
  */
 export async function processReminderResponse(prisma, candidateId, text) {
   const n = String(text || '').trim().toLowerCase();
   const active = await getActiveInterview(prisma, candidateId);
   if (!active) return { action: 'unknown', interview: null };
-
-  // Solo procesar si se envió recordatorio
   if (!active.reminderSentAt) return { action: 'unknown', interview: active };
 
-  const isConfirm   = /^(s[ií]|claro|listo|ok|confirmo|voy|ah[ií] estoy|de acuerdo|dale)/.test(n);
-  const isCancel    = /^(no|nop|negativo|no puedo|no voy|no asisto|cancelo)/.test(n);
+  const isConfirm    = /^(s[ií]|claro|listo|ok|confirmo|voy|ah[ií] estoy|de acuerdo|dale)/.test(n);
+  const isCancel     = /^(no|nop|negativo|no puedo|no voy|no asisto|cancelo)/.test(n);
   const isReschedule = /(reprogramar|cambiar|otro d[ií]a|otra hora|no puedo hoy|imposible hoy)/.test(n);
 
   if (isConfirm) {
@@ -297,7 +290,6 @@ export async function processReminderResponse(prisma, candidateId, text) {
     return { action: 'cancelled', interview: active };
   }
 
-  // Respuesta ambigua — registrar sin cambiar estado
   await prisma.interview.update({
     where: { id: active.id },
     data: { reminderResponse: ReminderResponse.NO_RESPONSE }
@@ -313,16 +305,13 @@ export async function processReminderResponse(prisma, candidateId, text) {
  * Busca entrevistas que deben recibir recordatorio en la próxima ventana.
  * Criterios: status SCHEDULED/CONFIRMED, scheduledAt entre ahora+50min y ahora+70min,
  * reminderSentAt IS NULL.
- *
- * @param {object} prisma
- * @returns {Promise<Array>} Lista de entrevistas con candidato y slot incluidos.
  */
 export async function findInterviewsDueForReminder(prisma) {
   if (typeof prisma.interview?.findMany !== 'function') return [];
 
   const now = new Date();
-  const windowStart = new Date(now.getTime() + 50 * 60 * 1000);  // +50 min
-  const windowEnd   = new Date(now.getTime() + 70 * 60 * 1000);  // +70 min
+  const windowStart = new Date(now.getTime() + 50 * 60 * 1000);
+  const windowEnd   = new Date(now.getTime() + 70 * 60 * 1000);
 
   return prisma.interview.findMany({
     where: {

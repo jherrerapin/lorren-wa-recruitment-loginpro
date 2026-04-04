@@ -19,9 +19,9 @@ import { findInterviewsDueForReminder, buildReminderMessage } from './interviewF
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 
-const INACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;        // 24h sin actividad
-const REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000;         // 6h entre recordatorios
-const WHATSAPP_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;  // ventana de 24h de WhatsApp
+const INACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const WHATSAPP_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const INACTIVITY_STEPS_ELIGIBLE = new Set([
   'COLLECTING_DATA',
@@ -29,35 +29,23 @@ const INACTIVITY_STEPS_ELIGIBLE = new Set([
   'ASK_CV'
 ]);
 
-// TTL del lock: 55s (< intervalo del setInterval de 60s para evitar starvation)
 const LOCK_TTL_MS = 55_000;
 const LOCK_KEY_INACTIVITY = 'loginpro:lock:reminder:inactivity';
 const LOCK_KEY_INTERVIEW  = 'loginpro:lock:reminder:interview';
 
 // ─── LOCK DISTRIBUIDO ────────────────────────────────────────────────────────
 
-/**
- * Intenta adquirir un lock Redis exclusivo.
- * @param {import('ioredis').Redis|null} redisClient
- * @param {string} key
- * @returns {Promise<boolean>} true si se obtuvo el lock
- */
 async function acquireLock(redisClient, key) {
-  if (!redisClient || redisClient.status !== 'ready') return true; // sin Redis, siempre ejecutar
+  if (!redisClient || redisClient.status !== 'ready') return true;
   try {
     const result = await redisClient.set(key, '1', 'NX', 'PX', LOCK_TTL_MS);
     return result === 'OK';
   } catch (err) {
     console.warn(`[LOCK_WARN] No se pudo verificar lock ${key}:`, err.message);
-    return true; // en caso de error Redis, ejecutar igualmente
+    return true;
   }
 }
 
-/**
- * Libera el lock Redis.
- * @param {import('ioredis').Redis|null} redisClient
- * @param {string} key
- */
 async function releaseLock(redisClient, key) {
   if (!redisClient || redisClient.status !== 'ready') return;
   try {
@@ -133,7 +121,12 @@ async function dispatchInterviewReminders(prisma) {
 
   for (const interview of dueInterviews) {
     try {
-      const message = buildReminderMessage(interview);
+      // buildReminderMessage(candidateName, scheduledAt, address?)
+      const message = buildReminderMessage(
+        interview.candidate.fullName,
+        interview.slot.scheduledAt,
+        interview.slot.vacancy?.operationAddress ?? null
+      );
       await sendTextMessage(interview.candidate.phone, message);
 
       await prisma.interview.update({
@@ -150,17 +143,9 @@ async function dispatchInterviewReminders(prisma) {
 
 // ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
-/**
- * Punto de entrada del dispatcher.
- * Recibe opciones con el cliente Redis para el lock distribuido.
- *
- * @param {import('@prisma/client').PrismaClient} prisma
- * @param {{ redisClient?: import('ioredis').Redis|null }} [opts]
- */
 export async function runReminderDispatcher(prisma, opts = {}) {
   const { redisClient = null } = opts;
 
-  // ── Job 1: recordatorios de inactividad ──
   const gotInactivityLock = await acquireLock(redisClient, LOCK_KEY_INACTIVITY);
   if (gotInactivityLock) {
     try {
@@ -172,7 +157,6 @@ export async function runReminderDispatcher(prisma, opts = {}) {
     console.log('[REMINDER_SKIP] Inactividad: otro pod tiene el lock.');
   }
 
-  // ── Job 2: recordatorios de entrevistas ──
   const gotInterviewLock = await acquireLock(redisClient, LOCK_KEY_INTERVIEW);
   if (gotInterviewLock) {
     try {
