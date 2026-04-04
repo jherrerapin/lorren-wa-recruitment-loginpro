@@ -1,28 +1,40 @@
 -- Migration: 20260404220000_vacancy_interview_scheduling
--- Adds: Gender enum, ExperienceRequirement enum, BookingStatus enum,
---       ConversationStep new values (SCHEDULING, SCHEDULED),
---       Vacancy model, InterviewSlot model, InterviewBooking model,
---       New columns in Candidate (vacancyId, gender, locality, zoneViable, interviewNotes)
+-- Idempotente: usa IF NOT EXISTS y bloques DO para todos los objetos.
 
 -- ─────────────────────────────────────────────
--- 1. Nuevos ENUMs
+-- 1. ENUMs (solo crea si no existen)
 -- ─────────────────────────────────────────────
 
-CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE', 'OTHER', 'UNKNOWN');
+DO $$ BEGIN
+  CREATE TYPE "Gender" AS ENUM ('MALE', 'FEMALE', 'OTHER', 'UNKNOWN');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE "ExperienceRequirement" AS ENUM ('YES', 'NO', 'INDIFFERENT');
+DO $$ BEGIN
+  CREATE TYPE "ExperienceRequirement" AS ENUM ('YES', 'NO', 'INDIFFERENT');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE "BookingStatus" AS ENUM ('SCHEDULED', 'CONFIRMED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED');
+DO $$ BEGIN
+  CREATE TYPE "BookingStatus" AS ENUM ('SCHEDULED', 'CONFIRMED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Agrega nuevos valores al enum ConversationStep
-ALTER TYPE "ConversationStep" ADD VALUE IF NOT EXISTS 'SCHEDULING';
-ALTER TYPE "ConversationStep" ADD VALUE IF NOT EXISTS 'SCHEDULED';
+DO $$ BEGIN
+  ALTER TYPE "ConversationStep" ADD VALUE IF NOT EXISTS 'SCHEDULING';
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TYPE "ConversationStep" ADD VALUE IF NOT EXISTS 'SCHEDULED';
+EXCEPTION WHEN others THEN NULL;
+END $$;
 
 -- ─────────────────────────────────────────────
 -- 2. Tabla Vacancy
 -- ─────────────────────────────────────────────
 
-CREATE TABLE "Vacancy" (
+CREATE TABLE IF NOT EXISTS "Vacancy" (
     "id"                    TEXT NOT NULL,
     "title"                 TEXT NOT NULL,
     "role"                  TEXT NOT NULL,
@@ -44,8 +56,7 @@ CREATE TABLE "Vacancy" (
     "schedulingEnabled"     BOOLEAN NOT NULL DEFAULT false,
     "acceptingApplications" BOOLEAN NOT NULL DEFAULT true,
     "createdAt"             TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt"             TIMESTAMP(3) NOT NULL,
-
+    "updatedAt"             TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Vacancy_pkey" PRIMARY KEY ("id")
 );
 
@@ -53,7 +64,7 @@ CREATE TABLE "Vacancy" (
 -- 3. Tabla InterviewSlot
 -- ─────────────────────────────────────────────
 
-CREATE TABLE "InterviewSlot" (
+CREATE TABLE IF NOT EXISTS "InterviewSlot" (
     "id"                  TEXT NOT NULL,
     "vacancyId"           TEXT NOT NULL,
     "dayOfWeek"           INTEGER,
@@ -64,7 +75,6 @@ CREATE TABLE "InterviewSlot" (
     "maxCandidates"       INTEGER NOT NULL DEFAULT 10,
     "isActive"            BOOLEAN NOT NULL DEFAULT true,
     "createdAt"           TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
     CONSTRAINT "InterviewSlot_pkey" PRIMARY KEY ("id")
 );
 
@@ -72,7 +82,7 @@ CREATE TABLE "InterviewSlot" (
 -- 4. Tabla InterviewBooking
 -- ─────────────────────────────────────────────
 
-CREATE TABLE "InterviewBooking" (
+CREATE TABLE IF NOT EXISTS "InterviewBooking" (
     "id"                   TEXT NOT NULL,
     "candidateId"          TEXT NOT NULL,
     "vacancyId"            TEXT NOT NULL,
@@ -84,8 +94,7 @@ CREATE TABLE "InterviewBooking" (
     "reminderResponse"     TEXT,
     "notes"                TEXT,
     "createdAt"            TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt"            TIMESTAMP(3) NOT NULL,
-
+    "updatedAt"            TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "InterviewBooking_pkey" PRIMARY KEY ("id")
 );
 
@@ -94,37 +103,52 @@ CREATE TABLE "InterviewBooking" (
 -- ─────────────────────────────────────────────
 
 ALTER TABLE "Candidate"
-    ADD COLUMN IF NOT EXISTS "vacancyId"       TEXT,
-    ADD COLUMN IF NOT EXISTS "gender"          "Gender" NOT NULL DEFAULT 'UNKNOWN',
-    ADD COLUMN IF NOT EXISTS "locality"        TEXT,
-    ADD COLUMN IF NOT EXISTS "zoneViable"      BOOLEAN,
-    ADD COLUMN IF NOT EXISTS "interviewNotes"  TEXT;
+    ADD COLUMN IF NOT EXISTS "vacancyId"      TEXT,
+    ADD COLUMN IF NOT EXISTS "gender"         "Gender" NOT NULL DEFAULT 'UNKNOWN',
+    ADD COLUMN IF NOT EXISTS "locality"       TEXT,
+    ADD COLUMN IF NOT EXISTS "zoneViable"     BOOLEAN,
+    ADD COLUMN IF NOT EXISTS "interviewNotes" TEXT;
 
 -- ─────────────────────────────────────────────
--- 6. Foreign keys
+-- 6. Foreign keys (solo si no existen)
 -- ─────────────────────────────────────────────
 
-ALTER TABLE "Candidate"
+DO $$ BEGIN
+  ALTER TABLE "Candidate"
     ADD CONSTRAINT "Candidate_vacancyId_fkey"
-        FOREIGN KEY ("vacancyId") REFERENCES "Vacancy"("id")
-        ON DELETE SET NULL ON UPDATE CASCADE;
+    FOREIGN KEY ("vacancyId") REFERENCES "Vacancy"("id")
+    ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "InterviewSlot"
+DO $$ BEGIN
+  ALTER TABLE "InterviewSlot"
     ADD CONSTRAINT "InterviewSlot_vacancyId_fkey"
-        FOREIGN KEY ("vacancyId") REFERENCES "Vacancy"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+    FOREIGN KEY ("vacancyId") REFERENCES "Vacancy"("id")
+    ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "InterviewBooking"
+DO $$ BEGIN
+  ALTER TABLE "InterviewBooking"
     ADD CONSTRAINT "InterviewBooking_candidateId_fkey"
-        FOREIGN KEY ("candidateId") REFERENCES "Candidate"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+    FOREIGN KEY ("candidateId") REFERENCES "Candidate"("id")
+    ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "InterviewBooking"
+DO $$ BEGIN
+  ALTER TABLE "InterviewBooking"
     ADD CONSTRAINT "InterviewBooking_vacancyId_fkey"
-        FOREIGN KEY ("vacancyId") REFERENCES "Vacancy"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+    FOREIGN KEY ("vacancyId") REFERENCES "Vacancy"("id")
+    ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "InterviewBooking"
+DO $$ BEGIN
+  ALTER TABLE "InterviewBooking"
     ADD CONSTRAINT "InterviewBooking_slotId_fkey"
-        FOREIGN KEY ("slotId") REFERENCES "InterviewSlot"("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE;
+    FOREIGN KEY ("slotId") REFERENCES "InterviewSlot"("id")
+    ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
