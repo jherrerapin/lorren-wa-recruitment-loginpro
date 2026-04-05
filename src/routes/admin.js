@@ -4,7 +4,14 @@ import ExcelJS from 'exceljs';
 import path from 'node:path';
 import multer from 'multer';
 import { normalizeCandidateFields } from '../services/candidateData.js';
-import { candidateHasCv, exportFilenameByScope, filterCandidatesByScope, normalizeCandidateStatusForUI } from '../services/candidateExport.js';
+import {
+  candidateHasCv,
+  exportFilenameByScope,
+  filterCandidatesByScope,
+  isOperationallyCompleteWithoutCv,
+  isOperationallyRegistered,
+  normalizeCandidateStatusForUI
+} from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
 import { MessageDirection, MessageType } from '@prisma/client';
 import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
@@ -73,6 +80,27 @@ function isValidDateString(str) {
   return typeof str === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(str);
 }
 
+function isFemaleHumanReviewCandidate(candidate) {
+  if (!candidate || candidate.gender !== 'FEMALE' || !candidate.botPaused) return false;
+  return /revision humana|revisión humana|candidata femenina/i.test(candidate.botPauseReason || '');
+}
+
+function safeAdminReturnPath(value) {
+  const raw = String(value || '').trim();
+  return raw.startsWith('/admin') ? raw : '/admin';
+}
+
+function withFlashMessage(returnTo, type, message) {
+  const safePath = safeAdminReturnPath(returnTo);
+  const [pathname, queryString = ''] = safePath.split('?');
+  const params = new URLSearchParams(queryString);
+  params.delete('success');
+  params.delete('error');
+  params.set(type, message);
+  const suffix = params.toString();
+  return suffix ? `${pathname}?${suffix}` : pathname;
+}
+
 const STATUS_LABELS = {
   'NUEVO': 'Nuevo', 'REGISTRADO': 'Registrado', 'VALIDANDO': 'Registrado',
   'APROBADO': 'Registrado', 'RECHAZADO': 'Rechazado', 'CONTACTADO': 'Contactado'
@@ -84,6 +112,14 @@ const EXPORT_SCOPES = new Set(['registered', 'missing_cv_complete', 'new', 'cont
 const STATUS_SCOPE_SUMMARY_LABELS = {
   registered: 'registrados', new: 'nuevos', contacted: 'contactados',
   rejected: 'rechazados', all: 'totales'
+};
+const ACTIVE_BOOKING_STATUSES = ['SCHEDULED', 'CONFIRMED', 'RESCHEDULED'];
+const ALL_BOOKING_STATUSES = ['SCHEDULED', 'CONFIRMED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED'];
+const BOOKING_ACTION_STATUS = {
+  attended: 'CONFIRMED',
+  no_show: 'NO_SHOW',
+  cancelled: 'CANCELLED',
+  rescheduled: 'RESCHEDULED'
 };
 
 const ALLOWED_CV_MIMES = new Set([
@@ -150,13 +186,25 @@ async function buildDashboardData(prisma, dateStr) {
   const { start, end } = colombiaDayBounds(dateStr);
 
   const vacancies = await prisma.vacancy.findMany({
-    where: { acceptingApplications: true },
+    where: {
+      OR: [
+        { acceptingApplications: true },
+        {
+          interviewBookings: {
+            some: {
+              scheduledAt: { gte: start, lte: end },
+              status: { in: ALL_BOOKING_STATUSES }
+            }
+          }
+        }
+      ]
+    },
     orderBy: [{ city: 'asc' }, { title: 'asc' }],
     include: {
       interviewBookings: {
         where: {
           scheduledAt: { gte: start, lte: end },
-          status: { in: ['SCHEDULED', 'CONFIRMED', 'RESCHEDULED'] }
+          status: { in: ALL_BOOKING_STATUSES }
         },
         include: {
           candidate: {
@@ -164,7 +212,9 @@ async function buildDashboardData(prisma, dateStr) {
               id: true, fullName: true, phone: true,
               documentType: true, documentNumber: true,
               age: true, neighborhood: true, status: true,
-              cvData: true, gender: true
+              cvData: true, gender: true,
+              botPaused: true, botPauseReason: true,
+              currentStep: true
             }
           }
         },
@@ -177,9 +227,12 @@ async function buildDashboardData(prisma, dateStr) {
           id: true, fullName: true, phone: true,
           documentType: true, documentNumber: true,
           age: true, neighborhood: true, status: true,
-          cvData: true, gender: true, createdAt: true,
+          cvData: true, cvOriginalName: true, cvMimeType: true,
+          gender: true, createdAt: true,
+          botPaused: true, botPauseReason: true,
+          currentStep: true,
           interviewBookings: {
-            where: { status: { in: ['SCHEDULED', 'CONFIRMED', 'RESCHEDULED'] } },
+            where: { status: { in: ACTIVE_BOOKING_STATUSES } },
             select: { id: true }
           }
         }
@@ -198,39 +251,59 @@ async function buildDashboardData(prisma, dateStr) {
       id: true, fullName: true, phone: true,
       documentType: true, documentNumber: true,
       age: true, neighborhood: true, status: true,
-      cvData: true, createdAt: true
+      cvData: true, createdAt: true,
+      gender: true, botPaused: true, botPauseReason: true,
+      currentStep: true
     }
   });
 
   const citiesMap = new Map();
-  const ATTENDED_STATUSES = new Set(['RECHAZADO', 'CONTACTADO']);
 
   for (const v of vacancies) {
     const city = v.city || 'Sin ciudad';
     if (!citiesMap.has(city)) citiesMap.set(city, []);
 
-    const bookedCandidateIds = new Set(v.candidates
-      .filter(c => c.interviewBookings.length > 0)
-      .map(c => c.id));
+    const candidatesWithFlags = v.candidates.map((candidate) => ({
+      ...candidate,
+      isFemaleHumanReview: isFemaleHumanReviewCandidate(candidate)
+    }));
+    const bookedCandidateIds = new Set(candidatesWithFlags
+      .filter((candidate) => candidate.interviewBookings.length > 0)
+      .map((candidate) => candidate.id));
+    const operationallyRegisteredCandidates = candidatesWithFlags
+      .filter((candidate) => isOperationallyRegistered(candidate));
+    const operationallyCompleteWithoutCvCandidates = candidatesWithFlags
+      .filter((candidate) => isOperationallyCompleteWithoutCv(candidate));
 
     const enriched = {
       ...v,
       bookingsToday: v.interviewBookings.map(b => ({
         ...b,
         formattedTime: formatTimeCO(b.scheduledAt),
-        formattedDateTime: formatDateTimeCO(b.scheduledAt)
+        formattedDateTime: formatDateTimeCO(b.scheduledAt),
+        isFemaleHumanReview: isFemaleHumanReviewCandidate(b.candidate)
       })),
       registeredNoBooking: v.schedulingEnabled
-        ? v.candidates.filter(c => !bookedCandidateIds.has(c.id) && !ATTENDED_STATUSES.has(c.status))
+        ? operationallyRegisteredCandidates
+          .filter((candidate) => !bookedCandidateIds.has(candidate.id))
         : [],
-      cvOnlyPipeline: !v.schedulingEnabled ? v.candidates : []
+      registeredComplete: !v.schedulingEnabled
+        ? operationallyRegisteredCandidates
+        : [],
+      completeWithoutCv: operationallyCompleteWithoutCvCandidates
     };
 
     citiesMap.get(city).push(enriched);
   }
 
   const cities = Array.from(citiesMap.entries()).map(([name, vacs]) => ({ name, vacancies: vacs }));
-  return { cities, legacyCandidates };
+  return {
+    cities,
+    legacyCandidates: legacyCandidates.map((candidate) => ({
+      ...candidate,
+      isFemaleHumanReview: isFemaleHumanReviewCandidate(candidate)
+    }))
+  };
 }
 
 function parseVacancyBody(body) {
@@ -358,7 +431,17 @@ async function fetchMonitorMessages(prisma) {
   return prisma.message.findMany({
     orderBy: { createdAt: 'desc' },
     take: 100,
-    include: { candidate: { select: { phone: true, currentStep: true } } }
+    include: {
+      candidate: {
+        select: {
+          phone: true,
+          currentStep: true,
+          gender: true,
+          botPaused: true,
+          botPauseReason: true
+        }
+      }
+    }
   });
 }
 
@@ -382,7 +465,10 @@ export function adminRouter(prisma) {
         activeStatusScope: requestedStatus,
         summaryLabel: STATUS_SCOPE_SUMMARY_LABELS[requestedStatus] || STATUS_SCOPE_SUMMARY_LABELS.all,
         normalizeCandidateStatusForUI, cities: [], legacyCandidates: [],
-        activeCity: null, selectedDate: todayCO(), todayStr: todayCO()
+        activeCity: null, selectedDate: todayCO(), todayStr: todayCO(),
+        successMsg: normalizeString(req.query.success),
+        errorMsg: normalizeString(req.query.error),
+        isFemaleHumanReviewCandidate
       });
     }
 
@@ -398,7 +484,10 @@ export function adminRouter(prisma) {
     return res.render('list', {
       mode: 'vacancies', cities, legacyCandidates, activeCity, selectedDate,
       todayStr: todayCO(), formatDateTimeCO, formatTimeCO, role: req.userRole,
-      normalizeCandidateStatusForUI, candidates: [], activeStatusScope: null, summaryLabel: ''
+      normalizeCandidateStatusForUI, candidates: [], activeStatusScope: null, summaryLabel: '',
+      successMsg: normalizeString(req.query.success),
+      errorMsg: normalizeString(req.query.error),
+      isFemaleHumanReviewCandidate
     });
   });
 
@@ -406,7 +495,7 @@ export function adminRouter(prisma) {
   router.get('/monitor', ensureDevRole, async (req, res) => {
     try {
       const messages = await fetchMonitorMessages(prisma);
-      res.render('monitor', { messages, formatDateTimeCO, role: req.userRole });
+      res.render('monitor', { messages, formatDateTimeCO, role: req.userRole, isFemaleHumanReviewCandidate });
     } catch (err) {
       console.error('[monitor]', err);
       res.status(500).json({ error: 'internal_server_error' });
@@ -419,6 +508,8 @@ export function adminRouter(prisma) {
       const payload = messages.map(m => ({
         id: m.id, direction: m.direction, body: m.body, timestamp: m.createdAt,
         phone: m.candidate?.phone || '', currentStep: m.candidate?.currentStep || '',
+        gender: m.candidate?.gender || '',
+        isFemaleHumanReview: isFemaleHumanReviewCandidate(m.candidate),
         debugTrace: m.rawPayload?.debugTrace || null
       }));
       res.json(payload);
@@ -492,7 +583,15 @@ export function adminRouter(prisma) {
   router.get('/candidates/:id', async (req, res) => {
     const candidate = await prisma.candidate.findUnique({
       where: { id: req.params.id },
-      include: { messages: { orderBy: { createdAt: 'asc' } } }
+      include: {
+        messages: { orderBy: { createdAt: 'asc' } },
+        interviewBookings: {
+          orderBy: { scheduledAt: 'desc' },
+          include: {
+            vacancy: { select: { id: true, title: true, role: true, city: true } }
+          }
+        }
+      }
     });
     if (!candidate) return res.status(404).send('Candidato no encontrado.');
 
@@ -510,13 +609,42 @@ export function adminRouter(prisma) {
     const outboundError   = normalizeString(req.query.outboundError);
     const botPauseSuccess = normalizeString(req.query.botPauseSuccess);
     const botPauseError   = normalizeString(req.query.botPauseError);
+    const bookingSuccess  = normalizeString(req.query.bookingSuccess || req.query.success);
+    const bookingError    = normalizeString(req.query.bookingError || req.query.error);
 
     res.render('detail', {
       candidate, role: req.userRole, formatDateTimeCO,
       normalizeCandidateStatusForUI, cvSizeBytes,
       outboundWindow, cvSuccess, cvError,
-      outboundSuccess, outboundError, botPauseSuccess, botPauseError
+      outboundSuccess, outboundError, botPauseSuccess, botPauseError,
+      bookingSuccess, bookingError, isFemaleHumanReviewCandidate
     });
+  });
+
+  router.post('/interviews/:id/status', express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const action = normalizeString(req.body.action);
+    const nextStatus = action ? BOOKING_ACTION_STATUS[action] : null;
+    const returnTo = safeAdminReturnPath(req.body.returnTo || req.get('referer') || '/admin');
+
+    if (!nextStatus) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Acción de entrevista inválida.'));
+    }
+
+    const booking = await prisma.interviewBooking.findUnique({
+      where: { id },
+      select: { id: true }
+    });
+    if (!booking) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Entrevista no encontrada.'));
+    }
+
+    await prisma.interviewBooking.update({
+      where: { id },
+      data: { status: nextStatus }
+    });
+
+    return res.redirect(withFlashMessage(returnTo, 'success', 'Entrevista actualizada correctamente.'));
   });
 
   // ── Cambiar estado ───────────────────────────────────────────
