@@ -1,3 +1,7 @@
 export function buildTechnicalOutboundCandidateUpdate(now = new Date()) {
-  return { lastOutboundAt: now };
+  return {
+    lastOutboundAt: now,
+    reminderScheduledFor: null,
+    reminderState: 'CANCELLED'
+  };
 }

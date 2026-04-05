@@ -22,6 +22,7 @@
  */
 
 import axios from 'axios';
+import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
@@ -331,17 +332,21 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
   }
 
   try {
+    const model = DEFAULT_MODEL;
+    const temp = parseOptionalTemperature();
+    const useTemp = temp.value !== null && modelSupportsTemperature(model);
+
     const response = await axios.post(
       OPENAI_URL,
       {
-        model: DEFAULT_MODEL,
+        model,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep }) },
           { role: 'user', content: String(inboundText || '') }
         ],
         max_completion_tokens: 600,
-        temperature: 0.78
+        ...(useTemp ? { temperature: temp.value } : {})
       },
       {
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
@@ -459,7 +464,11 @@ export async function act({ actions, candidate, nextStep, nextSlot, prisma }) {
         case 'mark_no_interest': {
           await prisma.candidate.update({
             where: { id: candidate.id },
-            data:  { currentStep: ConversationStep.DONE }
+            data:  {
+              currentStep: ConversationStep.DONE,
+              reminderScheduledFor: null,
+              reminderState: 'SKIPPED'
+            }
           });
           break;
         }
