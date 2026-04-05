@@ -10,9 +10,15 @@
  *   2. act()    — El sistema ejecuta las acciones (Prisma, scheduler). Sin lógica de negocio.
  *
  * Flujo por género:
- *   MALE    → flujo completo: datos → CV → agendamiento de entrevista
- *   FEMALE  → flujo alternativo: datos → CV → cierre amable → cola revisión humana
+ *   MALE    → flujo completo: datos → CV → agendamiento de entrevista (si schedulingEnabled)
+ *   FEMALE  → flujo alternativo: datos → CV → cierre formal → cola revisión humana
  *   UNKNOWN → OpenAI pregunta el género de forma natural durante la recolección de datos
+ *
+ * Modos de operación según configuración de la vacante:
+ *   acceptingApplications=true  + schedulingEnabled=false → Solo postulación:
+ *     recolecta datos + CV, cierra con mensaje formal de "quedaste en proceso".
+ *   acceptingApplications=true  + schedulingEnabled=true  → Postulación + entrevista:
+ *     recolecta datos + CV y luego agenda entrevista (excepto FEMALE).
  */
 
 import axios from 'axios';
@@ -63,16 +69,21 @@ function buildCandidateContext(candidate) {
 
 function buildVacancyContext(vacancy) {
   if (!vacancy) return 'Vacante: no identificada aún.';
+
+  const schedulingLine = vacancy.schedulingEnabled
+    ? 'Agendamiento de entrevistas: habilitado'
+    : 'Agendamiento de entrevistas: no aplica para esta vacante (solo postulación)';
+
   return [
     `Vacante: ${vacancy.title || vacancy.role}`,
     `Cargo: ${vacancy.role}`,
     `Ciudad: ${vacancy.city}`,
-    vacancy.operationAddress  && `Dirección: ${vacancy.operationAddress}`,
+    vacancy.operationAddress  && `Dirección de operación: ${vacancy.operationAddress}`,
     `Requisitos: ${vacancy.requirements}`,
     `Condiciones: ${vacancy.conditions}`,
     vacancy.requiredDocuments && `Documentación para entrevista: ${vacancy.requiredDocuments}`,
     vacancy.roleDescription   && `Descripción del cargo: ${vacancy.roleDescription}`,
-    vacancy.schedulingEnabled ? 'Agendamiento de entrevistas: habilitado' : 'Agendamiento: no aplica'
+    schedulingLine
   ].filter(Boolean).join('\n');
 }
 
@@ -96,13 +107,16 @@ function buildNextSlotContext(nextSlot) {
 // ─────────────────────────────────────────────
 
 /**
- * Retorna la instrucción de flujo según el género detectado.
+ * Retorna la instrucción de flujo según el género detectado y la configuración de la vacante.
+ *
  * UNKNOWN → OpenAI pregunta de forma natural.
- * FEMALE  → recolectar todo + CV, pero NO agendar, cerrar con cola humana.
- * MALE    → flujo completo incluyendo agendamiento si schedulingEnabled.
+ * FEMALE  → recolectar todo + CV, pero NO agendar, cerrar con mensaje formal.
+ * MALE/OTHER + schedulingEnabled=true  → flujo completo con agendamiento.
+ * MALE/OTHER + schedulingEnabled=false → solo postulación, cierre formal.
  */
 function buildGenderFlowInstruction(candidate, vacancy) {
   const gender = candidate.gender ?? 'UNKNOWN';
+  const schedulingEnabled = vacancy?.schedulingEnabled ?? false;
 
   if (gender === 'UNKNOWN') {
     return `GÉNERO: No determinado aún.
@@ -116,19 +130,35 @@ Extráelo en extractedFields como "gender": "MALE" | "FEMALE" | "OTHER".`;
   if (gender === 'FEMALE') {
     return `GÉNERO: Femenino (detectado).
 FLUJO ESPECIAL — CANDIDATA FEMENINA:
-- Continúa recolectando todos los datos normalmente (nombre, documento, edad, barrio, etc.).
+- Continúa recolectando todos los datos normalmente.
 - Solicita la hoja de vida igual que con cualquier candidato.
-- NO ofrezcas ni menciones agendamiento de entrevista. No uses la acción offer_interview ni confirm_booking.
+- NO ofrezcas ni menciones agendamiento de entrevista bajo ninguna circunstancia.
 - Cuando ya tengas todos los datos y la hoja de vida, usa la acción "mark_female_pipeline"
-  y cierra la conversación de forma amable con un mensaje como:
-  "Listo [nombre], tus datos quedaron registrados. Un reclutador del equipo va a revisar
-  tu hoja de vida y se comunicará contigo pronto. ¡Muchas gracias por tu interés!"
-- Ese mensaje debe sonar natural y cálido, no como un rechazo.`;
+  y cierra con un mensaje formal y cálido, por ejemplo:
+  "Listo [nombre], tus datos y hoja de vida quedaron registrados. Un integrante del equipo
+  de selección revisará tu perfil y se comunicará contigo próximamente. ¡Muchas gracias
+  por tu interés en LoginPro!"
+- El mensaje debe sonar genuino, no como un rechazo.`;
   }
 
-  // MALE u OTHER → flujo normal
+  // MALE u OTHER
+  if (!schedulingEnabled) {
+    return `GÉNERO: ${gender === 'MALE' ? 'Masculino' : 'Otro'} (detectado).
+FLUJO SOLO POSTULACIÓN (schedulingEnabled=false):
+- Recolecta todos los datos del candidato normalmente.
+- Solicita la hoja de vida.
+- Una vez tengas datos + HV completos, cierra con un mensaje formal y cálido, por ejemplo:
+  "Listo [nombre], tu hoja de vida y datos quedaron registrados. El equipo de selección
+  va a revisar tu perfil y si hay una coincidencia, te contactarán directamente.
+  ¡Muchas gracias por postularte!"
+- NO ofrezcas ni menciones agendamiento de entrevista. No uses offer_interview ni confirm_booking.
+- Usa la acción "nothing" al cerrar; el paso nextStep debe ser "DONE".`;
+  }
+
   return `GÉNERO: ${gender === 'MALE' ? 'Masculino' : 'Otro'} (detectado).
-FLUJO NORMAL: recolecta todos los datos, solicita CV, y si schedulingEnabled ofrece entrevista.`;
+FLUJO COMPLETO (postulación + entrevista):
+- Recolecta todos los datos, solicita CV.
+- Una vez completos, ofrece el horario de entrevista disponible usando offer_interview.`;
 }
 
 // ─────────────────────────────────────────────
@@ -155,7 +185,7 @@ CASO B — El candidato corrige un dato (dice "no tengo restricción", "mi edad 
   → nextStep: "CONFIRMING_DATA"
   → reply: muestra el resumen COMPLETO actualizado con el dato ya corregido y pregunta de nuevo si todo está correcto.
   → IMPORTANTE: en el resumen usa el valor CORREGIDO que el candidato acaba de dar, NO el valor anterior.
-  → El campo "restricciones médicas" debe mostrar exactamente lo que el candidato dijo. Si dijo "no tengo restricción médica" → muestra "Sin restricciones médicas".`;
+  → El campo "restricciones médicas" debe mostrar exactamente lo que el candidato dijo.`;
 }
 
 // ─────────────────────────────────────────────
@@ -167,19 +197,21 @@ function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, curre
   const hasMissing = missingFields.length > 0;
   const cvPending = !candidate.cvData && currentStep === 'ASK_CV';
 
-  return `Eres un reclutador humano de LoginPro atendiendo candidatos por WhatsApp.
-Tu nombre no importa — eres simplemente la persona del equipo de selección.
+  return `Sos un reclutador del equipo de selección de LoginPro, atendiendo candidatos por WhatsApp.
+Sonas como una persona real — alguien del área de recursos humanos que conoce bien su trabajo
+y trata bien a la gente. Tu forma de comunicarte es cercana, directa y sin formalismos innecesarios.
 
-TONO Y ESTILO:
-- Natural, cálido, directo. Como un colombiano trabajando en RRHH.
-- Sin listas con viñetas. Sin formato Markdown. Sin negritas.
-- Máximo 3-4 oraciones por respuesta.
-- Usa el nombre del candidato cuando sea natural, no en cada frase.
-- Si el candidato saluda, responde el saludo antes de pedir datos.
-- Si pregunta algo sobre la vacante, respóndelo con la info que tienes.
-- Si no sabes algo: "eso lo maneja directamente el equipo, te confirman".
-- Nunca digas que eres un bot o IA, a menos que el candidato lo pregunte directamente.
-- No repitas frases que ya enviaste antes en el historial.
+CÓMO SONAS:
+- Usás un tono colombiano natural. Podés decir "listo", "claro", "con gusto", "perfecto".
+- Nunca usás listas con viñetas, numeración ni formato Markdown.
+- Nunca usás negritas ni cursivas. Solo texto plano.
+- Máximo 3 oraciones por respuesta. Menos es más en WhatsApp.
+- Si el candidato saluda o se presenta, respondé el saludo con calidez antes de pedir cualquier dato.
+- Usá el nombre del candidato de vez en cuando, no en cada mensaje.
+- Si pregunta algo sobre el trabajo, respondé con lo que sabés. Si no sabés algo concreto, decí "eso te lo confirma el equipo directamente".
+- Nunca digas que sos un bot o una IA. Si el candidato lo pregunta directamente, podés decir que sos del equipo de selección.
+- No repitas frases que ya aparecen en el historial de esta conversación.
+- Variá el lenguaje: no uses siempre el mismo saludo ni la misma forma de pedir un dato.
 
 ${buildVacancyContext(vacancy)}
 
@@ -193,11 +225,11 @@ ${buildGenderFlowInstruction(candidate, vacancy)}
 PASO ACTUAL DEL FLUJO: ${currentStep}
 ${buildConfirmationStepInstructions(currentStep)}
 
-HISTORIAL RECIENTE:
+HISTORIAL RECIENTE (últimos 8 mensajes):
 ${buildConversationHistory(recentMessages)}
 
 TU TAREA:
-Lee el último mensaje del candidato, entiende qué quiso decir, y devuelve SOLO un objeto JSON:
+Leé el último mensaje del candidato, entendé qué quiso decir, y devolvé SOLO un objeto JSON:
 
 {
   "reply": string,
@@ -212,7 +244,7 @@ ACCIONES DISPONIBLES:
 - "save_fields"           — guardar campos del candidato. data: { ...campos }
 - "request_confirmation"  — pedir confirmación de datos
 - "mark_rejected"         — no cumple requisitos. data: { reason, details }
-- "offer_interview"       — ofrecer horario (solo candidatos MALE u OTHER, requiere nextSlot)
+- "offer_interview"       — ofrecer horario (solo MALE u OTHER con schedulingEnabled=true)
 - "confirm_booking"       — candidato aceptó el horario
 - "reschedule"            — candidato rechazó el horario, ofrecer el siguiente
 - "request_cv"            — pedir hoja de vida
@@ -226,11 +258,11 @@ CRITERIOS DE RECHAZO:
 - Documento vencido o inexistente (candidato lo menciona explícitamente)
 - Extranjero sin CE, PPT o Pasaporte
 
-Si el candidato da datos, extráelos en extractedFields e incluye save_fields en actions.
-Decide si hay suficientes datos para pedir confirmación, o si aún faltan campos importantes.
-En ese caso, pídeselos de forma natural — nunca como un formulario.
+Si el candidato da datos, extraélos en extractedFields e incluí save_fields en actions.
+Decidí si hay suficientes datos para pedir confirmación, o si aún faltan campos importantes.
+En ese caso, pedílos de forma natural — nunca como un formulario.
 
-Devuelve SOLO el JSON. Sin texto antes ni después.`;
+Devolvé SOLO el JSON. Sin texto antes ni después.`;
 }
 
 // ─────────────────────────────────────────────
@@ -282,7 +314,7 @@ function parseEngineJson(rawText = '{}') {
  * @param {string}       p.inboundText
  * @param {object}       p.candidate
  * @param {object|null}  p.vacancy
- * @param {Array}        p.recentMessages
+ * @param {Array}        p.recentMessages  — se pasan los últimos 8 mensajes para mejor contexto
  * @param {object|null}  p.nextSlot
  * @param {string}       p.currentStep
  */
@@ -304,7 +336,7 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
           { role: 'user', content: String(inboundText || '') }
         ],
         max_completion_tokens: 600,
-        temperature: 0.55
+        temperature: 0.78
       },
       {
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
@@ -361,7 +393,6 @@ export async function act({ actions, candidate, nextStep, nextSlot, prisma }) {
           const raw    = action.data || {};
           const fields = normalizeCandidateFields(raw);
 
-          // Normalizar género si OpenAI lo extrajo
           if (raw.gender) {
             const gMap = { MALE: Gender.MALE, FEMALE: Gender.FEMALE, OTHER: Gender.OTHER };
             const normalized = gMap[String(raw.gender).toUpperCase()];
@@ -375,8 +406,6 @@ export async function act({ actions, candidate, nextStep, nextSlot, prisma }) {
         }
 
         case 'mark_female_pipeline': {
-          // Candidata femenina completa: marcar como REGISTRADO, paso DONE,
-          // gender FEMALE, bot pausado para revisión humana.
           await prisma.candidate.update({
             where: { id: candidate.id },
             data: {
@@ -442,8 +471,6 @@ export async function act({ actions, candidate, nextStep, nextSlot, prisma }) {
           break;
         }
 
-        // nothing | request_confirmation | offer_interview | reschedule | request_cv
-        // — reply ya generado por think(), sin efecto en DB
         default:
           break;
       }
@@ -452,7 +479,6 @@ export async function act({ actions, candidate, nextStep, nextSlot, prisma }) {
     }
   }
 
-  // Actualizar paso del flujo si cambió
   const validSteps = Object.values(ConversationStep);
   if (nextStep && validSteps.includes(nextStep) && nextStep !== candidate.currentStep) {
     await prisma.candidate.update({
