@@ -2,6 +2,12 @@ function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
 
+export function candidateHasCv(candidate = {}) {
+  return Boolean(candidate.cvData)
+    || hasValue(candidate.cvOriginalName)
+    || hasValue(candidate.cvMimeType);
+}
+
 export function normalizeCandidateStatusForUI(status) {
   if (status === 'VALIDANDO' || status === 'APROBADO') return 'REGISTRADO';
   return status;
@@ -19,7 +25,7 @@ export function isOperationallyRegistered(candidate) {
     && hasValue(candidate.experienceTime)
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
-    && Boolean(candidate.cvData)
+    && candidateHasCv(candidate)
     && uiStatus !== 'RECHAZADO'
     && uiStatus !== 'CONTACTADO';
 }
@@ -36,7 +42,7 @@ export function isOperationallyCompleteWithoutCv(candidate) {
     && hasValue(candidate.experienceTime)
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
-    && !hasValue(candidate.cvData)
+    && !candidateHasCv(candidate)
     && uiStatus !== 'RECHAZADO';
 }
 

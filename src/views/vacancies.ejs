@@ -108,7 +108,7 @@
     @media (max-width: 640px) {
       .form-grid { grid-template-columns: 1fr; }
       .form-grid .full { grid-column: 1; }
-      tbody td:nth-child(3), thead th:nth-child(3) { display: none; }
+      tbody td:nth-child(2), thead th:nth-child(2) { display: none; }
     }
   </style>
 </head>
@@ -156,7 +156,6 @@
       <thead><tr>
         <th>Vacante</th>
         <th>Operación</th>
-        <th>Clave (key)</th>
         <th>Modo bot</th>
         <th>Estado</th>
         <th>Acciones</th>
@@ -182,7 +181,6 @@
               <% if (v.role) { %><div style="font-size:11px;color:var(--text-muted);"><%= v.role %></div><% } %>
             </td>
             <td><span style="font-size:12px;"><%= opLabel %></span></td>
-            <td><code style="background:var(--gray-light);padding:2px 6px;border-radius:4px;font-size:12px;"><%= v.key %></code></td>
             <td><span style="font-size:12px;"><%= modeIcon %> <%= modeTxt %></span></td>
             <td><span class="badge <%= badgeCls %>"><span class="dot <%= dotCls %>"></span><%= badgeTxt %></span></td>
             <td>
@@ -220,7 +218,7 @@
               <div class="no-ops-warn">⚠️ No hay operaciones configuradas. <a href="/admin/locations" style="color:var(--amber);font-weight:700;">Crea ciudades y operaciones primero →</a></div>
               <input type="hidden" name="operationId" value="" />
             <% } else { %>
-            <select id="c-operation" name="operationId" required onchange="updateCreateKeyFromOp('c')">
+            <select id="c-operation" name="operationId" required>
               <option value="">— Selecciona operación —</option>
               <% let lastCity = null; %>
               <% for (const op of operations) { %>
@@ -238,16 +236,11 @@
 
           <div class="form-group">
             <label for="c-title">Título <span style="color:var(--red)">*</span></label>
-            <input id="c-title" name="title" type="text" required placeholder="Ej: Auxiliar de Cargue" oninput="updateCreateKeyFromOp('c')" />
+            <input id="c-title" name="title" type="text" required placeholder="Ej: Auxiliar de Cargue" />
           </div>
           <div class="form-group">
             <label for="c-role">Rol / Cargo</label>
             <input id="c-role" name="role" type="text" placeholder="Ej: Auxiliar de Cargue y Descargue" />
-          </div>
-          <div class="form-group full">
-            <label for="c-key">Clave interna (key)</label>
-            <input id="c-key" name="key" type="text" readonly placeholder="Se genera automáticamente" />
-            <span class="form-hint">Generada desde título + ciudad. Identificador interno — no se muestra al candidato.</span>
           </div>
           <div class="form-group full">
             <label for="c-address">Dirección de operación</label>
@@ -347,7 +340,7 @@
               <div class="no-ops-warn">⚠️ Sin operaciones. <a href="/admin/locations" style="color:var(--amber);font-weight:700;">Configurar →</a></div>
               <input type="hidden" name="operationId" value="" />
             <% } else { %>
-            <select id="e-operation" name="operationId" onchange="updateCreateKeyFromOp('e')">
+            <select id="e-operation" name="operationId">
               <option value="">— Sin operación asignada —</option>
               <% let lastCityE = null; %>
               <% for (const op of operations) { %>
@@ -364,16 +357,11 @@
 
           <div class="form-group">
             <label for="e-title">Título <span style="color:var(--red)">*</span></label>
-            <input id="e-title" name="title" type="text" required oninput="updateCreateKeyFromOp('e')" />
+            <input id="e-title" name="title" type="text" required />
           </div>
           <div class="form-group">
             <label for="e-role">Rol / Cargo</label>
             <input id="e-role" name="role" type="text" />
-          </div>
-          <div class="form-group full">
-            <label for="e-key">Clave interna (key) <span style="color:var(--red)">*</span></label>
-            <input id="e-key" name="key" type="text" required />
-            <span class="form-hint">Identificador interno — cambiar puede afectar el enrutamiento del bot.</span>
           </div>
           <div class="form-group full">
             <label for="e-address">Dirección de operación</label>
@@ -489,22 +477,6 @@
     return true;
   }
 
-  function toSlug(str) {
-    return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9\s-]/g, '').trim().replace(/[\s]+/g, '-').replace(/-+/g, '-');
-  }
-
-  // Actualiza key usando ciudad derivada del select de operación
-  function updateCreateKeyFromOp(prefix) {
-    const sel   = document.getElementById(prefix + '-operation');
-    const title = document.getElementById(prefix + '-title')?.value || '';
-    const keyEl = document.getElementById(prefix + '-key');
-    if (!sel || !keyEl) return;
-    const selectedOpt = sel.options[sel.selectedIndex];
-    const city = selectedOpt?.dataset?.city || '';
-    keyEl.value = [title, city].filter(Boolean).map(toSlug).join('-');
-  }
-
   function openCreate() {
     const cb = document.getElementById('c-isActive');
     cb.checked = false;
@@ -518,12 +490,11 @@
     f.action = '/admin/vacancies/' + v.id + '/edit';
     document.getElementById('e-title').value   = v.title || '';
     document.getElementById('e-role').value    = v.role  || '';
-    document.getElementById('e-key').value     = v.key   || '';
     document.getElementById('e-address').value = v.operationAddress || '';
     document.getElementById('e-minAge').value  = v.minAge != null ? v.minAge : '';
     document.getElementById('e-maxAge').value  = v.maxAge != null ? v.maxAge : '';
     document.getElementById('e-exp').value     = v.experienceRequired || 'INDIFFERENT';
-    document.getElementById('e-desc').value    = v.description  || '';
+    document.getElementById('e-desc').value    = v.roleDescription || '';
     document.getElementById('e-req').value     = v.requirements || '';
     document.getElementById('e-cond').value    = v.conditions   || '';
 

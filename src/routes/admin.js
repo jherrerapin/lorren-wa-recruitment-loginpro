@@ -2,10 +2,9 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import multer from 'multer';
 import { normalizeCandidateFields } from '../services/candidateData.js';
-import { exportFilenameByScope, filterCandidatesByScope, normalizeCandidateStatusForUI } from '../services/candidateExport.js';
+import { candidateHasCv, exportFilenameByScope, filterCandidatesByScope, normalizeCandidateStatusForUI } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
 import { MessageDirection, MessageType } from '@prisma/client';
 import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
@@ -230,10 +229,9 @@ function parseVacancyBody(body) {
 
   return {
     title:                str(body.title),
-    city:                 str(body.city),
-    key:                  str(body.key),
+    operationId:          str(body.operationId),
     role:                 str(body.role),
-    description:          str(body.description),
+    roleDescription:      str(body.description),
     requirements:         str(body.requirements),
     conditions:           str(body.conditions),
     operationAddress:     str(body.operationAddress),
@@ -244,6 +242,19 @@ function parseVacancyBody(body) {
     acceptingApplications: bool(body.acceptingApplications),
     schedulingEnabled:    bool(body.schedulingEnabled),
   };
+}
+
+async function loadOperation(prisma, operationId) {
+  if (!operationId) return null;
+
+  try {
+    return await prisma.operation.findUnique({
+      where: { id: operationId },
+      include: { city: { select: { name: true } } }
+    });
+  } catch {
+    return null;
+  }
 }
 
 async function loadOperations(prisma) {
@@ -336,7 +347,28 @@ export function adminRouter(prisma) {
     const scope = normalizeString(req.query.scope) || 'all';
     if (!EXPORT_SCOPES.has(scope)) return res.status(400).send('Scope inválido.');
 
-    const allCandidates = await prisma.candidate.findMany({ orderBy: { createdAt: 'desc' } });
+    const allCandidates = await prisma.candidate.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        fullName: true,
+        phone: true,
+        documentType: true,
+        documentNumber: true,
+        age: true,
+        neighborhood: true,
+        zone: true,
+        experienceInfo: true,
+        experienceTime: true,
+        medicalRestrictions: true,
+        transportMode: true,
+        status: true,
+        rejectionReason: true,
+        rejectionDetails: true,
+        createdAt: true,
+        cvMimeType: true,
+        cvOriginalName: true
+      }
+    });
     const candidates = filterCandidatesByScope(allCandidates, scope);
 
     const workbook = new ExcelJS.Workbook();
@@ -359,7 +391,7 @@ export function adminRouter(prisma) {
     for (const c of candidates) {
       sheet.addRow({
         ...c,
-        hasCV: c.cvData ? 'Sí' : 'No',
+        hasCV: candidateHasCv(c) ? 'Sí' : 'No',
         createdAt: formatDateTimeCO(c.createdAt)
       });
     }
@@ -437,13 +469,32 @@ export function adminRouter(prisma) {
   router.post('/candidates/:id/bot-pause', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const reason = normalizeString(req.body.reason) || 'Pausa manual desde admin';
-    await prisma.candidate.update({ where: { id }, data: { botPaused: true, botPauseReason: reason } });
+    await prisma.candidate.update({
+      where: { id },
+      data: {
+        botPaused: true,
+        botPausedAt: new Date(),
+        botPausedBy: req.userRole || 'admin',
+        botPauseReason: reason,
+        reminderScheduledFor: null,
+        reminderState: 'CANCELLED'
+      }
+    });
     res.redirect(`/admin/candidates/${id}?botPauseSuccess=` + encodeURIComponent('Bot pausado correctamente.'));
   });
 
   router.post('/candidates/:id/bot-resume', ensureDevRole, async (req, res) => {
     const { id } = req.params;
-    await prisma.candidate.update({ where: { id }, data: { botPaused: false, botPauseReason: null } });
+    await prisma.candidate.update({
+      where: { id },
+      data: {
+        botPaused: false,
+        botPausedAt: null,
+        botPauseReason: null,
+        reminderScheduledFor: null,
+        reminderState: 'CANCELLED'
+      }
+    });
     res.redirect(`/admin/candidates/${id}?botPauseSuccess=` + encodeURIComponent('Bot reanudado correctamente.'));
   });
 
@@ -560,7 +611,14 @@ export function adminRouter(prisma) {
   // ── CRUD de vacantes ─────────────────────────────────────────
   router.get('/vacancies', async (req, res) => {
     const [vacancies, operations] = await Promise.all([
-      prisma.vacancy.findMany({ orderBy: [{ city: 'asc' }, { title: 'asc' }] }),
+      prisma.vacancy.findMany({
+        orderBy: [{ city: 'asc' }, { title: 'asc' }],
+        include: {
+          operation: {
+            include: { city: { select: { name: true } } }
+          }
+        }
+      }),
       loadOperations(prisma)
     ]);
     const successMsg = normalizeString(req.query.success);
@@ -570,17 +628,18 @@ export function adminRouter(prisma) {
 
   router.post('/vacancies/create', express.urlencoded({ extended: true }), async (req, res) => {
     const data = parseVacancyBody(req.body);
-    if (!data.title || !data.city || !data.key) {
-      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título, ciudad y clave son obligatorios.'));
-    }
-    const existing = await prisma.vacancy.findFirst({ where: { key: data.key } });
-    if (existing) {
-      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Ya existe una vacante con esa clave (' + data.key + '). Elige otra.'));
+    const operation = await loadOperation(prisma, data.operationId);
+    if (!data.title || !operation) {
+      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
     await prisma.vacancy.create({
       data: {
-        id: randomUUID(), key: data.key, title: data.title, city: data.city,
-        role: data.role, description: data.description, requirements: data.requirements,
+        title: data.title,
+        city: operation.city.name,
+        operationId: operation.id,
+        role: data.role,
+        roleDescription: data.roleDescription,
+        requirements: data.requirements,
         conditions: data.conditions, operationAddress: data.operationAddress,
         minAge: data.minAge, maxAge: data.maxAge,
         experienceRequired: data.experienceRequired,
@@ -594,18 +653,19 @@ export function adminRouter(prisma) {
   router.post('/vacancies/:id/edit', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const data = parseVacancyBody(req.body);
-    if (!data.title || !data.city || !data.key) {
-      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título, ciudad y clave son obligatorios.'));
-    }
-    const conflict = await prisma.vacancy.findFirst({ where: { key: data.key, NOT: { id } } });
-    if (conflict) {
-      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('La clave "' + data.key + '" ya está en uso por otra vacante.'));
+    const operation = await loadOperation(prisma, data.operationId);
+    if (!data.title || !operation) {
+      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
     await prisma.vacancy.update({
       where: { id },
       data: {
-        key: data.key, title: data.title, city: data.city, role: data.role,
-        description: data.description, requirements: data.requirements,
+        title: data.title,
+        city: operation.city.name,
+        operationId: operation.id,
+        role: data.role,
+        roleDescription: data.roleDescription,
+        requirements: data.requirements,
         conditions: data.conditions, operationAddress: data.operationAddress,
         minAge: data.minAge, maxAge: data.maxAge,
         experienceRequired: data.experienceRequired,

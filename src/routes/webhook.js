@@ -146,6 +146,24 @@ function getMissingFields(candidate) {
 }
 function containsCandidateData(text) { return Object.keys(parseNaturalData(text)).length > 0; }
 function hasHv(candidate) { return Boolean(candidate?.cvData); }
+function resolveInboundMessageType(message = {}) {
+  if (message.type === 'text') return MessageType.TEXT;
+  if (message.type === 'document') return MessageType.DOCUMENT;
+  if (message.type === 'image') return MessageType.IMAGE;
+  if (message.type === 'interactive') return MessageType.INTERACTIVE;
+  return MessageType.UNKNOWN;
+}
+function buildInboundBody(message = {}) {
+  if (message.type === 'text') return message.text?.body || '';
+  if (message.type === 'document') return message.document?.filename || '';
+  if (message.type === 'image') return message.image?.caption || '';
+  if (message.type === 'interactive') {
+    return message.interactive?.button_reply?.title
+      || message.interactive?.list_reply?.title
+      || '';
+  }
+  return '';
+}
 function getNaturalDelayMs(inputText = '', outputText = '') { if (process.env.NODE_ENV === 'test') return 0; const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
 
 function buildConfirmationSummary(candidate) {
@@ -436,6 +454,14 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
 
   if (candidate.currentStep === ConversationStep.GREETING_SENT) {
     if (isNegativeInterest(cleanText)) {
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          currentStep: ConversationStep.DONE,
+          reminderScheduledFor: null,
+          reminderState: 'SKIPPED'
+        }
+      });
       await reply(prisma, candidate.id, from, CIERRE_NO_INTERES, cleanText, { body: CIERRE_NO_INTERES, source: 'bot_flow' });
       return;
     }
@@ -702,51 +728,67 @@ export function webhookRouter(prisma) {
           continue;
         }
 
-        const inbound = await saveInboundMessage(prisma, candidate.id, message, message.document?.filename || '', MessageType.DOCUMENT, from);
+        const inboundType = resolveInboundMessageType(message);
+        const inboundBody = buildInboundBody(message);
+        const inbound = await saveInboundMessage(prisma, candidate.id, message, inboundBody, inboundType, from);
         if (!inbound.isNew) continue;
 
         await cancelReminderOnInbound(prisma, candidate.id);
 
         const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-        if (shouldBlockAutomation(freshCandidate)) continue;
+        const automationBlocked = shouldBlockAutomation(freshCandidate);
         const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
         debugTrace.cv_detected = message.type === 'document';
 
         try {
           if (message.type === 'document') {
             const mimeType = message.document?.mime_type || '';
-            if (!isCvMimeTypeAllowed(mimeType)) {
+            const filename = message.document?.filename || 'hoja_de_vida';
+            if (!isCvMimeTypeAllowed(mimeType, filename)) {
               debugTrace.cv_invalid_mime = true;
-              console.warn('[CV_ERROR]', JSON.stringify({ phone: from, mimeType, reason: 'invalid_mime' }));
-              await reply(prisma, candidate.id, from, 'Recibí tu archivo, pero por favor envíalo como PDF o Word (.doc/.docx).', '', { source: 'bot_flow' });
+              console.warn('[CV_ERROR]', JSON.stringify({ phone: from, mimeType, filename, reason: 'invalid_mime' }));
+              if (!automationBlocked) {
+                await reply(prisma, candidate.id, from, 'Recibí tu archivo, pero por favor envíalo como PDF o Word (.doc/.docx).', '', { source: 'bot_flow' });
+              }
             } else {
               try {
                 const metadata = await fetchMediaMetadata(message.document.id);
                 const cvBuffer = await downloadMedia(metadata.url);
-                await prisma.candidate.update({ where: { id: candidate.id }, data: { cvData: cvBuffer, cvMimeType: mimeType, cvOriginalName: message.document?.filename || 'hoja_de_vida' } });
-                debugTrace.cv_saved = true;
-                console.log('[CV_TRACE]', JSON.stringify({ phone: from, filename: message.document?.filename || null, mimeType }));
-                const afterCvSave = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-                const missing = getMissingFields(afterCvSave);
-                if (shouldFinalizeAfterCv({ missingFields: missing })) {
-                  await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
-                  await reply(prisma, candidate.id, from, MENSAJE_FINAL, '', { body: MENSAJE_FINAL, source: 'bot_flow' });
-                } else {
-                  if (afterCvSave.currentStep !== ConversationStep.COLLECTING_DATA && afterCvSave.currentStep !== ConversationStep.CONFIRMING_DATA) {
-                    await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
+                await prisma.candidate.update({
+                  where: { id: candidate.id },
+                  data: {
+                    cvData: cvBuffer,
+                    cvMimeType: mimeType || null,
+                    cvOriginalName: filename
                   }
-                  await reply(prisma, candidate.id, from, `Hoja de vida recibida. Aún necesito estos datos para completar tu registro: ${missing.join(', ')}`, '', { source: 'bot_flow' });
+                });
+                debugTrace.cv_saved = true;
+                console.log('[CV_TRACE]', JSON.stringify({ phone: from, filename, mimeType }));
+                const afterCvSave = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+                if (!automationBlocked && afterCvSave.currentStep !== ConversationStep.DONE) {
+                  const missing = getMissingFields(afterCvSave);
+                  if (shouldFinalizeAfterCv({ missingFields: missing })) {
+                    await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.DONE, status: CandidateStatus.REGISTRADO } });
+                    await reply(prisma, candidate.id, from, MENSAJE_FINAL, '', { body: MENSAJE_FINAL, source: 'bot_flow' });
+                  } else {
+                    if (afterCvSave.currentStep !== ConversationStep.COLLECTING_DATA && afterCvSave.currentStep !== ConversationStep.CONFIRMING_DATA) {
+                      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
+                    }
+                    await reply(prisma, candidate.id, from, `Hoja de vida recibida. Aún necesito estos datos para completar tu registro: ${missing.join(', ')}`, '', { source: 'bot_flow' });
+                  }
                 }
               } catch (error) {
                 debugTrace.cv_download_failed = true;
                 debugTrace.error_summary = summarizeError(error);
                 console.error('[CV_ERROR]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
-                await reply(prisma, candidate.id, from, 'No pude descargar tu hoja de vida en este momento. Inténtalo nuevamente en unos minutos.', '', { source: 'bot_flow' });
+                if (!automationBlocked) {
+                  await reply(prisma, candidate.id, from, 'No pude descargar tu hoja de vida en este momento. Inténtalo nuevamente en unos minutos.', '', { source: 'bot_flow' });
+                }
               }
             }
-          } else if (freshCandidate.currentStep === ConversationStep.DONE) {
+          } else if (!automationBlocked && freshCandidate.currentStep === ConversationStep.DONE) {
             await reply(prisma, candidate.id, from, MENSAJE_DONE_CV_REPEAT, '', { source: 'bot_cv_request' });
-          } else {
+          } else if (!automationBlocked) {
             await reply(prisma, candidate.id, from, 'Por ahora solo puedo procesar mensajes de texto para continuar con tu registro.', '', { source: 'bot_flow' });
           }
         } finally {
