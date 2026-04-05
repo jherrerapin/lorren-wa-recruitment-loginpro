@@ -37,5 +37,11 @@ export async function runChatEngine({
     prisma,
   });
 
-  return result.reply;
+  return {
+    reply: result.reply,
+    actions: result.actions,
+    nextStep: result.nextStep,
+    extractedFields: result.extractedFields,
+    fallback: result.fallback,
+  };
 }

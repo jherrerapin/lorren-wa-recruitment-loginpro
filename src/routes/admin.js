@@ -237,6 +237,17 @@ function parseVacancyBody(body) {
   const str = (v) => (typeof v === 'string' ? v.trim() || null : null);
   const int = (v) => { const n = parseInt(v, 10); return Number.isNaN(n) ? null : n; };
   const bool = (v) => v === 'true' || v === true || v === 'on';
+  const time = (v) => {
+    const value = str(v);
+    return value && /^\d{2}:\d{2}$/.test(value) ? value : null;
+  };
+  const positiveInt = (v, fallback) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  const slotDays = Array.isArray(body.slotDays)
+    ? body.slotDays
+    : (typeof body.slotDays === 'string' ? [body.slotDays] : []);
 
   return {
     title:                str(body.title),
@@ -246,13 +257,58 @@ function parseVacancyBody(body) {
     requirements:         str(body.requirements),
     conditions:           str(body.conditions),
     operationAddress:     str(body.operationAddress),
+    interviewAddress:     str(body.interviewAddress),
     minAge:               int(body.minAge),
     maxAge:               int(body.maxAge),
     experienceRequired:   str(body.experienceRequired) || 'INDIFFERENT',
     isActive:             bool(body.isActive),
     acceptingApplications: bool(body.acceptingApplications),
     schedulingEnabled:    bool(body.schedulingEnabled),
+    slotDays:             [...new Set(slotDays
+      .map((value) => parseInt(value, 10))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6))].sort((a, b) => a - b),
+    slotStartTime:        time(body.slotStartTime),
+    slotEndTime:          time(body.slotEndTime),
+    slotDurationMinutes:  positiveInt(body.slotDurationMinutes, 20),
+    slotMaxCandidates:    positiveInt(body.slotMaxCandidates, 10),
   };
+}
+
+function resolveVacancyAddress(data) {
+  return data.interviewAddress || data.operationAddress || '';
+}
+
+function hasValidInterviewConfig(data) {
+  if (!data.schedulingEnabled) return true;
+  if (!data.slotDays.length || !data.slotStartTime || !data.slotEndTime) return false;
+  return data.slotStartTime < data.slotEndTime;
+}
+
+function buildWeeklyInterviewSlots(vacancyId, data) {
+  return data.slotDays.map((dayOfWeek) => ({
+    vacancyId,
+    dayOfWeek,
+    startTime: data.slotStartTime,
+    endTime: data.slotEndTime,
+    slotDurationMinutes: data.slotDurationMinutes,
+    maxCandidates: data.slotMaxCandidates,
+    isActive: true
+  }));
+}
+
+async function syncVacancyInterviewSlots(prisma, vacancyId, data) {
+  if (!data.schedulingEnabled) return;
+  await prisma.interviewSlot.deleteMany({
+    where: {
+      vacancyId,
+      specificDate: null
+    }
+  });
+
+  const slots = buildWeeklyInterviewSlots(vacancyId, data);
+  if (!slots.length) return;
+
+  await prisma.interviewSlot.createMany({ data: slots });
 }
 
 async function loadOperation(prisma, operationId) {
@@ -649,6 +705,10 @@ export function adminRouter(prisma) {
       prisma.vacancy.findMany({
         orderBy: [{ city: 'asc' }, { title: 'asc' }],
         include: {
+          interviewSlots: {
+            where: { isActive: true, specificDate: null },
+            orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }]
+          },
           operation: {
             include: { city: { select: { name: true } } }
           }
@@ -667,23 +727,33 @@ export function adminRouter(prisma) {
     if (!data.title || !operation) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
+    if (!hasValidInterviewConfig(data)) {
+      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Debes configurar al menos un día y un rango horario válido para entrevistas.'));
+    }
     const city = operation.city.name;
     const key = await buildUniqueVacancyKey(prisma, data.title, city);
-    await prisma.vacancy.create({
-      data: {
-        title: data.title,
-        key,
-        city,
-        operationId: operation.id,
-        role: data.role,
-        roleDescription: data.roleDescription,
-        requirements: data.requirements,
-        conditions: data.conditions, operationAddress: data.operationAddress,
-        minAge: data.minAge, maxAge: data.maxAge,
-        experienceRequired: data.experienceRequired,
-        isActive: data.isActive, acceptingApplications: data.acceptingApplications,
-        schedulingEnabled: data.schedulingEnabled,
-      }
+    await prisma.$transaction(async (tx) => {
+      const vacancy = await tx.vacancy.create({
+        data: {
+          title: data.title,
+          key,
+          city,
+          operationId: operation.id,
+          role: data.role,
+          roleDescription: data.roleDescription,
+          requirements: data.requirements,
+          conditions: data.conditions,
+          operationAddress: resolveVacancyAddress(data),
+          minAge: data.minAge,
+          maxAge: data.maxAge,
+          experienceRequired: data.experienceRequired,
+          isActive: data.isActive,
+          acceptingApplications: data.acceptingApplications,
+          schedulingEnabled: data.schedulingEnabled,
+        }
+      });
+
+      await syncVacancyInterviewSlots(tx, vacancy.id, data);
     });
     res.redirect('/admin/vacancies?success=' + encodeURIComponent('Vacante "' + data.title + '" creada correctamente.'));
   });
@@ -695,24 +765,34 @@ export function adminRouter(prisma) {
     if (!data.title || !operation) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
+    if (!hasValidInterviewConfig(data)) {
+      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Debes configurar al menos un día y un rango horario válido para entrevistas.'));
+    }
     const city = operation.city.name;
     const key = await buildUniqueVacancyKey(prisma, data.title, city, id);
-    await prisma.vacancy.update({
-      where: { id },
-      data: {
-        title: data.title,
-        key,
-        city,
-        operationId: operation.id,
-        role: data.role,
-        roleDescription: data.roleDescription,
-        requirements: data.requirements,
-        conditions: data.conditions, operationAddress: data.operationAddress,
-        minAge: data.minAge, maxAge: data.maxAge,
-        experienceRequired: data.experienceRequired,
-        isActive: data.isActive, acceptingApplications: data.acceptingApplications,
-        schedulingEnabled: data.schedulingEnabled,
-      }
+    await prisma.$transaction(async (tx) => {
+      await tx.vacancy.update({
+        where: { id },
+        data: {
+          title: data.title,
+          key,
+          city,
+          operationId: operation.id,
+          role: data.role,
+          roleDescription: data.roleDescription,
+          requirements: data.requirements,
+          conditions: data.conditions,
+          operationAddress: resolveVacancyAddress(data),
+          minAge: data.minAge,
+          maxAge: data.maxAge,
+          experienceRequired: data.experienceRequired,
+          isActive: data.isActive,
+          acceptingApplications: data.acceptingApplications,
+          schedulingEnabled: data.schedulingEnabled,
+        }
+      });
+
+      await syncVacancyInterviewSlots(tx, id, data);
     });
     res.redirect('/admin/vacancies?success=' + encodeURIComponent('Vacante "' + data.title + '" actualizada correctamente.'));
   });
