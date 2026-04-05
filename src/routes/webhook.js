@@ -106,7 +106,7 @@ function isAffirmativeInterest(text) {
   const n = normalizeText(text).toLowerCase(); if (!n) return false;
   const patterns = ['si', 'sí', 'claro', 'listo', 'ok', 'okay', 'dale', 'de una', 'hagámosle', 'vamos', 'estoy interesado', 'estoy interesada', 'me interesa', 'quiero aplicar', 'quiero postularme', 'quiero participar', 'deseo continuar', 'me gustaría postularme', 'quiero seguir', 'continuar'];
   if (patterns.some((p) => n === p || n.includes(p))) return true;
-  return /(quiero|deseo|me gustar[ií]a|vamos|listo|claro).*(aplicar|postular|continuar|seguir|participar)/i.test(n);
+  return /(quiero|deseo|me gustar[ií]a|vamos|listo|claro).*(aplicar|postular|continuar|seguir|participar|hacerlo)/i.test(n);
 }
 function isAffirmativeConfirmation(text) {
   const n = normalizeText(text).toLowerCase();
@@ -466,6 +466,21 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         const missing = getMissingFields(updated);
         return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
       }
+
+      if (USE_CONVERSATION_ENGINE) {
+        const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+        const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updatedCandidate);
+        const replyText = await runChatEngine({
+          prisma,
+          candidate: updatedCandidate,
+          vacancy,
+          inboundText: cleanText,
+          recentMessages,
+          nextSlot,
+        });
+        return reply(prisma, updatedCandidate.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+      }
+
       return reply(prisma, candidate.id, from, SOLICITAR_DATOS, cleanText, { body: SOLICITAR_DATOS, source: 'bot_flow' });
     }
 
@@ -496,6 +511,21 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
       const missing = getMissingFields(updated);
       return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
     }
+
+    if (USE_CONVERSATION_ENGINE) {
+      const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+      const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updatedCandidate);
+      const replyText = await runChatEngine({
+        prisma,
+        candidate: updatedCandidate,
+        vacancy,
+        inboundText: cleanText,
+        recentMessages,
+        nextSlot,
+      });
+      return reply(prisma, updatedCandidate.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+    }
+
     return reply(prisma, candidate.id, from, GUIA_CONTINUAR, cleanText, { body: GUIA_CONTINUAR, source: 'bot_flow' });
   }
 
