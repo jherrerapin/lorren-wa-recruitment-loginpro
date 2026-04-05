@@ -539,7 +539,7 @@ export function adminRouter(prisma) {
 
     try {
       await sendTextMessage(candidate.phone, body);
-      const update = buildTechnicalOutboundCandidateUpdate(action, candidate);
+      const update = buildTechnicalOutboundCandidateUpdate(new Date());
       await prisma.candidate.update({ where: { id }, data: update });
       await prisma.message.create({
         data: {
