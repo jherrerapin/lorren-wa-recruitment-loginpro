@@ -14,6 +14,7 @@ export function createDebugTrace({ phone, currentStepBefore }) {
     openai_intent: 'unknown',
     openai_detected_fields: [],
     persisted_fields: [],
+    consolidated_fields: [],
     rejected_fields: [],
     ignored_low_confidence_fields: [],
     suspicious_full_name_rejected: false,
@@ -98,12 +99,51 @@ export function isSuspiciousFullName(value = '') {
   return false;
 }
 
+function normalizeComparableValue(field, value) {
+  if (value === undefined || value === null) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  if (field === 'documentNumber') return raw.replace(/\D/g, '');
+  return raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isEquivalentFieldValue(field, currentValue, nextValue) {
+  return normalizeComparableValue(field, currentValue) === normalizeComparableValue(field, nextValue);
+}
+
+function canConsolidateField(field, currentValue, nextValue) {
+  const currentNormalized = normalizeComparableValue(field, currentValue);
+  const nextNormalized = normalizeComparableValue(field, nextValue);
+  if (!currentNormalized || !nextNormalized || currentNormalized === nextNormalized) return false;
+
+  switch (field) {
+    case 'fullName':
+      return isSuspiciousFullName(String(currentValue || '')) && !isSuspiciousFullName(String(nextValue || ''));
+    case 'documentType':
+      return !['cc', 'ti', 'ce', 'ppt', 'pasaporte'].includes(currentNormalized)
+        && ['cc', 'ti', 'ce', 'ppt', 'pasaporte'].includes(nextNormalized);
+    case 'documentNumber':
+      return currentNormalized.length < nextNormalized.length
+        && (nextNormalized.startsWith(currentNormalized) || nextNormalized.endsWith(currentNormalized));
+    case 'neighborhood':
+      return currentNormalized.length < nextNormalized.length && nextNormalized.includes(currentNormalized);
+    default:
+      return false;
+  }
+}
+
 export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {}) {
   const sourceByField = options.sourceByField || {};
   const allowOverwriteFields = new Set(options.allowOverwriteFields || []);
   const decisions = {
     persistedData: {},
     persistedFields: [],
+    consolidatedFields: [],
     rejectedFields: [],
     ignoredLowConfidenceFields: [],
     suspiciousFullNameRejected: false,
@@ -130,6 +170,15 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
     const shouldForceOverwrite = allowOverwriteFields.has(field);
 
     if (candidateHasValue && !shouldForceOverwrite) {
+      if (isEquivalentFieldValue(field, candidate[field], value)) {
+        continue;
+      }
+      if (canConsolidateField(field, candidate[field], value)) {
+        decisions.persistedData[field] = value;
+        decisions.persistedFields.push(field);
+        decisions.consolidatedFields.push(field);
+        continue;
+      }
       decisions.rejectedFields.push(field);
       continue;
     }

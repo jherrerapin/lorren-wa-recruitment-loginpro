@@ -188,6 +188,20 @@ function buildVacancyContinuePrompt(candidate) {
   if (candidate.currentStep === ConversationStep.DONE) return MENSAJE_DONE_ACK;
   return 'Si estás interesado en continuar, respóndeme y te solicitaré tus datos.';
 }
+function buildMissingFieldsReply(candidate, normalizedData = {}) {
+  const missing = getMissingFields(candidate);
+  if (!missing.length) return '';
+  const capturedCount = Object.keys(normalizedData || {})
+    .filter((field) => REQUIRED_FIELDS.includes(field) && candidate[field] !== undefined && candidate[field] !== null && candidate[field] !== '')
+    .length;
+  if (capturedCount >= 2) return `Perfecto, ya registré esos datos. Para seguir necesito: ${missing.join(', ')}.`;
+  if (capturedCount === 1) return `Listo, ese dato ya quedó registrado. Ahora necesito: ${missing.join(', ')}.`;
+  return `Para continuar necesito: ${missing.join(', ')}.`;
+}
+function buildQuestionFollowUpReply(vacancy, inboundText = '', followUpText = '') {
+  const answer = buildVacancyQuestionLead(vacancy, inboundText);
+  return followUpText ? `${answer}\n\n${followUpText}` : answer;
+}
 function buildVacancyReply(vacancy, candidate, inboundText = '') {
   const lines = [];
   lines.push(isQuestionLike(inboundText) ? buildVacancyQuestionLead(vacancy, inboundText) : 'Hola, gracias por comunicarte con LoginPro.');
@@ -404,6 +418,18 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     if (!effectiveVacancy) {
       return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });
     }
+    if (USE_CONVERSATION_ENGINE && isQuestionLike(cleanText)) {
+      const { recentMessages, nextSlot } = await buildEngineContext(prisma, candidateState);
+      const replyText = await runChatEngine({
+        prisma,
+        candidate: candidateState,
+        vacancy: effectiveVacancy,
+        inboundText: cleanText,
+        recentMessages,
+        nextSlot,
+      });
+      return reply(prisma, candidateState.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+    }
     const body = buildVacancyReply(effectiveVacancy, candidateState, cleanText);
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context' });
   };
@@ -459,10 +485,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   }
 
   const currentVacancy = candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId) : null;
+  const askedVacancyQuestion = Boolean(currentVacancy && isQuestionLike(cleanText));
 
   if (resolvedIntent === 'faq' || isFAQ(cleanText)) {
     if (currentVacancy) return replyWithVacancyContext(candidate, currentVacancy);
     return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });
+  }
+
+  if (askedVacancyQuestion && !hasDataIntent) {
+    return replyWithVacancyContext(candidate, currentVacancy);
   }
 
   if (candidate.currentStep === ConversationStep.ASK_CV && !hasDataIntent) return reply(prisma, candidate.id, from, RECORDATORIO_HV, cleanText, { body: RECORDATORIO_HV, source: 'bot_cv_request' });
@@ -493,6 +524,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     }
     const decisions = splitFieldDecisions(normalizedData, current, { sourceByField, allowOverwriteFields });
     debugTrace.persisted_fields.push(...decisions.persistedFields);
+    debugTrace.consolidated_fields?.push(...(decisions.consolidatedFields || []));
     debugTrace.rejected_fields.push(...decisions.rejectedFields);
     debugTrace.ignored_low_confidence_fields.push(...decisions.ignoredLowConfidenceFields);
     debugTrace.suspicious_full_name_rejected = decisions.suspiciousFullNameRejected;
@@ -522,7 +554,8 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
 
     if (missing.length) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
-      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
+      const replyText = buildMissingFieldsReply(updatedCandidate, normalizedData);
+      return reply(prisma, candidate.id, from, replyText, cleanText, { body: replyText, source: 'bot_flow' });
     }
 
     if (resolveStepAfterDataCompletion({ hasCv: hasHv(updatedCandidate) }) === ConversationStep.DONE) {
@@ -597,10 +630,17 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
 
         if (shouldAskForConfirmation(updated, normalizedData)) {
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
-          return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
+          const confirmationText = buildConfirmationSummary(updated);
+          const body = askedVacancyQuestion
+            ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
+            : confirmationText;
+          return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
         }
-        const missing = getMissingFields(updated);
-        return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
+        const followUp = buildMissingFieldsReply(updated, normalizedData);
+        const body = askedVacancyQuestion
+          ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
+          : followUp;
+        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
       if (USE_CONVERSATION_ENGINE) {
@@ -617,7 +657,10 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         return reply(prisma, updatedCandidate.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
       }
 
-      return reply(prisma, candidate.id, from, SOLICITAR_DATOS, cleanText, { body: SOLICITAR_DATOS, source: 'bot_flow' });
+      const body = askedVacancyQuestion
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, SOLICITAR_DATOS)
+        : SOLICITAR_DATOS;
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
     const rejection = shouldRejectByRequirements(cleanText, normalizedData);
@@ -642,10 +685,17 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
 
       if (shouldAskForConfirmation(updated, normalizedData)) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
-        return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
+        const confirmationText = buildConfirmationSummary(updated);
+        const body = askedVacancyQuestion
+          ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
+          : confirmationText;
+        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
-      const missing = getMissingFields(updated);
-      return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
+      const followUp = buildMissingFieldsReply(updated, normalizedData);
+      const body = askedVacancyQuestion
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
+        : followUp;
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
     if (USE_CONVERSATION_ENGINE) {
@@ -685,11 +735,18 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
 
     if (shouldAskForConfirmation(updated, normalizedData)) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
-      return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
+      const confirmationText = buildConfirmationSummary(updated);
+      const body = askedVacancyQuestion
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
+        : confirmationText;
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
-    const missing = getMissingFields(updated);
-    return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
+    const followUp = buildMissingFieldsReply(updated, normalizedData);
+    const body = askedVacancyQuestion
+      ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
+      : followUp;
+    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
   }
 }
 

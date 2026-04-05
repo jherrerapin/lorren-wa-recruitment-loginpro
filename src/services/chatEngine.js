@@ -31,6 +31,7 @@ export async function runChatEngine({
   await act({
     actions: result.actions,
     candidate,
+    extractedFields: result.extractedFields,
     nextStep: result.nextStep,
     nextSlot,
     prisma,

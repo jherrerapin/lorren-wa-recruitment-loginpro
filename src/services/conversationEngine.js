@@ -264,7 +264,9 @@ CRITERIOS DE RECHAZO:
 - Documento vencido o inexistente (candidato lo menciona explícitamente)
 - Extranjero sin CE, PPT o Pasaporte
 
-Si el candidato da datos, extraélos en extractedFields e incluí save_fields en actions.
+Si el candidato da datos, extraélos en extractedFields aunque no todos vayan dentro de save_fields; el sistema también persistirá extractedFields.
+Si el candidato hace una pregunta sobre la vacante, respóndela primero usando el contexto real y luego continúa el flujo sin repetir frases quemadas.
+Si ya hay datos capturados en el historial, consolídalos con lo nuevo y pide solo lo realmente faltante.
 Decidí si hay suficientes datos para pedir confirmación, o si aún faltan campos importantes.
 En ese caso, pedílos de forma natural — nunca como un formulario.
 
@@ -307,6 +309,21 @@ function parseEngineJson(rawText = '{}') {
   const objMatch = t.match(/\{[\s\S]*\}/);
   if (objMatch) { try { return JSON.parse(objMatch[0]); } catch { /* fall */ } }
   return null;
+}
+
+function mergeEngineFields(actions = [], extractedFields = {}) {
+  const merged = { ...(extractedFields || {}) };
+  for (const action of actions || []) {
+    if (action?.type !== 'save_fields' || typeof action?.data !== 'object' || !action.data) continue;
+    Object.assign(merged, action.data);
+  }
+  return merged;
+}
+
+function mapEngineGender(rawGender, Gender) {
+  if (!rawGender) return null;
+  const gMap = { MALE: Gender.MALE, FEMALE: Gender.FEMALE, OTHER: Gender.OTHER };
+  return gMap[String(rawGender).toUpperCase()] || null;
 }
 
 // ─────────────────────────────────────────────
@@ -390,102 +407,108 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
  * @param {object|null}      p.nextSlot
  * @param {PrismaClient}     p.prisma
  */
-export async function act({ actions, candidate, nextStep, nextSlot, prisma }) {
+export async function act({ actions, candidate, extractedFields = {}, nextStep, nextSlot, prisma }) {
   const { normalizeCandidateFields }  = await import('./candidateData.js');
   const { createBooking }             = await import('./interviewScheduler.js');
   const { CandidateStatus, ConversationStep, Gender } = await import('@prisma/client');
+  const normalizedActions = Array.isArray(actions) ? actions : [];
+  const mergedRawFields = mergeEngineFields(normalizedActions, extractedFields);
+  const mergedFields = normalizeCandidateFields(mergedRawFields);
+  const mappedGender = mapEngineGender(mergedRawFields.gender, Gender);
+  if (mappedGender) mergedFields.gender = mappedGender;
 
-  for (const action of actions) {
+  if (Object.keys(mergedFields).length) {
+    await prisma.candidate.update({ where: { id: candidate.id }, data: mergedFields })
+      .catch((err) => console.error('[ACT_FIELDS_ERROR]', { error: err?.message?.slice(0, 200) }));
+  }
+
+  const pendingUpdate = {};
+  let terminalStep = null;
+  let requestedStep = null;
+  const setStep = (step, options = {}) => {
+    if (!step) return;
+    if (options.terminal) {
+      terminalStep = step;
+      return;
+    }
+    if (!terminalStep) requestedStep = step;
+  };
+
+  for (const action of normalizedActions) {
     try {
       switch (action.type) {
 
-        case 'save_fields': {
-          const raw    = action.data || {};
-          const fields = normalizeCandidateFields(raw);
-
-          if (raw.gender) {
-            const gMap = { MALE: Gender.MALE, FEMALE: Gender.FEMALE, OTHER: Gender.OTHER };
-            const normalized = gMap[String(raw.gender).toUpperCase()];
-            if (normalized) fields.gender = normalized;
-          }
-
-          if (Object.keys(fields).length) {
-            await prisma.candidate.update({ where: { id: candidate.id }, data: fields });
-          }
+        case 'save_fields':
           break;
-        }
+
+        case 'request_cv':
+          setStep(ConversationStep.ASK_CV);
+          break;
+
+        case 'request_confirmation':
+          setStep(ConversationStep.CONFIRMING_DATA);
+          break;
 
         case 'mark_female_pipeline': {
-          await prisma.candidate.update({
-            where: { id: candidate.id },
-            data: {
-              gender:          Gender.FEMALE,
-              status:          CandidateStatus.REGISTRADO,
-              currentStep:     ConversationStep.DONE,
-              botPaused:       true,
-              botPausedAt:     new Date(),
-              botPauseReason:  'Candidata femenina — pendiente revisión humana de hoja de vida',
-              reminderScheduledFor: null,
-              reminderState:   'SKIPPED'
-            }
-          });
+          pendingUpdate.gender = Gender.FEMALE;
+          pendingUpdate.status = CandidateStatus.REGISTRADO;
+          pendingUpdate.botPaused = true;
+          pendingUpdate.botPausedAt = new Date();
+          pendingUpdate.botPauseReason = 'Candidata femenina — pendiente revisión humana de hoja de vida';
+          pendingUpdate.reminderScheduledFor = null;
+          pendingUpdate.reminderState = 'SKIPPED';
+          setStep(ConversationStep.DONE, { terminal: true });
           console.info('[FEMALE_PIPELINE]', { phone: candidate.phone, candidateId: candidate.id });
           break;
         }
 
         case 'mark_rejected': {
-          await prisma.candidate.update({
-            where: { id: candidate.id },
-            data: {
-              status:           CandidateStatus.RECHAZADO,
-              currentStep:      ConversationStep.DONE,
-              rejectionReason:  action.data?.reason  || 'No cumple requisitos',
-              rejectionDetails: action.data?.details || null,
-              reminderScheduledFor: null,
-              reminderState:    'SKIPPED'
-            }
-          });
+          pendingUpdate.status = CandidateStatus.RECHAZADO;
+          pendingUpdate.rejectionReason = action.data?.reason || 'No cumple requisitos';
+          pendingUpdate.rejectionDetails = action.data?.details || null;
+          pendingUpdate.reminderScheduledFor = null;
+          pendingUpdate.reminderState = 'SKIPPED';
+          setStep(ConversationStep.DONE, { terminal: true });
           break;
         }
 
         case 'confirm_booking': {
-          if (!nextSlot?.slot || !candidate.vacancyId) break;
+          if (!nextSlot?.slot || !candidate.vacancyId) {
+            console.warn('[ACT_SKIPPED]', { action: action.type, reason: 'missing_slot_or_vacancy' });
+            break;
+          }
           await createBooking(
             prisma, candidate.id, candidate.vacancyId,
             nextSlot.slot.id, nextSlot.date, !nextSlot.windowOk
           );
-          await prisma.candidate.update({
-            where: { id: candidate.id },
-            data:  { currentStep: ConversationStep.SCHEDULED }
-          });
+          setStep(ConversationStep.SCHEDULED, { terminal: true });
           break;
         }
 
         case 'mark_no_interest': {
-          await prisma.candidate.update({
-            where: { id: candidate.id },
-            data:  {
-              currentStep: ConversationStep.DONE,
-              reminderScheduledFor: null,
-              reminderState: 'SKIPPED'
-            }
-          });
+          pendingUpdate.reminderScheduledFor = null;
+          pendingUpdate.reminderState = 'SKIPPED';
+          setStep(ConversationStep.DONE, { terminal: true });
           break;
         }
 
         case 'pause_bot': {
-          await prisma.candidate.update({
-            where: { id: candidate.id },
-            data: {
-              botPaused:      true,
-              botPausedAt:    new Date(),
-              botPauseReason: action.data?.reason || 'Requiere atención humana'
-            }
-          });
+          pendingUpdate.botPaused = true;
+          pendingUpdate.botPausedAt = new Date();
+          pendingUpdate.botPauseReason = action.data?.reason || 'Requiere atención humana';
+          pendingUpdate.reminderScheduledFor = null;
+          pendingUpdate.reminderState = 'CANCELLED';
           break;
         }
 
+        case 'offer_interview':
+        case 'reschedule':
+        case 'nothing':
+          console.info('[ACT_NOOP]', { action: action.type, candidateId: candidate.id });
+          break;
+
         default:
+          console.warn('[ACT_UNHANDLED]', { action: action?.type || 'unknown', candidateId: candidate.id });
           break;
       }
     } catch (err) {
@@ -494,10 +517,18 @@ export async function act({ actions, candidate, nextStep, nextSlot, prisma }) {
   }
 
   const validSteps = Object.values(ConversationStep);
-  if (nextStep && validSteps.includes(nextStep) && nextStep !== candidate.currentStep) {
+  const finalStep = terminalStep
+    || requestedStep
+    || (nextStep && validSteps.includes(nextStep) ? nextStep : null);
+
+  if (finalStep && finalStep !== candidate.currentStep) {
+    pendingUpdate.currentStep = finalStep;
+  }
+
+  if (Object.keys(pendingUpdate).length) {
     await prisma.candidate.update({
       where: { id: candidate.id },
-      data:  { currentStep: nextStep }
+      data: pendingUpdate
     }).catch((e) => console.error('[ACT_STEP_UPDATE_ERROR]', e?.message));
   }
 }

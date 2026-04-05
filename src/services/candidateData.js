@@ -31,6 +31,15 @@ const IMPLICIT_NEIGHBORHOODS = new Set([
 // Helpers de normalización
 // ─────────────────────────────────────────────
 
+function normalizeLooseText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function capitalizeWords(str = '') {
   return String(str || '')
     .toLowerCase()
@@ -85,25 +94,53 @@ function normalizeExperienceTime(value = '') {
 
 function normalizeMedicalRestrictions(value = '') {
   const raw = String(value || '').trim();
-  const n = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+  const n = normalizeLooseText(raw);
   if (!n) return null;
-  if (/^(no tengo restricciones?( medicas?)?|sin restricciones?( medicas?)?|ninguna restriccion)$/.test(n)) {
+  if (/^(no tengo restricciones?( medicas?)?|no cuento con restricciones?( medicas?)?|sin restricciones?( medicas?)?|sin ninguna restriccion|ninguna restriccion)$/.test(n)) {
     return 'Sin restricciones médicas';
   }
   return capitalizeWords(raw);
 }
 
 function normalizeTransportMode(value = '') {
-  const n = String(value || '').trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+  const n = normalizeLooseText(value);
   if (!n) return null;
   if (['sin medio de transporte', 'sin transporte', 'ninguno', 'ninguna',
     'no tengo transporte', 'no tengo medio de transporte'].includes(n)) {
     return 'Sin medio de transporte';
   }
+  if (/\b(tengo|cuento con|si tengo|manejo|me movilizo en|voy en)\s+(moto|motocicleta)\b/.test(n)) return 'Moto';
+  if (/\b(tengo|cuento con|si tengo|manejo|me movilizo en|voy en)\s+(bicicleta|bici)\b/.test(n)) return 'Bicicleta';
   if (['moto', 'motocicleta', 'motocicleta propia'].includes(n)) return 'Moto';
   if (['bicicleta', 'bici'].includes(n)) return 'Bicicleta';
   return capitalizeWords(n);
+}
+
+function normalizeExperienceInfo(value = '') {
+  const n = normalizeLooseText(value);
+  if (!n) return null;
+  if ((/\b(no|sin|ninguna|ninguno|nunca)\b/.test(n) && /experien/.test(n)) || n === 'no') return 'No';
+  if ((/\b(si|yes|tengo|cuento con|poseo)\b/.test(n) && /experien/.test(n)) || n === 'si' || n === 'sí') return 'Sí';
+  return null;
+}
+
+function detectDocumentTypeHint(text = '') {
+  const patterns = [
+    /\b(?:tipo(?:\s+de)?\s+documento|documento|identificacion|identificaci[oó]n)\s*(?:es|:|-)?\s*(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[ií]a|pasaporte|ppt)\b/i,
+    /\b(c[ée]dula\s+de\s+extranjer[ií]a|tarjeta\s+de\s+identidad|pasaporte|ppt)\b/i
+  ];
+  for (const pattern of patterns) {
+    const match = String(text || '').match(pattern);
+    if (match?.[1]) return normalizeDocumentType(match[1]);
+  }
+  return null;
+}
+
+function detectExperienceTime(text = '') {
+  const compact = String(text || '').replace(/\s+/g, ' ').trim();
+  const match = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a[nñ]os?|semanas?))(?:\s+de\s+experiencia)?\b/i);
+  if (!match?.[1]) return null;
+  return normalizeExperienceTime(match[1]);
 }
 
 function hasNameTokens(candidate = '') {
@@ -159,6 +196,9 @@ export function parseNaturalData(text = '') {
     result.documentNumber = docMatch[2];
     remaining = remaining.replace(docMatch[0], ' ');
   }
+  if (!result.documentType) {
+    result.documentType = detectDocumentTypeHint(compact);
+  }
   if (!result.documentNumber) {
     const docNum = remaining.match(/(?:^|\s)(\d{7,12})(?:\s|$)/);
     if (docNum) {
@@ -208,6 +248,31 @@ export function parseNaturalData(text = '') {
   );
   if (transportNegative) result.transportMode = 'Sin medio de transporte';
 
+  if (!result.transportMode) {
+    const transportPositive = compact.match(/\b(?:tengo|cuento con|si tengo|manejo|me movilizo en|voy en)\s+(moto|motocicleta|bicicleta|bici)\b/i);
+    if (transportPositive?.[1]) result.transportMode = normalizeTransportMode(transportPositive[1]);
+  }
+
+  const experienceNegative = /\b(?:no\s+tengo|no\s+cuento\s+con|sin|ninguna)\s+experiencia\b/i.test(compact)
+    || /\bnunca\s+he\s+trabajado\b/i.test(compact);
+  if (experienceNegative) {
+    result.experienceInfo = 'No';
+    result.experienceTime = '0';
+  }
+
+  if (!result.experienceInfo) {
+    const experiencePositive = /\b(?:tengo|cuento con|si tengo|poseo)\s+experiencia\b/i.test(compact);
+    if (experiencePositive) result.experienceInfo = 'Sí';
+  }
+
+  if (!result.experienceTime) {
+    const detectedExperienceTime = detectExperienceTime(compact);
+    if (detectedExperienceTime) {
+      result.experienceTime = detectedExperienceTime;
+      result.experienceInfo = 'Sí';
+    }
+  }
+
   // — Nombre: solo intento local si hay prefijo muy explícito. Lo demás lo resuelve OpenAI.
   const detectedName = detectLeadingName(text);
   if (detectedName) result.fullName = detectedName;
@@ -231,7 +296,7 @@ export function normalizeCandidateFields(fields = {}) {
   }
   if (fields.neighborhood) normalized.neighborhood = capitalizeWords(fields.neighborhood);
   if (fields.experienceInfo) {
-    normalized.experienceInfo = /(si|sí|yes|tengo)/i.test(String(fields.experienceInfo)) ? 'Sí' : 'No';
+    normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || (/(si|sí|yes|tengo)/i.test(String(fields.experienceInfo)) ? 'Sí' : 'No');
   }
   if (fields.experienceTime) {
     normalized.experienceTime = normalizeExperienceTime(fields.experienceTime);
@@ -260,6 +325,7 @@ export function isHighConfidenceLocalField(field, value) {
   if (field === 'age') return false;
   if (field === 'fullName') return !isSuspiciousFullName(raw) && hasNameTokens(raw);
   if (field === 'neighborhood') return raw.length >= 3;
+  if (field === 'experienceInfo') return /^(si|sí|no)$/i.test(raw) || /experien/i.test(raw);
   if (field === 'medicalRestrictions') {
     return /sin restricciones|no tengo restricciones|ninguna restriccion/i.test(raw) || raw.length >= 8;
   }
