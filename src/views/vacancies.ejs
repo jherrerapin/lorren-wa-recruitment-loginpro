@@ -94,6 +94,10 @@
     .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
       border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12);
     }
+    .form-group input[readonly] {
+      background: var(--gray-light); color: var(--text-faint); cursor: default;
+      border-color: var(--border-soft);
+    }
     .form-group textarea { resize: vertical; min-height: 70px; }
     .form-hint { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
     .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
@@ -225,16 +229,16 @@
 
           <div class="form-group">
             <label for="c-title">Título <span style="color:var(--red)">*</span></label>
-            <input id="c-title" name="title" type="text" required placeholder="Ej: Auxiliar de Cargue — Ibagué" />
+            <input id="c-title" name="title" type="text" required placeholder="Ej: Auxiliar de Cargue" oninput="updateCreateKey()" />
           </div>
           <div class="form-group">
             <label for="c-city">Ciudad <span style="color:var(--red)">*</span></label>
-            <input id="c-city" name="city" type="text" required placeholder="Ej: Ibagué" />
+            <input id="c-city" name="city" type="text" required placeholder="Ej: Ibagué" oninput="updateCreateKey()" />
           </div>
-          <div class="form-group">
-            <label for="c-key">Clave única (key) <span style="color:var(--red)">*</span></label>
-            <input id="c-key" name="key" type="text" required placeholder="Ej: ibague-auxiliar-2025" />
-            <span class="form-hint">Identificador interno — no se muestra al candidato.</span>
+          <div class="form-group full">
+            <label for="c-key">Clave interna (key)</label>
+            <input id="c-key" name="key" type="text" readonly placeholder="Se genera automáticamente" />
+            <span class="form-hint">Generada desde título + ciudad. Identificador interno — no se muestra al candidato.</span>
           </div>
           <div class="form-group">
             <label for="c-role">Rol / Cargo</label>
@@ -291,7 +295,10 @@
               <input type="checkbox" name="acceptingApplications" value="true" checked />
             </div>
             <div class="toggle-row">
-              <div><div class="toggle-label">Agendamiento de entrevistas</div><div class="toggle-desc">Activa el flujo de agenda en el bot.</div></div>
+              <div>
+                <div class="toggle-label">Agendamiento de entrevistas</div>
+                <div class="toggle-desc">Activa el flujo de agenda en el bot. Si está apagado, el bot cierra con "quedaste en proceso, te contactamos".</div>
+              </div>
               <input type="checkbox" name="schedulingEnabled" value="true" />
             </div>
           </div>
@@ -327,10 +334,10 @@
             <label for="e-city">Ciudad <span style="color:var(--red)">*</span></label>
             <input id="e-city" name="city" type="text" required />
           </div>
-          <div class="form-group">
-            <label for="e-key">Clave única (key) <span style="color:var(--red)">*</span></label>
+          <div class="form-group full">
+            <label for="e-key">Clave interna (key) <span style="color:var(--red)">*</span></label>
             <input id="e-key" name="key" type="text" required />
-            <span class="form-hint">Identificador interno — no se muestra al candidato.</span>
+            <span class="form-hint">Identificador interno — no se muestra al candidato. Cambiar puede afectar el enrutamiento del bot.</span>
           </div>
           <div class="form-group">
             <label for="e-role">Rol / Cargo</label>
@@ -387,7 +394,10 @@
               <input type="checkbox" id="e-accepting" name="acceptingApplications" value="true" />
             </div>
             <div class="toggle-row">
-              <div><div class="toggle-label">Agendamiento de entrevistas</div><div class="toggle-desc">Activa el flujo de agenda en el bot.</div></div>
+              <div>
+                <div class="toggle-label">Agendamiento de entrevistas</div>
+                <div class="toggle-desc">Activa el flujo de agenda en el bot. Si está apagado, el bot cierra con "quedaste en proceso, te contactamos".</div>
+              </div>
               <input type="checkbox" id="e-scheduling" name="schedulingEnabled" value="true" />
             </div>
           </div>
@@ -403,7 +413,29 @@
 </div>
 
 <script>
+  // ── Slug generator ──────────────────────────────────────
+  function toSlug(str) {
+    return str
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')  // remove accents
+      .replace(/[^a-z0-9\s-]/g, '')     // remove non-alphanumeric
+      .trim()
+      .replace(/[\s]+/g, '-')           // spaces to hyphens
+      .replace(/-+/g, '-');             // collapse consecutive hyphens
+  }
+
+  function updateCreateKey() {
+    const title = document.getElementById('c-title').value;
+    const city  = document.getElementById('c-city').value;
+    const parts = [title, city].filter(Boolean).map(toSlug);
+    document.getElementById('c-key').value = parts.join('-');
+  }
+
+  // ── Modal helpers ────────────────────────────────────────
   function openCreate() {
+    // Reset key when opening fresh
+    document.getElementById('c-key').value = '';
     document.getElementById('modalCreate').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
