@@ -37,12 +37,10 @@
     .page-header h1 { font-size: 20px; font-weight: 700; color: var(--navy); }
     .page-header .sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 
-    /* Alert */
     .alert { padding: 10px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 600; margin-bottom: 20px; }
     .alert-success { background: var(--green-light); color: var(--green); border: 1px solid #86efac; }
     .alert-error   { background: var(--red-light);   color: var(--red);   border: 1px solid #fca5a5; }
 
-    /* Buttons */
     .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; border: none; text-decoration: none; transition: all .15s; }
     .btn-primary   { background: var(--teal);  color: #fff; }
     .btn-primary:hover { background: var(--teal-hover); }
@@ -52,7 +50,6 @@
     .btn-danger:hover { background: #fecaca; }
     .btn-sm { padding: 5px 11px; font-size: 12px; }
 
-    /* Table */
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
     table { width: 100%; border-collapse: collapse; }
     thead th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
@@ -60,7 +57,6 @@
     tbody tr:last-child td { border-bottom: none; }
     tbody tr:hover td { background: #fafbfc; }
 
-    /* Badges */
     .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
     .badge-open   { background: var(--green-light); color: var(--green); }
     .badge-paused { background: var(--amber-light); color: var(--amber); }
@@ -70,7 +66,6 @@
     .dot-amber { background: var(--amber); }
     .dot-red   { background: var(--red); }
 
-    /* Modal */
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
     .modal-overlay.open { display: flex; }
     .modal { background: var(--surface); border-radius: var(--radius-lg); width: 100%; max-width: 680px; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
@@ -81,7 +76,6 @@
     .modal-body { padding: 20px 24px; }
     .modal-footer { padding: 14px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
 
-    /* Form */
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
     .form-grid .full { grid-column: 1 / -1; }
     .form-group { display: flex; flex-direction: column; gap: 5px; }
@@ -100,14 +94,24 @@
     }
     .form-group textarea { resize: vertical; min-height: 70px; }
     .form-hint { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
-    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
-    .toggle-row:last-child { border-bottom: none; }
-    .toggle-label { font-size: 13px; font-weight: 600; color: var(--text); }
-    .toggle-desc  { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
-    .toggle-row input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--teal); }
     .section-divider { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border-soft); grid-column: 1 / -1; }
 
-    /* Empty */
+    /* ── Radio mode selector ── */
+    .mode-group { display: flex; flex-direction: column; gap: 8px; }
+    .mode-option {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 12px 14px; border-radius: var(--radius);
+      border: 2px solid var(--border); background: var(--surface-2);
+      cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .mode-option:hover { border-color: #a0c4be; background: #f3faf9; }
+    .mode-option input[type=radio] { margin-top: 2px; width: 16px; height: 16px; accent-color: var(--teal); flex-shrink: 0; cursor: pointer; }
+    .mode-option input[type=radio]:checked + .mode-option-body { color: var(--navy); }
+    .mode-option:has(input:checked) { border-color: var(--teal); background: var(--teal-light); }
+    .mode-option-title { font-size: 13px; font-weight: 700; color: var(--text); }
+    .mode-option-desc  { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .mode-label-inactive .mode-option-title { color: var(--text-muted); }
+
     .empty-state { text-align: center; padding: 48px 24px; color: var(--text-faint); }
     .empty-state .empty-icon { font-size: 36px; margin-bottom: 10px; }
     .empty-state p { font-size: 14px; }
@@ -184,7 +188,7 @@
             const dotCls   = isOpen ? 'dot-green' : (isPaused ? 'dot-amber' : 'dot-red');
             const badgeTxt = isOpen ? 'Abierta' : (isPaused ? 'Pausada' : 'Inactiva');
             const modeIcon = v.schedulingEnabled ? '🗓️' : '📋';
-            const modeTxt  = v.schedulingEnabled ? 'Agendamiento' : 'Solo HV';
+            const modeTxt  = v.schedulingEnabled ? 'Con entrevista' : 'Solo HV';
             const toggleLabel = isOpen ? 'Pausar' : (isPaused ? 'Reabrir' : 'Activar');
             const toggleClass = isOpen ? 'btn-danger' : 'btn-secondary';
           %>
@@ -214,6 +218,15 @@
 
 </div>
 
+<!--
+  HELPER: deriveVacancyFields(mode) → { isActive, acceptingApplications, schedulingEnabled }
+  mode: 'inactive' | 'apply_only' | 'apply_schedule'
+
+  inactive       → isActive=false, accepting=false, scheduling=false
+  apply_only     → isActive=true,  accepting=true,  scheduling=false
+  apply_schedule → isActive=true,  accepting=true,  scheduling=true
+-->
+
 <!-- ── Modal Crear ── -->
 <div class="modal-overlay" id="modalCreate">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalCreateTitle">
@@ -221,7 +234,7 @@
       <h2 id="modalCreateTitle">➕ Nueva vacante</h2>
       <button class="modal-close" onclick="closeModal('modalCreate')" aria-label="Cerrar">&times;</button>
     </div>
-    <form method="post" action="/admin/vacancies/create">
+    <form method="post" action="/admin/vacancies/create" id="formCreate" onsubmit="injectModeFields('formCreate','c-mode')">
       <div class="modal-body">
         <div class="form-grid">
 
@@ -283,23 +296,35 @@
             <textarea id="c-cond" name="conditions" placeholder="Salario, horario, beneficios…"></textarea>
           </div>
 
-          <div class="section-divider">Configuración</div>
+          <div class="section-divider">Modo de operación</div>
 
           <div class="full">
-            <div class="toggle-row">
-              <div><div class="toggle-label">Vacante activa</div><div class="toggle-desc">Habilita la vacante en el sistema.</div></div>
-              <input type="checkbox" name="isActive" value="true" checked />
-            </div>
-            <div class="toggle-row">
-              <div><div class="toggle-label">Recibir postulaciones</div><div class="toggle-desc">Los candidatos pueden postularse vía WhatsApp.</div></div>
-              <input type="checkbox" name="acceptingApplications" value="true" checked />
-            </div>
-            <div class="toggle-row">
-              <div>
-                <div class="toggle-label">Agendamiento de entrevistas</div>
-                <div class="toggle-desc">Activa el flujo de agenda en el bot. Si está apagado, el bot cierra con "quedaste en proceso, te contactamos".</div>
-              </div>
-              <input type="checkbox" name="schedulingEnabled" value="true" />
+            <div class="mode-group" id="c-mode" role="radiogroup" aria-label="Modo de operación">
+
+              <label class="mode-option mode-label-inactive">
+                <input type="radio" name="_vacancyMode" value="inactive" />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">🔴 Vacante inactiva</div>
+                  <div class="mode-option-desc">No aparece en el bot. Los candidatos que escriban no serán enrutados a esta vacante.</div>
+                </div>
+              </label>
+
+              <label class="mode-option">
+                <input type="radio" name="_vacancyMode" value="apply_only" checked />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">📋 Solo postulación</div>
+                  <div class="mode-option-desc">El bot recolecta datos y hoja de vida. Al terminar cierra con “quedaste registrado, te contactamos”. No se agenda entrevista.</div>
+                </div>
+              </label>
+
+              <label class="mode-option">
+                <input type="radio" name="_vacancyMode" value="apply_schedule" />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">🗓️ Postulación + entrevista</div>
+                  <div class="mode-option-desc">El bot recolecta datos, hoja de vida y luego ofrece y agenda la entrevista automáticamente (excepto candidatas femeninas).</div>
+                </div>
+              </label>
+
             </div>
           </div>
 
@@ -320,7 +345,7 @@
       <h2 id="modalEditTitle">✏️ Editar vacante</h2>
       <button class="modal-close" onclick="closeModal('modalEdit')" aria-label="Cerrar">&times;</button>
     </div>
-    <form method="post" id="editForm" action="">
+    <form method="post" id="formEdit" action="" onsubmit="injectModeFields('formEdit','e-mode')">
       <div class="modal-body">
         <div class="form-grid">
 
@@ -382,23 +407,35 @@
             <textarea id="e-cond" name="conditions"></textarea>
           </div>
 
-          <div class="section-divider">Configuración</div>
+          <div class="section-divider">Modo de operación</div>
 
           <div class="full">
-            <div class="toggle-row">
-              <div><div class="toggle-label">Vacante activa</div><div class="toggle-desc">Habilita la vacante en el sistema.</div></div>
-              <input type="checkbox" id="e-isActive" name="isActive" value="true" />
-            </div>
-            <div class="toggle-row">
-              <div><div class="toggle-label">Recibir postulaciones</div><div class="toggle-desc">Los candidatos pueden postularse vía WhatsApp.</div></div>
-              <input type="checkbox" id="e-accepting" name="acceptingApplications" value="true" />
-            </div>
-            <div class="toggle-row">
-              <div>
-                <div class="toggle-label">Agendamiento de entrevistas</div>
-                <div class="toggle-desc">Activa el flujo de agenda en el bot. Si está apagado, el bot cierra con "quedaste en proceso, te contactamos".</div>
-              </div>
-              <input type="checkbox" id="e-scheduling" name="schedulingEnabled" value="true" />
+            <div class="mode-group" id="e-mode" role="radiogroup" aria-label="Modo de operación">
+
+              <label class="mode-option mode-label-inactive">
+                <input type="radio" name="_vacancyMode" value="inactive" />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">🔴 Vacante inactiva</div>
+                  <div class="mode-option-desc">No aparece en el bot. Los candidatos que escriban no serán enrutados a esta vacante.</div>
+                </div>
+              </label>
+
+              <label class="mode-option">
+                <input type="radio" name="_vacancyMode" value="apply_only" />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">📋 Solo postulación</div>
+                  <div class="mode-option-desc">El bot recolecta datos y hoja de vida. Al terminar cierra con “quedaste registrado, te contactamos”. No se agenda entrevista.</div>
+                </div>
+              </label>
+
+              <label class="mode-option">
+                <input type="radio" name="_vacancyMode" value="apply_schedule" />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">🗓️ Postulación + entrevista</div>
+                  <div class="mode-option-desc">El bot recolecta datos, hoja de vida y luego ofrece y agenda la entrevista automáticamente (excepto candidatas femeninas).</div>
+                </div>
+              </label>
+
             </div>
           </div>
 
@@ -413,51 +450,91 @@
 </div>
 
 <script>
-  // ── Slug generator ──────────────────────────────────────
+  // ── Derivación de campos desde modo ───────────────────────────────
+  // inactive       → isActive=false, accepting=false, scheduling=false
+  // apply_only     → isActive=true,  accepting=true,  scheduling=false
+  // apply_schedule → isActive=true,  accepting=true,  scheduling=true
+
+  const MODE_MAP = {
+    inactive:       { isActive: false, acceptingApplications: false, schedulingEnabled: false },
+    apply_only:     { isActive: true,  acceptingApplications: true,  schedulingEnabled: false },
+    apply_schedule: { isActive: true,  acceptingApplications: true,  schedulingEnabled: true  }
+  };
+
+  function injectModeFields(formId, radioGroupId) {
+    const form  = document.getElementById(formId);
+    const group = document.getElementById(radioGroupId);
+    const mode  = group.querySelector('input[name="_vacancyMode"]:checked')?.value || 'apply_only';
+    const fields = MODE_MAP[mode];
+
+    // Remover inyecciones previas
+    form.querySelectorAll('input[data-mode-injected]').forEach(el => el.remove());
+
+    // Inyectar los 3 campos que el backend espera
+    Object.entries(fields).forEach(([name, value]) => {
+      const input = document.createElement('input');
+      input.type  = 'hidden';
+      input.name  = name;
+      input.value = value ? 'true' : '';
+      input.dataset.modeInjected = '1';
+      form.appendChild(input);
+    });
+
+    // Permitir que el submit continue
+    return true;
+  }
+
+  // ── Slug generator ───────────────────────────────────────────
   function toSlug(str) {
     return str
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')  // remove accents
-      .replace(/[^a-z0-9\s-]/g, '')     // remove non-alphanumeric
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s-]/g, '')
       .trim()
-      .replace(/[\s]+/g, '-')           // spaces to hyphens
-      .replace(/-+/g, '-');             // collapse consecutive hyphens
+      .replace(/[\s]+/g, '-')
+      .replace(/-+/g, '-');
   }
 
   function updateCreateKey() {
     const title = document.getElementById('c-title').value;
     const city  = document.getElementById('c-city').value;
-    const parts = [title, city].filter(Boolean).map(toSlug);
-    document.getElementById('c-key').value = parts.join('-');
+    document.getElementById('c-key').value = [title, city].filter(Boolean).map(toSlug).join('-');
   }
 
-  // ── Modal helpers ────────────────────────────────────────
+  // ── Modal helpers ───────────────────────────────────────────
   function openCreate() {
-    // Reset key when opening fresh
     document.getElementById('c-key').value = '';
+    // Modo por defecto: apply_only
+    const group = document.getElementById('c-mode');
+    group.querySelectorAll('input[type=radio]').forEach(r => r.checked = (r.value === 'apply_only'));
     document.getElementById('modalCreate').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
 
   function openEdit(v) {
-    const f = document.getElementById('editForm');
+    const f = document.getElementById('formEdit');
     f.action = '/admin/vacancies/' + v.id + '/edit';
 
-    document.getElementById('e-title').value       = v.title || '';
-    document.getElementById('e-city').value        = v.city  || '';
-    document.getElementById('e-key').value         = v.key   || '';
-    document.getElementById('e-role').value        = v.role  || '';
-    document.getElementById('e-address').value     = v.operationAddress || '';
-    document.getElementById('e-minAge').value      = v.minAge != null ? v.minAge : '';
-    document.getElementById('e-maxAge').value      = v.maxAge != null ? v.maxAge : '';
-    document.getElementById('e-exp').value         = v.experienceRequired || 'INDIFFERENT';
-    document.getElementById('e-desc').value        = v.description  || '';
-    document.getElementById('e-req').value         = v.requirements || '';
-    document.getElementById('e-cond').value        = v.conditions   || '';
-    document.getElementById('e-isActive').checked  = Boolean(v.isActive);
-    document.getElementById('e-accepting').checked = Boolean(v.acceptingApplications);
-    document.getElementById('e-scheduling').checked= Boolean(v.schedulingEnabled);
+    document.getElementById('e-title').value   = v.title || '';
+    document.getElementById('e-city').value    = v.city  || '';
+    document.getElementById('e-key').value     = v.key   || '';
+    document.getElementById('e-role').value    = v.role  || '';
+    document.getElementById('e-address').value = v.operationAddress || '';
+    document.getElementById('e-minAge').value  = v.minAge != null ? v.minAge : '';
+    document.getElementById('e-maxAge').value  = v.maxAge != null ? v.maxAge : '';
+    document.getElementById('e-exp').value     = v.experienceRequired || 'INDIFFERENT';
+    document.getElementById('e-desc').value    = v.description  || '';
+    document.getElementById('e-req').value     = v.requirements || '';
+    document.getElementById('e-cond').value    = v.conditions   || '';
+
+    // Derivar modo desde los campos actuales de la vacante
+    let mode = 'inactive';
+    if (v.isActive && v.schedulingEnabled)      mode = 'apply_schedule';
+    else if (v.isActive && v.acceptingApplications) mode = 'apply_only';
+
+    const group = document.getElementById('e-mode');
+    group.querySelectorAll('input[type=radio]').forEach(r => r.checked = (r.value === mode));
 
     document.getElementById('modalEdit').classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -468,21 +545,16 @@
     document.body.style.overflow = '';
   }
 
-  // Cerrar al click en el overlay
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', e => {
       if (e.target === overlay) closeModal(overlay.id);
     });
   });
 
-  // Cerrar con Escape
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      document.querySelectorAll('.modal-overlay.open').forEach(m => closeModal(m.id));
-    }
+    if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(m => closeModal(m.id));
   });
 
-  // Auto-cerrar alertas después de 5s
   setTimeout(() => {
     document.querySelectorAll('.alert').forEach(a => {
       a.style.transition = 'opacity .4s';
