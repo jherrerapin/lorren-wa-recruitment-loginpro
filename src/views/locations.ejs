@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ciudades y Operaciones — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f4f5f7; --surface: #ffffff; --surface-2: #f9fafb;
+      --border: #e1e4e8; --border-soft: #eaecef;
+      --text: #1a1d23; --text-muted: #6b7280; --text-faint: #9ca3af;
+      --navy: #1e2d3d; --teal: #0d7a6b; --teal-light: #e6f4f1; --teal-hover: #0a5f53;
+      --red: #dc2626; --red-light: #fee2e2;
+      --green: #16a34a; --green-light: #dcfce7;
+      --amber: #b45309; --amber-light: #fef3c7;
+      --gray-light: #f3f4f6;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+      --radius: 8px; --radius-lg: 12px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+    .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; height: 52px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 500; padding: 4px 2px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
+    .navbar a:hover { color: #fff; border-bottom-color: rgba(255,255,255,.3); }
+    .navbar a.nav-active { color: #fff; border-bottom-color: #4fd1c5; }
+    .navbar .brand img { height: 28px; display: block; }
+    .navbar .spacer { flex: 1; }
+    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 5px 12px !important; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
+    .btn-logout:hover { border-color: rgba(255,255,255,.6) !important; color: #fff !important; }
+    .page { max-width: 900px; margin: 0 auto; padding: 28px 20px 60px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .page-header h1 { font-size: 20px; font-weight: 700; color: var(--navy); }
+    .page-header .sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .alert { padding: 10px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 600; margin-bottom: 20px; }
+    .alert-success { background: var(--green-light); color: var(--green); border: 1px solid #86efac; }
+    .alert-error   { background: var(--red-light);   color: var(--red);   border: 1px solid #fca5a5; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; border: none; text-decoration: none; transition: all .15s; }
+    .btn-primary   { background: var(--teal); color: #fff; }
+    .btn-primary:hover { background: var(--teal-hover); }
+    .btn-secondary { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--gray-light); color: var(--navy); }
+    .btn-danger    { background: var(--red-light); color: var(--red); border: 1px solid #fca5a5; }
+    .btn-danger:hover { background: #fecaca; }
+    .btn-sm { padding: 5px 11px; font-size: 12px; }
+    .btn-xs { padding: 3px 9px; font-size: 11px; }
+
+    /* City cards */
+    .city-list { display: flex; flex-direction: column; gap: 16px; }
+    .city-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .city-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; background: var(--surface-2);
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .city-name { font-size: 15px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 8px; }
+    .city-actions { display: flex; gap: 6px; }
+    .ops-list { padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
+    .op-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 12px; border-radius: var(--radius);
+      background: var(--surface-2); border: 1px solid var(--border-soft);
+    }
+    .op-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .op-sub  { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
+    .op-actions { display: flex; gap: 5px; }
+    .add-op-row { padding: 8px 18px 14px; }
+
+    /* Inline forms */
+    .inline-form { display: flex; gap: 8px; align-items: center; }
+    .inline-form input {
+      border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+      font-size: 13px; font-family: var(--font); color: var(--text);
+      background: var(--surface); outline: none; flex: 1; min-width: 0;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .inline-form input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
+
+    /* Add-city area */
+    .add-city-card {
+      background: var(--surface); border: 2px dashed var(--border);
+      border-radius: var(--radius-lg); padding: 16px 18px;
+    }
+    .add-city-title { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; }
+
+    .empty-ops { font-size: 12px; color: var(--text-faint); padding: 8px 0 0 2px; font-style: italic; }
+
+    .badge-count {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--teal-light); color: var(--teal);
+      font-size: 11px; font-weight: 700;
+    }
+
+    @media (max-width: 600px) {
+      .city-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .inline-form { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <a class="brand" href="/admin" aria-label="LoginPro">
+    <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+  </a>
+  <a href="/admin">Panel</a>
+  <a href="/admin/vacancies">Vacantes</a>
+  <a href="/admin/locations" class="nav-active">Ciudades</a>
+  <% if (role === 'dev') { %>
+    <a href="/admin/monitor">Monitor</a>
+  <% } %>
+  <span class="spacer"></span>
+  <form method="post" action="/logout">
+    <button type="submit" class="btn-logout">Cerrar sesión</button>
+  </form>
+</nav>
+
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <h1>🏙️ Ciudades y Operaciones</h1>
+      <p class="sub">Gestiona la jerarquía Ciudad → Operación/Zona. Las vacantes se crean dentro de una operación.</p>
+    </div>
+  </div>
+
+  <% if (successMsg) { %>
+    <div class="alert alert-success">✅ <%= successMsg %></div>
+  <% } %>
+  <% if (errorMsg) { %>
+    <div class="alert alert-error">⚠️ <%= errorMsg %></div>
+  <% } %>
+
+  <div class="city-list">
+
+    <% for (const city of cities) { %>
+    <div class="city-card">
+      <div class="city-header">
+        <div class="city-name">
+          🏙️ <%= city.name %>
+          <span class="badge-count" title="Operaciones"><%= city.operations.length %></span>
+        </div>
+        <div class="city-actions">
+          <!-- Editar nombre ciudad -->
+          <button class="btn btn-secondary btn-sm" onclick="toggleEditCity('<%= city.id %>')">
+            ✏️ Renombrar
+          </button>
+          <!-- Eliminar ciudad (solo si no tiene operaciones) -->
+          <% if (city.operations.length === 0) { %>
+          <form method="post" action="/admin/locations/cities/<%= city.id %>/delete"
+                onsubmit="return confirm('¿Eliminar ciudad <%= city.name %>? Esta acción no se puede deshacer.')">
+            <button type="submit" class="btn btn-danger btn-sm">🗑️ Eliminar</button>
+          </form>
+          <% } %>
+        </div>
+      </div>
+
+      <!-- Editar nombre ciudad (inline, oculto por defecto) -->
+      <div id="edit-city-<%= city.id %>" style="display:none; padding: 10px 18px; border-bottom: 1px solid var(--border-soft); background: var(--teal-light);">
+        <form method="post" action="/admin/locations/cities/<%= city.id %>/edit" class="inline-form">
+          <input type="text" name="name" value="<%= city.name %>" required placeholder="Nombre ciudad" />
+          <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditCity('<%= city.id %>')">Cancelar</button>
+        </form>
+      </div>
+
+      <!-- Operaciones -->
+      <div class="ops-list">
+        <% if (city.operations.length === 0) { %>
+          <p class="empty-ops">Sin operaciones. Agrega la primera abajo.</p>
+        <% } %>
+        <% for (const op of city.operations) { %>
+        <div class="op-row">
+          <div>
+            <div class="op-name">📍 <%= op.name %></div>
+            <div class="op-sub"><%= op._count?.vacancies || 0 %> vacante<%= (op._count?.vacancies || 0) !== 1 ? 's' : '' %> asociada<%= (op._count?.vacancies || 0) !== 1 ? 's' : '' %></div>
+          </div>
+          <div class="op-actions">
+            <button class="btn btn-secondary btn-xs" onclick="toggleEditOp('<%= op.id %>')">✏️</button>
+            <% if ((op._count?.vacancies || 0) === 0) { %>
+            <form method="post" action="/admin/locations/operations/<%= op.id %>/delete" style="display:inline;"
+                  onsubmit="return confirm('¿Eliminar operación <%= op.name %>?')">
+              <button type="submit" class="btn btn-danger btn-xs">🗑️</button>
+            </form>
+            <% } %>
+          </div>
+        </div>
+        <!-- Editar operación inline -->
+        <div id="edit-op-<%= op.id %>" style="display:none; padding: 6px 0;">
+          <form method="post" action="/admin/locations/operations/<%= op.id %>/edit" class="inline-form">
+            <input type="text" name="name" value="<%= op.name %>" required placeholder="Nombre operación" />
+            <button type="submit" class="btn btn-primary btn-xs">Guardar</button>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="toggleEditOp('<%= op.id %>')">✕</button>
+          </form>
+        </div>
+        <% } %>
+      </div>
+
+      <!-- Agregar operación -->
+      <div class="add-op-row">
+        <form method="post" action="/admin/locations/cities/<%= city.id %>/operations" class="inline-form">
+          <input type="text" name="name" required placeholder="Nueva operación / zona (ej: Siberia)" />
+          <button type="submit" class="btn btn-primary btn-sm">➕ Agregar</button>
+        </form>
+      </div>
+    </div>
+    <% } %>
+
+    <!-- Agregar ciudad -->
+    <div class="add-city-card">
+      <div class="add-city-title">➕ Nueva ciudad</div>
+      <form method="post" action="/admin/locations/cities" class="inline-form">
+        <input type="text" name="name" required placeholder="Ej: Bogotá, Cali, Barranquilla" />
+        <button type="submit" class="btn btn-primary">Crear ciudad</button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function toggleEditCity(id) {
+    const el = document.getElementById('edit-city-' + id);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+  function toggleEditOp(id) {
+    const el = document.getElementById('edit-op-' + id);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+  setTimeout(() => {
+    document.querySelectorAll('.alert').forEach(a => {
+      a.style.transition = 'opacity .4s';
+      a.style.opacity = '0';
+      setTimeout(() => a.remove(), 400);
+    });
+  }, 5000);
+</script>
+</body>
+</html>

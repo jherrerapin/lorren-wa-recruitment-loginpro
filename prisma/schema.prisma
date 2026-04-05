@@ -21,21 +21,13 @@ enum CandidateStatus {
 }
 
 enum ConversationStep {
-  /// Menú principal — el candidato aún no ha escrito.
   MENU
-  /// Se envió el saludo con la información de la vacante.
   GREETING_SENT
-  /// Se están capturando los datos del candidato.
   COLLECTING_DATA
-  /// Se están confirmando los datos con el candidato.
   CONFIRMING_DATA
-  /// Se pregunta por hoja de vida.
   ASK_CV
-  /// Flujo de datos completo — puede pasar a agendamiento si aplica.
   DONE
-  /// Esperando que el candidato confirme u ofrezca otro horario de entrevista.
   SCHEDULING
-  /// Entrevista agendada — flujo completo.
   SCHEDULED
 }
 
@@ -61,36 +53,56 @@ enum ReminderState {
 }
 
 enum Gender {
-  /// Género masculino detectado con alta certeza.
   MALE
-  /// Género femenino detectado con alta certeza.
   FEMALE
-  /// Otro género o no binario.
   OTHER
-  /// No se pudo determinar con certeza.
   UNKNOWN
 }
 
 enum ExperienceRequirement {
-  /// Se requiere experiencia previa.
   YES
-  /// No se requiere experiencia.
   NO
-  /// La experiencia es indiferente.
   INDIFFERENT
 }
 
 enum BookingStatus {
-  /// Entrevista agendada, esperando confirmación.
   SCHEDULED
-  /// Candidato confirmó asistencia.
   CONFIRMED
-  /// Candidato solicitó reagendar.
   RESCHEDULED
-  /// Candidato no se presentó.
   NO_SHOW
-  /// Entrevista cancelada.
   CANCELLED
+}
+
+// ─────────────────────────────────────────────
+// CITY — nivel 1 de la jerarquía geográfica
+// ─────────────────────────────────────────────
+
+/// Ciudad operativa (ej: Bogotá, Ibagué).
+model City {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  operations Operation[]
+}
+
+// ─────────────────────────────────────────────
+// OPERATION — nivel 2: zona/operación dentro de una ciudad
+// ─────────────────────────────────────────────
+
+/// Operación o zona dentro de una ciudad (ej: Siberia, Montevideo, Sur).
+model Operation {
+  id        String    @id @default(cuid())
+  name      String
+  cityId    String
+  city      City      @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  vacancies Vacancy[]
+
+  @@unique([name, cityId])
 }
 
 // ─────────────────────────────────────────────
@@ -99,52 +111,35 @@ enum BookingStatus {
 
 /// Vacante de reclutamiento configurable por el equipo de LoginPro.
 model Vacancy {
-  /// Identificador único interno.
   id                     String                @id @default(cuid())
-  /// Nombre de la vacante (ej: "Auxiliar de Cargue y Descargue - Ibagué").
   title                  String
-  /// Cargo específico (ej: "Auxiliar de Cargue y Descargue").
   role                   String
-  /// Descripción del perfil del cargo para contexto del bot y del reclutador.
   roleDescription        String?
-  /// Ciudad donde opera la vacante.
+  /// Ciudad (string) — se deriva automáticamente de operation.city.name al crear/editar.
   city                   String
-  /// Dirección exacta de la operación.
   operationAddress       String
-  /// Requisitos del cargo (texto largo, usado por el bot para responder preguntas).
   requirements           String
-  /// Condiciones: sueldo, horario, tipo de contrato, prestaciones, etc.
   conditions             String
-  /// Documentación que debe traer el candidato a la entrevista.
   requiredDocuments      String?
-  /// Edad mínima aceptada. Null = sin restricción.
   minAge                 Int?
-  /// Edad máxima aceptada. Null = sin restricción.
   maxAge                 Int?
-  /// Si se requiere experiencia previa en el cargo.
   experienceRequired     ExperienceRequirement @default(INDIFFERENT)
-  /// Meses mínimos de experiencia aceptables. Null = sin restricción.
   minExperienceMonths    Int?
-  /// Meses máximos de experiencia (tope). Null = sin restricción.
   maxExperienceMonths    Int?
-  /// Imagen de la publicidad de la vacante (para que el bot la reconozca si el candidato la envía).
   imageData              Bytes?
-  /// MIME type de la imagen.
   imageMimeType          String?
-  /// Si está activo el filtro de zona/localidad para esta vacante.
   zoneFilterEnabled      Boolean               @default(false)
-  /// Contexto de zonas en texto libre para que OpenAI evalúe viabilidad geográfica.
-  /// Ejemplo: "Localidades válidas: Suba, Engativá. Municipios válidos: Mosquera, Funza.
-  ///           Zonas no viables: Usme, Bosa, Ciudad Bolívar por distancia a la operación."
   zoneContext            String?
-  /// Si el flujo incluye agendamiento de entrevistas.
   schedulingEnabled      Boolean               @default(false)
-  /// Si la vacante está activa y recibiendo postulaciones.
   acceptingApplications  Boolean               @default(true)
-  /// Fecha de creación.
+  /// Si la vacante está activa en el sistema (visible para el bot).
+  isActive               Boolean               @default(true)
   createdAt              DateTime              @default(now())
-  /// Fecha de última actualización.
   updatedAt              DateTime              @updatedAt
+
+  /// Operación a la que pertenece esta vacante (FK hacia nivel 2).
+  operationId            String?
+  operation              Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
 
   candidates             Candidate[]
   interviewSlots         InterviewSlot[]
@@ -152,156 +147,107 @@ model Vacancy {
 }
 
 // ─────────────────────────────────────────────
-// INTERVIEW SLOT — bloques horarios configurables
+// INTERVIEW SLOT
 // ─────────────────────────────────────────────
 
-/// Bloque horario de entrevista configurado por el reclutador para una vacante.
 model InterviewSlot {
-  /// Identificador único.
   id                   String    @id @default(cuid())
-  /// Vacante a la que pertenece este bloque.
   vacancyId            String
   vacancy              Vacancy   @relation(fields: [vacancyId], references: [id])
-  /// Día de la semana recurrente (0=lunes, 1=martes … 6=domingo). Null si es fecha puntual.
   dayOfWeek            Int?
-  /// Fecha puntual específica. Null si es recurrente por dayOfWeek.
   specificDate         DateTime?
-  /// Hora de inicio del bloque ("HH:MM" en 24h, zona Colombia).
   startTime            String
-  /// Hora de fin del bloque ("HH:MM" en 24h, zona Colombia).
   endTime              String
-  /// Duración en minutos de cada cita dentro del bloque.
   slotDurationMinutes  Int       @default(20)
-  /// Máximo de candidatos citados en este bloque.
   maxCandidates        Int       @default(10)
-  /// Si el bloque está activo.
   isActive             Boolean   @default(true)
-  /// Fecha de creación.
   createdAt            DateTime  @default(now())
 
   bookings             InterviewBooking[]
 }
 
 // ─────────────────────────────────────────────
-// INTERVIEW BOOKING — agendamiento de candidato
+// INTERVIEW BOOKING
 // ─────────────────────────────────────────────
 
-/// Agendamiento de entrevista de un candidato para una vacante.
 model InterviewBooking {
-  /// Identificador único.
   id                    String        @id @default(cuid())
-  /// Candidato agendado.
   candidateId           String
   candidate             Candidate     @relation(fields: [candidateId], references: [id])
-  /// Vacante para la que se agenda.
   vacancyId             String
   vacancy               Vacancy       @relation(fields: [vacancyId], references: [id])
-  /// Bloque horario de referencia.
   slotId                String
   slot                  InterviewSlot @relation(fields: [slotId], references: [id])
-  /// Fecha y hora exacta de la entrevista (zona Colombia).
   scheduledAt           DateTime
-  /// Estado actual del agendamiento.
   status                BookingStatus @default(SCHEDULED)
-  /// Si se envió el recordatorio 1h antes.
   reminderSentAt        DateTime?
-  /// Si la ventana de 24h estaba cerrada cuando se intentó enviar el recordatorio.
   reminderWindowClosed  Boolean       @default(false)
-  /// Respuesta del candidato al recordatorio.
   reminderResponse      String?
-  /// Notas internas del reclutador sobre esta cita.
   notes                 String?
-  /// Fecha de creación.
   createdAt             DateTime      @default(now())
-  /// Fecha de última actualización.
   updatedAt             DateTime      @updatedAt
 }
 
 // ─────────────────────────────────────────────
-// CANDIDATE — modelo principal extendido
+// CANDIDATE
 // ─────────────────────────────────────────────
 
-/// Modelo principal de candidato.
 model Candidate {
   id                       String            @id @default(cuid())
   phone                    String            @unique
 
-  // ── Vacante asignada ──────────────────────
-  /// ID de la vacante a la que está aplicando. Null hasta que el bot la identifica.
   vacancyId                String?
   vacancy                  Vacancy?          @relation(fields: [vacancyId], references: [id])
 
-  // ── Datos personales ──────────────────────
   fullName                 String?
   documentType             String?
   documentNumber           String?
   age                      Int?
-  /// Género detectado por OpenAI a partir del nombre o el mensaje.
   gender                   Gender            @default(UNKNOWN)
-  /// Barrio/localidad del candidato.
   neighborhood             String?
-  /// Localidad o municipio (para vacantes con zoneFilterEnabled).
   locality                 String?
-  /// Resultado de la evaluación de zona por OpenAI. Null = no evaluado aún.
   zoneViable               Boolean?
 
-  // ── Experiencia y condiciones ─────────────
   experienceInfo           String?
   experienceTime           String?
   medicalRestrictions      String?
   transportMode            String?
 
-  // ── Rechazo ───────────────────────────────
   rejectionReason          String?
   rejectionDetails         String?
 
-  // ── Campos legados (no eliminar — datos históricos) ──
-  /// @deprecated usar neighborhood
   zone                     String?
-  /// @deprecated no se usa en el flujo actual
   experienceSummary        String?
-  /// @deprecated no se usa en el flujo actual
   availability             String?
 
-  // ── Estado del flujo ──────────────────────
   status                   CandidateStatus   @default(NUEVO)
   currentStep              ConversationStep  @default(MENU)
 
-  // ── Hoja de vida ──────────────────────────
-  /// @deprecated migrar a Cloudflare R2
   cvOriginalName           String?
-  /// @deprecated migrar a Cloudflare R2
   cvMimeType               String?
-  /// @deprecated migrar a Cloudflare R2
   cvData                   Bytes?
 
-  // ── Ventana multilinea ────────────────────
   multilineWindowUntil     DateTime?
   multilineBatchVersion    Int               @default(0)
 
-  // ── Actividad ─────────────────────────────
   lastInboundAt            DateTime?
   lastOutboundAt           DateTime?
   lastReminderAt           DateTime?
   reminderScheduledFor     DateTime?
   reminderState            ReminderState     @default(NONE)
 
-  // ── Control del bot ───────────────────────
   botPaused                Boolean           @default(false)
   botPausedAt              DateTime?
   botPausedBy              String?
   botPauseReason           String?
   botResumeMode            String?
 
-  // ── Duplicados documentales ───────────────
   potentialDuplicate       Boolean           @default(false)
   potentialDuplicateAt     DateTime?
   potentialDuplicateNote   String?
 
-  // ── Notas del reclutador ──────────────────
   interviewNotes           String?
 
-  // ── Timestamps ────────────────────────────
   createdAt                DateTime          @default(now())
   updatedAt                DateTime          @updatedAt
 
@@ -310,7 +256,7 @@ model Candidate {
 }
 
 // ─────────────────────────────────────────────
-// MESSAGE — historial de conversación
+// MESSAGE
 // ─────────────────────────────────────────────
 
 model Message {
