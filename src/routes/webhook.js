@@ -317,7 +317,23 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     console.log('[AI_FALLBACK]', JSON.stringify({ phone: candidate.phone, reason: 'openai_disabled' }));
   }
 
-  if (resolvedIntent === 'faq' || isFAQ(cleanText)) return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_flow' });
+  if (resolvedIntent === 'faq' || isFAQ(cleanText)) {
+    if (USE_CONVERSATION_ENGINE) {
+      const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+      const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updatedCandidate);
+      const replyText = await runChatEngine({
+        prisma,
+        candidate: updatedCandidate,
+        vacancy,
+        inboundText: cleanText,
+        recentMessages,
+        nextSlot,
+      });
+      return reply(prisma, updatedCandidate.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+    }
+    return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_flow' });
+  }
+
   if (candidate.status === CandidateStatus.RECHAZADO) return reply(prisma, candidate.id, from, DESCARTE_MSG);
   if (candidate.currentStep === ConversationStep.MENU) {
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
