@@ -11,6 +11,7 @@ import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../servic
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
 import { shouldBlockAutomation } from '../services/botAutomationPolicy.js';
+import { runChatEngine } from '../services/chatEngine.js';
 
 const FAQ_RESPONSE = 'En este momento estamos recolectando hojas de vida. La entrevista está prevista para el 8 de abril. Por favor manténte pendiente del llamado del equipo de reclutamiento.';
 
@@ -56,23 +57,10 @@ const REQUIRED_FIELDS = [
   'transportMode'
 ];
 
+const USE_CONVERSATION_ENGINE = process.env.USE_CONVERSATION_ENGINE === 'true';
+
 // ---------------------------------------------------------------------------
 // Rate limiting en memoria por número de teléfono.
-//
-// Objetivo: evitar que un número dispare llamadas ilimitadas a OpenAI
-// mediante mensajes rápidos o automatizados.
-//
-// Ventana deslizante simple (sliding window):
-//   - MAX_MESSAGES_PER_WINDOW mensajes como máximo en RATE_WINDOW_MS milisegundos.
-//   - Cuando se supera el límite, el mensaje se ignora (no se envía respuesta
-//     al candidato para no revelar el mecanismo).
-//   - El mapa se limpia de entradas expiradas cada CLEANUP_INTERVAL_MS para no
-//     acumular memoria indefinidamente.
-//
-// Consideración de escala: este store es in-memory. Si se corren múltiples
-// instancias en paralelo cada una tendrá su propio contador, lo que lo hace
-// menos efectivo. Para eso, reemplazar phoneTimestamps por Redis con
-// ZADD/ZREMRANGEBYSCORE. Por ahora es suficiente para una sola instancia.
 // ---------------------------------------------------------------------------
 const MAX_MESSAGES_PER_WINDOW = parseInt(process.env.RATE_LIMIT_MAX || '15', 10);
 const RATE_WINDOW_MS           = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(10 * 60 * 1000), 10); // 10 min
@@ -141,8 +129,6 @@ function shouldRejectByRequirements(text, parsed = {}) {
       };
     }
   }
-  // TODO(city+vacancy): cuando la vacante marque transporte como excluyente, aplicar descarte explícito
-  // con parsed.transportMode === 'Sin medio de transporte'.
   return { reject: false };
 }
 function getMissingFields(candidate) {
@@ -190,6 +176,27 @@ function shouldAskForConfirmation(candidate, normalizedData) {
   const correctedFields = Object.keys(normalizedData || {});
   const requiresReconfirm = correctedFields.some((field) => REQUIRED_FIELDS.includes(field));
   return requiresReconfirm && correctedFields.length >= 2 && missing.length <= 2;
+}
+
+async function buildEngineContext(prisma, candidate) {
+  const vacancy = candidate.vacancyId
+    ? await prisma.vacancy.findUnique({ where: { id: candidate.vacancyId } })
+    : null;
+
+  const recentMessagesRaw = await prisma.message.findMany({
+    where: { candidateId: candidate.id },
+    orderBy: { createdAt: 'desc' },
+    take: 8,
+    select: { direction: true, body: true },
+  });
+
+  const recentMessages = recentMessagesRaw
+    .reverse()
+    .map((m) => ({ direction: m.direction, body: m.body || '' }));
+
+  const nextSlot = null; // TODO: integrar scheduler si se requiere
+
+  return { vacancy, recentMessages, nextSlot };
 }
 
 export async function saveInboundMessage(prisma, candidateId, message, body, type, phone) {
@@ -356,6 +363,20 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
 
   const routeAfterConfirmation = async (updatedCandidate) => {
     const missing = getMissingFields(updatedCandidate);
+
+    if (USE_CONVERSATION_ENGINE) {
+      const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updatedCandidate);
+      const replyText = await runChatEngine({
+        prisma,
+        candidate: updatedCandidate,
+        vacancy,
+        inboundText: cleanText,
+        recentMessages,
+        nextSlot,
+      });
+      return reply(prisma, updatedCandidate.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+    }
+
     if (missing.length) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       return reply(prisma, candidate.id, from, `Gracias. Para continuar solo me falta: ${missing.join(', ')}`, cleanText, { source: 'bot_flow' });
@@ -376,6 +397,20 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     }
 
     const updated = await applyDecisionsAndUpdate();
+
+    if (USE_CONVERSATION_ENGINE) {
+      const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updated);
+      const replyText = await runChatEngine({
+        prisma,
+        candidate: updated,
+        vacancy,
+        inboundText: cleanText,
+        recentMessages,
+        nextSlot,
+      });
+      return reply(prisma, updated.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+    }
+
     if (resolvedIntent === 'confirmation_no_or_correction' && Object.keys(normalizedData).length === 0) {
       return reply(prisma, candidate.id, from, 'Gracias por avisar. Indícame por favor el dato que deseas corregir y lo actualizo.');
     }
@@ -384,13 +419,30 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   }
 
   if (candidate.currentStep === ConversationStep.GREETING_SENT) {
-      if (isNegativeInterest(cleanText)) { await reply(prisma, candidate.id, from, CIERRE_NO_INTERES, cleanText, { body: CIERRE_NO_INTERES, source: 'bot_flow' }); return; }
+    if (isNegativeInterest(cleanText)) {
+      await reply(prisma, candidate.id, from, CIERRE_NO_INTERES, cleanText, { body: CIERRE_NO_INTERES, source: 'bot_flow' });
+      return;
+    }
     if (isAffirmativeInterest(cleanText) || hasDataIntent) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       if (hasDataIntent) {
         const rejection = shouldRejectByRequirements(cleanText, normalizedData);
         if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
         const updated = await applyDecisionsAndUpdate();
+
+        if (USE_CONVERSATION_ENGINE) {
+          const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updated);
+          const replyText = await runChatEngine({
+            prisma,
+            candidate: updated,
+            vacancy,
+            inboundText: cleanText,
+            recentMessages,
+            nextSlot,
+          });
+          return reply(prisma, updated.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+        }
+
         if (shouldAskForConfirmation(updated, normalizedData)) {
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
           return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
@@ -407,6 +459,20 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     if (Object.keys(normalizedData).length >= 1) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       const updated = await applyDecisionsAndUpdate();
+
+      if (USE_CONVERSATION_ENGINE) {
+        const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updated);
+        const replyText = await runChatEngine({
+          prisma,
+          candidate: updated,
+          vacancy,
+          inboundText: cleanText,
+          recentMessages,
+          nextSlot,
+        });
+        return reply(prisma, updated.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+      }
+
       if (shouldAskForConfirmation(updated, normalizedData)) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
         return reply(prisma, candidate.id, from, buildConfirmationSummary(updated));
@@ -421,6 +487,19 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     const rejection = shouldRejectByRequirements(cleanText, normalizedData);
     if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
     const updated = await applyDecisionsAndUpdate();
+
+    if (USE_CONVERSATION_ENGINE) {
+      const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, updated);
+      const replyText = await runChatEngine({
+        prisma,
+        candidate: updated,
+        vacancy,
+        inboundText: cleanText,
+        recentMessages,
+        nextSlot,
+      });
+      return reply(prisma, updated.id, from, replyText, cleanText, { body: replyText, source: 'engine' });
+    }
 
     if (shouldAskForConfirmation(updated, normalizedData)) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
@@ -525,8 +604,6 @@ export function webhookRouter(prisma) {
         const from = message.from;
         if (!from) continue;
 
-        // Rate limiting: ignora el mensaje si el número supera el límite.
-        // Se evalúa antes del upsert para no crear registros de candidatos spam.
         if (!checkRateLimit(from)) continue;
 
         const candidate = await prisma.candidate.upsert({ where: { phone: from }, update: {}, create: { phone: from } });
