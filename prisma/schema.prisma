@@ -113,6 +113,7 @@ model Operation {
 model Vacancy {
   id                     String                @id @default(cuid())
   title                  String
+  key                    String                @unique
   role                   String
   roleDescription        String?
   /// Ciudad (string) — se deriva automáticamente de operation.city.name al crear/editar.

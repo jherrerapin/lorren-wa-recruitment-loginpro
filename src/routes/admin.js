@@ -23,6 +23,17 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function toSlug(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/[\s-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function formatDateTimeCO(value) {
   if (!value) return '';
   const date = value instanceof Date ? value : new Date(value);
@@ -254,6 +265,26 @@ async function loadOperation(prisma, operationId) {
     });
   } catch {
     return null;
+  }
+}
+
+async function buildUniqueVacancyKey(prisma, title, city, excludeId = null) {
+  const baseKey = toSlug(`${title || ''} ${city || ''}`) || 'vacancy';
+  let candidateKey = baseKey;
+  let suffix = 2;
+
+  while (true) {
+    const existing = await prisma.vacancy.findFirst({
+      where: {
+        key: candidateKey,
+        ...(excludeId ? { NOT: { id: excludeId } } : {})
+      },
+      select: { id: true }
+    });
+
+    if (!existing) return candidateKey;
+    candidateKey = `${baseKey}-${suffix}`;
+    suffix += 1;
   }
 }
 
@@ -632,10 +663,13 @@ export function adminRouter(prisma) {
     if (!data.title || !operation) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
+    const city = operation.city.name;
+    const key = await buildUniqueVacancyKey(prisma, data.title, city);
     await prisma.vacancy.create({
       data: {
         title: data.title,
-        city: operation.city.name,
+        key,
+        city,
         operationId: operation.id,
         role: data.role,
         roleDescription: data.roleDescription,
@@ -657,11 +691,14 @@ export function adminRouter(prisma) {
     if (!data.title || !operation) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
+    const city = operation.city.name;
+    const key = await buildUniqueVacancyKey(prisma, data.title, city, id);
     await prisma.vacancy.update({
       where: { id },
       data: {
         title: data.title,
-        city: operation.city.name,
+        key,
+        city,
         operationId: operation.id,
         role: data.role,
         roleDescription: data.roleDescription,
