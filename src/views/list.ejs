@@ -63,6 +63,12 @@
     .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
     .page-header h1 { font-size: 20px; font-weight: 700; color: var(--navy); }
     .page-header .sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .alert {
+      padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px;
+      font-size: 13px; font-weight: 600; border: 1px solid transparent;
+    }
+    .alert-success { background: var(--green-light); color: var(--green); border-color: #86efac; }
+    .alert-error { background: var(--red-light); color: var(--red); border-color: #fca5a5; }
 
     /* ── Date picker strip ── */
     .date-strip {
@@ -146,6 +152,7 @@
     .badge-validando  { background: var(--blue-light);   color: var(--blue); }
     .badge-contactado { background: var(--purple-light); color: var(--purple); }
     .badge-rechazado  { background: var(--red-light);    color: var(--red); }
+    .badge-human-review { background: #fef3c7; color: #92400e; }
 
     .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
     .dot-green  { background: var(--green); }
@@ -211,6 +218,8 @@
     .candidate-row:hover { background: var(--surface-2); }
     .candidate-name { font-weight: 600; color: var(--navy); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .candidate-doc  { font-size: 12px; color: var(--text-muted); }
+    .candidate-extra { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
+    .candidate-flags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
     .candidate-phone a { color: var(--teal); font-weight: 600; font-size: 12px; text-decoration: none; }
     .candidate-phone a:hover { text-decoration: underline; }
     .cv-pill {
@@ -221,6 +230,19 @@
     .cv-no   { background: var(--gray-light);   color: var(--text-faint); }
     .link-detail { font-size: 12px; color: var(--teal); font-weight: 600; text-decoration: none; white-space: nowrap; }
     .link-detail:hover { text-decoration: underline; }
+    .action-stack { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+    .action-form { display: inline; }
+    .action-btn {
+      border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px;
+      background: var(--surface); font-size: 11px; font-weight: 700; cursor: pointer;
+      transition: all .15s; color: var(--text-muted);
+    }
+    .action-btn:hover { color: var(--navy); background: var(--gray-light); }
+    .action-btn:disabled { opacity: .55; cursor: default; }
+    .action-btn-ok { border-color: #86efac; background: var(--green-light); color: var(--green); }
+    .action-btn-warn { border-color: #fcd34d; background: var(--amber-light); color: var(--amber); }
+    .action-btn-danger { border-color: #fca5a5; background: var(--red-light); color: var(--red); }
+    .action-btn-neutral { border-color: #cbd5e1; background: #eef2f7; color: #475569; }
 
     /* ── CV-Only notice ── */
     .cv-only-notice {
@@ -278,6 +300,8 @@
       .candidate-row .candidate-phone { display: none; }
       .bookings-table th:nth-child(3),
       .bookings-table td:nth-child(3) { display: none; }
+      .bookings-table th:nth-child(4),
+      .bookings-table td:nth-child(4) { display: none; }
       .page-header { flex-direction: column; align-items: flex-start; }
     }
   </style>
@@ -311,6 +335,13 @@
     </div>
     <a href="/admin" style="font-size:13px;color:var(--teal);font-weight:600;text-decoration:none;">← Ver por vacante</a>
   </div>
+
+  <% if (successMsg) { %>
+    <div class="alert alert-success"><%= successMsg %></div>
+  <% } %>
+  <% if (errorMsg) { %>
+    <div class="alert alert-error"><%= errorMsg %></div>
+  <% } %>
 
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
     <% const legacyTabs = [
@@ -350,7 +381,14 @@
         <% const statusLabel = { NUEVO:'Nuevo', REGISTRADO:'Registrado', RECHAZADO:'Rechazado', CONTACTADO:'Contactado' }; %>
         <tr>
           <td><%= formatDateTimeCO(c.createdAt) %></td>
-          <td style="font-weight:600;"><%= c.fullName || '—' %></td>
+          <td style="font-weight:600;">
+            <%= c.fullName || '—' %>
+            <% if (c.isFemaleHumanReview || isFemaleHumanReviewCandidate(c)) { %>
+              <div class="candidate-flags">
+                <span class="badge badge-human-review">Revisión humana</span>
+              </div>
+            <% } %>
+          </td>
           <td><a href="https://wa.me/<%= c.phone %>" target="_blank" style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
           <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
           <td><%= c.age || '—' %></td>
@@ -375,6 +413,10 @@
 
 <%
   const isToday = selectedDate === todayStr;
+  const dashboardParams = new URLSearchParams();
+  if (activeCity) dashboardParams.set('city', activeCity);
+  if (selectedDate) dashboardParams.set('date', selectedDate);
+  const currentDashboardPath = '/admin' + (dashboardParams.toString() ? '?' + dashboardParams.toString() : '');
 
   function fmtDate(d) {
     if (!d) return '';
@@ -390,11 +432,17 @@
 
   const bookingStatusLabel = {
     SCHEDULED:   { cls: 'booking-status-scheduled',   icon: '🕐', text: 'Agendado' },
-    CONFIRMED:   { cls: 'booking-status-confirmed',   icon: '✅', text: 'Confirmado' },
+    CONFIRMED:   { cls: 'booking-status-confirmed',   icon: '✅', text: 'Confirmada' },
     RESCHEDULED: { cls: 'booking-status-rescheduled', icon: '🔄', text: 'Reagendado' },
-    NO_SHOW:     { cls: 'booking-status-no_show',     icon: '❌', text: 'No se presentó' },
-    CANCELLED:   { cls: 'booking-status-cancelled',   icon: '🚫', text: 'Cancelado' }
+    NO_SHOW:     { cls: 'booking-status-no_show',     icon: '❌', text: 'No asistió' },
+    CANCELLED:   { cls: 'booking-status-cancelled',   icon: '🚫', text: 'Canceló' }
   };
+  const bookingActions = [
+    { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
+    { key: 'no_show', label: 'No asistió', cls: 'action-btn-danger', status: 'NO_SHOW' },
+    { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
+    { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
+  ];
 
   const candidateStatusBadge = {
     NUEVO:      { cls: 'badge-nuevo',      label: 'Nuevo' },
@@ -404,6 +452,18 @@
     CONTACTADO: { cls: 'badge-contactado', label: 'Contactado' },
     RECHAZADO:  { cls: 'badge-rechazado',  label: 'Rechazado' }
   };
+
+  function candidateOperationalMeta(candidate, options = {}) {
+    const includeNeighborhood = options.includeNeighborhood !== false;
+    const parts = [];
+    if (includeNeighborhood && candidate.neighborhood) parts.push('Barrio: ' + candidate.neighborhood);
+    if (candidate.locality || candidate.zone) parts.push('Localidad: ' + (candidate.locality || candidate.zone));
+    if (candidate.experienceInfo) parts.push('Experiencia: ' + candidate.experienceInfo);
+    if (candidate.experienceTime) parts.push('Tiempo: ' + candidate.experienceTime);
+    if (candidate.medicalRestrictions) parts.push('Restricciones: ' + candidate.medicalRestrictions);
+    if (candidate.transportMode) parts.push('Transporte: ' + candidate.transportMode);
+    return parts.join(' · ');
+  }
 %>
 
 <div class="page">
@@ -435,12 +495,19 @@
     </form>
   </div>
 
+  <% if (successMsg) { %>
+    <div class="alert alert-success"><%= successMsg %></div>
+  <% } %>
+  <% if (errorMsg) { %>
+    <div class="alert alert-error"><%= errorMsg %></div>
+  <% } %>
+
   <% if (cities.length > 0) { %>
   <div class="city-tabs" role="tablist">
     <% for (const city of cities) { %>
       <%
         const cityTotal = city.vacancies.reduce((sum, v) => {
-          return sum + v.bookingsToday.length + v.registeredNoBooking.length + v.cvOnlyPipeline.length;
+          return sum + v.bookingsToday.length + v.registeredNoBooking.length + v.registeredComplete.length + v.completeWithoutCv.length;
         }, 0);
         const cityUrl = '/admin?city=' + encodeURIComponent(city.name) + '&date=' + selectedDate;
       %>
@@ -469,7 +536,7 @@
         const isCvOnly     = !v.schedulingEnabled && v.acceptingApplications;
         const isClosed     = !v.acceptingApplications;
         const totalToday   = v.bookingsToday.length;
-        const totalPending = v.registeredNoBooking.length + v.cvOnlyPipeline.length;
+        const totalPending = v.registeredNoBooking.length + v.registeredComplete.length + v.completeWithoutCv.length;
         let modeIcon  = isClosed ? '🔴' : (isScheduling ? '🗓️' : '📋');
         let modeClass = isClosed ? 'closed' : (isScheduling ? 'scheduling' : 'cv-only');
         let modeBadgeClass = isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only');
@@ -501,18 +568,39 @@
               <div class="empty-state"><div class="empty-icon">📭</div><p>Sin entrevistas agendadas para este día.</p></div>
             <% } else { %>
               <table class="bookings-table" role="table">
-                <thead><tr><th>Hora</th><th>Candidato</th><th>Documento</th><th>Barrio</th><th>Estado cita</th><th>HV</th><th></th></tr></thead>
+                <thead><tr><th>Hora</th><th>Candidato</th><th>Documento</th><th>Barrio</th><th>Estado cita</th><th>HV</th><th>Acciones</th></tr></thead>
                 <tbody>
                   <% for (const b of v.bookingsToday) { %>
                     <% const bs = bookingStatusLabel[b.status] || { cls: '', icon: '•', text: b.status }; %>
                     <tr>
                       <td><span class="time-pill"><%= b.formattedTime %></span></td>
-                      <td><div style="font-weight:600;color:var(--navy);"><%= b.candidate.fullName || '—' %></div><% if (b.candidate.age) { %><div style="font-size:11px;color:var(--text-muted);"><%= b.candidate.age %> años</div><% } %></td>
+                      <td>
+                        <div style="font-weight:600;color:var(--navy);"><%= b.candidate.fullName || '—' %></div>
+                        <% if (b.isFemaleHumanReview) { %>
+                          <div class="candidate-flags">
+                            <span class="badge badge-human-review">Revisión humana</span>
+                          </div>
+                        <% } %>
+                        <% if (b.candidate.age) { %><div style="font-size:11px;color:var(--text-muted);"><%= b.candidate.age %> años</div><% } %>
+                        <% const bookingMeta = candidateOperationalMeta(b.candidate, { includeNeighborhood: false }); %>
+                        <% if (bookingMeta) { %><div class="candidate-extra"><%= bookingMeta %></div><% } %>
+                      </td>
                       <td style="font-size:12px;color:var(--text-muted);"><%= b.candidate.documentType && b.candidate.documentNumber ? b.candidate.documentType + ' ' + b.candidate.documentNumber : '—' %></td>
                       <td style="font-size:12px;color:var(--text-muted);"><%= b.candidate.neighborhood || '—' %></td>
                       <td><span class="<%= bs.cls %>" style="font-size:12px;"><%= bs.icon %> <%= bs.text %></span></td>
-                      <td><span class="cv-pill <%= b.candidate.cvData ? 'cv-yes' : 'cv-no' %>"><%= b.candidate.cvData ? '✓ HV' : 'Sin HV' %></span></td>
-                      <td><a href="/admin/candidates/<%= b.candidate.id %>" class="link-detail">Ver →</a></td>
+                      <td><span class="cv-pill <%= b.candidate.hasCv ? 'cv-yes' : 'cv-no' %>"><%= b.candidate.hasCv ? '✓ HV' : 'Sin HV' %></span></td>
+                      <td>
+                        <div class="action-stack">
+                          <% for (const action of bookingActions) { %>
+                            <form method="post" action="/admin/interviews/<%= b.id %>/status" class="action-form">
+                              <input type="hidden" name="action" value="<%= action.key %>" />
+                              <input type="hidden" name="returnTo" value="<%= currentDashboardPath %>" />
+                              <button type="submit" class="action-btn <%= action.cls %>" <%= b.status === action.status ? 'disabled' : '' %>><%= action.label %></button>
+                            </form>
+                          <% } %>
+                          <a href="/admin/candidates/<%= b.candidate.id %>" class="link-detail">Ver →</a>
+                        </div>
+                      </td>
                     </tr>
                   <% } %>
                 </tbody>
@@ -524,7 +612,7 @@
           <% if (isScheduling && v.registeredNoBooking.length > 0) { %>
           <div class="section">
             <div class="section-header">
-              <span class="section-title">👤&nbsp; Registrados — pendientes de agendar</span>
+              <span class="section-title">👤&nbsp; Pendientes de agendar</span>
               <span class="section-count"><%= v.registeredNoBooking.length %></span>
             </div>
             <div class="candidates-list">
@@ -532,10 +620,20 @@
                 <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
                 <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
                 <div class="candidate-row">
-                  <div><div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div><div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></div></div>
+                  <div>
+                    <div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div>
+                    <% if (c.isFemaleHumanReview) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-human-review">Revisión humana</span>
+                      </div>
+                    <% } %>
+                    <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                  </div>
                   <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
-                  <span class="cv-pill <%= c.cvData ? 'cv-yes' : 'cv-no' %>"><%= c.cvData ? '✓ HV' : 'Sin HV' %></span>
+                  <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span>
                   <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
                 </div>
               <% } %>
@@ -544,31 +642,119 @@
           </div>
           <% } %>
 
+          <% if (isScheduling && v.completeWithoutCv.length > 0) { %>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">📄&nbsp; Completos pendientes de HV</span>
+              <span class="section-count"><%= v.completeWithoutCv.length %></span>
+            </div>
+            <div class="candidates-list">
+              <% for (const c of v.completeWithoutCv.slice(0, 20)) { %>
+                <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
+                <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
+                <div class="candidate-row">
+                  <div>
+                    <div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div>
+                    <% if (c.isFemaleHumanReview) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-human-review">Revisión humana</span>
+                      </div>
+                    <% } %>
+                    <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                  </div>
+                  <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                  <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
+                  <span class="cv-pill cv-no">Sin HV</span>
+                  <div class="action-stack">
+                    <form method="post" action="/admin/candidates/<%= c.id %>/request-hv" class="action-form">
+                      <input type="hidden" name="returnTo" value="<%= currentDashboardPath %>" />
+                      <button type="submit" class="action-btn action-btn-warn">Solicitar HV</button>
+                    </form>
+                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  </div>
+                </div>
+              <% } %>
+              <% if (v.completeWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.completeWithoutCv.length - 20 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+            </div>
+          </div>
+          <% } %>
+
           <% if (isCvOnly) { %>
           <div class="section">
             <div class="section-header">
-              <span class="section-title">📥&nbsp; Candidatos registrados</span>
-              <span class="section-count"><%= v.cvOnlyPipeline.length %></span>
+              <span class="section-title">📥&nbsp; Registrados completos</span>
+              <span class="section-count"><%= v.registeredComplete.length %></span>
             </div>
             <div class="cv-only-notice"><span class="icon">⚠️</span><p>Modo <strong>solo recepción de hojas de vida</strong>.<span> El agendamiento está deshabilitado para esta vacante.</span></p></div>
-            <% if (v.cvOnlyPipeline.length === 0) { %>
+            <% if (v.registeredComplete.length === 0) { %>
               <div class="empty-state"><div class="empty-icon">📭</div><p>Aún no hay candidatos registrados.</p></div>
             <% } else { %>
               <div class="candidates-list">
-                <% for (const c of v.cvOnlyPipeline.slice(0, 25)) { %>
+                <% for (const c of v.registeredComplete.slice(0, 25)) { %>
                   <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
                   <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
                   <div class="candidate-row">
-                    <div><div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div><div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div></div>
+                    <div>
+                      <div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div>
+                      <% if (c.isFemaleHumanReview) { %>
+                        <div class="candidate-flags">
+                          <span class="badge badge-human-review">Revisión humana</span>
+                        </div>
+                      <% } %>
+                      <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                    </div>
                     <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
                     <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
-                    <span class="cv-pill <%= c.cvData ? 'cv-yes' : 'cv-no' %>"><%= c.cvData ? '✓ HV' : 'Sin HV' %></span>
+                    <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span>
                     <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
                   </div>
                 <% } %>
-                <% if (v.cvOnlyPipeline.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.cvOnlyPipeline.length - 25 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+                <% if (v.registeredComplete.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.registeredComplete.length - 25 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
               </div>
             <% } %>
+          </div>
+          <% } %>
+
+          <% if (isCvOnly && v.completeWithoutCv.length > 0) { %>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">📄&nbsp; Completos pendientes de HV</span>
+              <span class="section-count"><%= v.completeWithoutCv.length %></span>
+            </div>
+            <div class="candidates-list">
+              <% for (const c of v.completeWithoutCv.slice(0, 25)) { %>
+                <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
+                <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
+                <div class="candidate-row">
+                  <div>
+                    <div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div>
+                    <% if (c.isFemaleHumanReview) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-human-review">Revisión humana</span>
+                      </div>
+                    <% } %>
+                    <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                  </div>
+                  <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                  <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
+                  <span class="cv-pill cv-no">Sin HV</span>
+                  <div class="action-stack">
+                    <form method="post" action="/admin/candidates/<%= c.id %>/request-hv" class="action-form">
+                      <input type="hidden" name="returnTo" value="<%= currentDashboardPath %>" />
+                      <button type="submit" class="action-btn action-btn-warn">Solicitar HV</button>
+                    </form>
+                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  </div>
+                </div>
+              <% } %>
+              <% if (v.completeWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.completeWithoutCv.length - 25 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+            </div>
           </div>
           <% } %>
 
@@ -608,11 +794,18 @@
           <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
           <% const stBadge = { NUEVO:{cls:'badge-nuevo',label:'Nuevo'}, REGISTRADO:{cls:'badge-registrado',label:'Registrado'}, RECHAZADO:{cls:'badge-rechazado',label:'Rechazado'}, CONTACTADO:{cls:'badge-contactado',label:'Contactado'} }; %>
           <tr>
-            <td style="font-weight:600;"><%= c.fullName || '—' %></td>
+            <td style="font-weight:600;">
+              <%= c.fullName || '—' %>
+              <% if (c.isFemaleHumanReview) { %>
+                <div class="candidate-flags">
+                  <span class="badge badge-human-review">Revisión humana</span>
+                </div>
+              <% } %>
+            </td>
             <td><a href="https://wa.me/<%= c.phone %>" target="_blank" style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
             <td style="font-size:12px;color:var(--text-muted);"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></td>
             <td><span class="badge <%= (stBadge[uiSt]||{cls:'badge-nuevo'}).cls %>"><%= (stBadge[uiSt]||{label:uiSt}).label %></span></td>
-            <td><span class="cv-pill <%= c.cvData ? 'cv-yes' : 'cv-no' %>"><%= c.cvData ? '✓ HV' : 'Sin HV' %></span></td>
+            <td><span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span></td>
             <td style="font-size:12px;color:var(--text-muted);"><%= formatDateTimeCO(c.createdAt) %></td>
             <td><a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a></td>
           </tr>
@@ -630,3 +823,4 @@
 
 </body>
 </html>
+

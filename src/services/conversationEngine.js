@@ -57,6 +57,7 @@ function buildCandidateContext(candidate) {
     candidate.age             && `Edad: ${candidate.age}`,
     candidate.gender          && `Género: ${genderLabel}`,
     candidate.neighborhood    && `Barrio: ${candidate.neighborhood}`,
+    candidate.locality        && `Localidad: ${candidate.locality}`,
     candidate.experienceInfo  && `Experiencia: ${candidate.experienceInfo}`,
     candidate.experienceTime  && `Tiempo de experiencia: ${candidate.experienceTime}`,
     medLabel                  && `Restricciones médicas: ${medLabel}`,
@@ -187,17 +188,17 @@ Estás esperando que el candidato confirme o corrija sus datos.
 
 CASO A — El candidato confirma (dice "sí", "si", "correcto", "está bien", "si está bien", "todo bien", "listo", etc.):
   → Interpretá CUALQUIER respuesta afirmativa como confirmación definitiva.
-  → nextStep: "ASK_CV"
-  → actions: [{ "type": "request_cv" }]
-  → reply: pedí la hoja de vida de forma natural.
-  → NO vuelvas a mostrar el resumen de datos. Ya están confirmados.
+  → Si después de consolidar lo ya capturado NO falta ningún dato, avanzá al siguiente paso real.
+  → Si falta hoja de vida, usá nextStep: "ASK_CV" y actions: [{ "type": "request_cv" }].
+  → Si todavía faltan datos, NO vuelvas a pedir confirmación: pedí solo lo que falta y usá nextStep: "COLLECTING_DATA".
+  → NO vuelvas a mostrar el mismo resumen ni repitas exactamente la misma redacción.
 
-CASO B — El candidato corrige un dato (dice "no tengo restricción", "mi edad es 28", "me llamo...", etc.):
+CASO B — El candidato corrige o completa un dato de forma natural (por ejemplo "no, tengo 5 años de experiencia", "mi medio de transporte es bicicleta", "tengo 25 años", "soy de 25 años", "bicicleta", "cicla", "bicivleta"):
   → Extraé el dato corregido en extractedFields.
-  → actions: [{ "type": "save_fields", "data": { ...campo_corregido } }, { "type": "request_confirmation" }]
-  → nextStep: "CONFIRMING_DATA"
-  → reply: mostrá el resumen COMPLETO actualizado con el dato ya corregido y preguntá de nuevo si todo está correcto.
-  → IMPORTANTE: en el resumen usá el valor CORREGIDO que el candidato acaba de dar, NO el valor anterior.
+  → Tratá estas respuestas como correcciones válidas aunque el candidato NO diga "corrijo".
+  → Si después de aplicar la corrección todavía faltan datos, mostrá un resumen breve actualizado UNA sola vez y pedí solo lo faltante. No reabras el mismo loop de confirmación.
+  → Si después de aplicar la corrección ya no falta nada, NO te quedes en CONFIRMING_DATA: avanzá al siguiente paso real.
+  → IMPORTANTE: usá el valor corregido que el candidato acaba de dar, NO el anterior.
   → El campo "restricciones médicas" debe mostrar exactamente lo que el candidato dijo.`;
 }
 
@@ -258,6 +259,7 @@ CÓMO SONÁS:
 - Nunca digas que sos un bot o una IA. Si el candidato lo pregunta directamente, podés decir que sos del equipo de selección.
 - No repitas frases que ya aparecen en el historial de esta conversación.
 - Variá el lenguaje: no uses siempre el mismo saludo ni la misma forma de pedir un dato.
+- Si ya pediste confirmación recientemente, no repitas exactamente la misma redacción en el siguiente mensaje.
 
 ${buildVacancyContext(vacancy)}
 
@@ -306,6 +308,7 @@ CRITERIOS DE RECHAZO:
 - Extranjero sin CE, PPT o Pasaporte
 
 Si el candidato da datos, extraélos en extractedFields aunque no todos vayan dentro de save_fields; el sistema también persistirá extractedFields.
+Si el candidato envía un mensaje largo con datos mezclados o en desorden, extraé todos los campos válidos que puedas en una sola respuesta y no vuelvas a pedir los mismos datos como si faltaran.
 Si el candidato hace una pregunta sobre la vacante, respóndela primero usando el contexto real y luego continúa el flujo sin repetir frases quemadas.
 Si ya hay datos capturados en el historial, consolídalos con lo nuevo y pide solo lo realmente faltante.
 Decidí si hay suficientes datos para pedir confirmación, o si aún faltan campos importantes.
@@ -359,6 +362,10 @@ function mergeEngineFields(actions = [], extractedFields = {}) {
     Object.assign(merged, action.data);
   }
   return merged;
+}
+
+export function extractEngineCandidateFields(actions = [], extractedFields = {}) {
+  return mergeEngineFields(actions, extractedFields);
 }
 
 function mapEngineGender(rawGender, Gender) {
@@ -453,10 +460,14 @@ export async function act({ actions, candidate, extractedFields = {}, nextStep, 
   const { cancelCandidateBookings, createBooking } = await import('./interviewScheduler.js');
   const { CandidateStatus, ConversationStep, Gender } = await import('@prisma/client');
   const normalizedActions = Array.isArray(actions) ? actions : [];
-  const mergedRawFields = mergeEngineFields(normalizedActions, extractedFields);
+  const mergedRawFields = extractEngineCandidateFields(normalizedActions, extractedFields);
   const mergedFields = normalizeCandidateFields(mergedRawFields);
   const mappedGender = mapEngineGender(mergedRawFields.gender, Gender);
   if (mappedGender) mergedFields.gender = mappedGender;
+  const candidateAfterMerge = { ...candidate, ...mergedFields };
+  const missingFieldsAfterMerge = getMissingFields(candidateAfterMerge);
+  const hasNewRequiredData = Object.keys(mergedFields).some((field) => REQUIRED_FIELDS.includes(field));
+  const hasCvAfterMerge = Boolean(candidateAfterMerge.cvData || candidateAfterMerge.cvOriginalName || candidateAfterMerge.cvMimeType);
 
   if (Object.keys(mergedFields).length) {
     await prisma.candidate.update({ where: { id: candidate.id }, data: mergedFields })
@@ -483,10 +494,27 @@ export async function act({ actions, candidate, extractedFields = {}, nextStep, 
           break;
 
         case 'request_cv':
+          if (missingFieldsAfterMerge.length) {
+            console.info('[ACT_REQUEST_CV_DEFERRED]', { candidateId: candidate.id, missingFields: missingFieldsAfterMerge });
+            setStep(ConversationStep.COLLECTING_DATA);
+            break;
+          }
           setStep(ConversationStep.ASK_CV);
           break;
 
         case 'request_confirmation':
+          if (candidate.currentStep === ConversationStep.CONFIRMING_DATA && hasNewRequiredData) {
+            if (missingFieldsAfterMerge.length) {
+              setStep(ConversationStep.COLLECTING_DATA);
+            } else if (!hasCvAfterMerge) {
+              setStep(ConversationStep.ASK_CV);
+            }
+            break;
+          }
+          if (candidate.currentStep === ConversationStep.CONFIRMING_DATA && !missingFieldsAfterMerge.length && !hasCvAfterMerge) {
+            setStep(ConversationStep.ASK_CV);
+            break;
+          }
           setStep(ConversationStep.CONFIRMING_DATA);
           break;
 

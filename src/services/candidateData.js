@@ -26,6 +26,10 @@ const IMPLICIT_NEIGHBORHOODS = new Set([
   'salado', 'gaitan', 'combeima', 'modelia', 'centro', 'ciudadela',
   'bolivar', 'simon'
 ]);
+const BIKE_VARIANTS = ['bicicleta', 'bici', 'cicla', 'bicivleta', 'bivivleta', 'bisicleta'];
+const MOTO_VARIANTS = ['moto', 'motocicleta'];
+const BUS_VARIANTS = ['bus', 'buseta', 'transporte publico', 'servicio publico'];
+const LOCATION_STOPWORDS = /\b(cc|ti|ce|ppt|pasaporte|documento|edad|experien|restric|medic|salud|transporte|moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|bus|nombre|hoja de vida|hv|cv|trabaj|independiente)\b/i;
 
 // ─────────────────────────────────────────────
 // Helpers de normalización
@@ -62,6 +66,50 @@ function normalizeDocumentType(value = '') {
     ppt: 'PPT', pasaporte: 'Pasaporte'
   };
   return map[normalized] || null;
+}
+
+function detectTransportKeyword(text = '') {
+  const n = normalizeLooseText(text);
+  const compact = n.replace(/[.,;:]/g, ' ');
+  if (!compact) return null;
+  if (BIKE_VARIANTS.some((variant) => new RegExp(`\\b${variant}\\b`, 'i').test(compact))) return 'Bicicleta';
+  if (MOTO_VARIANTS.some((variant) => new RegExp(`\\b${variant}\\b`, 'i').test(compact))) return 'Moto';
+  if (BUS_VARIANTS.some((variant) => new RegExp(`\\b${variant}\\b`, 'i').test(compact))) return 'Bus';
+  return null;
+}
+
+function detectContextualAge(text = '') {
+  const compact = normalizeLooseText(text);
+  if (!compact) return null;
+
+  const explicit = compact.match(/\b(?:mi\s+edad\s+es|edad\s*(?:es|:)?|tengo|soy\s+de)\s*(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?\b(?!\s+de\s+experiencia)/i);
+  const fallback = !/experien/i.test(compact)
+    ? compact.match(/^\D*(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?\D*$/i)
+    : null;
+  const rawAge = explicit?.[1] || fallback?.[1];
+  if (!rawAge) return null;
+
+  const age = Number.parseInt(rawAge, 10);
+  if (!Number.isFinite(age) || age < 14 || age > 80) return null;
+  return age;
+}
+
+function detectAgeFromSequence(text = '') {
+  const segments = String(text || '')
+    .split(/[\n,]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    const compact = normalizeLooseText(segment);
+    if (!compact || /\d{6,}/.test(compact) || /experien/.test(compact)) continue;
+    const match = compact.match(/^(?:edad\s*[:\-]?\s*)?(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?$/i);
+    if (!match?.[1]) continue;
+    const age = Number.parseInt(match[1], 10);
+    if (Number.isFinite(age) && age >= 14 && age <= 80) return age;
+  }
+
+  return null;
 }
 
 function normalizeExperienceTime(value = '') {
@@ -109,11 +157,59 @@ function normalizeTransportMode(value = '') {
     'no tengo transporte', 'no tengo medio de transporte'].includes(n)) {
     return 'Sin medio de transporte';
   }
-  if (/\b(tengo|cuento con|si tengo|manejo|me movilizo en|voy en)\s+(moto|motocicleta)\b/.test(n)) return 'Moto';
-  if (/\b(tengo|cuento con|si tengo|manejo|me movilizo en|voy en)\s+(bicicleta|bici)\b/.test(n)) return 'Bicicleta';
-  if (['moto', 'motocicleta', 'motocicleta propia'].includes(n)) return 'Moto';
-  if (['bicicleta', 'bici'].includes(n)) return 'Bicicleta';
+  if (/\b(tengo|cuento con|si tengo|manejo|me movilizo en|voy en|mi medio de transporte es|transporte es)\s+/.test(n)) {
+    const detected = detectTransportKeyword(n);
+    if (detected) return detected;
+  }
+  const directDetected = detectTransportKeyword(n);
+  if (directDetected) return directDetected;
+  if (['motocicleta propia', 'moto propia'].includes(n)) return 'Moto';
   return capitalizeWords(n);
+}
+
+function cleanLocationValue(value = '') {
+  return String(value || '')
+    .replace(/\b(?:localidad|comuna|zona|sector|barrio|vereda|ciudadela)\s*[:\-]?\s*/i, '')
+    .replace(/\b(?:y\s+tengo|tengo|con|y)\b.*$/i, '')
+    .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, '')
+    .trim();
+}
+
+function looksLikeLocationChunk(value = '') {
+  const normalized = normalizeLooseText(cleanLocationValue(value));
+  if (!normalized || normalized.length < 3 || normalized.length > 40) return false;
+  if (/\d{3,}/.test(normalized)) return false;
+  if (LOCATION_STOPWORDS.test(normalized)) return false;
+  if (detectTransportKeyword(normalized)) return false;
+  const words = normalized.split(' ').filter(Boolean);
+  if (!words.length || words.length > 4) return false;
+  return words.every((word) => /^[a-zñ]+$/.test(word) && word.length > 1);
+}
+
+function detectLocationFromSequence(text = '') {
+  const segments = String(text || '')
+    .split(/[\n,]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  let locality = null;
+  for (const segment of segments) {
+    const localityMatch = segment.match(/\b(?:localidad|comuna|zona)\s*[:\-]?\s*([^,.\n]{2,60})/i);
+    if (localityMatch?.[1]) {
+      locality = capitalizeWords(cleanLocationValue(localityMatch[1]));
+      break;
+    }
+  }
+
+  let neighborhood = null;
+  for (let index = 1; index < Math.min(segments.length, 6); index += 1) {
+    const segment = segments[index];
+    if (!looksLikeLocationChunk(segment)) continue;
+    neighborhood = capitalizeWords(cleanLocationValue(segment));
+    break;
+  }
+
+  return { neighborhood, locality };
 }
 
 function normalizeExperienceInfo(value = '') {
@@ -189,7 +285,7 @@ export function parseNaturalData(text = '') {
   let remaining = String(text || '');
 
   // — Documento: alta certeza cuando hay prefijo explícito o número largo
-  const docRegex = /\b(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|\.|\s)\s*(\d{6,12})\b/i;
+  const docRegex = /\b(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[íi]a|pasaporte|ppt)\s*(?:es|:|\-|#|,|\.|\s)+\s*(\d{6,12})\b/i;
   const docMatch = compact.match(docRegex) || remaining.match(docRegex);
   if (docMatch) {
     result.documentType = normalizeDocumentType(docMatch[1]) || docMatch[1].toUpperCase();
@@ -207,9 +303,13 @@ export function parseNaturalData(text = '') {
     }
   }
 
-  // — EDAD: delegada completamente a OpenAI. No se extrae aquí.
-  // OpenAI distingue edad de cédula, entiende "veintiocho", "28 añitos",
-  // errores de tipeo, contexto conversacional completo.
+  // — Edad: solo cuando hay contexto explícito de alta certeza.
+  const detectedAge = detectContextualAge(compact);
+  if (detectedAge !== null) result.age = detectedAge;
+  if (result.age === undefined) {
+    const ageFromSequence = detectAgeFromSequence(text);
+    if (ageFromSequence !== null) result.age = ageFromSequence;
+  }
 
   // — Barrio: alta certeza cuando hay prefijo explícito
   const barrioMatch = compact.match(
@@ -238,6 +338,12 @@ export function parseNaturalData(text = '') {
     if (implicit) result.neighborhood = capitalizeWords(implicit);
   }
 
+  if (!result.neighborhood || !result.locality) {
+    const inferredLocation = detectLocationFromSequence(text);
+    if (!result.locality && inferredLocation.locality) result.locality = inferredLocation.locality;
+    if (!result.neighborhood && inferredLocation.neighborhood) result.neighborhood = inferredLocation.neighborhood;
+  }
+
   // — Restricciones médicas negativas: alta certeza (patrón muy específico)
   const medicalNegative = /\b(no\s+tengo\s+restricciones?(\s+m[ée]dicas?)?|sin\s+restricciones?(\s+m[ée]dicas?)?|ninguna\s+restricci[oó]n)\b/i.test(compact);
   if (medicalNegative) result.medicalRestrictions = 'Sin restricciones médicas';
@@ -249,8 +355,17 @@ export function parseNaturalData(text = '') {
   if (transportNegative) result.transportMode = 'Sin medio de transporte';
 
   if (!result.transportMode) {
-    const transportPositive = compact.match(/\b(?:tengo|cuento con|si tengo|manejo|me movilizo en|voy en)\s+(moto|motocicleta|bicicleta|bici)\b/i);
-    if (transportPositive?.[1]) result.transportMode = normalizeTransportMode(transportPositive[1]);
+    const transportPositive = compact.match(/\b(?:mi\s+medio\s+de\s+transporte\s+es|medio\s+de\s+transporte\s*:|transporte\s*:|transporte\s+es|tengo|cuento con|si tengo|manejo|me movilizo en|voy en)\b/i);
+    if (transportPositive && detectTransportKeyword(compact)) {
+      result.transportMode = normalizeTransportMode(compact);
+    }
+  }
+
+  if (!result.transportMode && /^(?:en\s+)?[a-záéíóúñ]+$/i.test(compact)) {
+    const directTransport = compact.replace(/^en\s+/i, '');
+    if (detectTransportKeyword(directTransport)) {
+      result.transportMode = normalizeTransportMode(directTransport);
+    }
   }
 
   const experienceNegative = /\b(?:no\s+tengo|no\s+cuento\s+con|sin|ninguna)\s+experiencia\b/i.test(compact)
@@ -295,6 +410,7 @@ export function normalizeCandidateFields(fields = {}) {
     if (Number.isFinite(age)) normalized.age = age;
   }
   if (fields.neighborhood) normalized.neighborhood = capitalizeWords(fields.neighborhood);
+  if (fields.locality) normalized.locality = capitalizeWords(fields.locality);
   if (fields.experienceInfo) {
     normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || (/(si|sí|yes|tengo)/i.test(String(fields.experienceInfo)) ? 'Sí' : 'No');
   }
@@ -321,14 +437,17 @@ export function normalizeCandidateFields(fields = {}) {
 export function isHighConfidenceLocalField(field, value) {
   const raw = String(value ?? '').trim();
   if (!raw) return false;
-  // La edad NUNCA se marca como alta certeza local — siempre gana OpenAI
-  if (field === 'age') return false;
+  if (field === 'age') {
+    const age = Number.parseInt(raw, 10);
+    return Number.isFinite(age) && age >= 14 && age <= 80;
+  }
   if (field === 'fullName') return !isSuspiciousFullName(raw) && hasNameTokens(raw);
   if (field === 'neighborhood') return raw.length >= 3;
+  if (field === 'locality') return raw.length >= 3;
   if (field === 'experienceInfo') return /^(si|sí|no)$/i.test(raw) || /experien/i.test(raw);
   if (field === 'medicalRestrictions') {
     return /sin restricciones|no tengo restricciones|ninguna restriccion/i.test(raw) || raw.length >= 8;
   }
-  if (field === 'transportMode') return /^(moto|bicicleta|bici|sin medio de transporte)$/i.test(raw);
+  if (field === 'transportMode') return /^(moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|bus|buseta|transporte publico|servicio publico|sin medio de transporte)$/i.test(raw);
   return true;
 }

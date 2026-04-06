@@ -30,6 +30,10 @@
     .msg-body { flex: 1; color: #ddd; word-break: break-word; white-space: pre-wrap; }
     .msg-step { color: #f39c12; font-size: 11px; min-width: 120px; text-align: right; font-family: monospace; }
     .msg-trace { min-width: 260px; font-size: 11px; color: #9bd1ff; font-family: monospace; white-space: pre-wrap; }
+    .human-flag {
+      display: inline-flex; margin-top: 4px; padding: 2px 8px; border-radius: 999px;
+      background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 700;
+    }
     .refresh-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
     .refresh-bar span { color: #888; font-size: 12px; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; animation: pulse 2s infinite; }
@@ -62,7 +66,10 @@
           <span class="msg-phone"><a href="https://wa.me/<%= m.candidate.phone %>" target="_blank"><%= m.candidate.phone %></a></span>
           <span class="msg-dir <%= isOut ? 'dir-out' : 'dir-in' %>"><%= isOut ? '&#8594;' : '&#8592;' %></span>
           <span class="msg-body"><%= m.body || '(archivo)' %></span>
-          <span class="msg-step"><%= m.candidate.currentStep %></span>
+          <span class="msg-step">
+            <%= m.candidate.currentStep %>
+            <% if (isFemaleHumanReviewCandidate(m.candidate)) { %><br><span class="human-flag">Rev. humana</span><% } %>
+          </span>
           <span class="msg-trace"><% if (m.rawPayload && m.rawPayload.debugTrace) { %>AI:<%= m.rawPayload.debugTrace.openai_status %>/<%= m.rawPayload.debugTrace.openai_intent || "-" %>
 P:<%= (m.rawPayload.debugTrace.persisted_fields || []).join(",") || "-" %>
 CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_detected ? "detected" : "-") %><% } else { %>-<% } %></span>
@@ -91,7 +98,7 @@ CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_
               + '<span class="msg-phone"><a href="https://wa.me/' + m.phone + '" target="_blank">' + m.phone + '</a></span>'
               + '<span class="msg-dir ' + dirClass + '">' + arrow + '</span>'
               + '<span class="msg-body">' + body + '</span>'
-              + '<span class="msg-step">' + (m.currentStep || '') + '</span>'
+              + '<span class="msg-step">' + (m.currentStep || '') + (m.isFemaleHumanReview ? '<br><span class="human-flag">Rev. humana</span>' : '') + '</span>'
               + '<span class="msg-trace">' + traceTxt + '</span>'
               + '</div>';
           }).join('');

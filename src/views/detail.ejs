@@ -53,6 +53,35 @@
     .inline-upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .btn-danger { padding: 8px 16px; background: #c0392b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
     .btn-danger:hover { background: #a93226; }
+    .header-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+    .header-line h1 { margin-bottom: 0; }
+    .badge-human-review {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      background: #fef3c7; color: #92400e;
+    }
+    .booking-list { display: grid; gap: 12px; }
+    .booking-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; background: #fafafa; }
+    .booking-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .booking-title { font-weight: 700; color: #2c3e50; }
+    .booking-meta { font-size: 13px; color: #666; }
+    .booking-status { font-size: 13px; font-weight: 700; }
+    .booking-status-confirmed { color: #1f7a38; }
+    .booking-status-scheduled { color: #2980b9; }
+    .booking-status-rescheduled { color: #b45309; }
+    .booking-status-no_show { color: #b8322b; }
+    .booking-status-cancelled { color: #6b7280; text-decoration: line-through; }
+    .booking-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .booking-actions form { display: inline; }
+    .action-btn {
+      border: 1px solid #d1d5db; border-radius: 999px; padding: 6px 10px; background: #fff;
+      font-size: 12px; font-weight: 700; cursor: pointer; color: #475569;
+    }
+    .action-btn:disabled { opacity: .55; cursor: default; }
+    .action-btn-ok { border-color: #86efac; background: #dcfce7; color: #15803d; }
+    .action-btn-warn { border-color: #fcd34d; background: #fef3c7; color: #b45309; }
+    .action-btn-danger { border-color: #fca5a5; background: #fee2e2; color: #b8322b; }
+    .action-btn-neutral { border-color: #cbd5e1; background: #eef2f7; color: #475569; }
   </style>
 </head>
 <body>
@@ -71,8 +100,27 @@
   </nav>
   <div class="container">
     <a href="/admin" class="back-link">&larr; Volver al listado</a>
-    <h1><%= candidate.fullName || 'Candidato sin nombre' %></h1>
+    <div class="header-line">
+      <h1><%= candidate.fullName || 'Candidato sin nombre' %></h1>
+      <% if (isFemaleHumanReviewCandidate(candidate)) { %>
+        <span class="badge-human-review">Revisión humana candidata femenina</span>
+      <% } %>
+    </div>
     <% const uiStatus = normalizeCandidateStatusForUI(candidate.status); %>
+    <% const detailReturnTo = '/admin/candidates/' + candidate.id; %>
+    <% const bookingStatusLabel = {
+      SCHEDULED:   { cls: 'booking-status-scheduled', text: 'Agendada' },
+      CONFIRMED:   { cls: 'booking-status-confirmed', text: 'Confirmada' },
+      RESCHEDULED: { cls: 'booking-status-rescheduled', text: 'Reagendó' },
+      NO_SHOW:     { cls: 'booking-status-no_show', text: 'No asistió' },
+      CANCELLED:   { cls: 'booking-status-cancelled', text: 'Canceló' }
+    }; %>
+    <% const bookingActions = [
+      { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
+      { key: 'no_show', label: 'No asistió', cls: 'action-btn-danger', status: 'NO_SHOW' },
+      { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
+      { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
+    ]; %>
 
     <% if (cvSuccess) { %>
       <div class="alert alert-success"><%= cvSuccess %></div>
@@ -91,6 +139,12 @@
     <% } %>
     <% if (botPauseError) { %>
       <div class="alert alert-error"><%= botPauseError %></div>
+    <% } %>
+    <% if (bookingSuccess) { %>
+      <div class="alert alert-success"><%= bookingSuccess %></div>
+    <% } %>
+    <% if (bookingError) { %>
+      <div class="alert alert-error"><%= bookingError %></div>
     <% } %>
 
     <div class="card">
@@ -174,6 +228,40 @@
             <button type="submit" class="btn-primary" style="padding:6px 12px;">Reanudar bot</button>
           </form>
         <% } %>
+      <% } %>
+    </div>
+
+    <div class="card">
+      <h2>Entrevistas</h2>
+      <% if (!candidate.interviewBookings || candidate.interviewBookings.length === 0) { %>
+        <p>Este candidato aún no tiene entrevistas registradas.</p>
+      <% } else { %>
+        <div class="booking-list">
+          <% for (const booking of candidate.interviewBookings) { %>
+            <% const bookingUi = bookingStatusLabel[booking.status] || { cls: '', text: booking.status }; %>
+            <div class="booking-item">
+              <div class="booking-head">
+                <div>
+                  <div class="booking-title"><%= booking.vacancy?.title || booking.vacancy?.role || 'Vacante sin nombre' %></div>
+                  <div class="booking-meta">
+                    <%= formatDateTimeCO(booking.scheduledAt) %>
+                    <% if (booking.vacancy?.city) { %> · <%= booking.vacancy.city %><% } %>
+                  </div>
+                </div>
+                <div class="booking-status <%= bookingUi.cls %>"><%= bookingUi.text %></div>
+              </div>
+              <div class="booking-actions">
+                <% for (const action of bookingActions) { %>
+                  <form method="post" action="/admin/interviews/<%= booking.id %>/status">
+                    <input type="hidden" name="action" value="<%= action.key %>" />
+                    <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
+                    <button type="submit" class="action-btn <%= action.cls %>" <%= booking.status === action.status ? 'disabled' : '' %>><%= action.label %></button>
+                  </form>
+                <% } %>
+              </div>
+            </div>
+          <% } %>
+        </div>
       <% } %>
     </div>
 

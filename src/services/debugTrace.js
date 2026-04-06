@@ -1,4 +1,4 @@
-const CANDIDATE_FIELDS = ['fullName', 'documentType', 'documentNumber', 'age', 'neighborhood', 'experienceInfo', 'experienceTime', 'medicalRestrictions', 'transportMode'];
+const CANDIDATE_FIELDS = ['fullName', 'documentType', 'documentNumber', 'age', 'neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'medicalRestrictions', 'transportMode'];
 
 export { CANDIDATE_FIELDS };
 
@@ -116,10 +116,33 @@ function isEquivalentFieldValue(field, currentValue, nextValue) {
   return normalizeComparableValue(field, currentValue) === normalizeComparableValue(field, nextValue);
 }
 
+function isIncompleteFieldValue(field, value) {
+  const normalized = normalizeComparableValue(field, value);
+  if (!normalized) return true;
+
+  switch (field) {
+    case 'age': {
+      const age = Number.parseInt(normalized, 10);
+      return !Number.isFinite(age) || age < 14 || age > 80;
+    }
+    case 'transportMode':
+      return ['ninguno', 'ninguna', 'sin', 'transporte'].includes(normalized);
+    case 'medicalRestrictions':
+      return ['no', 'ninguna', 'ninguno', 'pendiente'].includes(normalized);
+    case 'experienceTime':
+      return normalized === '0' || normalized === 'no' || normalized.length < 3;
+    case 'locality':
+      return normalized.length < 3;
+    default:
+      return false;
+  }
+}
+
 function canConsolidateField(field, currentValue, nextValue) {
   const currentNormalized = normalizeComparableValue(field, currentValue);
   const nextNormalized = normalizeComparableValue(field, nextValue);
   if (!currentNormalized || !nextNormalized || currentNormalized === nextNormalized) return false;
+  if (isIncompleteFieldValue(field, currentValue)) return true;
 
   switch (field) {
     case 'fullName':
@@ -131,7 +154,18 @@ function canConsolidateField(field, currentValue, nextValue) {
       return currentNormalized.length < nextNormalized.length
         && (nextNormalized.startsWith(currentNormalized) || nextNormalized.endsWith(currentNormalized));
     case 'neighborhood':
+    case 'locality':
       return currentNormalized.length < nextNormalized.length && nextNormalized.includes(currentNormalized);
+    case 'age':
+      return false;
+    case 'transportMode':
+      return currentNormalized === 'sin medio de transporte' && nextNormalized !== 'sin medio de transporte';
+    case 'medicalRestrictions':
+      return currentNormalized.length < nextNormalized.length
+        || /sin restricciones|no tengo restricciones|ninguna restriccion/.test(nextNormalized);
+    case 'experienceTime':
+      return currentNormalized.length < nextNormalized.length
+        || currentNormalized === '0';
     default:
       return false;
   }
@@ -153,6 +187,7 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
   for (const field of CANDIDATE_FIELDS) {
     const value = parsedData[field];
     if (value === undefined || value === null || value === '') continue;
+    const fieldSource = sourceByField[field] || 'unknown';
 
     if (field === 'fullName' && isSuspiciousFullName(value)) {
       decisions.rejectedFields.push('fullName');
@@ -161,7 +196,12 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
       continue;
     }
 
-    if (field === 'experienceTime' && String(value).trim().length < 2 && String(value).trim() !== '0') {
+    const trimmedValue = String(value).trim();
+    const allowShortExperienceTime = field === 'experienceTime'
+      && /^\d+$/.test(trimmedValue)
+      && (allowOverwriteFields.has(field) || ['openai', 'engine', 'merged'].includes(fieldSource));
+
+    if (field === 'experienceTime' && trimmedValue.length < 2 && trimmedValue !== '0' && !allowShortExperienceTime) {
       decisions.ignoredLowConfidenceFields.push('experienceTime');
       continue;
     }
@@ -185,6 +225,9 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
 
     decisions.persistedData[field] = value;
     decisions.persistedFields.push(field);
+    if (candidateHasValue && shouldForceOverwrite) {
+      decisions.consolidatedFields.push(field);
+    }
   }
 
   return decisions;
