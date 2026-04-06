@@ -63,7 +63,7 @@
         <% const isOut = m.direction === 'OUTBOUND'; %>
         <div class="msg-row">
           <span class="msg-time"><%= formatDateTimeCO(m.createdAt) %></span>
-          <span class="msg-phone"><a href="https://wa.me/<%= m.candidate.phone %>" target="_blank"><%= m.candidate.phone %></a></span>
+          <span class="msg-phone"><a href="/admin/candidates/<%= m.candidate.id %>/open-whatsapp?returnTo=<%= encodeURIComponent('/admin/monitor') %>" target="_blank" rel="noopener"><%= m.candidate.phone %></a></span>
           <span class="msg-dir <%= isOut ? 'dir-out' : 'dir-in' %>"><%= isOut ? '&#8594;' : '&#8592;' %></span>
           <span class="msg-body"><%= m.body || '(archivo)' %></span>
           <span class="msg-step">
@@ -78,6 +78,8 @@ CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_
     </div>
   </div>
   <script>
+    const monitorReturnTo = encodeURIComponent('/admin/monitor');
+
     setInterval(() => {
       fetch('/admin/monitor/api')
         .then(r => r.json())
@@ -95,7 +97,7 @@ CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_
               : '-';
             return '<div class="msg-row">'
               + '<span class="msg-time">' + ts + '</span>'
-              + '<span class="msg-phone"><a href="https://wa.me/' + m.phone + '" target="_blank">' + m.phone + '</a></span>'
+              + '<span class="msg-phone"><a href="/admin/candidates/' + m.candidateId + '/open-whatsapp?returnTo=' + monitorReturnTo + '" target="_blank" rel="noopener">' + m.phone + '</a></span>'
               + '<span class="msg-dir ' + dirClass + '">' + arrow + '</span>'
               + '<span class="msg-body">' + body + '</span>'
               + '<span class="msg-step">' + (m.currentStep || '') + (m.isFemaleHumanReview ? '<br><span class="human-flag">Rev. humana</span>' : '') + '</span>'

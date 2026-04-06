@@ -2,10 +2,43 @@ function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
 
+function normalizePhoneDigits(phone = '') {
+  return String(phone || '').replace(/\D/g, '');
+}
+
 export function candidateHasCv(candidate = {}) {
   return Boolean(candidate.cvData)
     || hasValue(candidate.cvOriginalName)
     || hasValue(candidate.cvMimeType);
+}
+
+export function buildWhatsAppLink(phone = '') {
+  const digits = normalizePhoneDigits(phone);
+  return digits ? `https://wa.me/${digits}` : '';
+}
+
+export function buildAdminOpenWhatsAppPath(candidateId = '') {
+  return candidateId ? `/admin/candidates/${candidateId}/open-whatsapp` : '/admin';
+}
+
+export function candidateHasUnreadInbound(candidate = {}) {
+  if (!candidate?.lastInboundAt) return false;
+  if (!candidate?.lastOutboundAt) return true;
+  return new Date(candidate.lastInboundAt).getTime() > new Date(candidate.lastOutboundAt).getTime();
+}
+
+export function compareCandidatesByRecentInbound(a = {}, b = {}) {
+  const aUnread = candidateHasUnreadInbound(a) ? 1 : 0;
+  const bUnread = candidateHasUnreadInbound(b) ? 1 : 0;
+  if (aUnread !== bUnread) return bUnread - aUnread;
+
+  const aInbound = a?.lastInboundAt ? new Date(a.lastInboundAt).getTime() : 0;
+  const bInbound = b?.lastInboundAt ? new Date(b.lastInboundAt).getTime() : 0;
+  if (aInbound !== bInbound) return bInbound - aInbound;
+
+  const aCreated = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+  const bCreated = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+  return bCreated - aCreated;
 }
 
 export function normalizeCandidateStatusForUI(status) {

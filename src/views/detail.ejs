@@ -108,6 +108,9 @@
     </div>
     <% const uiStatus = normalizeCandidateStatusForUI(candidate.status); %>
     <% const detailReturnTo = '/admin/candidates/' + candidate.id; %>
+    <% const whatsappHref = role === 'dev'
+      ? '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(detailReturnTo)
+      : 'https://wa.me/' + candidate.phone; %>
     <% const bookingStatusLabel = {
       SCHEDULED:   { cls: 'booking-status-scheduled', text: 'Agendada' },
       CONFIRMED:   { cls: 'booking-status-confirmed', text: 'Confirmada' },
@@ -186,12 +189,18 @@
           <label>Fecha de registro</label>
           <span><%= formatDateTimeCO(candidate.createdAt) %></span>
         </div>
+        <% if (role === 'dev') { %>
+        <div class="info-item">
+          <label>Último inbound</label>
+          <span><%= candidate.lastInboundAt ? formatDateTimeCO(candidate.lastInboundAt) : 'Sin mensajes inbound' %></span>
+        </div>
+        <% } %>
         <div class="info-item">
           <label>Motivo de rechazo</label>
           <span><%= candidate.rejectionReason || '—' %></span>
         </div>
       </div>
-      <a href="https://wa.me/<%= candidate.phone %>" target="_blank" class="btn-wa">Escribir por WhatsApp</a>
+      <a href="<%= whatsappHref %>" <%= role === 'dev' ? '' : 'target="_blank"' %> class="btn-wa">Escribir por WhatsApp</a>
       <% if (candidate.cvData) { %>
         <a href="/admin/candidates/<%= candidate.id %>/cv" class="btn-cv">Descargar Hoja de Vida</a>
       <% } %>
@@ -230,6 +239,52 @@
         <% } %>
       <% } %>
     </div>
+
+    <% if (role === 'dev') { %>
+    <div class="card">
+      <h2>Vacante asignada</h2>
+      <div class="info-grid" style="margin-bottom: 14px;">
+        <div class="info-item">
+          <label>Vacante actual</label>
+          <span>
+            <% if (candidate.vacancy) { %>
+              <%= candidate.vacancy.title || candidate.vacancy.role %>
+              <% if (candidate.vacancy.city) { %> · <%= candidate.vacancy.city %><% } %>
+            <% } else { %>
+              Sin vacante asignada
+            <% } %>
+          </span>
+        </div>
+        <div class="info-item">
+          <label>Estado vacante</label>
+          <span>
+            <% if (candidate.vacancy) { %>
+              <%= candidate.vacancy.isActive ? 'Activa' : 'Inactiva' %>
+              · <%= candidate.vacancy.acceptingApplications ? 'Recibiendo postulaciones' : 'No recibe postulaciones' %>
+            <% } else { %>
+              —
+            <% } %>
+          </span>
+        </div>
+      </div>
+      <form method="post" action="/admin/candidates/<%= candidate.id %>/assign-vacancy" class="status-form" style="flex-wrap: wrap; align-items: flex-end;">
+        <div class="field-group" style="min-width: 320px; flex: 1;">
+          <label for="vacancyId">Selecciona una vacante</label>
+          <select id="vacancyId" name="vacancyId" required>
+            <option value="">Selecciona una vacante</option>
+            <% for (const vacancy of availableVacancies || []) { %>
+              <option value="<%= vacancy.id %>" <%= candidate.vacancyId === vacancy.id ? 'selected' : '' %>>
+                <%= vacancy.city %> · <%= vacancy.title || vacancy.role %> (<%= vacancy.role %>)
+                <% if (!vacancy.isActive) { %> · Inactiva<% } %>
+                <% if (!vacancy.acceptingApplications) { %> · Sin postulaciones<% } %>
+              </option>
+            <% } %>
+          </select>
+        </div>
+        <button type="submit" class="btn-primary"><%= candidate.vacancyId ? 'Cambiar vacante' : 'Asignar vacante' %></button>
+      </form>
+    </div>
+    <% } %>
 
     <div class="card">
       <h2>Entrevistas</h2>
@@ -328,8 +383,11 @@
         </form>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
           <input type="hidden" name="action" value="request_hv" />
-          <button type="submit">Solicitar Hoja de vida</button>
+          <button type="submit" <%= outboundWindow && !outboundWindow.isOpen ? 'disabled title="Ventana de 24h cerrada"' : '' %>>Solicitar Hoja de vida</button>
         </form>
+        <% if (outboundWindow && !outboundWindow.isOpen) { %>
+          <div style="font-size:12px;color:#b45309;margin-top:6px;">Ventana de 24h cerrada</div>
+        <% } %>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
           <input type="hidden" name="action" value="reminder" />
           <button type="submit">Enviar recordatorio</button>

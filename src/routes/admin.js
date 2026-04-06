@@ -5,6 +5,10 @@ import path from 'node:path';
 import multer from 'multer';
 import { normalizeCandidateFields } from '../services/candidateData.js';
 import {
+  buildAdminOpenWhatsAppPath,
+  buildWhatsAppLink,
+  compareCandidatesByRecentInbound,
+  candidateHasUnreadInbound,
   candidateHasCv,
   exportFilenameByScope,
   filterCandidatesByScope,
@@ -183,10 +187,14 @@ function hasPdfSignature(buffer) {
 }
 
 function decorateDashboardCandidate(candidate) {
+  const outboundWindowOpen = Boolean(candidate?.lastInboundAt)
+    && (Date.now() - new Date(candidate.lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS;
   return {
     ...candidate,
     hasCv: candidateHasCv(candidate),
-    isFemaleHumanReview: isFemaleHumanReviewCandidate(candidate)
+    isFemaleHumanReview: isFemaleHumanReviewCandidate(candidate),
+    outboundWindowOpen,
+    hasNewInbound: candidateHasUnreadInbound(candidate)
   };
 }
 
@@ -205,8 +213,9 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
   });
 }
 
-async function buildDashboardData(prisma, dateStr) {
+async function buildDashboardData(prisma, dateStr, options = {}) {
   const { start, end } = colombiaDayBounds(dateStr);
+  const isDev = options.role === 'dev';
 
   const vacancies = await prisma.vacancy.findMany({
     where: {
@@ -239,7 +248,9 @@ async function buildDashboardData(prisma, dateStr) {
               medicalRestrictions: true, transportMode: true,
               cvOriginalName: true, cvMimeType: true, gender: true,
               botPaused: true, botPauseReason: true,
-              currentStep: true
+              currentStep: true,
+              lastInboundAt: true,
+              lastOutboundAt: true
             }
           }
         },
@@ -258,6 +269,8 @@ async function buildDashboardData(prisma, dateStr) {
           gender: true, createdAt: true,
           botPaused: true, botPauseReason: true,
           currentStep: true,
+          lastInboundAt: true,
+          lastOutboundAt: true,
           interviewBookings: {
             where: { status: { in: ACTIVE_BOOKING_STATUSES } },
             select: { id: true }
@@ -282,7 +295,9 @@ async function buildDashboardData(prisma, dateStr) {
       medicalRestrictions: true, transportMode: true,
       cvOriginalName: true, cvMimeType: true, createdAt: true,
       gender: true, botPaused: true, botPauseReason: true,
-      currentStep: true
+      currentStep: true,
+      lastInboundAt: true,
+      lastOutboundAt: true
     }
   });
 
@@ -301,6 +316,21 @@ async function buildDashboardData(prisma, dateStr) {
     const operationallyCompleteWithoutCvCandidates = candidatesWithFlags
       .filter((candidate) => isOperationallyCompleteWithoutCv(candidate));
 
+    const registeredNoBooking = v.schedulingEnabled
+      ? operationallyRegisteredCandidates
+        .filter((candidate) => !bookedCandidateIds.has(candidate.id))
+      : [];
+    const registeredComplete = !v.schedulingEnabled
+      ? operationallyRegisteredCandidates
+      : [];
+    const completeWithoutCv = operationallyCompleteWithoutCvCandidates;
+
+    if (isDev) {
+      registeredNoBooking.sort(compareCandidatesByRecentInbound);
+      registeredComplete.sort(compareCandidatesByRecentInbound);
+      completeWithoutCv.sort(compareCandidatesByRecentInbound);
+    }
+
     const enriched = {
       ...v,
       bookingsToday: v.interviewBookings.map(b => ({
@@ -310,23 +340,20 @@ async function buildDashboardData(prisma, dateStr) {
         formattedDateTime: formatDateTimeCO(b.scheduledAt),
         isFemaleHumanReview: isFemaleHumanReviewCandidate(b.candidate)
       })),
-      registeredNoBooking: v.schedulingEnabled
-        ? operationallyRegisteredCandidates
-          .filter((candidate) => !bookedCandidateIds.has(candidate.id))
-        : [],
-      registeredComplete: !v.schedulingEnabled
-        ? operationallyRegisteredCandidates
-        : [],
-      completeWithoutCv: operationallyCompleteWithoutCvCandidates
+      registeredNoBooking,
+      registeredComplete,
+      completeWithoutCv
     };
 
     citiesMap.get(city).push(enriched);
   }
 
   const cities = Array.from(citiesMap.entries()).map(([name, vacs]) => ({ name, vacancies: vacs }));
+  const decoratedLegacyCandidates = legacyCandidates.map(decorateDashboardCandidate);
+  if (isDev) decoratedLegacyCandidates.sort(compareCandidatesByRecentInbound);
   return {
     cities,
-    legacyCandidates: legacyCandidates.map(decorateDashboardCandidate)
+    legacyCandidates: decoratedLegacyCandidates
   };
 }
 
@@ -458,6 +485,7 @@ async function fetchMonitorMessages(prisma) {
     include: {
       candidate: {
         select: {
+          id: true,
           phone: true,
           currentStep: true,
           gender: true,
@@ -498,7 +526,7 @@ export function adminRouter(prisma) {
 
     const rawDate = normalizeString(req.query.date);
     const selectedDate = isValidDateString(rawDate) ? rawDate : todayCO();
-    const { cities, legacyCandidates } = await buildDashboardData(prisma, selectedDate);
+    const { cities, legacyCandidates } = await buildDashboardData(prisma, selectedDate, { role: req.userRole });
 
     const rawCity = normalizeString(req.query.city);
     const availableCities = cities.map(c => c.name);
@@ -531,6 +559,7 @@ export function adminRouter(prisma) {
       const messages = await fetchMonitorMessages(prisma);
       const payload = messages.map(m => ({
         id: m.id, direction: m.direction, body: m.body, timestamp: m.createdAt,
+        candidateId: m.candidate?.id || '',
         phone: m.candidate?.phone || '', currentStep: m.candidate?.currentStep || '',
         gender: m.candidate?.gender || '',
         isFemaleHumanReview: isFemaleHumanReviewCandidate(m.candidate),
@@ -546,17 +575,20 @@ export function adminRouter(prisma) {
   // ── Exportar candidatos ──────────────────────────────────────
   router.get('/export', async (req, res) => {
     const scope = normalizeString(req.query.scope) || 'all';
+    const appBaseUrl = `${req.protocol}://${req.get('host')}`;
     if (!EXPORT_SCOPES.has(scope)) return res.status(400).send('Scope inválido.');
 
     const allCandidates = await prisma.candidate.findMany({
       orderBy: { createdAt: 'desc' },
       select: {
+        id: true,
         fullName: true,
         phone: true,
         documentType: true,
         documentNumber: true,
         age: true,
         neighborhood: true,
+        locality: true,
         zone: true,
         experienceInfo: true,
         experienceTime: true,
@@ -574,13 +606,17 @@ export function adminRouter(prisma) {
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Candidatos');
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
     sheet.columns = [
       { header: 'Nombre', key: 'fullName', width: 28 },
       { header: 'Teléfono', key: 'phone', width: 18 },
+      { header: 'Link WhatsApp', key: 'whatsappLink', width: 18 },
+      { header: 'Enviar mensaje', key: 'sendMessageLink', width: 20 },
       { header: 'Doc. Tipo', key: 'documentType', width: 12 },
       { header: 'Doc. Número', key: 'documentNumber', width: 18 },
       { header: 'Edad', key: 'age', width: 8 },
       { header: 'Barrio', key: 'neighborhood', width: 20 },
+      { header: 'Localidad', key: 'locality', width: 18 },
       { header: 'Experiencia', key: 'experienceInfo', width: 14 },
       { header: 'Tiempo exp.', key: 'experienceTime', width: 16 },
       { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
@@ -590,12 +626,74 @@ export function adminRouter(prisma) {
       { header: 'Fecha registro', key: 'createdAt', width: 20 },
     ];
     for (const c of candidates) {
-      sheet.addRow({
+      const whatsappLink = buildWhatsAppLink(c.phone);
+      const sendMessageLink = `${appBaseUrl}${buildAdminOpenWhatsAppPath(c.id)}`;
+      const row = sheet.addRow({
         ...c,
+        neighborhood: c.neighborhood || c.zone || '',
+        locality: c.locality || c.zone || '',
+        whatsappLink: whatsappLink ? 'Abrir WhatsApp' : 'Sin número',
+        sendMessageLink: 'Enviar mensaje',
         hasCV: candidateHasCv(c) ? 'Sí' : 'No',
         createdAt: formatDateTimeCO(c.createdAt)
       });
+      if (whatsappLink) {
+        row.getCell('whatsappLink').value = { text: 'Abrir WhatsApp', hyperlink: whatsappLink };
+      }
+      row.getCell('sendMessageLink').value = { text: 'Enviar mensaje', hyperlink: sendMessageLink };
     }
+    sheet.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: sheet.columns.length }
+    };
+    sheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2D3D' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+      };
+    });
+    const statusColors = {
+      REGISTRADO: 'FFDCFCE7',
+      VALIDANDO: 'FFDBEAFE',
+      APROBADO: 'FFDCFCE7',
+      CONTACTADO: 'FFEDE9FE',
+      RECHAZADO: 'FFFEE2E2',
+      NUEVO: 'FFF3F4F6'
+    };
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      row.eachCell((cell) => {
+        cell.alignment = { vertical: 'top', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+      });
+      const statusCell = row.getCell('status');
+      const statusColor = statusColors[String(statusCell.value || '').toUpperCase()] || 'FFFFFFFF';
+      statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusColor } };
+      statusCell.font = { bold: true, color: { argb: 'FF1F2937' } };
+
+      const hvCell = row.getCell('hasCV');
+      hvCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: hvCell.value === 'Sí' ? 'FFDCFCE7' : 'FFFEE2E2' }
+      };
+      hvCell.font = { bold: true, color: { argb: hvCell.value === 'Sí' ? 'FF166534' : 'FF991B1B' } };
+
+      ['whatsappLink', 'sendMessageLink'].forEach((key) => {
+        const linkCell = row.getCell(key);
+        linkCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
+      });
+    });
     const filename = exportFilenameByScope(scope);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -608,6 +706,16 @@ export function adminRouter(prisma) {
     const candidate = await prisma.candidate.findUnique({
       where: { id: req.params.id },
       include: {
+        vacancy: {
+          select: {
+            id: true,
+            title: true,
+            city: true,
+            role: true,
+            acceptingApplications: true,
+            isActive: true
+          }
+        },
         messages: { orderBy: { createdAt: 'asc' } },
         interviewBookings: {
           orderBy: { scheduledAt: 'desc' },
@@ -626,6 +734,34 @@ export function adminRouter(prisma) {
     const outboundWindow = req.userRole === 'dev'
       ? await getOutboundWindowStatus(prisma, candidate.id)
       : null;
+    const availableVacancies = req.userRole === 'dev'
+      ? await prisma.vacancy.findMany({
+        where: {
+          OR: [
+            { isActive: true },
+            { acceptingApplications: true }
+          ]
+        },
+        orderBy: [{ city: 'asc' }, { title: 'asc' }],
+        select: {
+          id: true,
+          title: true,
+          city: true,
+          role: true,
+          acceptingApplications: true,
+          isActive: true
+        }
+      })
+      : [];
+    const detailCandidate = {
+      ...candidate,
+      outboundWindowOpen: outboundWindow?.isOpen ?? (
+        Boolean(candidate.lastInboundAt)
+        && (Date.now() - new Date(candidate.lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS
+      ),
+      lastInboundAt: outboundWindow?.lastInboundAt || candidate.lastInboundAt || null,
+      hasNewInbound: candidateHasUnreadInbound(candidate)
+    };
 
     const cvSuccess = normalizeString(req.query.cvSuccess);
     const cvError   = normalizeString(req.query.cvError);
@@ -637,8 +773,9 @@ export function adminRouter(prisma) {
     const bookingError    = normalizeString(req.query.bookingError || req.query.error);
 
     res.render('detail', {
-      candidate, role: req.userRole, formatDateTimeCO,
+      candidate: detailCandidate, role: req.userRole, formatDateTimeCO,
       normalizeCandidateStatusForUI, cvSizeBytes,
+      availableVacancies,
       outboundWindow, cvSuccess, cvError,
       outboundSuccess, outboundError, botPauseSuccess, botPauseError,
       bookingSuccess, bookingError, isFemaleHumanReviewCandidate
@@ -682,6 +819,64 @@ export function adminRouter(prisma) {
   });
 
   // ── Edición manual ───────────────────────────────────────────
+  router.get('/candidates/:id/open-whatsapp', ensureDevRole, async (req, res) => {
+    const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.query.returnTo || req.get('referer') || '/admin');
+    const candidate = await prisma.candidate.findUnique({
+      where: { id },
+      select: { id: true, phone: true }
+    });
+
+    if (!candidate) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
+    }
+
+    await prisma.candidate.update({
+      where: { id },
+      data: { status: 'CONTACTADO' }
+    });
+
+    const whatsappUrl = buildWhatsAppLink(candidate.phone);
+    if (!whatsappUrl) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'El candidato no tiene un número válido para WhatsApp.'));
+    }
+
+    return res.redirect(whatsappUrl);
+  });
+
+  router.post('/candidates/:id/assign-vacancy', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const vacancyId = normalizeString(req.body.vacancyId);
+    const returnTo = `/admin/candidates/${id}`;
+
+    const candidate = await prisma.candidate.findUnique({
+      where: { id },
+      select: { id: true }
+    });
+    if (!candidate) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
+    }
+
+    if (!vacancyId) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Debes seleccionar una vacante.'));
+    }
+
+    const vacancy = await prisma.vacancy.findUnique({
+      where: { id: vacancyId },
+      select: { id: true, isActive: true, acceptingApplications: true }
+    });
+    if (!vacancy || (!vacancy.isActive && !vacancy.acceptingApplications)) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'La vacante seleccionada no está disponible para asignación.'));
+    }
+
+    await prisma.candidate.update({
+      where: { id },
+      data: { vacancyId: vacancy.id }
+    });
+
+    return res.redirect(withFlashMessage(returnTo, 'success', 'Vacante asignada correctamente.'));
+  });
+
   router.post('/candidates/:id/edit', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const raw = req.body;

@@ -153,6 +153,7 @@
     .badge-contactado { background: var(--purple-light); color: var(--purple); }
     .badge-rechazado  { background: var(--red-light);    color: var(--red); }
     .badge-human-review { background: #fef3c7; color: #92400e; }
+    .badge-unread { background: #dbeafe; color: #1d4ed8; }
 
     .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
     .dot-green  { background: var(--green); }
@@ -219,6 +220,7 @@
     .candidate-name { font-weight: 600; color: var(--navy); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .candidate-doc  { font-size: 12px; color: var(--text-muted); }
     .candidate-extra { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
+    .candidate-dev-meta { font-size: 11px; color: var(--blue); margin-top: 4px; font-weight: 600; }
     .candidate-flags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
     .candidate-phone a { color: var(--teal); font-weight: 600; font-size: 12px; text-decoration: none; }
     .candidate-phone a:hover { text-decoration: underline; }
@@ -388,8 +390,16 @@
                 <span class="badge badge-human-review">Revisión humana</span>
               </div>
             <% } %>
+            <% if (role === 'dev' && c.hasNewInbound) { %>
+              <div class="candidate-flags">
+                <span class="badge badge-unread">Mensaje nuevo</span>
+              </div>
+            <% } %>
+            <% if (role === 'dev') { %>
+              <div class="candidate-dev-meta"><%= c.lastInboundAt ? 'Último inbound: ' + formatDateTimeCO(c.lastInboundAt) : 'Sin inbound' %></div>
+            <% } %>
           </td>
-          <td><a href="https://wa.me/<%= c.phone %>" target="_blank" style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
+          <td><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank"' %> style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
           <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
           <td><%= c.age || '—' %></td>
           <td><%= c.neighborhood || c.zone || '—' %></td>
@@ -463,6 +473,17 @@
     if (candidate.medicalRestrictions) parts.push('Restricciones: ' + candidate.medicalRestrictions);
     if (candidate.transportMode) parts.push('Transporte: ' + candidate.transportMode);
     return parts.join(' · ');
+  }
+  function candidateWhatsappHref(candidate) {
+    if (role === 'dev') {
+      return '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(currentDashboardPath);
+    }
+    return 'https://wa.me/' + candidate.phone;
+  }
+
+  function candidateLastInboundLabel(candidate) {
+    if (!candidate.lastInboundAt) return 'Sin inbound';
+    return 'Último inbound: ' + formatDateTimeCO(candidate.lastInboundAt);
   }
 %>
 
@@ -627,14 +648,23 @@
                         <span class="badge badge-human-review">Revisión humana</span>
                       </div>
                     <% } %>
+                    <% if (role === 'dev' && c.hasNewInbound) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-unread">Mensaje nuevo</span>
+                      </div>
+                    <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></div>
                     <% const candidateMeta = candidateOperationalMeta(c); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                    <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastInboundLabel(c) %></div><% } %>
                   </div>
-                  <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                  <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
                   <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span>
-                  <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  <div class="action-stack">
+                    <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
+                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  </div>
                 </div>
               <% } %>
               <% if (v.registeredNoBooking.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.registeredNoBooking.length - 20 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
@@ -660,18 +690,25 @@
                         <span class="badge badge-human-review">Revisión humana</span>
                       </div>
                     <% } %>
+                    <% if (role === 'dev' && c.hasNewInbound) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-unread">Mensaje nuevo</span>
+                      </div>
+                    <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
                     <% const candidateMeta = candidateOperationalMeta(c); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                    <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastInboundLabel(c) %></div><% } %>
                   </div>
-                  <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                  <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
                   <span class="cv-pill cv-no">Sin HV</span>
                   <div class="action-stack">
                     <form method="post" action="/admin/candidates/<%= c.id %>/request-hv" class="action-form">
                       <input type="hidden" name="returnTo" value="<%= currentDashboardPath %>" />
-                      <button type="submit" class="action-btn action-btn-warn">Solicitar HV</button>
+                      <button type="submit" class="action-btn action-btn-warn" <%= c.outboundWindowOpen ? '' : 'disabled title="Ventana de 24h cerrada"' %>>Solicitar HV</button>
                     </form>
+                    <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
                     <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
                   </div>
                 </div>
@@ -703,14 +740,23 @@
                           <span class="badge badge-human-review">Revisión humana</span>
                         </div>
                       <% } %>
+                      <% if (role === 'dev' && c.hasNewInbound) { %>
+                        <div class="candidate-flags">
+                          <span class="badge badge-unread">Mensaje nuevo</span>
+                        </div>
+                      <% } %>
                       <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
                     <% const candidateMeta = candidateOperationalMeta(c); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
-                    </div>
-                    <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                    <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastInboundLabel(c) %></div><% } %>
+                  </div>
+                    <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= c.phone %></a></div>
                     <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
                     <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span>
-                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                    <div class="action-stack">
+                      <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
+                      <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                    </div>
                   </div>
                 <% } %>
                 <% if (v.registeredComplete.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.registeredComplete.length - 25 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
@@ -737,18 +783,25 @@
                         <span class="badge badge-human-review">Revisión humana</span>
                       </div>
                     <% } %>
+                    <% if (role === 'dev' && c.hasNewInbound) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-unread">Mensaje nuevo</span>
+                      </div>
+                    <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
                     <% const candidateMeta = candidateOperationalMeta(c); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                    <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastInboundLabel(c) %></div><% } %>
                   </div>
-                  <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
+                  <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
                   <span class="cv-pill cv-no">Sin HV</span>
                   <div class="action-stack">
                     <form method="post" action="/admin/candidates/<%= c.id %>/request-hv" class="action-form">
                       <input type="hidden" name="returnTo" value="<%= currentDashboardPath %>" />
-                      <button type="submit" class="action-btn action-btn-warn">Solicitar HV</button>
+                      <button type="submit" class="action-btn action-btn-warn" <%= c.outboundWindowOpen ? '' : 'disabled title="Ventana de 24h cerrada"' %>>Solicitar HV</button>
                     </form>
+                    <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
                     <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
                   </div>
                 </div>
@@ -801,8 +854,16 @@
                   <span class="badge badge-human-review">Revisión humana</span>
                 </div>
               <% } %>
+              <% if (role === 'dev' && c.hasNewInbound) { %>
+                <div class="candidate-flags">
+                  <span class="badge badge-unread">Mensaje nuevo</span>
+                </div>
+              <% } %>
+              <% if (role === 'dev') { %>
+                <div class="candidate-dev-meta"><%= c.lastInboundAt ? 'Último inbound: ' + formatDateTimeCO(c.lastInboundAt) : 'Sin inbound' %></div>
+              <% } %>
             </td>
-            <td><a href="https://wa.me/<%= c.phone %>" target="_blank" style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
+            <td><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank"' %> style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
             <td style="font-size:12px;color:var(--text-muted);"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></td>
             <td><span class="badge <%= (stBadge[uiSt]||{cls:'badge-nuevo'}).cls %>"><%= (stBadge[uiSt]||{label:uiSt}).label %></span></td>
             <td><span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span></td>
