@@ -16,6 +16,7 @@ export async function runChatEngine({
   inboundText,
   recentMessages,
   nextSlot = null,
+  candidateFieldHints = {},
 }) {
   const currentStep = candidate.currentStep || ConversationStep.MENU;
 
@@ -32,12 +33,17 @@ export async function runChatEngine({
   const extractedFields = result.extractedFields && typeof result.extractedFields === 'object'
     ? result.extractedFields
     : {};
-  const candidateFields = extractEngineCandidateFields(actions, extractedFields);
+  const engineCandidateFields = extractEngineCandidateFields(actions, extractedFields);
+  const candidateFields = {
+    ...(candidateFieldHints && typeof candidateFieldHints === 'object' ? candidateFieldHints : {}),
+    ...engineCandidateFields
+  };
 
   await act({
     actions,
     candidate,
     extractedFields,
+    candidateFields,
     nextStep: result.nextStep,
     nextSlot,
     prisma,
@@ -50,5 +56,7 @@ export async function runChatEngine({
     extractedFields,
     candidateFields,
     fallback: result.fallback,
+    fallbackReason: result.fallbackReason || null,
+    loopGuardApplied: Boolean(result.loopGuardApplied),
   };
 }

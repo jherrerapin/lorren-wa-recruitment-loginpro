@@ -395,6 +395,14 @@ export function parseNaturalData(text = '') {
   return result;
 }
 
+export function hasMeaningfulCandidateData(fields = {}) {
+  const normalized = normalizeCandidateFields(fields);
+  return Object.entries(normalized).some(([field, value]) => {
+    if (value === undefined || value === null || value === '') return false;
+    return isHighConfidenceLocalField(field, value);
+  });
+}
+
 export function normalizeCandidateFields(fields = {}) {
   const normalized = {};
 

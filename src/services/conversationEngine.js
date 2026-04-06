@@ -261,6 +261,15 @@ CÓMO SONÁS:
 - Variá el lenguaje: no uses siempre el mismo saludo ni la misma forma de pedir un dato.
 - Si ya pediste confirmación recientemente, no repitas exactamente la misma redacción en el siguiente mensaje.
 
+PRIORIDADES DE CONVERSACIÓN:
+- Priorizá entender la intención real del candidato, no solo completar casillas.
+- Si el candidato hace una pregunta, plantea una objeción o pide información antes de dar datos, respondé eso primero y recién después guiá el siguiente paso.
+- Si el candidato dice algo como "quiero información", "quiero saber primero", "no te voy a dar mis datos hasta saber más", "ya envié eso", "eso está mal", tratá ese mensaje como contexto humano real, no como un bloqueo.
+- Si el candidato cambia de intención, se arrepiente, dice "ya no", "mejor no" o "después", adaptate a eso de inmediato.
+- Si expresa no interés en cualquier etapa, cerrá correctamente con "mark_no_interest" y no sigas empujando datos.
+- Si ya entregó suficiente contexto o varios datos mezclados, consolidá y avanzá; no vuelvas a pedir lo mismo.
+- Si el candidato ya entendió la vacante y solo necesita una respuesta humana, no lo devuelvas al mismo carril rígido de siempre.
+
 ${buildVacancyContext(vacancy)}
 
 ${buildCandidateContext(candidate)}
@@ -302,6 +311,11 @@ ACCIONES DISPONIBLES:
 - "pause_bot"             — necesita atención humana. data: { reason }
 - "nothing"               — no se requiere acción del sistema
 
+REGLAS CRÍTICAS DE INTENCIÓN:
+- Si el candidato expresa no interés, desiste o pide dejarlo para después, priorizá "mark_no_interest" o "pause_bot" según corresponda; no sigas recolectando datos.
+- Si el candidato hace una pregunta y además faltan datos, la respuesta debe resolver primero la pregunta y solo después retomar lo pendiente.
+- Si el candidato corrige algo en lenguaje natural, extraé y sobrescribí ese dato sin exigir frases formales.
+
 CRITERIOS DE RECHAZO:
 - Edad claramente fuera del rango de la vacante
 - Documento vencido o inexistente (candidato lo menciona explícitamente)
@@ -310,6 +324,9 @@ CRITERIOS DE RECHAZO:
 Si el candidato da datos, extraélos en extractedFields aunque no todos vayan dentro de save_fields; el sistema también persistirá extractedFields.
 Si el candidato envía un mensaje largo con datos mezclados o en desorden, extraé todos los campos válidos que puedas en una sola respuesta y no vuelvas a pedir los mismos datos como si faltaran.
 Si el candidato hace una pregunta sobre la vacante, respóndela primero usando el contexto real y luego continúa el flujo sin repetir frases quemadas.
+Si el candidato plantea una objeción o pide información antes de compartir datos, atendé esa objeción primero y no respondas como formulario.
+Si dice "ya envié eso" o "eso está mal", revisá el contexto, consolidá lo que ya existe y pedí solo lo que realmente falta o corregí lo necesario.
+Si no hubo cambio real de datos ni de estado, no repitas casi la misma respuesta del bot anterior: reformulá y aportá algo más útil.
 Si ya hay datos capturados en el historial, consolídalos con lo nuevo y pide solo lo realmente faltante.
 Decidí si hay suficientes datos para pedir confirmación, o si aún faltan campos importantes.
 En ese caso, pedílos de forma natural — nunca como un formulario.
@@ -355,6 +372,93 @@ function parseEngineJson(rawText = '{}') {
   return null;
 }
 
+function normalizeReplySignature(text = '') {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenOverlapRatio(a = '', b = '') {
+  const aTokens = new Set(normalizeReplySignature(a).split(' ').filter(Boolean));
+  const bTokens = new Set(normalizeReplySignature(b).split(' ').filter(Boolean));
+  if (!aTokens.size || !bTokens.size) return 0;
+  let intersection = 0;
+  for (const token of aTokens) {
+    if (bTokens.has(token)) intersection += 1;
+  }
+  return intersection / Math.max(aTokens.size, bTokens.size);
+}
+
+function isSubstantiallySimilarReply(nextReply = '', previousReply = '') {
+  const next = normalizeReplySignature(nextReply);
+  const previous = normalizeReplySignature(previousReply);
+  if (!next || !previous) return false;
+  if (next === previous) return true;
+  if (next.length > 24 && previous.length > 24 && (next.includes(previous) || previous.includes(next))) return true;
+  return tokenOverlapRatio(nextReply, previousReply) >= 0.78;
+}
+
+function hasMeaningfulEngineProgress(decision = {}, currentStep = '') {
+  if (!decision || typeof decision !== 'object') return false;
+  if (decision.nextStep && decision.nextStep !== currentStep) return true;
+  if (decision.extractedFields && Object.keys(decision.extractedFields).length) return true;
+  const actions = Array.isArray(decision.actions) ? decision.actions : [];
+  return actions.some((action) => !['nothing', 'request_confirmation'].includes(action?.type));
+}
+
+function buildLoopSafeReply({ candidate = {}, currentStep = '', recentMessages = [] } = {}) {
+  const missingFields = getMissingFields(candidate);
+  const lastBotMessage = [...recentMessages].reverse().find((message) => message.direction === 'OUTBOUND')?.body || '';
+
+  if (currentStep === 'ASK_CV') {
+    return /hoja de vida|hv|cv/i.test(lastBotMessage)
+      ? 'Cuando puedas, adjúntame la hoja de vida en PDF o Word y con eso dejamos tu proceso listo.'
+      : 'Para cerrar tu registro me hace falta la hoja de vida. Puedes enviarla en PDF o Word cuando te quede bien.';
+  }
+
+  if (currentStep === 'CONFIRMING_DATA' && !missingFields.length) {
+    return 'Si todo ya quedó correcto, respóndeme sí y seguimos. Si ves algo por ajustar, escríbeme solo ese dato y lo actualizo.';
+  }
+
+  if (missingFields.length) {
+    const fieldList = missingFields.join(', ');
+    const variants = [
+      `Para dejar esto listo todavía me faltan: ${fieldList}. Puedes enviármelos en el orden que prefieras.`,
+      `Voy bien con tu registro. Solo necesito completar ${fieldList}.`,
+      `Seguimos bien. Compárteme únicamente ${fieldList} y avanzamos.`
+    ];
+    const index = Math.min((recentMessages || []).length % variants.length, variants.length - 1);
+    return variants[index];
+  }
+
+  return 'Te sigo acompañando con el proceso. Si quieres corregir algo, envíame solo ese dato; si está bien, continuamos.';
+}
+
+function applyLoopGuardToDecision(decision, context = {}) {
+  const recentOutbound = (context.recentMessages || [])
+    .filter((message) => message.direction === 'OUTBOUND')
+    .slice(-3);
+
+  if (!recentOutbound.length || hasMeaningfulEngineProgress(decision, context.currentStep)) {
+    return { ...decision, loopGuardApplied: false };
+  }
+
+  const isLooping = recentOutbound.some((message) => isSubstantiallySimilarReply(decision.reply, message.body || ''));
+  if (!isLooping) {
+    return { ...decision, loopGuardApplied: false };
+  }
+
+  return {
+    ...decision,
+    reply: buildLoopSafeReply(context),
+    loopGuardApplied: true
+  };
+}
+
 function mergeEngineFields(actions = [], extractedFields = {}) {
   const merged = { ...(extractedFields || {}) };
   for (const action of actions || []) {
@@ -393,7 +497,16 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
   const fallbackReply = '¡Hola! Gracias por escribir. ¿En qué puedo ayudarte?';
 
   if (!process.env.OPENAI_API_KEY) {
-    return { reply: fallbackReply, nextStep: currentStep, actions: [], extractedFields: {}, raw: null, fallback: true };
+    return {
+      reply: fallbackReply,
+      nextStep: currentStep,
+      actions: [],
+      extractedFields: {},
+      raw: null,
+      fallback: true,
+      fallbackReason: 'missing_openai_api_key',
+      loopGuardApplied: false
+    };
   }
 
   try {
@@ -423,20 +536,50 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
 
     if (!raw || typeof raw.reply !== 'string') {
       console.warn('[ENGINE_PARSE_FAIL]', { phone: candidate?.phone });
-      return { reply: fallbackReply, nextStep: currentStep, actions: [], extractedFields: {}, raw, fallback: true };
+      return {
+        reply: fallbackReply,
+        nextStep: currentStep,
+        actions: [],
+        extractedFields: {},
+        raw,
+        fallback: true,
+        fallbackReason: 'invalid_engine_json',
+        loopGuardApplied: false
+      };
     }
 
-    return {
-      reply:           raw.reply.trim(),
-      nextStep:        raw.nextStep || currentStep,
-      actions:         Array.isArray(raw.actions) ? raw.actions : [],
+    const decision = applyLoopGuardToDecision({
+      reply: raw.reply.trim(),
+      nextStep: raw.nextStep || currentStep,
+      actions: Array.isArray(raw.actions) ? raw.actions : [],
       extractedFields: raw.extractedFields || {},
       raw,
-      fallback:        false
+      fallback: false,
+      fallbackReason: null
+    }, {
+      candidate,
+      currentStep,
+      recentMessages
+    });
+
+    return {
+      ...decision,
+      raw,
+      fallback: false,
+      fallbackReason: null
     };
   } catch (error) {
     console.error('[ENGINE_ERROR]', { phone: candidate?.phone, error: error?.message?.slice(0, 200) });
-    return { reply: fallbackReply, nextStep: currentStep, actions: [], extractedFields: {}, raw: null, fallback: true };
+    return {
+      reply: fallbackReply,
+      nextStep: currentStep,
+      actions: [],
+      extractedFields: {},
+      raw: null,
+      fallback: true,
+      fallbackReason: error?.code || error?.message || 'engine_error',
+      loopGuardApplied: false
+    };
   }
 }
 
@@ -455,12 +598,14 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
  * @param {object|null}      p.nextSlot
  * @param {PrismaClient}     p.prisma
  */
-export async function act({ actions, candidate, extractedFields = {}, nextStep, nextSlot, prisma }) {
+export async function act({ actions, candidate, extractedFields = {}, candidateFields = {}, nextStep, nextSlot, prisma }) {
   const { normalizeCandidateFields }  = await import('./candidateData.js');
   const { cancelCandidateBookings, createBooking } = await import('./interviewScheduler.js');
   const { CandidateStatus, ConversationStep, Gender } = await import('@prisma/client');
   const normalizedActions = Array.isArray(actions) ? actions : [];
-  const mergedRawFields = extractEngineCandidateFields(normalizedActions, extractedFields);
+  const mergedRawFields = Object.keys(candidateFields || {}).length
+    ? candidateFields
+    : extractEngineCandidateFields(normalizedActions, extractedFields);
   const mergedFields = normalizeCandidateFields(mergedRawFields);
   const mappedGender = mapEngineGender(mergedRawFields.gender, Gender);
   if (mappedGender) mergedFields.gender = mappedGender;

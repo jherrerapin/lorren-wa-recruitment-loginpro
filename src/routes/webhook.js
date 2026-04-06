@@ -5,7 +5,7 @@ import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { tryOpenAIParse } from '../services/aiParser.js';
 import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
 import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
-import { isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData } from '../services/candidateData.js';
+import { hasMeaningfulCandidateData, isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData } from '../services/candidateData.js';
 import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
@@ -157,7 +157,7 @@ function containsCandidateData(text, parsedData = null) {
   const candidateData = parsedData && typeof parsedData === 'object'
     ? parsedData
     : parseNaturalData(text);
-  return Object.keys(candidateData || {}).length > 0;
+  return hasMeaningfulCandidateData(candidateData);
 }
 function hasHv(candidate) { return Boolean(candidate?.cvData); }
 function resolveInboundMessageType(message = {}) {
@@ -593,7 +593,20 @@ async function previewEngineCandidateFields(prisma, candidate, inboundText, prov
   return extractEngineCandidateFields(preview.actions, preview.extractedFields);
 }
 
-async function replyWithEngine(prisma, candidate, from, inboundText, providedVacancy = null) {
+function shouldUsePrimaryConversationEngine(candidate, inboundText = '') {
+  if (!USE_CONVERSATION_ENGINE || !process.env.OPENAI_API_KEY) return false;
+  if (!candidate || !normalizeText(inboundText)) return false;
+  return [
+    ConversationStep.GREETING_SENT,
+    ConversationStep.COLLECTING_DATA,
+    ConversationStep.CONFIRMING_DATA,
+    ConversationStep.ASK_CV,
+    ConversationStep.SCHEDULING,
+    ConversationStep.SCHEDULED
+  ].includes(candidate.currentStep);
+}
+
+async function replyWithEngine(prisma, candidate, from, inboundText, providedVacancy = null, options = {}) {
   const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, candidate, inboundText, providedVacancy);
   const engineResult = await runChatEngine({
     prisma,
@@ -602,7 +615,28 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     inboundText,
     recentMessages,
     nextSlot,
+    candidateFieldHints: options.candidateFieldHints || {},
   });
+  if (options.debugTrace) {
+    options.debugTrace.engine_primary = true;
+    options.debugTrace.engine_actions = (engineResult.actions || []).map((action) => action?.type).filter(Boolean);
+    options.debugTrace.engine_loop_guard = Boolean(engineResult.loopGuardApplied);
+  }
+
+  if (engineResult.fallback) {
+    if (options.debugTrace) {
+      options.debugTrace.engine_fallback_used = true;
+      options.debugTrace.engine_fallback_reason = engineResult.fallbackReason || 'engine_returned_fallback';
+      options.debugTrace.openai_status = 'fallback';
+    }
+    console.warn('[ENGINE_PRIMARY_FALLBACK]', JSON.stringify({
+      phone: candidate.phone,
+      candidateId: candidate.id,
+      reason: engineResult.fallbackReason || 'engine_returned_fallback'
+    }));
+    return false;
+  }
+
   const candidateAfterActions = await prisma.candidate.findUnique({ where: { id: candidate.id } }) || candidate;
 
   const primaryAction = getPrimaryEngineAction(engineResult.actions);
@@ -621,7 +655,8 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     ? buildInterviewReplyPayload(body, source, nextSlot)
     : { body, source };
 
-  return reply(prisma, candidate.id, from, body, inboundText, rawPayload);
+  await reply(prisma, candidate.id, from, body, inboundText, rawPayload);
+  return true;
 }
 
 async function resolveVacancyFromConversation(prisma, text, options = {}) {
@@ -854,10 +889,31 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
       return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });
     }
     if (USE_CONVERSATION_ENGINE && isQuestionLike(cleanText)) {
-      return replyWithEngine(prisma, candidateState, from, cleanText, effectiveVacancy);
+      const handledByEngine = await replyWithEngine(prisma, candidateState, from, cleanText, effectiveVacancy, {
+        candidateFieldHints: normalizedData,
+        debugTrace
+      });
+      if (handledByEngine) return;
     }
     const body = buildVacancyReplyNatural(effectiveVacancy, candidateState, cleanText);
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context' });
+  };
+
+  const tryPrimaryEngineReply = async (candidateState = candidate, vacancyState = currentVacancy) => {
+    if (!shouldUsePrimaryConversationEngine(candidateState, cleanText)) return false;
+
+    if (hasDataIntent) {
+      const rejection = shouldRejectByRequirements(cleanText, normalizedData);
+      if (rejection.reject) {
+        await rejectCandidate(prisma, candidate.id, from, rejection);
+        return true;
+      }
+    }
+
+    return replyWithEngine(prisma, candidateState, from, cleanText, vacancyState, {
+      candidateFieldHints: normalizedData,
+      debugTrace
+    });
   };
 
   if (aiResult.status === 'error') {
@@ -912,20 +968,24 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     return reply(prisma, candidate.id, from, SALUDO_INICIAL, cleanText, { body: SALUDO_INICIAL, source: 'bot_vacancy_prompt' });
   }
 
-  if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
-    if (isNegativeInterest(cleanText)) {
-      await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: {
-          currentStep: ConversationStep.DONE,
-          reminderScheduledFor: null,
-          reminderState: 'SKIPPED'
-        }
-      });
-      await reply(prisma, candidate.id, from, CIERRE_NO_INTERES, cleanText, { body: CIERRE_NO_INTERES, source: 'bot_flow' });
-      return;
-    }
+  if (candidate.currentStep !== ConversationStep.DONE && isNegativeInterest(cleanText)) {
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        currentStep: ConversationStep.DONE,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      }
+    });
+    await reply(prisma, candidate.id, from, CIERRE_NO_INTERES, cleanText, { body: CIERRE_NO_INTERES, source: 'bot_flow' });
+    return;
+  }
 
+  if (await tryPrimaryEngineReply(candidate, currentVacancy)) {
+    return;
+  }
+
+  if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
     const resolution = await resolveVacancyForCandidate();
     if (resolution.resolved && resolution.vacancy) {
       await prisma.candidate.update({
@@ -960,10 +1020,6 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   }
 
   if ((candidate.currentStep === ConversationStep.SCHEDULING || candidate.currentStep === ConversationStep.SCHEDULED) && currentVacancy && isSchedulingEligibleCandidate(candidate, currentVacancy)) {
-    if (USE_CONVERSATION_ENGINE) {
-      return replyWithEngine(prisma, candidate, from, cleanText, currentVacancy);
-    }
-
     const nextSlot = await resolveInterviewSlotContext(prisma, candidate, currentVacancy, cleanText);
 
     if (isSchedulingRescheduleIntent(cleanText)) {
@@ -1110,10 +1166,6 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
-    if (USE_CONVERSATION_ENGINE) {
-      return replyWithEngine(prisma, updated, from, cleanText);
-    }
-
     if (resolvedIntent === 'confirmation_no_or_correction' && Object.keys(normalizedData).length === 0) {
       return reply(prisma, candidate.id, from, 'Gracias por avisar. Indícame por favor el dato que deseas corregir y lo actualizo.');
     }
@@ -1155,10 +1207,6 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
           return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
         }
 
-        if (USE_CONVERSATION_ENGINE) {
-          return replyWithEngine(prisma, updated, from, cleanText);
-        }
-
         if (shouldAskForConfirmation(updated, normalizedData)) {
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
           const confirmationText = buildConfirmationSummary(updated);
@@ -1172,11 +1220,6 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
           ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
           : followUp;
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
-      }
-
-      if (USE_CONVERSATION_ENGINE) {
-        const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-        return replyWithEngine(prisma, updatedCandidate, from, cleanText);
       }
 
       const body = askedVacancyQuestion
@@ -1201,10 +1244,6 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
       }
 
-      if (USE_CONVERSATION_ENGINE) {
-        return replyWithEngine(prisma, updated, from, cleanText);
-      }
-
       if (shouldAskForConfirmation(updated, normalizedData)) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
         const confirmationText = buildConfirmationSummary(updated);
@@ -1218,11 +1257,6 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
         : followUp;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
-    }
-
-    if (USE_CONVERSATION_ENGINE) {
-      const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-      return replyWithEngine(prisma, updatedCandidate, from, cleanText);
     }
 
     return reply(prisma, candidate.id, from, GUIA_CONTINUAR, cleanText, { body: GUIA_CONTINUAR, source: 'bot_flow' });
@@ -1240,10 +1274,6 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         hasCv: hasHv(updated)
       });
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
-    }
-
-    if (USE_CONVERSATION_ENGINE) {
-      return replyWithEngine(prisma, updated, from, cleanText);
     }
 
     if (shouldAskForConfirmation(updated, normalizedData)) {

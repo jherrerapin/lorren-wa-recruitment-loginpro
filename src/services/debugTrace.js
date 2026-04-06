@@ -13,6 +13,11 @@ export function createDebugTrace({ phone, currentStepBefore }) {
     openai_temperature_omitted: true,
     openai_intent: 'unknown',
     openai_detected_fields: [],
+    engine_primary: false,
+    engine_fallback_used: false,
+    engine_fallback_reason: null,
+    engine_loop_guard: false,
+    engine_actions: [],
     persisted_fields: [],
     consolidated_fields: [],
     rejected_fields: [],
@@ -44,8 +49,12 @@ export function summarizeError(error) {
 export function inferIntent(text = '') {
   const n = String(text).trim().toLowerCase();
   if (!n) return 'empty';
+  if (/(no me interesa|ya no|mejor no|prefiero no|paso)/i.test(n)) return 'decline_intent';
+  if (/(quiero informacion|quiero saber|informacion|antes quiero saber|primero quiero saber)/i.test(n)) return 'info_request';
+  if (/(no te voy a dar mis datos|antes de darte mis datos|antes de enviar mis datos)/i.test(n)) return 'objection';
+  if (/(ya envie eso|ya envié eso|ya lo envie|ya lo envié|ya mande eso)/i.test(n)) return 'already_sent';
+  if (/(otra vacante|otro cargo|cambie de opinion|cambié de opinión|me interesa otra)/i.test(n)) return 'change_intent';
   if (/(si|sí|quiero|interesad|continuar|postular|aplicar)/i.test(n)) return 'apply_intent';
-  if (/(no gracias|no me interesa|no deseo|prefiero no|paso)/i.test(n)) return 'decline_intent';
   if (/(hoja de vida|cv|curriculum)/i.test(n)) return 'cv_intent';
   return 'data_or_unknown';
 }
