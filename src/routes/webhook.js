@@ -13,7 +13,7 @@ import { conversationUnderstanding } from '../services/conversationUnderstanding
 import { shouldBlockAutomation } from '../services/botAutomationPolicy.js';
 import { runChatEngine } from '../services/chatEngine.js';
 import { think, extractEngineCandidateFields } from '../services/conversationEngine.js';
-import { normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
+import { findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
 import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { generateBookingConfirmation, generateInterviewOffer } from '../services/naturalReply.js';
 
@@ -31,6 +31,7 @@ const MENSAJE_DONE_CV_REPEAT = 'Ya tenemos tu registro completo. Si deseas actua
 const GUIA_CONTINUAR = 'Puedo ayudarte a continuar con la postulación. Si deseas seguir, envíame tus datos y te voy guiando.';
 const CONFIRMACION_PROMPT = '¿Está correcto? Responde Sí para continuar o envíame la corrección.';
 const INTERVIEW_OFFER_SOURCES = new Set(['interview_offer', 'interview_reschedule']);
+const ASK_VACANCY_FOR_CV = 'Recibi tu hoja de vida. Para asociarla correctamente, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.';
 
 const REQUIRED_FIELDS = [
   'fullName',
@@ -187,6 +188,15 @@ function buildVacancyLocation(vacancy) {
     .filter(Boolean)
     .join(' - ');
 }
+function buildVacancyCompactSummary(vacancy) {
+  if (!vacancy) return '';
+  const role = vacancy.title || vacancy.role || 'la vacante';
+  const location = buildVacancyLocation(vacancy);
+  const parts = [`La vacante que tengo para ti es ${role}${location ? ` en ${location}` : ''}.`];
+  if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
+  else if (vacancy.requirements) parts.push(`Los requisitos principales son ${vacancy.requirements}.`);
+  return parts.join(' ');
+}
 function buildVacancyQuestionLead(vacancy, text = '') {
   const n = normalizeComparableText(text);
   const location = buildVacancyLocation(vacancy);
@@ -217,6 +227,13 @@ function buildVacancyContinuePrompt(candidate) {
   }
   if (candidate.currentStep === ConversationStep.DONE) return MENSAJE_DONE_ACK;
   return 'Si estás interesado en continuar, respóndeme y te solicitaré tus datos.';
+}
+function buildVacancyAssociationPrompt(options = {}) {
+  const intro = (options.cvReceived || options.hasCv)
+    ? 'Recibi tu hoja de vida.'
+    : (options.dataCaptured ? 'Ya registre lo que me compartiste.' : 'Con gusto te ayudo.');
+  const attachment = options.hasCv ? 'Para asociarla correctamente' : 'Para asociar bien tu proceso';
+  return `${intro} ${attachment}, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.`;
 }
 function buildMissingFieldsReply(candidate, normalizedData = {}) {
   const missing = getMissingFields(candidate);
@@ -263,6 +280,26 @@ function buildVacancyReply(vacancy, candidate, inboundText = '') {
   if (vacancy.conditions) lines.push(`*Condiciones:* ${vacancy.conditions}`);
   lines.push('', buildVacancyContinuePrompt(candidate));
   return lines.join('\n');
+}
+
+function buildVacancyReplyNatural(vacancy, candidate, inboundText = '') {
+  const continuePrompt = buildVacancyContinuePrompt(candidate);
+  const compactSummary = buildVacancyCompactSummary(vacancy);
+
+  if (isQuestionLike(inboundText)) {
+    const lines = [buildVacancyQuestionLead(vacancy, inboundText)];
+    if (candidate.currentStep === ConversationStep.GREETING_SENT) lines.push(compactSummary);
+    if (continuePrompt) lines.push(continuePrompt);
+    return lines.filter(Boolean).join('\n\n');
+  }
+
+  if ([ConversationStep.COLLECTING_DATA, ConversationStep.CONFIRMING_DATA, ConversationStep.ASK_CV].includes(candidate.currentStep)) {
+    return [compactSummary, continuePrompt].filter(Boolean).join('\n\n');
+  }
+
+  return ['Hola, gracias por comunicarte con LoginPro.', compactSummary, continuePrompt]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function isSchedulingEligibleCandidate(candidate, vacancy) {
@@ -508,10 +545,13 @@ function mergeFieldSource(sourceByField, field, source) {
 function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {}, aiFields = {}) {
   if (!USE_CONVERSATION_ENGINE) return false;
   if (!candidate || !cleanText) return false;
-  if (![ConversationStep.CONFIRMING_DATA, ConversationStep.COLLECTING_DATA, ConversationStep.ASK_CV].includes(candidate.currentStep)) {
+  if (![ConversationStep.GREETING_SENT, ConversationStep.CONFIRMING_DATA, ConversationStep.COLLECTING_DATA, ConversationStep.ASK_CV].includes(candidate.currentStep)) {
     return false;
   }
   if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) return true;
+  if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
+    return Boolean(Object.keys(localParsedData || {}).length || Object.keys(aiFields || {}).length);
+  }
   return Object.keys(aiFields || {}).length === 0 || Object.keys(localParsedData || {}).length <= 1;
 }
 
@@ -582,6 +622,32 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     : { body, source };
 
   return reply(prisma, candidate.id, from, body, inboundText, rawPayload);
+}
+
+async function resolveVacancyFromConversation(prisma, text, options = {}) {
+  const vacancies = options.vacancies || await findActiveVacancies(prisma);
+  const resolution = await resolveVacancyFromText(prisma, text, {
+    cityHint: options.cityHint,
+    roleHint: options.roleHint,
+    vacancies,
+  });
+
+  if (resolution.resolved || !options.allowSingleFallback || vacancies.length !== 1) {
+    return resolution;
+  }
+
+  const fallbackVacancy = vacancies[0];
+  if (!fallbackVacancy?.isActive || !fallbackVacancy?.acceptingApplications) {
+    return resolution;
+  }
+
+  return {
+    resolved: true,
+    vacancy: fallbackVacancy,
+    city: fallbackVacancy.operation?.city?.name || fallbackVacancy.city || null,
+    roleHint: options.roleHint || null,
+    reason: 'single_active_vacancy_fallback'
+  };
 }
 
 async function pauseInterviewFlow(prisma, candidateId, reason) {
@@ -710,7 +776,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   debugTrace.batched_message_count = options.batchedMessageCount || 1;
   debugTrace.used_multiline_context = Boolean(options.usedMultilineContext);
   debugTrace.consolidated_input_summary = options.consolidatedInputSummary || null;
-  const currentVacancy = candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId) : null;
+  let currentVacancy = candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId) : null;
 
   const aiResult = await tryOpenAIParse(cleanText);
   const understanding = await conversationUnderstanding(cleanText, { aiResult });
@@ -766,10 +832,11 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
   debugTrace.vacancy_hint_city = vacancyHints.city;
   debugTrace.vacancy_hint_role = vacancyHints.roleHint;
 
-  const resolveVacancyForCandidate = async () => {
-    const resolution = await resolveVacancyFromText(prisma, cleanText, {
+  const resolveVacancyForCandidate = async (options = {}) => {
+    const resolution = await resolveVacancyFromConversation(prisma, cleanText, {
       cityHint: vacancyHints.city,
       roleHint: vacancyHints.roleHint,
+      allowSingleFallback: Boolean(options.allowSingleFallback),
     });
     debugTrace.vacancy_resolution = {
       resolved: resolution.resolved,
@@ -789,7 +856,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     if (USE_CONVERSATION_ENGINE && isQuestionLike(cleanText)) {
       return replyWithEngine(prisma, candidateState, from, cleanText, effectiveVacancy);
     }
-    const body = buildVacancyReply(effectiveVacancy, candidateState, cleanText);
+    const body = buildVacancyReplyNatural(effectiveVacancy, candidateState, cleanText);
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context' });
   };
 
@@ -800,10 +867,39 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     console.log('[AI_FALLBACK]', JSON.stringify({ phone: candidate.phone, reason: 'openai_disabled' }));
   }
 
+  if (!currentVacancy) {
+    const shouldRetryVacancyResolution = hasDataIntent
+      || Boolean(vacancyHints.city || vacancyHints.roleHint)
+      || isAffirmativeInterest(cleanText)
+      || isQuestionLike(cleanText);
+
+    if (shouldRetryVacancyResolution) {
+      const resolution = await resolveVacancyForCandidate({
+        allowSingleFallback: hasDataIntent || hasHv(candidate)
+      });
+      if (resolution.resolved && resolution.vacancy) {
+        await prisma.candidate.update({
+          where: { id: candidate.id },
+          data: { vacancyId: resolution.vacancy.id }
+        });
+        candidate = { ...candidate, vacancyId: resolution.vacancy.id };
+        currentVacancy = resolution.vacancy;
+      }
+    }
+  }
+
   if (candidate.status === CandidateStatus.RECHAZADO) return reply(prisma, candidate.id, from, DESCARTE_MSG);
 
   if (candidate.currentStep === ConversationStep.MENU) {
-    const resolution = await resolveVacancyForCandidate();
+    const resolution = currentVacancy && candidate.vacancyId
+      ? {
+        resolved: true,
+        vacancy: currentVacancy,
+        city: currentVacancy.operation?.city?.name || currentVacancy.city || null,
+        roleHint: vacancyHints.roleHint,
+        reason: 'resolved_before_menu'
+      }
+      : await resolveVacancyForCandidate();
     const updateData = { currentStep: ConversationStep.GREETING_SENT };
     if (resolution.resolved && resolution.vacancy) updateData.vacancyId = resolution.vacancy.id;
     await prisma.candidate.update({ where: { id: candidate.id }, data: updateData });
@@ -838,6 +934,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
       });
       const candidateState = { ...candidate, vacancyId: resolution.vacancy.id };
       return replyWithVacancyContext(candidateState, resolution.vacancy);
+    }
+
+    if (hasDataIntent) {
+      const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
+      const body = buildVacancyAssociationPrompt({
+        dataCaptured: true,
+        hasCv: hasHv(updated)
+      });
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }
 
     return reply(prisma, candidate.id, from, SALUDO_INICIAL, cleanText, { body: SALUDO_INICIAL, source: 'bot_vacancy_prompt' });
@@ -931,7 +1036,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     return;
   }
 
-  const applyDecisionsAndUpdate = async () => {
+  async function applyDecisionsAndUpdate() {
     const current = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     const explicitCorrection = /\b(corrijo|correccion|corrección|quise decir|actualizo|de hecho|mejor|perd[oó]n|en realidad|más bien|mas bien)\b/i.test(cleanText);
     const allowOverwriteFields = inferNaturalOverwriteFields(cleanText, normalizedData, current, candidate.currentStep);
@@ -953,7 +1058,7 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     }
     const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     return { updatedCandidate, decisions };
-  };
+  }
 
   const routeAfterConfirmation = async (updatedCandidate) => {
     const missing = getMissingFields(updatedCandidate);
@@ -961,6 +1066,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       const replyText = buildMissingFieldsReply(updatedCandidate, normalizedData);
       return reply(prisma, candidate.id, from, replyText, cleanText, { body: replyText, source: 'bot_flow' });
+    }
+
+    if (!updatedCandidate.vacancyId) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
+      const body = buildVacancyAssociationPrompt({
+        dataCaptured: true,
+        hasCv: hasHv(updatedCandidate)
+      });
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }
 
     if (resolveStepAfterDataCompletion({ hasCv: hasHv(updatedCandidate) }) === ConversationStep.DONE) {
@@ -1032,6 +1146,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
         const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
 
+        if (!updated.vacancyId) {
+          await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
+          const body = buildVacancyAssociationPrompt({
+            dataCaptured: true,
+            hasCv: hasHv(updated)
+          });
+          return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+        }
+
         if (USE_CONVERSATION_ENGINE) {
           return replyWithEngine(prisma, updated, from, cleanText);
         }
@@ -1069,6 +1192,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
 
+      if (!updated.vacancyId) {
+        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
+        const body = buildVacancyAssociationPrompt({
+          dataCaptured: true,
+          hasCv: hasHv(updated)
+        });
+        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+      }
+
       if (USE_CONVERSATION_ENGINE) {
         return replyWithEngine(prisma, updated, from, cleanText);
       }
@@ -1100,6 +1232,15 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     const rejection = shouldRejectByRequirements(cleanText, normalizedData);
     if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
     const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
+
+    if (!updated.vacancyId) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
+      const body = buildVacancyAssociationPrompt({
+        dataCaptured: true,
+        hasCv: hasHv(updated)
+      });
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+    }
 
     if (USE_CONVERSATION_ENGINE) {
       return replyWithEngine(prisma, updated, from, cleanText);
@@ -1305,6 +1446,21 @@ export function webhookRouter(prisma) {
                 console.log('[CV_TRACE]', JSON.stringify({ phone: from, filename, mimeType }));
                 const afterCvSave = await prisma.candidate.findUnique({ where: { id: candidate.id } });
                 if (!automationBlocked && afterCvSave.currentStep !== ConversationStep.DONE) {
+                  if (!afterCvSave.vacancyId) {
+                    debugTrace.vacancy_resolution = {
+                      resolved: false,
+                      vacancyId: null,
+                      city: null,
+                      roleHint: null,
+                      reason: 'cv_saved_waiting_vacancy'
+                    };
+                    await prisma.candidate.update({
+                      where: { id: candidate.id },
+                      data: { currentStep: ConversationStep.GREETING_SENT }
+                    });
+                    await reply(prisma, candidate.id, from, ASK_VACANCY_FOR_CV, '', { body: ASK_VACANCY_FOR_CV, source: 'bot_vacancy_prompt' });
+                    continue;
+                  }
                   if (afterCvSave.currentStep === ConversationStep.SCHEDULING || afterCvSave.currentStep === ConversationStep.SCHEDULED) {
                     const activeBooking = await loadActiveInterviewBooking(prisma, candidate.id);
                     const body = activeBooking
@@ -1353,3 +1509,4 @@ export function webhookRouter(prisma) {
 
   return router;
 }
+

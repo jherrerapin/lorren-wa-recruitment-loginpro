@@ -190,6 +190,21 @@ function decorateDashboardCandidate(candidate) {
   };
 }
 
+async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
+  const update = buildTechnicalOutboundCandidateUpdate(new Date());
+  await sendTextMessage(candidate.phone, body);
+  await prisma.candidate.update({ where: { id: candidate.id }, data: update });
+  await prisma.message.create({
+    data: {
+      candidateId: candidate.id,
+      direction: MessageDirection.OUTBOUND,
+      messageType: MessageType.TEXT,
+      body,
+      rawPayload
+    }
+  });
+}
+
 async function buildDashboardData(prisma, dateStr) {
   const { start, end } = colombiaDayBounds(dateStr);
 
@@ -219,7 +234,9 @@ async function buildDashboardData(prisma, dateStr) {
             select: {
               id: true, fullName: true, phone: true,
               documentType: true, documentNumber: true,
-              age: true, neighborhood: true, status: true,
+              age: true, neighborhood: true, locality: true, zone: true, status: true,
+              experienceInfo: true, experienceTime: true,
+              medicalRestrictions: true, transportMode: true,
               cvOriginalName: true, cvMimeType: true, gender: true,
               botPaused: true, botPauseReason: true,
               currentStep: true
@@ -234,7 +251,9 @@ async function buildDashboardData(prisma, dateStr) {
         select: {
           id: true, fullName: true, phone: true,
           documentType: true, documentNumber: true,
-          age: true, neighborhood: true, status: true,
+          age: true, neighborhood: true, locality: true, zone: true, status: true,
+          experienceInfo: true, experienceTime: true,
+          medicalRestrictions: true, transportMode: true,
           cvOriginalName: true, cvMimeType: true,
           gender: true, createdAt: true,
           botPaused: true, botPauseReason: true,
@@ -258,7 +277,9 @@ async function buildDashboardData(prisma, dateStr) {
     select: {
       id: true, fullName: true, phone: true,
       documentType: true, documentNumber: true,
-      age: true, neighborhood: true, status: true,
+      age: true, neighborhood: true, locality: true, zone: true, status: true,
+      experienceInfo: true, experienceTime: true,
+      medicalRestrictions: true, transportMode: true,
       cvOriginalName: true, cvMimeType: true, createdAt: true,
       gender: true, botPaused: true, botPauseReason: true,
       currentStep: true
@@ -811,22 +832,41 @@ export function adminRouter(prisma) {
     }
 
     try {
-      await sendTextMessage(candidate.phone, body);
-      const update = buildTechnicalOutboundCandidateUpdate(new Date());
-      await prisma.candidate.update({ where: { id }, data: update });
-      await prisma.message.create({
-        data: {
-          candidateId: id,
-          direction: MessageDirection.OUTBOUND,
-          messageType: MessageType.TEXT,
-          body,
-          rawPayload: {}
-        }
+      await sendAdminOutboundMessage(prisma, candidate, body, {
+        source: 'admin_outbound',
+        action: action || 'free_text'
       });
       res.redirect(`/admin/candidates/${id}?outboundSuccess=` + encodeURIComponent('Mensaje enviado correctamente.'));
     } catch (err) {
       console.error('[outbound]', err);
       res.redirect(`/admin/candidates/${id}?outboundError=` + encodeURIComponent('Error al enviar el mensaje.'));
+    }
+  });
+
+  router.post('/candidates/:id/request-hv', express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.body.returnTo);
+    const candidate = await prisma.candidate.findUnique({ where: { id } });
+    if (!candidate) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
+    }
+
+    const window = await getOutboundWindowStatus(prisma, id);
+    if (!window.isOpen) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'La ventana de 24h de WhatsApp está vencida. No se puede solicitar la HV.'));
+    }
+
+    const body = 'Hola 👋 Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).';
+
+    try {
+      await sendAdminOutboundMessage(prisma, candidate, body, {
+        source: 'admin_request_hv',
+        action: 'request_hv'
+      });
+      res.redirect(withFlashMessage(returnTo, 'success', 'Solicitud de HV enviada correctamente.'));
+    } catch (err) {
+      console.error('[request_hv]', err);
+      res.redirect(withFlashMessage(returnTo, 'error', 'Error al enviar la solicitud de HV.'));
     }
   });
 

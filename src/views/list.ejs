@@ -218,6 +218,7 @@
     .candidate-row:hover { background: var(--surface-2); }
     .candidate-name { font-weight: 600; color: var(--navy); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .candidate-doc  { font-size: 12px; color: var(--text-muted); }
+    .candidate-extra { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
     .candidate-flags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
     .candidate-phone a { color: var(--teal); font-weight: 600; font-size: 12px; text-decoration: none; }
     .candidate-phone a:hover { text-decoration: underline; }
@@ -451,6 +452,18 @@
     CONTACTADO: { cls: 'badge-contactado', label: 'Contactado' },
     RECHAZADO:  { cls: 'badge-rechazado',  label: 'Rechazado' }
   };
+
+  function candidateOperationalMeta(candidate, options = {}) {
+    const includeNeighborhood = options.includeNeighborhood !== false;
+    const parts = [];
+    if (includeNeighborhood && candidate.neighborhood) parts.push('Barrio: ' + candidate.neighborhood);
+    if (candidate.locality || candidate.zone) parts.push('Localidad: ' + (candidate.locality || candidate.zone));
+    if (candidate.experienceInfo) parts.push('Experiencia: ' + candidate.experienceInfo);
+    if (candidate.experienceTime) parts.push('Tiempo: ' + candidate.experienceTime);
+    if (candidate.medicalRestrictions) parts.push('Restricciones: ' + candidate.medicalRestrictions);
+    if (candidate.transportMode) parts.push('Transporte: ' + candidate.transportMode);
+    return parts.join(' · ');
+  }
 %>
 
 <div class="page">
@@ -569,6 +582,8 @@
                           </div>
                         <% } %>
                         <% if (b.candidate.age) { %><div style="font-size:11px;color:var(--text-muted);"><%= b.candidate.age %> años</div><% } %>
+                        <% const bookingMeta = candidateOperationalMeta(b.candidate, { includeNeighborhood: false }); %>
+                        <% if (bookingMeta) { %><div class="candidate-extra"><%= bookingMeta %></div><% } %>
                       </td>
                       <td style="font-size:12px;color:var(--text-muted);"><%= b.candidate.documentType && b.candidate.documentNumber ? b.candidate.documentType + ' ' + b.candidate.documentNumber : '—' %></td>
                       <td style="font-size:12px;color:var(--text-muted);"><%= b.candidate.neighborhood || '—' %></td>
@@ -613,6 +628,8 @@
                       </div>
                     <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
@@ -644,11 +661,19 @@
                       </div>
                     <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
                   <span class="cv-pill cv-no">Sin HV</span>
-                  <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  <div class="action-stack">
+                    <form method="post" action="/admin/candidates/<%= c.id %>/request-hv" class="action-form">
+                      <input type="hidden" name="returnTo" value="<%= currentDashboardPath %>" />
+                      <button type="submit" class="action-btn action-btn-warn">Solicitar HV</button>
+                    </form>
+                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  </div>
                 </div>
               <% } %>
               <% if (v.completeWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.completeWithoutCv.length - 20 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
@@ -679,6 +704,8 @@
                         </div>
                       <% } %>
                       <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     </div>
                     <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
                     <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
@@ -711,11 +738,19 @@
                       </div>
                     <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
+                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="https://wa.me/<%= c.phone %>" target="_blank" rel="noopener">📱 <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
                   <span class="cv-pill cv-no">Sin HV</span>
-                  <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  <div class="action-stack">
+                    <form method="post" action="/admin/candidates/<%= c.id %>/request-hv" class="action-form">
+                      <input type="hidden" name="returnTo" value="<%= currentDashboardPath %>" />
+                      <button type="submit" class="action-btn action-btn-warn">Solicitar HV</button>
+                    </form>
+                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                  </div>
                 </div>
               <% } %>
               <% if (v.completeWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.completeWithoutCv.length - 25 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
@@ -788,3 +823,4 @@
 
 </body>
 </html>
+

@@ -1,4 +1,4 @@
-const CANDIDATE_FIELDS = ['fullName', 'documentType', 'documentNumber', 'age', 'neighborhood', 'experienceInfo', 'experienceTime', 'medicalRestrictions', 'transportMode'];
+const CANDIDATE_FIELDS = ['fullName', 'documentType', 'documentNumber', 'age', 'neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'medicalRestrictions', 'transportMode'];
 
 export { CANDIDATE_FIELDS };
 
@@ -131,6 +131,8 @@ function isIncompleteFieldValue(field, value) {
       return ['no', 'ninguna', 'ninguno', 'pendiente'].includes(normalized);
     case 'experienceTime':
       return normalized === '0' || normalized === 'no' || normalized.length < 3;
+    case 'locality':
+      return normalized.length < 3;
     default:
       return false;
   }
@@ -152,6 +154,7 @@ function canConsolidateField(field, currentValue, nextValue) {
       return currentNormalized.length < nextNormalized.length
         && (nextNormalized.startsWith(currentNormalized) || nextNormalized.endsWith(currentNormalized));
     case 'neighborhood':
+    case 'locality':
       return currentNormalized.length < nextNormalized.length && nextNormalized.includes(currentNormalized);
     case 'age':
       return false;

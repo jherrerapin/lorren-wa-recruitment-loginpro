@@ -57,6 +57,7 @@ function buildCandidateContext(candidate) {
     candidate.age             && `Edad: ${candidate.age}`,
     candidate.gender          && `Género: ${genderLabel}`,
     candidate.neighborhood    && `Barrio: ${candidate.neighborhood}`,
+    candidate.locality        && `Localidad: ${candidate.locality}`,
     candidate.experienceInfo  && `Experiencia: ${candidate.experienceInfo}`,
     candidate.experienceTime  && `Tiempo de experiencia: ${candidate.experienceTime}`,
     medLabel                  && `Restricciones médicas: ${medLabel}`,
@@ -307,6 +308,7 @@ CRITERIOS DE RECHAZO:
 - Extranjero sin CE, PPT o Pasaporte
 
 Si el candidato da datos, extraélos en extractedFields aunque no todos vayan dentro de save_fields; el sistema también persistirá extractedFields.
+Si el candidato envía un mensaje largo con datos mezclados o en desorden, extraé todos los campos válidos que puedas en una sola respuesta y no vuelvas a pedir los mismos datos como si faltaran.
 Si el candidato hace una pregunta sobre la vacante, respóndela primero usando el contexto real y luego continúa el flujo sin repetir frases quemadas.
 Si ya hay datos capturados en el historial, consolídalos con lo nuevo y pide solo lo realmente faltante.
 Decidí si hay suficientes datos para pedir confirmación, o si aún faltan campos importantes.
