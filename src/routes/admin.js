@@ -510,8 +510,43 @@ export function adminRouter(prisma) {
   router.get('/', async (req, res) => {
     const requestedStatus = normalizeString(req.query.status);
     if (requestedStatus && ADMIN_STATUS_SCOPES.has(requestedStatus)) {
-      const allCandidates = await prisma.candidate.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
+      const legacyQuery = {
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          fullName: true,
+          phone: true,
+          documentType: true,
+          documentNumber: true,
+          age: true,
+          neighborhood: true,
+          locality: true,
+          zone: true,
+          experienceInfo: true,
+          experienceTime: true,
+          medicalRestrictions: true,
+          transportMode: true,
+          status: true,
+          rejectionReason: true,
+          rejectionDetails: true,
+          createdAt: true,
+          cvMimeType: true,
+          cvOriginalName: true,
+          gender: true,
+          botPaused: true,
+          botPauseReason: true,
+          lastInboundAt: true,
+          lastOutboundAt: true
+        }
+      };
+      if (req.userRole !== 'dev') legacyQuery.take = 200;
+
+      const allCandidates = (await prisma.candidate.findMany(legacyQuery))
+        .map(decorateDashboardCandidate);
       const candidates = filterCandidatesByScope(allCandidates, requestedStatus);
+      if (req.userRole === 'dev') {
+        candidates.sort(compareCandidatesByRecentInbound);
+      }
       return res.render('list', {
         mode: 'legacy', candidates, formatDateTimeCO, role: req.userRole,
         activeStatusScope: requestedStatus,

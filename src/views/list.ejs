@@ -325,6 +325,28 @@
   </form>
 </nav>
 
+<%
+  const isLegacyMode = typeof mode === 'undefined' || mode === 'legacy';
+  const currentLegacyPath = activeStatusScope ? '/admin?status=' + encodeURIComponent(activeStatusScope) : '/admin';
+  const dashboardParams = new URLSearchParams();
+  if (activeCity) dashboardParams.set('city', activeCity);
+  if (selectedDate) dashboardParams.set('date', selectedDate);
+  const currentDashboardPath = '/admin' + (dashboardParams.toString() ? '?' + dashboardParams.toString() : '');
+  const currentAdminReturnPath = isLegacyMode ? currentLegacyPath : currentDashboardPath;
+
+  function candidateWhatsappHref(candidate) {
+    if (role === 'dev') {
+      return '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(currentAdminReturnPath);
+    }
+    return 'https://wa.me/' + candidate.phone;
+  }
+
+  function candidateLastInboundLabel(candidate) {
+    if (!candidate.lastInboundAt) return 'Sin inbound';
+    return 'Último inbound: ' + formatDateTimeCO(candidate.lastInboundAt);
+  }
+%>
+
 <% if (typeof mode === 'undefined' || mode === 'legacy') { %>
 <%# ═══════════════════════════════════════════════════════ %>
 <%# MODO LEGACY — tabla plana (compatible con ?status=)    %>
@@ -423,10 +445,6 @@
 
 <%
   const isToday = selectedDate === todayStr;
-  const dashboardParams = new URLSearchParams();
-  if (activeCity) dashboardParams.set('city', activeCity);
-  if (selectedDate) dashboardParams.set('date', selectedDate);
-  const currentDashboardPath = '/admin' + (dashboardParams.toString() ? '?' + dashboardParams.toString() : '');
 
   function fmtDate(d) {
     if (!d) return '';
@@ -473,17 +491,6 @@
     if (candidate.medicalRestrictions) parts.push('Restricciones: ' + candidate.medicalRestrictions);
     if (candidate.transportMode) parts.push('Transporte: ' + candidate.transportMode);
     return parts.join(' · ');
-  }
-  function candidateWhatsappHref(candidate) {
-    if (role === 'dev') {
-      return '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(currentDashboardPath);
-    }
-    return 'https://wa.me/' + candidate.phone;
-  }
-
-  function candidateLastInboundLabel(candidate) {
-    if (!candidate.lastInboundAt) return 'Sin inbound';
-    return 'Último inbound: ' + formatDateTimeCO(candidate.lastInboundAt);
   }
 %>
 
