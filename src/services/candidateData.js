@@ -234,6 +234,11 @@ function detectDocumentTypeHint(text = '') {
 
 function detectExperienceTime(text = '') {
   const compact = String(text || '').replace(/\s+/g, ' ').trim();
+  // Solo consideramos que el texto describe tiempo de experiencia si
+  // explícitamente menciona experiencia. Esto evita confundir la edad
+  // del candidato ("38 anos") con 38 años de experiencia.
+  if (!/experien/i.test(compact)) return null;
+
   const match = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a[nñ]os?|semanas?))(?:\s+de\s+experiencia)?\b/i);
   if (!match?.[1]) return null;
   return normalizeExperienceTime(match[1]);
@@ -264,11 +269,9 @@ function detectLeadingName(text = '') {
     if (!isSuspiciousFullName(candidate)) return candidate;
   }
 
-  const firstChunk = compact.split(/[\n,]/)[0]?.trim() || '';
-  if (hasNameTokens(firstChunk)) {
-    const candidate = capitalizeWords(firstChunk);
-    if (!isSuspiciousFullName(candidate)) return candidate;
-  }
+  // Importante: NO usar el primer chunk como nombre por defecto.
+  // Frases como "buen dia", "si porfavor" o "soy de ibague tolima"
+  // se estaban interpretando como nombre completo.
 
   return null;
 }
