@@ -104,6 +104,14 @@ function withFlashMessage(returnTo, type, message) {
   return suffix ? `${pathname}?${suffix}` : pathname;
 }
 
+function buildCandidateDetailPath(candidateId, returnTo = null) {
+  const safeReturnTo = returnTo ? safeAdminReturnPath(returnTo) : null;
+  const params = new URLSearchParams();
+  if (safeReturnTo) params.set('returnTo', safeReturnTo);
+  const query = params.toString();
+  return query ? `/admin/candidates/${candidateId}?${query}` : `/admin/candidates/${candidateId}`;
+}
+
 const STATUS_LABELS = {
   'NUEVO': 'Nuevo', 'REGISTRADO': 'Registrado', 'VALIDANDO': 'Registrado',
   'APROBADO': 'Aprobado', 'RECHAZADO': 'Rechazado', 'CONTACTADO': 'Contactado'
@@ -277,6 +285,13 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
 async function buildDashboardData(prisma, dateStr, options = {}) {
   const { start, end } = colombiaDayBounds(dateStr);
   const isDev = options.role === 'dev';
+  const candidateFilters = options.candidateFilters || null;
+  const shouldFilterCandidates = options.role === 'admin'
+    && candidateFilters
+    && Object.values(candidateFilters).some(Boolean);
+  const filterDashboardCandidates = (candidates) => (
+    shouldFilterCandidates ? applyRecruiterCandidateFilters(candidates, candidateFilters) : candidates
+  );
 
   const vacancies = await prisma.vacancy.findMany({
     where: {
@@ -380,14 +395,27 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
     const operationallyCompleteWithoutCvCandidates = candidatesWithFlags
       .filter((candidate) => isOperationallyCompleteWithoutCv(candidate));
 
-    const registeredNoBooking = v.schedulingEnabled
+    const registeredNoBookingBase = v.schedulingEnabled
       ? operationallyRegisteredCandidates
         .filter((candidate) => !bookedCandidateIds.has(candidate.id))
       : [];
-    const registeredComplete = !v.schedulingEnabled
+    const registeredCompleteBase = !v.schedulingEnabled
       ? operationallyRegisteredCandidates
       : [];
-    const completeWithoutCv = operationallyCompleteWithoutCvCandidates;
+    const completeWithoutCvBase = operationallyCompleteWithoutCvCandidates;
+    const registeredNoBooking = filterDashboardCandidates(registeredNoBookingBase);
+    const registeredComplete = filterDashboardCandidates(registeredCompleteBase);
+    const completeWithoutCv = filterDashboardCandidates(completeWithoutCvBase);
+    const filteredBookingsToday = v.interviewBookings
+      .map(b => ({
+        ...b,
+        candidate: decorateDashboardCandidate(b.candidate),
+        formattedTime: formatTimeCO(b.scheduledAt),
+        formattedDateTime: formatDateTimeCO(b.scheduledAt),
+        isFemaleHumanReview: isFemaleHumanReviewCandidate(b.candidate)
+      }))
+      .filter((booking) => !shouldFilterCandidates
+        || applyRecruiterCandidateFilters([booking.candidate], candidateFilters).length > 0);
 
     if (isDev) {
       registeredNoBooking.sort(compareCandidatesByRecentInbound);
@@ -397,13 +425,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
 
     const enriched = {
       ...v,
-      bookingsToday: v.interviewBookings.map(b => ({
-        ...b,
-        candidate: decorateDashboardCandidate(b.candidate),
-        formattedTime: formatTimeCO(b.scheduledAt),
-        formattedDateTime: formatDateTimeCO(b.scheduledAt),
-        isFemaleHumanReview: isFemaleHumanReviewCandidate(b.candidate)
-      })),
+      bookingsToday: filteredBookingsToday,
       registeredNoBooking,
       registeredComplete,
       completeWithoutCv
@@ -413,7 +435,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
   }
 
   const cities = Array.from(citiesMap.entries()).map(([name, vacs]) => ({ name, vacancies: vacs }));
-  const decoratedLegacyCandidates = legacyCandidates.map(decorateDashboardCandidate);
+  const decoratedLegacyCandidates = filterDashboardCandidates(legacyCandidates.map(decorateDashboardCandidate));
   if (isDev) decoratedLegacyCandidates.sort(compareCandidatesByRecentInbound);
   return {
     cities,
@@ -663,7 +685,10 @@ export function adminRouter(prisma) {
 
     const rawDate = normalizeString(req.query.date);
     const selectedDate = isValidDateString(rawDate) ? rawDate : todayCO();
-    const { cities, legacyCandidates } = await buildDashboardData(prisma, selectedDate, { role: req.userRole });
+    const { cities, legacyCandidates } = await buildDashboardData(prisma, selectedDate, {
+      role: req.userRole,
+      candidateFilters: adminFilters
+    });
 
     const rawCity = normalizeString(req.query.city);
     const availableCities = cities.map(c => c.name);
@@ -910,6 +935,7 @@ export function adminRouter(prisma) {
   });
 
   router.get('/candidates/:id', async (req, res) => {
+    const returnToPath = safeAdminReturnPath(req.query.returnTo || '/admin');
     const candidate = await prisma.candidate.findUnique({
       where: { id: req.params.id },
       include: {
@@ -992,6 +1018,7 @@ export function adminRouter(prisma) {
       candidate: detailCandidate, role: req.userRole, formatDateTimeCO,
       normalizeCandidateStatusForUI, cvSizeBytes,
       availableVacancies,
+      returnToPath,
       outboundWindow, cvSuccess, cvError,
       outboundSuccess, outboundError, botPauseSuccess, botPauseError,
       bookingSuccess, bookingError, isFemaleHumanReviewCandidate
@@ -1028,10 +1055,11 @@ export function adminRouter(prisma) {
   router.post('/candidates/:id/status', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const status = normalizeString(req.body.status);
+    const returnTo = safeAdminReturnPath(req.body.returnTo || '/admin');
     const allowed = ['NUEVO', 'REGISTRADO', 'APROBADO', 'CONTACTADO', 'RECHAZADO'];
-    if (!status || !allowed.includes(status)) return res.redirect(`/admin/candidates/${id}`);
+    if (!status || !allowed.includes(status)) return res.redirect(buildCandidateDetailPath(id, returnTo));
     await prisma.candidate.update({ where: { id }, data: { status } });
-    res.redirect(`/admin/candidates/${id}`);
+    res.redirect(buildCandidateDetailPath(id, returnTo));
   });
 
   // ── Edición manual ───────────────────────────────────────────
@@ -1101,6 +1129,7 @@ export function adminRouter(prisma) {
 
   router.post('/candidates/:id/edit', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.body.returnTo || '/admin');
     const raw = req.body;
     const candidateCoreFields = normalizeCandidateFields({
       fullName:            normalizeString(raw.fullName),
@@ -1122,7 +1151,7 @@ export function adminRouter(prisma) {
 
     const data = { ...candidateCoreFields, ...adminStatusFields };
     await prisma.candidate.update({ where: { id }, data });
-    res.redirect(`/admin/candidates/${id}`);
+    res.redirect(buildCandidateDetailPath(id, returnTo));
   });
 
   // ── Pausar / reanudar bot ────────────────────────────────────
