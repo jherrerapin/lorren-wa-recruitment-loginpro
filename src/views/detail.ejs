@@ -168,14 +168,6 @@
           <span><%= candidate.neighborhood || candidate.zone || '—' %></span>
         </div>
         <div class="info-item">
-          <label>Experiencia en el cargo</label>
-          <span><%= candidate.experienceInfo || '—' %></span>
-        </div>
-        <div class="info-item">
-          <label>Tiempo de experiencia</label>
-          <span><%= candidate.experienceTime || '—' %></span>
-        </div>
-        <div class="info-item">
           <label>Restricciones médicas</label>
           <span><%= candidate.medicalRestrictions || '—' %></span>
         </div>
@@ -424,18 +416,6 @@
           <div class="field-group">
             <label for="neighborhood">Barrio</label>
             <input id="neighborhood" name="neighborhood" type="text" value="<%= candidate.neighborhood || '' %>" />
-          </div>
-          <div class="field-group">
-            <label for="experienceInfo">¿Tiene experiencia?</label>
-            <select id="experienceInfo" name="experienceInfo">
-              <option value="" <%= !candidate.experienceInfo ? 'selected' : '' %>>—</option>
-              <option value="Sí" <%= candidate.experienceInfo === 'Sí' ? 'selected' : '' %>>Sí</option>
-              <option value="No" <%= candidate.experienceInfo === 'No' ? 'selected' : '' %>>No</option>
-            </select>
-          </div>
-          <div class="field-group">
-            <label for="experienceTime">Tiempo de experiencia</label>
-            <input id="experienceTime" name="experienceTime" type="text" value="<%= candidate.experienceTime || '' %>" />
           </div>
           <div class="field-group">
             <label for="medicalRestrictions">Restricciones médicas</label>

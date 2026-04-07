@@ -342,17 +342,15 @@
 
 <%
   const isLegacyMode = typeof mode === 'undefined' || mode === 'legacy';
-  const vacancyFilterFields = ['transportMode', 'neighborhood', 'locality', 'experienceInfo', 'experienceTime'];
+  const vacancyFilterFields = ['transportMode', 'neighborhood', 'locality'];
   const vacancyFilterLabels = {
     transportMode: 'Medio de transporte',
     neighborhood: 'Barrio',
-    locality: 'Localidad / zona',
-    experienceInfo: 'Experiencia',
-    experienceTime: 'Tiempo de experiencia'
+    locality: 'Localidad / zona'
   };
   const legacyParams = new URLSearchParams();
   if (activeStatusScope) legacyParams.set('status', activeStatusScope);
-  ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
+  ['neighborhood', 'locality', 'transportMode'].forEach((key) => {
     if (adminFilters && adminFilters[key]) legacyParams.set(key, adminFilters[key]);
   });
   const currentLegacyPath = '/admin' + (legacyParams.toString() ? '?' + legacyParams.toString() : '');
@@ -463,12 +461,6 @@
       <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Localidad / zona
         <input type="text" name="locality" value="<%= adminFilters?.locality || '' %>" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:170px;" />
       </label>
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Experiencia
-        <input type="text" name="experienceInfo" value="<%= adminFilters?.experienceInfo || '' %>" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:160px;" />
-      </label>
-      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Tiempo experiencia
-        <input type="text" name="experienceTime" value="<%= adminFilters?.experienceTime || '' %>" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:160px;" />
-      </label>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Transporte
         <input type="text" name="transportMode" value="<%= adminFilters?.transportMode || '' %>" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:160px;" />
       </label>
@@ -493,8 +485,7 @@
     <thead>
       <tr>
         <th>Fecha registro</th><th>Nombre</th><th>Teléfono</th><th>Documento</th>
-        <th>Edad</th><th>Barrio</th><th>Experiencia</th><th>Tiempo exp.</th>
-        <th>Restr. médicas</th><th>Transporte</th><th>Estado</th><th>Rechazo</th><th></th>
+        <th>Edad</th><th>Barrio</th><th>Restr. médicas</th><th>Transporte</th><th>Estado</th><th>Rechazo</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -524,8 +515,6 @@
           <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
           <td><%= c.age || '—' %></td>
           <td><%= c.neighborhood || c.zone || '—' %></td>
-          <td><%= c.experienceInfo || '—' %></td>
-          <td><%= c.experienceTime || '—' %></td>
           <td><%= c.medicalRestrictions || '—' %></td>
           <td><%= c.transportMode || '—' %></td>
           <td><span class="badge <%= statusBadge[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span></td>
@@ -585,8 +574,6 @@
     const parts = [];
     if (includeNeighborhood && candidate.neighborhood) parts.push('Barrio: ' + candidate.neighborhood);
     if (candidate.locality || candidate.zone) parts.push('Localidad: ' + (candidate.locality || candidate.zone));
-    if (candidate.experienceInfo) parts.push('Experiencia: ' + candidate.experienceInfo);
-    if (candidate.experienceTime) parts.push('Tiempo: ' + candidate.experienceTime);
     if (candidate.medicalRestrictions) parts.push('Restricciones: ' + candidate.medicalRestrictions);
     if (candidate.transportMode) parts.push('Transporte: ' + candidate.transportMode);
     return parts.join(' · ');
@@ -660,14 +647,6 @@
     <div class="filter-field">
       <label for="filterLocality">Localidad / zona</label>
       <input id="filterLocality" type="text" name="locality" value="<%= adminFilters?.locality || '' %>" placeholder="Ej: Norte, Sur..." />
-    </div>
-    <div class="filter-field">
-      <label for="filterExperienceInfo">Experiencia</label>
-      <input id="filterExperienceInfo" type="text" name="experienceInfo" value="<%= adminFilters?.experienceInfo || '' %>" placeholder="Sí / No" />
-    </div>
-    <div class="filter-field">
-      <label for="filterExperienceTime">Tiempo experiencia</label>
-      <input id="filterExperienceTime" type="text" name="experienceTime" value="<%= adminFilters?.experienceTime || '' %>" placeholder="Ej: 2 años" />
     </div>
     <button type="submit" class="export-btn" style="cursor:pointer;">Aplicar filtros</button>
     <a href="/admin<%= activeCity ? '?city=' + encodeURIComponent(activeCity) + (selectedDate ? '&date=' + encodeURIComponent(selectedDate) : '') : (selectedDate ? '?date=' + encodeURIComponent(selectedDate) : '') %>" class="export-btn">Quitar filtros</a>

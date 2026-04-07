@@ -33,8 +33,6 @@ Campos que puedes extraer (omite los que no estén presentes o no sean claros):
   "documentNumber": string,   // Solo los dígitos
   "age": number,              // Edad en años — número entero
   "neighborhood": string,     // Barrio, sector, localidad donde vive
-  "experienceInfo": string,   // "Sí" o "No"
-  "experienceTime": string,   // Ejemplo: "2 años", "6 meses", "0"
   "medicalRestrictions": string, // Lo que diga el candidato sobre su condición física
   "transportMode": string,    // Moto | Bicicleta | Sin medio de transporte | lo que diga
 }
@@ -50,11 +48,6 @@ Cómo pensar sobre los datos (no son reglas, son criterios de sentido común):
   "28 añitos", "28 años de edad", "tengo 28 añitos", "soy de 28", incluso solo "28"
   si el contexto del mensaje sugiere que está hablando de sí mismo.
   Un número de cédula tiene muchos más dígitos que una edad — un humano jamás los confunde.
-
-• La experiencia también se expresa de mil formas: "dos años", "dos añitos",
-  "como 6 meses", "casi un año", "poquita experiencia", "llevo 3 meses",
-  "tengo bastante experiencia", "nunca he trabajado en eso". Tú entiendes todo eso.
-  Convierte tiempo a formato "N años" o "N meses".
 
 • El nombre puede aparecer al inicio del mensaje, después de "soy", "me llamo",
   o simplemente escrito. Capitaliza bien: "MARIA PEREZ" → "Maria Perez".

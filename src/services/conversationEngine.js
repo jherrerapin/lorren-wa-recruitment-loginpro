@@ -58,8 +58,6 @@ function buildCandidateContext(candidate) {
     candidate.gender          && `Género: ${genderLabel}`,
     candidate.neighborhood    && `Barrio: ${candidate.neighborhood}`,
     candidate.locality        && `Localidad: ${candidate.locality}`,
-    candidate.experienceInfo  && `Experiencia: ${candidate.experienceInfo}`,
-    candidate.experienceTime  && `Tiempo de experiencia: ${candidate.experienceTime}`,
     medLabel                  && `Restricciones médicas: ${medLabel}`,
     candidate.transportMode   && `Transporte: ${candidate.transportMode}`
   ].filter(Boolean);
@@ -193,7 +191,7 @@ CASO A — El candidato confirma (dice "sí", "si", "correcto", "está bien", "s
   → Si todavía faltan datos, NO vuelvas a pedir confirmación: pedí solo lo que falta y usá nextStep: "COLLECTING_DATA".
   → NO vuelvas a mostrar el mismo resumen ni repitas exactamente la misma redacción.
 
-CASO B — El candidato corrige o completa un dato de forma natural (por ejemplo "no, tengo 5 años de experiencia", "mi medio de transporte es bicicleta", "tengo 25 años", "soy de 25 años", "bicicleta", "cicla", "bicivleta"):
+CASO B — El candidato corrige o completa un dato de forma natural (por ejemplo "mi medio de transporte es bicicleta", "tengo 25 años", "soy de 25 años", "bicicleta", "cicla", "bicivleta"):
   → Extraé el dato corregido en extractedFields.
   → Tratá estas respuestas como correcciones válidas aunque el candidato NO diga "corrijo".
   → Si después de aplicar la corrección todavía faltan datos, mostrá un resumen breve actualizado UNA sola vez y pedí solo lo faltante. No reabras el mismo loop de confirmación.
@@ -340,8 +338,7 @@ Devolvé SOLO el JSON. Sin texto antes ni después.`;
 
 const REQUIRED_FIELDS = [
   'fullName', 'documentType', 'documentNumber', 'age',
-  'neighborhood', 'experienceInfo', 'experienceTime',
-  'medicalRestrictions', 'transportMode'
+  'neighborhood', 'medicalRestrictions', 'transportMode'
 ];
 
 const FIELD_LABELS = {
@@ -350,8 +347,6 @@ const FIELD_LABELS = {
   documentNumber:       'número de documento',
   age:                  'edad',
   neighborhood:         'barrio',
-  experienceInfo:       'experiencia en el cargo',
-  experienceTime:       'tiempo de experiencia',
   medicalRestrictions:  'restricciones médicas',
   transportMode:        'medio de transporte'
 };

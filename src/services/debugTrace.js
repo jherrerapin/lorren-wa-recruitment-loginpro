@@ -1,4 +1,4 @@
-const CANDIDATE_FIELDS = ['fullName', 'documentType', 'documentNumber', 'age', 'neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'medicalRestrictions', 'transportMode'];
+const CANDIDATE_FIELDS = ['fullName', 'documentType', 'documentNumber', 'age', 'neighborhood', 'locality', 'medicalRestrictions', 'transportMode'];
 
 export { CANDIDATE_FIELDS };
 
@@ -138,8 +138,6 @@ function isIncompleteFieldValue(field, value) {
       return ['ninguno', 'ninguna', 'sin', 'transporte'].includes(normalized);
     case 'medicalRestrictions':
       return ['no', 'ninguna', 'ninguno', 'pendiente'].includes(normalized);
-    case 'experienceTime':
-      return normalized === '0' || normalized === 'no' || normalized.length < 3;
     case 'locality':
       return normalized.length < 3;
     default:
@@ -172,9 +170,6 @@ function canConsolidateField(field, currentValue, nextValue) {
     case 'medicalRestrictions':
       return currentNormalized.length < nextNormalized.length
         || /sin restricciones|no tengo restricciones|ninguna restriccion/.test(nextNormalized);
-    case 'experienceTime':
-      return currentNormalized.length < nextNormalized.length
-        || currentNormalized === '0';
     default:
       return false;
   }
@@ -206,15 +201,6 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
     }
 
     const trimmedValue = String(value).trim();
-    const allowShortExperienceTime = field === 'experienceTime'
-      && /^\d+$/.test(trimmedValue)
-      && (allowOverwriteFields.has(field) || ['openai', 'engine', 'merged'].includes(fieldSource));
-
-    if (field === 'experienceTime' && trimmedValue.length < 2 && trimmedValue !== '0' && !allowShortExperienceTime) {
-      decisions.ignoredLowConfidenceFields.push('experienceTime');
-      continue;
-    }
-
     const candidateHasValue = candidate[field] !== undefined && candidate[field] !== null && candidate[field] !== '';
     const shouldForceOverwrite = allowOverwriteFields.has(field);
 

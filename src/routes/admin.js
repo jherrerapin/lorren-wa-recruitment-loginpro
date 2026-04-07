@@ -3,7 +3,7 @@ import express from 'express';
 import ExcelJS from 'exceljs';
 import path from 'node:path';
 import multer from 'multer';
-import { normalizeCandidateFields } from '../services/candidateData.js';
+import { normalizeCandidateFields, normalizeTransportMode } from '../services/candidateData.js';
 import {
   buildWhatsAppLink,
   compareCandidatesByRecentInbound,
@@ -164,29 +164,28 @@ function normalizeBinaryData(value) {
 }
 
 function normalizeCandidateListFilters(source = {}) {
+  const rawTransportMode = normalizeString(source.transportMode);
   return {
     neighborhood: normalizeString(source.neighborhood) || '',
     locality: normalizeString(source.locality) || '',
-    experienceInfo: normalizeString(source.experienceInfo) || '',
-    experienceTime: normalizeString(source.experienceTime) || '',
-    transportMode: normalizeString(source.transportMode) || '',
+    transportMode: normalizeTransportMode(rawTransportMode) || rawTransportMode || '',
   };
 }
 
 function normalizeVacancyDashboardFilters(source = {}) {
   const filtersByVacancyId = {};
   for (const [key, value] of Object.entries(source || {})) {
-    const match = /^vf_([^_]+)_(transportMode|neighborhood|locality|experienceInfo|experienceTime)$/.exec(String(key));
+    const match = /^vf_([^_]+)_(transportMode|neighborhood|locality)$/.exec(String(key));
     if (!match) continue;
     const [, vacancyId, field] = match;
-    const normalizedValue = normalizeString(value);
+    const normalizedValue = field === 'transportMode'
+      ? (normalizeTransportMode(value) || normalizeString(value))
+      : normalizeString(value);
     if (!normalizedValue) continue;
     if (!filtersByVacancyId[vacancyId]) {
       filtersByVacancyId[vacancyId] = {
         neighborhood: '',
         locality: '',
-        experienceInfo: '',
-        experienceTime: '',
         transportMode: ''
       };
     }
@@ -204,8 +203,6 @@ function applyRecruiterCandidateFilters(candidates, filters) {
   return candidates.filter((candidate) => (
     includesCaseInsensitive(candidate.neighborhood || candidate.zone, filters.neighborhood)
     && includesCaseInsensitive(candidate.locality || candidate.zone, filters.locality)
-    && includesCaseInsensitive(candidate.experienceInfo, filters.experienceInfo)
-    && includesCaseInsensitive(candidate.experienceTime, filters.experienceTime)
     && includesCaseInsensitive(candidate.transportMode, filters.transportMode)
   ));
 }
@@ -277,15 +274,27 @@ function hasPdfSignature(buffer) {
   return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
 }
 
-function decorateDashboardCandidate(candidate) {
-  const outboundWindowOpen = Boolean(candidate?.lastInboundAt)
-    && (Date.now() - new Date(candidate.lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS;
+function normalizeCandidateSnapshot(candidate) {
+  if (!candidate || typeof candidate !== 'object') return candidate;
+  const normalizedTransport = normalizeTransportMode(candidate.transportMode);
   return {
     ...candidate,
-    hasCv: candidateHasCv(candidate),
-    isFemaleHumanReview: isFemaleHumanReviewCandidate(candidate),
+    transportMode: normalizedTransport || normalizeString(candidate.transportMode),
+    experienceInfo: null,
+    experienceTime: null
+  };
+}
+
+function decorateDashboardCandidate(candidate) {
+  const normalizedCandidate = normalizeCandidateSnapshot(candidate);
+  const outboundWindowOpen = Boolean(normalizedCandidate?.lastInboundAt)
+    && (Date.now() - new Date(normalizedCandidate.lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS;
+  return {
+    ...normalizedCandidate,
+    hasCv: candidateHasCv(normalizedCandidate),
+    isFemaleHumanReview: isFemaleHumanReviewCandidate(normalizedCandidate),
     outboundWindowOpen,
-    hasNewInbound: candidateHasUnreadInbound(candidate)
+    hasNewInbound: candidateHasUnreadInbound(normalizedCandidate)
   };
 }
 
@@ -342,7 +351,6 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
               id: true, fullName: true, phone: true,
               documentType: true, documentNumber: true,
               age: true, neighborhood: true, locality: true, zone: true, status: true,
-              experienceInfo: true, experienceTime: true,
               medicalRestrictions: true, transportMode: true,
               cvOriginalName: true, cvMimeType: true, gender: true,
               botPaused: true, botPauseReason: true,
@@ -362,7 +370,6 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
           id: true, fullName: true, phone: true,
           documentType: true, documentNumber: true,
           age: true, neighborhood: true, locality: true, zone: true, status: true,
-          experienceInfo: true, experienceTime: true,
           medicalRestrictions: true, transportMode: true,
           cvOriginalName: true, cvMimeType: true,
           gender: true, createdAt: true,
@@ -391,7 +398,6 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
       id: true, fullName: true, phone: true,
       documentType: true, documentNumber: true,
       age: true, neighborhood: true, locality: true, zone: true, status: true,
-      experienceInfo: true, experienceTime: true,
       medicalRestrictions: true, transportMode: true,
       cvOriginalName: true, cvMimeType: true, createdAt: true,
       gender: true, botPaused: true, botPauseReason: true,
@@ -658,8 +664,6 @@ export function adminRouter(prisma) {
           neighborhood: true,
           locality: true,
           zone: true,
-          experienceInfo: true,
-          experienceTime: true,
           medicalRestrictions: true,
           transportMode: true,
           status: true,
@@ -776,8 +780,6 @@ export function adminRouter(prisma) {
         neighborhood: true,
         locality: true,
         zone: true,
-        experienceInfo: true,
-        experienceTime: true,
         medicalRestrictions: true,
         transportMode: true,
         status: true,
@@ -788,7 +790,7 @@ export function adminRouter(prisma) {
         cvOriginalName: true
       }
     });
-    const candidates = filterCandidatesByScope(allCandidates, scope);
+    const candidates = filterCandidatesByScope(allCandidates.map(normalizeCandidateSnapshot), scope);
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Candidatos');
@@ -802,8 +804,6 @@ export function adminRouter(prisma) {
       { header: 'Edad', key: 'age', width: 8 },
       { header: 'Barrio', key: 'neighborhood', width: 20 },
       { header: 'Localidad', key: 'locality', width: 18 },
-      { header: 'Experiencia', key: 'experienceInfo', width: 14 },
-      { header: 'Tiempo exp.', key: 'experienceTime', width: 16 },
       { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
       { header: 'Transporte', key: 'transportMode', width: 16 },
       { header: 'Estado', key: 'status', width: 14 },
@@ -811,14 +811,15 @@ export function adminRouter(prisma) {
       { header: 'Fecha registro', key: 'createdAt', width: 20 },
     ];
     for (const c of candidates) {
-      const whatsappLink = buildWhatsAppLink(c.phone);
+      const normalizedCandidate = normalizeCandidateSnapshot(c);
+      const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
       const row = sheet.addRow({
-        ...c,
-        neighborhood: c.neighborhood || c.zone || '',
-        locality: c.locality || c.zone || '',
+        ...normalizedCandidate,
+        neighborhood: normalizedCandidate.neighborhood || normalizedCandidate.zone || '',
+        locality: normalizedCandidate.locality || normalizedCandidate.zone || '',
         whatsappLink: whatsappLink ? 'Abrir WhatsApp' : 'Sin número',
-        hasCV: candidateHasCv(c) ? 'Sí' : 'No',
-        createdAt: formatDateTimeCO(c.createdAt)
+        hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
+        createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
       });
       if (whatsappLink) {
         row.getCell('whatsappLink').value = { text: 'Abrir WhatsApp', hyperlink: whatsappLink };
@@ -1020,7 +1021,7 @@ export function adminRouter(prisma) {
       })
       : [];
     const detailCandidate = {
-      ...candidate,
+      ...normalizeCandidateSnapshot(candidate),
       outboundWindowOpen: outboundWindow?.isOpen ?? (
         Boolean(candidate.lastInboundAt)
         && (Date.now() - new Date(candidate.lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS
@@ -1161,8 +1162,6 @@ export function adminRouter(prisma) {
       documentNumber:      normalizeString(raw.documentNumber),
       age:                 raw.age ? parseInt(raw.age, 10) : null,
       neighborhood:        normalizeString(raw.neighborhood),
-      experienceInfo:      normalizeString(raw.experienceInfo),
-      experienceTime:      normalizeString(raw.experienceTime),
       medicalRestrictions: normalizeString(raw.medicalRestrictions),
       transportMode:       normalizeString(raw.transportMode),
     });

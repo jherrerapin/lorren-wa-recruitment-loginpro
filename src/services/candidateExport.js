@@ -60,8 +60,6 @@ export function isOperationallyRegistered(candidate) {
     && candidate.age !== null
     && candidate.age !== undefined
     && hasValue(candidate.neighborhood)
-    && hasValue(candidate.experienceInfo)
-    && hasValue(candidate.experienceTime)
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
     && candidateHasCv(candidate)
@@ -77,8 +75,6 @@ export function isOperationallyCompleteWithoutCv(candidate) {
     && candidate.age !== null
     && candidate.age !== undefined
     && hasValue(candidate.neighborhood)
-    && hasValue(candidate.experienceInfo)
-    && hasValue(candidate.experienceTime)
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
     && !candidateHasCv(candidate)

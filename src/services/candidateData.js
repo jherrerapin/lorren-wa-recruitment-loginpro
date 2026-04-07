@@ -7,8 +7,8 @@
  *   - Proveer un parser local LIGERO que sirve SOLO como primer pase rápido
  *     para campos de alta certeza (número de documento, barrio con prefijo
  *     explícito, transporte, restricciones médicas negativas).
- *   - La FUENTE DE VERDAD para campos ambiguos (edad, nombre, experiencia,
- *     tiempo de experiencia) es OpenAI — NO este parser.
+ *   - La FUENTE DE VERDAD para campos ambiguos (edad, nombre) es OpenAI
+ *     — NO este parser.
  *
  * Por qué no usamos regex rígido para edad:
  *   Los candidatos escriben de mil formas: "tengo 28", "28 años", "veintiocho",
@@ -150,20 +150,24 @@ function normalizeMedicalRestrictions(value = '') {
   return capitalizeWords(raw);
 }
 
-function normalizeTransportMode(value = '') {
+export function normalizeTransportMode(value = '') {
   const n = normalizeLooseText(value);
   if (!n) return null;
-  if (['sin medio de transporte', 'sin transporte', 'ninguno', 'ninguna',
-    'no tengo transporte', 'no tengo medio de transporte'].includes(n)) {
+  if (
+    ['sin medio de transporte', 'sin transporte', 'ninguno', 'ninguna',
+      'no tengo transporte', 'no tengo medio de transporte', 'no tiene', 'no tengo',
+      'sin vehiculo', 'sin vehículo'].includes(n)
+    || /^(?:no\s+(?:tengo|tiene|cuento con)|sin)\b/.test(n)
+  ) {
     return 'Sin medio de transporte';
   }
+  if (n === 'motocicleta propia' || n === 'moto propia') return 'Moto';
   if (/\b(tengo|cuento con|si tengo|manejo|me movilizo en|voy en|mi medio de transporte es|transporte es)\s+/.test(n)) {
     const detected = detectTransportKeyword(n);
     if (detected) return detected;
   }
   const directDetected = detectTransportKeyword(n);
   if (directDetected) return directDetected;
-  if (['motocicleta propia', 'moto propia'].includes(n)) return 'Moto';
   return capitalizeWords(n);
 }
 
@@ -275,8 +279,8 @@ function detectLeadingName(text = '') {
 
 // ─────────────────────────────────────────────
 // Parser local LIGERO — solo campos de alta certeza
-// La edad, el nombre completo y la experiencia NO se extraen aquí.
-// OpenAI es la fuente de verdad para esos campos.
+// La edad y el nombre completo no se fuerzan con reglas rígidas.
+// La experiencia ya no forma parte del flujo de captura.
 // ─────────────────────────────────────────────
 
 export function parseNaturalData(text = '') {
@@ -368,26 +372,6 @@ export function parseNaturalData(text = '') {
     }
   }
 
-  const experienceNegative = /\b(?:no\s+tengo|no\s+cuento\s+con|sin|ninguna)\s+experiencia\b/i.test(compact)
-    || /\bnunca\s+he\s+trabajado\b/i.test(compact);
-  if (experienceNegative) {
-    result.experienceInfo = 'No';
-    result.experienceTime = '0';
-  }
-
-  if (!result.experienceInfo) {
-    const experiencePositive = /\b(?:tengo|cuento con|si tengo|poseo)\s+experiencia\b/i.test(compact);
-    if (experiencePositive) result.experienceInfo = 'Sí';
-  }
-
-  if (!result.experienceTime) {
-    const detectedExperienceTime = detectExperienceTime(compact);
-    if (detectedExperienceTime) {
-      result.experienceTime = detectedExperienceTime;
-      result.experienceInfo = 'Sí';
-    }
-  }
-
   // — Nombre: solo intento local si hay prefijo muy explícito. Lo demás lo resuelve OpenAI.
   const detectedName = detectLeadingName(text);
   if (detectedName) result.fullName = detectedName;
@@ -419,19 +403,6 @@ export function normalizeCandidateFields(fields = {}) {
   }
   if (fields.neighborhood) normalized.neighborhood = capitalizeWords(fields.neighborhood);
   if (fields.locality) normalized.locality = capitalizeWords(fields.locality);
-  if (fields.experienceInfo) {
-    normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || (/(si|sí|yes|tengo)/i.test(String(fields.experienceInfo)) ? 'Sí' : 'No');
-  }
-  if (fields.experienceTime) {
-    normalized.experienceTime = normalizeExperienceTime(fields.experienceTime);
-  }
-  if (normalized.experienceTime) {
-    const m = normalized.experienceTime.match(/^(\d+)/);
-    if (m && Number.parseInt(m[1], 10) > 0) normalized.experienceInfo = 'Sí';
-  }
-  if (normalized.experienceInfo === 'No') {
-    normalized.experienceTime = normalized.experienceTime || '0';
-  }
   if (fields.medicalRestrictions) {
     normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
   }
@@ -452,10 +423,9 @@ export function isHighConfidenceLocalField(field, value) {
   if (field === 'fullName') return !isSuspiciousFullName(raw) && hasNameTokens(raw);
   if (field === 'neighborhood') return raw.length >= 3;
   if (field === 'locality') return raw.length >= 3;
-  if (field === 'experienceInfo') return /^(si|sí|no)$/i.test(raw) || /experien/i.test(raw);
   if (field === 'medicalRestrictions') {
     return /sin restricciones|no tengo restricciones|ninguna restriccion/i.test(raw) || raw.length >= 8;
   }
-  if (field === 'transportMode') return /^(moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|bus|buseta|transporte publico|servicio publico|sin medio de transporte)$/i.test(raw);
+  if (field === 'transportMode') return /^(moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|bus|buseta|transporte publico|servicio publico|sin medio de transporte|no tiene|no tengo)$/i.test(raw);
   return true;
 }

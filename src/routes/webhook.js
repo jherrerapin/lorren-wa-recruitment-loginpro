@@ -20,7 +20,7 @@ import { generateBookingConfirmation, generateInterviewOffer } from '../services
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 
-const SOLICITAR_DATOS = 'Perfecto. Enviáme por favor estos datos para continuar: nombre completo, tipo de documento, número de documento, edad, barrio, si tienes experiencia en el cargo y cuánto tiempo, si tienes restricciones médicas y qué medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea más fácil.';
+const SOLICITAR_DATOS = 'Perfecto. Enviáme por favor estos datos para continuar: nombre completo, tipo de documento, número de documento, edad, barrio, si tienes restricciones médicas y qué medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea más fácil.';
 const DESCARTE_MSG = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque no cumples con uno de los requisitos definidos para esta vacante.';
 const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
 const SOLICITAR_HV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida (HV) en PDF o Word (.doc/.docx) para finalizar tu postulación.';
@@ -39,8 +39,6 @@ const REQUIRED_FIELDS = [
   'documentNumber',
   'age',
   'neighborhood',
-  'experienceInfo',
-  'experienceTime',
   'medicalRestrictions',
   'transportMode'
 ];
@@ -50,8 +48,6 @@ const FIELD_LABELS = {
   documentNumber: 'el número de documento',
   age: 'la edad',
   neighborhood: 'el barrio',
-  experienceInfo: 'la experiencia en el cargo',
-  experienceTime: 'el tiempo de experiencia',
   medicalRestrictions: 'las restricciones médicas',
   transportMode: 'el medio de transporte'
 };
@@ -138,8 +134,6 @@ function getMissingFields(candidate) {
   if (!candidate.documentNumber) m.push('número de documento');
   if (!candidate.age) m.push('edad');
   if (!candidate.neighborhood) m.push('barrio');
-  if (!candidate.experienceInfo) m.push('experiencia en el cargo');
-  if (!candidate.experienceTime) m.push('tiempo de experiencia');
   if (!candidate.medicalRestrictions) m.push('restricciones médicas');
   if (!candidate.transportMode) m.push('medio de transporte');
   return m;
@@ -402,8 +396,6 @@ function buildConfirmationSummary(candidate, options = {}) {
     `• Documento: ${documentLabel}`,
     `• Edad: ${candidate.age ? `${candidate.age} años` : 'Pendiente'}`,
     `• Barrio: ${candidate.neighborhood || 'Pendiente'}`,
-    `• Experiencia: ${candidate.experienceInfo || 'Pendiente'}`,
-    `• Tiempo de experiencia: ${candidate.experienceTime || 'Pendiente'}`,
     `• Restricciones médicas: ${candidate.medicalRestrictions || 'Pendiente'}`,
     `• Medio de transporte: ${candidate.transportMode || 'Pendiente'}`,
     prompt
@@ -518,12 +510,6 @@ function inferNaturalOverwriteFields(text, normalizedData = {}, current = {}, cu
   }
   if (normalizedData.medicalRestrictions && /\b(restric|medic|salud|sin restricciones|ninguna restric)\b/.test(normalizedText)) {
     allow.add('medicalRestrictions');
-  }
-  if (normalizedData.experienceTime && /\b(experien|mes|meses|semana|semanas|anos|años)\b/.test(normalizedText)) {
-    allow.add('experienceTime');
-  }
-  if (normalizedData.experienceInfo && /\b(experien|trabaj)\b/.test(normalizedText)) {
-    allow.add('experienceInfo');
   }
 
   if (
