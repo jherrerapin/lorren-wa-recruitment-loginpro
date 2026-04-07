@@ -173,6 +173,28 @@ function normalizeCandidateListFilters(source = {}) {
   };
 }
 
+function normalizeVacancyDashboardFilters(source = {}) {
+  const filtersByVacancyId = {};
+  for (const [key, value] of Object.entries(source || {})) {
+    const match = /^vf_([^_]+)_(transportMode|neighborhood|locality|experienceInfo|experienceTime)$/.exec(String(key));
+    if (!match) continue;
+    const [, vacancyId, field] = match;
+    const normalizedValue = normalizeString(value);
+    if (!normalizedValue) continue;
+    if (!filtersByVacancyId[vacancyId]) {
+      filtersByVacancyId[vacancyId] = {
+        neighborhood: '',
+        locality: '',
+        experienceInfo: '',
+        experienceTime: '',
+        transportMode: ''
+      };
+    }
+    filtersByVacancyId[vacancyId][field] = normalizedValue;
+  }
+  return filtersByVacancyId;
+}
+
 function includesCaseInsensitive(value, search) {
   if (!search) return true;
   return String(value || '').toLowerCase().includes(String(search).toLowerCase());
@@ -618,6 +640,7 @@ export function adminRouter(prisma) {
   router.get('/', async (req, res) => {
     const requestedStatus = normalizeString(req.query.status);
     const adminFilters = normalizeCandidateListFilters(req.query);
+    const vacancyFiltersById = normalizeVacancyDashboardFilters(req.query);
     const canUseLegacyScope = requestedStatus
       && ADMIN_STATUS_SCOPES.has(requestedStatus)
       && (req.userRole === 'dev' || requestedStatus !== 'inbox');
@@ -679,15 +702,15 @@ export function adminRouter(prisma) {
         successMsg: normalizeString(req.query.success),
         errorMsg: normalizeString(req.query.error),
         isFemaleHumanReviewCandidate,
-        adminFilters
+        adminFilters,
+        vacancyFiltersById: {}
       });
     }
 
     const rawDate = normalizeString(req.query.date);
     const selectedDate = isValidDateString(rawDate) ? rawDate : todayCO();
     const { cities, legacyCandidates } = await buildDashboardData(prisma, selectedDate, {
-      role: req.userRole,
-      candidateFilters: adminFilters
+      role: req.userRole
     });
 
     const rawCity = normalizeString(req.query.city);
@@ -702,7 +725,8 @@ export function adminRouter(prisma) {
       successMsg: normalizeString(req.query.success),
       errorMsg: normalizeString(req.query.error),
       isFemaleHumanReviewCandidate,
-      adminFilters
+      adminFilters,
+      vacancyFiltersById
     });
   });
 

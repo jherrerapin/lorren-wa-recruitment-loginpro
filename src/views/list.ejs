@@ -301,10 +301,13 @@
     }
     .filter-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
     .filter-field label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
-    .filter-field input {
+    .filter-field input,
+    .filter-field select {
       border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
       font-size: 13px; color: var(--text); background: var(--surface-2);
     }
+    .vacancy-filter-bar { margin: 0 18px 14px; }
+    .filter-note { font-size: 12px; color: var(--text-muted); }
 
     /* ── Responsive ── */
     @media (max-width: 768px) {
@@ -339,18 +342,33 @@
 
 <%
   const isLegacyMode = typeof mode === 'undefined' || mode === 'legacy';
+  const vacancyFilterFields = ['transportMode', 'neighborhood', 'locality', 'experienceInfo', 'experienceTime'];
+  const vacancyFilterLabels = {
+    transportMode: 'Medio de transporte',
+    neighborhood: 'Barrio',
+    locality: 'Localidad / zona',
+    experienceInfo: 'Experiencia',
+    experienceTime: 'Tiempo de experiencia'
+  };
   const legacyParams = new URLSearchParams();
   if (activeStatusScope) legacyParams.set('status', activeStatusScope);
   ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
     if (adminFilters && adminFilters[key]) legacyParams.set(key, adminFilters[key]);
   });
   const currentLegacyPath = '/admin' + (legacyParams.toString() ? '?' + legacyParams.toString() : '');
+  function appendVacancyFilters(params, excludedVacancyId = null) {
+    if (!vacancyFiltersById) return;
+    for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) {
+      if (!filters || vacancyId === excludedVacancyId) continue;
+      for (const field of vacancyFilterFields) {
+        if (filters[field]) params.set('vf_' + vacancyId + '_' + field, filters[field]);
+      }
+    }
+  }
   const dashboardParams = new URLSearchParams();
   if (activeCity) dashboardParams.set('city', activeCity);
   if (selectedDate) dashboardParams.set('date', selectedDate);
-  ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
-    if (adminFilters && adminFilters[key]) dashboardParams.set(key, adminFilters[key]);
-  });
+  appendVacancyFilters(dashboardParams);
   const currentDashboardPath = '/admin' + (dashboardParams.toString() ? '?' + dashboardParams.toString() : '');
   const currentAdminReturnPath = isLegacyMode ? currentLegacyPath : currentDashboardPath;
 
@@ -365,6 +383,32 @@
   function candidateLastInboundLabel(candidate) {
     if (!candidate.lastInboundAt) return 'Sin inbound';
     return 'Último inbound: ' + formatDateTimeCO(candidate.lastInboundAt);
+  }
+
+  function candidateFilterValue(candidate, field) {
+    if (!candidate) return '';
+    if (field === 'neighborhood') return candidate.neighborhood || candidate.zone || '';
+    if (field === 'locality') return candidate.locality || candidate.zone || '';
+    return candidate[field] || '';
+  }
+
+  function candidateMatchesVacancyFilters(candidate, filters) {
+    if (!filters) return true;
+    return vacancyFilterFields.every((field) => {
+      if (!filters[field]) return true;
+      return String(candidateFilterValue(candidate, field)).toLowerCase() === String(filters[field]).toLowerCase();
+    });
+  }
+
+  function buildVacancyFilterOptions(candidates, field) {
+    const uniqueValues = new Map();
+    for (const candidate of candidates || []) {
+      const value = String(candidateFilterValue(candidate, field) || '').trim();
+      if (!value) continue;
+      const key = value.toLowerCase();
+      if (!uniqueValues.has(key)) uniqueValues.set(key, value);
+    }
+    return Array.from(uniqueValues.values()).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
   }
 %>
 
@@ -442,7 +486,7 @@
     <a href="/admin/export?scope=contacted" class="export-btn">↓ Contactados</a>
     <a href="/admin/export?scope=rejected" class="export-btn">↓ Rechazados</a>
     <a href="/admin/export?scope=all" class="export-btn">↓ Todos</a>
-    <a href="/admin/outreach/approved" class="export-btn">↗ Outreach aprobados</a>
+    <a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a>
   </div>
 
   <table class="legacy-table" style="background:var(--surface);box-shadow:var(--shadow-sm);border-radius:0 0 8px 8px;border:1px solid var(--border);overflow:hidden;">
@@ -559,9 +603,9 @@
 
     <form method="get" action="/admin" id="dateForm" style="display:contents;">
       <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
-      <% ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => { if (adminFilters && adminFilters[key]) { %>
-        <input type="hidden" name="<%= key %>" value="<%= adminFilters[key] %>" />
-      <% } }); %>
+      <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
+        <input type="hidden" name="vf_<%= vacancyId %>_<%= field %>" value="<%= filters[field] %>" />
+      <% } } } } %>
       <div class="date-strip">
         <label for="datePicker">📅 Fecha entrevistas:</label>
         <input
@@ -577,9 +621,7 @@
             const todayParams = new URLSearchParams();
             if (activeCity) todayParams.set('city', activeCity);
             if (todayStr) todayParams.set('date', todayStr);
-            ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
-              if (adminFilters && adminFilters[key]) todayParams.set(key, adminFilters[key]);
-            });
+            appendVacancyFilters(todayParams);
           %>
           <a href="/admin?<%= todayParams.toString() %>" class="btn-today">Hoy</a>
         <% } else { %>
@@ -604,7 +646,7 @@
 
   <% if (cities.length > 0) { %>
   <% if (role === 'admin') { %>
-  <form method="get" action="/admin" class="filter-strip" style="margin-bottom:16px;">
+  <form method="get" action="/admin" class="filter-strip" style="display:none;">
     <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
     <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
     <div class="filter-field">
@@ -640,9 +682,7 @@
         const cityUrlParams = new URLSearchParams();
         cityUrlParams.set('city', city.name);
         cityUrlParams.set('date', selectedDate);
-        ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
-          if (adminFilters && adminFilters[key]) cityUrlParams.set(key, adminFilters[key]);
-        });
+        appendVacancyFilters(cityUrlParams);
         const cityUrl = '/admin?' + cityUrlParams.toString();
       %>
       <a href="<%= cityUrl %>" class="city-tab <%= activeCity === city.name ? 'active' : '' %>" role="tab" aria-selected="<%= activeCity === city.name ? 'true' : 'false' %>">
@@ -675,6 +715,23 @@
         let modeClass = isClosed ? 'closed' : (isScheduling ? 'scheduling' : 'cv-only');
         let modeBadgeClass = isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only');
         let modeBadgeText  = isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV');
+        const currentVacancyFilters = (vacancyFiltersById && vacancyFiltersById[v.id]) || {};
+        const vacancyFilterSourceCandidates = [
+          ...v.registeredNoBooking,
+          ...v.registeredComplete,
+          ...v.completeWithoutCv,
+          ...v.bookingsToday.map((booking) => booking.candidate).filter(Boolean)
+        ];
+        const filteredBookingsToday = v.bookingsToday.filter((booking) => candidateMatchesVacancyFilters(booking.candidate, currentVacancyFilters));
+        const filteredRegisteredNoBooking = v.registeredNoBooking.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters));
+        const filteredRegisteredComplete = v.registeredComplete.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters));
+        const filteredCompleteWithoutCv = v.completeWithoutCv.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters));
+        const vacancyFiltersActive = vacancyFilterFields.some((field) => currentVacancyFilters[field]);
+        const clearVacancyParams = new URLSearchParams();
+        if (activeCity) clearVacancyParams.set('city', activeCity);
+        if (selectedDate) clearVacancyParams.set('date', selectedDate);
+        appendVacancyFilters(clearVacancyParams, v.id);
+        const clearVacancyFilterHref = '/admin' + (clearVacancyParams.toString() ? '?' + clearVacancyParams.toString() : '');
       %>
 
       <div class="vacancy-card" id="vacancy-<%= v.id %>">
@@ -691,20 +748,49 @@
           </div>
         </div>
 
+        <% if (role === 'admin') { %>
+        <form method="get" action="/admin" class="filter-strip vacancy-filter-bar">
+          <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
+          <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
+          <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { if (vacancyId !== v.id) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
+            <input type="hidden" name="vf_<%= vacancyId %>_<%= field %>" value="<%= filters[field] %>" />
+          <% } } } } } %>
+          <% for (const field of vacancyFilterFields) { %>
+            <% const fieldOptions = buildVacancyFilterOptions(vacancyFilterSourceCandidates, field); %>
+            <% if (fieldOptions.length > 0) { %>
+            <div class="filter-field">
+              <label for="vacancyFilter_<%= v.id %>_<%= field %>"><%= vacancyFilterLabels[field] %></label>
+              <select id="vacancyFilter_<%= v.id %>_<%= field %>" name="vf_<%= v.id %>_<%= field %>">
+                <option value="">Todos</option>
+                <% for (const option of fieldOptions) { %>
+                  <option value="<%= option %>" <%= currentVacancyFilters[field] === option ? 'selected' : '' %>><%= option %></option>
+                <% } %>
+              </select>
+            </div>
+            <% } %>
+          <% } %>
+          <button type="submit" class="export-btn" style="cursor:pointer;">Aplicar filtros</button>
+          <a href="<%= clearVacancyFilterHref %>#vacancy-<%= v.id %>" class="export-btn">Quitar filtros</a>
+          <% if (vacancyFiltersActive) { %>
+            <span class="filter-note">Filtro activo en esta vacante.</span>
+          <% } %>
+        </form>
+        <% } %>
+
         <div class="vacancy-body">
           <% if (isScheduling) { %>
           <div class="section">
             <div class="section-header">
               <span class="section-title">🗓️&nbsp; Entrevistas — <%= isToday ? 'Hoy' : displayDate %></span>
-              <span class="section-count"><%= v.bookingsToday.length %> cita<%= v.bookingsToday.length !== 1 ? 's' : '' %></span>
+              <span class="section-count"><%= filteredBookingsToday.length %> cita<%= filteredBookingsToday.length !== 1 ? 's' : '' %></span>
             </div>
-            <% if (v.bookingsToday.length === 0) { %>
+            <% if (filteredBookingsToday.length === 0) { %>
               <div class="empty-state"><div class="empty-icon">📭</div><p>Sin entrevistas agendadas para este día.</p></div>
             <% } else { %>
               <table class="bookings-table" role="table">
                 <thead><tr><th>Hora</th><th>Candidato</th><th>Documento</th><th>Barrio</th><th>Estado cita</th><th>HV</th><th>Acciones</th></tr></thead>
                 <tbody>
-                  <% for (const b of v.bookingsToday) { %>
+                  <% for (const b of filteredBookingsToday) { %>
                     <% const bs = bookingStatusLabel[b.status] || { cls: '', icon: '•', text: b.status }; %>
                     <tr>
                       <td><span class="time-pill"><%= b.formattedTime %></span></td>
@@ -747,10 +833,13 @@
           <div class="section">
             <div class="section-header">
               <span class="section-title">👤&nbsp; Pendientes de agendar</span>
-              <span class="section-count"><%= v.registeredNoBooking.length %></span>
+              <span class="section-count"><%= filteredRegisteredNoBooking.length %></span>
             </div>
             <div class="candidates-list">
-              <% for (const c of v.registeredNoBooking.slice(0, 20)) { %>
+              <% if (filteredRegisteredNoBooking.length === 0) { %>
+                <div class="empty-state"><div class="empty-icon">📭</div><p>No hay candidatos que coincidan con este filtro.</p></div>
+              <% } %>
+              <% for (const c of filteredRegisteredNoBooking.slice(0, 20)) { %>
                 <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
                 <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
                 <div class="candidate-row">
@@ -780,7 +869,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (v.registeredNoBooking.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.registeredNoBooking.length - 20 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredRegisteredNoBooking.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredRegisteredNoBooking.length - 20 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>
@@ -789,10 +878,13 @@
           <div class="section">
             <div class="section-header">
               <span class="section-title">📄&nbsp; Completos pendientes de HV</span>
-              <span class="section-count"><%= v.completeWithoutCv.length %></span>
+              <span class="section-count"><%= filteredCompleteWithoutCv.length %></span>
             </div>
             <div class="candidates-list">
-              <% for (const c of v.completeWithoutCv.slice(0, 20)) { %>
+              <% if (filteredCompleteWithoutCv.length === 0) { %>
+                <div class="empty-state"><div class="empty-icon">📭</div><p>No hay candidatos que coincidan con este filtro.</p></div>
+              <% } %>
+              <% for (const c of filteredCompleteWithoutCv.slice(0, 20)) { %>
                 <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
                 <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
                 <div class="candidate-row">
@@ -826,7 +918,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (v.completeWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.completeWithoutCv.length - 20 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredCompleteWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 20 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>
@@ -835,14 +927,14 @@
           <div class="section">
             <div class="section-header">
               <span class="section-title">📥&nbsp; Registrados completos</span>
-              <span class="section-count"><%= v.registeredComplete.length %></span>
+              <span class="section-count"><%= filteredRegisteredComplete.length %></span>
             </div>
             <div class="cv-only-notice"><span class="icon">⚠️</span><p>Modo <strong>solo recepción de hojas de vida</strong>.<span> El agendamiento está deshabilitado para esta vacante.</span></p></div>
-            <% if (v.registeredComplete.length === 0) { %>
-              <div class="empty-state"><div class="empty-icon">📭</div><p>Aún no hay candidatos registrados.</p></div>
+            <% if (filteredRegisteredComplete.length === 0) { %>
+              <div class="empty-state"><div class="empty-icon">📭</div><p><%= vacancyFiltersActive ? 'No hay candidatos que coincidan con este filtro.' : 'Aún no hay candidatos registrados.' %></p></div>
             <% } else { %>
               <div class="candidates-list">
-                <% for (const c of v.registeredComplete.slice(0, 25)) { %>
+                <% for (const c of filteredRegisteredComplete.slice(0, 25)) { %>
                   <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
                   <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
                   <div class="candidate-row">
@@ -872,7 +964,7 @@
                     </div>
                   </div>
                 <% } %>
-                <% if (v.registeredComplete.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.registeredComplete.length - 25 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+                <% if (filteredRegisteredComplete.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredRegisteredComplete.length - 25 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
               </div>
             <% } %>
           </div>
@@ -882,10 +974,13 @@
           <div class="section">
             <div class="section-header">
               <span class="section-title">📄&nbsp; Completos pendientes de HV</span>
-              <span class="section-count"><%= v.completeWithoutCv.length %></span>
+              <span class="section-count"><%= filteredCompleteWithoutCv.length %></span>
             </div>
             <div class="candidates-list">
-              <% for (const c of v.completeWithoutCv.slice(0, 25)) { %>
+              <% if (filteredCompleteWithoutCv.length === 0) { %>
+                <div class="empty-state"><div class="empty-icon">📭</div><p>No hay candidatos que coincidan con este filtro.</p></div>
+              <% } %>
+              <% for (const c of filteredCompleteWithoutCv.slice(0, 25)) { %>
                 <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
                 <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-nuevo', label: uiSt }; %>
                 <div class="candidate-row">
@@ -919,7 +1014,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (v.completeWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= v.completeWithoutCv.length - 25 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredCompleteWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 25 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>
@@ -942,7 +1037,7 @@
           <a href="/admin/export?scope=missing_cv_complete" class="export-btn">↓ Descargar pendientes HV</a>
           <a href="/admin/export?scope=approved" class="export-btn">↓ Descargar aprobados</a>
           <a href="/admin/export?scope=all" class="export-btn">↓ Descargar todos</a>
-          <a href="/admin/outreach/approved" class="export-btn">↗ Outreach aprobados</a>
+          <a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a>
           <a href="/admin/vacancies" class="export-btn" style="margin-left:auto;">⚙️ Gestionar vacantes</a>
         </div>
       </div>
