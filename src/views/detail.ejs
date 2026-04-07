@@ -99,7 +99,7 @@
     </form>
   </nav>
   <div class="container">
-    <a href="/admin" class="back-link">&larr; Volver al listado</a>
+    <a href="<%= returnToPath || '/admin' %>" class="back-link">&larr; Volver al listado</a>
     <div class="header-line">
       <h1><%= candidate.fullName || 'Candidato sin nombre' %></h1>
       <% if (isFemaleHumanReviewCandidate(candidate)) { %>
@@ -107,7 +107,7 @@
       <% } %>
     </div>
     <% const uiStatus = normalizeCandidateStatusForUI(candidate.status); %>
-    <% const detailReturnTo = '/admin/candidates/' + candidate.id; %>
+    <% const detailReturnTo = '/admin/candidates/' + candidate.id + '?returnTo=' + encodeURIComponent(returnToPath || '/admin'); %>
     <% const whatsappHref = '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(detailReturnTo); %>
     <% const bookingStatusLabel = {
       SCHEDULED:   { cls: 'booking-status-scheduled', text: 'Agendada' },
@@ -216,6 +216,7 @@
         <% } %>
       </div>
       <form method="post" action="/admin/candidates/<%= candidate.id %>/status" class="status-form">
+        <input type="hidden" name="returnTo" value="<%= returnToPath || '/admin' %>" />
         <select name="status">
           <option value="NUEVO" <%= uiStatus === 'NUEVO' ? 'selected' : '' %>>Nuevo</option>
           <option value="REGISTRADO" <%= uiStatus === 'REGISTRADO' ? 'selected' : '' %>>Registrado</option>
@@ -402,6 +403,7 @@
     <div class="card">
       <h2>Edición manual de datos</h2>
       <form method="post" action="/admin/candidates/<%= candidate.id %>/edit">
+        <input type="hidden" name="returnTo" value="<%= returnToPath || '/admin' %>" />
         <div class="edit-form">
           <div class="field-group">
             <label for="fullName">Nombre completo</label>

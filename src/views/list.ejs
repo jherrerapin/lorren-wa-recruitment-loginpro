@@ -294,6 +294,17 @@
       background: var(--surface); text-decoration: none; transition: all .15s;
     }
     .export-btn:hover { background: var(--gray-light); color: var(--navy); }
+    .filter-strip {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 10px 14px; box-shadow: var(--shadow-sm);
+    }
+    .filter-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+    .filter-field label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+    .filter-field input {
+      border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+      font-size: 13px; color: var(--text); background: var(--surface-2);
+    }
 
     /* ── Responsive ── */
     @media (max-width: 768px) {
@@ -337,11 +348,18 @@
   const dashboardParams = new URLSearchParams();
   if (activeCity) dashboardParams.set('city', activeCity);
   if (selectedDate) dashboardParams.set('date', selectedDate);
+  ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
+    if (adminFilters && adminFilters[key]) dashboardParams.set(key, adminFilters[key]);
+  });
   const currentDashboardPath = '/admin' + (dashboardParams.toString() ? '?' + dashboardParams.toString() : '');
   const currentAdminReturnPath = isLegacyMode ? currentLegacyPath : currentDashboardPath;
 
   function candidateWhatsappHref(candidate) {
     return '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(currentAdminReturnPath);
+  }
+
+  function candidateDetailHref(candidate) {
+    return '/admin/candidates/' + candidate.id + '?returnTo=' + encodeURIComponent(currentAdminReturnPath);
   }
 
   function candidateLastInboundLabel(candidate) {
@@ -369,6 +387,7 @@
   <% if (errorMsg) { %>
     <div class="alert alert-error"><%= errorMsg %></div>
   <% } %>
+  <% const showRecruiterFilters = role === 'admin' && ['registered', 'missing_cv_complete'].includes(activeStatusScope); %>
   <% if (role === 'dev') { %>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
       <a href="/admin?status=inbox" class="export-btn">Inbox</a>
@@ -391,7 +410,6 @@
     <% } %>
   </div>
 
-  <% const showRecruiterFilters = role === 'admin' && ['registered', 'missing_cv_complete'].includes(activeStatusScope); %>
   <% if (showRecruiterFilters) { %>
     <form method="get" action="/admin" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);box-shadow:var(--shadow-sm);">
       <input type="hidden" name="status" value="<%= activeStatusScope %>" />
@@ -468,7 +486,7 @@
           <td><%= c.transportMode || '—' %></td>
           <td><span class="badge <%= statusBadge[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span></td>
           <td><%= c.rejectionReason || '—' %></td>
-          <td><a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver</a></td>
+          <td><a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver</a></td>
         </tr>
       <% } %>
     </tbody>
@@ -541,6 +559,9 @@
 
     <form method="get" action="/admin" id="dateForm" style="display:contents;">
       <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
+      <% ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => { if (adminFilters && adminFilters[key]) { %>
+        <input type="hidden" name="<%= key %>" value="<%= adminFilters[key] %>" />
+      <% } }); %>
       <div class="date-strip">
         <label for="datePicker">📅 Fecha entrevistas:</label>
         <input
@@ -552,7 +573,15 @@
           onchange="this.form.submit()"
         />
         <% if (!isToday) { %>
-          <a href="/admin<%= activeCity ? '?city=' + encodeURIComponent(activeCity) : '' %>" class="btn-today">Hoy</a>
+          <%
+            const todayParams = new URLSearchParams();
+            if (activeCity) todayParams.set('city', activeCity);
+            if (todayStr) todayParams.set('date', todayStr);
+            ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
+              if (adminFilters && adminFilters[key]) todayParams.set(key, adminFilters[key]);
+            });
+          %>
+          <a href="/admin?<%= todayParams.toString() %>" class="btn-today">Hoy</a>
         <% } else { %>
           <span class="is-today">✓ Hoy</span>
         <% } %>
@@ -574,13 +603,47 @@
   <% } %>
 
   <% if (cities.length > 0) { %>
+  <% if (role === 'admin') { %>
+  <form method="get" action="/admin" class="filter-strip" style="margin-bottom:16px;">
+    <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
+    <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
+    <div class="filter-field">
+      <label for="filterTransportMode">Medio de transporte</label>
+      <input id="filterTransportMode" type="text" name="transportMode" value="<%= adminFilters?.transportMode || '' %>" placeholder="Moto, bicicleta, bus..." />
+    </div>
+    <div class="filter-field">
+      <label for="filterNeighborhood">Barrio</label>
+      <input id="filterNeighborhood" type="text" name="neighborhood" value="<%= adminFilters?.neighborhood || '' %>" placeholder="Ej: Papayo" />
+    </div>
+    <div class="filter-field">
+      <label for="filterLocality">Localidad / zona</label>
+      <input id="filterLocality" type="text" name="locality" value="<%= adminFilters?.locality || '' %>" placeholder="Ej: Norte, Sur..." />
+    </div>
+    <div class="filter-field">
+      <label for="filterExperienceInfo">Experiencia</label>
+      <input id="filterExperienceInfo" type="text" name="experienceInfo" value="<%= adminFilters?.experienceInfo || '' %>" placeholder="Sí / No" />
+    </div>
+    <div class="filter-field">
+      <label for="filterExperienceTime">Tiempo experiencia</label>
+      <input id="filterExperienceTime" type="text" name="experienceTime" value="<%= adminFilters?.experienceTime || '' %>" placeholder="Ej: 2 años" />
+    </div>
+    <button type="submit" class="export-btn" style="cursor:pointer;">Aplicar filtros</button>
+    <a href="/admin<%= activeCity ? '?city=' + encodeURIComponent(activeCity) + (selectedDate ? '&date=' + encodeURIComponent(selectedDate) : '') : (selectedDate ? '?date=' + encodeURIComponent(selectedDate) : '') %>" class="export-btn">Quitar filtros</a>
+  </form>
+  <% } %>
   <div class="city-tabs" role="tablist">
     <% for (const city of cities) { %>
       <%
         const cityTotal = city.vacancies.reduce((sum, v) => {
           return sum + v.bookingsToday.length + v.registeredNoBooking.length + v.registeredComplete.length + v.completeWithoutCv.length;
         }, 0);
-        const cityUrl = '/admin?city=' + encodeURIComponent(city.name) + '&date=' + selectedDate;
+        const cityUrlParams = new URLSearchParams();
+        cityUrlParams.set('city', city.name);
+        cityUrlParams.set('date', selectedDate);
+        ['neighborhood', 'locality', 'experienceInfo', 'experienceTime', 'transportMode'].forEach((key) => {
+          if (adminFilters && adminFilters[key]) cityUrlParams.set(key, adminFilters[key]);
+        });
+        const cityUrl = '/admin?' + cityUrlParams.toString();
       %>
       <a href="<%= cityUrl %>" class="city-tab <%= activeCity === city.name ? 'active' : '' %>" role="tab" aria-selected="<%= activeCity === city.name ? 'true' : 'false' %>">
         📍 <%= city.name %>
@@ -669,7 +732,7 @@
                               <button type="submit" class="action-btn <%= action.cls %>" <%= b.status === action.status ? 'disabled' : '' %>><%= action.label %></button>
                             </form>
                           <% } %>
-                          <a href="/admin/candidates/<%= b.candidate.id %>" class="link-detail">Ver →</a>
+                          <a href="<%= candidateDetailHref(b.candidate) %>" class="link-detail">Ver →</a>
                         </div>
                       </td>
                     </tr>
@@ -713,7 +776,7 @@
                   <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span>
                   <div class="action-stack">
                     <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
-                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                    <a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver →</a>
                   </div>
                 </div>
               <% } %>
@@ -759,7 +822,7 @@
                       <button type="submit" class="action-btn action-btn-warn" <%= c.outboundWindowOpen ? '' : 'disabled title="Ventana de 24h cerrada"' %>>Solicitar HV</button>
                     </form>
                     <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
-                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                    <a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver →</a>
                   </div>
                 </div>
               <% } %>
@@ -805,7 +868,7 @@
                     <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span>
                     <div class="action-stack">
                       <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
-                      <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                      <a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver →</a>
                     </div>
                   </div>
                 <% } %>
@@ -852,7 +915,7 @@
                       <button type="submit" class="action-btn action-btn-warn" <%= c.outboundWindowOpen ? '' : 'disabled title="Ventana de 24h cerrada"' %>>Solicitar HV</button>
                     </form>
                     <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
-                    <a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a>
+                    <a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver →</a>
                   </div>
                 </div>
               <% } %>
@@ -921,7 +984,7 @@
             <td><span class="badge <%= (stBadge[uiSt]||{cls:'badge-nuevo'}).cls %>"><%= (stBadge[uiSt]||{label:uiSt}).label %></span></td>
             <td><span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span></td>
             <td style="font-size:12px;color:var(--text-muted);"><%= formatDateTimeCO(c.createdAt) %></td>
-            <td><a href="/admin/candidates/<%= c.id %>" class="link-detail">Ver →</a></td>
+            <td><a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver →</a></td>
           </tr>
         <% } %>
         <% if (legacyCandidates.length > 10) { %>
