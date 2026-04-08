@@ -57,6 +57,51 @@ function formatPhoneForDisplay(value) {
   return stripCountryCode57(value) || String(value || '');
 }
 
+function normalizeVacancyTextBlock(value) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildVacancySection(label, value) {
+  const content = normalizeVacancyTextBlock(value);
+  if (!content) return null;
+  return content.includes('\n')
+    ? `${label}:\n${content}`
+    : `${label}: ${content}`;
+}
+
+function buildManualVacancyInfoMessage(vacancy) {
+  if (!vacancy) return '';
+  const title = normalizeString(vacancy.title) || normalizeString(vacancy.role) || 'la vacante';
+  const city = normalizeString(vacancy.city);
+  const lines = [`Hola, te comparto la información de la vacante ${title}${city ? ` en ${city}` : ''}.`];
+
+  const description = buildVacancySection('Descripción', vacancy.roleDescription);
+  const operationArea = buildVacancySection('Zona de operación', vacancy.operationAddress);
+  const interviewPoint = buildVacancySection('Punto de entrevista', vacancy.interviewAddress);
+  const requirements = buildVacancySection('Requisitos', vacancy.requirements);
+  const conditions = buildVacancySection('Condiciones', vacancy.conditions);
+
+  if (description) lines.push(description);
+  if (operationArea) lines.push(operationArea);
+  if (interviewPoint) lines.push(interviewPoint);
+  if (requirements) lines.push(requirements);
+  if (conditions) lines.push(conditions);
+
+  lines.push(
+    vacancy.acceptingApplications
+      ? 'Si te interesa continuar, me confirmas y seguimos con tu proceso.'
+      : 'En este momento no estamos recibiendo personal para esta vacante, pero sí podemos dejar tus datos y tu hoja de vida para cuando vuelva a abrir.'
+  );
+
+  return lines.filter(Boolean).join('\n\n');
+}
+
 function normalizeCandidateSearch(source = {}) {
   const field = normalizeString(source.searchField);
   const text = normalizeString(source.searchText);
@@ -64,6 +109,27 @@ function normalizeCandidateSearch(source = {}) {
     field: ['document', 'phone'].includes(field) ? field : 'document',
     text: text || ''
   };
+}
+
+function normalizeVacancySearches(source = {}) {
+  const searchesByVacancyId = {};
+  for (const [key, value] of Object.entries(source || {})) {
+    const match = /^vs_([^_]+)_(field|text)$/.exec(String(key));
+    if (!match) continue;
+    const [, vacancyId, field] = match;
+    if (!searchesByVacancyId[vacancyId]) {
+      searchesByVacancyId[vacancyId] = { field: 'document', text: '' };
+    }
+    if (field === 'field') {
+      const normalizedField = normalizeString(value);
+      searchesByVacancyId[vacancyId].field = ['document', 'phone'].includes(normalizedField)
+        ? normalizedField
+        : 'document';
+      continue;
+    }
+    searchesByVacancyId[vacancyId].text = normalizeString(value) || '';
+  }
+  return searchesByVacancyId;
 }
 
 function candidateMatchesSearch(candidate, search = {}) {
@@ -442,15 +508,11 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
   const { start, end } = colombiaDayBounds(dateStr);
   const isDev = options.role === 'dev';
   const candidateFilters = options.candidateFilters || null;
-  const candidateSearch = options.candidateSearch || null;
   const shouldFilterCandidates = options.role === 'admin'
     && candidateFilters
     && Object.values(candidateFilters).some(Boolean);
   const filterDashboardCandidates = (candidates) => (
     shouldFilterCandidates ? applyRecruiterCandidateFilters(candidates, candidateFilters) : candidates
-  );
-  const filterSearchedCandidates = (candidates) => (
-    candidateSearch?.text ? candidates.filter((candidate) => candidateMatchesSearch(candidate, candidateSearch)) : candidates
   );
 
   const vacancies = await prisma.vacancy.findMany({
@@ -570,10 +632,10 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
       ? operationallyRegisteredCandidates
       : [];
     const completeWithoutCvBase = operationallyCompleteWithoutCvCandidates;
-    const registeredNoBooking = filterSearchedCandidates(filterDashboardCandidates(registeredNoBookingBase));
-    const registeredComplete = filterSearchedCandidates(filterDashboardCandidates(registeredCompleteBase));
-    const completeWithoutCv = filterSearchedCandidates(filterDashboardCandidates(completeWithoutCvBase));
-    const approvedCandidates = filterSearchedCandidates(filterDashboardCandidates(approvedCandidatesBase));
+    const registeredNoBooking = filterDashboardCandidates(registeredNoBookingBase);
+    const registeredComplete = filterDashboardCandidates(registeredCompleteBase);
+    const completeWithoutCv = filterDashboardCandidates(completeWithoutCvBase);
+    const approvedCandidates = filterDashboardCandidates(approvedCandidatesBase);
     const filteredBookingsToday = normalizeInterviewBookings(v.interviewBookings)
       .map(b => ({
         ...b,
@@ -583,8 +645,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
         isFemaleHumanReview: isFemaleHumanReviewCandidate(b.candidate)
       }))
       .filter((booking) => (
-        (!shouldFilterCandidates || applyRecruiterCandidateFilters([booking.candidate], candidateFilters).length > 0)
-        && candidateMatchesSearch(booking.candidate, candidateSearch)
+        !shouldFilterCandidates || applyRecruiterCandidateFilters([booking.candidate], candidateFilters).length > 0
       ));
 
     if (isDev) {
@@ -607,7 +668,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
   }
 
   const cities = Array.from(citiesMap.entries()).map(([name, vacs]) => ({ name, vacancies: vacs }));
-  const decoratedLegacyCandidates = filterSearchedCandidates(filterDashboardCandidates(legacyCandidates.map(decorateDashboardCandidate)));
+  const decoratedLegacyCandidates = filterDashboardCandidates(legacyCandidates.map(decorateDashboardCandidate));
   if (isDev) decoratedLegacyCandidates.sort(compareCandidatesByRecentInbound);
   return {
     cities,
@@ -784,6 +845,7 @@ export function adminRouter(prisma) {
     const adminFilters = normalizeCandidateListFilters(req.query);
     const vacancyFiltersById = normalizeVacancyDashboardFilters(req.query);
     const candidateSearch = normalizeCandidateSearch(req.query);
+    const vacancySearchById = normalizeVacancySearches(req.query);
     const canUseLegacyScope = requestedStatus
       && ADMIN_STATUS_SCOPES.has(requestedStatus)
       && (req.userRole === 'dev' || RECRUITER_STATUS_SCOPES.has(requestedStatus));
@@ -853,15 +915,15 @@ export function adminRouter(prisma) {
         isFemaleHumanReviewCandidate,
         adminFilters,
         candidateSearch,
-        vacancyFiltersById: {}
+        vacancyFiltersById: {},
+        vacancySearchById: {}
       });
     }
 
     const rawDate = normalizeString(req.query.date);
     const selectedDate = isValidDateString(rawDate) ? rawDate : todayCO();
     const { cities, legacyCandidates } = await buildDashboardData(prisma, selectedDate, {
-      role: req.userRole,
-      candidateSearch
+      role: req.userRole
     });
 
     const rawCity = normalizeString(req.query.city);
@@ -877,8 +939,9 @@ export function adminRouter(prisma) {
       errorMsg: normalizeString(req.query.error),
       isFemaleHumanReviewCandidate,
       adminFilters,
-      candidateSearch,
-      vacancyFiltersById
+      candidateSearch: null,
+      vacancyFiltersById,
+      vacancySearchById
     });
   });
 
@@ -1125,7 +1188,10 @@ export function adminRouter(prisma) {
             acceptingApplications: true,
             isActive: true,
             operationAddress: true,
-            interviewAddress: true
+            interviewAddress: true,
+            roleDescription: true,
+            requirements: true,
+            conditions: true
           }
         },
         messages: { orderBy: { createdAt: 'asc' } },
@@ -1435,6 +1501,62 @@ export function adminRouter(prisma) {
       ? `${whatsappBaseUrl}?text=${encodeURIComponent(whatsappText)}`
       : whatsappBaseUrl;
     return res.redirect(whatsappUrl);
+  });
+
+  router.post('/candidates/:id/send-vacancy-info', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.body.returnTo || `/admin/candidates/${id}`);
+    const candidate = await prisma.candidate.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        phone: true,
+        vacancy: {
+          select: {
+            id: true,
+            title: true,
+            city: true,
+            role: true,
+            roleDescription: true,
+            requirements: true,
+            conditions: true,
+            operationAddress: true,
+            interviewAddress: true,
+            acceptingApplications: true
+          }
+        }
+      }
+    });
+
+    if (!candidate) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
+    }
+
+    if (!candidate.vacancy) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'El candidato no tiene una vacante asignada.'));
+    }
+
+    const window = await getOutboundWindowStatus(prisma, id);
+    if (!window.isOpen) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'La ventana de 24h de WhatsApp está vencida. No se puede enviar la información de la vacante.'));
+    }
+
+    const body = buildManualVacancyInfoMessage(candidate.vacancy);
+    if (!body) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'La vacante no tiene información suficiente para enviarla.'));
+    }
+
+    try {
+      await sendAdminOutboundMessage(prisma, candidate, body, {
+        source: 'admin_manual_vacancy_info',
+        action: 'send_vacancy_info',
+        vacancyId: candidate.vacancy.id
+      });
+      return res.redirect(withFlashMessage(returnTo, 'success', 'Información de la vacante enviada correctamente.'));
+    } catch (error) {
+      console.error('[send_vacancy_info]', error);
+      return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible enviar la información de la vacante.'));
+    }
   });
 
   router.post('/candidates/:id/assign-vacancy', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {

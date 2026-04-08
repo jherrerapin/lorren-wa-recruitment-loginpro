@@ -416,12 +416,19 @@
       }
     }
   }
+  function appendVacancySearches(params, excludedVacancyId = null) {
+    if (!vacancySearchById) return;
+    for (const [vacancyId, search] of Object.entries(vacancySearchById)) {
+      if (!search || vacancyId === excludedVacancyId) continue;
+      if (search.field) params.set('vs_' + vacancyId + '_field', search.field);
+      if (search.text) params.set('vs_' + vacancyId + '_text', search.text);
+    }
+  }
   const dashboardParams = new URLSearchParams();
   if (activeCity) dashboardParams.set('city', activeCity);
   if (selectedDate) dashboardParams.set('date', selectedDate);
-  if (candidateSearch?.field) dashboardParams.set('searchField', candidateSearch.field);
-  if (candidateSearch?.text) dashboardParams.set('searchText', candidateSearch.text);
   appendVacancyFilters(dashboardParams);
+  appendVacancySearches(dashboardParams);
   const currentDashboardPath = '/admin' + (dashboardParams.toString() ? '?' + dashboardParams.toString() : '');
   const currentAdminReturnPath = isLegacyMode ? currentLegacyPath : currentDashboardPath;
 
@@ -476,6 +483,17 @@
       if (!uniqueValues.has(key)) uniqueValues.set(key, value);
     }
     return Array.from(uniqueValues.values()).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  }
+  function candidateMatchesVacancySearch(candidate, search) {
+    if (!search || !search.text) return true;
+    const candidateField = search.field === 'phone'
+      ? formatCandidatePhone(candidate && candidate.phone)
+      : String((candidate && candidate.documentNumber) || '').replace(/\D+/g, '');
+    const queryValue = search.field === 'phone'
+      ? String(search.text || '').replace(/\D+/g, '').replace(/^57(?=\d{10,}$)/, '')
+      : String(search.text || '').replace(/\D+/g, '');
+    if (!queryValue) return true;
+    return String(candidateField || '').includes(queryValue);
   }
   function candidateObservationSnippet(candidate) {
     const note = String(candidate?.interviewNotes || '').trim();
@@ -702,11 +720,14 @@
 
     <form method="get" action="/admin" id="dateForm" style="display:contents;">
       <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
-      <% if (candidateSearch?.field) { %><input type="hidden" name="searchField" value="<%= candidateSearch.field %>" /><% } %>
-      <% if (candidateSearch?.text) { %><input type="hidden" name="searchText" value="<%= candidateSearch.text %>" /><% } %>
       <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
         <input type="hidden" name="vf_<%= vacancyId %>_<%= field %>" value="<%= filters[field] %>" />
       <% } } } } %>
+      <% if (vacancySearchById) { for (const [vacancyId, search] of Object.entries(vacancySearchById)) { if (search?.field) { %>
+        <input type="hidden" name="vs_<%= vacancyId %>_field" value="<%= search.field %>" />
+      <% } if (search?.text) { %>
+        <input type="hidden" name="vs_<%= vacancyId %>_text" value="<%= search.text %>" />
+      <% } } } %>
       <div class="date-strip">
         <label for="datePicker">📅 Fecha entrevistas:</label>
         <input
@@ -722,9 +743,8 @@
             const todayParams = new URLSearchParams();
             if (activeCity) todayParams.set('city', activeCity);
             if (todayStr) todayParams.set('date', todayStr);
-            if (candidateSearch?.field) todayParams.set('searchField', candidateSearch.field);
-            if (candidateSearch?.text) todayParams.set('searchText', candidateSearch.text);
             appendVacancyFilters(todayParams);
+            appendVacancySearches(todayParams);
           %>
           <a href="/admin?<%= todayParams.toString() %>" class="btn-today">Hoy</a>
         <% } else { %>
@@ -746,31 +766,6 @@
       <a href="/admin?status=all<%= candidateSearch?.field ? '&searchField=' + encodeURIComponent(candidateSearch.field) : '' %><%= candidateSearch?.text ? '&searchText=' + encodeURIComponent(candidateSearch.text) : '' %>" class="export-btn">Ver todos</a>
     </div>
   <% } %>
-
-  <form method="get" action="/admin" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);box-shadow:var(--shadow-sm);">
-    <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
-    <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
-    <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
-      <input type="hidden" name="vf_<%= vacancyId %>_<%= field %>" value="<%= filters[field] %>" />
-    <% } } } } %>
-    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Buscar por
-      <select name="searchField" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:150px;">
-        <option value="document" <%= (candidateSearch?.field || 'document') === 'document' ? 'selected' : '' %>>Documento</option>
-        <option value="phone" <%= candidateSearch?.field === 'phone' ? 'selected' : '' %>>Celular</option>
-      </select>
-    </label>
-    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Valor
-      <input type="text" name="searchText" value="<%= candidateSearch?.text || '' %>" placeholder="Escribe el número a buscar" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:220px;" />
-    </label>
-    <button type="submit" class="export-btn" style="cursor:pointer;">Buscar</button>
-    <%
-      const clearSearchParams = new URLSearchParams();
-      if (activeCity) clearSearchParams.set('city', activeCity);
-      if (selectedDate) clearSearchParams.set('date', selectedDate);
-      appendVacancyFilters(clearSearchParams);
-    %>
-    <a href="/admin<%= clearSearchParams.toString() ? '?' + clearSearchParams.toString() : '' %>" class="export-btn">Limpiar búsqueda</a>
-  </form>
 
   <% if (cities.length > 0) { %>
   <% if (role === 'admin') { %>
@@ -802,9 +797,8 @@
         const cityUrlParams = new URLSearchParams();
         cityUrlParams.set('city', city.name);
         cityUrlParams.set('date', selectedDate);
-        if (candidateSearch?.field) cityUrlParams.set('searchField', candidateSearch.field);
-        if (candidateSearch?.text) cityUrlParams.set('searchText', candidateSearch.text);
         appendVacancyFilters(cityUrlParams);
+        appendVacancySearches(cityUrlParams);
         const cityUrl = '/admin?' + cityUrlParams.toString();
       %>
       <a href="<%= cityUrl %>" class="city-tab <%= activeCity === city.name ? 'active' : '' %>" role="tab" aria-selected="<%= activeCity === city.name ? 'true' : 'false' %>">
@@ -838,6 +832,7 @@
         let modeBadgeClass = isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only');
         let modeBadgeText  = isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV');
         const currentVacancyFilters = (vacancyFiltersById && vacancyFiltersById[v.id]) || {};
+        const currentVacancySearch = (vacancySearchById && vacancySearchById[v.id]) || { field: 'document', text: '' };
         const currentVacancyFilterFields = getVacancyFilterFields(v);
         const vacancyFilterSourceCandidates = [
           ...v.registeredNoBooking,
@@ -846,17 +841,40 @@
           ...v.approvedCandidates,
           ...v.bookingsToday.map((booking) => booking.candidate).filter(Boolean)
         ];
-        const filteredBookingsToday = v.bookingsToday.filter((booking) => candidateMatchesVacancyFilters(booking.candidate, currentVacancyFilters, v));
-        const filteredRegisteredNoBooking = v.registeredNoBooking.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
-        const filteredRegisteredComplete = v.registeredComplete.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
-        const filteredCompleteWithoutCv = v.completeWithoutCv.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
-        const filteredApprovedCandidates = v.approvedCandidates.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
+        const filteredBookingsToday = v.bookingsToday.filter((booking) => (
+          candidateMatchesVacancyFilters(booking.candidate, currentVacancyFilters, v)
+          && candidateMatchesVacancySearch(booking.candidate, currentVacancySearch)
+        ));
+        const filteredRegisteredNoBooking = v.registeredNoBooking.filter((candidate) => (
+          candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v)
+          && candidateMatchesVacancySearch(candidate, currentVacancySearch)
+        ));
+        const filteredRegisteredComplete = v.registeredComplete.filter((candidate) => (
+          candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v)
+          && candidateMatchesVacancySearch(candidate, currentVacancySearch)
+        ));
+        const filteredCompleteWithoutCv = v.completeWithoutCv.filter((candidate) => (
+          candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v)
+          && candidateMatchesVacancySearch(candidate, currentVacancySearch)
+        ));
+        const filteredApprovedCandidates = v.approvedCandidates.filter((candidate) => (
+          candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v)
+          && candidateMatchesVacancySearch(candidate, currentVacancySearch)
+        ));
         const vacancyFiltersActive = vacancyFilterFields.some((field) => currentVacancyFilters[field]);
-        const clearVacancyParams = new URLSearchParams();
-        if (activeCity) clearVacancyParams.set('city', activeCity);
-        if (selectedDate) clearVacancyParams.set('date', selectedDate);
-        appendVacancyFilters(clearVacancyParams, v.id);
-        const clearVacancyFilterHref = '/admin' + (clearVacancyParams.toString() ? '?' + clearVacancyParams.toString() : '');
+        const vacancySearchActive = Boolean(currentVacancySearch.text);
+        const clearVacancyFilterParams = new URLSearchParams();
+        if (activeCity) clearVacancyFilterParams.set('city', activeCity);
+        if (selectedDate) clearVacancyFilterParams.set('date', selectedDate);
+        appendVacancyFilters(clearVacancyFilterParams, v.id);
+        appendVacancySearches(clearVacancyFilterParams);
+        const clearVacancyFilterHref = '/admin' + (clearVacancyFilterParams.toString() ? '?' + clearVacancyFilterParams.toString() : '');
+        const clearVacancySearchParams = new URLSearchParams();
+        if (activeCity) clearVacancySearchParams.set('city', activeCity);
+        if (selectedDate) clearVacancySearchParams.set('date', selectedDate);
+        appendVacancyFilters(clearVacancySearchParams);
+        appendVacancySearches(clearVacancySearchParams, v.id);
+        const clearVacancySearchHref = '/admin' + (clearVacancySearchParams.toString() ? '?' + clearVacancySearchParams.toString() : '');
       %>
 
       <div class="vacancy-card" id="vacancy-<%= v.id %>">
@@ -873,6 +891,35 @@
           </div>
         </div>
 
+        <form method="get" action="/admin" class="filter-strip vacancy-filter-bar">
+          <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
+          <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
+          <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
+            <input type="hidden" name="vf_<%= vacancyId %>_<%= field %>" value="<%= filters[field] %>" />
+          <% } } } } %>
+          <% if (vacancySearchById) { for (const [vacancyId, search] of Object.entries(vacancySearchById)) { if (vacancyId !== v.id) { if (search?.field) { %>
+            <input type="hidden" name="vs_<%= vacancyId %>_field" value="<%= search.field %>" />
+          <% } if (search?.text) { %>
+            <input type="hidden" name="vs_<%= vacancyId %>_text" value="<%= search.text %>" />
+          <% } } } } %>
+          <div class="filter-field">
+            <label for="vacancySearchField_<%= v.id %>">Buscar por</label>
+            <select id="vacancySearchField_<%= v.id %>" name="vs_<%= v.id %>_field">
+              <option value="document" <%= currentVacancySearch.field === 'document' ? 'selected' : '' %>>Documento</option>
+              <option value="phone" <%= currentVacancySearch.field === 'phone' ? 'selected' : '' %>>Celular</option>
+            </select>
+          </div>
+          <div class="filter-field" style="min-width:220px;">
+            <label for="vacancySearchText_<%= v.id %>">Número a buscar</label>
+            <input id="vacancySearchText_<%= v.id %>" type="text" name="vs_<%= v.id %>_text" value="<%= currentVacancySearch.text || '' %>" placeholder="Documento o celular" />
+          </div>
+          <button type="submit" class="export-btn" style="cursor:pointer;">Buscar</button>
+          <a href="<%= clearVacancySearchHref %>#vacancy-<%= v.id %>" class="export-btn">Quitar búsqueda</a>
+          <% if (vacancySearchActive) { %>
+            <span class="filter-note">Búsqueda activa en esta vacante.</span>
+          <% } %>
+        </form>
+
         <% if (role === 'admin') { %>
         <form method="get" action="/admin" class="filter-strip vacancy-filter-bar">
           <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
@@ -880,6 +927,11 @@
           <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { if (vacancyId !== v.id) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
             <input type="hidden" name="vf_<%= vacancyId %>_<%= field %>" value="<%= filters[field] %>" />
           <% } } } } } %>
+          <% if (vacancySearchById) { for (const [vacancyId, search] of Object.entries(vacancySearchById)) { if (search?.field) { %>
+            <input type="hidden" name="vs_<%= vacancyId %>_field" value="<%= search.field %>" />
+          <% } if (search?.text) { %>
+            <input type="hidden" name="vs_<%= vacancyId %>_text" value="<%= search.text %>" />
+          <% } } } %>
           <% for (const field of currentVacancyFilterFields) { %>
             <% const fieldOptions = buildVacancyFilterOptions(vacancyFilterSourceCandidates, field, v); %>
             <% if (fieldOptions.length > 0) { %>
