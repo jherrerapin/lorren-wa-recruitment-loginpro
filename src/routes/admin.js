@@ -3,7 +3,13 @@ import express from 'express';
 import ExcelJS from 'exceljs';
 import path from 'node:path';
 import multer from 'multer';
-import { normalizeCandidateFields, normalizeTransportMode } from '../services/candidateData.js';
+import {
+  alignCandidateLocationFields,
+  getCandidateResidenceValue,
+  getResidenceFieldConfig,
+  normalizeCandidateFields,
+  normalizeTransportMode
+} from '../services/candidateData.js';
 import {
   buildWhatsAppLink,
   compareCandidatesByRecentInbound,
@@ -616,6 +622,7 @@ function parseVacancyBody(body) {
     minAge:               int(body.minAge),
     maxAge:               int(body.maxAge),
     experienceRequired:   str(body.experienceRequired) || 'INDIFFERENT',
+    experienceTimeText:   (str(body.experienceRequired) === 'YES' ? str(body.experienceTimeText) : null),
     isActive:             bool(body.isActive),
     acceptingApplications: bool(body.acceptingApplications),
     schedulingEnabled:    bool(body.schedulingEnabled),
@@ -764,7 +771,8 @@ export function adminRouter(prisma) {
           botPauseReason: true,
           lastInboundAt: true,
           lastOutboundAt: true,
-          devLastSeenAt: true
+          devLastSeenAt: true,
+          vacancy: { select: { city: true } }
         }
       };
       if (requestedStatus === 'inbox' && req.userRole === 'dev') {
@@ -877,7 +885,8 @@ export function adminRouter(prisma) {
         rejectionDetails: true,
         createdAt: true,
         cvMimeType: true,
-        cvOriginalName: true
+        cvOriginalName: true,
+        vacancy: { select: { city: true } }
       }
     });
     const candidates = filterCandidatesByScope(allCandidates.map(normalizeCandidateSnapshot), scope);
@@ -902,11 +911,13 @@ export function adminRouter(prisma) {
     ];
     for (const c of candidates) {
       const normalizedCandidate = normalizeCandidateSnapshot(c);
+      const residenceConfig = getResidenceFieldConfig(normalizedCandidate.vacancy);
+      const residenceValue = getCandidateResidenceValue(normalizedCandidate, normalizedCandidate.vacancy) || normalizedCandidate.zone || '';
       const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
       const row = sheet.addRow({
         ...normalizedCandidate,
-        neighborhood: normalizedCandidate.neighborhood || normalizedCandidate.zone || '',
-        locality: normalizedCandidate.locality || normalizedCandidate.zone || '',
+        neighborhood: residenceConfig.field === 'neighborhood' ? residenceValue : '',
+        locality: residenceConfig.field === 'locality' ? residenceValue : (normalizedCandidate.locality || ''),
         whatsappLink: whatsappLink ? 'Abrir WhatsApp' : 'Sin número',
         hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
         createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
@@ -1454,7 +1465,8 @@ export function adminRouter(prisma) {
         cvData: true,
         cvOriginalName: true,
         cvMimeType: true,
-        currentStep: true
+        currentStep: true,
+        vacancy: { select: { city: true } }
       }
     });
 
@@ -1462,15 +1474,18 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
     }
 
-    const candidateCoreFields = normalizeCandidateFields({
+    const residenceInput = normalizeString(raw.residenceArea) || normalizeString(raw.locality) || normalizeString(raw.neighborhood);
+    let candidateCoreFields = normalizeCandidateFields({
       fullName:            normalizeString(raw.fullName),
       documentType:        normalizeString(raw.documentType),
       documentNumber:      normalizeString(raw.documentNumber),
       age:                 raw.age ? parseInt(raw.age, 10) : null,
-      neighborhood:        normalizeString(raw.neighborhood),
+      neighborhood:        residenceInput,
+      locality:            residenceInput,
       medicalRestrictions: normalizeString(raw.medicalRestrictions),
       transportMode:       normalizeString(raw.transportMode),
     });
+    candidateCoreFields = alignCandidateLocationFields(candidateCoreFields, existingCandidate.vacancy, { clearAlternate: true });
     const adminStatusFields = {
       rejectionReason:  normalizeString(raw.rejectionReason),
       rejectionDetails: normalizeString(raw.rejectionDetails),
@@ -1710,6 +1725,7 @@ export function adminRouter(prisma) {
           minAge: data.minAge,
           maxAge: data.maxAge,
           experienceRequired: data.experienceRequired,
+          experienceTimeText: data.experienceTimeText,
           isActive: data.isActive,
           acceptingApplications: data.acceptingApplications,
           schedulingEnabled: data.schedulingEnabled,
@@ -1750,6 +1766,7 @@ export function adminRouter(prisma) {
           minAge: data.minAge,
           maxAge: data.maxAge,
           experienceRequired: data.experienceRequired,
+          experienceTimeText: data.experienceTimeText,
           isActive: data.isActive,
           acceptingApplications: data.acceptingApplications,
           schedulingEnabled: data.schedulingEnabled,
@@ -1798,3 +1815,4 @@ export function adminRouter(prisma) {
 
   return router;
 }
+

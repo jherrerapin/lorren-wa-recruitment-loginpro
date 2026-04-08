@@ -1,19 +1,24 @@
 import { sendTextMessage } from './whatsapp.js';
 import { canScheduleReminderPolicy, isWithinWhatsappWindow } from './reminderPolicy.js';
+import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
 
 const REMINDER_DELAY_MS = 25 * 60 * 1000;
-const REQUIRED_FIELDS = [
-  ['fullName', 'nombre completo'],
-  ['documentType', 'tipo de documento'],
-  ['documentNumber', 'número de documento'],
-  ['age', 'edad'],
-  ['neighborhood', 'barrio'],
-  ['medicalRestrictions', 'restricciones médicas'],
-  ['transportMode', 'medio de transporte']
-];
 
 function hasValue(value) {
   return value !== undefined && value !== null && value !== '';
+}
+
+function buildRequiredFields(candidate = {}) {
+  const residenceConfig = getResidenceFieldConfig(candidate?.vacancy);
+  return [
+    ['fullName', 'nombre completo'],
+    ['documentType', 'tipo de documento'],
+    ['documentNumber', 'número de documento'],
+    ['age', 'edad'],
+    [residenceConfig.field, residenceConfig.label],
+    ['medicalRestrictions', 'restricciones médicas'],
+    ['transportMode', 'medio de transporte']
+  ];
 }
 
 function formatList(items = []) {
@@ -24,8 +29,13 @@ function formatList(items = []) {
 }
 
 export function getReminderMissingItems(candidate = {}) {
-  const missingFields = REQUIRED_FIELDS
-    .filter(([field]) => !hasValue(candidate?.[field]))
+  const residenceConfig = getResidenceFieldConfig(candidate?.vacancy);
+  const missingFields = buildRequiredFields(candidate)
+    .filter(([field]) => (
+      field === residenceConfig.field
+        ? !hasValue(getCandidateResidenceValue(candidate, candidate?.vacancy))
+        : !hasValue(candidate?.[field])
+    ))
     .map(([, label]) => label);
 
   const missingHv = !hasValue(candidate?.cvData);
@@ -44,10 +54,10 @@ export function buildReminderText(candidate = {}) {
   }
 
   if (!missingParts.length) {
-    return 'Hola 👋 Te escribo para recordarte que tu proceso sigue abierto. Si necesitas apoyo para continuar, aquí quedo atento.';
+    return 'Hola, te escribo para recordarte que tu proceso sigue abierto. Si necesitas apoyo para continuar, aquí quedo atento.';
   }
 
-  return `Hola 👋 Te escribo para recordarte que tu proceso sigue abierto. Para completar tu postulación aún me falta ${formatList(missingParts)}.`;
+  return `Hola, te escribo para recordarte que tu proceso sigue abierto. Para completar tu postulación aún me falta ${formatList(missingParts)}.`;
 }
 
 export function canScheduleReminder(candidate) {

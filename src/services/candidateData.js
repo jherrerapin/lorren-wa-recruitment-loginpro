@@ -44,6 +44,70 @@ function normalizeLooseText(value = '') {
     .trim();
 }
 
+function resolveCityValue(vacancyOrCity = null) {
+  if (typeof vacancyOrCity === 'string') return vacancyOrCity;
+  return vacancyOrCity?.city
+    || vacancyOrCity?.vacancy?.city
+    || vacancyOrCity?.operation?.city?.name
+    || vacancyOrCity?.vacancy?.operation?.city?.name
+    || null;
+}
+
+export function isBogotaCity(vacancyOrCity = null) {
+  const normalized = normalizeLooseText(resolveCityValue(vacancyOrCity));
+  return normalized === 'bogota';
+}
+
+export function getResidenceFieldConfig(vacancyOrCity = null) {
+  if (isBogotaCity(vacancyOrCity)) {
+    return {
+      field: 'locality',
+      label: 'localidad',
+      labelTitle: 'Localidad',
+      articleLabel: 'la localidad'
+    };
+  }
+
+  return {
+    field: 'neighborhood',
+    label: 'barrio',
+    labelTitle: 'Barrio',
+    articleLabel: 'el barrio'
+  };
+}
+
+export function getCandidateResidenceValue(candidate = {}, vacancyOrCity = null) {
+  const config = getResidenceFieldConfig(vacancyOrCity || candidate?.vacancy || candidate);
+  if (config.field === 'locality') {
+    return candidate?.locality || candidate?.neighborhood || candidate?.zone || null;
+  }
+  return candidate?.neighborhood || candidate?.locality || candidate?.zone || null;
+}
+
+export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, options = {}) {
+  const config = getResidenceFieldConfig(vacancyOrCity);
+  const normalized = { ...fields };
+  const clearAlternate = options.clearAlternate !== false;
+
+  if (config.field === 'locality') {
+    if (!normalized.locality && normalized.neighborhood) {
+      normalized.locality = normalized.neighborhood;
+    }
+    if (normalized.locality && clearAlternate) {
+      normalized.neighborhood = null;
+    }
+    return normalized;
+  }
+
+  if (!normalized.neighborhood && normalized.locality) {
+    normalized.neighborhood = normalized.locality;
+  }
+  if (normalized.neighborhood && clearAlternate) {
+    normalized.locality = null;
+  }
+  return normalized;
+}
+
 function capitalizeWords(str = '') {
   return String(str || '')
     .toLowerCase()

@@ -12,6 +12,7 @@
 import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
 import { splitFieldDecisions } from './debugTrace.js';
+import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
@@ -21,7 +22,6 @@ const CORE_PROFILE_FIELDS = [
   'documentType',
   'documentNumber',
   'age',
-  'neighborhood',
   'medicalRestrictions',
   'transportMode'
 ];
@@ -36,8 +36,12 @@ function buildFieldState(value) {
     : { captured: false };
 }
 
-function getCoreFieldGaps(candidate = {}) {
-  return CORE_PROFILE_FIELDS.filter((field) => !hasValue(candidate[field]));
+function getCoreFieldGaps(candidate = {}, vacancy = null) {
+  const gaps = CORE_PROFILE_FIELDS.filter((field) => !hasValue(candidate[field]));
+  if (!hasValue(getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy))) {
+    gaps.push(getResidenceFieldConfig(vacancy || candidate?.vacancy).field);
+  }
+  return gaps;
 }
 
 function normalizeMedicalRestrictionsLabel(value) {
@@ -73,7 +77,7 @@ function buildMessageActor(message = {}) {
   return 'Bot';
 }
 
-export function buildCandidateStateForModel(candidate = {}, recentMessages = []) {
+export function buildCandidateStateForModel(candidate = {}, vacancy = null, recentMessages = []) {
   const genderLabel = {
     MALE: 'Masculino',
     FEMALE: 'Femenino',
@@ -82,7 +86,9 @@ export function buildCandidateStateForModel(candidate = {}, recentMessages = [])
   }[candidate.gender] ?? 'No determinado';
 
   const hasCv = Boolean(candidate.cvData || candidate.cvOriginalName || candidate.cvMimeType);
-  const coreDataComplete = getCoreFieldGaps(candidate).length === 0;
+  const coreDataComplete = getCoreFieldGaps(candidate, vacancy).length === 0;
+  const residenceConfig = getResidenceFieldConfig(vacancy || candidate?.vacancy);
+  const residenceValue = getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy);
 
   return {
     currentStep: candidate.currentStep || 'MENU',
@@ -106,6 +112,11 @@ export function buildCandidateStateForModel(candidate = {}, recentMessages = [])
       gender: buildFieldState(genderLabel),
       neighborhood: buildFieldState(candidate.neighborhood),
       locality: buildFieldState(candidate.locality),
+      residenceArea: {
+        field: residenceConfig.field,
+        label: residenceConfig.label,
+        state: buildFieldState(residenceValue)
+      },
       medicalRestrictions: buildFieldState(normalizeMedicalRestrictionsLabel(candidate.medicalRestrictions)),
       transportMode: buildFieldState(candidate.transportMode),
       experienceInfo: buildFieldState(candidate.experienceInfo),
@@ -263,7 +274,7 @@ ${actionInstruction}
 }
 
 function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep }) {
-  const candidateState = buildCandidateStateForModel(candidate, recentMessages);
+  const candidateState = buildCandidateStateForModel(candidate, vacancy, recentMessages);
   const vacancyState = buildVacancyStateForModel(vacancy);
 
   return `Sos un reclutador del equipo de seleccion de LoginPro atendiendo candidatos por WhatsApp.
@@ -292,6 +303,8 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No confundas edad con anos de experiencia.
 - No pierdas datos enviados en varios fragmentos.
 - No ignores transportes como carro, automovil, bici, bicicleta, cicla, bus o independiente.
+- Si la vacante es en Bogota, pide y usa la localidad como zona de residencia; no sigas pidiendo barrio.
+- Si el candidato da una localidad o la menciona como barrio para Bogota, guardala como localidad.
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
 - Si la vacante existe pero esta inactiva o pausada, explica que hoy no se esta recibiendo personal, pero aun puedes pedir datos y hoja de vida para dejar el perfil registrado.
 - No te quedes en bucle cuando el usuario corrige.

@@ -95,6 +95,18 @@ test('isOperationallyCompleteWithoutCv permite CONTACTADO si cumple criterio y s
   assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'CONTACTADO' }), true);
 });
 
+test('criterios operativos aceptan localidad en Bogota aunque no haya barrio', () => {
+  const bogotaCandidate = {
+    ...baseCandidate,
+    neighborhood: null,
+    locality: 'Suba',
+    vacancy: { city: 'Bogota' }
+  };
+
+  assert.equal(isOperationallyRegistered(bogotaCandidate), true);
+  assert.equal(isOperationallyCompleteWithoutCv({ ...bogotaCandidate, cvData: null }), true);
+});
+
 test('scope missing_cv_complete filtra candidatos completos sin HV', () => {
   const candidates = [
     { ...baseCandidate, id: 'ok', cvData: null, status: 'REGISTRADO' },

@@ -110,6 +110,17 @@
       <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
     </form>
   </nav>
+  <%
+    const normalizeCityName = (value) => String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    const usesLocality = normalizeCityName(candidate?.vacancy?.city) === 'bogota';
+    const residenceLabel = usesLocality ? 'Localidad' : 'Barrio';
+    const residenceValue = usesLocality
+      ? (candidate.locality || candidate.neighborhood || candidate.zone || '')
+      : (candidate.neighborhood || candidate.locality || candidate.zone || '');
+  %>
   <div class="container">
     <a href="<%= returnToPath || '/admin' %>" class="back-link">&larr; Volver al listado</a>
     <div class="header-line">
@@ -179,8 +190,8 @@
           <span><%= candidate.age ? candidate.age + ' años' : '—' %></span>
         </div>
         <div class="info-item">
-          <label>Barrio</label>
-          <span><%= candidate.neighborhood || candidate.zone || '—' %></span>
+          <label><%= residenceLabel %></label>
+          <span><%= residenceValue || '—' %></span>
         </div>
         <div class="info-item">
           <label>Restricciones médicas</label>
@@ -500,8 +511,8 @@
           </div>
           <% } %>
           <div class="field-group">
-            <label for="neighborhood">Barrio</label>
-            <input id="neighborhood" name="neighborhood" type="text" value="<%= candidate.neighborhood || '' %>" />
+            <label for="residenceArea"><%= residenceLabel %></label>
+            <input id="residenceArea" name="residenceArea" type="text" value="<%= residenceValue || '' %>" />
           </div>
           <div class="field-group">
             <label for="medicalRestrictions">Restricciones médicas</label>
@@ -559,3 +570,4 @@
   </div>
 </body>
 </html>
+

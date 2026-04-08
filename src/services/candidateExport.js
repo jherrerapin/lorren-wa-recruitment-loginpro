@@ -1,3 +1,5 @@
+import { getCandidateResidenceValue } from './candidateData.js';
+
 function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
@@ -86,7 +88,7 @@ export function isOperationallyRegistered(candidate) {
     && hasValue(candidate.documentNumber)
     && candidate.age !== null
     && candidate.age !== undefined
-    && hasValue(candidate.neighborhood)
+    && hasValue(getCandidateResidenceValue(candidate))
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
     && candidateHasCv(candidate)
@@ -101,7 +103,7 @@ export function isOperationallyCompleteWithoutCv(candidate) {
     && hasValue(candidate.documentNumber)
     && candidate.age !== null
     && candidate.age !== undefined
-    && hasValue(candidate.neighborhood)
+    && hasValue(getCandidateResidenceValue(candidate))
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
     && !candidateHasCv(candidate)

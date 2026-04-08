@@ -368,6 +368,37 @@
     neighborhood: 'Barrio',
     locality: 'Localidad / zona'
   };
+  function normalizeCityName(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  }
+  function vacancyUsesLocality(vacancyOrCity) {
+    const city = typeof vacancyOrCity === 'string'
+      ? vacancyOrCity
+      : (vacancyOrCity && vacancyOrCity.city) || '';
+    return normalizeCityName(city) === 'bogota';
+  }
+  function getResidenceLabel(vacancyOrCity) {
+    return vacancyUsesLocality(vacancyOrCity) ? 'Localidad' : 'Barrio';
+  }
+  function getCandidateResidenceValue(candidate, vacancyOrCity = null) {
+    if (!candidate) return '';
+    if (vacancyUsesLocality(vacancyOrCity || candidate.vacancy || candidate.city)) {
+      return candidate.locality || candidate.neighborhood || candidate.zone || '';
+    }
+    return candidate.neighborhood || candidate.locality || candidate.zone || '';
+  }
+  function getVacancyFilterFields(vacancyOrCity) {
+    return vacancyUsesLocality(vacancyOrCity)
+      ? ['transportMode', 'locality']
+      : ['transportMode', 'neighborhood', 'locality'];
+  }
+  function getVacancyFilterLabel(field, vacancyOrCity) {
+    if (field === 'locality' && vacancyUsesLocality(vacancyOrCity)) return 'Localidad';
+    return vacancyFilterLabels[field] || field;
+  }
   const legacyParams = new URLSearchParams();
   if (activeStatusScope) legacyParams.set('status', activeStatusScope);
   ['neighborhood', 'locality', 'transportMode'].forEach((key) => {
@@ -409,25 +440,27 @@
     return candidate?.gender === 'FEMALE' || candidate?.isFemaleCandidate;
   }
 
-  function candidateFilterValue(candidate, field) {
+  function candidateFilterValue(candidate, field, vacancyOrCity = null) {
     if (!candidate) return '';
-    if (field === 'neighborhood') return candidate.neighborhood || candidate.zone || '';
-    if (field === 'locality') return candidate.locality || candidate.zone || '';
+    if (field === 'neighborhood') return candidate.neighborhood || (!vacancyUsesLocality(vacancyOrCity || candidate.vacancy || candidate.city) ? (candidate.locality || candidate.zone || '') : '');
+    if (field === 'locality') return vacancyUsesLocality(vacancyOrCity || candidate.vacancy || candidate.city)
+      ? (candidate.locality || candidate.neighborhood || candidate.zone || '')
+      : (candidate.locality || candidate.zone || '');
     return candidate[field] || '';
   }
 
-  function candidateMatchesVacancyFilters(candidate, filters) {
+  function candidateMatchesVacancyFilters(candidate, filters, vacancyOrCity = null) {
     if (!filters) return true;
     return vacancyFilterFields.every((field) => {
       if (!filters[field]) return true;
-      return String(candidateFilterValue(candidate, field)).toLowerCase() === String(filters[field]).toLowerCase();
+      return String(candidateFilterValue(candidate, field, vacancyOrCity)).toLowerCase() === String(filters[field]).toLowerCase();
     });
   }
 
-  function buildVacancyFilterOptions(candidates, field) {
+  function buildVacancyFilterOptions(candidates, field, vacancyOrCity = null) {
     const uniqueValues = new Map();
     for (const candidate of candidates || []) {
-      const value = String(candidateFilterValue(candidate, field) || '').trim();
+      const value = String(candidateFilterValue(candidate, field, vacancyOrCity) || '').trim();
       if (!value) continue;
       const key = value.toLowerCase();
       if (!uniqueValues.has(key)) uniqueValues.set(key, value);
@@ -516,7 +549,7 @@
     <thead>
       <tr>
         <th>Fecha registro</th><th>Nombre</th><th>Teléfono</th><th>Documento</th>
-        <th>Edad</th><th>Barrio</th><th>Restr. médicas</th><th>Transporte</th><th>Estado</th><th>Rechazo</th><th></th>
+        <th>Edad</th><th>Barrio / localidad</th><th>Restr. médicas</th><th>Transporte</th><th>Estado</th><th>Rechazo</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -554,7 +587,7 @@
           <td><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank"' %> style="color:#25d366;font-weight:600;"><%= c.phone %></a></td>
           <td><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : (c.documentNumber || '—') %></td>
           <td><%= c.age || '—' %></td>
-          <td><%= c.neighborhood || c.zone || '—' %></td>
+          <td><%= getCandidateResidenceValue(c, c.vacancy) || '—' %></td>
           <td><%= c.medicalRestrictions || '—' %></td>
           <td><%= c.transportMode || '—' %></td>
           <td><span class="badge <%= statusBadge[uiStatus] || 'badge-nuevo' %>"><%= statusLabel[uiStatus] || uiStatus %></span></td>
@@ -610,10 +643,11 @@
   };
 
   function candidateOperationalMeta(candidate, options = {}) {
-    const includeNeighborhood = options.includeNeighborhood !== false;
+    const includeResidence = options.includeResidence !== false;
+    const residenceContext = options.residenceContext || candidate?.vacancy || candidate;
     const parts = [];
-    if (includeNeighborhood && candidate.neighborhood) parts.push('Barrio: ' + candidate.neighborhood);
-    if (candidate.locality || candidate.zone) parts.push('Localidad: ' + (candidate.locality || candidate.zone));
+    const residenceValue = getCandidateResidenceValue(candidate, residenceContext);
+    if (includeResidence && residenceValue) parts.push(getResidenceLabel(residenceContext) + ': ' + residenceValue);
     if (candidate.medicalRestrictions) parts.push('Restricciones: ' + candidate.medicalRestrictions);
     if (candidate.transportMode) parts.push('Transporte: ' + candidate.transportMode);
     return parts.join(' · ');
@@ -735,6 +769,7 @@
         let modeBadgeClass = isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only');
         let modeBadgeText  = isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV');
         const currentVacancyFilters = (vacancyFiltersById && vacancyFiltersById[v.id]) || {};
+        const currentVacancyFilterFields = getVacancyFilterFields(v);
         const vacancyFilterSourceCandidates = [
           ...v.registeredNoBooking,
           ...v.registeredComplete,
@@ -742,11 +777,11 @@
           ...v.approvedCandidates,
           ...v.bookingsToday.map((booking) => booking.candidate).filter(Boolean)
         ];
-        const filteredBookingsToday = v.bookingsToday.filter((booking) => candidateMatchesVacancyFilters(booking.candidate, currentVacancyFilters));
-        const filteredRegisteredNoBooking = v.registeredNoBooking.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters));
-        const filteredRegisteredComplete = v.registeredComplete.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters));
-        const filteredCompleteWithoutCv = v.completeWithoutCv.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters));
-        const filteredApprovedCandidates = v.approvedCandidates.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters));
+        const filteredBookingsToday = v.bookingsToday.filter((booking) => candidateMatchesVacancyFilters(booking.candidate, currentVacancyFilters, v));
+        const filteredRegisteredNoBooking = v.registeredNoBooking.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
+        const filteredRegisteredComplete = v.registeredComplete.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
+        const filteredCompleteWithoutCv = v.completeWithoutCv.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
+        const filteredApprovedCandidates = v.approvedCandidates.filter((candidate) => candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v));
         const vacancyFiltersActive = vacancyFilterFields.some((field) => currentVacancyFilters[field]);
         const clearVacancyParams = new URLSearchParams();
         if (activeCity) clearVacancyParams.set('city', activeCity);
@@ -776,11 +811,11 @@
           <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { if (vacancyId !== v.id) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
             <input type="hidden" name="vf_<%= vacancyId %>_<%= field %>" value="<%= filters[field] %>" />
           <% } } } } } %>
-          <% for (const field of vacancyFilterFields) { %>
-            <% const fieldOptions = buildVacancyFilterOptions(vacancyFilterSourceCandidates, field); %>
+          <% for (const field of currentVacancyFilterFields) { %>
+            <% const fieldOptions = buildVacancyFilterOptions(vacancyFilterSourceCandidates, field, v); %>
             <% if (fieldOptions.length > 0) { %>
             <div class="filter-field">
-              <label for="vacancyFilter_<%= v.id %>_<%= field %>"><%= vacancyFilterLabels[field] %></label>
+              <label for="vacancyFilter_<%= v.id %>_<%= field %>"><%= getVacancyFilterLabel(field, v) %></label>
               <select id="vacancyFilter_<%= v.id %>_<%= field %>" name="vf_<%= v.id %>_<%= field %>">
                 <option value="">Todos</option>
                 <% for (const option of fieldOptions) { %>
@@ -809,7 +844,7 @@
               <div class="empty-state"><div class="empty-icon">📭</div><p>Sin entrevistas agendadas para este día.</p></div>
             <% } else { %>
               <table class="bookings-table" role="table">
-                <thead><tr><th>Hora</th><th>Candidato</th><th>Documento</th><th>Barrio</th><th>Estado cita</th><th>HV</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Hora</th><th>Candidato</th><th>Documento</th><th><%= getResidenceLabel(v) %></th><th>Estado cita</th><th>HV</th><th>Acciones</th></tr></thead>
                 <tbody>
                   <% for (const b of filteredBookingsToday) { %>
                     <% const bs = bookingStatusLabel[b.status] || { cls: '', icon: '•', text: b.status }; %>
@@ -828,13 +863,13 @@
                           </div>
                         <% } %>
                         <% if (b.candidate.age) { %><div style="font-size:11px;color:var(--text-muted);"><%= b.candidate.age %> años</div><% } %>
-                        <% const bookingMeta = candidateOperationalMeta(b.candidate, { includeNeighborhood: false }); %>
+                        <% const bookingMeta = candidateOperationalMeta(b.candidate, { includeResidence: false, residenceContext: v }); %>
                         <% if (bookingMeta) { %><div class="candidate-extra"><%= bookingMeta %></div><% } %>
                         <% const bookingNote = candidateObservationSnippet(b.candidate); %>
                         <% if (bookingNote) { %><div class="candidate-note">Observaciones: <%= bookingNote %></div><% } %>
                       </td>
                       <td style="font-size:12px;color:var(--text-muted);"><%= b.candidate.documentType && b.candidate.documentNumber ? b.candidate.documentType + ' ' + b.candidate.documentNumber : '—' %></td>
-                      <td style="font-size:12px;color:var(--text-muted);"><%= b.candidate.neighborhood || '—' %></td>
+                      <td style="font-size:12px;color:var(--text-muted);"><%= getCandidateResidenceValue(b.candidate, v) || '—' %></td>
                       <td><span class="<%= bs.cls %>" style="font-size:12px;"><%= bs.icon %> <%= bs.text %></span></td>
                       <td><span class="cv-pill <%= b.candidate.hasCv ? 'cv-yes' : 'cv-no' %>"><%= b.candidate.hasCv ? '✓ HV' : 'Sin HV' %></span></td>
                       <td>
@@ -889,7 +924,7 @@
                       </div>
                     <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %></div>
-                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% const candidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const registeredNoBookingNote = candidateObservationSnippet(c); %>
                     <% if (registeredNoBookingNote) { %><div class="candidate-note">Observaciones: <%= registeredNoBookingNote %></div><% } %>
@@ -941,7 +976,7 @@
                       </div>
                     <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
-                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% const candidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const completeWithoutCvNote = candidateObservationSnippet(c); %>
                     <% if (completeWithoutCvNote) { %><div class="candidate-note">Observaciones: <%= completeWithoutCvNote %></div><% } %>
@@ -998,7 +1033,7 @@
                         </div>
                       <% } %>
                       <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
-                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% const candidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const registeredCompleteNote = candidateObservationSnippet(c); %>
                     <% if (registeredCompleteNote) { %><div class="candidate-note">Observaciones: <%= registeredCompleteNote %></div><% } %>
@@ -1051,7 +1086,7 @@
                       </div>
                     <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
-                    <% const candidateMeta = candidateOperationalMeta(c); %>
+                    <% const candidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const cvOnlyNote = candidateObservationSnippet(c); %>
                     <% if (cvOnlyNote) { %><div class="candidate-note">Observaciones: <%= cvOnlyNote %></div><% } %>
@@ -1106,7 +1141,7 @@
                       </div>
                     <% } %>
                     <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '-' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> anios<% } %></div>
-                    <% const approvedCandidateMeta = candidateOperationalMeta(c); %>
+                    <% const approvedCandidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
                     <% if (approvedCandidateMeta) { %><div class="candidate-extra"><%= approvedCandidateMeta %></div><% } %>
                     <% const approvedCandidateNote = candidateObservationSnippet(c); %>
                     <% if (approvedCandidateNote) { %><div class="candidate-note">Observaciones: <%= approvedCandidateNote %></div><% } %>
@@ -1211,4 +1246,5 @@
 
 </body>
 </html>
+
 

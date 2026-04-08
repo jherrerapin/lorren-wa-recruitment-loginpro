@@ -72,6 +72,23 @@ test('buildReminderText especifica exactamente los campos faltantes y la HV cuan
   assert.doesNotMatch(text, /datos faltantes/i);
 });
 
+test('buildReminderText pide localidad para vacantes de Bogota', () => {
+  const text = buildReminderText({
+    fullName: 'Laura Gomez',
+    documentType: 'CC',
+    documentNumber: '123456789',
+    age: 29,
+    locality: null,
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    cvData: null,
+    vacancy: { city: 'Bogota' }
+  });
+
+  assert.match(text, /localidad/i);
+  assert.doesNotMatch(text, /barrio/i);
+});
+
 test('runReminderDispatcher envía recordatorio contextualizado según lo que falta', async () => {
   process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
   process.env.META_ACCESS_TOKEN = 'meta-access-token';

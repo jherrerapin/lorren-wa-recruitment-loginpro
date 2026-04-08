@@ -126,6 +126,7 @@ model Vacancy {
   minAge                 Int?
   maxAge                 Int?
   experienceRequired     ExperienceRequirement @default(INDIFFERENT)
+  experienceTimeText     String?
   minExperienceMonths    Int?
   maxExperienceMonths    Int?
   imageData              Bytes?

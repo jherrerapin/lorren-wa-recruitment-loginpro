@@ -5,7 +5,15 @@ import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { tryOpenAIParse } from '../services/aiParser.js';
 import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
 import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
-import { hasMeaningfulCandidateData, isHighConfidenceLocalField, normalizeCandidateFields, parseNaturalData } from '../services/candidateData.js';
+import {
+  alignCandidateLocationFields,
+  getCandidateResidenceValue,
+  getResidenceFieldConfig,
+  hasMeaningfulCandidateData,
+  isHighConfidenceLocalField,
+  normalizeCandidateFields,
+  parseNaturalData
+} from '../services/candidateData.js';
 import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
@@ -20,7 +28,6 @@ import { generateBookingConfirmation, generateInterviewOffer } from '../services
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 
-const SOLICITAR_DATOS = 'Perfecto. Enviáme por favor estos datos para continuar: nombre completo, tipo de documento, número de documento, edad, barrio, si tienes restricciones médicas y qué medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea más fácil.';
 const DESCARTE_MSG = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque no cumples con uno de los requisitos definidos para esta vacante.';
 const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
 const SOLICITAR_HV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida (HV) en PDF o Word (.doc/.docx) para finalizar tu postulación.';
@@ -33,21 +40,11 @@ const CONFIRMACION_PROMPT = '¿Está correcto? Responde Sí para continuar o env
 const INTERVIEW_OFFER_SOURCES = new Set(['interview_offer', 'interview_reschedule']);
 const ASK_VACANCY_FOR_CV = 'Recibi tu hoja de vida. Para asociarla correctamente, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.';
 
-const REQUIRED_FIELDS = [
-  'fullName',
-  'documentType',
-  'documentNumber',
-  'age',
-  'neighborhood',
-  'medicalRestrictions',
-  'transportMode'
-];
 const FIELD_LABELS = {
   fullName: 'el nombre completo',
   documentType: 'el tipo de documento',
   documentNumber: 'el número de documento',
   age: 'la edad',
-  neighborhood: 'el barrio',
   medicalRestrictions: 'las restricciones médicas',
   transportMode: 'el medio de transporte'
 };
@@ -128,25 +125,85 @@ function shouldRejectByRequirements(text, parsed = {}) {
   if (mentionsForeigner(text) && hasValidForeignDocumentMention(text, parsed)) return { reject: false };
   return { reject: false };
 }
-function getMissingFields(candidate) {
+function getRequiredFieldKeys(vacancy = null) {
+  const residenceConfig = getResidenceFieldConfig(vacancy);
+  return [
+    'fullName',
+    'documentType',
+    'documentNumber',
+    'age',
+    residenceConfig.field,
+    'medicalRestrictions',
+    'transportMode'
+  ];
+}
+function getFieldLabel(field, vacancy = null) {
+  if (field === 'locality' || field === 'neighborhood') {
+    return getResidenceFieldConfig(vacancy).articleLabel;
+  }
+  return FIELD_LABELS[field] || field;
+}
+function buildResidenceMissingField(candidate, vacancy = null) {
+  return getCandidateResidenceValue(candidate, vacancy) ? null : getResidenceFieldConfig(vacancy).label;
+}
+function getMissingFieldsForVacancy(candidate, vacancy = null) {
   const m = [];
   if (!candidate.fullName) m.push('nombre completo');
   if (!candidate.documentType) m.push('tipo de documento');
-  if (!candidate.documentNumber) m.push('número de documento');
+  if (!candidate.documentNumber) m.push('numero de documento');
   if (!candidate.age) m.push('edad');
-  if (!candidate.neighborhood) m.push('barrio');
-  if (!candidate.medicalRestrictions) m.push('restricciones médicas');
+  const missingResidence = buildResidenceMissingField(candidate, vacancy);
+  if (missingResidence) m.push(missingResidence);
+  if (!candidate.medicalRestrictions) m.push('restricciones medicas');
   if (!candidate.transportMode) m.push('medio de transporte');
   return m;
 }
-function formatFieldList(fields = []) {
+function formatFieldListForVacancy(fields = [], vacancy = null) {
   const labels = fields
-    .map((field) => FIELD_LABELS[field] || field)
+    .map((field) => getFieldLabel(field, vacancy))
     .filter(Boolean);
   if (!labels.length) return '';
   if (labels.length === 1) return labels[0];
   if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
   return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
+}
+function buildDataRequestPrompt(vacancy = null) {
+  const residenceConfig = getResidenceFieldConfig(vacancy);
+  return `Perfecto. Enviame por favor estos datos para continuar: nombre completo, tipo de documento, numero de documento, edad, ${residenceConfig.label}, si tienes restricciones medicas y que medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea mas facil.`;
+}
+function getMissingFields(candidate, vacancy = null) {
+  return getMissingFieldsForVacancy(candidate, vacancy);
+}
+function formatFieldList(fields = [], vacancy = null) {
+  return formatFieldListForVacancy(fields, vacancy);
+}
+function buildMissingFieldsReply(candidate, normalizedData = {}, vacancy = null) {
+  const missing = getMissingFields(candidate, vacancy);
+  if (!missing.length) return '';
+  const capturedCount = Object.keys(normalizedData || {})
+    .filter((field) => getRequiredFieldKeys(vacancy).includes(field) && normalizedData[field] !== undefined && normalizedData[field] !== null && normalizedData[field] !== '')
+    .length;
+  if (capturedCount >= 2) return `Perfecto, ya registre esos datos. Para seguir necesito: ${missing.join(', ')}.`;
+  if (capturedCount === 1) return `Listo, ese dato ya quedo registrado. Ahora necesito: ${missing.join(', ')}.`;
+  return `Para continuar necesito: ${missing.join(', ')}.`;
+}
+function buildUpdatedConfirmationReply(candidate, updatedFields = [], vacancy = null) {
+  const updatedLabel = formatFieldList(updatedFields, vacancy);
+  const missing = getMissingFields(candidate, vacancy);
+  const intro = updatedLabel
+    ? `Listo, ya actualice ${updatedLabel}. Asi va tu registro:`
+    : 'Listo, asi va tu registro:';
+  const prompt = missing.length
+    ? `Para seguir me faltan: ${missing.join(', ')}.`
+    : 'Si todo esta bien, seguimos con el siguiente paso.';
+  return buildConfirmationSummary(candidate, { intro, prompt }, vacancy);
+}
+function buildConfirmationClarifier(candidate, vacancy = null) {
+  const missing = getMissingFields(candidate, vacancy);
+  if (missing.length) {
+    return `Si ves algo por ajustar, enviame solo el dato correcto. Para seguir todavia necesito: ${missing.join(', ')}.`;
+  }
+  return 'Si todo esta correcto, responde si y seguimos. Si quieres ajustar algo, enviame solo ese dato y lo actualizo.';
 }
 function containsCandidateData(text, parsedData = null) {
   const candidateData = parsedData && typeof parsedData === 'object'
@@ -258,7 +315,7 @@ function buildVacancyContinuePrompt(candidate, vacancy = null) {
       return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF o Word.';
     }
     if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
-      const missing = getMissingFields(candidate);
+      const missing = getMissingFields(candidate, vacancy);
       if (missing.length) {
         return `Si quieres dejar tu perfil registrado, aun me faltan estos datos: ${missing.join(', ')}.`;
       }
@@ -268,7 +325,7 @@ function buildVacancyContinuePrompt(candidate, vacancy = null) {
   }
   if (candidate.currentStep === ConversationStep.ASK_CV) return RECORDATORIO_HV;
   if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
-    const missing = getMissingFields(candidate);
+    const missing = getMissingFields(candidate, vacancy);
     if (missing.length) return `Si deseas continuar, aun me faltan estos datos: ${missing.join(', ')}.`;
     return SOLICITAR_HV;
   }
@@ -281,34 +338,6 @@ function buildVacancyAssociationPrompt(options = {}) {
     : (options.dataCaptured ? 'Ya registre lo que me compartiste.' : 'Con gusto te ayudo.');
   const attachment = options.hasCv ? 'Para asociarla correctamente' : 'Para asociar bien tu proceso';
   return `${intro} ${attachment}, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.`;
-}
-function buildMissingFieldsReply(candidate, normalizedData = {}) {
-  const missing = getMissingFields(candidate);
-  if (!missing.length) return '';
-  const capturedCount = Object.keys(normalizedData || {})
-    .filter((field) => REQUIRED_FIELDS.includes(field) && candidate[field] !== undefined && candidate[field] !== null && candidate[field] !== '')
-    .length;
-  if (capturedCount >= 2) return `Perfecto, ya registré esos datos. Para seguir necesito: ${missing.join(', ')}.`;
-  if (capturedCount === 1) return `Listo, ese dato ya quedó registrado. Ahora necesito: ${missing.join(', ')}.`;
-  return `Para continuar necesito: ${missing.join(', ')}.`;
-}
-function buildUpdatedConfirmationReply(candidate, updatedFields = []) {
-  const updatedLabel = formatFieldList(updatedFields);
-  const missing = getMissingFields(candidate);
-  const intro = updatedLabel
-    ? `Listo, ya actualicé ${updatedLabel}. Así va tu registro:`
-    : 'Listo, así va tu registro:';
-  const prompt = missing.length
-    ? `Para seguir me faltan: ${missing.join(', ')}.`
-    : 'Si todo está bien, seguimos con el siguiente paso.';
-  return buildConfirmationSummary(candidate, { intro, prompt });
-}
-function buildConfirmationClarifier(candidate) {
-  const missing = getMissingFields(candidate);
-  if (missing.length) {
-    return `Si ves algo por ajustar, envíame solo el dato correcto. Para seguir todavía necesito: ${missing.join(', ')}.`;
-  }
-  return 'Si todo está correcto, responde sí y seguimos. Si quieres ajustar algo, envíame solo ese dato y lo actualizo.';
 }
 function buildQuestionFollowUpReply(vacancy, inboundText = '', followUpText = '') {
   const answer = buildVacancyQuestionLead(vacancy, inboundText);
@@ -458,7 +487,9 @@ async function loadVacancyContext(prisma, vacancyId) {
   });
 }
 
-function buildConfirmationSummary(candidate, options = {}) {
+function buildConfirmationSummary(candidate, options = {}, vacancy = null) {
+  const residenceConfig = getResidenceFieldConfig(vacancy);
+  const residenceValue = getCandidateResidenceValue(candidate, vacancy) || 'Pendiente';
   const documentLabel = candidate.documentType && candidate.documentNumber
     ? `${candidate.documentType} ${candidate.documentNumber}`
     : 'Pendiente';
@@ -466,12 +497,12 @@ function buildConfirmationSummary(candidate, options = {}) {
   const prompt = options.prompt || CONFIRMACION_PROMPT;
   return [
     intro,
-    `• Nombre completo: ${candidate.fullName || 'Pendiente'}`,
-    `• Documento: ${documentLabel}`,
-    `• Edad: ${candidate.age ? `${candidate.age} años` : 'Pendiente'}`,
-    `• Barrio: ${candidate.neighborhood || 'Pendiente'}`,
-    `• Restricciones médicas: ${candidate.medicalRestrictions || 'Pendiente'}`,
-    `• Medio de transporte: ${candidate.transportMode || 'Pendiente'}`,
+    `- Nombre completo: ${candidate.fullName || 'Pendiente'}`,
+    `- Documento: ${documentLabel}`,
+    `- Edad: ${candidate.age ? `${candidate.age} anios` : 'Pendiente'}`,
+    `- ${residenceConfig.labelTitle}: ${residenceValue}`,
+    `- Restricciones medicas: ${candidate.medicalRestrictions || 'Pendiente'}`,
+    `- Medio de transporte: ${candidate.transportMode || 'Pendiente'}`,
     prompt
   ].join('\n');
 }
@@ -551,17 +582,22 @@ async function buildInterviewConfirmationReply(candidate, vacancy, nextSlot) {
   });
 }
 
-function shouldAskForConfirmation(candidate, normalizedData) {
+function shouldAskForConfirmation(candidate, normalizedData, vacancy = null) {
   if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
-    return getMissingFields(candidate).length === 0;
+    return getMissingFields(candidate, vacancy).length === 0;
   }
-  const missing = getMissingFields(candidate);
-  const hasMainBlock = REQUIRED_FIELDS.every((field) => candidate[field] !== null && candidate[field] !== undefined && candidate[field] !== '');
+  const missing = getMissingFields(candidate, vacancy);
+  const hasMainBlock = getRequiredFieldKeys(vacancy).every((field) => {
+    if (field === 'locality' || field === 'neighborhood') {
+      return Boolean(getCandidateResidenceValue(candidate, vacancy));
+    }
+    return candidate[field] !== null && candidate[field] !== undefined && candidate[field] !== '';
+  });
   if (hasMainBlock) return true;
   if (!missing.length) return true;
 
   const correctedFields = Object.keys(normalizedData || {});
-  const requiresReconfirm = correctedFields.some((field) => REQUIRED_FIELDS.includes(field));
+  const requiresReconfirm = correctedFields.some((field) => getRequiredFieldKeys(vacancy).includes(field));
   return requiresReconfirm && correctedFields.length >= 2 && missing.length <= 2;
 }
 
@@ -940,7 +976,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'engine');
   }
-  const normalizedData = normalizeCandidateFields(mergedData);
+  let normalizedData = normalizeCandidateFields(mergedData);
+  if (currentVacancy) {
+    normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
+  }
   const hasDataIntent = containsCandidateData(cleanText, normalizedData);
 
   debugTrace.openai_used = aiResult.used || Object.keys(engineFields).length > 0;
@@ -1060,6 +1099,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         });
         candidate = { ...candidate, vacancyId: resolution.vacancy.id };
         currentVacancy = resolution.vacancy;
+        normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
+        debugTrace.normalized_fields = normalizedData;
       } else if (await replyFromVacancyResolutionFailure(resolution)) {
         return;
       }
@@ -1247,10 +1288,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   const routeAfterConfirmation = async (updatedCandidate) => {
-    const missing = getMissingFields(updatedCandidate);
+    const missing = getMissingFields(updatedCandidate, currentVacancy);
     if (missing.length) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
-      const replyText = buildMissingFieldsReply(updatedCandidate, normalizedData);
+      const replyText = buildMissingFieldsReply(updatedCandidate, normalizedData, currentVacancy);
       return reply(prisma, candidate.id, from, replyText, cleanText, { body: replyText, source: 'bot_flow' });
     }
 
@@ -1277,8 +1318,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     const { updatedCandidate: updated, decisions } = await applyDecisionsAndUpdate();
-    const correctedRequiredFields = decisions.persistedFields.filter((field) => REQUIRED_FIELDS.includes(field));
-    const missingAfterCorrection = getMissingFields(updated);
+    const correctedRequiredFields = decisions.persistedFields.filter((field) => getRequiredFieldKeys(currentVacancy).includes(field));
+    const missingAfterCorrection = getMissingFields(updated, currentVacancy);
 
     if (correctedRequiredFields.length) {
       if (!missingAfterCorrection.length) {
@@ -1289,7 +1330,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         where: { id: candidate.id },
         data: { currentStep: ConversationStep.COLLECTING_DATA }
       });
-      const correctionReply = buildUpdatedConfirmationReply(updated, correctedRequiredFields);
+      const correctionReply = buildUpdatedConfirmationReply(updated, correctedRequiredFields, currentVacancy);
       const body = askedVacancyQuestion
         ? buildQuestionFollowUpReply(currentVacancy, cleanText, correctionReply)
         : correctionReply;
@@ -1300,7 +1341,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, 'Gracias por avisar. Indícame por favor el dato que deseas corregir y lo actualizo.');
     }
     const latest = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-    const followUp = buildConfirmationClarifier(latest);
+    const followUp = buildConfirmationClarifier(latest, currentVacancy);
     const body = askedVacancyQuestion
       ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
       : followUp;
@@ -1337,24 +1378,25 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
         }
 
-        if (shouldAskForConfirmation(updated, normalizedData)) {
+        if (shouldAskForConfirmation(updated, normalizedData, currentVacancy)) {
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
-          const confirmationText = buildConfirmationSummary(updated);
+          const confirmationText = buildConfirmationSummary(updated, {}, currentVacancy);
           const body = askedVacancyQuestion
             ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
             : confirmationText;
           return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
         }
-        const followUp = buildMissingFieldsReply(updated, normalizedData);
+        const followUp = buildMissingFieldsReply(updated, normalizedData, currentVacancy);
         const body = askedVacancyQuestion
           ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
           : followUp;
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
+      const dataPrompt = buildDataRequestPrompt(currentVacancy);
       const body = askedVacancyQuestion
-        ? buildQuestionFollowUpReply(currentVacancy, cleanText, SOLICITAR_DATOS)
-        : SOLICITAR_DATOS;
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, dataPrompt)
+        : dataPrompt;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
@@ -1374,15 +1416,15 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
       }
 
-      if (shouldAskForConfirmation(updated, normalizedData)) {
+      if (shouldAskForConfirmation(updated, normalizedData, currentVacancy)) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
-        const confirmationText = buildConfirmationSummary(updated);
+        const confirmationText = buildConfirmationSummary(updated, {}, currentVacancy);
         const body = askedVacancyQuestion
           ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
           : confirmationText;
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
-      const followUp = buildMissingFieldsReply(updated, normalizedData);
+      const followUp = buildMissingFieldsReply(updated, normalizedData, currentVacancy);
       const body = askedVacancyQuestion
         ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
         : followUp;
@@ -1406,16 +1448,16 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }
 
-    if (shouldAskForConfirmation(updated, normalizedData)) {
-      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
-      const confirmationText = buildConfirmationSummary(updated);
+      if (shouldAskForConfirmation(updated, normalizedData, currentVacancy)) {
+        await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
+        const confirmationText = buildConfirmationSummary(updated, {}, currentVacancy);
       const body = askedVacancyQuestion
         ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
         : confirmationText;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
-    const followUp = buildMissingFieldsReply(updated, normalizedData);
+      const followUp = buildMissingFieldsReply(updated, normalizedData, currentVacancy);
     const body = askedVacancyQuestion
       ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
       : followUp;
@@ -1629,7 +1671,10 @@ export function webhookRouter(prisma) {
                     await reply(prisma, candidate.id, from, body, '', { body, source: 'bot_flow' });
                     continue;
                   }
-                  const missing = getMissingFields(afterCvSave);
+                  const afterCvVacancy = afterCvSave.vacancyId
+                    ? await loadVacancyContext(prisma, afterCvSave.vacancyId)
+                    : null;
+                  const missing = getMissingFields(afterCvSave, afterCvVacancy);
                   if (shouldFinalizeAfterCv({ missingFields: missing })) {
                     await finalizeCandidateAfterCv(prisma, afterCvSave, from);
                   } else {
@@ -1669,4 +1714,5 @@ export function webhookRouter(prisma) {
 
   return router;
 }
+
 

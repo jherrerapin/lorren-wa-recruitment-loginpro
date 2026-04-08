@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
+import {
+  alignCandidateLocationFields,
+  getCandidateResidenceValue,
+  getResidenceFieldConfig,
+  normalizeCandidateFields,
+  parseNaturalData
+} from '../src/services/candidateData.js';
 import { splitFieldDecisions } from '../src/services/debugTrace.js';
 
 test('frase de intención no se persiste como fullName', () => {
@@ -204,4 +210,12 @@ test('detecta genero femenino explicito en el mensaje', () => {
   const parsed = parseNaturalData('Soy mujer y estoy interesada en la vacante');
   const normalized = normalizeCandidateFields(parsed);
   assert.equal(normalized.gender, 'FEMALE');
+});
+
+test('usa localidad como residencia principal para vacantes de Bogota', () => {
+  assert.equal(getResidenceFieldConfig('Bogota').field, 'locality');
+  const aligned = alignCandidateLocationFields({ neighborhood: 'Suba' }, { city: 'Bogota' }, { clearAlternate: true });
+  assert.equal(aligned.locality, 'Suba');
+  assert.equal(aligned.neighborhood, null);
+  assert.equal(getCandidateResidenceValue({ locality: 'Suba' }, { city: 'Bogota' }), 'Suba');
 });

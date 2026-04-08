@@ -269,11 +269,16 @@
           </div>
           <div class="form-group full">
             <label for="c-exp">Experiencia requerida</label>
-            <select id="c-exp" name="experienceRequired">
+            <select id="c-exp" name="experienceRequired" onchange="syncExperienceField('c-exp', 'c-exp-time-group')">
               <option value="INDIFFERENT">Indiferente</option>
               <option value="YES">Requerida</option>
               <option value="NO">No requerida</option>
             </select>
+          </div>
+          <div class="form-group full" id="c-exp-time-group" style="display:none;">
+            <label for="c-expTimeText">Tiempo de experiencia requerido</label>
+            <input id="c-expTimeText" name="experienceTimeText" type="text" placeholder="Ej: 6 meses, 1 año, experiencia reciente en coordinación" />
+            <span class="form-hint">Este texto se guarda tal cual para que el bot y el equipo reclutador lo usen como referencia.</span>
           </div>
 
           <div class="section-divider">Textos para el bot</div>
@@ -418,11 +423,16 @@
           </div>
           <div class="form-group full">
             <label for="e-exp">Experiencia requerida</label>
-            <select id="e-exp" name="experienceRequired">
+            <select id="e-exp" name="experienceRequired" onchange="syncExperienceField('e-exp', 'e-exp-time-group')">
               <option value="INDIFFERENT">Indiferente</option>
               <option value="YES">Requerida</option>
               <option value="NO">No requerida</option>
             </select>
+          </div>
+          <div class="form-group full" id="e-exp-time-group" style="display:none;">
+            <label for="e-expTimeText">Tiempo de experiencia requerido</label>
+            <input id="e-expTimeText" name="experienceTimeText" type="text" />
+            <span class="form-hint">Ej: 6 meses, 1 año, coordinación de personal operativo.</span>
           </div>
 
           <div class="section-divider">Textos para el bot</div>
@@ -536,6 +546,16 @@
     syncScheduleConfig(checkboxId, flowGroupId, scheduleConfigId);
   }
 
+  function syncExperienceField(selectId, fieldGroupId) {
+    const select = document.getElementById(selectId);
+    const group = document.getElementById(fieldGroupId);
+    if (!select || !group) return;
+    const visible = select.value === 'YES';
+    group.style.display = visible ? '' : 'none';
+    const input = group.querySelector('input[name="experienceTimeText"]');
+    if (input && !visible) input.value = '';
+  }
+
   function injectConfigFields(formId, checkboxId, flowGroupId) {
     const form      = document.getElementById(formId);
     const checkbox  = document.getElementById(checkboxId);
@@ -562,9 +582,12 @@
     cb.checked = false;
     document.getElementById('c-address').value = '';
     document.getElementById('c-interviewAddress').value = '';
+    document.getElementById('c-exp').value = 'INDIFFERENT';
+    document.getElementById('c-expTimeText').value = '';
     document.getElementById('c-slotStartTime').value = '08:00';
     document.getElementById('c-slotMaxCandidates').value = '10';
     document.querySelectorAll('#c-schedule-config input[name="slotDays"]').forEach((input) => { input.checked = false; });
+    syncExperienceField('c-exp', 'c-exp-time-group');
     syncActiveState('c-isActive', 'c-flow', 'c-toggle-row', 'c-schedule-config');
     document.getElementById('modalCreate').classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -580,6 +603,7 @@
     document.getElementById('e-minAge').value  = v.minAge != null ? v.minAge : '';
     document.getElementById('e-maxAge').value  = v.maxAge != null ? v.maxAge : '';
     document.getElementById('e-exp').value     = v.experienceRequired || 'INDIFFERENT';
+    document.getElementById('e-expTimeText').value = v.experienceTimeText || '';
     document.getElementById('e-desc').value    = v.roleDescription || '';
     document.getElementById('e-req').value     = v.requirements || '';
     document.getElementById('e-cond').value    = v.conditions   || '';
@@ -605,6 +629,7 @@
     cb.checked = !!v.isActive;
     const flow  = v.schedulingEnabled ? 'apply_schedule' : 'apply_only';
     document.getElementById('e-flow').querySelectorAll('input[type=radio]').forEach(r => r.checked = (r.value === flow));
+    syncExperienceField('e-exp', 'e-exp-time-group');
     syncActiveState('e-isActive', 'e-flow', 'e-toggle-row', 'e-schedule-config');
     document.getElementById('modalEdit').classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -628,6 +653,13 @@
       radio.addEventListener('change', () => syncScheduleConfig(checkboxId, flowGroupId, configId));
     });
   });
+  ['c-exp', 'e-exp'].forEach((selectId) => {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    select.addEventListener('change', () => syncExperienceField(selectId, selectId === 'c-exp' ? 'c-exp-time-group' : 'e-exp-time-group'));
+  });
+  syncExperienceField('c-exp', 'c-exp-time-group');
+  syncExperienceField('e-exp', 'e-exp-time-group');
   setTimeout(() => {
     document.querySelectorAll('.alert').forEach(a => {
       a.style.transition = 'opacity .4s'; a.style.opacity = '0';
