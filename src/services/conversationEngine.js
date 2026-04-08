@@ -11,6 +11,7 @@
 
 import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
+import { splitFieldDecisions } from './debugTrace.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
@@ -120,14 +121,20 @@ export function buildVacancyStateForModel(vacancy) {
     };
   }
 
+  const availabilityStatus = vacancy.isActive && vacancy.acceptingApplications
+    ? 'OPEN'
+    : (vacancy.isActive ? 'PAUSED' : 'INACTIVE');
+
   return {
     resolved: true,
     title: vacancy.title || vacancy.role || null,
     role: vacancy.role || vacancy.title || null,
     city: vacancy.operation?.city?.name || vacancy.city || null,
+    availabilityStatus,
     operation: {
       name: vacancy.operation?.name || null,
-      address: vacancy.operationAddress || null
+      zone: vacancy.operationAddress || null,
+      interviewAddress: vacancy.interviewAddress || null
     },
     schedulingEnabled: Boolean(vacancy.schedulingEnabled),
     acceptingApplications: Boolean(vacancy.acceptingApplications),
@@ -215,6 +222,14 @@ INSTRUCCIONES PARA CONFIRMING_DATA:
 function buildSchedulingStepInstructions(currentStep, candidate, vacancy, nextSlot) {
   if (!vacancy?.schedulingEnabled) return '';
 
+  if (!vacancy?.isActive || !vacancy?.acceptingApplications) {
+    return `
+INSTRUCCION CRITICA DE DISPONIBILIDAD:
+- Esta vacante no esta abierta para recibir personal en este momento.
+- No ofrezcas entrevistas ni agendamiento.
+- Puedes pedir datos y hoja de vida para dejar el perfil registrado por si se reactiva.`;
+  }
+
   if (candidate.gender === 'FEMALE') {
     return `
 INSTRUCCION CRITICA DE AGENDA:
@@ -267,6 +282,7 @@ PRIORIDADES:
 - Si plantea una objecion, atiendela antes de retomar el flujo.
 - Si ya envio datos en fragmentos, consolidalos.
 - Si corrige algo, usa el valor nuevo y no reabras la misma confirmacion.
+- Si ya envio la hoja de vida y en este mensaje por fin aclara ciudad o vacante, ubica el proceso, explica brevemente la vacante real y luego sigue solo con lo faltante.
 - Si expresa no interes, cierra correctamente con "mark_no_interest".
 - Si un humano ya intervino, no respondas encima; usa "pause_bot" o "nothing" segun corresponda.
 
@@ -275,6 +291,8 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No confundas edad con anos de experiencia.
 - No pierdas datos enviados en varios fragmentos.
 - No ignores transportes como carro, automovil, bici, bicicleta, cicla, bus o independiente.
+- Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
+- Si la vacante existe pero esta inactiva o pausada, explica que hoy no se esta recibiendo personal, pero aun puedes pedir datos y hoja de vida para dejar el perfil registrado.
 - No te quedes en bucle cuando el usuario corrige.
 - No reabras confirmacion si el dato ya fue corregido.
 - No respondas como formulario disfrazado.
@@ -569,17 +587,27 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
 
   const mergedFields = normalizeCandidateFields(mergedRawFields);
   const mappedGender = mapEngineGender(mergedRawFields.gender, Gender);
-  if (mappedGender) mergedFields.gender = mappedGender;
+  const engineSourceByField = Object.fromEntries(
+    Object.keys(mergedFields).map((field) => [field, 'engine'])
+  );
+  const fieldDecisions = splitFieldDecisions(mergedFields, candidate, {
+    sourceByField: engineSourceByField,
+    allowOverwriteFields: ['age', 'transportMode', 'medicalRestrictions', 'experienceInfo', 'experienceTime']
+  });
+  const persistedFields = { ...(fieldDecisions.persistedData || {}) };
+  if (mappedGender && (!candidate.gender || candidate.gender === Gender.UNKNOWN)) {
+    persistedFields.gender = mappedGender;
+  }
 
-  const candidateAfterMerge = { ...candidate, ...mergedFields };
+  const candidateAfterMerge = { ...candidate, ...persistedFields };
   const coreFieldGapsAfterMerge = getCoreFieldGaps(candidateAfterMerge);
-  const hasNewCoreData = Object.keys(mergedFields).some((field) => CORE_PROFILE_FIELDS.includes(field));
+  const hasNewCoreData = Object.keys(persistedFields).some((field) => CORE_PROFILE_FIELDS.includes(field));
   const hasCvAfterMerge = Boolean(candidateAfterMerge.cvData || candidateAfterMerge.cvOriginalName || candidateAfterMerge.cvMimeType);
 
-  if (Object.keys(mergedFields).length) {
+  if (Object.keys(persistedFields).length) {
     await prisma.candidate.update({
       where: { id: candidate.id },
-      data: mergedFields
+      data: persistedFields
     }).catch((error) => {
       console.error('[ACT_FIELDS_ERROR]', { error: error?.message?.slice(0, 200) });
     });

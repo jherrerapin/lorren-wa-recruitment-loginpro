@@ -217,7 +217,7 @@
       <h2 id="modalCreateTitle">➕ Nueva vacante</h2>
       <button class="modal-close" onclick="closeModal('modalCreate')" aria-label="Cerrar">&times;</button>
     </div>
-    <form method="post" action="/admin/vacancies/create" id="formCreate" onsubmit="injectConfigFields('formCreate','c-isActive','c-flow','c-address','c-interviewAddress')">
+    <form method="post" action="/admin/vacancies/create" id="formCreate" onsubmit="injectConfigFields('formCreate','c-isActive','c-flow')">
       <div class="modal-body">
         <div class="form-grid">
 
@@ -254,8 +254,8 @@
             <input id="c-role" name="role" type="text" placeholder="Ej: Auxiliar de Cargue y Descargue" />
           </div>
           <div class="form-group full">
-            <label for="c-address">Dirección de operación</label>
-            <input id="c-address" name="operationAddress" type="text" placeholder="Ej: Carrera 5 # 10-20" />
+            <label for="c-address">Zona de operación</label>
+            <input id="c-address" name="operationAddress" type="text" placeholder="Ej: Zona industrial / Montevideo / Norte" />
           </div>
 
           <div class="section-divider">Edad y experiencia</div>
@@ -327,7 +327,7 @@
             <div class="form-group full">
               <label for="c-interviewAddress">Dirección de entrevista</label>
               <input id="c-interviewAddress" name="interviewAddress" type="text" placeholder="Ej: Carrera 80 # 12-30" />
-              <span class="form-hint">Si la dejas vacía, se usará la dirección de operación.</span>
+              <span class="form-hint">Si la dejas vacía, el bot usará la zona de operación como referencia.</span>
             </div>
             <div class="form-group full">
               <label>Días disponibles para entrevista</label>
@@ -342,16 +342,8 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="c-slotStartTime">Hora inicial</label>
+              <label for="c-slotStartTime">Hora de entrevista</label>
               <input id="c-slotStartTime" name="slotStartTime" type="time" value="08:00" />
-            </div>
-            <div class="form-group">
-              <label for="c-slotEndTime">Hora final</label>
-              <input id="c-slotEndTime" name="slotEndTime" type="time" value="17:00" />
-            </div>
-            <div class="form-group">
-              <label for="c-slotDurationMinutes">Duración por entrevista</label>
-              <input id="c-slotDurationMinutes" name="slotDurationMinutes" type="number" min="10" max="180" value="20" />
             </div>
             <div class="form-group">
               <label for="c-slotMaxCandidates">Candidatos por slot</label>
@@ -375,7 +367,7 @@
       <h2 id="modalEditTitle">✏️ Editar vacante</h2>
       <button class="modal-close" onclick="closeModal('modalEdit')" aria-label="Cerrar">&times;</button>
     </div>
-    <form method="post" id="formEdit" action="" onsubmit="injectConfigFields('formEdit','e-isActive','e-flow','e-address','e-interviewAddress')">
+    <form method="post" id="formEdit" action="" onsubmit="injectConfigFields('formEdit','e-isActive','e-flow')">
       <div class="modal-body">
         <div class="form-grid">
 
@@ -411,7 +403,7 @@
             <input id="e-role" name="role" type="text" />
           </div>
           <div class="form-group full">
-            <label for="e-address">Dirección de operación</label>
+            <label for="e-address">Zona de operación</label>
             <input id="e-address" name="operationAddress" type="text" />
           </div>
 
@@ -484,7 +476,7 @@
             <div class="form-group full">
               <label for="e-interviewAddress">Dirección de entrevista</label>
               <input id="e-interviewAddress" name="interviewAddress" type="text" />
-              <span class="form-hint">Si la dejas vacía, se usará la dirección de operación.</span>
+              <span class="form-hint">Si la dejas vacía, el bot usará la zona de operación como referencia.</span>
             </div>
             <div class="form-group full">
               <label>Días disponibles para entrevista</label>
@@ -498,16 +490,8 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="e-slotStartTime">Hora inicial</label>
+              <label for="e-slotStartTime">Hora de entrevista</label>
               <input id="e-slotStartTime" name="slotStartTime" type="time" value="08:00" />
-            </div>
-            <div class="form-group">
-              <label for="e-slotEndTime">Hora final</label>
-              <input id="e-slotEndTime" name="slotEndTime" type="time" value="17:00" />
-            </div>
-            <div class="form-group">
-              <label for="e-slotDurationMinutes">Duración por entrevista</label>
-              <input id="e-slotDurationMinutes" name="slotDurationMinutes" type="number" min="10" max="180" value="20" />
             </div>
             <div class="form-group">
               <label for="e-slotMaxCandidates">Candidatos por slot</label>
@@ -552,18 +536,12 @@
     syncScheduleConfig(checkboxId, flowGroupId, scheduleConfigId);
   }
 
-  function injectConfigFields(formId, checkboxId, flowGroupId, addressId, interviewAddressId) {
+  function injectConfigFields(formId, checkboxId, flowGroupId) {
     const form      = document.getElementById(formId);
     const checkbox  = document.getElementById(checkboxId);
     const flowGroup = document.getElementById(flowGroupId);
-    const addressInput = document.getElementById(addressId);
-    const interviewAddressInput = document.getElementById(interviewAddressId);
     const isActive  = checkbox.checked;
     const flowVal   = flowGroup.querySelector('input[type=radio]:checked')?.value || 'apply_only';
-    const interviewAddress = interviewAddressInput?.value?.trim() || '';
-    if (isActive && flowVal === 'apply_schedule' && interviewAddress && addressInput) {
-      addressInput.value = interviewAddress;
-    }
     const fields = {
       isActive,
       acceptingApplications: isActive,
@@ -585,8 +563,6 @@
     document.getElementById('c-address').value = '';
     document.getElementById('c-interviewAddress').value = '';
     document.getElementById('c-slotStartTime').value = '08:00';
-    document.getElementById('c-slotEndTime').value = '17:00';
-    document.getElementById('c-slotDurationMinutes').value = '20';
     document.getElementById('c-slotMaxCandidates').value = '10';
     document.querySelectorAll('#c-schedule-config input[name="slotDays"]').forEach((input) => { input.checked = false; });
     syncActiveState('c-isActive', 'c-flow', 'c-toggle-row', 'c-schedule-config');
@@ -600,7 +576,7 @@
     document.getElementById('e-title').value   = v.title || '';
     document.getElementById('e-role').value    = v.role  || '';
     document.getElementById('e-address').value = v.operationAddress || '';
-    document.getElementById('e-interviewAddress').value = v.operationAddress || '';
+    document.getElementById('e-interviewAddress').value = v.interviewAddress || '';
     document.getElementById('e-minAge').value  = v.minAge != null ? v.minAge : '';
     document.getElementById('e-maxAge').value  = v.maxAge != null ? v.maxAge : '';
     document.getElementById('e-exp').value     = v.experienceRequired || 'INDIFFERENT';
@@ -612,8 +588,6 @@
       : [];
     const primarySlot = weeklySlots[0] || null;
     document.getElementById('e-slotStartTime').value = primarySlot?.startTime || '08:00';
-    document.getElementById('e-slotEndTime').value = primarySlot?.endTime || '17:00';
-    document.getElementById('e-slotDurationMinutes').value = primarySlot?.slotDurationMinutes || '20';
     document.getElementById('e-slotMaxCandidates').value = primarySlot?.maxCandidates || '10';
     document.querySelectorAll('#e-schedule-config input[name="slotDays"]').forEach((input) => {
       input.checked = weeklySlots.some((slot) => String(slot.dayOfWeek) === input.value);

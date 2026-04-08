@@ -13,7 +13,7 @@ import { conversationUnderstanding } from '../services/conversationUnderstanding
 import { shouldBlockAutomation } from '../services/botAutomationPolicy.js';
 import { runChatEngine } from '../services/chatEngine.js';
 import { think, extractEngineCandidateFields } from '../services/conversationEngine.js';
-import { findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
+import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
 import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { generateBookingConfirmation, generateInterviewOffer } from '../services/naturalReply.js';
 
@@ -82,7 +82,7 @@ function checkRateLimit(phone) {
 }
 
 // Limpieza periódica para no acumular entradas viejas en memoria.
-setInterval(() => {
+const rateLimitCleanupTimer = setInterval(() => {
   const windowStart = Date.now() - RATE_WINDOW_MS;
   for (const [phone, timestamps] of phoneTimestamps.entries()) {
     const active = timestamps.filter(t => t > windowStart);
@@ -93,6 +93,7 @@ setInterval(() => {
     }
   }
 }, CLEANUP_INTERVAL_MS);
+rateLimitCleanupTimer.unref?.();
 
 function normalizeText(text = '') { return text.trim(); }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -182,45 +183,97 @@ function buildVacancyLocation(vacancy) {
     .filter(Boolean)
     .join(' - ');
 }
+function isVacancyOpen(vacancy) {
+  return Boolean(vacancy?.isActive && vacancy?.acceptingApplications);
+}
+function getVacancyOperationZone(vacancy) {
+  return vacancy?.operationAddress || '';
+}
+function getVacancyInterviewAddress(vacancy) {
+  return vacancy?.interviewAddress || vacancy?.operationAddress || '';
+}
 function buildVacancyCompactSummary(vacancy) {
   if (!vacancy) return '';
   const role = vacancy.title || vacancy.role || 'la vacante';
   const location = buildVacancyLocation(vacancy);
-  const parts = [`La vacante que tengo para ti es ${role}${location ? ` en ${location}` : ''}.`];
+  const parts = [
+    isVacancyOpen(vacancy)
+      ? `La vacante que tengo para ti es ${role}${location ? ` en ${location}` : ''}.`
+      : `La vacante de ${role}${location ? ` en ${location}` : ''} existe en el sistema, pero en este momento no esta activa para recibir personal.`
+  ];
   if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
   else if (vacancy.requirements) parts.push(`Los requisitos principales son ${vacancy.requirements}.`);
   return parts.join(' ');
 }
+function buildNoOperationsAvailableReply(city = null) {
+  const location = city ? ` en ${city}` : '';
+  return `En este momento no tengo operaciones disponibles${location}. Si mas adelante se abre una vacante, con gusto te comparto la informacion.`;
+}
+function buildCityVacancyOptionsReply(city, vacancies = []) {
+  const options = [...new Set(
+    vacancies
+      .map((vacancy) => vacancy?.title || vacancy?.role)
+      .filter(Boolean)
+  )];
+  if (!options.length) return buildNoOperationsAvailableReply(city);
+  const label = options.length === 1
+    ? options[0]
+    : `${options.slice(0, -1).join(', ')} y ${options[options.length - 1]}`;
+  return `En ${city} tengo estas vacantes activas: ${label}. Dime cual te interesa y te comparto la informacion.`;
+}
 function buildVacancyQuestionLead(vacancy, text = '') {
   const n = normalizeComparableText(text);
   const location = buildVacancyLocation(vacancy);
-  const addressLabel = vacancy?.schedulingEnabled ? 'la dirección de entrevista' : 'el punto de operación';
+  const operationZone = getVacancyOperationZone(vacancy);
+  const interviewAddress = getVacancyInterviewAddress(vacancy);
+  const availabilityLead = isVacancyOpen(vacancy)
+    ? 'Claro.'
+    : 'Claro. En este momento esa vacante no esta recibiendo personal, pero te comparto la informacion registrada.';
   if (/(donde|direccion|ubicacion|queda|sector)/.test(n)) {
-    return vacancy?.operationAddress
-      ? `Claro. La vacante está registrada para ${location || 'esa operación'} y ${addressLabel} es ${vacancy.operationAddress}.`
-      : `Claro. La vacante está registrada para ${location || 'esa operación'}.`;
+    if (vacancy?.schedulingEnabled && interviewAddress) {
+      return `${availabilityLead} La vacante esta registrada para ${location || 'esa operacion'}${operationZone ? `, zona de operacion ${operationZone}` : ''}, y la direccion de entrevista es ${interviewAddress}.`;
+    }
+    if (operationZone) {
+      return `${availabilityLead} La vacante esta registrada para ${location || 'esa operacion'} y la zona de operacion es ${operationZone}.`;
+    }
+    return `${availabilityLead} La vacante esta registrada para ${location || 'esa operacion'}.`;
   }
   if (/(requisit|document|edad|experien|perfil)/.test(n) && vacancy?.requirements) {
-    return `Claro. Los requisitos registrados para esta vacante son: ${vacancy.requirements}.`;
+    return `${availabilityLead} Los requisitos registrados para esta vacante son: ${vacancy.requirements}.`;
   }
   if (/(pago|salario|sueldo|turno|horario|condicion|beneficio|contrato)/.test(n) && vacancy?.conditions) {
-    return `Claro. Las condiciones registradas para esta vacante son: ${vacancy.conditions}.`;
+    return `${availabilityLead} Las condiciones registradas para esta vacante son: ${vacancy.conditions}.`;
   }
   if (/(funcion|cargo|labor|hacer|rol)/.test(n)) {
     const description = vacancy?.roleDescription || vacancy?.role || vacancy?.title;
-    return `Claro. El cargo registrado es ${vacancy?.title || vacancy?.role || 'la vacante consultada'}${description ? ` y la descripción disponible es: ${description}.` : '.'}`;
+    return `${availabilityLead} El cargo registrado es ${vacancy?.title || vacancy?.role || 'la vacante consultada'}${description ? ` y la descripcion disponible es: ${description}.` : '.'}`;
   }
-  return 'Claro. Te comparto la información real que tengo registrada para esa vacante.';
+  return isVacancyOpen(vacancy)
+    ? 'Claro. Te comparto la informacion real que tengo registrada para esa vacante.'
+    : 'Claro. En este momento la vacante no esta activa para recibir personal, pero te comparto la informacion registrada y puedo dejar tu perfil guardado.';
 }
-function buildVacancyContinuePrompt(candidate) {
+function buildVacancyContinuePrompt(candidate, vacancy = null) {
+  if (vacancy && !isVacancyOpen(vacancy)) {
+    if (candidate.currentStep === ConversationStep.ASK_CV) {
+      return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF o Word.';
+    }
+    if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
+      const missing = getMissingFields(candidate);
+      if (missing.length) {
+        return `Si quieres dejar tu perfil registrado, aun me faltan estos datos: ${missing.join(', ')}.`;
+      }
+      return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, enviame tambien tu hoja de vida.';
+    }
+    return 'Si quieres, puedo tomar tus datos y tu hoja de vida para dejar tu perfil registrado por si la vacante se vuelve a abrir.';
+  }
   if (candidate.currentStep === ConversationStep.ASK_CV) return RECORDATORIO_HV;
   if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
     const missing = getMissingFields(candidate);
-    if (missing.length) return `Si deseas continuar, aún me faltan estos datos: ${missing.join(', ')}.`;
+    if (missing.length) return `Si deseas continuar, aun me faltan estos datos: ${missing.join(', ')}.`;
     return SOLICITAR_HV;
   }
   if (candidate.currentStep === ConversationStep.DONE) return MENSAJE_DONE_ACK;
-  return 'Si estás interesado en continuar, respóndeme y te solicitaré tus datos.';
+  return 'Si estas interesado en continuar, respondeme y te solicitare tus datos.';
 }
 function buildVacancyAssociationPrompt(options = {}) {
   const intro = (options.cvReceived || options.hasCv)
@@ -261,24 +314,40 @@ function buildQuestionFollowUpReply(vacancy, inboundText = '', followUpText = ''
   const answer = buildVacancyQuestionLead(vacancy, inboundText);
   return followUpText ? `${answer}\n\n${followUpText}` : answer;
 }
+function buildInactiveVacancyReply(vacancy, candidate, inboundText = '') {
+  const continuePrompt = buildVacancyContinuePrompt(candidate, vacancy);
+  const summary = buildVacancyCompactSummary(vacancy);
+  if (isQuestionLike(inboundText)) {
+    return [buildVacancyQuestionLead(vacancy, inboundText), continuePrompt]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+  return [summary, continuePrompt].filter(Boolean).join('\n\n');
+}
 function buildVacancyReply(vacancy, candidate, inboundText = '') {
   const lines = [];
   lines.push(isQuestionLike(inboundText) ? buildVacancyQuestionLead(vacancy, inboundText) : 'Hola, gracias por comunicarte con LoginPro.');
-  lines.push('', 'Te comparto la información de la vacante disponible:', '', `*Vacante:* ${vacancy.title || vacancy.role}`);
+  lines.push('', 'Te comparto la informacion de la vacante disponible:', '', `*Vacante:* ${vacancy.title || vacancy.role}`);
   if (vacancy.role && vacancy.role !== vacancy.title) lines.push(`*Cargo:* ${vacancy.role}`);
   const location = buildVacancyLocation(vacancy);
-  if (location) lines.push(`*Ciudad / operación:* ${location}`);
-  if (vacancy.operationAddress) lines.push(`*${vacancy.schedulingEnabled ? 'Dirección de entrevista' : 'Dirección de operación'}:* ${vacancy.operationAddress}`);
-  if (vacancy.roleDescription) lines.push(`*Descripción del cargo:* ${vacancy.roleDescription}`);
+  if (location) lines.push(`*Ciudad / operacion:* ${location}`);
+  if (getVacancyOperationZone(vacancy)) lines.push(`*Zona de operacion:* ${getVacancyOperationZone(vacancy)}`);
+  if (vacancy.schedulingEnabled && getVacancyInterviewAddress(vacancy)) lines.push(`*Direccion de entrevista:* ${getVacancyInterviewAddress(vacancy)}`);
+  if (!isVacancyOpen(vacancy)) lines.push('*Estado:* En este momento no estamos recibiendo personal para esta vacante.');
+  if (vacancy.roleDescription) lines.push(`*Descripcion del cargo:* ${vacancy.roleDescription}`);
   if (vacancy.requirements) lines.push(`*Requisitos:* ${vacancy.requirements}`);
   if (vacancy.conditions) lines.push(`*Condiciones:* ${vacancy.conditions}`);
-  lines.push('', buildVacancyContinuePrompt(candidate));
+  lines.push('', buildVacancyContinuePrompt(candidate, vacancy));
   return lines.join('\n');
 }
 
 function buildVacancyReplyNatural(vacancy, candidate, inboundText = '') {
-  const continuePrompt = buildVacancyContinuePrompt(candidate);
+  const continuePrompt = buildVacancyContinuePrompt(candidate, vacancy);
   const compactSummary = buildVacancyCompactSummary(vacancy);
+
+  if (!isVacancyOpen(vacancy)) {
+    return buildInactiveVacancyReply(vacancy, candidate, inboundText);
+  }
 
   if (isQuestionLike(inboundText)) {
     const lines = [buildVacancyQuestionLead(vacancy, inboundText)];
@@ -297,7 +366,12 @@ function buildVacancyReplyNatural(vacancy, candidate, inboundText = '') {
 }
 
 function isSchedulingEligibleCandidate(candidate, vacancy) {
-  return Boolean(vacancy?.schedulingEnabled && candidate?.gender !== 'FEMALE');
+  return Boolean(
+    vacancy?.schedulingEnabled
+    && vacancy?.isActive
+    && vacancy?.acceptingApplications
+    && candidate?.gender !== 'FEMALE'
+  );
 }
 
 function isSchedulingConfirmationIntent(text = '') {
@@ -666,18 +740,20 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
 }
 
 async function resolveVacancyFromConversation(prisma, text, options = {}) {
-  const vacancies = options.vacancies || await findActiveVacancies(prisma);
+  const activeVacancies = options.activeVacancies || await findActiveVacancies(prisma);
+  const allVacancies = options.allVacancies || await findAllVacancies(prisma);
   const resolution = await resolveVacancyFromText(prisma, text, {
     cityHint: options.cityHint,
     roleHint: options.roleHint,
-    vacancies,
+    activeVacancies,
+    allVacancies,
   });
 
-  if (resolution.resolved || !options.allowSingleFallback || vacancies.length !== 1) {
+  if (resolution.resolved || !options.allowSingleFallback || activeVacancies.length !== 1) {
     return resolution;
   }
 
-  const fallbackVacancy = vacancies[0];
+  const fallbackVacancy = activeVacancies[0];
   if (!fallbackVacancy?.isActive || !fallbackVacancy?.acceptingApplications) {
     return resolution;
   }
@@ -706,6 +782,21 @@ async function pauseInterviewFlow(prisma, candidateId, reason) {
 
 async function finalizeCandidateAfterCv(prisma, candidate, from) {
   const vacancy = candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId) : null;
+
+  if (vacancy && !isVacancyOpen(vacancy)) {
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        currentStep: ConversationStep.DONE,
+        status: CandidateStatus.REGISTRADO,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      }
+    });
+    const location = buildVacancyLocation(vacancy);
+    const body = `Ya recibi tu informacion y tu hoja de vida para ${vacancy.title || vacancy.role}${location ? ` en ${location}` : ''}. En este momento no estamos recibiendo personal para esa vacante, pero tu perfil queda registrado por si se vuelve a abrir.`;
+    return reply(prisma, candidate.id, from, body, '', { body, source: 'bot_flow' });
+  }
 
   if (isSchedulingEligibleCandidate(candidate, vacancy)) {
     const nextSlot = await resolveInterviewSlotContext(prisma, { ...candidate, currentStep: ConversationStep.SCHEDULING }, vacancy);
@@ -810,7 +901,7 @@ async function rejectCandidate(prisma, candidateId, from, rejection = {}) {
   await reply(prisma, candidateId, from, DESCARTE_MSG, '', { body: DESCARTE_MSG, source: 'bot_flow' });
 }
 
-async function processText(prisma, candidate, from, text, debugTrace, options = {}) {
+export async function processText(prisma, candidate, from, text, debugTrace, options = {}) {
   const cleanText = normalizeText(text);
   const fallbackIntent = detectConversationIntent(cleanText, { isDoneStep: candidate.currentStep === ConversationStep.DONE });
   debugTrace.openai_intent = inferIntent(cleanText);
@@ -889,10 +980,33 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     return resolution;
   };
 
+  const replyFromVacancyResolutionFailure = async (resolution) => {
+    if (!resolution) return null;
+    if (resolution.reason === 'city_without_active_vacancies' || resolution.reason === 'no_active_vacancies') {
+      const body = buildNoOperationsAvailableReply(resolution.city);
+      await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+      return true;
+    }
+    if (resolution.reason === 'city_with_active_vacancies' && resolution.city) {
+      const activeVacancies = await findActiveVacancies(prisma);
+      const cityVacancies = activeVacancies.filter((vacancy) => (
+        normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(resolution.city)
+      ));
+      const body = buildCityVacancyOptionsReply(resolution.city, cityVacancies);
+      await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+      return true;
+    }
+    return false;
+  };
+
   const replyWithVacancyContext = async (candidateState, vacancy = null) => {
     const effectiveVacancy = vacancy || await loadVacancyContext(prisma, candidateState.vacancyId);
     if (!effectiveVacancy) {
       return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });
+    }
+    if (!isVacancyOpen(effectiveVacancy)) {
+      const body = buildInactiveVacancyReply(effectiveVacancy, candidateState, cleanText);
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context' });
     }
     if (USE_CONVERSATION_ENGINE && isQuestionLike(cleanText)) {
       const handledByEngine = await replyWithEngine(prisma, candidateState, from, cleanText, effectiveVacancy, {
@@ -946,6 +1060,8 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
         });
         candidate = { ...candidate, vacancyId: resolution.vacancy.id };
         currentVacancy = resolution.vacancy;
+      } else if (await replyFromVacancyResolutionFailure(resolution)) {
+        return;
       }
     }
   }
@@ -969,6 +1085,10 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
     if (resolution.resolved && resolution.vacancy) {
       const candidateState = { ...candidate, currentStep: ConversationStep.GREETING_SENT, vacancyId: resolution.vacancy.id };
       return replyWithVacancyContext(candidateState, resolution.vacancy);
+    }
+
+    if (await replyFromVacancyResolutionFailure(resolution)) {
+      return;
     }
 
     return reply(prisma, candidate.id, from, SALUDO_INICIAL, cleanText, { body: SALUDO_INICIAL, source: 'bot_vacancy_prompt' });
@@ -1000,6 +1120,10 @@ async function processText(prisma, candidate, from, text, debugTrace, options = 
       });
       const candidateState = { ...candidate, vacancyId: resolution.vacancy.id };
       return replyWithVacancyContext(candidateState, resolution.vacancy);
+    }
+
+    if (await replyFromVacancyResolutionFailure(resolution)) {
+      return;
     }
 
     if (hasDataIntent) {

@@ -27,6 +27,10 @@ function canonicalVacancyCity(vacancy) {
   return vacancy?.operation?.city?.name || vacancy?.city || null;
 }
 
+function isVacancyOpen(vacancy) {
+  return Boolean(vacancy?.isActive && vacancy?.acceptingApplications);
+}
+
 function buildCityNames(vacancies = []) {
   return Array.from(new Set(vacancies.map(canonicalVacancyCity).filter(Boolean)));
 }
@@ -158,42 +162,114 @@ export async function findActiveVacancies(prisma) {
   });
 }
 
+export async function findAllVacancies(prisma) {
+  return prisma.vacancy.findMany({
+    include: {
+      operation: {
+        include: {
+          city: true,
+        },
+      },
+    },
+    orderBy: [
+      { updatedAt: 'desc' },
+      { title: 'asc' },
+    ],
+  });
+}
+
+function pickBestVacancyMatch(vacancies = [], context = {}) {
+  if (!vacancies.length) return null;
+
+  const scored = vacancies
+    .map((vacancy) => ({ vacancy, score: scoreVacancy(vacancy, context) }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored[0] || null;
+  const runnerUp = scored[1] || null;
+  return {
+    best,
+    runnerUp,
+    margin: best ? (runnerUp ? best.score - runnerUp.score : best.score) : 0
+  };
+}
+
 export async function resolveVacancyFromText(prisma, text, options = {}) {
   const normalizedText = normalizeResolverText(text);
   if (!normalizedText) {
     return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'empty_input' };
   }
 
-  const vacancies = options.vacancies || await findActiveVacancies(prisma);
-  if (!vacancies.length) {
-    return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'no_active_vacancies' };
+  const allVacancies = options.allVacancies || options.vacancies || await findAllVacancies(prisma);
+  const activeVacancies = options.activeVacancies || options.vacancies || allVacancies.filter(isVacancyOpen);
+
+  if (!allVacancies.length) {
+    return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'no_vacancies_configured' };
   }
 
-  const city = options.cityHint || detectCityFromText(text, buildCityNames(vacancies));
+  const city = options.cityHint || detectCityFromText(text, buildCityNames(allVacancies));
   const roleHint = options.roleHint || detectRoleHintFromText(text, { city });
   if (!city && !roleHint) {
     return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'missing_city_and_role' };
   }
 
   const matchingCityVacancies = city
-    ? vacancies.filter((vacancy) => normalizeResolverText(canonicalVacancyCity(vacancy)) === normalizeResolverText(city))
-    : vacancies;
+    ? activeVacancies.filter((vacancy) => normalizeResolverText(canonicalVacancyCity(vacancy)) === normalizeResolverText(city))
+    : activeVacancies;
+
+  const inactiveVacancies = allVacancies.filter((vacancy) => !isVacancyOpen(vacancy));
+  const inactiveCityVacancies = city
+    ? inactiveVacancies.filter((vacancy) => normalizeResolverText(canonicalVacancyCity(vacancy)) === normalizeResolverText(city))
+    : inactiveVacancies;
+
+  const threshold = roleHint ? 4.5 : 6;
 
   if (city && !matchingCityVacancies.length) {
+    const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
+    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold) {
+      return {
+        resolved: true,
+        vacancy: inactiveMatch.best.vacancy,
+        city,
+        roleHint,
+        reason: 'matched_inactive_vacancy'
+      };
+    }
     return { resolved: false, vacancy: null, city, roleHint, reason: 'city_without_active_vacancies' };
   }
 
-  const scored = matchingCityVacancies
-    .map((vacancy) => ({ vacancy, score: scoreVacancy(vacancy, { text, city, roleHint }) }))
-    .sort((a, b) => b.score - a.score);
+  if (!activeVacancies.length) {
+    const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
+    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold) {
+      return {
+        resolved: true,
+        vacancy: inactiveMatch.best.vacancy,
+        city: city || canonicalVacancyCity(inactiveMatch.best.vacancy),
+        roleHint,
+        reason: 'matched_inactive_vacancy'
+      };
+    }
+    return { resolved: false, vacancy: null, city, roleHint, reason: 'no_active_vacancies' };
+  }
 
-  const best = scored[0];
-  const runnerUp = scored[1];
+  const { best, runnerUp, margin } = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint });
   const hasUniqueCityMatch = Boolean(city && matchingCityVacancies.length === 1 && hasInterestSignal(text));
-  const threshold = roleHint ? 4.5 : hasUniqueCityMatch ? 4 : 6;
-  const margin = runnerUp ? best.score - runnerUp.score : best.score;
+  const effectiveThreshold = roleHint ? threshold : hasUniqueCityMatch ? 4 : 6;
 
-  if (!best || best.score < threshold) {
+  if (!best || best.score < effectiveThreshold) {
+    const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
+    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold) {
+      return {
+        resolved: true,
+        vacancy: inactiveMatch.best.vacancy,
+        city: city || canonicalVacancyCity(inactiveMatch.best.vacancy),
+        roleHint,
+        reason: 'matched_inactive_vacancy'
+      };
+    }
+    if (city && !roleHint && matchingCityVacancies.length) {
+      return { resolved: false, vacancy: null, city, roleHint, reason: 'city_with_active_vacancies' };
+    }
     return { resolved: false, vacancy: null, city, roleHint, reason: 'low_confidence_match' };
   }
 

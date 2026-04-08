@@ -34,7 +34,8 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
     `Vacante: ${vacancy.title || vacancy.role}`,
     `Cargo: ${vacancy.role}`,
     `Ciudad: ${vacancy.city}`,
-    vacancy.operationAddress ? `Dirección de operación: ${vacancy.operationAddress}` : null,
+    vacancy.operationAddress ? `Zona de operación: ${vacancy.operationAddress}` : null,
+    vacancy.interviewAddress ? `Dirección de entrevista: ${vacancy.interviewAddress}` : null,
     `Requisitos: ${vacancy.requirements}`,
     `Condiciones: ${vacancy.conditions}`,
     vacancy.requiredDocuments ? `Documentación requerida para la entrevista: ${vacancy.requiredDocuments}` : null,
@@ -243,7 +244,7 @@ export async function generateInterviewOffer({
  * Genera el mensaje de confirmación final de entrevista agendada.
  */
 export async function generateBookingConfirmation({ formattedDate, vacancy, candidateName }) {
-  const address = vacancy?.operationAddress || '';
+  const address = vacancy?.interviewAddress || vacancy?.operationAddress || '';
   const docs = vacancy?.requiredDocuments || '';
   const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
 

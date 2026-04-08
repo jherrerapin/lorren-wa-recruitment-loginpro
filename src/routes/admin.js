@@ -21,6 +21,7 @@ import { sendTextMessage } from '../services/whatsapp.js';
 import { MessageDirection, MessageType } from '@prisma/client';
 import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
+import { listOfferableSlots, createBooking, cancelCandidateBookings } from '../services/interviewScheduler.js';
 
 function sessionAuth(req, res, next) {
   const role = req.session?.userRole;
@@ -163,6 +164,16 @@ function normalizeBinaryData(value) {
   if (value instanceof ArrayBuffer) return Buffer.from(value);
   if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
   return Buffer.from(value);
+}
+
+function parseInterviewAssignment(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const [slotId, scheduledAtRaw] = raw.split('|');
+  if (!slotId || !scheduledAtRaw) return null;
+  const scheduledAt = new Date(scheduledAtRaw);
+  if (Number.isNaN(scheduledAt.getTime())) return null;
+  return { slotId, scheduledAt };
 }
 
 function normalizeCandidateListFilters(source = {}) {
@@ -532,20 +543,13 @@ function parseVacancyBody(body) {
       .map((value) => parseInt(value, 10))
       .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6))].sort((a, b) => a - b),
     slotStartTime:        time(body.slotStartTime),
-    slotEndTime:          time(body.slotEndTime),
-    slotDurationMinutes:  positiveInt(body.slotDurationMinutes, 20),
     slotMaxCandidates:    positiveInt(body.slotMaxCandidates, 10),
   };
 }
 
-function resolveVacancyAddress(data) {
-  return data.interviewAddress || data.operationAddress || '';
-}
-
 function hasValidInterviewConfig(data) {
   if (!data.schedulingEnabled) return true;
-  if (!data.slotDays.length || !data.slotStartTime || !data.slotEndTime) return false;
-  return data.slotStartTime < data.slotEndTime;
+  return Boolean(data.slotDays.length && data.slotStartTime);
 }
 
 function buildWeeklyInterviewSlots(vacancyId, data) {
@@ -553,8 +557,6 @@ function buildWeeklyInterviewSlots(vacancyId, data) {
     vacancyId,
     dayOfWeek,
     startTime: data.slotStartTime,
-    endTime: data.slotEndTime,
-    slotDurationMinutes: data.slotDurationMinutes,
     maxCandidates: data.slotMaxCandidates,
     isActive: true
   }));
@@ -974,8 +976,11 @@ export function adminRouter(prisma) {
             title: true,
             city: true,
             role: true,
+            schedulingEnabled: true,
             acceptingApplications: true,
-            isActive: true
+            isActive: true,
+            operationAddress: true,
+            interviewAddress: true
           }
         },
         messages: { orderBy: { createdAt: 'asc' } },
@@ -1005,6 +1010,14 @@ export function adminRouter(prisma) {
     const outboundWindow = req.userRole === 'dev'
       ? await getOutboundWindowStatus(prisma, candidate.id)
       : null;
+    const availableInterviewSlots = candidate.vacancyId && candidate.vacancy?.schedulingEnabled
+      ? (await listOfferableSlots(
+        prisma,
+        candidate.vacancyId,
+        candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null,
+        new Date()
+      )).slice(0, 12)
+      : [];
     const availableVacancies = req.userRole === 'dev'
       ? await prisma.vacancy.findMany({
         where: {
@@ -1047,6 +1060,7 @@ export function adminRouter(prisma) {
       candidate: detailCandidate, role: req.userRole, formatDateTimeCO,
       normalizeCandidateStatusForUI, cvSizeBytes,
       availableVacancies,
+      availableInterviewSlots,
       returnToPath,
       outboundWindow, cvSuccess, cvError,
       outboundSuccess, outboundError, botPauseSuccess, botPauseError,
@@ -1078,6 +1092,85 @@ export function adminRouter(prisma) {
     });
 
     return res.redirect(withFlashMessage(returnTo, 'success', 'Entrevista actualizada correctamente.'));
+  });
+
+  router.post('/candidates/:id/interview-assign', express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.body.returnTo || `/admin/candidates/${id}`);
+    const selectedSlot = parseInterviewAssignment(req.body.slotOption);
+
+    if (!selectedSlot) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Debes seleccionar un horario de entrevista válido.'));
+    }
+
+    const candidate = await prisma.candidate.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        vacancyId: true,
+        lastInboundAt: true,
+        vacancy: {
+          select: {
+            id: true,
+            title: true,
+            role: true,
+            schedulingEnabled: true
+          }
+        }
+      }
+    });
+
+    if (!candidate) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
+    }
+
+    if (!candidate.vacancyId || !candidate.vacancy?.schedulingEnabled) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'La vacante del candidato no tiene agenda habilitada.'));
+    }
+
+    const offerableSlots = await listOfferableSlots(
+      prisma,
+      candidate.vacancyId,
+      candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null,
+      new Date()
+    );
+
+    const chosenOffer = offerableSlots.find((option) => (
+      option.slot?.id === selectedSlot.slotId
+      && option.date?.getTime?.() === selectedSlot.scheduledAt.getTime()
+    ));
+
+    if (!chosenOffer?.slot) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Ese horario ya no está disponible. Actualiza la página e intenta de nuevo.'));
+    }
+
+    const activeBooking = await prisma.interviewBooking.findFirst({
+      where: {
+        candidateId: candidate.id,
+        status: { in: ACTIVE_BOOKING_STATUSES }
+      },
+      select: { id: true }
+    });
+
+    if (activeBooking) {
+      await cancelCandidateBookings(prisma, candidate.id, 'RESCHEDULED');
+    }
+
+    await createBooking(
+      prisma,
+      candidate.id,
+      candidate.vacancyId,
+      chosenOffer.slot.id,
+      chosenOffer.date,
+      !chosenOffer.windowOk
+    );
+
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: { currentStep: 'SCHEDULED' }
+    });
+
+    return res.redirect(withFlashMessage(returnTo, 'success', `Entrevista asignada para ${chosenOffer.formattedDate}.`));
   });
 
   // ── Cambiar estado ───────────────────────────────────────────
@@ -1372,7 +1465,7 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
     if (!hasValidInterviewConfig(data)) {
-      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Debes configurar al menos un día y un rango horario válido para entrevistas.'));
+      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Debes configurar al menos un día y una hora de entrevista válida.'));
     }
     const city = operation.city.name;
     const key = await buildUniqueVacancyKey(prisma, data.title, city);
@@ -1387,7 +1480,8 @@ export function adminRouter(prisma) {
           roleDescription: data.roleDescription,
           requirements: data.requirements,
           conditions: data.conditions,
-          operationAddress: resolveVacancyAddress(data),
+          operationAddress: data.operationAddress || '',
+          interviewAddress: data.interviewAddress,
           minAge: data.minAge,
           maxAge: data.maxAge,
           experienceRequired: data.experienceRequired,
@@ -1410,7 +1504,7 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Título y operación son obligatorios.'));
     }
     if (!hasValidInterviewConfig(data)) {
-      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Debes configurar al menos un día y un rango horario válido para entrevistas.'));
+      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Debes configurar al menos un día y una hora de entrevista válida.'));
     }
     const city = operation.city.name;
     const key = await buildUniqueVacancyKey(prisma, data.title, city, id);
@@ -1426,7 +1520,8 @@ export function adminRouter(prisma) {
           roleDescription: data.roleDescription,
           requirements: data.requirements,
           conditions: data.conditions,
-          operationAddress: resolveVacancyAddress(data),
+          operationAddress: data.operationAddress || '',
+          interviewAddress: data.interviewAddress,
           minAge: data.minAge,
           maxAge: data.maxAge,
           experienceRequired: data.experienceRequired,

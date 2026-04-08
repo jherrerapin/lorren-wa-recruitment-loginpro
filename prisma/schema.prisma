@@ -119,6 +119,7 @@ model Vacancy {
   /// Ciudad (string) — se deriva automáticamente de operation.city.name al crear/editar.
   city                   String
   operationAddress       String
+  interviewAddress       String?
   requirements           String
   conditions             String
   requiredDocuments      String?
@@ -158,8 +159,6 @@ model InterviewSlot {
   dayOfWeek            Int?
   specificDate         DateTime?
   startTime            String
-  endTime              String
-  slotDurationMinutes  Int       @default(20)
   maxCandidates        Int       @default(10)
   isActive             Boolean   @default(true)
   createdAt            DateTime  @default(now())

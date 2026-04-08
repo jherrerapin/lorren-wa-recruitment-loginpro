@@ -62,6 +62,11 @@
     }
     .booking-list { display: grid; gap: 12px; }
     .booking-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; background: #fafafa; }
+    .booking-manual {
+      border: 1px solid #dbeafe; border-radius: 8px; padding: 14px; background: #f8fbff; margin-bottom: 14px;
+    }
+    .booking-manual form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .booking-manual .field-group { min-width: 280px; flex: 1; }
     .booking-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
     .booking-title { font-weight: 700; color: #2c3e50; }
     .booking-meta { font-size: 13px; color: #666; }
@@ -280,6 +285,39 @@
 
     <div class="card">
       <h2>Entrevistas</h2>
+      <% if (candidate.vacancy?.schedulingEnabled) { %>
+        <div class="booking-manual">
+          <div style="font-weight:700;color:#2c3e50;margin-bottom:6px;">Asignar horario manualmente</div>
+          <div style="font-size:13px;color:#64748b;margin-bottom:10px;">
+            <% if (candidate.vacancy?.interviewAddress || candidate.vacancy?.operationAddress) { %>
+              Punto de entrevista: <%= candidate.vacancy.interviewAddress || candidate.vacancy.operationAddress %>
+            <% } else { %>
+              Usa uno de los horarios disponibles configurados para esta vacante.
+            <% } %>
+          </div>
+          <% if (availableInterviewSlots && availableInterviewSlots.length) { %>
+            <form method="post" action="/admin/candidates/<%= candidate.id %>/interview-assign">
+              <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
+              <div class="field-group">
+                <label for="slotOption">Horario de entrevista</label>
+                <select id="slotOption" name="slotOption" required>
+                  <option value="">Selecciona un horario</option>
+                  <% for (const option of availableInterviewSlots) { %>
+                    <option value="<%= option.slot.id %>|<%= option.date.toISOString() %>">
+                      <%= option.formattedDate %><%= option.windowOk ? '' : ' · recordatorio fuera de ventana 24h' %>
+                    </option>
+                  <% } %>
+                </select>
+              </div>
+              <button type="submit" class="btn-primary">Asignar horario</button>
+            </form>
+          <% } else { %>
+            <p style="font-size:13px;color:#b45309;">No hay horarios disponibles configurados en este momento para esta vacante.</p>
+          <% } %>
+        </div>
+      <% } else if (candidate.vacancyId) { %>
+        <p style="margin-bottom:12px;color:#64748b;">La vacante asignada a este candidato no tiene agenda automática habilitada.</p>
+      <% } %>
       <% if (!candidate.interviewBookings || candidate.interviewBookings.length === 0) { %>
         <p>Este candidato aún no tiene entrevistas registradas.</p>
       <% } else { %>
