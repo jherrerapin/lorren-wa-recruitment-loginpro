@@ -714,6 +714,17 @@ function parseVacancyBody(body) {
   const str = (v) => (typeof v === 'string' ? v.trim() || null : null);
   const int = (v) => { const n = parseInt(v, 10); return Number.isNaN(n) ? null : n; };
   const bool = (v) => v === 'true' || v === true || v === 'on';
+  const normalizeRequiredDocuments = (value) => {
+    const values = Array.isArray(value)
+      ? value
+      : (typeof value === 'string' ? [value] : []);
+
+    const normalized = values
+      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter(Boolean);
+
+    return normalized.length ? normalized.join('\n') : null;
+  };
   const time = (v) => {
     const value = str(v);
     return value && /^\d{2}:\d{2}$/.test(value) ? value : null;
@@ -735,6 +746,7 @@ function parseVacancyBody(body) {
     conditions:           str(body.conditions),
     operationAddress:     str(body.operationAddress),
     interviewAddress:     str(body.interviewAddress),
+    requiredDocuments:    normalizeRequiredDocuments(body.requiredDocuments),
     minAge:               int(body.minAge),
     maxAge:               int(body.maxAge),
     experienceRequired:   str(body.experienceRequired) || 'INDIFFERENT',
@@ -1919,6 +1931,7 @@ export function adminRouter(prisma) {
           conditions: data.conditions,
           operationAddress: data.operationAddress || '',
           interviewAddress: data.interviewAddress,
+          requiredDocuments: data.requiredDocuments,
           minAge: data.minAge,
           maxAge: data.maxAge,
           experienceRequired: data.experienceRequired,
@@ -1960,6 +1973,7 @@ export function adminRouter(prisma) {
           conditions: data.conditions,
           operationAddress: data.operationAddress || '',
           interviewAddress: data.interviewAddress,
+          requiredDocuments: data.requiredDocuments,
           minAge: data.minAge,
           maxAge: data.maxAge,
           experienceRequired: data.experienceRequired,

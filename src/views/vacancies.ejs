@@ -80,6 +80,9 @@
     .form-group input[readonly] { background: var(--gray-light); color: var(--text-faint); cursor: default; border-color: var(--border-soft); }
     .form-group textarea { resize: vertical; min-height: 70px; }
     .form-hint { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+    .document-list { display: flex; flex-direction: column; gap: 8px; }
+    .document-row { display: flex; gap: 8px; align-items: center; }
+    .document-row input { flex: 1; }
     .section-divider { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); margin: 16px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border-soft); grid-column: 1 / -1; }
     .op-select-wrap { display: flex; flex-direction: column; gap: 4px; }
     .op-city-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 6px 10px 2px; }
@@ -335,6 +338,14 @@
               <span class="form-hint">Si la dejas vacía, el bot usará la zona de operación como referencia.</span>
             </div>
             <div class="form-group full">
+              <label>Documentos para la entrevista</label>
+              <div class="document-list" id="c-required-documents"></div>
+              <div style="display:flex;justify-content:flex-start;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addRequiredDocumentField('c')">Agregar otro documento</button>
+              </div>
+              <span class="form-hint">Estos documentos se enviarán cuando el bot confirme la entrevista.</span>
+            </div>
+            <div class="form-group full">
               <label>Días disponibles para entrevista</label>
               <div class="schedule-days">
                 <% const scheduleDays = [{ value: 0, label: 'Lun' }, { value: 1, label: 'Mar' }, { value: 2, label: 'Mié' }, { value: 3, label: 'Jue' }, { value: 4, label: 'Vie' }, { value: 5, label: 'Sáb' }, { value: 6, label: 'Dom' }]; %>
@@ -489,6 +500,14 @@
               <span class="form-hint">Si la dejas vacía, el bot usará la zona de operación como referencia.</span>
             </div>
             <div class="form-group full">
+              <label>Documentos para la entrevista</label>
+              <div class="document-list" id="e-required-documents"></div>
+              <div style="display:flex;justify-content:flex-start;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addRequiredDocumentField('e')">Agregar otro documento</button>
+              </div>
+              <span class="form-hint">Estos documentos se enviarán cuando el bot confirme la entrevista.</span>
+            </div>
+            <div class="form-group full">
               <label>Días disponibles para entrevista</label>
               <div class="schedule-days">
                 <% for (const day of scheduleDays) { %>
@@ -556,6 +575,57 @@
     if (input && !visible) input.value = '';
   }
 
+  function createRequiredDocumentRow(prefix, value = '') {
+    const row = document.createElement('div');
+    row.className = 'document-row';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.name = 'requiredDocuments';
+    input.placeholder = 'Ej: Cédula original';
+    input.value = value || '';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-secondary btn-sm';
+    removeBtn.textContent = 'Quitar';
+    removeBtn.addEventListener('click', () => {
+      const container = document.getElementById(prefix + '-required-documents');
+      if (!container) return;
+      if (container.children.length <= 1) {
+        input.value = '';
+        return;
+      }
+      row.remove();
+    });
+
+    row.appendChild(input);
+    row.appendChild(removeBtn);
+    return row;
+  }
+
+  function setRequiredDocumentFields(prefix, values = []) {
+    const container = document.getElementById(prefix + '-required-documents');
+    if (!container) return;
+    container.innerHTML = '';
+    const docs = Array.isArray(values) ? values.filter(Boolean) : [];
+    const source = docs.length ? docs : [''];
+    source.forEach((value) => container.appendChild(createRequiredDocumentRow(prefix, value)));
+  }
+
+  function addRequiredDocumentField(prefix, value = '') {
+    const container = document.getElementById(prefix + '-required-documents');
+    if (!container) return;
+    container.appendChild(createRequiredDocumentRow(prefix, value));
+  }
+
+  function splitRequiredDocuments(value) {
+    return String(value || '')
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
   function injectConfigFields(formId, checkboxId, flowGroupId) {
     const form      = document.getElementById(formId);
     const checkbox  = document.getElementById(checkboxId);
@@ -587,6 +657,7 @@
     document.getElementById('c-slotStartTime').value = '08:00';
     document.getElementById('c-slotMaxCandidates').value = '10';
     document.querySelectorAll('#c-schedule-config input[name="slotDays"]').forEach((input) => { input.checked = false; });
+    setRequiredDocumentFields('c');
     syncExperienceField('c-exp', 'c-exp-time-group');
     syncActiveState('c-isActive', 'c-flow', 'c-toggle-row', 'c-schedule-config');
     document.getElementById('modalCreate').classList.add('open');
@@ -607,6 +678,7 @@
     document.getElementById('e-desc').value    = v.roleDescription || '';
     document.getElementById('e-req').value     = v.requirements || '';
     document.getElementById('e-cond').value    = v.conditions   || '';
+    setRequiredDocumentFields('e', splitRequiredDocuments(v.requiredDocuments));
     const weeklySlots = Array.isArray(v.interviewSlots)
       ? v.interviewSlots.filter((slot) => slot && slot.dayOfWeek !== null && slot.dayOfWeek !== undefined)
       : [];
