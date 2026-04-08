@@ -18,7 +18,7 @@ import {
   normalizeCandidateStatusForUI
 } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
-import { MessageDirection, MessageType } from '@prisma/client';
+import { ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
 import { listOfferableSlots, createBooking, cancelCandidateBookings } from '../services/interviewScheduler.js';
@@ -1097,7 +1097,8 @@ export function adminRouter(prisma) {
   router.post('/candidates/:id/interview-assign', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const returnTo = safeAdminReturnPath(req.body.returnTo || `/admin/candidates/${id}`);
-    const selectedSlot = parseInterviewAssignment(req.body.slotOption);
+    try {
+      const selectedSlot = parseInterviewAssignment(req.body.slotOption);
 
     if (!selectedSlot) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Debes seleccionar un horario de entrevista válido.'));
@@ -1144,33 +1145,44 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Ese horario ya no está disponible. Actualiza la página e intenta de nuevo.'));
     }
 
-    const activeBooking = await prisma.interviewBooking.findFirst({
-      where: {
-        candidateId: candidate.id,
-        status: { in: ACTIVE_BOOKING_STATUSES }
-      },
-      select: { id: true }
-    });
+    await prisma.$transaction(async (tx) => {
+      const activeBooking = await tx.interviewBooking.findFirst({
+        where: {
+          candidateId: candidate.id,
+          status: { in: ACTIVE_BOOKING_STATUSES }
+        },
+        select: { id: true }
+      });
 
-    if (activeBooking) {
-      await cancelCandidateBookings(prisma, candidate.id, 'RESCHEDULED');
-    }
+      if (activeBooking) {
+        await cancelCandidateBookings(tx, candidate.id, 'RESCHEDULED');
+      }
 
-    await createBooking(
-      prisma,
-      candidate.id,
-      candidate.vacancyId,
-      chosenOffer.slot.id,
-      chosenOffer.date,
-      !chosenOffer.windowOk
-    );
+      await createBooking(
+        tx,
+        candidate.id,
+        candidate.vacancyId,
+        chosenOffer.slot.id,
+        chosenOffer.date,
+        !chosenOffer.windowOk
+      );
 
-    await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: { currentStep: 'SCHEDULED' }
+      await tx.candidate.update({
+        where: { id: candidate.id },
+        data: { currentStep: ConversationStep.SCHEDULED }
+      });
     });
 
     return res.redirect(withFlashMessage(returnTo, 'success', `Entrevista asignada para ${chosenOffer.formattedDate}.`));
+    } catch (error) {
+      console.error('[manual_interview_assign]', {
+        candidateId: id,
+        returnTo,
+        slotOption: req.body?.slotOption,
+        error
+      });
+      return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible asignar la entrevista en este momento.'));
+    }
   });
 
   // ── Cambiar estado ───────────────────────────────────────────
