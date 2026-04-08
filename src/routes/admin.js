@@ -466,26 +466,28 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
     }
   });
 
-  const legacyCandidates = await prisma.candidate.findMany({
-    where: {
-      vacancyId: null,
-      status: { in: ['NUEVO', 'REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO'] }
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-    select: {
-      id: true, fullName: true, phone: true,
-      documentType: true, documentNumber: true,
-      age: true, neighborhood: true, locality: true, zone: true, status: true,
-      medicalRestrictions: true, transportMode: true,
-      cvOriginalName: true, cvMimeType: true, createdAt: true,
-      gender: true, botPaused: true, botPauseReason: true,
-      currentStep: true,
-      lastInboundAt: true,
-      lastOutboundAt: true,
-      devLastSeenAt: true
-    }
-  });
+  const legacyCandidates = isDev
+    ? await prisma.candidate.findMany({
+      where: {
+        vacancyId: null,
+        status: { in: ['NUEVO', 'REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO'] }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: {
+        id: true, fullName: true, phone: true,
+        documentType: true, documentNumber: true,
+        age: true, neighborhood: true, locality: true, zone: true, status: true,
+        medicalRestrictions: true, transportMode: true,
+        cvOriginalName: true, cvMimeType: true, createdAt: true,
+        gender: true, botPaused: true, botPauseReason: true,
+        currentStep: true,
+        lastInboundAt: true,
+        lastOutboundAt: true,
+        devLastSeenAt: true
+      }
+    })
+    : [];
 
   const citiesMap = new Map();
 

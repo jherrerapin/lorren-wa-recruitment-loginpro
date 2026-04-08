@@ -1069,7 +1069,7 @@
   </div>
   <% } %>
 
-  <% if (legacyCandidates && legacyCandidates.length > 0) { %>
+  <% if (role === 'dev' && legacyCandidates && legacyCandidates.length > 0) { %>
   <div class="legacy-section">
     <div class="legacy-header">
       <h3>⚙️ Candidatos sin vacante asignada <span style="font-weight:400;color:var(--text-muted);font-size:13px;">(<%= legacyCandidates.length %>)</span></h3>
