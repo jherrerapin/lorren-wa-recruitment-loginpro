@@ -45,6 +45,12 @@
     .btn-danger:hover { background: #fecaca; }
     .btn-sm { padding: 5px 11px; font-size: 12px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .city-sections { display: flex; flex-direction: column; gap: 18px; }
+    .city-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .city-section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; background: linear-gradient(135deg, #f8fbfc 0%, #eef6f5 100%); border-bottom: 1px solid var(--border-soft); }
+    .city-section-title { font-size: 16px; font-weight: 700; color: var(--navy); }
+    .city-section-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .city-count { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 999px; background: var(--teal-light); color: var(--teal-hover); font-size: 12px; font-weight: 700; white-space: nowrap; }
     table { width: 100%; border-collapse: collapse; }
     thead th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
     tbody td { padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 13px; vertical-align: middle; }
@@ -156,59 +162,80 @@
   <% if (vacancies.length === 0) { %>
     <div class="card">
       <div class="empty-state">
-        <div class="empty-icon">📋</div>
-        <p>No hay vacantes registradas todavía.</p>
-        <p style="margin-top:6px;font-size:13px;">Crea la primera usando el botón de arriba.</p>
+        <div class="empty-icon">[]</div>
+        <p>No hay vacantes registradas todavia.</p>
+        <p style="margin-top:6px;font-size:13px;">Crea la primera usando el boton de arriba.</p>
       </div>
     </div>
   <% } else { %>
-  <div class="card">
-    <table>
-      <thead><tr>
-        <th>Vacante</th>
-        <th>Operación</th>
-        <th>Modo bot</th>
-        <th>Estado</th>
-        <th>Acciones</th>
-      </tr></thead>
-      <tbody>
-        <% for (const v of vacancies) { %>
-          <%
-            const isOpen   = v.isActive && v.acceptingApplications;
-            const isPaused = v.isActive && !v.acceptingApplications;
-            const isClosed = !v.isActive;
-            const badgeCls = isOpen ? 'badge-open' : (isPaused ? 'badge-paused' : 'badge-closed');
-            const dotCls   = isOpen ? 'dot-green'  : (isPaused ? 'dot-amber'   : 'dot-red');
-            const badgeTxt = isOpen ? 'Abierta'    : (isPaused ? 'Pausada'     : 'Inactiva');
-            const modeIcon = v.schedulingEnabled ? '🗓️' : '📋';
-            const modeTxt  = v.schedulingEnabled ? 'Con entrevista' : 'Solo HV';
-            const toggleClass = isOpen ? 'btn-danger' : 'btn-secondary';
-            const toggleLabel = isOpen ? 'Pausar'     : (isPaused ? 'Reabrir'  : 'Activar');
-            const opLabel = v.operation ? `${v.operation.city.name} › ${v.operation.name}` : (v.city || '—');
-          %>
-          <tr>
-            <td>
-              <div style="font-weight:700;color:var(--navy);"><%= v.title %></div>
-              <% if (v.role) { %><div style="font-size:11px;color:var(--text-muted);"><%= v.role %></div><% } %>
-            </td>
-            <td><span style="font-size:12px;"><%= opLabel %></span></td>
-            <td><span style="font-size:12px;"><%= modeIcon %> <%= modeTxt %></span></td>
-            <td><span class="badge <%= badgeCls %>"><span class="dot <%= dotCls %>"></span><%= badgeTxt %></span></td>
-            <td>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="btn btn-secondary btn-sm" onclick="openEdit(<%= JSON.stringify(v) %>)">✏️ Editar</button>
-                <form method="post" action="/admin/vacancies/<%= v.id %>/toggle" style="display:inline;">
-                  <button type="submit" class="btn <%= toggleClass %> btn-sm"><%= toggleLabel %></button>
-                </form>
-                <form method="post" action="/admin/vacancies/<%= v.id %>/delete" style="display:inline;" onsubmit="return confirm('¿Seguro que deseas eliminar esta vacante?');">
-                  <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
-                </form>
-              </div>
-            </td>
-          </tr>
-        <% } %>
-      </tbody>
-    </table>
+  <%
+    const vacancyGroups = vacancies.reduce((groups, vacancy) => {
+      const city = vacancy.city || 'Sin ciudad';
+      if (!groups[city]) groups[city] = [];
+      groups[city].push(vacancy);
+      return groups;
+    }, {});
+    const groupedCities = Object.keys(vacancyGroups).sort((a, b) => a.localeCompare(b, 'es'));
+  %>
+  <div class="city-sections">
+    <% for (const cityName of groupedCities) { %>
+      <% const cityVacancies = vacancyGroups[cityName]; %>
+      <section class="city-section">
+        <div class="city-section-header">
+          <div>
+            <div class="city-section-title"><%= cityName %></div>
+            <div class="city-section-subtitle">Vacantes organizadas para esta ciudad</div>
+          </div>
+          <div class="city-count"><%= cityVacancies.length %> vacante<%= cityVacancies.length !== 1 ? 's' : '' %></div>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Vacante</th>
+            <th>Operacion</th>
+            <th>Modo bot</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr></thead>
+          <tbody>
+            <% for (const v of cityVacancies) { %>
+              <%
+                const isOpen   = v.isActive && v.acceptingApplications;
+                const isPaused = v.isActive && !v.acceptingApplications;
+                const isClosed = !v.isActive;
+                const badgeCls = isOpen ? 'badge-open' : (isPaused ? 'badge-paused' : 'badge-closed');
+                const dotCls   = isOpen ? 'dot-green'  : (isPaused ? 'dot-amber'   : 'dot-red');
+                const badgeTxt = isOpen ? 'Abierta'    : (isPaused ? 'Pausada'     : 'Inactiva');
+                const modeIcon = v.schedulingEnabled ? 'Agenda' : 'HV';
+                const modeTxt  = v.schedulingEnabled ? 'Con entrevista' : 'Solo HV';
+                const toggleClass = isOpen ? 'btn-danger' : 'btn-secondary';
+                const toggleLabel = isOpen ? 'Pausar'     : (isPaused ? 'Reabrir'  : 'Activar');
+                const opLabel = v.operation ? (v.operation.city.name + ' > ' + v.operation.name) : (v.city || '-');
+              %>
+              <tr>
+                <td>
+                  <div style="font-weight:700;color:var(--navy);"><%= v.title %></div>
+                  <% if (v.role) { %><div style="font-size:11px;color:var(--text-muted);"><%= v.role %></div><% } %>
+                </td>
+                <td><span style="font-size:12px;"><%= opLabel %></span></td>
+                <td><span style="font-size:12px;"><%= modeIcon %> <%= modeTxt %></span></td>
+                <td><span class="badge <%= badgeCls %>"><span class="dot <%= dotCls %>"></span><%= badgeTxt %></span></td>
+                <td>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button class="btn btn-secondary btn-sm" onclick="openEdit(<%= JSON.stringify(v) %>)">Editar</button>
+                    <form method="post" action="/admin/vacancies/<%= v.id %>/toggle" style="display:inline;">
+                      <button type="submit" class="btn <%= toggleClass %> btn-sm"><%= toggleLabel %></button>
+                    </form>
+                    <form method="post" action="/admin/vacancies/<%= v.id %>/delete" style="display:inline;" onsubmit="return confirm('Seguro que deseas eliminar esta vacante?');">
+                      <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </section>
+    <% } %>
   </div>
   <% } %>
 </div>
