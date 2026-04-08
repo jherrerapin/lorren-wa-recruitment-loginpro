@@ -128,3 +128,74 @@ test('negación compuesta de transporte termina en sin medio de transporte', () 
   const normalized = normalizeCandidateFields(parsed);
   assert.equal(normalized.transportMode, 'Sin medio de transporte');
 });
+
+test('no toma saludo + intención como fullName aunque detecte barrio', () => {
+  const parsed = parseNaturalData('Buenas noches estoy interesado en la vacante de cargue y descargue en la ciudad de ibague vivo en el salado');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.fullName, undefined);
+  assert.equal(normalized.neighborhood, 'Salado');
+});
+
+test('prioriza la edad actual sobre un cumpleaños futuro mencionado después', () => {
+  const parsed = parseNaturalData('18 años el otro mes cumplo 19');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.age, 18);
+});
+
+test('normaliza restricciones médicas cuando la negación viene al final', () => {
+  const parsed = parseNaturalData('restricciones medicas ninguna');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
+});
+
+test('no toma formatos de archivo como fullName', () => {
+  const parsed = parseNaturalData('Por pdf');
+  const normalized = normalizeCandidateFields(parsed);
+  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  assert.equal(normalized.fullName, undefined);
+  assert.equal(decisions.suspiciousFullNameRejected, false);
+  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
+});
+
+test('un si solo no se interpreta como experiencia', () => {
+  const parsed = parseNaturalData('Si');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.experienceInfo, undefined);
+});
+
+test('no toma frases de cargo como fullName', () => {
+  const parsed = parseNaturalData('Para el cargo de auxiliar de cargue y descargue');
+  const normalized = normalizeCandidateFields(parsed);
+  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  assert.equal(normalized.fullName, undefined);
+  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
+});
+
+test('no toma restricciones medicas como fullName', () => {
+  const parsed = parseNaturalData('Sin restriccion medica');
+  const normalized = normalizeCandidateFields(parsed);
+  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  assert.equal(normalized.fullName, undefined);
+  assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
+  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
+});
+
+test('no confunde calle 80 con edad ni con fullName', () => {
+  const parsed = parseNaturalData('Desde Bogota calle 80');
+  const normalized = normalizeCandidateFields(parsed);
+  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  assert.equal(normalized.age, undefined);
+  assert.equal(normalized.fullName, undefined);
+  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
+});
+
+test('bloque con direccion no contamina la edad del candidato', () => {
+  const parsed = parseNaturalData('Cristian David Mahecha puentes\nCedula de ciudadania\n1233895932\nBogota calle 80\nNo tengo restricciones medicas\nTransporte bicicleta');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.fullName, 'Cristian David Mahecha Puentes');
+  assert.equal(normalized.documentType, 'CC');
+  assert.equal(normalized.documentNumber, '1233895932');
+  assert.equal(normalized.age, undefined);
+  assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
+  assert.equal(normalized.transportMode, 'Bicicleta');
+});

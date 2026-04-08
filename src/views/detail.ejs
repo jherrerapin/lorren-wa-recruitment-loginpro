@@ -343,6 +343,12 @@
                     <button type="submit" class="action-btn <%= action.cls %>" <%= booking.status === action.status ? 'disabled' : '' %>><%= action.label %></button>
                   </form>
                 <% } %>
+                <% if (role === 'dev') { %>
+                  <form method="post" action="/admin/interviews/<%= booking.id %>/delete" onsubmit="return confirm('¿Seguro que deseas eliminar este agendamiento? Esta acción no se puede deshacer.');">
+                    <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
+                    <button type="submit" class="action-btn action-btn-danger">Eliminar agendamiento</button>
+                  </form>
+                <% } %>
               </div>
             </div>
           <% } %>
@@ -428,6 +434,17 @@
           <button type="submit">Enviar mensaje libre</button>
         </form>
       </div>
+    <% } %>
+
+    <% if (role === 'dev') { %>
+    <div class="card">
+      <h2>Herramientas de desarrollo</h2>
+      <p style="margin-bottom:12px;color:#64748b;">Estas acciones son solo para limpieza manual y no están disponibles para reclutador.</p>
+      <form method="post" action="/admin/candidates/<%= candidate.id %>/delete" onsubmit="return confirm('¿Seguro que deseas eliminar este candidato con sus mensajes y agendamientos? Esta acción no se puede deshacer.');">
+        <input type="hidden" name="returnTo" value="<%= returnToPath || '/admin' %>" />
+        <button type="submit" class="btn-danger">Eliminar registro completo</button>
+      </form>
+    </div>
     <% } %>
 
     <div class="card">

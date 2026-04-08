@@ -18,7 +18,14 @@ const MOTO_VARIANTS = ['moto', 'motocicleta'];
 const CAR_VARIANTS = ['carro', 'automovil', 'automóvil', 'vehiculo', 'vehículo'];
 const BUS_VARIANTS = ['bus', 'buseta', 'transporte publico', 'transporte público', 'servicio publico', 'servicio público'];
 const INDEPENDENT_VARIANTS = ['independiente'];
-const LOCATION_STOPWORDS = /\b(cc|ti|ce|ppt|pasaporte|documento|edad|experien|restric|medic|salud|transporte|moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|bus|nombre|hoja de vida|hv|cv|trabaj|independiente)\b/i;
+const LOCATION_STOPWORDS = /\b(cc|ti|ce|ppt|pasaporte|documento|cedula|cédula|ciudadania|ciudadanía|numero|número|edad|experiencia|experiencias|restriccion|restricciones|medica|medicas|salud|transporte|moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|bus|nombre|hoja de vida|hv|cv|trabajo|trabajando|independiente|corrijo|cuento|sin|no|auxiliar|cargue|descargue|bodega|operativo|operativa|vacante|cargo|anuncio|turno|turnos|disponibilidad)\b/i;
+const ADDRESS_TOKENS = /^(?:calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv|km|kilometro|kilómetro|entrada|salida)$/i;
+
+function looksLikeJobRoleChunk(value = '') {
+  const normalized = normalizeLooseText(value);
+  if (!normalized) return false;
+  return /\b(auxiliar|operativ|cargue|descargue|bodega|vacante|cargo|anuncio|turno|turnos|perfil|requisit)\b/.test(normalized);
+}
 
 function normalizeLooseText(value = '') {
   return String(value || '')
@@ -64,7 +71,7 @@ function detectTransportKeyword(text = '') {
   const normalized = normalizeLooseText(text);
   if (!normalized) return null;
 
-  if (/(^|\b)(sin|no tengo|no tiene|ninguno|ninguna)(\b|$)/.test(normalized) && /transporte|vehiculo|vehiculo|moto|bicicleta|carro|bus/.test(normalized)) {
+  if (/\b(?:sin|no\s+tengo|no\s+tiene|ninguno|ninguna)\s+(?:medio\s+de\s+transporte|transporte|vehiculo|moto|motocicleta|bicicleta|bici|cicla|carro|automovil|bus|buseta)\b/.test(normalized)) {
     return 'Sin medio de transporte';
   }
   if (BIKE_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) return 'Bicicleta';
@@ -75,15 +82,55 @@ function detectTransportKeyword(text = '') {
   return null;
 }
 
+function cleanTransportSegment(value = '') {
+  return String(value || '')
+    .replace(/\b(?:mi\s+)?medio\s+de\s+transporte(?:\s+es)?\s*[:\-]?\s*/i, '')
+    .replace(/\btransporte(?:\s+es)?\s*[:\-]?\s*/i, '')
+    .replace(/\bme\s+movilizo\s+en\s+/i, '')
+    .replace(/\bvoy\s+en\s+/i, '')
+    .trim();
+}
+
+function hasAddressLikeContext(text = '') {
+  const normalized = normalizeLooseText(text);
+  if (!normalized) return false;
+  return /\b(?:calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv|km|kilometro|kilometro|entrada|salida)\s+\d{1,3}\b/.test(normalized)
+    || /\b(?:de|desde)\s+[a-zñ]+(?:\s+[a-zñ]+)?\s+(?:calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv)\s+\d{1,3}\b/.test(normalized);
+}
+
+function detectTransportFromSequence(text = '') {
+  const segments = String(text || '')
+    .split(/[\n,]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    const normalizedSegment = normalizeLooseText(segment);
+    if (!normalizedSegment) continue;
+
+    const cleanedSegment = cleanTransportSegment(segment);
+    const normalizedCleaned = normalizeLooseText(cleanedSegment);
+    const hasTransportLabel = /\b(?:mi\s+)?medio\s+de\s+transporte\b|\btransporte\b/.test(normalizedSegment);
+    const isShortSegment = normalizedCleaned.split(' ').filter(Boolean).length <= 4;
+
+    if ((hasTransportLabel || isShortSegment) && detectTransportKeyword(normalizedCleaned || normalizedSegment)) {
+      return normalizeTransportMode(normalizedCleaned || normalizedSegment);
+    }
+  }
+
+  return null;
+}
+
 function detectContextualAge(text = '') {
   const compact = normalizeLooseText(text);
   if (!compact) return null;
 
+  const ageWithYears = compact.match(/\b(\d{1,2})\s*anos\b(?!\s+de\s+experiencia)/i);
   const explicit = compact.match(/\b(?:mi\s+edad\s+es|edad\s*(?:es|:)?|tengo|soy\s+de)\s*(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?\b(?!\s+de\s+experiencia)/i);
-  const fallback = !/experien/i.test(compact)
+  const fallback = !/experien/i.test(compact) && !hasAddressLikeContext(compact)
     ? compact.match(/^\D*(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?\D*$/i)
     : null;
-  const rawAge = explicit?.[1] || fallback?.[1];
+  const rawAge = ageWithYears?.[1] || explicit?.[1] || fallback?.[1];
   if (!rawAge) return null;
 
   const age = Number.parseInt(rawAge, 10);
@@ -99,12 +146,65 @@ function detectAgeFromSequence(text = '') {
 
   for (const segment of segments) {
     const compact = normalizeLooseText(segment);
-    if (!compact || /\d{6,}/.test(compact) || /experien/.test(compact)) continue;
+    if (!compact || /\d{6,}/.test(compact) || /experien/.test(compact) || hasAddressLikeContext(compact)) continue;
     const match = compact.match(/^(?:edad\s*[:\-]?\s*)?(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?$/i);
     if (!match?.[1]) continue;
 
     const age = Number.parseInt(match[1], 10);
     if (Number.isFinite(age) && age >= 14 && age <= 80) return age;
+  }
+
+  return null;
+}
+
+function normalizeExperienceDuration(value = '') {
+  const raw = String(value || '').trim();
+  const normalizedRaw = normalizeLooseText(raw);
+  if (!normalizedRaw) return null;
+
+  const wordToNum = {
+    un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
+    seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11,
+    doce: 12, trece: 13, catorce: 14, quince: 15
+  };
+
+  let normalized = normalizedRaw;
+  for (const [word, num] of Object.entries(wordToNum)) {
+    normalized = normalized.replace(new RegExp(`\\b${word}\\b`, 'i'), String(num));
+  }
+
+  const match = normalized.match(/(\d+)\s*(mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?)/i);
+  if (!match) return capitalizeWords(raw);
+
+  const amount = Number.parseInt(match[1], 10);
+  let unit = match[2].toLowerCase();
+  if (unit.startsWith('mes')) unit = amount === 1 ? 'mes' : 'meses';
+  else if (unit.startsWith('a')) unit = amount === 1 ? 'año' : 'años';
+  else if (unit.startsWith('semana')) unit = amount === 1 ? 'semana' : 'semanas';
+
+  return `${amount} ${unit}`;
+}
+
+function detectStandaloneAge(text = '') {
+  const tokens = String(text || '')
+    .split(/[\s,]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!/^\d{1,2}$/.test(token)) continue;
+
+    const age = Number.parseInt(token, 10);
+    if (!Number.isFinite(age) || age < 14 || age > 80) continue;
+
+    const previous = normalizeLooseText(tokens[index - 1] || '');
+    const next = normalizeLooseText(tokens[index + 1] || '');
+    if (/^(cc|ti|ce|ppt|pasaporte)$/.test(previous)) continue;
+    if (ADDRESS_TOKENS.test(previous)) continue;
+    if (/^(mes|meses|semana|semanas|ano|anos)$/.test(next)) continue;
+
+    return age;
   }
 
   return null;
@@ -141,7 +241,7 @@ function normalizeMedicalRestrictions(value = '') {
   const raw = String(value || '').trim();
   const normalized = normalizeLooseText(raw);
   if (!normalized) return null;
-  if (/^(no tengo restricciones?( medicas?)?|no cuento con restricciones?( medicas?)?|sin restricciones?( medicas?)?|sin ninguna restriccion|ninguna restriccion)$/.test(normalized)) {
+  if (/^(no tengo restriccion(?:es)?( medicas?)?|no cuento con restriccion(?:es)?( medicas?)?|sin restriccion(?:es)?( medicas?)?|sin ninguna restriccion|ninguna restriccion|restriccion(?:es)? medicas? ninguna|restriccion(?:es)? ninguna)$/.test(normalized)) {
     return 'Sin restricciones médicas';
   }
   return capitalizeWords(raw);
@@ -176,6 +276,7 @@ function looksLikeLocationChunk(value = '') {
   if (!normalized || normalized.length < 3 || normalized.length > 40) return false;
   if (/\d{3,}/.test(normalized)) return false;
   if (LOCATION_STOPWORDS.test(normalized)) return false;
+  if (looksLikeJobRoleChunk(normalized)) return false;
   if (detectTransportKeyword(normalized)) return false;
 
   const words = normalized.split(' ').filter(Boolean);
@@ -212,8 +313,8 @@ function detectLocationFromSequence(text = '') {
 function normalizeExperienceInfo(value = '') {
   const normalized = normalizeLooseText(value);
   if (!normalized) return null;
-  if ((/\b(no|sin|ninguna|ninguno|nunca)\b/.test(normalized) && /experien/.test(normalized)) || normalized === 'no') return 'No';
-  if ((/\b(si|yes|tengo|cuento con|poseo)\b/.test(normalized) && /experien/.test(normalized)) || normalized === 'si' || normalized === 'sí') return 'Sí';
+  if (/\b(?:sin experiencia|no tengo experiencia|ninguna experiencia|nunca he trabajado)\b/.test(normalized)) return 'No';
+  if (/\b(si|yes|tengo|cuento con|poseo)\b/.test(normalized) && /experien/.test(normalized)) return 'Sí';
   return null;
 }
 
@@ -246,26 +347,71 @@ function hasNameTokens(candidate = '') {
   return parts.every((part) => NAME_TOKEN_REGEX.test(part));
 }
 
+function sanitizeNameCandidate(value = '') {
+  return String(value || '')
+    .split(/[\n,]/)[0]
+    .replace(/\b(?:c\.?\s*c\.?|c[ée]dula|documento|t\.?\s*i\.?|c\.?\s*e\.?|pasaporte|ppt)\b.*$/i, '')
+    .replace(/\b(?:deseo|quiero|estoy|me encuentro|me interesa|interesado|interesada|vacante|cargo|rol|puesto|documentacion|documentación|informacion|información|gracias)\b.*$/i, '')
+    .replace(/[.;:\-\s]+$/g, '')
+    .trim();
+}
+
+function detectRobustExperienceTime(text = '') {
+  const compact = normalizeLooseText(text);
+  if (!compact) return null;
+
+  const fuzzyDuration = compact.match(/\b(\d+)\s+([a-z]+(?:\s+[a-z]+)?)\s+de\s+experiencia\b/i);
+  if (fuzzyDuration?.[1] && fuzzyDuration?.[2]) {
+    const amount = Number.parseInt(fuzzyDuration[1], 10);
+    const unitHint = fuzzyDuration[2].replace(/\s+/g, '');
+    if (Number.isFinite(amount)) {
+      if (unitHint.startsWith('mes')) return `${amount} ${amount === 1 ? 'mes' : 'meses'}`;
+      if (unitHint.startsWith('a')) return `${amount} ${amount === 1 ? 'año' : 'años'}`;
+      if (unitHint.startsWith('sem')) return `${amount} ${amount === 1 ? 'semana' : 'semanas'}`;
+    }
+  }
+
+  const duration = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/i)?.[1];
+  if (!duration) return null;
+
+  const hasWorkContext = /\b(experien|trabaj|labor|cargo|oficio)\b/.test(compact);
+  const hasShortAffirmativeContext = /\bsi\s+tengo\s+/.test(compact);
+  if (!hasWorkContext && !hasShortAffirmativeContext) return null;
+
+  return normalizeExperienceDuration(duration);
+}
+
 function detectLeadingName(text = '') {
   const compact = String(text || '').trim();
   if (!compact) return null;
 
+  const explicitLabel = compact.match(
+    /\b(?:nombre\s+completo|nombre)(?:\s+es)?\s*[:\-]?\s+([A-Za-zÃÃ‰ÃÃ“ÃšÃ‘Ã¡Ã©ÃÃ³ÃºÃ±][A-Za-zÃÃ‰ÃÃ“ÃšÃ‘Ã¡Ã©ÃÃ³ÃºÃ±'\-.\s]{3,60})/i
+  );
+  if (explicitLabel?.[1]) {
+    const labeledName = capitalizeWords(sanitizeNameCandidate(explicitLabel[1]));
+    if (!isSuspiciousFullName(labeledName)) return labeledName;
+  }
+
   const prefixed = compact.match(
     /(?:me\s+llamo|soy|mi\s+nombre\s+es|nombre\s*[:\-]?)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.\s]{3,60})/i
   );
-  if (prefixed?.[1]) return capitalizeWords(prefixed[1]);
+  if (prefixed?.[1]) {
+    const prefixedName = capitalizeWords(sanitizeNameCandidate(prefixed[1]));
+    if (!isSuspiciousFullName(prefixedName)) return prefixedName;
+  }
 
   const leading = compact.match(
     /^\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*){1,3})(?=\s+(?:c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|c\.?\s*e\.?|pasaporte|ppt|\d))/i
   );
   if (leading?.[1]) {
-    const cleaned = leading[1].replace(/\b(cc|ti|ce|ppt|pasaporte)\b$/i, '').trim();
+    const cleaned = sanitizeNameCandidate(leading[1].replace(/\b(cc|ti|ce|ppt|pasaporte)\b$/i, '').trim());
     if (!hasNameTokens(cleaned)) return null;
     const candidate = capitalizeWords(cleaned);
     if (!isSuspiciousFullName(candidate)) return candidate;
   }
 
-  const firstChunk = compact.split(/[\n,]/)[0]?.trim() || '';
+  const firstChunk = sanitizeNameCandidate(compact.split(/[\n,]/)[0]?.trim() || '');
   if (hasNameTokens(firstChunk)) {
     const candidate = capitalizeWords(firstChunk);
     if (!isSuspiciousFullName(candidate)) return candidate;
@@ -305,6 +451,10 @@ export function parseNaturalData(text = '') {
     const ageFromSequence = detectAgeFromSequence(text);
     if (ageFromSequence !== null) result.age = ageFromSequence;
   }
+  if (result.age === undefined) {
+    const standaloneAge = detectStandaloneAge(remaining);
+    if (standaloneAge !== null) result.age = standaloneAge;
+  }
 
   const neighborhoodMatch = compact.match(/\b(?:barrio|zona|sector|localidad|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i)
     || remaining.match(/\b(?:barrio|zona|sector|localidad|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i);
@@ -339,17 +489,22 @@ export function parseNaturalData(text = '') {
     if (!result.neighborhood && inferredLocation.neighborhood) result.neighborhood = inferredLocation.neighborhood;
   }
 
-  const medicalNegative = /\b(no\s+tengo\s+restricciones?(\s+medicas?)?|sin\s+restricciones?(\s+medicas?)?|ninguna\s+restriccion)\b/i.test(normalizeLooseText(compact));
+  const medicalNegative = /\b(no\s+tengo\s+restriccion(?:es)?(\s+medicas?)?|no\s+cuento\s+con\s+restriccion(?:es)?(\s+medicas?)?|sin\s+restriccion(?:es)?(\s+medicas?)?|ninguna\s+restriccion|restriccion(?:es)?\s+medicas?\s+ninguna|restriccion(?:es)?\s+ninguna)\b/i.test(normalizeLooseText(compact));
   if (medicalNegative) result.medicalRestrictions = 'Sin restricciones médicas';
 
-  const transportNegative = compact.match(/\b(?:no\s+(?:tengo|cuento\s+con)\s+(?:medio\s+de\s+transporte|transporte|moto|bicicleta|bici|carro|bus)|sin\s+medio\s+de\s+transporte)\b/i);
+  const transportNegative = compact.match(/\b(?:no\s+(?:tengo|cuento\s+con)\s+(?:medio\s+de\s+transporte|transporte|moto|motocicleta|bicicleta|bici|cicla|carro|bus)|sin\s+(?:medio\s+de\s+transporte|transporte|moto|motocicleta|bicicleta|bici|cicla|carro|bus))\b/i);
   if (transportNegative) result.transportMode = 'Sin medio de transporte';
 
   if (!result.transportMode) {
-    const transportPositive = compact.match(/\b(?:mi\s+medio\s+de\s+transporte\s+es|medio\s+de\s+transporte\s*:|transporte\s*:|transporte\s+es|tengo|cuento con|si tengo|manejo|me movilizo en|voy en|independiente\s*-\s*bus)\b/i);
+    const transportPositive = compact.match(/\b(?:mi\s+medio\s+de\s+transporte(?:\s+es)?|medio\s+de\s+transporte(?:\s+es)?|transporte\s*:|transporte\s+es|tengo|cuento con|si tengo|manejo|me movilizo en|voy en|independiente\s*-\s*bus)\b/i);
     if (transportPositive && detectTransportKeyword(compact)) {
-      result.transportMode = normalizeTransportMode(compact);
+      result.transportMode = normalizeTransportMode(cleanTransportSegment(compact));
     }
+  }
+
+  if (!result.transportMode) {
+    const transportFromSequence = detectTransportFromSequence(text);
+    if (transportFromSequence) result.transportMode = transportFromSequence;
   }
 
   if (!result.transportMode && /^(?:en\s+)?[a-záéíóúñ]+$/i.test(compact)) {
@@ -360,9 +515,14 @@ export function parseNaturalData(text = '') {
   }
 
   const negativeExperience = normalizeExperienceInfo(compact);
-  if (negativeExperience) result.experienceInfo = negativeExperience;
+  if (negativeExperience) {
+    result.experienceInfo = negativeExperience;
+    if (negativeExperience === 'No' && !result.experienceTime) {
+      result.experienceTime = '0';
+    }
+  }
 
-  const experienceTime = detectExperienceTime(compact);
+  const experienceTime = detectRobustExperienceTime(compact) || detectExperienceTime(compact);
   if (experienceTime) {
     result.experienceTime = experienceTime;
     if (!result.experienceInfo) result.experienceInfo = 'Sí';
@@ -396,7 +556,7 @@ export function normalizeCandidateFields(fields = {}) {
   if (fields.medicalRestrictions) normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
   if (fields.transportMode) normalized.transportMode = normalizeTransportMode(fields.transportMode);
   if (fields.experienceInfo) normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || capitalizeWords(fields.experienceInfo);
-  if (fields.experienceTime) normalized.experienceTime = normalizeExperienceTime(fields.experienceTime);
+  if (fields.experienceTime) normalized.experienceTime = normalizeExperienceDuration(fields.experienceTime);
 
   return normalized;
 }
