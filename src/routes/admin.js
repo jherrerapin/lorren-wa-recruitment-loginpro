@@ -136,6 +136,13 @@ const BOOKING_ACTION_STATUS = {
   cancelled: 'CANCELLED',
   rescheduled: 'RESCHEDULED'
 };
+const BOOKING_STATUS_PRIORITY = {
+  CONFIRMED: 5,
+  SCHEDULED: 4,
+  NO_SHOW: 3,
+  CANCELLED: 2,
+  RESCHEDULED: 1
+};
 
 const ALLOWED_CV_MIMES = new Set([
   'application/pdf', 'application/msword',
@@ -174,6 +181,57 @@ function parseInterviewAssignment(value) {
   const scheduledAt = new Date(scheduledAtRaw);
   if (Number.isNaN(scheduledAt.getTime())) return null;
   return { slotId, scheduledAt };
+}
+
+function bookingDedupKey(booking) {
+  const candidateId = booking?.candidateId || booking?.candidate?.id || 'candidate';
+  const vacancyId = booking?.vacancyId || booking?.vacancy?.id || 'vacancy';
+  const scheduledAt = booking?.scheduledAt ? new Date(booking.scheduledAt).toISOString() : 'no-date';
+  return `${candidateId}|${vacancyId}|${scheduledAt}`;
+}
+
+function bookingPriority(booking) {
+  return BOOKING_STATUS_PRIORITY[booking?.status] || 0;
+}
+
+function normalizeInterviewBookings(bookings = []) {
+  const unique = new Map();
+
+  for (const booking of bookings) {
+    const key = bookingDedupKey(booking);
+    const current = unique.get(key);
+    if (!current) {
+      unique.set(key, booking);
+      continue;
+    }
+
+    const incomingPriority = bookingPriority(booking);
+    const currentPriority = bookingPriority(current);
+    if (incomingPriority > currentPriority) {
+      unique.set(key, booking);
+      continue;
+    }
+    if (incomingPriority < currentPriority) continue;
+
+    const incomingUpdatedAt = booking?.updatedAt ? new Date(booking.updatedAt).getTime() : 0;
+    const currentUpdatedAt = current?.updatedAt ? new Date(current.updatedAt).getTime() : 0;
+    if (incomingUpdatedAt > currentUpdatedAt) {
+      unique.set(key, booking);
+      continue;
+    }
+
+    const incomingCreatedAt = booking?.createdAt ? new Date(booking.createdAt).getTime() : 0;
+    const currentCreatedAt = current?.createdAt ? new Date(current.createdAt).getTime() : 0;
+    if (incomingCreatedAt > currentCreatedAt) {
+      unique.set(key, booking);
+    }
+  }
+
+  return Array.from(unique.values()).sort((a, b) => {
+    const dateDiff = new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime();
+    if (dateDiff !== 0) return dateDiff;
+    return bookingPriority(b) - bookingPriority(a);
+  });
 }
 
 function normalizeCandidateListFilters(source = {}) {
@@ -449,7 +507,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
     const registeredNoBooking = filterDashboardCandidates(registeredNoBookingBase);
     const registeredComplete = filterDashboardCandidates(registeredCompleteBase);
     const completeWithoutCv = filterDashboardCandidates(completeWithoutCvBase);
-    const filteredBookingsToday = v.interviewBookings
+    const filteredBookingsToday = normalizeInterviewBookings(v.interviewBookings)
       .map(b => ({
         ...b,
         candidate: decorateDashboardCandidate(b.candidate),
@@ -1039,6 +1097,7 @@ export function adminRouter(prisma) {
       : [];
     const detailCandidate = {
       ...normalizeCandidateSnapshot(candidate),
+      interviewBookings: normalizeInterviewBookings(candidate.interviewBookings || []),
       outboundWindowOpen: outboundWindow?.isOpen ?? (
         Boolean(candidate.lastInboundAt)
         && (Date.now() - new Date(candidate.lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS
