@@ -1074,16 +1074,15 @@
             </div>
           </div>
           <% } %>
-
           <% if (v.approvedCandidates.length > 0) { %>
           <div class="section">
             <div class="section-header">
-              <span class="section-title">✅&nbsp; Aprobados</span>
+              <span class="section-title">Aprobados</span>
               <span class="section-count"><%= filteredApprovedCandidates.length %></span>
             </div>
             <div class="candidates-list">
               <% if (filteredApprovedCandidates.length === 0) { %>
-                <div class="empty-state"><div class="empty-icon">📭</div><p>No hay candidatos aprobados que coincidan con este filtro.</p></div>
+                <div class="empty-state"><div class="empty-icon">-</div><p>No hay candidatos aprobados que coincidan con este filtro.</p></div>
               <% } %>
               <% for (const c of filteredApprovedCandidates.slice(0, 25)) { %>
                 <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
@@ -1098,7 +1097,7 @@
                     <% } %>
                     <% if (c.isFemaleHumanReview) { %>
                       <div class="candidate-flags">
-                        <span class="badge badge-human-review">RevisiÃ³n humana</span>
+                        <span class="badge badge-human-review">Revision humana</span>
                       </div>
                     <% } %>
                     <% if (role === 'dev' && c.hasNewInbound) { %>
@@ -1106,23 +1105,23 @@
                         <span class="badge badge-unread">Mensaje nuevo</span>
                       </div>
                     <% } %>
-                    <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : 'â€”' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> aÃ±os<% } %></div>
+                    <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '-' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> anios<% } %></div>
                     <% const approvedCandidateMeta = candidateOperationalMeta(c); %>
                     <% if (approvedCandidateMeta) { %><div class="candidate-extra"><%= approvedCandidateMeta %></div><% } %>
                     <% const approvedCandidateNote = candidateObservationSnippet(c); %>
                     <% if (approvedCandidateNote) { %><div class="candidate-note">Observaciones: <%= approvedCandidateNote %></div><% } %>
                     <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
                   </div>
-                  <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>ðŸ“± <%= c.phone %></a></div>
+                  <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>Tel. <%= c.phone %></a></div>
                   <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
-                  <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? 'âœ“ HV' : 'Sin HV' %></span>
+                  <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? 'OK HV' : 'Sin HV' %></span>
                   <div class="action-stack">
                     <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
-                    <a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver â†’</a>
+                    <a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver -&gt;</a>
                   </div>
                 </div>
               <% } %>
-              <% if (filteredApprovedCandidates.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredApprovedCandidates.length - 25 %> mÃ¡s aprobados</div><% } %>
+              <% if (filteredApprovedCandidates.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredApprovedCandidates.length - 25 %> mas aprobados</div><% } %>
             </div>
           </div>
           <% } %>
