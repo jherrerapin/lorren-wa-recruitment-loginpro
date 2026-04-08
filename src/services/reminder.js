@@ -2,8 +2,53 @@ import { sendTextMessage } from './whatsapp.js';
 import { canScheduleReminderPolicy, isWithinWhatsappWindow } from './reminderPolicy.js';
 
 const REMINDER_DELAY_MS = 25 * 60 * 1000;
+const REQUIRED_FIELDS = [
+  ['fullName', 'nombre completo'],
+  ['documentType', 'tipo de documento'],
+  ['documentNumber', 'número de documento'],
+  ['age', 'edad'],
+  ['neighborhood', 'barrio'],
+  ['medicalRestrictions', 'restricciones médicas'],
+  ['transportMode', 'medio de transporte']
+];
 
-export const REMINDER_TEXT = 'Hola 👋 Te escribo para recordar que tu proceso sigue abierto. Si deseas continuar, envíame los datos faltantes o tu Hoja de vida (HV).';
+function hasValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function formatList(items = []) {
+  if (!items.length) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} y ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}`;
+}
+
+export function getReminderMissingItems(candidate = {}) {
+  const missingFields = REQUIRED_FIELDS
+    .filter(([field]) => !hasValue(candidate?.[field]))
+    .map(([, label]) => label);
+
+  const missingHv = !hasValue(candidate?.cvData);
+  return { missingFields, missingHv };
+}
+
+export function buildReminderText(candidate = {}) {
+  const { missingFields, missingHv } = getReminderMissingItems(candidate);
+  const missingParts = [];
+
+  if (missingFields.length) {
+    missingParts.push(`estos datos: ${formatList(missingFields)}`);
+  }
+  if (missingHv) {
+    missingParts.push('tu hoja de vida (HV) en PDF o Word (.doc/.docx)');
+  }
+
+  if (!missingParts.length) {
+    return 'Hola 👋 Te escribo para recordarte que tu proceso sigue abierto. Si necesitas apoyo para continuar, aquí quedo atento.';
+  }
+
+  return `Hola 👋 Te escribo para recordarte que tu proceso sigue abierto. Para completar tu postulación aún me falta ${formatList(missingParts)}.`;
+}
 
 export function canScheduleReminder(candidate) {
   return canScheduleReminderPolicy(candidate);
@@ -85,8 +130,9 @@ export async function runReminderDispatcher(prisma, { now = new Date() } = {}) {
       continue;
     }
 
-    await sendTextMessage(candidate.phone, REMINDER_TEXT);
-    await storeOutbound(prisma, candidate.id, REMINDER_TEXT, { source: 'auto_reminder' });
+    const reminderText = buildReminderText(candidate);
+    await sendTextMessage(candidate.phone, reminderText);
+    await storeOutbound(prisma, candidate.id, reminderText, { source: 'auto_reminder' });
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {

@@ -1153,6 +1153,48 @@ export function adminRouter(prisma) {
     return res.redirect(withFlashMessage(returnTo, 'success', 'Entrevista actualizada correctamente.'));
   });
 
+  router.post('/interviews/:id/delete', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.body.returnTo || req.get('referer') || '/admin');
+
+    const booking = await prisma.interviewBooking.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        candidateId: true
+      }
+    });
+
+    if (!booking) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Agendamiento no encontrado.'));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.interviewBooking.delete({
+        where: { id: booking.id }
+      });
+
+      const remainingActiveBooking = await tx.interviewBooking.findFirst({
+        where: {
+          candidateId: booking.candidateId,
+          status: { in: ACTIVE_BOOKING_STATUSES }
+        },
+        select: { id: true }
+      });
+
+      if (!remainingActiveBooking) {
+        await tx.candidate.update({
+          where: { id: booking.candidateId },
+          data: {
+            currentStep: ConversationStep.SCHEDULING
+          }
+        });
+      }
+    });
+
+    return res.redirect(withFlashMessage(returnTo, 'success', 'Agendamiento eliminado correctamente.'));
+  });
+
   router.post('/candidates/:id/interview-assign', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const returnTo = safeAdminReturnPath(req.body.returnTo || `/admin/candidates/${id}`);
@@ -1251,7 +1293,7 @@ export function adminRouter(prisma) {
         }
       }
 
-      return res.redirect(withFlashMessage(returnTo, 'success', `Entrevista asignada para ${chosenOffer.formattedDate}.`));
+    return res.redirect(withFlashMessage(returnTo, 'success', `Entrevista asignada para ${chosenOffer.formattedDate}.`));
     } catch (error) {
       console.error('[manual_interview_assign]', {
         candidateId: id,
@@ -1337,6 +1379,37 @@ export function adminRouter(prisma) {
     });
 
     return res.redirect(withFlashMessage(returnTo, 'success', 'Vacante asignada correctamente.'));
+  });
+
+  router.post('/candidates/:id/delete', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.body.returnTo || '/admin');
+
+    const candidate = await prisma.candidate.findUnique({
+      where: { id },
+      select: { id: true, fullName: true }
+    });
+
+    if (!candidate) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.message.deleteMany({
+        where: { candidateId: candidate.id }
+      });
+
+      await tx.interviewBooking.deleteMany({
+        where: { candidateId: candidate.id }
+      });
+
+      await tx.candidate.delete({
+        where: { id: candidate.id }
+      });
+    });
+
+    const candidateLabel = candidate.fullName || 'el candidato';
+    return res.redirect(withFlashMessage(returnTo, 'success', `Se eliminó ${candidateLabel} correctamente.`));
   });
 
   router.post('/candidates/:id/edit', express.urlencoded({ extended: true }), async (req, res) => {

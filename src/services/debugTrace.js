@@ -85,23 +85,57 @@ export function isSuspiciousFullName(value = '') {
   if (/[?¿]/.test(name)) return true;
 
   const explicitNonNamePatterns = [
+    /\b(hola|buenas|buen dia|buenos dias|buenas tardes|buenas noches)\b/,
+    /\b(si claro|sí claro|claro,?\s+si|claro,?\s+sí)\b/,
+    /\b(si por favor|sí por favor|por favor|claro que si|claro que sí)\b/,
     /\b(me interesa|estoy interesado|estoy interesada|quiero continuar|deseo continuar|quiero seguir|quiero aplicar|quiero postularme|ok|okay|si estoy interesado|si estoy interesada)\b/,
-    /\b(me|interesa|quiero|deseo|estoy|tengo|poseo|busco|necesito|puedo|continuar)\b/,
-    /\b(que|cuales|como|cuando|donde|datos|necesitas|vehiculo|vehículo|moto)\b/
+    /\b(me|interesa|quiero|deseo|estoy|tengo|poseo|busco|necesito|puedo|continuar|cuento|corrijo)\b/,
+    /\b(que|cuales|como|cuando|donde|datos|necesitas|vehiculo|vehículo|moto|restricciones|medicas|médicas|transporte|cargo|vacante)\b/,
+    /\b(barrio|localidad|zona|sector|vereda|ciudadela)\b/,
+    /\b(cundinamarca|tolima|antioquia|boyaca|boyacá|santander|meta|caldas|quindio|quindío|risaralda|huila|cauca|narino|nariño)\b/,
+    /\b(pdf|doc|docx|word|archivo|adjunto|adjunta|hoja de vida|hv|cv)\b/,
+    /\b(bogota|bogotá|ibague|ibagué|funza|mosquera|madrid|siberia)\b/,
+    /\b(calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv)\b/,
+    /^(para\s+(el|la)\b|de\s+[a-záéíóúñ]+$)/,
+    /\b(restriccion(?:es)?\s+medica(?:s)?|sin\s+restriccion(?:es)?(\s+medica(?:s)?)?)\b/
   ];
   if (explicitNonNamePatterns.some((pattern) => pattern.test(normalized))) return true;
 
   const commonIntentPhrases = [
     'si estoy interesado',
     'si estoy interesada',
+    'si claro',
+    'si por favor',
+    'por favor',
+    'cundinamarca',
+    'tolima',
+    'buenas tardes',
+    'buenas noches',
+    'buen dia',
+    'buenos dias',
     'que datos necesitas',
     'tengo moto',
+    'cuento con',
+    'corrijo',
     'poseo vehiculo',
     'poseo vehículo',
+    'barrio',
+    'localidad',
+    'zona',
+    'sector',
+    'vereda',
     'me interesa',
     'quiero continuar',
     'deseo continuar',
-    'ok'
+    'ok',
+    'por pdf',
+    'por word',
+    'hoja de vida',
+    'archivo adjunto',
+    'para el',
+    'para la',
+    'sin restriccion medica',
+    'sin restricciones medicas'
   ];
   if (commonIntentPhrases.some((phrase) => normalized.includes(phrase))) return true;
 
@@ -109,7 +143,7 @@ export function isSuspiciousFullName(value = '') {
   if (parts.length < 2 || parts.length > 4) return true;
   if (parts.some((part) => part.length < 2)) return true;
 
-  const connectors = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
+  const connectors = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'al', 'y']);
   const lexicalParts = parts.filter((part) => !connectors.has(part.toLowerCase()));
   return lexicalParts.length < 2;
 }
