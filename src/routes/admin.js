@@ -84,13 +84,11 @@ function buildManualVacancyInfoMessage(vacancy) {
 
   const description = buildVacancySection('Descripción', vacancy.roleDescription);
   const operationArea = buildVacancySection('Zona de operación', vacancy.operationAddress);
-  const interviewPoint = buildVacancySection('Punto de entrevista', vacancy.interviewAddress);
   const requirements = buildVacancySection('Requisitos', vacancy.requirements);
   const conditions = buildVacancySection('Condiciones', vacancy.conditions);
 
   if (description) lines.push(description);
   if (operationArea) lines.push(operationArea);
-  if (interviewPoint) lines.push(interviewPoint);
   if (requirements) lines.push(requirements);
   if (conditions) lines.push(conditions);
 
