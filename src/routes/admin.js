@@ -1099,81 +1099,100 @@ export function adminRouter(prisma) {
     const returnTo = safeAdminReturnPath(req.body.returnTo || `/admin/candidates/${id}`);
     try {
       const selectedSlot = parseInterviewAssignment(req.body.slotOption);
+      if (!selectedSlot) {
+        return res.redirect(withFlashMessage(returnTo, 'error', 'Debes seleccionar un horario de entrevista válido.'));
+      }
 
-    if (!selectedSlot) {
-      return res.redirect(withFlashMessage(returnTo, 'error', 'Debes seleccionar un horario de entrevista válido.'));
-    }
-
-    const candidate = await prisma.candidate.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        vacancyId: true,
-        lastInboundAt: true,
-        vacancy: {
-          select: {
-            id: true,
-            title: true,
-            role: true,
-            schedulingEnabled: true
+      const candidate = await prisma.candidate.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          vacancyId: true,
+          lastInboundAt: true,
+          vacancy: {
+            select: {
+              id: true,
+              title: true,
+              role: true,
+              schedulingEnabled: true
+            }
           }
         }
-      }
-    });
-
-    if (!candidate) {
-      return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
-    }
-
-    if (!candidate.vacancyId || !candidate.vacancy?.schedulingEnabled) {
-      return res.redirect(withFlashMessage(returnTo, 'error', 'La vacante del candidato no tiene agenda habilitada.'));
-    }
-
-    const offerableSlots = await listOfferableSlots(
-      prisma,
-      candidate.vacancyId,
-      candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null,
-      new Date()
-    );
-
-    const chosenOffer = offerableSlots.find((option) => (
-      option.slot?.id === selectedSlot.slotId
-      && option.date?.getTime?.() === selectedSlot.scheduledAt.getTime()
-    ));
-
-    if (!chosenOffer?.slot) {
-      return res.redirect(withFlashMessage(returnTo, 'error', 'Ese horario ya no está disponible. Actualiza la página e intenta de nuevo.'));
-    }
-
-    await prisma.$transaction(async (tx) => {
-      const activeBooking = await tx.interviewBooking.findFirst({
-        where: {
-          candidateId: candidate.id,
-          status: { in: ACTIVE_BOOKING_STATUSES }
-        },
-        select: { id: true }
       });
 
-      if (activeBooking) {
-        await cancelCandidateBookings(tx, candidate.id, 'RESCHEDULED');
+      if (!candidate) {
+        return res.redirect(withFlashMessage(returnTo, 'error', 'Candidato no encontrado.'));
       }
 
-      await createBooking(
-        tx,
-        candidate.id,
+      if (!candidate.vacancyId || !candidate.vacancy?.schedulingEnabled) {
+        return res.redirect(withFlashMessage(returnTo, 'error', 'La vacante del candidato no tiene agenda habilitada.'));
+      }
+
+      const offerableSlots = await listOfferableSlots(
+        prisma,
         candidate.vacancyId,
-        chosenOffer.slot.id,
-        chosenOffer.date,
-        !chosenOffer.windowOk
+        candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null,
+        new Date()
       );
 
-      await tx.candidate.update({
-        where: { id: candidate.id },
-        data: { currentStep: ConversationStep.SCHEDULED }
-      });
-    });
+      const chosenOffer = offerableSlots.find((option) => (
+        option.slot?.id === selectedSlot.slotId
+        && option.date?.getTime?.() === selectedSlot.scheduledAt.getTime()
+      ));
 
-    return res.redirect(withFlashMessage(returnTo, 'success', `Entrevista asignada para ${chosenOffer.formattedDate}.`));
+      if (!chosenOffer?.slot) {
+        return res.redirect(withFlashMessage(returnTo, 'error', 'Ese horario ya no está disponible. Actualiza la página e intenta de nuevo.'));
+      }
+
+      await prisma.$transaction(async (tx) => {
+        const activeBooking = await tx.interviewBooking.findFirst({
+          where: {
+            candidateId: candidate.id,
+            status: { in: ACTIVE_BOOKING_STATUSES }
+          },
+          select: { id: true }
+        });
+
+        if (activeBooking) {
+          await cancelCandidateBookings(tx, candidate.id, 'RESCHEDULED');
+        }
+
+        await createBooking(
+          tx,
+          candidate.id,
+          candidate.vacancyId,
+          chosenOffer.slot.id,
+          chosenOffer.date,
+          !chosenOffer.windowOk
+        );
+      });
+
+      try {
+        await prisma.candidate.update({
+          where: { id: candidate.id },
+          data: { currentStep: ConversationStep.SCHEDULED }
+        });
+      } catch (stepError) {
+        console.error('[manual_interview_assign_step_update]', {
+          candidateId: candidate.id,
+          preferredStep: ConversationStep.SCHEDULED,
+          stepError
+        });
+        try {
+          await prisma.candidate.update({
+            where: { id: candidate.id },
+            data: { currentStep: ConversationStep.SCHEDULING }
+          });
+        } catch (fallbackStepError) {
+          console.error('[manual_interview_assign_step_update_fallback]', {
+            candidateId: candidate.id,
+            fallbackStep: ConversationStep.SCHEDULING,
+            fallbackStepError
+          });
+        }
+      }
+
+      return res.redirect(withFlashMessage(returnTo, 'success', `Entrevista asignada para ${chosenOffer.formattedDate}.`));
     } catch (error) {
       console.error('[manual_interview_assign]', {
         candidateId: id,
