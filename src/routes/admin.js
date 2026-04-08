@@ -32,6 +32,7 @@ import { listOfferableSlots, createBooking, cancelCandidateBookings } from '../s
 import { getReminderMissingItems } from '../services/reminder.js';
 import { clearCandidateCvStorage, resolveCandidateCvBuffer, storeCandidateCv } from '../services/cvStorage.js';
 import { isStorageConfigured } from '../services/storage.js';
+import { loadPendingCvMigrationCount, migrateCandidateCvBatch } from '../services/cvMigration.js';
 
 function sessionAuth(req, res, next) {
   const role = req.session?.userRole;
@@ -300,20 +301,6 @@ function normalizeBinaryData(value) {
   if (value instanceof ArrayBuffer) return Buffer.from(value);
   if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
   return Buffer.from(value);
-}
-
-function isTransientDatabaseAvailabilityError(error) {
-  if (!error) return false;
-  if (error.code === 'P1001') return true;
-
-  const message = String(error.message || error).toLowerCase();
-  return [
-    'the database system is starting up',
-    'the database system is not yet accepting connections',
-    'consistent recovery state has not been yet reached',
-    "can't reach database server",
-    'failed to connect to postgres'
-  ].some((snippet) => message.includes(snippet));
 }
 
 function parseInterviewAssignment(value) {
@@ -878,54 +865,6 @@ async function loadBotChatCount(prisma) {
       }
     }
   });
-}
-
-async function loadPendingCvMigrationCount(prisma) {
-  return prisma.candidate.count({
-    where: {
-      cvData: { not: null },
-      cvStorageKey: null
-    }
-  });
-}
-
-async function migrateCandidateCvBatch(prisma, limit = 20) {
-  const candidates = await prisma.candidate.findMany({
-    where: {
-      cvData: { not: null },
-      cvStorageKey: null
-    },
-    select: {
-      id: true,
-      cvData: true,
-      cvMimeType: true,
-      cvOriginalName: true
-    },
-    take: limit,
-    orderBy: { createdAt: 'asc' }
-  });
-
-  let migrated = 0;
-  let failed = 0;
-
-  for (const candidate of candidates) {
-    try {
-      await storeCandidateCv(prisma, candidate.id, normalizeBinaryData(candidate.cvData), {
-        mimeType: candidate.cvMimeType || 'application/octet-stream',
-        originalName: candidate.cvOriginalName || 'hoja_de_vida'
-      });
-      migrated += 1;
-    } catch (error) {
-      if (isTransientDatabaseAvailabilityError(error)) {
-        console.error('[CV_STORAGE_MIGRATION_INTERRUPTED_DB_UNAVAILABLE]', candidate.id, error);
-        return { found: candidates.length, migrated, failed, interrupted: true };
-      }
-      failed += 1;
-      console.error('[CV_STORAGE_MIGRATION_FAILED]', candidate.id, error);
-    }
-  }
-
-  return { found: candidates.length, migrated, failed, interrupted: false };
 }
 
 export function adminRouter(prisma) {
