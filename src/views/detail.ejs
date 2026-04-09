@@ -81,6 +81,7 @@
     .booking-status-confirmed { color: #1f7a38; }
     .booking-status-scheduled { color: #2980b9; }
     .booking-status-rescheduled { color: #b45309; }
+    .booking-status-no_response { color: #7c3aed; }
     .booking-status-no_show { color: #b8322b; }
     .booking-status-cancelled { color: #6b7280; text-decoration: line-through; }
     .booking-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
@@ -151,7 +152,7 @@
     </a>
     <a href="/admin">Candidatos</a>
     <a href="/admin/vacancies">Vacantes</a>
-    <% if (canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
+    <% if (typeof canManageUsers !== 'undefined' && canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
     <% if (role === 'dev') { %>
       <a href="/admin/monitor">Monitor</a>
     <% } %>
@@ -188,11 +189,13 @@
       SCHEDULED:   { cls: 'booking-status-scheduled', text: 'Agendada' },
       CONFIRMED:   { cls: 'booking-status-confirmed', text: 'Confirmada' },
       RESCHEDULED: { cls: 'booking-status-rescheduled', text: 'Reagendó' },
+      NO_RESPONSE: { cls: 'booking-status-no_response', text: 'No contesta' },
       NO_SHOW:     { cls: 'booking-status-no_show', text: 'No asistió' },
       CANCELLED:   { cls: 'booking-status-cancelled', text: 'Canceló' }
     }; %>
     <% const bookingActions = [
       { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
+      { key: 'no_response', label: 'No contesta', cls: 'action-btn-warn', status: 'NO_RESPONSE' },
       { key: 'no_show', label: 'No asistió', cls: 'action-btn-danger', status: 'NO_SHOW' },
       { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
       { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
@@ -289,7 +292,7 @@
       </div>
       <% if (role === 'dev' && outboundWindow?.expiringSoon && interviewWindowManaged) { %>
         <div class="alert alert-error" style="background:#fff7ed;border-color:#fdba74;color:#9a3412;">
-          La ventana de 24h estÃ¡ por vencer para este candidato. El sistema intentarÃ¡ enviar un mensaje de continuidad antes del cierre para incentivar respuesta y sostener el contacto.
+          La ventana de 24h está por vencer para este candidato. El sistema intentará enviar un mensaje de continuidad antes del cierre para incentivar respuesta y sostener el contacto.
         </div>
       <% } %>
       <form method="post" action="/admin/candidates/<%= candidate.id %>/status" class="status-form">

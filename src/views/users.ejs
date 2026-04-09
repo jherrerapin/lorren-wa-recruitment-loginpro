@@ -50,6 +50,12 @@
     .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
     .btn-danger { background: var(--red-light); color: var(--red); border: 1px solid #fca5a5; }
     .btn-warning { background: var(--amber-light); color: var(--amber); border: 1px solid #fcd34d; }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .table-scroll > table { min-width: 860px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid #eaecef; vertical-align: top; }
     th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
@@ -97,10 +103,7 @@
     @media (max-width: 820px) {
       .grid { grid-template-columns: 1fr; }
       .full { grid-column: 1; }
-      table, thead, tbody, tr, td, th { display: block; }
-      thead { display: none; }
-      tr { border-bottom: 1px solid #eaecef; padding: 10px 0; }
-      td { border: none; padding: 8px 0; }
+      .table-scroll > table { min-width: 760px; }
     }
   </style>
 </head>
@@ -215,6 +218,7 @@
       <% if (!users.length) { %>
         <div class="empty">Todavía no hay usuarios creados en base de datos para este alcance.</div>
       <% } else { %>
+        <div class="table-scroll">
         <table>
           <thead>
             <tr>
@@ -266,6 +270,7 @@
             <% } %>
           </tbody>
         </table>
+        </div>
       <% } %>
     </section>
   </div>

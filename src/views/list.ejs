@@ -241,6 +241,7 @@
     .booking-status-confirmed  { color: var(--green);  font-weight: 600; }
     .booking-status-scheduled  { color: var(--blue);   font-weight: 600; }
     .booking-status-rescheduled{ color: var(--amber);  font-weight: 600; }
+    .booking-status-no_response{ color: var(--purple); font-weight: 600; }
     .booking-status-no_show    { color: var(--red);    font-weight: 600; }
     .booking-status-cancelled  { color: var(--text-faint); font-weight: 500; text-decoration: line-through; }
 
@@ -336,6 +337,12 @@
     .legacy-table tr.legacy-row-female td { background: #fff5fa; }
     .legacy-table tr.legacy-row-female:hover td { background: #fde7f3; }
     .bookings-table tr.row-female td { background: #fff7fb; }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .table-scroll > table { min-width: 720px; }
 
     /* ── Export bar ── */
     .export-bar {
@@ -445,12 +452,7 @@
         align-items: stretch;
       }
       .filter-field { width: 100%; }
-      .bookings-table,
-      .legacy-table {
-        display: block;
-        overflow-x: auto;
-        white-space: nowrap;
-      }
+      .table-scroll > table { min-width: 780px; }
       .candidate-row {
         grid-template-columns: 1fr;
         gap: 6px;
@@ -479,7 +481,7 @@
   </a>
   <a href="/admin">Panel</a>
   <a href="/admin/vacancies">Vacantes</a>
-  <% if (canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
+  <% if (typeof canManageUsers !== 'undefined' && canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
   <% if (role === 'dev') { %>
     <a href="/admin/monitor">Monitor</a>
   <% } %>
@@ -584,7 +586,7 @@
     return candidate?.createdAt || null;
   }
 
-  function candidateLastMessageLabel(candidate) {
+  function candidateRegistrationLabel(candidate) {
     if (!candidate?.createdAt) return 'Fecha de registro: sin dato';
     return 'Fecha de registro: ' + formatDateTimeCO(candidate.createdAt);
   }
@@ -750,7 +752,8 @@
     <a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a>
   </div>
 
-  <table id="legacy-candidates-table" class="legacy-table" style="background:var(--surface);box-shadow:var(--shadow-sm);border-radius:0 0 8px 8px;border:1px solid var(--border);overflow:hidden;">
+  <div class="table-scroll" style="background:var(--surface);box-shadow:var(--shadow-sm);border-radius:0 0 8px 8px;border:1px solid var(--border);overflow:hidden;">
+  <table id="legacy-candidates-table" class="legacy-table">
     <thead>
       <tr>
         <th>Actividad reciente</th><th>Nombre</th><th>Teléfono</th><th>Documento</th>
@@ -802,6 +805,7 @@
       <% } %>
     </tbody>
   </table>
+  </div>
 </div>
 
 <% } else { %>
@@ -828,11 +832,13 @@
     SCHEDULED:   { cls: 'booking-status-scheduled',   icon: '🕐', text: 'Agendado' },
     CONFIRMED:   { cls: 'booking-status-confirmed',   icon: '✅', text: 'Confirmada' },
     RESCHEDULED: { cls: 'booking-status-rescheduled', icon: '🔄', text: 'Reagendado' },
+    NO_RESPONSE: { cls: 'booking-status-no_response', icon: '📵', text: 'No contesta' },
     NO_SHOW:     { cls: 'booking-status-no_show',     icon: '❌', text: 'No asistió' },
     CANCELLED:   { cls: 'booking-status-cancelled',   icon: '🚫', text: 'Canceló' }
   };
   const bookingActions = [
     { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
+    { key: 'no_response', label: 'No contesta', cls: 'action-btn-warn', status: 'NO_RESPONSE' },
     { key: 'no_show', label: 'No asistió', cls: 'action-btn-danger', status: 'NO_SHOW' },
     { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
     { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
@@ -1137,6 +1143,7 @@
             <% if (filteredBookingsToday.length === 0) { %>
               <div class="empty-state"><div class="empty-icon">📭</div><p>Sin entrevistas agendadas para este día.</p></div>
             <% } else { %>
+              <div class="table-scroll">
               <table class="bookings-table" role="table">
                 <thead><tr><th>Hora</th><th>Candidato</th><th>Documento</th><th><%= getResidenceLabel(v) %></th><th>Estado cita</th><th>HV</th><th>Acciones</th></tr></thead>
                 <tbody>
@@ -1182,6 +1189,7 @@
                   <% } %>
                 </tbody>
               </table>
+              </div>
             <% } %>
           </div>
           <% } %>
@@ -1535,6 +1543,7 @@
       <h3>Atencion manual pendiente <span style="font-weight:400;color:var(--text-muted);font-size:13px;">(<%= manualReviewCandidates.length %>)</span></h3>
       <span style="font-size:12px;color:var(--text-muted);">Chats que requieren seguimiento humano</span>
     </div>
+    <div class="table-scroll">
     <table class="legacy-table">
       <thead><tr><th>Actividad</th><th>Nombre</th><th>Motivo</th><th>Telefono</th><th>Estado</th><th></th></tr></thead>
       <tbody>
@@ -1557,6 +1566,7 @@
         <% } %>
       </tbody>
     </table>
+    </div>
   </div>
   <% } %>
 
@@ -1566,6 +1576,7 @@
       <h3>⚙️ Candidatos sin vacante asignada <span style="font-weight:400;color:var(--text-muted);font-size:13px;">(<%= legacyCandidates.length %>)</span></h3>
       <a href="/admin?status=all" style="font-size:12px;color:var(--teal);font-weight:600;text-decoration:none;">Ver todos →</a>
     </div>
+    <div class="table-scroll">
     <table class="legacy-table">
       <thead><tr><th>Nombre</th><th>Teléfono</th><th>Documento</th><th>Estado</th><th>HV</th><th>Registro</th><th></th></tr></thead>
       <tbody>
@@ -1611,6 +1622,7 @@
         <% } %>
       </tbody>
     </table>
+    </div>
   </div>
   <% } %>
 

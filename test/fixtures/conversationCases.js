@@ -863,5 +863,125 @@ export const conversationCases = [
       lastReplyIncludes: ['direccion de entrevista', 'Calle 80 # 10-20'],
       lastReplyNotIncludes: ['enviame tus datos', 'hoja de vida']
     }
+  },
+  {
+    id: 'scheduled-confirmation-updates-booking-status',
+    steps: ['confirmo asistencia'],
+    candidate: candidateDefaults({
+      currentStep: 'SCHEDULED',
+      vacancyId: 'vac-sched',
+      fullName: 'Carlos Perez',
+      gender: 'MALE',
+      documentType: 'CC',
+      documentNumber: '555444333',
+      age: 29,
+      locality: 'Funza',
+      medicalRestrictions: 'Sin restricciones medicas',
+      transportMode: 'Bicicleta',
+      cvData: Buffer.from('pdf'),
+      cvOriginalName: 'hv.pdf',
+      cvMimeType: 'application/pdf',
+      lastInboundAt: new Date()
+    }),
+    interviewSlots: schedulingSlots,
+    interviewBookings: [{
+      id: 'booking-confirm-1',
+      candidateId: 'candidate-1',
+      vacancyId: 'vac-sched',
+      slotId: 'slot-1',
+      scheduledAt: new Date(Date.now() + 8 * 60 * 60 * 1000),
+      status: 'SCHEDULED',
+      reminderSentAt: new Date(Date.now() - 10 * 60 * 1000),
+      reminderResponse: null,
+      notes: null
+    }],
+    expect: {
+      candidate: { currentStep: 'SCHEDULED', reminderState: 'SKIPPED' },
+      bookingCount: 1,
+      bookingStatuses: ['CONFIRMED'],
+      bookingReminderResponses: ['CONFIRMED'],
+      lastReplyIncludes: ['entrevista queda confirmada'],
+      lastReplyNotIncludes: ['enviame tus datos', 'hoja de vida']
+    }
+  },
+  {
+    id: 'scheduled-cancellation-updates-booking-status',
+    steps: ['quiero cancelar la entrevista'],
+    candidate: candidateDefaults({
+      currentStep: 'SCHEDULED',
+      vacancyId: 'vac-sched',
+      fullName: 'Carlos Perez',
+      gender: 'MALE',
+      documentType: 'CC',
+      documentNumber: '555444333',
+      age: 29,
+      locality: 'Funza',
+      medicalRestrictions: 'Sin restricciones medicas',
+      transportMode: 'Bicicleta',
+      cvData: Buffer.from('pdf'),
+      cvOriginalName: 'hv.pdf',
+      cvMimeType: 'application/pdf',
+      lastInboundAt: new Date()
+    }),
+    interviewSlots: schedulingSlots,
+    interviewBookings: [{
+      id: 'booking-cancel-1',
+      candidateId: 'candidate-1',
+      vacancyId: 'vac-sched',
+      slotId: 'slot-1',
+      scheduledAt: new Date(Date.now() + 8 * 60 * 60 * 1000),
+      status: 'SCHEDULED',
+      reminderSentAt: new Date(Date.now() - 10 * 60 * 1000),
+      reminderResponse: null,
+      notes: null
+    }],
+    expect: {
+      candidate: { currentStep: 'DONE', reminderState: 'SKIPPED' },
+      bookingCount: 1,
+      bookingStatuses: ['CANCELLED'],
+      bookingReminderResponses: ['CANCELLED'],
+      lastReplyIncludes: ['entrevista cancelada'],
+      lastReplyNotIncludes: ['enviame tus datos', 'hoja de vida']
+    }
+  },
+  {
+    id: 'scheduled-reschedule-marks-current-booking-and-offers-new-slot',
+    steps: ['necesito reprogramar la entrevista'],
+    candidate: candidateDefaults({
+      currentStep: 'SCHEDULED',
+      vacancyId: 'vac-sched',
+      fullName: 'Carlos Perez',
+      gender: 'MALE',
+      documentType: 'CC',
+      documentNumber: '555444333',
+      age: 29,
+      locality: 'Funza',
+      medicalRestrictions: 'Sin restricciones medicas',
+      transportMode: 'Bicicleta',
+      cvData: Buffer.from('pdf'),
+      cvOriginalName: 'hv.pdf',
+      cvMimeType: 'application/pdf',
+      lastInboundAt: new Date()
+    }),
+    interviewSlots: schedulingSlots,
+    interviewBookings: [{
+      id: 'booking-reschedule-1',
+      candidateId: 'candidate-1',
+      vacancyId: 'vac-sched',
+      slotId: 'slot-1',
+      scheduledAt: new Date(Date.now() + 8 * 60 * 60 * 1000),
+      status: 'SCHEDULED',
+      reminderSentAt: new Date(Date.now() - 10 * 60 * 1000),
+      reminderResponse: null,
+      notes: null
+    }],
+    expect: {
+      candidate: { currentStep: 'SCHEDULING', reminderState: 'SKIPPED' },
+      bookingCount: 1,
+      bookingStatuses: ['RESCHEDULED'],
+      bookingReminderResponses: ['RESCHEDULED'],
+      lastReplyIncludes: ['te puedo ofrecer', 'me confirmas si te sirve'],
+      lastReplyNotIncludes: ['enviame tus datos', 'hoja de vida']
+    }
   }
 ];

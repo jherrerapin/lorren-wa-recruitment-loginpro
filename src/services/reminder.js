@@ -1,14 +1,17 @@
 import { sendTextMessage } from './whatsapp.js';
 import {
   canScheduleReminderPolicy,
+  canSendInterviewConfirmationPromptPolicy,
   canSendInterviewKeepalivePolicy,
   getWhatsappWindowState,
+  shouldMarkInterviewNoResponsePolicy
 } from './reminderPolicy.js';
 import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
 import { formatInterviewDate } from './interviewScheduler.js';
 
 const REMINDER_DELAY_MS = 25 * 60 * 1000;
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
+const INTERVIEW_CONFIRMATION_SOURCE = 'interview_confirmation_prompt';
 
 function hasValue(value) {
   return value !== undefined && value !== null && value !== '';
@@ -19,7 +22,7 @@ function buildRequiredFields(candidate = {}) {
   return [
     ['fullName', 'nombre completo'],
     ['documentType', 'tipo de documento'],
-    ['documentNumber', 'número de documento'],
+    ['documentNumber', 'numero de documento'],
     ['age', 'edad'],
     [residenceConfig.field, residenceConfig.label],
     ['medicalRestrictions', 'restricciones médicas'],
@@ -60,10 +63,10 @@ export function buildReminderText(candidate = {}) {
   }
 
   if (!missingParts.length) {
-    return 'Hola, te escribo para recordarte que tu proceso sigue abierto. Si necesitas apoyo para continuar, aquí quedo atento.';
+    return 'Hola, te escribo para recordarte que tu proceso sigue abierto. Si necesitas apoyo para continuar, aqui quedo atento.';
   }
 
-  return `Hola, te escribo para recordarte que tu proceso sigue abierto. Para completar tu postulación aún me falta ${formatList(missingParts)}.`;
+  return `Hola, te escribo para recordarte que tu proceso sigue abierto. Para completar tu postulacion aun me falta ${formatList(missingParts)}.`;
 }
 
 export function canScheduleReminder(candidate) {
@@ -135,7 +138,13 @@ async function findActiveInterviewBooking(prisma, candidateId) {
     },
     orderBy: { scheduledAt: 'asc' },
     select: {
-      scheduledAt: true
+      id: true,
+      slotId: true,
+      scheduledAt: true,
+      status: true,
+      reminderSentAt: true,
+      reminderResponse: true,
+      notes: true
     }
   });
 }
@@ -144,12 +153,20 @@ function buildInterviewKeepaliveText(candidate = {}, booking = null) {
   if (candidate.currentStep === 'SCHEDULED') {
     const scheduledDate = booking?.scheduledAt ? formatInterviewDate(new Date(booking.scheduledAt)) : null;
     if (scheduledDate) {
-      return `Tu entrevista sigue programada para ${scheduledDate}. Si necesitas ajustar algo o confirmar que sigues disponible, respóndeme por aquí para mantener este chat activo.`;
+      return `Tu entrevista sigue programada para ${scheduledDate}. Si necesitas ajustar algo o confirmar que sigues disponible, respondeme por aqui para mantener este chat activo.`;
     }
-    return 'Tu proceso de entrevista sigue activo. Si necesitas ajustar algo o confirmarme que sigues disponible, respóndeme por aquí para mantener este chat abierto.';
+    return 'Tu proceso de entrevista sigue activo. Si necesitas ajustar algo o confirmarme que sigues disponible, respondeme por aqui para mantener este chat abierto.';
   }
 
-  return 'Sigo pendiente de tu confirmación para la entrevista. Si sigues interesado, respóndeme por aquí con un sí o dime si necesitas otro horario para mantener tu proceso activo.';
+  return 'Sigo pendiente de tu confirmacion para la entrevista. Si sigues interesado, respondeme por aqui con un si o dime si necesitas otro horario para mantener tu proceso activo.';
+}
+
+function buildInterviewConfirmationText(booking = null) {
+  const scheduledDate = booking?.scheduledAt ? formatInterviewDate(new Date(booking.scheduledAt)) : null;
+  if (!scheduledDate) {
+    return 'Tu entrevista sigue activa. Por favor respondeme si confirmas asistencia, si deseas reprogramar o si prefieres cancelar.';
+  }
+  return `Tu entrevista esta programada para ${scheduledDate}. Por favor respondeme con una de estas opciones: confirmo, cancelar o reprogramar.`;
 }
 
 async function hasInterviewKeepaliveSinceLastInbound(prisma, candidateId, lastInboundAt) {
@@ -167,6 +184,59 @@ async function hasInterviewKeepaliveSinceLastInbound(prisma, candidateId, lastIn
   return recentOutbounds.some((message) => message?.rawPayload?.source === INTERVIEW_KEEPALIVE_SOURCE);
 }
 
+async function sendInterviewConfirmationPrompt(prisma, candidate, booking, now = new Date()) {
+  const body = buildInterviewConfirmationText(booking);
+  await sendTextMessage(candidate.phone, body);
+  await storeOutbound(prisma, candidate.id, body, {
+    source: INTERVIEW_CONFIRMATION_SOURCE,
+    bookingId: booking.id,
+    scheduledAt: booking.scheduledAt?.toISOString?.() || null
+  });
+  await prisma.interviewBooking.updateMany({
+    where: { id: booking.id },
+    data: {
+      reminderSentAt: now,
+      reminderResponse: null
+    }
+  });
+  await prisma.candidate.update({
+    where: { id: candidate.id },
+    data: {
+      lastOutboundAt: now
+    }
+  });
+  console.log('[REMINDER_TRACE]', JSON.stringify({
+    candidateId: candidate.id,
+    bookingId: booking.id,
+    event: 'interview_confirmation_prompt_sent'
+  }));
+}
+
+async function markInterviewNoResponse(prisma, candidate, booking, now = new Date()) {
+  await prisma.interviewBooking.updateMany({
+    where: { id: booking.id },
+    data: {
+      status: 'NO_RESPONSE',
+      reminderResponse: 'NO_RESPONSE',
+      notes: 'Marcado automaticamente por falta de respuesta al recordatorio de confirmacion.'
+    }
+  });
+  await prisma.candidate.update({
+    where: { id: candidate.id },
+    data: {
+      currentStep: 'SCHEDULING',
+      reminderScheduledFor: null,
+      reminderState: 'SKIPPED'
+    }
+  });
+  console.log('[REMINDER_TRACE]', JSON.stringify({
+    candidateId: candidate.id,
+    bookingId: booking.id,
+    event: 'interview_marked_no_response',
+    at: now.toISOString()
+  }));
+}
+
 async function runInterviewKeepaliveDispatcher(prisma, now = new Date()) {
   if (typeof prisma?.candidate?.findMany !== 'function') return;
 
@@ -179,12 +249,23 @@ async function runInterviewKeepaliveDispatcher(prisma, now = new Date()) {
   });
 
   for (const candidate of candidates) {
-    if (!canSendInterviewKeepalivePolicy(candidate, now)) continue;
-    if (await hasInterviewKeepaliveSinceLastInbound(prisma, candidate.id, candidate.lastInboundAt)) continue;
-
     const booking = candidate.currentStep === 'SCHEDULED'
       ? await findActiveInterviewBooking(prisma, candidate.id)
       : null;
+
+    if (booking && shouldMarkInterviewNoResponsePolicy(candidate, booking, now)) {
+      await markInterviewNoResponse(prisma, candidate, booking, now);
+      continue;
+    }
+
+    if (booking && canSendInterviewConfirmationPromptPolicy(candidate, booking, now)) {
+      await sendInterviewConfirmationPrompt(prisma, candidate, booking, now);
+      continue;
+    }
+
+    if (!canSendInterviewKeepalivePolicy(candidate, now)) continue;
+    if (await hasInterviewKeepaliveSinceLastInbound(prisma, candidate.id, candidate.lastInboundAt)) continue;
+
     const body = buildInterviewKeepaliveText(candidate, booking);
     const windowState = getWhatsappWindowState(candidate.lastInboundAt, now);
 

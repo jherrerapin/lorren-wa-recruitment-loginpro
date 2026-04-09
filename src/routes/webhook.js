@@ -483,7 +483,12 @@ function isSchedulingConfirmationIntent(text = '') {
 
 function isSchedulingRescheduleIntent(text = '') {
   const n = normalizeComparableText(text);
-  return /\b(otro horario|otra hora|otro dia|otro dia|reagend|cambiar horario|no puedo|no me queda|no me sirve|mas tarde|mas temprano|otra opcion)\b/.test(n);
+  return /\b(otro horario|otra hora|otro dia|reagend|reprogram|reprogramar|reprogramada|cambiar horario|no puedo|no me queda|no me sirve|mas tarde|mas temprano|otra opcion|posponer)\b/.test(n);
+}
+
+function isSchedulingCancellationIntent(text = '') {
+  const n = normalizeComparableText(text);
+  return /\b(cancelar|cancelo|cancelada|cancelado|ya no puedo asistir|no voy a asistir|no podre asistir|no podr[ée] asistir|ya no deseo continuar|retiro mi postulacion|retiro mi proceso)\b/.test(n);
 }
 
 function getPrimaryEngineAction(actions = []) {
@@ -539,8 +544,13 @@ async function loadActiveInterviewBooking(prisma, candidateId) {
     },
     orderBy: { scheduledAt: 'asc' },
     select: {
+      id: true,
       slotId: true,
-      scheduledAt: true
+      scheduledAt: true,
+      status: true,
+      reminderSentAt: true,
+      reminderResponse: true,
+      notes: true
     }
   });
 }
@@ -651,6 +661,14 @@ async function buildInterviewConfirmationReply(candidate, vacancy, nextSlot) {
     formattedDate: nextSlot.formattedDate,
     vacancy,
     candidateName: candidate.fullName
+  });
+}
+
+async function updateInterviewBookingResponse(prisma, bookingId, data = {}) {
+  if (!bookingId) return;
+  await prisma.interviewBooking.updateMany({
+    where: { id: bookingId },
+    data
   });
 }
 
@@ -1367,6 +1385,120 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     currentVacancy
     && (candidate.currentStep === ConversationStep.SCHEDULING || candidate.currentStep === ConversationStep.SCHEDULED)
     && isSchedulingEligibleCandidate(candidate, currentVacancy)
+    && (
+      isSchedulingConfirmationIntent(cleanText)
+      || isSchedulingRescheduleIntent(cleanText)
+      || isSchedulingCancellationIntent(cleanText)
+      || isDocumentValidationQuestion(cleanText)
+    )
+  ) {
+    const activeBooking = await loadActiveInterviewBooking(prisma, candidate.id);
+    const nextSlot = await resolveInterviewSlotContext(prisma, candidate, currentVacancy, cleanText);
+
+    if (isSchedulingRescheduleIntent(cleanText)) {
+      if (!nextSlot?.slot) {
+        await pauseInterviewFlow(prisma, candidate.id, 'No hay un siguiente slot valido para reagendar');
+        const body = 'En este momento no tengo un siguiente horario válido para ofrecerte. El equipo te contactará para ayudarte con la reprogramación.';
+        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+      }
+
+      if (activeBooking?.id) {
+        await updateInterviewBookingResponse(prisma, activeBooking.id, {
+          status: 'RESCHEDULED',
+          reminderResponse: 'RESCHEDULED',
+          notes: 'Reagendada por respuesta del candidato en WhatsApp.'
+        });
+      }
+
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          currentStep: ConversationStep.SCHEDULING,
+          reminderScheduledFor: null,
+          reminderState: 'SKIPPED'
+        }
+      });
+      const body = await buildInterviewOfferReply(candidate, currentVacancy, nextSlot, true);
+      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_reschedule', nextSlot));
+    }
+
+    if (isSchedulingCancellationIntent(cleanText) && activeBooking?.id) {
+      await updateInterviewBookingResponse(prisma, activeBooking.id, {
+        status: 'CANCELLED',
+        reminderResponse: 'CANCELLED',
+        notes: 'Cancelada por respuesta del candidato en WhatsApp.'
+      });
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          currentStep: ConversationStep.DONE,
+          reminderScheduledFor: null,
+          reminderState: 'SKIPPED'
+        }
+      });
+      const body = 'Entendido. Dejo tu entrevista cancelada por ahora. Si luego deseas retomar el proceso o pedir un nuevo horario, escríbeme por aquí y te ayudo.';
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'interview_cancelled' });
+    }
+
+    if (isSchedulingConfirmationIntent(cleanText)) {
+      if (candidate.currentStep === ConversationStep.SCHEDULED && activeBooking?.id) {
+        await updateInterviewBookingResponse(prisma, activeBooking.id, {
+          status: 'CONFIRMED',
+          reminderResponse: 'CONFIRMED',
+          notes: 'Confirmada por respuesta del candidato en WhatsApp.'
+        });
+        await prisma.candidate.update({
+          where: { id: candidate.id },
+          data: {
+            currentStep: ConversationStep.SCHEDULED,
+            reminderScheduledFor: null,
+            reminderState: 'SKIPPED'
+          }
+        });
+        const confirmedBody = activeBooking?.scheduledAt
+          ? `Perfecto, tu entrevista queda confirmada para ${formatInterviewDate(new Date(activeBooking.scheduledAt))}. Si necesitas cambiarla, me escribes por este medio.`
+          : 'Perfecto, tu entrevista queda confirmada. Si necesitas cambiarla, me escribes por este medio.';
+        return reply(prisma, candidate.id, from, confirmedBody, cleanText, {
+          body: confirmedBody,
+          source: 'interview_confirmed'
+        });
+      }
+
+      if (!nextSlot?.slot) {
+        await pauseInterviewFlow(prisma, candidate.id, 'No se encontro un slot vigente para confirmar');
+        const body = 'No pude confirmar el horario en este momento. El equipo de selección te contactará para terminar el agendamiento.';
+        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+      }
+
+      await cancelCandidateBookings(
+        prisma,
+        candidate.id,
+        candidate.currentStep === ConversationStep.SCHEDULED ? 'RESCHEDULED' : 'CANCELLED'
+      );
+      await createBooking(prisma, candidate.id, candidate.vacancyId, nextSlot.slot.id, nextSlot.date, !nextSlot.windowOk);
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          currentStep: ConversationStep.SCHEDULED,
+          reminderScheduledFor: null,
+          reminderState: 'SKIPPED'
+        }
+      });
+      const body = await buildInterviewConfirmationReply(candidate, currentVacancy, nextSlot);
+      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_booking_confirmation', nextSlot));
+    }
+
+    if (isDocumentValidationQuestion(cleanText)) {
+      await pauseInterviewFlow(prisma, candidate.id, 'Consulta documental pendiente de validacion manual');
+      const body = 'Voy a validar ese caso documental con el equipo antes de confirmarte algo. Te escribimos por este medio apenas tenga una respuesta segura.';
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+    }
+  }
+
+  if (
+    currentVacancy
+    && (candidate.currentStep === ConversationStep.SCHEDULING || candidate.currentStep === ConversationStep.SCHEDULED)
+    && isSchedulingEligibleCandidate(candidate, currentVacancy)
     && isDocumentValidationQuestion(cleanText)
   ) {
     await pauseInterviewFlow(prisma, candidate.id, 'Consulta documental pendiente de validacion manual');
@@ -1453,6 +1585,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   if ((candidate.currentStep === ConversationStep.SCHEDULING || candidate.currentStep === ConversationStep.SCHEDULED) && currentVacancy && isSchedulingEligibleCandidate(candidate, currentVacancy)) {
+    const activeBooking = await loadActiveInterviewBooking(prisma, candidate.id);
     const nextSlot = await resolveInterviewSlotContext(prisma, candidate, currentVacancy, cleanText);
 
     if (isSchedulingRescheduleIntent(cleanText)) {
@@ -1460,6 +1593,14 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         await pauseInterviewFlow(prisma, candidate.id, 'No hay un siguiente slot valido para reagendar');
         const body = 'En este momento no tengo un siguiente horario válido para ofrecerte. El equipo te contactará para ayudarte con la reprogramación.';
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+      }
+
+      if (activeBooking?.id) {
+        await updateInterviewBookingResponse(prisma, activeBooking.id, {
+          status: 'RESCHEDULED',
+          reminderResponse: 'RESCHEDULED',
+          notes: 'Reagendada por respuesta del candidato en WhatsApp.'
+        });
       }
 
       await prisma.candidate.update({
@@ -1474,7 +1615,48 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_reschedule', nextSlot));
     }
 
+    if (isSchedulingCancellationIntent(cleanText) && activeBooking?.id) {
+      await updateInterviewBookingResponse(prisma, activeBooking.id, {
+        status: 'CANCELLED',
+        reminderResponse: 'CANCELLED',
+        notes: 'Cancelada por respuesta del candidato en WhatsApp.'
+      });
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          currentStep: ConversationStep.DONE,
+          reminderScheduledFor: null,
+          reminderState: 'SKIPPED'
+        }
+      });
+      const body = 'Entendido. Dejo tu entrevista cancelada por ahora. Si luego deseas retomar el proceso o pedir un nuevo horario, escríbeme por aquí y te ayudo.';
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'interview_cancelled' });
+    }
+
     if (isSchedulingConfirmationIntent(cleanText)) {
+      if (candidate.currentStep === ConversationStep.SCHEDULED && activeBooking?.id) {
+        await updateInterviewBookingResponse(prisma, activeBooking.id, {
+          status: 'CONFIRMED',
+          reminderResponse: 'CONFIRMED',
+          notes: 'Confirmada por respuesta del candidato en WhatsApp.'
+        });
+        await prisma.candidate.update({
+          where: { id: candidate.id },
+          data: {
+            currentStep: ConversationStep.SCHEDULED,
+            reminderScheduledFor: null,
+            reminderState: 'SKIPPED'
+          }
+        });
+        const confirmedBody = activeBooking?.scheduledAt
+          ? `Perfecto, tu entrevista queda confirmada para ${formatInterviewDate(new Date(activeBooking.scheduledAt))}. Si necesitas cambiarla, me escribes por este medio.`
+          : 'Perfecto, tu entrevista queda confirmada. Si necesitas cambiarla, me escribes por este medio.';
+        return reply(prisma, candidate.id, from, confirmedBody, cleanText, {
+          body: confirmedBody,
+          source: 'interview_confirmed'
+        });
+      }
+
       if (!nextSlot?.slot) {
         await pauseInterviewFlow(prisma, candidate.id, 'No se encontro un slot vigente para confirmar');
         const body = 'No pude confirmar el horario en este momento. El equipo de selección te contactará para terminar el agendamiento.';

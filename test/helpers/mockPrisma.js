@@ -36,6 +36,14 @@ function matchesCondition(value, condition) {
     }
   }
 
+  if (value instanceof Date || condition instanceof Date) {
+    const left = normalizeDate(value);
+    const right = normalizeDate(condition);
+    if (left instanceof Date && right instanceof Date && !Number.isNaN(left.getTime()) && !Number.isNaN(right.getTime())) {
+      return left.getTime() === right.getTime();
+    }
+  }
+
   return value === condition;
 }
 

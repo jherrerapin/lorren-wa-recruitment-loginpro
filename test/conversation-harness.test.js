@@ -137,6 +137,22 @@ function assertCaseExpectations(conversationCase, prisma, whatsappMock) {
   if (conversationCase.expect?.bookingCount !== undefined) {
     assert.equal(prisma.state.interviewBookings.length, conversationCase.expect.bookingCount, `${conversationCase.id}: cantidad de bookings inesperada`);
   }
+
+  if (conversationCase.expect?.bookingStatuses) {
+    assert.deepEqual(
+      prisma.state.interviewBookings.map((booking) => booking.status),
+      conversationCase.expect.bookingStatuses,
+      `${conversationCase.id}: estados de booking inesperados`
+    );
+  }
+
+  if (conversationCase.expect?.bookingReminderResponses) {
+    assert.deepEqual(
+      prisma.state.interviewBookings.map((booking) => booking.reminderResponse || null),
+      conversationCase.expect.bookingReminderResponses,
+      `${conversationCase.id}: reminderResponse de booking inesperado`
+    );
+  }
 }
 
 async function runConversationCase(conversationCase) {

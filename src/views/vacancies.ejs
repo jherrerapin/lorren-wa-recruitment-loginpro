@@ -60,6 +60,12 @@
     .badge-open   { background: var(--green-light); color: var(--green); }
     .badge-paused { background: var(--amber-light); color: var(--amber); }
     .badge-closed { background: var(--red-light);   color: var(--red); }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .table-scroll > table { min-width: 760px; }
     .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
     .dot-green { background: var(--green); } .dot-amber { background: var(--amber); } .dot-red { background: var(--red); }
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
@@ -145,11 +151,7 @@
         width: 100%;
         justify-content: flex-start;
       }
-      table {
-        display: block;
-        overflow-x: auto;
-        white-space: nowrap;
-      }
+      .table-scroll > table { min-width: 720px; }
       .modal-overlay { padding: 18px 12px; }
       .modal-body,
       .modal-footer,
@@ -193,7 +195,7 @@
   </a>
   <a href="/admin">Panel</a>
   <a href="/admin/vacancies" class="nav-active">Vacantes</a>
-  <% if (canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
+  <% if (typeof canManageUsers !== 'undefined' && canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
   <% if (role === 'dev') { %>
     <a href="/admin/locations">Ciudades</a>
   <% } %>
@@ -256,6 +258,7 @@
           </div>
           <div class="city-count"><%= cityVacancies.length %> vacante<%= cityVacancies.length !== 1 ? 's' : '' %></div>
         </div>
+        <div class="table-scroll">
         <table>
           <thead><tr>
             <th>Vacante</th>
@@ -302,6 +305,7 @@
             <% } %>
           </tbody>
         </table>
+        </div>
       </section>
     <% } %>
   </div>
