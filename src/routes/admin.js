@@ -1068,7 +1068,7 @@ async function loadApprovedOutreachCandidates(prisma, accessContext = null) {
   return candidates.sort(sortOutreachCandidates);
 }
 
-function parseVacancyBody(body) {
+export function parseVacancyBody(body) {
   const str = (v) => (typeof v === 'string' ? v.trim() || null : null);
   const int = (v) => { const n = parseInt(v, 10); return Number.isNaN(n) ? null : n; };
   const bool = (v) => v === 'true' || v === true || v === 'on';
@@ -1091,9 +1091,33 @@ function parseVacancyBody(body) {
     const n = parseInt(v, 10);
     return Number.isFinite(n) && n > 0 ? n : fallback;
   };
+  const scheduleMode = str(body.slotScheduleMode) === 'BY_DAY' ? 'BY_DAY' : 'UNIFORM';
   const slotDays = Array.isArray(body.slotDays)
     ? body.slotDays
     : (typeof body.slotDays === 'string' ? [body.slotDays] : []);
+  const normalizedSlotDays = [...new Set(slotDays
+    .map((value) => parseInt(value, 10))
+    .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6))].sort((a, b) => a - b);
+  const slotDayTimes = normalizedSlotDays
+    .map((dayOfWeek) => {
+      const keys = [`slotDayTime_${dayOfWeek}`, `slotDayTime[${dayOfWeek}]`, `slotDayTime.${dayOfWeek}`];
+      const startTime = keys.map((key) => time(body[key])).find(Boolean);
+      return startTime ? { dayOfWeek, startTime } : null;
+    })
+    .filter(Boolean);
+  const slotConfigs = scheduleMode === 'BY_DAY'
+    ? slotDayTimes.map(({ dayOfWeek, startTime }) => ({
+      dayOfWeek,
+      startTime,
+      maxCandidates: positiveInt(body.slotMaxCandidates, 10)
+    }))
+    : normalizedSlotDays
+      .map((dayOfWeek) => ({
+        dayOfWeek,
+        startTime: time(body.slotStartTime),
+        maxCandidates: positiveInt(body.slotMaxCandidates, 10)
+      }))
+      .filter((slot) => slot.startTime);
 
   return {
     title:                str(body.title),
@@ -1112,25 +1136,40 @@ function parseVacancyBody(body) {
     isActive:             bool(body.isActive),
     acceptingApplications: bool(body.acceptingApplications),
     schedulingEnabled:    bool(body.schedulingEnabled),
-    slotDays:             [...new Set(slotDays
-      .map((value) => parseInt(value, 10))
-      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6))].sort((a, b) => a - b),
+    slotScheduleMode:     scheduleMode,
+    slotDays:             normalizedSlotDays,
     slotStartTime:        time(body.slotStartTime),
+    slotDayTimes,
+    slotConfigs,
     slotMaxCandidates:    positiveInt(body.slotMaxCandidates, 10),
   };
 }
 
-function hasValidInterviewConfig(data) {
+export function hasValidInterviewConfig(data) {
   if (!data.schedulingEnabled) return true;
-  return Boolean(data.slotDays.length && data.slotStartTime);
+  if (!data.slotDays.length) return false;
+  if (data.slotScheduleMode === 'BY_DAY') {
+    return data.slotConfigs.length === data.slotDays.length;
+  }
+  return Boolean(data.slotStartTime && data.slotConfigs.length);
 }
 
-function buildWeeklyInterviewSlots(vacancyId, data) {
-  return data.slotDays.map((dayOfWeek) => ({
+export function buildWeeklyInterviewSlots(vacancyId, data) {
+  const configs = Array.isArray(data.slotConfigs) && data.slotConfigs.length
+    ? data.slotConfigs
+    : data.slotDays
+      .map((dayOfWeek) => ({
+        dayOfWeek,
+        startTime: data.slotStartTime,
+        maxCandidates: data.slotMaxCandidates
+      }))
+      .filter((slot) => slot.startTime);
+
+  return configs.map((slot) => ({
     vacancyId,
-    dayOfWeek,
-    startTime: data.slotStartTime,
-    maxCandidates: data.slotMaxCandidates,
+    dayOfWeek: slot.dayOfWeek,
+    startTime: slot.startTime,
+    maxCandidates: slot.maxCandidates || data.slotMaxCandidates,
     isActive: true
   }));
 }
@@ -1725,19 +1764,35 @@ export function adminRouter(prisma) {
     const action = normalizeString(req.body.action);
     const nextStatus = action ? BOOKING_ACTION_STATUS[action] : null;
     const returnTo = safeAdminReturnPath(req.body.returnTo || req.get('referer') || '/admin');
+    const recruiterAllowedActions = new Set(['attended', 'no_show', 'rescheduled']);
 
     if (!nextStatus) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Acción de entrevista inválida.'));
     }
 
+    if (req.userRole !== 'dev' && !recruiterAllowedActions.has(action)) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Ese perfil no puede ejecutar esa acciÃ³n sobre la entrevista.'));
+    }
+
     const booking = await prisma.interviewBooking.findUnique({
       where: { id },
-      select: { id: true, candidateId: true, status: true }
+      select: {
+        id: true,
+        candidateId: true,
+        vacancyId: true,
+        slotId: true,
+        scheduledAt: true,
+        status: true
+      }
     });
     if (!booking) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Entrevista no encontrada.'));
     }
     if (!await ensureCandidateIdAccess(prisma, req, booking.candidateId, res, returnTo)) return;
+
+    if (action === 'rescheduled' && req.userRole !== 'dev') {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Usa el formulario de reagendamiento para elegir el nuevo horario de entrevista.'));
+    }
 
     await prisma.interviewBooking.update({
       where: { id },

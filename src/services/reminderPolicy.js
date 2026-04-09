@@ -7,10 +7,10 @@ export const INTERVIEW_CONFIRMATION_LEAD_MS = Number.parseInt(
   process.env.INTERVIEW_CONFIRMATION_LEAD_MS || String(60 * 60 * 1000),
   10
 ) || (60 * 60 * 1000);
-export const INTERVIEW_NO_RESPONSE_GRACE_MS = Number.parseInt(
-  process.env.INTERVIEW_NO_RESPONSE_GRACE_MS || String(15 * 60 * 1000),
+export const INTERVIEW_NO_RESPONSE_LEAD_MS = Number.parseInt(
+  process.env.INTERVIEW_NO_RESPONSE_LEAD_MS || String(10 * 60 * 1000),
   10
-) || (15 * 60 * 1000);
+) || (10 * 60 * 1000);
 
 const REMINDER_ELIGIBLE_STEPS = new Set([
   'GREETING_SENT',
@@ -101,5 +101,5 @@ export function shouldMarkInterviewNoResponsePolicy(candidate, booking, now = ne
     return false;
   }
 
-  return now.getTime() >= scheduledAt.getTime() + INTERVIEW_NO_RESPONSE_GRACE_MS;
+  return now.getTime() >= scheduledAt.getTime() - INTERVIEW_NO_RESPONSE_LEAD_MS;
 }

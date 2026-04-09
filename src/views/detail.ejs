@@ -193,6 +193,7 @@
       NO_SHOW:     { cls: 'booking-status-no_show', text: 'No asistió' },
       CANCELLED:   { cls: 'booking-status-cancelled', text: 'Canceló' }
     }; %>
+    <% const isDevRole = String(role) === 'dev'; %>
     <% const bookingActions = [
       { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
       { key: 'no_response', label: 'No contesta', cls: 'action-btn-warn', status: 'NO_RESPONSE' },
@@ -200,6 +201,9 @@
       { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
       { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
     ]; %>
+    <% const recruiterBookingActions = bookingActions.filter((action) => ['attended', 'no_show'].includes(action.key)); %>
+    <% const visibleBookingActions = isDevRole ? bookingActions : recruiterBookingActions; %>
+    <% const canRenderManualSchedulePanel = candidate.vacancy?.schedulingEnabled && (isDevRole || !(candidate.interviewBookings || []).some((booking) => ['SCHEDULED', 'CONFIRMED'].includes(booking.status))); %>
     <% const interviewWindowManaged = ['SCHEDULING', 'SCHEDULED'].includes(candidate.currentStep); %>
 
     <% if (cvSuccess) { %>
@@ -418,7 +422,7 @@
 
     <div class="card">
       <h2>Entrevistas</h2>
-      <% if (candidate.vacancy?.schedulingEnabled) { %>
+      <% if (canRenderManualSchedulePanel) { %>
         <div class="booking-manual">
           <div style="font-weight:700;color:#2c3e50;margin-bottom:6px;">Asignar horario manualmente</div>
           <div style="font-size:13px;color:#64748b;margin-bottom:10px;">
@@ -448,7 +452,7 @@
             <p style="font-size:13px;color:#b45309;">No hay horarios disponibles configurados en este momento para esta vacante.</p>
           <% } %>
         </div>
-      <% } else if (candidate.vacancyId) { %>
+      <% } else if (candidate.vacancyId && isDevRole) { %>
         <p style="margin-bottom:12px;color:#64748b;">La vacante asignada a este candidato no tiene agenda automática habilitada.</p>
       <% } %>
       <% if (!candidate.interviewBookings || candidate.interviewBookings.length === 0) { %>
@@ -469,14 +473,38 @@
                 <div class="booking-status <%= bookingUi.cls %>"><%= bookingUi.text %></div>
               </div>
               <div class="booking-actions">
-                <% for (const action of bookingActions) { %>
+                <% for (const action of visibleBookingActions) { %>
                   <form method="post" action="/admin/interviews/<%= booking.id %>/status">
                     <input type="hidden" name="action" value="<%= action.key %>" />
                     <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
                     <button type="submit" class="action-btn <%= action.cls %>" <%= booking.status === action.status ? 'disabled' : '' %>><%= action.label %></button>
                   </form>
                 <% } %>
-                <% if (String(role) === 'dev') { %>
+                <% if (!isDevRole && candidate.vacancy?.schedulingEnabled) { %>
+                  <details style="width:100%;">
+                    <summary class="action-btn action-btn-warn" style="list-style:none;display:inline-flex;">Reagendó</summary>
+                    <div style="margin-top:10px;padding:12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">
+                      <% if (availableInterviewSlots && availableInterviewSlots.length) { %>
+                        <form method="post" action="/admin/candidates/<%= candidate.id %>/interview-assign" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+                          <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
+                          <div class="field-group" style="flex:1;min-width:220px;">
+                            <label for="slotOption-<%= booking.id %>">Nueva fecha y hora de entrevista</label>
+                            <select id="slotOption-<%= booking.id %>" name="slotOption" required>
+                              <option value="">Selecciona un nuevo horario</option>
+                              <% for (const option of availableInterviewSlots) { %>
+                                <option value="<%= option.slot.id %>|<%= option.date.toISOString() %>"><%= option.formattedDate %></option>
+                              <% } %>
+                            </select>
+                          </div>
+                          <button type="submit" class="action-btn action-btn-warn">Confirmar reagendamiento</button>
+                        </form>
+                      <% } else { %>
+                        <div style="font-size:12px;color:#92400e;">No hay horarios disponibles esta semana. Se deberá contactar al candidato para concretar un nuevo horario.</div>
+                      <% } %>
+                    </div>
+                  </details>
+                <% } %>
+                <% if (isDevRole) { %>
                   <form method="post" action="/admin/interviews/<%= booking.id %>/delete" onsubmit="return confirm('¿Seguro que deseas eliminar este agendamiento? Esta acción no se puede deshacer.');">
                     <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
                     <button type="submit" class="action-btn action-btn-danger">Eliminar agendamiento</button>

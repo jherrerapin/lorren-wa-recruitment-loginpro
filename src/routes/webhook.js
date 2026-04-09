@@ -641,7 +641,7 @@ async function resolveInterviewSlotContext(prisma, candidate, vacancy, inboundTe
 
 async function buildInterviewOfferReply(candidate, vacancy, nextSlot, isReschedule = false) {
   if (!nextSlot?.slot) {
-    return 'Ya registré tu proceso. En este momento no tengo un horario válido para ofrecerte, así que el equipo te contactará para coordinar la entrevista.';
+    return 'Ya registré tu proceso. En este momento no tengo un horario válido para ofrecerte, así que el equipo te contactará para concretar la entrevista.';
   }
 
   return generateInterviewOffer({
@@ -670,6 +670,27 @@ async function updateInterviewBookingResponse(prisma, bookingId, data = {}) {
     where: { id: bookingId },
     data
   });
+}
+
+async function handleRescheduleWithoutSlots(prisma, candidate, activeBooking, from, cleanText) {
+  if (activeBooking?.id) {
+    await updateInterviewBookingResponse(prisma, activeBooking.id, {
+      status: 'RESCHEDULED',
+      reminderResponse: 'RESCHEDULED',
+      notes: 'SolicitÃ³ reprogramar, pero no habia mas espacios disponibles en la semana.'
+    });
+  }
+  await pauseInterviewFlow(prisma, candidate.id, 'Solicito reprogramacion sin horarios disponibles');
+  await prisma.candidate.update({
+    where: { id: candidate.id },
+    data: {
+      currentStep: ConversationStep.SCHEDULING,
+      reminderScheduledFor: null,
+      reminderState: 'SKIPPED'
+    }
+  });
+  const body = 'En este momento no tengo mas espacios disponibles esta semana para reprogramarte. El equipo te contactara para concretar un nuevo horario.';
+  return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'interview_reschedule_manual_followup' });
 }
 
 function shouldAskForConfirmation(candidate, normalizedData, vacancy = null) {
@@ -965,7 +986,7 @@ async function finalizeCandidateAfterCv(prisma, candidate, from) {
     const nextSlot = await resolveInterviewSlotContext(prisma, { ...candidate, currentStep: ConversationStep.SCHEDULING }, vacancy);
     if (!nextSlot?.slot) {
       await pauseInterviewFlow(prisma, candidate.id, 'Vacante con agenda habilitada sin slots validos disponibles');
-      const body = 'Ya recibí tu hoja de vida y tus datos. En este momento no tengo un horario válido para ofrecerte, así que el equipo de selección te contactará para coordinar la entrevista.';
+      const body = 'Ya recibí tu hoja de vida y tus datos. En este momento no tengo un horario válido para ofrecerte, así que el equipo de selección te contactará para concretar la entrevista.';
       return reply(prisma, candidate.id, from, body, '', { body, source: 'bot_flow' });
     }
 
@@ -1397,9 +1418,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     if (isSchedulingRescheduleIntent(cleanText)) {
       if (!nextSlot?.slot) {
-        await pauseInterviewFlow(prisma, candidate.id, 'No hay un siguiente slot valido para reagendar');
-        const body = 'En este momento no tengo un siguiente horario válido para ofrecerte. El equipo te contactará para ayudarte con la reprogramación.';
-        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+        return handleRescheduleWithoutSlots(prisma, candidate, activeBooking, from, cleanText);
       }
 
       if (activeBooking?.id) {
@@ -1590,9 +1609,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     if (isSchedulingRescheduleIntent(cleanText)) {
       if (!nextSlot?.slot) {
-        await pauseInterviewFlow(prisma, candidate.id, 'No hay un siguiente slot valido para reagendar');
-        const body = 'En este momento no tengo un siguiente horario válido para ofrecerte. El equipo te contactará para ayudarte con la reprogramación.';
-        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+        return handleRescheduleWithoutSlots(prisma, candidate, activeBooking, from, cleanText);
       }
 
       if (activeBooking?.id) {
@@ -2247,4 +2264,5 @@ export function webhookRouter(prisma) {
 
   return router;
 }
+
 

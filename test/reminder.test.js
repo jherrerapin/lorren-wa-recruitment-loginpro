@@ -251,7 +251,8 @@ test('runReminderDispatcher marca no respuesta si no contestan tras el recordato
   process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
   process.env.META_ACCESS_TOKEN = 'meta-access-token';
 
-  const now = new Date('2026-04-08T15:20:00.000Z');
+  const beforeThreshold = new Date('2026-04-08T14:49:00.000Z');
+  const now = new Date('2026-04-08T14:50:00.000Z');
   const prisma = createMockPrisma({
     candidates: [{
       id: 'cand-scheduled-3',
@@ -280,6 +281,10 @@ test('runReminderDispatcher marca no respuesta si no contestan tras el recordato
   const restoreAxios = installOpenAIMock({ whatsappMock });
 
   try {
+    await runReminderDispatcher(prisma, { now: beforeThreshold });
+    assert.equal(prisma.state.interviewBookings[0].status, 'SCHEDULED');
+    assert.equal(prisma.state.interviewBookings[0].reminderResponse, null);
+
     await runReminderDispatcher(prisma, { now });
     assert.equal(whatsappMock.sentMessages.length, 0);
     assert.equal(prisma.state.interviewBookings[0].status, 'NO_RESPONSE');

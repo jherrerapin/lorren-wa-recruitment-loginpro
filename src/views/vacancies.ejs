@@ -123,6 +123,14 @@
     .schedule-day { display: flex; align-items: center; justify-content: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
     .schedule-day input { display: none; }
     .schedule-day:has(input:checked) { border-color: var(--teal); background: var(--teal-light); color: var(--teal-hover); }
+    .schedule-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .schedule-mode-option { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .schedule-mode-option input { margin-top: 2px; accent-color: var(--teal); }
+    .schedule-day-times { display: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+    .schedule-day-times.is-visible { display: grid; }
+    .schedule-day-time { display:flex; flex-direction:column; gap:6px; padding:10px 12px; border:1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .schedule-day-time.is-disabled { opacity: .45; }
+    .schedule-day-time label { font-size:12px; font-weight:600; color: var(--text-muted); }
     .empty-state { text-align: center; padding: 48px 24px; color: var(--text-faint); }
     .empty-state .empty-icon { font-size: 36px; margin-bottom: 10px; }
     .no-ops-warn { font-size: 12px; color: var(--amber); background: var(--amber-light); border: 1px solid #fcd34d; border-radius: var(--radius); padding: 8px 12px; }
@@ -175,6 +183,8 @@
       .form-grid .full { grid-column: 1; }
       .schedule-config { grid-template-columns: 1fr; }
       .schedule-days { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .schedule-mode-grid,
+      .schedule-day-times { grid-template-columns: 1fr; }
       .modal-footer { flex-direction: column; }
       .modal-footer .btn {
         width: 100%;
@@ -446,6 +456,22 @@
             </div>
             <div class="form-group full">
               <label>Días disponibles para entrevista</label>
+              <div class="schedule-mode-grid" style="margin-bottom:10px;">
+                <label class="schedule-mode-option">
+                  <input type="radio" name="slotScheduleMode" value="UNIFORM" checked />
+                  <div>
+                    <div style="font-size:12px;font-weight:700;color:var(--text);">Misma hora para los días seleccionados</div>
+                    <div class="form-hint">Se aplica una sola hora a todos los días marcados.</div>
+                  </div>
+                </label>
+                <label class="schedule-mode-option">
+                  <input type="radio" name="slotScheduleMode" value="BY_DAY" />
+                  <div>
+                    <div style="font-size:12px;font-weight:700;color:var(--text);">Hora específica por día</div>
+                    <div class="form-hint">Permite poner una hora distinta según el día.</div>
+                  </div>
+                </label>
+              </div>
               <div class="schedule-days">
                 <% const scheduleDays = [{ value: 0, label: 'Lun' }, { value: 1, label: 'Mar' }, { value: 2, label: 'Mié' }, { value: 3, label: 'Jue' }, { value: 4, label: 'Vie' }, { value: 5, label: 'Sáb' }, { value: 6, label: 'Dom' }]; %>
                 <% for (const day of scheduleDays) { %>
@@ -459,10 +485,22 @@
             <div class="form-group">
               <label for="c-slotStartTime">Hora de entrevista</label>
               <input id="c-slotStartTime" name="slotStartTime" type="time" value="08:00" />
+              <span class="form-hint">Se usa cuando todos los días seleccionados comparten la misma hora.</span>
             </div>
             <div class="form-group">
               <label for="c-slotMaxCandidates">Candidatos por slot</label>
               <input id="c-slotMaxCandidates" name="slotMaxCandidates" type="number" min="1" max="100" value="10" />
+            </div>
+            <div class="form-group full">
+              <label>Hora específica por día</label>
+              <div class="schedule-day-times" id="c-slot-day-times">
+                <% for (const day of scheduleDays) { %>
+                  <div class="schedule-day-time" data-day-config="<%= day.value %>">
+                    <label for="c-slotDayTime-<%= day.value %>"><%= day.label %></label>
+                    <input id="c-slotDayTime-<%= day.value %>" name="slotDayTime_<%= day.value %>" type="time" />
+                  </div>
+                <% } %>
+              </div>
             </div>
           </div>
         </div>
@@ -608,6 +646,22 @@
             </div>
             <div class="form-group full">
               <label>Días disponibles para entrevista</label>
+              <div class="schedule-mode-grid" style="margin-bottom:10px;">
+                <label class="schedule-mode-option">
+                  <input type="radio" name="slotScheduleMode" value="UNIFORM" checked />
+                  <div>
+                    <div style="font-size:12px;font-weight:700;color:var(--text);">Misma hora para los días seleccionados</div>
+                    <div class="form-hint">Se aplica una sola hora a todos los días marcados.</div>
+                  </div>
+                </label>
+                <label class="schedule-mode-option">
+                  <input type="radio" name="slotScheduleMode" value="BY_DAY" />
+                  <div>
+                    <div style="font-size:12px;font-weight:700;color:var(--text);">Hora específica por día</div>
+                    <div class="form-hint">Permite poner una hora distinta según el día.</div>
+                  </div>
+                </label>
+              </div>
               <div class="schedule-days">
                 <% for (const day of scheduleDays) { %>
                   <label class="schedule-day">
@@ -620,10 +674,22 @@
             <div class="form-group">
               <label for="e-slotStartTime">Hora de entrevista</label>
               <input id="e-slotStartTime" name="slotStartTime" type="time" value="08:00" />
+              <span class="form-hint">Se usa cuando todos los días seleccionados comparten la misma hora.</span>
             </div>
             <div class="form-group">
               <label for="e-slotMaxCandidates">Candidatos por slot</label>
               <input id="e-slotMaxCandidates" name="slotMaxCandidates" type="number" min="1" max="100" value="10" />
+            </div>
+            <div class="form-group full">
+              <label>Hora específica por día</label>
+              <div class="schedule-day-times" id="e-slot-day-times">
+                <% for (const day of scheduleDays) { %>
+                  <div class="schedule-day-time" data-day-config="<%= day.value %>">
+                    <label for="e-slotDayTime-<%= day.value %>"><%= day.label %></label>
+                    <input id="e-slotDayTime-<%= day.value %>" name="slotDayTime_<%= day.value %>" type="time" />
+                  </div>
+                <% } %>
+              </div>
             </div>
           </div>
         </div>
@@ -647,6 +713,33 @@
     config.classList.toggle('is-visible', visible);
     config.querySelectorAll('input').forEach((input) => {
       input.disabled = !visible;
+    });
+    syncScheduleMode(scheduleConfigId.startsWith('c-') ? 'c' : 'e');
+  }
+
+  function getSelectedDayValues(prefix) {
+    return Array.from(document.querySelectorAll(`#${prefix}-schedule-config input[name="slotDays"]:checked`))
+      .map((input) => input.value);
+  }
+
+  function syncScheduleMode(prefix) {
+    const mode = document.querySelector(`#modal${prefix === 'c' ? 'Create' : 'Edit'} input[name="slotScheduleMode"]:checked`)?.value || 'UNIFORM';
+    const uniformInput = document.getElementById(`${prefix}-slotStartTime`);
+    const dayTimesContainer = document.getElementById(`${prefix}-slot-day-times`);
+    const selectedDays = new Set(getSelectedDayValues(prefix));
+    const byDay = mode === 'BY_DAY';
+    if (uniformInput) uniformInput.disabled = byDay;
+    if (!dayTimesContainer) return;
+    dayTimesContainer.classList.toggle('is-visible', byDay);
+    dayTimesContainer.querySelectorAll('[data-day-config]').forEach((item) => {
+      const day = item.getAttribute('data-day-config');
+      const enabled = byDay && selectedDays.has(day);
+      item.classList.toggle('is-disabled', !enabled);
+      const input = item.querySelector('input');
+      if (input) {
+        input.disabled = !enabled;
+        if (!enabled) input.value = '';
+      }
     });
   }
 
@@ -755,10 +848,13 @@
     document.getElementById('c-expTimeText').value = '';
     document.getElementById('c-slotStartTime').value = '08:00';
     document.getElementById('c-slotMaxCandidates').value = '10';
+    document.querySelectorAll('#modalCreate input[name="slotScheduleMode"]').forEach((input) => { input.checked = input.value === 'UNIFORM'; });
     document.querySelectorAll('#c-schedule-config input[name="slotDays"]').forEach((input) => { input.checked = false; });
+    document.querySelectorAll('#c-slot-day-times input[type="time"]').forEach((input) => { input.value = ''; });
     setRequiredDocumentFields('c');
     syncExperienceField('c-exp', 'c-exp-time-group');
     syncActiveState('c-isActive', 'c-flow', 'c-toggle-row', 'c-schedule-config');
+    syncScheduleMode('c');
     document.getElementById('modalCreate').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -782,10 +878,19 @@
       ? v.interviewSlots.filter((slot) => slot && slot.dayOfWeek !== null && slot.dayOfWeek !== undefined)
       : [];
     const primarySlot = weeklySlots[0] || null;
+    const uniqueTimes = [...new Set(weeklySlots.map((slot) => slot.startTime).filter(Boolean))];
     document.getElementById('e-slotStartTime').value = primarySlot?.startTime || '08:00';
     document.getElementById('e-slotMaxCandidates').value = primarySlot?.maxCandidates || '10';
     document.querySelectorAll('#e-schedule-config input[name="slotDays"]').forEach((input) => {
       input.checked = weeklySlots.some((slot) => String(slot.dayOfWeek) === input.value);
+    });
+    document.querySelectorAll('#e-slot-day-times input[type="time"]').forEach((input) => { input.value = ''; });
+    weeklySlots.forEach((slot) => {
+      const input = document.getElementById(`e-slotDayTime-${slot.dayOfWeek}`);
+      if (input) input.value = slot.startTime || '';
+    });
+    document.querySelectorAll('#modalEdit input[name="slotScheduleMode"]').forEach((input) => {
+      input.checked = input.value === (uniqueTimes.length > 1 ? 'BY_DAY' : 'UNIFORM');
     });
 
     // Seleccionar operación si existe
@@ -802,6 +907,7 @@
     document.getElementById('e-flow').querySelectorAll('input[type=radio]').forEach(r => r.checked = (r.value === flow));
     syncExperienceField('e-exp', 'e-exp-time-group');
     syncActiveState('e-isActive', 'e-flow', 'e-toggle-row', 'e-schedule-config');
+    syncScheduleMode('e');
     document.getElementById('modalEdit').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
@@ -824,6 +930,14 @@
       radio.addEventListener('change', () => syncScheduleConfig(checkboxId, flowGroupId, configId));
     });
   });
+  ['c', 'e'].forEach((prefix) => {
+    document.querySelectorAll(`#${prefix}-schedule-config input[name="slotDays"]`).forEach((input) => {
+      input.addEventListener('change', () => syncScheduleMode(prefix));
+    });
+    document.querySelectorAll(`#modal${prefix === 'c' ? 'Create' : 'Edit'} input[name="slotScheduleMode"]`).forEach((input) => {
+      input.addEventListener('change', () => syncScheduleMode(prefix));
+    });
+  });
   ['c-exp', 'e-exp'].forEach((selectId) => {
     const select = document.getElementById(selectId);
     if (!select) return;
@@ -831,6 +945,8 @@
   });
   syncExperienceField('c-exp', 'c-exp-time-group');
   syncExperienceField('e-exp', 'e-exp-time-group');
+  syncScheduleMode('c');
+  syncScheduleMode('e');
   setTimeout(() => {
     document.querySelectorAll('.alert').forEach(a => {
       a.style.transition = 'opacity .4s'; a.style.opacity = '0';
