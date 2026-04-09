@@ -16,11 +16,19 @@ const ROLE_STOPWORDS = new Set([
 ]);
 const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|descargue|descarge|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol)\b/i;
 const LOCATION_ALIASES = [
-  { value: 'Bogota', patterns: [/\bbogota\b/i, /\bfunza\b/i, /\bmosquera\b/i, /\bmadrid\b/i, /\bsiberia\b/i, /\bsuba\b/i, /\bengativa\b/i, /\bcalle 80\b/i, /\bvillas? de granada\b/i, /\bel rosal\b/i] },
+  { value: 'Bogota', patterns: [/\bbogota\b/i, /\bbogota d\.?c\.?\b/i] },
+  { value: 'Suba', patterns: [/\bsuba\b/i, /\blisboa\b/i, /\bbilbao\b/i] },
+  { value: 'Engativa', patterns: [/\bengativa\b/i, /\bvillas? de granada\b/i] },
+  { value: 'Calle 80', patterns: [/\bcalle 80\b/i, /\bportal 80\b/i] },
+  { value: 'Funza', patterns: [/\bfunza\b/i] },
+  { value: 'Mosquera', patterns: [/\bmosquera\b/i] },
+  { value: 'Madrid', patterns: [/\bmadrid\b/i] },
+  { value: 'El Rosal', patterns: [/\bel rosal\b/i] },
+  { value: 'Siberia', patterns: [/\bsiberia\b/i] },
   { value: 'Ibague', patterns: [/\bibague\b/i] }
 ];
 const LOCATION_GROUPS = [
-  { key: 'bogota-siberia', aliases: ['bogota', 'siberia', 'funza', 'mosquera', 'madrid', 'suba', 'engativa', 'calle 80', 'villas de granada', 'el rosal'] },
+  { key: 'bogota-siberia', aliases: ['bogota', 'siberia', 'funza', 'mosquera', 'madrid', 'suba', 'engativa', 'calle 80', 'villas de granada', 'el rosal', 'cota', 'lisboa', 'bilbao', 'portal 80'] },
   { key: 'ibague', aliases: ['ibague'] }
 ];
 
@@ -325,6 +333,9 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   if (!city && !roleHint) {
     return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'missing_city_and_role' };
   }
+  if (!city && roleHint) {
+    return { resolved: false, vacancy: null, city: null, roleHint, reason: 'missing_city_for_role' };
+  }
 
   const matchingCityVacancies = city
     ? activeVacancies.filter((vacancy) => cityMatchesVacancy(vacancy, city))
@@ -339,19 +350,6 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   const threshold = roleHint ? (roleTokenCount >= 2 ? 4 : 4.5) : 6;
 
   if (city && !matchingCityVacancies.length) {
-    const crossCityActiveMatch = roleHint
-      ? pickBestVacancyMatch(activeVacancies, { text, city: null, roleHint })
-      : null;
-    if (isStrongUniqueRoleMatch(crossCityActiveMatch, threshold)) {
-      return {
-        resolved: true,
-        vacancy: crossCityActiveMatch.best.vacancy,
-        city: canonicalVacancyCity(crossCityActiveMatch.best.vacancy),
-        roleHint,
-        reason: 'matched_active_vacancy_by_role_outside_city'
-      };
-    }
-
     const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
     if (inactiveMatch?.best && inactiveMatch.best.score >= threshold) {
       return {
@@ -379,8 +377,8 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
     return { resolved: false, vacancy: null, city, roleHint, reason: 'no_active_vacancies' };
   }
 
-  if (city && !roleHint && matchingCityVacancies.length) {
-    return { resolved: false, vacancy: null, city, roleHint, reason: 'city_with_active_vacancies' };
+  if (city && !roleHint) {
+    return { resolved: false, vacancy: null, city, roleHint, reason: 'missing_role_for_city' };
   }
 
   const { best, runnerUp, margin } = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint });
@@ -397,10 +395,7 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
         reason: 'matched_inactive_vacancy'
       };
     }
-    if (city && !roleHint && matchingCityVacancies.length) {
-      return { resolved: false, vacancy: null, city, roleHint, reason: 'city_with_active_vacancies' };
-    }
-    return { resolved: false, vacancy: null, city, roleHint, reason: 'low_confidence_match' };
+    return { resolved: false, vacancy: null, city, roleHint, reason: 'no_matching_vacancy_for_city' };
   }
 
   if (

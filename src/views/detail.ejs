@@ -238,10 +238,10 @@
     <% if (outboundError) { %>
       <div class="alert alert-error"><%= outboundError %></div>
     <% } %>
-    <% if (botPauseSuccess) { %>
+    <% if (role === 'dev' && botPauseSuccess) { %>
       <div class="alert alert-success"><%= botPauseSuccess %></div>
     <% } %>
-    <% if (botPauseError) { %>
+    <% if (role === 'dev' && botPauseError) { %>
       <div class="alert alert-error"><%= botPauseError %></div>
     <% } %>
     <% if (bookingSuccess) { %>
@@ -305,6 +305,7 @@
 
     <div class="card">
       <h2>Estado del candidato</h2>
+      <% if (role === 'dev') { %>
       <div style="margin-bottom:12px;font-size:14px;">
         <strong>Bot:</strong>
         <% if (candidate.botPaused) { %>
@@ -314,6 +315,7 @@
           <span style="color:#1f7a38;">Activo</span>
         <% } %>
       </div>
+      <% } %>
       <% if (role === 'dev' && outboundWindow?.expiringSoon && interviewWindowManaged) { %>
         <div class="alert alert-error" style="background:#fff7ed;border-color:#fdba74;color:#9a3412;">
           La ventana de 24h está por vencer para este candidato. El sistema intentará enviar un mensaje de continuidad antes del cierre para incentivar respuesta y sostener el contacto.

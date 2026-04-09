@@ -1,5 +1,5 @@
 import { normalizeCandidateFields, parseNaturalData } from './candidateData.js';
-import { detectRoleHintFromText } from './vacancyResolver.js';
+import { detectCityFromText, detectRoleHintFromText } from './vacancyResolver.js';
 
 const EMPTY_UNDERSTANDING = Object.freeze({
   intent: 'unknown',
@@ -51,14 +51,15 @@ export async function conversationUnderstanding(text, options = {}) {
   const normalized = normalizeCandidateFields(localParsed);
   const aiCity = typeof aiFields.city === 'string' ? aiFields.city.trim() || null : null;
   const aiRoleHint = typeof aiFields.roleHint === 'string' ? aiFields.roleHint.trim() || null : null;
+  const localCity = detectCityFromText(input);
   const localRoleHint = detectRoleHintFromText(input);
 
   understanding.candidateFields = normalized;
   understanding.intent = Object.keys(normalized).length ? 'provide_data' : 'unknown';
   understanding.suggestedNextAction = Object.keys(normalized).length ? 'collect_or_confirm' : 'ask_for_clarification';
 
-  if (aiCity) {
-    understanding.cityDetection = { detected: true, value: aiCity, confidence: 0.85 };
+  if (aiCity || localCity) {
+    understanding.cityDetection = { detected: true, value: aiCity || localCity, confidence: aiCity ? 0.85 : 0.68 };
   }
 
   if (aiRoleHint || localRoleHint) {

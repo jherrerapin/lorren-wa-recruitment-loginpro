@@ -3,11 +3,21 @@ import assert from 'node:assert/strict';
 import {
   alignCandidateLocationFields,
   getCandidateResidenceValue,
+  getOperationalProfile,
+  getResidenceFollowUp,
   getResidenceFieldConfig,
   normalizeCandidateFields,
   parseNaturalData
 } from '../src/services/candidateData.js';
 import { splitFieldDecisions } from '../src/services/debugTrace.js';
+
+const siberiaVacancy = {
+  city: 'Bogota',
+  operationAddress: 'Parques Logisticos Siberia',
+  interviewAddress: 'Villas de Granada',
+  title: 'Auxiliar de Bodega Siberia',
+  role: 'Auxiliar de bodega'
+};
 
 test('frase de intención no se persiste como fullName', () => {
   const normalized = normalizeCandidateFields({ fullName: 'me interesa' });
@@ -238,4 +248,43 @@ test('usa localidad como residencia principal para vacantes de Bogota', () => {
   assert.equal(aligned.locality, 'Suba');
   assert.equal(aligned.neighborhood, null);
   assert.equal(getCandidateResidenceValue({ locality: 'Suba' }, { city: 'Bogota' }), 'Suba');
+});
+
+test('para Siberia usa municipio si el candidato viene de Funza', () => {
+  const config = getResidenceFieldConfig(siberiaVacancy, { zone: 'Funza' });
+  const aligned = alignCandidateLocationFields({ zone: 'Funza' }, siberiaVacancy, { clearAlternate: false });
+  assert.equal(config.field, 'zone');
+  assert.equal(config.label, 'municipio');
+  assert.equal(aligned.zone, 'Funza');
+  assert.equal(getCandidateResidenceValue({ zone: 'Funza' }, siberiaVacancy), 'Funza');
+});
+
+test('para Siberia infiere Suba desde Lisboa sin seguir pidiendo barrio', () => {
+  const aligned = alignCandidateLocationFields({ zone: 'Bogota', neighborhood: 'Lisboa' }, siberiaVacancy, { clearAlternate: false });
+  assert.equal(aligned.locality, 'Suba');
+  assert.equal(getCandidateResidenceValue(aligned, siberiaVacancy), 'Suba');
+});
+
+test('para Siberia pide localidad cuando recibe un barrio de Bogota no mapeable', () => {
+  const candidate = { zone: 'Bogota', neighborhood: 'Palermo', locality: null };
+  const config = getResidenceFieldConfig(siberiaVacancy, candidate);
+  const followUp = getResidenceFollowUp(candidate, siberiaVacancy);
+  assert.equal(config.field, 'locality');
+  assert.equal(getCandidateResidenceValue(candidate, siberiaVacancy), null);
+  assert.match(followUp, /A que localidad pertenece ese barrio/i);
+});
+
+test('para Siberia pide localidad si solo dicen Bogota', () => {
+  const candidate = { zone: 'Bogota', locality: null, neighborhood: null };
+  const followUp = getResidenceFollowUp(candidate, siberiaVacancy);
+  assert.match(followUp, /localidad en Bogota/i);
+});
+
+test('para Siberia advierte desplazamiento cuando la localidad es lejana', () => {
+  const candidate = { zone: 'Bogota', locality: 'Kennedy', zoneViable: null };
+  const profile = getOperationalProfile(siberiaVacancy, candidate);
+  const followUp = getResidenceFollowUp(candidate, siberiaVacancy);
+  assert.equal(profile.key, 'bogota_siberia_corridor');
+  assert.equal(profile.needsCommuteWarning, true);
+  assert.match(followUp, /no contamos con ruta/i);
 });

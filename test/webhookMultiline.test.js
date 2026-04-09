@@ -25,7 +25,7 @@ test('resumen consolidado sanitiza documento y edad', () => {
   assert.doesNotMatch(summary, /1099887766/);
 });
 
-test('la ventana multilinea es larga al inicio y mas corta en un hilo ya resuelto', () => {
+test('la ventana multilinea se mantiene en 60 segundos para priorizar contextualizacion', () => {
   const previousEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'development';
   try {
@@ -34,14 +34,12 @@ test('la ventana multilinea es larga al inicio y mas corta en un hilo ya resuelt
       vacancyResolved: false,
       text: 'ibague'
     });
-    const resolvedWindow = getMultilineWindowMs({
+    assert.equal(earlyWindow, 60000);
+    assert.equal(getMultilineWindowMs({
       currentStep: 'ASK_CV',
       vacancyResolved: true,
       text: 'Si estoy interesado, que datos te doy?'
-    });
-
-    assert.equal(earlyWindow, 60000);
-    assert.equal(resolvedWindow, 20000);
+    }), 60000);
   } finally {
     process.env.NODE_ENV = previousEnv;
   }

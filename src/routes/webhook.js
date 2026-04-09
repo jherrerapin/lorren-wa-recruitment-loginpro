@@ -7,8 +7,11 @@ import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisio
 import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
 import {
   alignCandidateLocationFields,
+  detectResidenceFollowUpFields,
   getCandidateResidenceValue,
+  getOperationalProfile,
   getResidenceFieldConfig,
+  getResidenceFollowUp,
   hasMeaningfulCandidateData,
   isHighConfidenceLocalField,
   looksLikeNoMedicalRestrictionsText,
@@ -127,8 +130,8 @@ function shouldRejectByRequirements(text, parsed = {}) {
   if (mentionsForeigner(text) && hasValidForeignDocumentMention(text, parsed)) return { reject: false };
   return { reject: false };
 }
-function getRequiredFieldKeys(vacancy = null) {
-  const residenceConfig = getResidenceFieldConfig(vacancy);
+function getRequiredFieldKeys(vacancy = null, candidate = {}) {
+  const residenceConfig = getResidenceFieldConfig(vacancy, candidate);
   return [
     'fullName',
     'documentType',
@@ -140,13 +143,16 @@ function getRequiredFieldKeys(vacancy = null) {
   ];
 }
 function getFieldLabel(field, vacancy = null) {
+  if (field === 'zone') {
+    return 'el municipio';
+  }
   if (field === 'locality' || field === 'neighborhood') {
     return getResidenceFieldConfig(vacancy).articleLabel;
   }
   return FIELD_LABELS[field] || field;
 }
 function buildResidenceMissingField(candidate, vacancy = null) {
-  return getCandidateResidenceValue(candidate, vacancy) ? null : getResidenceFieldConfig(vacancy).label;
+  return getCandidateResidenceValue(candidate, vacancy) ? null : getResidenceFieldConfig(vacancy, candidate).label;
 }
 function getMissingFieldsForVacancy(candidate, vacancy = null) {
   const m = [];
@@ -169,8 +175,8 @@ function formatFieldListForVacancy(fields = [], vacancy = null) {
   if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
   return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
 }
-function buildDataRequestPrompt(vacancy = null) {
-  const residenceConfig = getResidenceFieldConfig(vacancy);
+function buildDataRequestPrompt(vacancy = null, candidate = {}) {
+  const residenceConfig = getResidenceFieldConfig(vacancy, candidate);
   return `Perfecto. Enviame por favor estos datos para continuar: nombre completo, tipo de documento, numero de documento, edad, ${residenceConfig.label}, si tienes restricciones medicas y que medio de transporte tienes. Puedes enviarlos en un solo mensaje, como te sea mas facil.`;
 }
 function getMissingFields(candidate, vacancy = null) {
@@ -197,6 +203,7 @@ function enrichNormalizedDataFromContext(text = '', normalizedData = {}, candida
   const missing = getMissingFields(candidate, vacancy);
   const missingSet = new Set(missing);
   const normalizedText = normalizeComparableText(text);
+  const residenceFollowUpFields = detectResidenceFollowUpFields(text, { ...candidate, ...normalizedData }, vacancy);
 
   if (!enriched.gender) {
     if (/\b(?:estoy|me encuentro)\s+interesada\b|\bquedo\s+atenta\b/.test(normalizedText)) {
@@ -212,13 +219,21 @@ function enrichNormalizedDataFromContext(text = '', normalizedData = {}, candida
     }
   }
 
+  Object.entries(residenceFollowUpFields).forEach(([field, value]) => {
+    if (enriched[field] === undefined || enriched[field] === null || enriched[field] === '') {
+      enriched[field] = value;
+    }
+  });
+
   return enriched;
 }
 function buildMissingFieldsReply(candidate, normalizedData = {}, vacancy = null) {
+  const residenceFollowUp = getResidenceFollowUp(candidate, vacancy);
+  if (residenceFollowUp) return residenceFollowUp;
   const missing = getMissingFields(candidate, vacancy);
   if (!missing.length) return '';
   const capturedCount = Object.keys(normalizedData || {})
-    .filter((field) => getRequiredFieldKeys(vacancy).includes(field) && normalizedData[field] !== undefined && normalizedData[field] !== null && normalizedData[field] !== '')
+    .filter((field) => getRequiredFieldKeys(vacancy, candidate).includes(field) && normalizedData[field] !== undefined && normalizedData[field] !== null && normalizedData[field] !== '')
     .length;
   if (capturedCount >= 2) return `Perfecto, ya registre esos datos. Para seguir necesito: ${missing.join(', ')}.`;
   if (capturedCount === 1) return `Listo, ese dato ya quedo registrado. Ahora necesito: ${missing.join(', ')}.`;
@@ -236,6 +251,8 @@ function buildUpdatedConfirmationReply(candidate, updatedFields = [], vacancy = 
   return buildConfirmationSummary(candidate, { intro, prompt }, vacancy);
 }
 function buildConfirmationClarifier(candidate, vacancy = null) {
+  const residenceFollowUp = getResidenceFollowUp(candidate, vacancy);
+  if (residenceFollowUp) return residenceFollowUp;
   const missing = getMissingFields(candidate, vacancy);
   if (missing.length) {
     return `Si ves algo por ajustar, enviame solo el dato correcto. Para seguir todavia necesito: ${missing.join(', ')}.`;
@@ -315,21 +332,10 @@ function buildVacancyCompactSummary(vacancy) {
   else if (vacancy.requirements) parts.push(`Los requisitos principales son ${vacancy.requirements}.`);
   return parts.join(' ');
 }
-function buildNoOperationsAvailableReply(city = null) {
+function buildNoOperationsAvailableReply(city = null, roleHint = null) {
   const location = city ? ` en ${city}` : '';
-  return `En este momento no tengo operaciones disponibles${location}. Si quieres, puedes dejar tus datos y tu hoja de vida para tener tu perfil en cuenta si se abre una vacante.`;
-}
-function buildCityVacancyOptionsReply(city, vacancies = []) {
-  const options = [...new Set(
-    vacancies
-      .map((vacancy) => vacancy?.title || vacancy?.role)
-      .filter(Boolean)
-  )];
-  if (!options.length) return buildNoOperationsAvailableReply(city);
-  const label = options.length === 1
-    ? options[0]
-    : `${options.slice(0, -1).join(', ')} y ${options[options.length - 1]}`;
-  return `En ${city} tengo estas vacantes activas: ${label}. Dime cual te interesa y te comparto la informacion. Si ninguna te sirve por ahora, igual puedes dejar tus datos y tu hoja de vida para tenerte en cuenta cuando se abra otra opcion.`;
+  const roleLine = roleHint ? ` de ${roleHint}` : '';
+  return `En este momento no tengo una vacante activa${roleLine}${location}. Si quieres, puedes dejar tus datos y tu hoja de vida para tener tu perfil en cuenta si se abre una vacante.`;
 }
 function buildVacancyQuestionLead(vacancy, text = '') {
   const n = normalizeComparableText(text);
@@ -389,11 +395,11 @@ function buildVacancyAssociationPrompt(options = {}) {
   const intro = (options.cvReceived || options.hasCv)
     ? 'Recibi tu hoja de vida.'
     : (options.dataCaptured ? 'Ya registre lo que me compartiste.' : 'Con gusto te ayudo.');
-  if (options.city && options.cityVacancyOptions?.length) {
-    return `${intro} Ya tengo que nos escribes desde ${options.city}. ${buildCityVacancyOptionsReply(options.city, options.cityVacancyOptions)}`;
-  }
   if (options.city) {
     return `${intro} Ya tengo que nos escribes desde ${options.city}. Ahora cuentame para que vacante o cargo estas aplicando.`;
+  }
+  if (options.roleHint) {
+    return `${intro} Ya tengo el cargo o vacante de interes: ${options.roleHint}. Ahora cuentame desde que ciudad nos escribes para ubicar bien tu proceso.`;
   }
   const attachment = options.hasCv ? 'Para asociarla correctamente' : 'Para asociar bien tu proceso';
   return `${intro} ${attachment}, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.`;
@@ -570,7 +576,7 @@ async function loadVacancyContext(prisma, vacancyId) {
 }
 
 function buildConfirmationSummary(candidate, options = {}, vacancy = null) {
-  const residenceConfig = getResidenceFieldConfig(vacancy);
+  const residenceConfig = getResidenceFieldConfig(vacancy, candidate);
   const residenceValue = getCandidateResidenceValue(candidate, vacancy) || 'Pendiente';
   const documentLabel = candidate.documentType && candidate.documentNumber
     ? `${candidate.documentType} ${candidate.documentNumber}`
@@ -694,12 +700,13 @@ async function handleRescheduleWithoutSlots(prisma, candidate, activeBooking, fr
 }
 
 function shouldAskForConfirmation(candidate, normalizedData, vacancy = null) {
+  if (getResidenceFollowUp(candidate, vacancy)) return false;
   if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
     return getMissingFields(candidate, vacancy).length === 0;
   }
   const missing = getMissingFields(candidate, vacancy);
-  const hasMainBlock = getRequiredFieldKeys(vacancy).every((field) => {
-    if (field === 'locality' || field === 'neighborhood') {
+  const hasMainBlock = getRequiredFieldKeys(vacancy, candidate).every((field) => {
+    if (field === 'locality' || field === 'neighborhood' || field === 'zone') {
       return Boolean(getCandidateResidenceValue(candidate, vacancy));
     }
     return candidate[field] !== null && candidate[field] !== undefined && candidate[field] !== '';
@@ -708,7 +715,7 @@ function shouldAskForConfirmation(candidate, normalizedData, vacancy = null) {
   if (!missing.length) return true;
 
   const correctedFields = Object.keys(normalizedData || {});
-  const requiresReconfirm = correctedFields.some((field) => getRequiredFieldKeys(vacancy).includes(field));
+  const requiresReconfirm = correctedFields.some((field) => getRequiredFieldKeys(vacancy, candidate).includes(field));
   return requiresReconfirm && correctedFields.length >= 2 && missing.length <= 2;
 }
 
@@ -808,6 +815,7 @@ async function previewEngineCandidateFields(prisma, candidate, inboundText, prov
 function shouldUsePrimaryConversationEngine(candidate, inboundText = '') {
   if (!USE_CONVERSATION_ENGINE || !process.env.OPENAI_API_KEY) return false;
   if (!candidate || !normalizeText(inboundText)) return false;
+  if (!candidate.vacancyId) return false;
   return [
     ConversationStep.GREETING_SENT,
     ConversationStep.COLLECTING_DATA,
@@ -889,35 +897,12 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
 async function resolveVacancyFromConversation(prisma, text, options = {}) {
   const activeVacancies = options.activeVacancies || await findActiveVacancies(prisma);
   const allVacancies = options.allVacancies || await findAllVacancies(prisma);
-  const resolution = await resolveVacancyFromText(prisma, text, {
+  return resolveVacancyFromText(prisma, text, {
     cityHint: options.cityHint,
     roleHint: options.roleHint,
     activeVacancies,
     allVacancies,
   });
-
-  if (
-    resolution.resolved
-    || !options.allowSingleFallback
-    || activeVacancies.length !== 1
-    || !options.roleHint
-    || options.cityHint
-  ) {
-    return resolution;
-  }
-
-  const fallbackVacancy = activeVacancies[0];
-  if (!fallbackVacancy?.isActive || !fallbackVacancy?.acceptingApplications) {
-    return resolution;
-  }
-
-  return {
-    resolved: true,
-    vacancy: fallbackVacancy,
-    city: fallbackVacancy.operation?.city?.name || fallbackVacancy.city || null,
-    roleHint: options.roleHint || null,
-    reason: 'single_active_vacancy_fallback'
-  };
 }
 
 async function buildVacancyResolutionContextText(prisma, candidateId, currentText = '') {
@@ -942,6 +927,22 @@ async function buildVacancyResolutionContextText(prisma, candidateId, currentTex
   }
 
   return parts.join('\n');
+}
+
+function buildVacancyResolutionUpdateData(resolution, candidateState = {}) {
+  const data = { vacancyId: resolution?.vacancy?.id || null };
+  if (!resolution?.vacancy || !resolution?.city) return data;
+
+  const operationalProfile = getOperationalProfile(resolution.vacancy, {
+    ...candidateState,
+    zone: candidateState?.zone || resolution.city
+  });
+
+  if (operationalProfile.key === 'bogota_siberia_corridor' && !candidateState?.zone) {
+    data.zone = resolution.city;
+  }
+
+  return data;
 }
 
 async function pauseInterviewFlow(prisma, candidateId, reason) {
@@ -1158,12 +1159,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
   normalizedData = enrichNormalizedDataFromContext(cleanText, normalizedData, candidate, currentVacancy);
   const hasDataIntent = containsCandidateData(cleanText, normalizedData);
-  const requiredFields = getRequiredFieldKeys(currentVacancy);
+  const requiredFields = getRequiredFieldKeys(currentVacancy, candidate);
   const hasNonNameProfileFieldCapture = Object.keys(normalizedData).some((field) => (
     requiredFields.includes(field) && field !== 'fullName'
   ));
   const hasMaterialProfileFieldCapture = Object.keys(normalizedData).some((field) => (
-    ['documentType', 'documentNumber', 'age', 'medicalRestrictions', 'transportMode', 'neighborhood', 'locality'].includes(field)
+    ['documentType', 'documentNumber', 'age', 'medicalRestrictions', 'transportMode', 'neighborhood', 'locality', 'zone', 'zoneViable'].includes(field)
   ));
 
   debugTrace.openai_used = aiResult.used || Object.keys(engineFields).length > 0;
@@ -1218,16 +1219,22 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   const replyFromVacancyResolutionFailure = async (resolution) => {
     if (!resolution) return null;
     if (resolution.reason === 'city_without_active_vacancies' || resolution.reason === 'no_active_vacancies') {
-      const body = buildNoOperationsAvailableReply(resolution.city);
+      const body = buildNoOperationsAvailableReply(resolution.city, resolution.roleHint);
       await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
       return true;
     }
-    if (['city_with_active_vacancies', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
-      const activeVacancies = await findActiveVacancies(prisma);
-      const cityVacancies = activeVacancies.filter((vacancy) => (
-        normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(resolution.city)
-      ));
-      const body = buildCityVacancyOptionsReply(resolution.city, cityVacancies);
+    if (resolution.reason === 'missing_city_for_role' && resolution.roleHint) {
+      const body = buildVacancyAssociationPrompt({ roleHint: resolution.roleHint });
+      await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+      return true;
+    }
+    if (resolution.reason === 'no_matching_vacancy_for_city' && resolution.city && resolution.roleHint) {
+      const body = `Ya tengo que nos escribes desde ${resolution.city} y que preguntas por ${resolution.roleHint}. En este momento no logro ubicar esa vacante activa con ese nombre exacto. Si quieres, puedes decirme el cargo tal como aparece en la oferta o dejar tus datos y tu hoja de vida para tenerte en cuenta cuando se abra.`;
+      await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+      return true;
+    }
+    if (['missing_role_for_city', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
+      const body = buildVacancyAssociationPrompt({ city: resolution.city });
       await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
       return true;
     }
@@ -1298,13 +1305,14 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         allowSingleFallback: hasMaterialProfileFieldCapture || hasHv(candidate)
       });
       if (resolution.resolved && resolution.vacancy) {
+        const resolutionUpdateData = buildVacancyResolutionUpdateData(resolution, candidate);
         await prisma.candidate.update({
           where: { id: candidate.id },
-          data: { vacancyId: resolution.vacancy.id }
+          data: resolutionUpdateData
         });
-        candidate = { ...candidate, vacancyId: resolution.vacancy.id };
+        candidate = { ...candidate, ...resolutionUpdateData };
         currentVacancy = resolution.vacancy;
-        normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
+        normalizedData = alignCandidateLocationFields({ ...normalizedData, zone: candidate.zone || normalizedData.zone }, currentVacancy, { clearAlternate: false });
         debugTrace.normalized_fields = normalizedData;
       } else if (
         ![
@@ -1373,7 +1381,9 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         Object.assign(updateData, initialDecisions.persistedData);
       }
     }
-    if (resolution.resolved && resolution.vacancy) updateData.vacancyId = resolution.vacancy.id;
+    if (resolution.resolved && resolution.vacancy) {
+      Object.assign(updateData, buildVacancyResolutionUpdateData(resolution, { ...candidate, ...updateData }));
+    }
     await prisma.candidate.update({ where: { id: candidate.id }, data: updateData });
 
     if (resolution.resolved && resolution.vacancy) {
@@ -1549,11 +1559,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
     const resolution = await resolveVacancyForCandidate();
     if (resolution.resolved && resolution.vacancy) {
+      const resolutionUpdateData = buildVacancyResolutionUpdateData(resolution, candidate);
       await prisma.candidate.update({
         where: { id: candidate.id },
-        data: { vacancyId: resolution.vacancy.id }
+        data: resolutionUpdateData
       });
-      const candidateState = { ...candidate, vacancyId: resolution.vacancy.id };
+      const candidateState = { ...candidate, ...resolutionUpdateData, vacancyId: resolution.vacancy.id };
       return replyWithVacancyContext(candidateState, resolution.vacancy);
     }
 
@@ -1563,17 +1574,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     if (hasDataIntent) {
       const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
-      const activeVacancies = await findActiveVacancies(prisma);
-      const cityVacancies = vacancyHints.city
-        ? activeVacancies.filter((vacancy) => (
-          normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(vacancyHints.city)
-        ))
-        : [];
       const body = buildVacancyAssociationPrompt({
         dataCaptured: true,
         hasCv: hasHv(updated),
         city: vacancyHints.city,
-        cityVacancyOptions: cityVacancies
+        roleHint: vacancyHints.roleHint
       });
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }
@@ -1766,6 +1771,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   const routeAfterConfirmation = async (updatedCandidate) => {
+    const residenceFollowUp = getResidenceFollowUp(updatedCandidate, currentVacancy);
+    if (residenceFollowUp) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
+      return reply(prisma, candidate.id, from, residenceFollowUp, cleanText, { body: residenceFollowUp, source: 'bot_flow' });
+    }
     const missing = getMissingFields(updatedCandidate, currentVacancy);
     if (missing.length) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
@@ -1775,19 +1785,13 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     if (!updatedCandidate.vacancyId) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-        const activeVacancies = await findActiveVacancies(prisma);
-        const cityVacancies = vacancyHints.city
-          ? activeVacancies.filter((vacancy) => (
-            normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(vacancyHints.city)
-          ))
-          : [];
-        const body = buildVacancyAssociationPrompt({
-          dataCaptured: true,
-          hasCv: hasHv(updatedCandidate),
-          city: vacancyHints.city,
-          cityVacancyOptions: cityVacancies
-        });
-        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+      const body = buildVacancyAssociationPrompt({
+        dataCaptured: true,
+        hasCv: hasHv(updatedCandidate),
+        city: vacancyHints.city,
+        roleHint: vacancyHints.roleHint
+      });
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }
 
     if (resolveStepAfterDataCompletion({ hasCv: hasHv(updatedCandidate) }) === ConversationStep.DONE) {
@@ -1804,7 +1808,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     const { updatedCandidate: updated, decisions } = await applyDecisionsAndUpdate();
-    const correctedRequiredFields = decisions.persistedFields.filter((field) => getRequiredFieldKeys(currentVacancy).includes(field));
+    const correctedRequiredFields = decisions.persistedFields.filter((field) => getRequiredFieldKeys(currentVacancy, updated).includes(field));
     const missingAfterCorrection = getMissingFields(updated, currentVacancy);
 
     if (correctedRequiredFields.length) {
@@ -1875,17 +1879,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
         if (!updated.vacancyId) {
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-          const activeVacancies = await findActiveVacancies(prisma);
-          const cityVacancies = vacancyHints.city
-            ? activeVacancies.filter((vacancy) => (
-              normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(vacancyHints.city)
-            ))
-            : [];
           const body = buildVacancyAssociationPrompt({
             dataCaptured: true,
             hasCv: hasHv(updated),
             city: vacancyHints.city,
-            cityVacancyOptions: cityVacancies
+            roleHint: vacancyHints.roleHint
           });
           return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
         }
@@ -1905,7 +1903,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
-      const dataPrompt = buildDataRequestPrompt(currentVacancy);
+      const dataPrompt = buildDataRequestPrompt(currentVacancy, candidate);
       const body = askedVacancyQuestion
         ? buildQuestionFollowUpReply(currentVacancy, cleanText, dataPrompt)
         : dataPrompt;
@@ -1921,17 +1919,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
       if (!updated.vacancyId) {
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-        const activeVacancies = await findActiveVacancies(prisma);
-        const cityVacancies = vacancyHints.city
-          ? activeVacancies.filter((vacancy) => (
-            normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(vacancyHints.city)
-          ))
-          : [];
         const body = buildVacancyAssociationPrompt({
           dataCaptured: true,
           hasCv: hasHv(updated),
           city: vacancyHints.city,
-          cityVacancyOptions: cityVacancies
+          roleHint: vacancyHints.roleHint
         });
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
       }
@@ -1970,17 +1962,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     if (!updated.vacancyId) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-      const activeVacancies = await findActiveVacancies(prisma);
-      const cityVacancies = vacancyHints.city
-        ? activeVacancies.filter((vacancy) => (
-          normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(vacancyHints.city)
-        ))
-        : [];
       const body = buildVacancyAssociationPrompt({
         dataCaptured: true,
         hasCv: hasHv(updated),
         city: vacancyHints.city,
-        cityVacancyOptions: cityVacancies
+        roleHint: vacancyHints.roleHint
       });
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }

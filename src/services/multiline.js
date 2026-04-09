@@ -1,5 +1,5 @@
 const DEFAULT_MULTILINE_WINDOW_MS = 60000;
-const MIN_MULTILINE_WINDOW_MS = 12000;
+const MIN_MULTILINE_WINDOW_MS = 60000;
 const MAX_MULTILINE_WINDOW_MS = 90000;
 
 function normalizeText(text = '') {
@@ -24,9 +24,7 @@ export function getMultilineWindowMs(context = {}) {
     return Math.max(MIN_MULTILINE_WINDOW_MS, Math.min(MAX_MULTILINE_WINDOW_MS, raw));
   }
 
-  const adaptiveDefault = isEarlyConversationContext(context) || looksLikeShortFragment(context.text)
-    ? DEFAULT_MULTILINE_WINDOW_MS
-    : 20000;
+  const adaptiveDefault = DEFAULT_MULTILINE_WINDOW_MS;
   return Math.max(MIN_MULTILINE_WINDOW_MS, Math.min(MAX_MULTILINE_WINDOW_MS, adaptiveDefault));
 }
 

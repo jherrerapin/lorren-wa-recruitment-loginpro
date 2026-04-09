@@ -1,5 +1,10 @@
 import axios from 'axios';
-import { parseNaturalData, normalizeCandidateFields } from '../../src/services/candidateData.js';
+import {
+  getResidenceFieldConfig,
+  getResidenceFollowUp,
+  normalizeCandidateFields,
+  parseNaturalData
+} from '../../src/services/candidateData.js';
 import { detectConversationIntent } from '../../src/services/conversationIntent.js';
 
 function extractMessage(payload = {}, role = 'user') {
@@ -55,14 +60,32 @@ function inferGenderFromName(fullName = '') {
   return null;
 }
 
-function listMissingCoreFields(candidateState = {}) {
+function buildResidenceVacancyContext(vacancyState = {}) {
+  return {
+    city: vacancyState.city || null,
+    title: vacancyState.title || null,
+    role: vacancyState.role || null,
+    operationAddress: vacancyState.operation?.address || vacancyState.operationAddress || null,
+    interviewAddress: vacancyState.interviewAddress || vacancyState.operation?.address || null
+  };
+}
+
+function listMissingCoreFields(candidateState = {}, vacancyState = {}, profileState = null) {
   const profile = candidateState.profile || {};
+  const effectiveProfileState = profileState || Object.fromEntries(
+    Object.entries(profile)
+      .filter(([, state]) => state?.captured)
+      .map(([field, state]) => [field, state.value])
+  );
+  const residenceConfig = getResidenceFieldConfig(buildResidenceVacancyContext(vacancyState), effectiveProfileState);
+  const residenceField = residenceConfig?.field || 'neighborhood';
+  const residenceLabel = residenceConfig?.label || 'barrio';
   return [
     ['fullName', 'nombre completo'],
     ['documentType', 'tipo de documento'],
     ['documentNumber', 'numero de documento'],
     ['age', 'edad'],
-    ['neighborhood', 'barrio'],
+    [residenceField, residenceLabel],
     ['medicalRestrictions', 'restricciones medicas'],
     ['transportMode', 'medio de transporte']
   ]
@@ -139,17 +162,20 @@ function buildEngineDecision(systemPrompt, userText) {
   if (roleHint) parsed.roleHint = roleHint;
 
   const mergedProfile = mergeProfileState(candidateState, parsed);
-  const missingFields = listMissingCoreFields({
+  const mergedCandidateState = {
     ...candidateState,
     profile: {
       ...(candidateState.profile || {}),
       ...Object.fromEntries(Object.entries(parsed).map(([field, value]) => [field, { captured: true, value }]))
     }
-  });
+  };
+  const residenceVacancyContext = buildResidenceVacancyContext(vacancyState);
+  const residenceFollowUp = getResidenceFollowUp(mergedProfile, residenceVacancyContext);
+  const missingFields = listMissingCoreFields(mergedCandidateState, vacancyState, mergedProfile);
 
   const currentStep = candidateState.currentStep || 'MENU';
   const hasCv = Boolean(candidateState.progress?.hasCv);
-  const completeAfterMerge = missingFields.length === 0;
+  const completeAfterMerge = missingFields.length === 0 && !residenceFollowUp;
   const questionLike = /\?|que|cual|donde|cuando|requisit|salario|pago|horario|ubicacion|direccion|funcion|cargo/.test(String(userText || '').toLowerCase());
   const noInterest = /\b(no me interesa|ya no|mejor no|prefiero no|paso)\b/i.test(userText);
   const affirmative = /^(si|sí|correcto|esta bien|está bien|todo bien|listo|perfecto)\b/i.test(String(userText || '').trim());
@@ -197,9 +223,9 @@ function buildEngineDecision(systemPrompt, userText) {
   if (questionLike && vacancyState.resolved) {
     const answer = answerVacancyQuestion(vacancyState, userText);
     if (!completeAfterMerge && currentStep !== 'ASK_CV') {
-      const nextMissing = missingFields.slice(0, 2).join(' y ');
+      const nextMissing = residenceFollowUp || missingFields.slice(0, 2).join(' y ');
       return {
-        reply: `${answer} Si quieres seguir, comparteme ${nextMissing}.`,
+        reply: residenceFollowUp ? `${answer} ${residenceFollowUp}` : `${answer} Si quieres seguir, comparteme ${nextMissing}.`,
         nextStep: 'COLLECTING_DATA',
         actions: Object.keys(parsed).length ? [{ type: 'save_fields', data: parsed }] : [{ type: 'nothing' }],
         extractedFields: parsed
@@ -208,6 +234,15 @@ function buildEngineDecision(systemPrompt, userText) {
     return {
       reply: answer,
       nextStep: currentStep,
+      actions: Object.keys(parsed).length ? [{ type: 'save_fields', data: parsed }] : [{ type: 'nothing' }],
+      extractedFields: parsed
+    };
+  }
+
+  if (residenceFollowUp && currentStep !== 'MENU' && currentStep !== 'GREETING_SENT') {
+    return {
+      reply: residenceFollowUp,
+      nextStep: 'COLLECTING_DATA',
       actions: Object.keys(parsed).length ? [{ type: 'save_fields', data: parsed }] : [{ type: 'nothing' }],
       extractedFields: parsed
     };
@@ -242,7 +277,7 @@ function buildEngineDecision(systemPrompt, userText) {
         };
       }
       return {
-        reply: `Perfecto. Para seguir me faltan ${missingFields.join(', ')}.`,
+        reply: residenceFollowUp || `Perfecto. Para seguir me faltan ${missingFields.join(', ')}.`,
         nextStep: 'COLLECTING_DATA',
         actions: [{ type: 'nothing' }],
         extractedFields: {}
@@ -259,7 +294,7 @@ function buildEngineDecision(systemPrompt, userText) {
         };
       }
       return {
-        reply: `Listo, ya actualice ese dato. Para seguir me faltan ${missingFields.join(', ')}.`,
+        reply: residenceFollowUp || `Listo, ya actualice ese dato. Para seguir me faltan ${missingFields.join(', ')}.`,
         nextStep: completeAfterMerge ? 'ASK_CV' : 'COLLECTING_DATA',
         actions: [{ type: 'save_fields', data: parsed }],
         extractedFields: parsed
@@ -313,7 +348,7 @@ function buildEngineDecision(systemPrompt, userText) {
       };
     }
     return {
-      reply: `Listo, ya registre eso. Para continuar me faltan ${missingFields.join(', ')}.`,
+      reply: residenceFollowUp || `Listo, ya registre eso. Para continuar me faltan ${missingFields.join(', ')}.`,
       nextStep: 'COLLECTING_DATA',
       actions: [{ type: 'save_fields', data: parsed }],
       extractedFields: parsed

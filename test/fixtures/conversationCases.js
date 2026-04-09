@@ -83,6 +83,8 @@ function candidateDefaults(overrides = {}) {
     botPaused: false,
     botPausedAt: null,
     botPauseReason: null,
+    zone: null,
+    zoneViable: null,
     lastInboundAt: null,
     lastOutboundAt: null,
     createdAt: new Date('2026-04-07T10:00:00.000Z'),
@@ -178,8 +180,12 @@ export const conversationCases = [
     ],
     operations: [OP_IBA, OP_BOG],
     expect: {
-      lastReplyIncludes: ['vacantes activas', 'Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones Ibague'],
-      lastReplyNotIncludes: ['enviame por favor estos datos', 'cuentame desde que ciudad']
+      candidate: {
+        currentStep: 'GREETING_SENT',
+        vacancyId: null
+      },
+      lastReplyIncludes: ['Ya tengo que nos escribes desde Ibague', 'para que vacante o cargo'],
+      lastReplyNotIncludes: ['Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones Ibague', 'enviame por favor estos datos']
     }
   },
   {
@@ -191,8 +197,8 @@ export const conversationCases = [
         currentStep: 'GREETING_SENT',
         vacancyId: null
       },
-      lastReplyIncludes: ['En Ibague tengo estas vacantes activas', 'Auxiliar de Cargue y Descargue Ibague'],
-      lastReplyNotIncludes: ['Coordinador de Operaciones', 'enviame tus datos', 'te solicitare tus datos']
+      lastReplyIncludes: ['Ya tengo que nos escribes desde Ibague', 'para que vacante o cargo'],
+      lastReplyNotIncludes: ['Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones', 'enviame tus datos', 'te solicitare tus datos']
     }
   },
   {
@@ -224,6 +230,95 @@ export const conversationCases = [
       candidate: { vacancyId: 'vac-iba-inactive', currentStep: 'GREETING_SENT' },
       lastReplyIncludes: ['no esta activa', 'dejar tu perfil registrado'],
       lastReplyNotIncludes: ['cuentame desde que ciudad', 'enviame por favor estos datos']
+    }
+  },
+  {
+    id: 'role-only-asks-city-before-continuing',
+    steps: ['Estoy interesado en la vacante de auxiliar de cargue y descargue'],
+    candidate: candidateDefaults({ currentStep: 'MENU' }),
+    expect: {
+      candidate: {
+        currentStep: 'GREETING_SENT',
+        vacancyId: null
+      },
+      lastReplyIncludes: ['Ya tengo el cargo o vacante de interes', 'desde que ciudad nos escribes'],
+      lastReplyNotIncludes: ['enviame por favor estos datos', 'Auxiliar de Cargue y Descargue Ibague']
+    }
+  },
+  {
+    id: 'siberia-bogota-neighborhood-asks-for-locality',
+    steps: ['Barrio Castilla'],
+    candidate: candidateDefaults({
+      currentStep: 'COLLECTING_DATA',
+      vacancyId: 'vac-bodega-siberia',
+      zone: 'Bogota'
+    }),
+    vacancies: [
+      {
+        id: 'vac-bodega-siberia',
+        title: 'Auxiliar de Bodega Siberia',
+        role: 'Auxiliar de bodega',
+        city: 'Bogota',
+        operationId: OP_BOG.id,
+        operation: OP_BOG,
+        operationAddress: 'Siberia',
+        interviewAddress: 'Villas de Granada',
+        requirements: 'Disponibilidad de tiempo y documento de identidad',
+        conditions: 'Pagos quincenales y turnos rotativos',
+        roleDescription: 'Apoyo de bodega y cargue en operacion Siberia',
+        requiredDocuments: 'Documento de identidad',
+        acceptingApplications: true,
+        isActive: true,
+        schedulingEnabled: true,
+        updatedAt: new Date('2026-04-07T13:10:00.000Z')
+      }
+    ],
+    operations: [OP_BOG],
+    expect: {
+      candidate: {
+        neighborhood: 'Castilla',
+        currentStep: 'COLLECTING_DATA'
+      },
+      lastReplyIncludes: ['necesito saber la localidad', 'A que localidad pertenece ese barrio'],
+      lastReplyNotIncludes: ['Perfecto, por favor confirma', 'hoja de vida']
+    }
+  },
+  {
+    id: 'siberia-far-locality-warns-about-commute',
+    steps: ['Si me interesa continuar'],
+    candidate: candidateDefaults({
+      currentStep: 'COLLECTING_DATA',
+      vacancyId: 'vac-bodega-siberia',
+      zone: 'Bogota',
+      locality: 'Kennedy'
+    }),
+    vacancies: [
+      {
+        id: 'vac-bodega-siberia',
+        title: 'Auxiliar de Bodega Siberia',
+        role: 'Auxiliar de bodega',
+        city: 'Bogota',
+        operationId: OP_BOG.id,
+        operation: OP_BOG,
+        operationAddress: 'Siberia',
+        interviewAddress: 'Villas de Granada',
+        requirements: 'Disponibilidad de tiempo y documento de identidad',
+        conditions: 'Pagos quincenales y turnos rotativos',
+        roleDescription: 'Apoyo de bodega y cargue en operacion Siberia',
+        requiredDocuments: 'Documento de identidad',
+        acceptingApplications: true,
+        isActive: true,
+        schedulingEnabled: true,
+        updatedAt: new Date('2026-04-07T13:10:00.000Z')
+      }
+    ],
+    operations: [OP_BOG],
+    expect: {
+      candidate: {
+        currentStep: 'COLLECTING_DATA'
+      },
+      lastReplyIncludes: ['La operacion queda en Siberia', 'no contamos con ruta', 'Consideras viable llegar'],
+      lastReplyNotIncludes: ['enviame por favor estos datos', 'Perfecto, por favor confirma']
     }
   },
   {
@@ -332,7 +427,8 @@ export const conversationCases = [
     operations: [OP_BOG],
     expect: {
       candidate: {
-        vacancyId: 'vac-siberia'
+        vacancyId: 'vac-siberia',
+        zone: 'Madrid'
       },
       absentFields: ['fullName', 'neighborhood'],
       lastReplyIncludes: ['Auxiliar Cargue y Descargue Siberia'],
@@ -369,7 +465,8 @@ export const conversationCases = [
     operations: [OP_BOG],
     expect: {
       candidate: {
-        vacancyId: 'vac-bodega-siberia'
+        vacancyId: 'vac-bodega-siberia',
+        zone: 'Funza'
       },
       candidateNot: {
         fullName: 'Funza Cundinamarca'
@@ -416,7 +513,7 @@ export const conversationCases = [
         transportMode: 'Bicicleta',
         currentStep: 'COLLECTING_DATA'
       },
-      lastReplyIncludes: ['edad', 'barrio'],
+      lastReplyIncludes: ['edad', 'localidad'],
       lastReplyNotIncludes: ['Nombre completo: Pendiente', 'Medio de transporte: Pendiente', 'restricciones médicas: pendiente']
     }
   },
@@ -469,10 +566,10 @@ export const conversationCases = [
     candidate: candidateDefaults({
       currentStep: 'COLLECTING_DATA',
       vacancyId: 'vac-siberia',
+      zone: 'Mosquera',
       fullName: 'Johan Sebastian Carrillo Aldana',
       documentType: 'CC',
       documentNumber: '1073506772',
-      neighborhood: 'Mosquera',
       transportMode: 'Bicicleta',
       cvData: Buffer.from('pdf'),
       cvOriginalName: 'hv.pdf',
@@ -745,7 +842,7 @@ export const conversationCases = [
       documentType: 'CC',
       documentNumber: '555444333',
       age: 29,
-      neighborhood: 'Suba',
+      locality: 'Suba',
       medicalRestrictions: 'Sin restricciones médicas',
       transportMode: 'Moto',
       cvData: Buffer.from('pdf'),

@@ -32,5 +32,17 @@ test('resolveVacancyFromText no autoasigna vacante cuando solo detecta ciudad', 
 
   assert.equal(resolution.resolved, false);
   assert.equal(resolution.city, 'Ibague');
-  assert.equal(resolution.reason, 'city_with_active_vacancies');
+  assert.equal(resolution.reason, 'missing_role_for_city');
+});
+
+test('resolveVacancyFromText no autoasigna vacante cuando solo detecta el cargo', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Estoy interesado en auxiliar de cargue y descargue', {
+    activeVacancies: [activeIbagueVacancy],
+    allVacancies: [activeIbagueVacancy]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.roleHint, 'auxiliar cargue descargue');
+  assert.equal(resolution.reason, 'missing_city_for_role');
 });

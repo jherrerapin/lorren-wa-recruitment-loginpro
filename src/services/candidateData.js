@@ -54,6 +54,43 @@ const IMPLICIT_NO_MEDICAL_RESTRICTION_PATTERNS = [
 ];
 const RIDE_HAIL_VARIANTS = ['uber', 'indriver', 'in driver', 'taxi'];
 const TRANSPORT_PRIORITY = ['Moto', 'Carro', 'Bicicleta', 'Bus', 'Independiente'];
+const SIBERIA_PROFILE_KEY = 'bogota_siberia_corridor';
+const SIBERIA_OPERATION_PATTERNS = [
+  /\bsiberia\b/i,
+  /\bparques?\s+logisticos?\b/i,
+  /\btierrapuerto\b/i,
+  /\bcelta\b/i,
+  /\bmetropolitano\b/i,
+  /\bvillas?\s+de\s+granada\b/i
+];
+const SIBERIA_NEARBY_MUNICIPALITIES = new Map([
+  ['funza', 'Funza'],
+  ['mosquera', 'Mosquera'],
+  ['madrid', 'Madrid'],
+  ['el rosal', 'El Rosal'],
+  ['cota', 'Cota']
+]);
+const SIBERIA_BOGOTA_LOCALITIES = new Map([
+  ['suba', 'Suba'],
+  ['engativa', 'Engativa']
+]);
+const SIBERIA_BOGOTA_NEIGHBORHOOD_TO_LOCALITY = new Map([
+  ['lisboa', 'Suba'],
+  ['bilbao', 'Suba'],
+  ['villas de granada', 'Engativa'],
+  ['quirigua', 'Engativa'],
+  ['portal 80', 'Engativa']
+]);
+const SIBERIA_CORRIDOR_REFERENCE_AREAS = new Set([
+  'Calle 80',
+  'Suba',
+  'Engativa',
+  'Funza',
+  'Mosquera',
+  'Madrid',
+  'El Rosal',
+  'Cota'
+]);
 
 function looksLikeJobRoleChunk(value = '') {
   const normalized = normalizeLooseText(value);
@@ -68,6 +105,263 @@ function normalizeLooseText(value = '') {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function buildOperationalProfileText(vacancyOrCity = null) {
+  if (typeof vacancyOrCity === 'string') return normalizeLooseText(vacancyOrCity);
+  return normalizeLooseText([
+    vacancyOrCity?.zoneContext,
+    vacancyOrCity?.city,
+    vacancyOrCity?.vacancy?.city,
+    vacancyOrCity?.operation?.city?.name,
+    vacancyOrCity?.vacancy?.operation?.city?.name,
+    vacancyOrCity?.title,
+    vacancyOrCity?.role,
+    vacancyOrCity?.operation?.name,
+    vacancyOrCity?.vacancy?.operation?.name,
+    vacancyOrCity?.operationAddress,
+    vacancyOrCity?.interviewAddress
+  ].filter(Boolean).join(' '));
+}
+
+export function isSiberiaCorridorVacancy(vacancyOrCity = null) {
+  const profileText = buildOperationalProfileText(vacancyOrCity);
+  if (!profileText) return false;
+  if (profileText.includes(SIBERIA_PROFILE_KEY)) return true;
+  return SIBERIA_OPERATION_PATTERNS.some((pattern) => pattern.test(profileText));
+}
+
+function normalizeKnownLabel(value = '') {
+  return capitalizeWords(String(value || '').trim());
+}
+
+function findMappedLocation(value = '', mapping = new Map()) {
+  const normalized = normalizeLooseText(value);
+  if (!normalized) return null;
+  for (const [alias, label] of mapping.entries()) {
+    if (normalized === alias || normalized.includes(alias)) {
+      return label;
+    }
+  }
+  return null;
+}
+
+function inferBogotaLocalityFromArea(value = '') {
+  const locality = findMappedLocation(value, SIBERIA_BOGOTA_LOCALITIES);
+  if (locality) return locality;
+  return findMappedLocation(value, SIBERIA_BOGOTA_NEIGHBORHOOD_TO_LOCALITY);
+}
+
+function isKnownBogotaCorridorReference(value = '') {
+  const normalized = normalizeLooseText(value);
+  if (!normalized) return false;
+  return normalized.includes('calle 80') || normalized.includes('portal 80');
+}
+
+function classifySiberiaArea(value = '') {
+  const raw = String(value || '').trim();
+  const normalized = normalizeLooseText(raw);
+  if (!normalized) {
+    return {
+      kind: 'empty',
+      label: null,
+      inferredLocality: null,
+      isIdeal: false
+    };
+  }
+
+  const municipality = findMappedLocation(normalized, SIBERIA_NEARBY_MUNICIPALITIES);
+  if (municipality) {
+    return {
+      kind: 'municipality',
+      label: municipality,
+      inferredLocality: null,
+      isIdeal: true
+    };
+  }
+
+  const locality = findMappedLocation(normalized, SIBERIA_BOGOTA_LOCALITIES);
+  if (locality) {
+    return {
+      kind: 'bogota_locality',
+      label: locality,
+      inferredLocality: locality,
+      isIdeal: true
+    };
+  }
+
+  const inferredLocality = inferBogotaLocalityFromArea(normalized);
+  if (inferredLocality) {
+    return {
+      kind: 'bogota_neighborhood',
+      label: normalizeKnownLabel(raw),
+      inferredLocality,
+      isIdeal: true
+    };
+  }
+
+  if (isKnownBogotaCorridorReference(normalized)) {
+    return {
+      kind: 'bogota_reference',
+      label: normalizeKnownLabel(raw),
+      inferredLocality: null,
+      isIdeal: true
+    };
+  }
+
+  if (normalized === 'bogota' || normalized.includes('bogota')) {
+    return {
+      kind: 'bogota_city',
+      label: 'Bogota',
+      inferredLocality: null,
+      isIdeal: false
+    };
+  }
+
+  if (normalized.length >= 3) {
+    return {
+      kind: 'other',
+      label: normalizeKnownLabel(raw),
+      inferredLocality: null,
+      isIdeal: false
+    };
+  }
+
+  return {
+    kind: 'empty',
+    label: null,
+    inferredLocality: null,
+    isIdeal: false
+  };
+}
+
+function getSiberiaResidenceSignals(candidate = {}) {
+  const zoneArea = classifySiberiaArea(candidate?.zone);
+  const localityArea = classifySiberiaArea(candidate?.locality);
+  const neighborhoodArea = classifySiberiaArea(candidate?.neighborhood);
+  return { zoneArea, localityArea, neighborhoodArea };
+}
+
+function getSiberiaResidenceMode(candidate = {}) {
+  const { zoneArea } = getSiberiaResidenceSignals(candidate);
+  return zoneArea.kind === 'municipality' ? 'municipality' : 'locality';
+}
+
+function getSiberiaResidenceValue(candidate = {}) {
+  const { zoneArea, localityArea, neighborhoodArea } = getSiberiaResidenceSignals(candidate);
+  if (getSiberiaResidenceMode(candidate) === 'municipality') {
+    return zoneArea.label || null;
+  }
+  return candidate?.locality
+    || localityArea.inferredLocality
+    || (zoneArea.kind === 'bogota_locality' ? zoneArea.label : null)
+    || neighborhoodArea.inferredLocality
+    || null;
+}
+
+function getSiberiaReferenceArea(candidate = {}) {
+  const { zoneArea, localityArea, neighborhoodArea } = getSiberiaResidenceSignals(candidate);
+  return zoneArea.label || localityArea.label || neighborhoodArea.label || null;
+}
+
+export function getOperationalProfile(vacancyOrCity = null, candidate = {}) {
+  if (!isSiberiaCorridorVacancy(vacancyOrCity)) {
+    return {
+      key: 'default',
+      residenceMode: isBogotaCity(vacancyOrCity) ? 'locality' : 'neighborhood',
+      noRouteSupport: false,
+      needsLocalityClarification: false,
+      needsMunicipalityClarification: false,
+      needsCommuteWarning: false,
+      referenceArea: null
+    };
+  }
+
+  const residenceMode = getSiberiaResidenceMode(candidate);
+  const residenceValue = getSiberiaResidenceValue(candidate);
+  const referenceArea = getSiberiaReferenceArea(candidate);
+  const { zoneArea } = getSiberiaResidenceSignals(candidate);
+  const needsLocalityClarification = residenceMode === 'locality'
+    && !residenceValue
+    && Boolean(
+      candidate?.neighborhood
+      || zoneArea.kind === 'bogota_reference'
+      || zoneArea.kind === 'bogota_city'
+    );
+  const needsMunicipalityClarification = residenceMode === 'municipality' && !candidate?.zone;
+  const needsCommuteWarning = Boolean(
+    referenceArea
+    && !needsLocalityClarification
+    && !needsMunicipalityClarification
+    && (candidate?.zoneViable === null || candidate?.zoneViable === undefined)
+    && !SIBERIA_CORRIDOR_REFERENCE_AREAS.has(residenceValue || referenceArea)
+    && !(
+      residenceMode === 'municipality'
+      && findMappedLocation(candidate?.zone, SIBERIA_NEARBY_MUNICIPALITIES)
+    )
+  );
+
+  return {
+    key: SIBERIA_PROFILE_KEY,
+    residenceMode,
+    noRouteSupport: true,
+    residenceValue,
+    referenceArea,
+    needsLocalityClarification,
+    needsMunicipalityClarification,
+    needsCommuteWarning
+  };
+}
+
+export function getResidenceFollowUp(candidate = {}, vacancyOrCity = null) {
+  const profile = getOperationalProfile(vacancyOrCity, candidate);
+  if (profile.key !== SIBERIA_PROFILE_KEY) return null;
+
+  if (profile.needsLocalityClarification) {
+    if (normalizeLooseText(candidate?.zone) === 'bogota' && !candidate?.neighborhood) {
+      return 'Para esta operacion en Siberia necesito saber la localidad en Bogota. ¿Desde que localidad nos escribes?';
+    }
+    const area = candidate?.neighborhood || candidate?.zone || 'ese barrio';
+    return `Ya tengo ${area}. Para esta operacion en Siberia necesito saber la localidad. ¿A que localidad pertenece ese barrio?`;
+  }
+
+  if (profile.needsMunicipalityClarification) {
+    return 'Para esta operacion en Siberia necesito saber desde que municipio te desplazarias. ¿Desde que municipio nos escribes?';
+  }
+
+  if (profile.needsCommuteWarning) {
+    const area = profile.referenceArea || 'tu zona';
+    return `La operacion queda en Siberia y no contamos con ruta. Desde ${area} el desplazamiento puede ser largo. ¿Consideras viable llegar por tu cuenta en caso de contratacion?`;
+  }
+
+  return null;
+}
+
+export function detectResidenceFollowUpFields(text = '', candidate = {}, vacancyOrCity = null) {
+  const profile = getOperationalProfile(vacancyOrCity, candidate);
+  if (profile.key !== SIBERIA_PROFILE_KEY) return {};
+
+  const normalized = normalizeLooseText(text);
+  if (!normalized) return {};
+
+  if (profile.needsCommuteWarning) {
+    if (/^(si|sii|sip|claro|ok|vale|de una|me sirve|me queda bien|si puedo|si me queda|seria viable|si es viable)\b/.test(normalized)) {
+      return { zoneViable: true };
+    }
+    if (/^(no|nop|no creo|no me sirve|no puedo|no seria viable|no es viable|queda muy lejos)\b/.test(normalized)) {
+      return { zoneViable: false };
+    }
+  }
+
+  if (profile.needsLocalityClarification && looksLikeLocationChunk(text)) {
+    return { locality: capitalizeWords(cleanLocationValue(text)) };
+  }
+
+  if (profile.needsMunicipalityClarification && looksLikeLocationChunk(text)) {
+    return { zone: capitalizeWords(cleanLocationValue(text)) };
+  }
+
+  return {};
 }
 
 export function looksLikeNoMedicalRestrictionsText(text = '', options = {}) {
@@ -103,7 +397,26 @@ export function isBogotaCity(vacancyOrCity = null) {
   return normalized === 'bogota';
 }
 
-export function getResidenceFieldConfig(vacancyOrCity = null) {
+export function getResidenceFieldConfig(vacancyOrCity = null, candidate = {}) {
+  const profile = getOperationalProfile(vacancyOrCity, candidate);
+  if (profile.key === SIBERIA_PROFILE_KEY) {
+    if (profile.residenceMode === 'municipality') {
+      return {
+        field: 'zone',
+        label: 'municipio',
+        labelTitle: 'Municipio',
+        articleLabel: 'el municipio'
+      };
+    }
+
+    return {
+      field: 'locality',
+      label: 'localidad',
+      labelTitle: 'Localidad',
+      articleLabel: 'la localidad'
+    };
+  }
+
   if (isBogotaCity(vacancyOrCity)) {
     return {
       field: 'locality',
@@ -122,17 +435,61 @@ export function getResidenceFieldConfig(vacancyOrCity = null) {
 }
 
 export function getCandidateResidenceValue(candidate = {}, vacancyOrCity = null) {
-  const config = getResidenceFieldConfig(vacancyOrCity || candidate?.vacancy || candidate);
+  const effectiveVacancy = vacancyOrCity || candidate?.vacancy || candidate;
+  const config = getResidenceFieldConfig(effectiveVacancy, candidate);
+  if (isSiberiaCorridorVacancy(effectiveVacancy)) {
+    return getSiberiaResidenceValue(candidate);
+  }
   if (config.field === 'locality') {
     return candidate?.locality || candidate?.neighborhood || candidate?.zone || null;
+  }
+  if (config.field === 'zone') {
+    return candidate?.zone || null;
   }
   return candidate?.neighborhood || candidate?.locality || candidate?.zone || null;
 }
 
 export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, options = {}) {
-  const config = getResidenceFieldConfig(vacancyOrCity);
+  const config = getResidenceFieldConfig(vacancyOrCity, fields);
+  const profile = getOperationalProfile(vacancyOrCity, fields);
   const normalized = { ...fields };
   const clearAlternate = options.clearAlternate !== false;
+
+  if (profile.key === SIBERIA_PROFILE_KEY) {
+    const municipalityFromZone = findMappedLocation(normalized.zone, SIBERIA_NEARBY_MUNICIPALITIES);
+    const municipalityFromLocality = findMappedLocation(normalized.locality, SIBERIA_NEARBY_MUNICIPALITIES);
+    const municipalityFromNeighborhood = findMappedLocation(normalized.neighborhood, SIBERIA_NEARBY_MUNICIPALITIES);
+
+    if (!normalized.zone && municipalityFromLocality) normalized.zone = municipalityFromLocality;
+    if (!normalized.zone && municipalityFromNeighborhood) normalized.zone = municipalityFromNeighborhood;
+    if (municipalityFromZone) normalized.zone = municipalityFromZone;
+
+    if (config.field === 'zone') {
+      if (normalized.zone && clearAlternate) {
+        normalized.locality = null;
+      }
+      return normalized;
+    }
+
+    const inferredLocality = inferBogotaLocalityFromArea(normalized.locality)
+      || inferBogotaLocalityFromArea(normalized.zone)
+      || inferBogotaLocalityFromArea(normalized.neighborhood);
+
+    if (!normalized.locality && inferredLocality) {
+      normalized.locality = inferredLocality;
+    }
+
+    if (
+      clearAlternate
+      && normalized.locality
+      && !findMappedLocation(normalized.zone, SIBERIA_NEARBY_MUNICIPALITIES)
+    ) {
+      normalized.zone = normalized.zone && normalizeLooseText(normalized.zone) === 'bogota'
+        ? 'Bogota'
+        : normalized.zone;
+    }
+    return normalized;
+  }
 
   if (config.field === 'locality') {
     if (!normalized.locality && normalized.neighborhood) {
@@ -601,8 +958,22 @@ export function parseNaturalData(text = '') {
     if (standaloneAge !== null) result.age = standaloneAge;
   }
 
-  const neighborhoodMatch = compact.match(/\b(?:barrio|zona|sector|localidad|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i)
-    || remaining.match(/\b(?:barrio|zona|sector|localidad|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i);
+  const localityMatch = compact.match(/\b(?:localidad|comuna)\s*[:\-]?\s*([^,.\n]{2,60})/i)
+    || remaining.match(/\b(?:localidad|comuna)\s*[:\-]?\s*([^,.\n]{2,60})/i);
+  if (localityMatch?.[1]) {
+    result.locality = capitalizeWords(cleanLocationValue(localityMatch[1]));
+    remaining = remaining.replace(localityMatch[0], ' ');
+  }
+
+  const municipalityMatch = compact.match(/\b(?:municipio|ciudad)\s*[:\-]?\s*([^,.\n]{2,60})/i)
+    || remaining.match(/\b(?:municipio|ciudad)\s*[:\-]?\s*([^,.\n]{2,60})/i);
+  if (municipalityMatch?.[1]) {
+    result.zone = capitalizeWords(cleanLocationValue(municipalityMatch[1]));
+    remaining = remaining.replace(municipalityMatch[0], ' ');
+  }
+
+  const neighborhoodMatch = compact.match(/\b(?:barrio|zona|sector|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i)
+    || remaining.match(/\b(?:barrio|zona|sector|vereda|ciudadela)\s*[:\-]?\s*([^,.\n]{2,60})/i);
   if (neighborhoodMatch) {
     const cleaned = neighborhoodMatch[1].replace(/\b(y\s+tengo|tengo|con|y)\b.*$/i, '').trim();
     const normalized = capitalizeWords(cleaned);
@@ -698,6 +1069,12 @@ export function normalizeCandidateFields(fields = {}) {
   }
   if (fields.neighborhood) normalized.neighborhood = capitalizeWords(fields.neighborhood);
   if (fields.locality) normalized.locality = capitalizeWords(fields.locality);
+  if (fields.zone) normalized.zone = capitalizeWords(fields.zone);
+  if (fields.zoneViable !== undefined && fields.zoneViable !== null && fields.zoneViable !== '') {
+    if (typeof fields.zoneViable === 'boolean') normalized.zoneViable = fields.zoneViable;
+    else if (/^(si|sii|sip|true|yes)$/i.test(String(fields.zoneViable).trim())) normalized.zoneViable = true;
+    else if (/^(no|nop|false)$/i.test(String(fields.zoneViable).trim())) normalized.zoneViable = false;
+  }
   if (fields.medicalRestrictions) normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
   if (fields.transportMode) normalized.transportMode = normalizeTransportMode(fields.transportMode);
   if (fields.experienceInfo) normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || capitalizeWords(fields.experienceInfo);
@@ -721,6 +1098,8 @@ export function isHighConfidenceLocalField(field, value) {
   if (field === 'fullName') return !isSuspiciousFullName(raw) && hasNameTokens(raw);
   if (field === 'neighborhood') return raw.length >= 3;
   if (field === 'locality') return raw.length >= 3;
+  if (field === 'zone') return raw.length >= 3;
+  if (field === 'zoneViable') return typeof value === 'boolean' || /^(true|false|si|no)$/i.test(raw);
   if (field === 'medicalRestrictions') {
     return /sin restricciones|no tengo restricciones|ninguna restriccion/i.test(raw) || raw.length >= 8;
   }

@@ -12,10 +12,14 @@
 import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
 import { splitFieldDecisions } from './debugTrace.js';
-import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import {
+  getCandidateResidenceValue,
+  getOperationalProfile,
+  getResidenceFieldConfig
+} from './candidateData.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const ENGINE_FALLBACK_REPLY = 'Te lei, dame un momento y continuo contigo.';
 const CORE_PROFILE_FIELDS = [
   'fullName',
@@ -39,7 +43,7 @@ function buildFieldState(value) {
 function getCoreFieldGaps(candidate = {}, vacancy = null) {
   const gaps = CORE_PROFILE_FIELDS.filter((field) => !hasValue(candidate[field]));
   if (!hasValue(getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy))) {
-    gaps.push(getResidenceFieldConfig(vacancy || candidate?.vacancy).field);
+    gaps.push(getResidenceFieldConfig(vacancy || candidate?.vacancy, candidate).field);
   }
   return gaps;
 }
@@ -87,8 +91,9 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
 
   const hasCv = Boolean(candidate.cvStorageKey || candidate.cvData || candidate.cvOriginalName || candidate.cvMimeType);
   const coreDataComplete = getCoreFieldGaps(candidate, vacancy).length === 0;
-  const residenceConfig = getResidenceFieldConfig(vacancy || candidate?.vacancy);
+  const residenceConfig = getResidenceFieldConfig(vacancy || candidate?.vacancy, candidate);
   const residenceValue = getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy);
+  const operationalProfile = getOperationalProfile(vacancy || candidate?.vacancy, candidate);
 
   return {
     currentStep: candidate.currentStep || 'MENU',
@@ -112,10 +117,21 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
       gender: buildFieldState(genderLabel),
       neighborhood: buildFieldState(candidate.neighborhood),
       locality: buildFieldState(candidate.locality),
+      zone: buildFieldState(candidate.zone),
+      zoneViable: buildFieldState(candidate.zoneViable === undefined || candidate.zoneViable === null
+        ? null
+        : (candidate.zoneViable ? 'Viable' : 'No viable')),
       residenceArea: {
         field: residenceConfig.field,
         label: residenceConfig.label,
         state: buildFieldState(residenceValue)
+      },
+      residenceStrategy: {
+        profileKey: operationalProfile.key,
+        mode: operationalProfile.residenceMode,
+        noRouteSupport: Boolean(operationalProfile.noRouteSupport),
+        needsLocalityClarification: Boolean(operationalProfile.needsLocalityClarification),
+        needsCommuteWarning: Boolean(operationalProfile.needsCommuteWarning)
       },
       medicalRestrictions: buildFieldState(normalizeMedicalRestrictionsLabel(candidate.medicalRestrictions)),
       transportMode: buildFieldState(candidate.transportMode),
@@ -136,6 +152,8 @@ export function buildVacancyStateForModel(vacancy) {
     ? 'OPEN'
     : (vacancy.isActive ? 'PAUSED' : 'INACTIVE');
 
+  const operationalProfile = getOperationalProfile(vacancy);
+
   return {
     resolved: true,
     title: vacancy.title || vacancy.role || null,
@@ -146,6 +164,11 @@ export function buildVacancyStateForModel(vacancy) {
       name: vacancy.operation?.name || null,
       zone: vacancy.operationAddress || null,
       interviewAddress: vacancy.interviewAddress || null
+    },
+    operationProfile: {
+      key: operationalProfile.key,
+      residenceMode: operationalProfile.residenceMode,
+      noRouteSupport: Boolean(operationalProfile.noRouteSupport)
     },
     schedulingEnabled: Boolean(vacancy.schedulingEnabled),
     acceptingApplications: Boolean(vacancy.acceptingApplications),
@@ -296,6 +319,7 @@ PRIORIDADES:
 - Si ya envio datos en fragmentos, consolidalos.
 - Si corrige algo, usa el valor nuevo y no reabras la misma confirmacion.
 - Si detectas un dato incoherente con el contexto reciente, corrigelo o pídelo de forma puntual; no confirmes datos absurdos.
+- Si todavia no tienes las dos piezas base del proceso, ciudad y vacante/cargo, no pidas datos personales; primero completa esa ubicacion del proceso.
 - Si ya envio la hoja de vida y en este mensaje por fin aclara ciudad o vacante, ubica el proceso, explica brevemente la vacante real y luego sigue solo con lo faltante.
 - Si expresa no interes, cierra correctamente con "mark_no_interest".
 - Si un humano ya intervino, no respondas encima; usa "pause_bot" o "nothing" segun corresponda.
@@ -305,8 +329,12 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No confundas edad con anos de experiencia.
 - No pierdas datos enviados en varios fragmentos.
 - No ignores transportes como carro, automovil, bici, bicicleta, cicla, bus o independiente.
+- Nunca listes vacantes solo porque el candidato dijo una ciudad. Si solo sabes la ciudad o la zona, pregunta por cual vacante o cargo escribe.
 - Si la vacante es en Bogota, pide y usa la localidad como zona de residencia; no sigas pidiendo barrio.
 - Si el candidato da una localidad o la menciona como barrio para Bogota, guardala como localidad.
+- Si la vacante pertenece al corredor Bogota-Siberia, usa localidad para Bogota y municipio para Funza, Mosquera, Madrid, El Rosal o Cota.
+- Si en Bogota te comparten un barrio pero no la localidad, pregunta unicamente a que localidad pertenece ese barrio.
+- Si la residencia parece lejana para Siberia, advierte que la operacion queda en Siberia, que no hay ruta y pregunta si el desplazamiento es viable.
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
 - Si la vacante existe pero esta inactiva o pausada, explica que hoy no se esta recibiendo personal, pero aun puedes pedir datos y hoja de vida para dejar el perfil registrado.
 - Si despues de datos + hoja de vida o despues de una entrevista agendada aparece una pregunta que no puedes responder con la vacante o el historial, usa "pause_bot" con una razon concreta.

@@ -22,7 +22,7 @@
 import axios from 'axios';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 
 /**
  * Construye el system prompt del reclutador con el contexto de la vacante.
