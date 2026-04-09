@@ -8,7 +8,8 @@ Chatbot de reclutamiento por WhatsApp para captar candidatos de pautas publicada
 2. **FAQ**: Si el candidato pregunta sobre horarios, salario, ubicación, etc., el bot responde de forma natural.
 3. **Captura de datos**: Cuando confirma interés, el bot pide datos (nombre, documento, edad, ciudad, barrio). El candidato puede enviarlos en cualquier formato y orden.
 4. **Confirmación**: El bot muestra los datos capturados para que el candidato los confirme.
-5. **Cierre**: Confirma registro e indica fecha de entrevista.
+5. **Agendamiento**: Si la vacante tiene agenda automática, el bot agenda la entrevista y envía confirmación con dirección y horario.
+6. **Cierre**: Confirma registro e indica fecha de entrevista.
 
 ## Requisitos
 - Node.js 20+
@@ -36,17 +37,25 @@ Chatbot de reclutamiento por WhatsApp para captar candidatos de pautas publicada
 El panel administrativo tiene dos roles con diferentes niveles de acceso:
 
 ### Reclutador (`ADMIN_USER` / `ADMIN_PASS`)
-- Listado de candidatos
+- Listado de candidatos con filtros por estado, vacante y texto libre
 - Detalle del candidato (sin historial de conversación)
+- Cambio de estado del candidato
+- Gestión de entrevistas: marcar Asistió / No asistió
+- Reagendamiento manual de entrevistas (si la vacante tiene agenda habilitada)
 - Descargar Excel con candidatos
-- Botón de WhatsApp para contactar candidatos
-- Descargar hoja de vida del candidato
-- **No tiene acceso** al Monitor en tiempo real
+- Botón de WhatsApp para contactar candidatos directamente
+- Subir y descargar hoja de vida del candidato
+- **No tiene acceso** al Monitor en tiempo real ni a herramientas de desarrollo
 
 ### Desarrollador (`DEV_USER` / `DEV_PASS`)
 - Todo lo del reclutador
-- Historial de conversación en el detalle del candidato
+- Historial de conversación completo en el detalle del candidato
 - Monitor en tiempo real de mensajes (`/admin/monitor`)
+- Botones adicionales en entrevistas: Confirmada, No contesta, Canceló, Reagendó
+- Herramientas de vacante: asignar vacante, enviar información, enviar mensajes salientes
+- Pausar / reanudar bot por candidato
+- Eliminar registro completo del candidato
+- Movimientos del reclutador auditados
 
 ## Variables de entorno
 | Variable | Descripción |
@@ -60,6 +69,15 @@ El panel administrativo tiene dos roles con diferentes niveles de acceso:
 | `ADMIN_PASS` | Contraseña del reclutador para el panel administrativo |
 | `DEV_USER` | Usuario del desarrollador para el panel administrativo |
 | `DEV_PASS` | Contraseña del desarrollador para el panel administrativo |
+| `OPENAI_API_KEY` | Clave de OpenAI para procesamiento de mensajes |
+| `OPENAI_MODEL` | Modelo a usar (recomendado: `gpt-5.4-mini-2026-03-17`) |
+| `OPENAI_ENABLED` | Activa o desactiva el uso de OpenAI (`true`/`false`) |
+| `SESSION_SECRET` | String aleatorio seguro para firmar cookies de sesión |
+| `R2_ACCOUNT_ID` | Account ID de Cloudflare R2 para almacenamiento de CVs |
+| `R2_ACCESS_KEY_ID` | Access Key de Cloudflare R2 |
+| `R2_SECRET_ACCESS_KEY` | Secret Key de Cloudflare R2 |
+| `R2_BUCKET` | Nombre del bucket R2 |
+| `R2_PUBLIC_BASE_URL` | URL pública del bucket (si tiene dominio personalizado) |
 
 ## Obtener un token de acceso permanente de Meta (System User Access Token)
 
