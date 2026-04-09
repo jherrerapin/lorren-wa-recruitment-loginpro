@@ -183,6 +183,19 @@ export const conversationCases = [
     }
   },
   {
+    id: 'city-only-does-not-auto-assign-even-with-single-active-city-vacancy',
+    steps: ['Buenas noches te estoy escribiendo desde ibague me dieron este numero para vacante de trabajo'],
+    candidate: candidateDefaults({ currentStep: 'MENU' }),
+    expect: {
+      candidate: {
+        currentStep: 'GREETING_SENT',
+        vacancyId: null
+      },
+      lastReplyIncludes: ['En Ibague tengo estas vacantes activas', 'Auxiliar de Cargue y Descargue Ibague'],
+      lastReplyNotIncludes: ['Coordinador de Operaciones', 'enviame tus datos', 'te solicitare tus datos']
+    }
+  },
+  {
     id: 'inactive-vacancy-offers-registration-for-future-openings',
     steps: ['Estoy en Ibague y me interesa coordinador de operaciones'],
     candidate: candidateDefaults({ currentStep: 'MENU' }),

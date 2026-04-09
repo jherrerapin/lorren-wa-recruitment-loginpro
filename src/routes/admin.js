@@ -146,7 +146,7 @@ function formatHumanList(items = []) {
 function buildMissingDataRequestMessage(candidate) {
   const { missingFields } = getReminderMissingItems(candidate);
   if (!missingFields.length) return null;
-  return `Hola 👋 Para continuar con tu postulación, por favor envíame ${formatHumanList(missingFields)}.`;
+  return `Para continuar con tu postulacion necesito ${formatHumanList(missingFields)}.`;
 }
 
 function normalizeCandidateSearch(source = {}) {
@@ -2397,7 +2397,7 @@ export function adminRouter(prisma) {
     }
 
     const templates = {
-      request_hv: 'Hola 👋 Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).',
+      request_hv: 'Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).',
       reminder: 'Te recuerdo que tu proceso sigue activo. Si deseas continuar, comparte la información faltante o tu Hoja de vida (HV).'
     };
 
@@ -2441,7 +2441,7 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'La ventana de 24h de WhatsApp está vencida. No se puede solicitar la HV.'));
     }
 
-    const body = 'Hola 👋 Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).';
+    const body = 'Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).';
 
     try {
       await sendAdminOutboundMessage(prisma, candidate, body, {

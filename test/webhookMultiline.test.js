@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { consolidateTextMessages, summarizeConsolidatedInput } from '../src/services/multiline.js';
+import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../src/services/multiline.js';
 
 test('consolida 3 a 5 mensajes consecutivos en un solo bloque de contexto', () => {
   const consolidated = consolidateTextMessages([
@@ -23,4 +23,26 @@ test('resumen consolidado sanitiza documento y edad', () => {
   assert.match(summary, /\[doc\]/);
   assert.match(summary, /\[edad\]/);
   assert.doesNotMatch(summary, /1099887766/);
+});
+
+test('la ventana multilinea es larga al inicio y mas corta en un hilo ya resuelto', () => {
+  const previousEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'development';
+  try {
+    const earlyWindow = getMultilineWindowMs({
+      currentStep: 'MENU',
+      vacancyResolved: false,
+      text: 'ibague'
+    });
+    const resolvedWindow = getMultilineWindowMs({
+      currentStep: 'ASK_CV',
+      vacancyResolved: true,
+      text: 'Si estoy interesado, que datos te doy?'
+    });
+
+    assert.equal(earlyWindow, 60000);
+    assert.equal(resolvedWindow, 20000);
+  } finally {
+    process.env.NODE_ENV = previousEnv;
+  }
 });
