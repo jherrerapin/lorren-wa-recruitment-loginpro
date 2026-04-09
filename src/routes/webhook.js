@@ -270,7 +270,12 @@ function buildInboundBody(message = {}) {
 function getNaturalDelayMs(inputText = '', outputText = '') { if (process.env.NODE_ENV === 'test') return 0; const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1500, Math.min(2500, 1500 + Math.min(1000, Math.round(l * 8)))); }
 function isQuestionLike(text = '') {
   const n = normalizeComparableText(text);
-  return String(text || '').includes('?') || /\b(que|cual|cuales|como|cuando|donde|cuanto|quien|requisitos|condiciones|horario|pago|direccion|ubicacion|cargo)\b/.test(n);
+  return String(text || '').includes('?') || /\b(que|cual|cuales|como|cuando|donde|cuanto|quien|puedo|puede|podria|requisitos|condiciones|horario|pago|direccion|ubicacion|cargo)\b/.test(n);
+}
+function isVacancyInfoQuestion(text = '') {
+  const n = normalizeComparableText(text);
+  if (!n || !isQuestionLike(text)) return false;
+  return /\b(donde|direccion|ubicacion|queda|sector|requisit|document|edad|experien|perfil|pago|salario|sueldo|turno|horario|condicion|beneficio|contrato|funcion|cargo|labor|hacer|rol|vacante|trabajo|empleo|postul|aplicar)\b/.test(n);
 }
 function isDocumentValidationQuestion(text = '') {
   const n = normalizeComparableText(text);
@@ -306,7 +311,7 @@ function buildVacancyCompactSummary(vacancy) {
 }
 function buildNoOperationsAvailableReply(city = null) {
   const location = city ? ` en ${city}` : '';
-  return `En este momento no tengo operaciones disponibles${location}. Si mas adelante se abre una vacante, con gusto te comparto la informacion.`;
+  return `En este momento no tengo operaciones disponibles${location}. Si quieres, puedes dejar tus datos y tu hoja de vida para tener tu perfil en cuenta si se abre una vacante.`;
 }
 function buildCityVacancyOptionsReply(city, vacancies = []) {
   const options = [...new Set(
@@ -395,6 +400,17 @@ function buildInactiveVacancyReply(vacancy, candidate, inboundText = '') {
   }
   return [summary, continuePrompt].filter(Boolean).join('\n\n');
 }
+function shouldEscalateManualCandidateQuestion(candidate = {}, text = '', vacancy = null) {
+  if (!vacancy || !isQuestionLike(text)) return false;
+  if (isDocumentValidationQuestion(text) || isVacancyInfoQuestion(text)) return false;
+  if (isAffirmativeInterest(text) || isAffirmativeConfirmation(text) || isNegativeInterest(text) || isPostCompletionAck(text)) return false;
+  return hasHv(candidate) || [
+    ConversationStep.ASK_CV,
+    ConversationStep.SCHEDULING,
+    ConversationStep.SCHEDULED,
+    ConversationStep.DONE
+  ].includes(candidate?.currentStep);
+}
 function buildVacancyReply(vacancy, candidate, inboundText = '') {
   const lines = [];
   lines.push(isQuestionLike(inboundText) ? buildVacancyQuestionLead(vacancy, inboundText) : 'Hola, gracias por comunicarte con LoginPro.');
@@ -423,7 +439,9 @@ function buildVacancyReplyNatural(vacancy, candidate, inboundText = '') {
   if (isQuestionLike(inboundText)) {
     const lines = [buildVacancyQuestionLead(vacancy, inboundText)];
     if (candidate.currentStep === ConversationStep.GREETING_SENT) lines.push(compactSummary);
-    if (continuePrompt) lines.push(continuePrompt);
+    if (![ConversationStep.SCHEDULING, ConversationStep.SCHEDULED, ConversationStep.DONE].includes(candidate.currentStep) && continuePrompt) {
+      lines.push(continuePrompt);
+    }
     return lines.filter(Boolean).join('\n\n');
   }
 
@@ -858,6 +876,13 @@ async function pauseInterviewFlow(prisma, candidateId, reason) {
   });
 }
 
+async function pauseForManualQuestionReview(prisma, candidate, from, inboundText = '') {
+  const reason = 'Duda posterior requiere intervencion manual';
+  await pauseInterviewFlow(prisma, candidate.id, reason);
+  const body = 'Quiero responderte bien esa duda y necesito validarla con el equipo. Ya deje tu chat marcado para seguimiento humano y te escribimos por este medio apenas tenga una respuesta segura.';
+  return reply(prisma, candidate.id, from, body, inboundText, { body, source: 'bot_manual_review', reason });
+}
+
 async function finalizeCandidateAfterCv(prisma, candidate, from) {
   const vacancy = candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId) : null;
 
@@ -1121,11 +1146,21 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     if (!effectiveVacancy) {
       return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });
     }
+    if (shouldEscalateManualCandidateQuestion(candidateState, cleanText, effectiveVacancy)) {
+      return pauseForManualQuestionReview(prisma, candidateState, from, cleanText);
+    }
     if (!isVacancyOpen(effectiveVacancy)) {
       const body = buildInactiveVacancyReply(effectiveVacancy, candidateState, cleanText);
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context' });
     }
-    if (USE_CONVERSATION_ENGINE && isQuestionLike(cleanText)) {
+    const shouldPreferDeterministicVacancyReply = isQuestionLike(cleanText)
+      && [
+        ConversationStep.ASK_CV,
+        ConversationStep.SCHEDULING,
+        ConversationStep.SCHEDULED,
+        ConversationStep.DONE
+      ].includes(candidateState.currentStep);
+    if (USE_CONVERSATION_ENGINE && isQuestionLike(cleanText) && !shouldPreferDeterministicVacancyReply) {
       const handledByEngine = await replyWithEngine(prisma, candidateState, from, cleanText, effectiveVacancy, {
         candidateFieldHints: normalizedData,
         debugTrace
@@ -1187,9 +1222,24 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   if (candidate.status === CandidateStatus.RECHAZADO) return reply(prisma, candidate.id, from, DESCARTE_MSG);
 
   const currentMissingFields = getMissingFields(candidate, currentVacancy);
-  const shouldPreferVacancyContextReply = currentVacancy
-    && !hasNonNameProfileFieldCapture
-    && Boolean(vacancyHints.city || vacancyHints.roleHint);
+  const shouldPreferVacancyContextReply = Boolean(
+    currentVacancy
+    && (
+      (
+        !hasNonNameProfileFieldCapture
+        && Boolean(vacancyHints.city || vacancyHints.roleHint)
+      )
+      || (
+        isQuestionLike(cleanText)
+        && [
+          ConversationStep.ASK_CV,
+          ConversationStep.SCHEDULING,
+          ConversationStep.SCHEDULED,
+          ConversationStep.DONE
+        ].includes(candidate.currentStep)
+      )
+    )
+  );
   const shouldPreferStructuredFieldReply = currentMissingFields.length === 1
     && currentMissingFields[0] === 'restricciones medicas'
     && (
@@ -1261,6 +1311,23 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
   }
 
+  if (
+    currentVacancy
+    && isQuestionLike(cleanText)
+    && !isSchedulingConfirmationIntent(cleanText)
+    && !isSchedulingRescheduleIntent(cleanText)
+    && !isDocumentValidationQuestion(cleanText)
+    && !hasMaterialProfileFieldCapture
+    && [
+      ConversationStep.ASK_CV,
+      ConversationStep.SCHEDULING,
+      ConversationStep.SCHEDULED,
+      ConversationStep.DONE
+    ].includes(candidate.currentStep)
+  ) {
+    return replyWithVacancyContext(candidate, currentVacancy);
+  }
+
   if (!shouldPreferVacancyContextReply && !shouldPreferStructuredFieldReply && await tryPrimaryEngineReply(candidate, currentVacancy)) {
     return;
   }
@@ -1297,7 +1364,13 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
   }
 
-  const askedVacancyQuestion = Boolean(currentVacancy && isQuestionLike(cleanText));
+  const askedVacancyQuestion = Boolean(
+    currentVacancy
+    && isQuestionLike(cleanText)
+    && !isSchedulingConfirmationIntent(cleanText)
+    && !isSchedulingRescheduleIntent(cleanText)
+    && !isDocumentValidationQuestion(cleanText)
+  );
 
   if (resolvedIntent === 'faq' || isFAQ(cleanText)) {
     if (currentVacancy) return replyWithVacancyContext(candidate, currentVacancy);
@@ -1375,9 +1448,20 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
   }
 
-  if (candidate.currentStep === ConversationStep.ASK_CV && !hasDataIntent) return reply(prisma, candidate.id, from, RECORDATORIO_HV, cleanText, { body: RECORDATORIO_HV, source: 'bot_cv_request' });
+  if (candidate.currentStep === ConversationStep.ASK_CV && !hasDataIntent) {
+    if (currentVacancy && isQuestionLike(cleanText)) {
+      return replyWithVacancyContext(candidate, currentVacancy);
+    }
+    if (hasHv(candidate)) {
+      return finalizeCandidateAfterCv(prisma, candidate, from);
+    }
+    return reply(prisma, candidate.id, from, RECORDATORIO_HV, cleanText, { body: RECORDATORIO_HV, source: 'bot_cv_request' });
+  }
 
   if (candidate.currentStep === ConversationStep.DONE) {
+    if (currentVacancy && isQuestionLike(cleanText)) {
+      return replyWithVacancyContext(candidate, currentVacancy);
+    }
     if (resolvedIntent === 'cv_intent') return reply(prisma, candidate.id, from, MENSAJE_DONE_CV_REPEAT, cleanText, { body: MENSAJE_DONE_CV_REPEAT, source: 'bot_cv_request' });
     if (resolvedIntent === 'post_completion_ack' || isPostCompletionAck(cleanText) || ['thanks', 'farewell'].includes(resolvedIntent)) {
       const ackSent = await wasDoneAckSent(prisma, candidate.id);

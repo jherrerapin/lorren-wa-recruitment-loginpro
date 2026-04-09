@@ -1,6 +1,6 @@
-const DEFAULT_MULTILINE_WINDOW_MS = 10000;
+const DEFAULT_MULTILINE_WINDOW_MS = 12000;
 const MIN_MULTILINE_WINDOW_MS = 8000;
-const MAX_MULTILINE_WINDOW_MS = 12000;
+const MAX_MULTILINE_WINDOW_MS = 15000;
 
 function normalizeText(text = '') {
   return String(text || '').trim();

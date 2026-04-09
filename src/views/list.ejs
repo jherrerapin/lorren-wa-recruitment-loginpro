@@ -560,7 +560,7 @@
     <div class="metric-pill">
       <span class="metric-pill-label">Chats acumulados</span>
       <span class="metric-pill-value"><%= botChatCount || 0 %></span>
-      <span class="metric-pill-sub">conversaciones registradas por el bot</span>
+      <span class="metric-pill-sub">personas que han escrito en total</span>
     </div>
     <a href="/admin" style="font-size:13px;color:var(--teal);font-weight:600;text-decoration:none;">← Ver por vacante</a>
   </div>
@@ -773,7 +773,7 @@
     <div class="metric-pill">
       <span class="metric-pill-label">Chats acumulados</span>
       <span class="metric-pill-value"><%= botChatCount || 0 %></span>
-      <span class="metric-pill-sub">conversaciones registradas por el bot</span>
+      <span class="metric-pill-sub">personas que han escrito en total</span>
     </div>
 
     <form method="get" action="/admin" id="dateForm" style="display:contents;">
@@ -817,6 +817,19 @@
   <% } %>
   <% if (errorMsg) { %>
     <div class="alert alert-error"><%= errorMsg %></div>
+  <% } %>
+  <% if (role === 'dev' && manualReviewCandidates && manualReviewCandidates.length > 0) { %>
+    <div class="alert alert-error" style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+      <div>
+        <strong>Hay <%= manualReviewCandidates.length %> chat<%= manualReviewCandidates.length !== 1 ? 's' : '' %> que requieren intervención manual.</strong>
+        <div style="margin-top:4px;font-size:13px;color:#7f1d1d;">La alerta se genera cuando el bot queda pausado por validaciones especiales o dudas que deben responderse de forma humana.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <% for (const c of manualReviewCandidates.slice(0, 4)) { %>
+          <a href="<%= candidateDetailHref(c) %>" class="export-btn" style="border-color:#fecaca;color:#991b1b;background:#fff;"><%= c.fullName || formatCandidatePhone(c.phone) %></a>
+        <% } %>
+      </div>
+    </div>
   <% } %>
   <% if (role === 'dev') { %>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
@@ -897,6 +910,7 @@
           ...v.registeredComplete,
           ...v.completeWithoutCv,
           ...v.approvedCandidates,
+          ...v.contractedCandidates,
           ...v.bookingsToday.map((booking) => booking.candidate).filter(Boolean)
         ];
         const filteredBookingsToday = v.bookingsToday.filter((booking) => (
@@ -916,6 +930,10 @@
           && candidateMatchesVacancySearch(candidate, currentVacancySearch)
         ));
         const filteredApprovedCandidates = v.approvedCandidates.filter((candidate) => (
+          candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v)
+          && candidateMatchesVacancySearch(candidate, currentVacancySearch)
+        ));
+        const filteredContractedCandidates = v.contractedCandidates.filter((candidate) => (
           candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v)
           && candidateMatchesVacancySearch(candidate, currentVacancySearch)
         ));
@@ -1291,7 +1309,7 @@
           <% if (v.approvedCandidates.length > 0) { %>
           <div class="section">
             <div class="section-header">
-              <span class="section-title">Aprobados / Contratados</span>
+              <span class="section-title">Aprobados</span>
               <span class="section-count"><%= filteredApprovedCandidates.length %></span>
             </div>
             <div class="candidates-list">
@@ -1336,6 +1354,53 @@
                 </div>
               <% } %>
               <% if (filteredApprovedCandidates.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredApprovedCandidates.length - 25 %> mas aprobados</div><% } %>
+            </div>
+          </div>
+          <% } %>
+
+          <% if (v.contractedCandidates.length > 0) { %>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">Contratados</span>
+              <span class="section-count"><%= filteredContractedCandidates.length %></span>
+            </div>
+            <div class="candidates-list">
+              <% if (filteredContractedCandidates.length === 0) { %>
+                <div class="empty-state"><div class="empty-icon">-</div><p>No hay contratados que coincidan con este filtro.</p></div>
+              <% } %>
+              <% for (const c of filteredContractedCandidates.slice(0, 25)) { %>
+                <% const uiSt = normalizeCandidateStatusForUI(c.status); %>
+                <% const stBadge = candidateStatusBadge[uiSt] || { cls: 'badge-contratado', label: uiSt }; %>
+                <div class="candidate-row <%= isFemaleCandidate(c) ? 'candidate-row-female' : '' %>">
+                  <div>
+                    <div class="candidate-name"><%= c.fullName || 'Sin nombre' %></div>
+                    <% if (isFemaleCandidate(c)) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-female"><%= c.isFemaleHumanReview ? 'Candidata femenina' : 'Mujer' %></span>
+                      </div>
+                    <% } %>
+                    <% if (role === 'dev' && c.hasNewInbound) { %>
+                      <div class="candidate-flags">
+                        <span class="badge badge-unread">Mensaje nuevo</span>
+                      </div>
+                    <% } %>
+                    <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '-' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
+                    <% const contractedCandidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
+                    <% if (contractedCandidateMeta) { %><div class="candidate-extra"><%= contractedCandidateMeta %></div><% } %>
+                    <% const contractedCandidateNote = candidateObservationSnippet(c); %>
+                    <% if (contractedCandidateNote) { %><div class="candidate-note">Observaciones: <%= contractedCandidateNote %></div><% } %>
+                    <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
+                  </div>
+                  <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>Tel. <%= formatCandidatePhone(c.phone) %></a></div>
+                  <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
+                  <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? 'OK HV' : 'Sin HV' %></span>
+                  <div class="action-stack">
+                    <% if (role === 'dev') { %><a href="<%= candidateWhatsappHref(c) %>" class="action-btn action-btn-neutral">Enviar mensaje</a><% } %>
+                    <a href="<%= candidateDetailHref(c) %>" class="link-detail">Ver -&gt;</a>
+                  </div>
+                </div>
+              <% } %>
+              <% if (filteredContractedCandidates.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredContractedCandidates.length - 25 %> más contratados</div><% } %>
             </div>
           </div>
           <% } %>
