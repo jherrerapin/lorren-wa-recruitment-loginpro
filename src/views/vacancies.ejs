@@ -137,7 +137,7 @@
   </a>
   <a href="/admin">Panel</a>
   <a href="/admin/vacancies" class="nav-active">Vacantes</a>
-  <a href="/admin/users">Usuarios</a>
+  <% if (canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
   <% if (role === 'dev') { %>
     <a href="/admin/locations">Ciudades</a>
   <% } %>

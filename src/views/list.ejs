@@ -386,7 +386,7 @@
   </a>
   <a href="/admin">Panel</a>
   <a href="/admin/vacancies">Vacantes</a>
-  <a href="/admin/users">Usuarios</a>
+  <% if (canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
   <% if (role === 'dev') { %>
     <a href="/admin/monitor">Monitor</a>
   <% } %>

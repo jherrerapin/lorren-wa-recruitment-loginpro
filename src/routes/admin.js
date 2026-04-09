@@ -59,6 +59,20 @@ function sessionAuth(req, res, next) {
   return next();
 }
 
+function canManageRecruiterUsers(req) {
+  const role = req.userRole || req.session?.userRole;
+  const source = req.userSource || req.session?.userSource;
+  return source === 'env' && (role === 'admin' || role === 'dev');
+}
+
+function ensureRecruiterUserManagementAccess(req, res) {
+  if (canManageRecruiterUsers(req)) return true;
+  if (res) {
+    return res.redirect('/admin?error=' + encodeURIComponent('La gestión de usuarios solo está disponible para reclutador y devloginpro.'));
+  }
+  return false;
+}
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -1265,6 +1279,7 @@ export function adminRouter(prisma) {
       candidates.sort(compareCandidatesByRecentInbound);
       return res.render('list', {
         mode: 'legacy', candidates, formatDateTimeCO, role: req.userRole,
+        canManageUsers: canManageRecruiterUsers(req),
         activeStatusScope: requestedStatus,
         summaryLabel: STATUS_SCOPE_SUMMARY_LABELS[requestedStatus] || STATUS_SCOPE_SUMMARY_LABELS.all,
         normalizeCandidateStatusForUI, cities: [], legacyCandidates: [], manualReviewCandidates: [],
@@ -1295,6 +1310,7 @@ export function adminRouter(prisma) {
     return res.render('list', {
       mode: 'vacancies', cities, legacyCandidates, manualReviewCandidates, activeCity, selectedDate,
       todayStr: todayCO(), formatDateTimeCO, formatTimeCO, role: req.userRole,
+      canManageUsers: canManageRecruiterUsers(req),
       normalizeCandidateStatusForUI, candidates: [], activeStatusScope: null, summaryLabel: '',
       successMsg: normalizeString(req.query.success),
       errorMsg: normalizeString(req.query.error),
@@ -1655,6 +1671,7 @@ export function adminRouter(prisma) {
 
     res.render('detail', {
       candidate: detailCandidate, role: req.userRole, formatDateTimeCO,
+      canManageUsers: canManageRecruiterUsers(req),
       normalizeCandidateStatusForUI, cvSizeBytes,
       formatActorRoleLabel,
       formatAdminEventLabel,
@@ -2406,6 +2423,7 @@ export function adminRouter(prisma) {
 
   // ── CRUD de vacantes ─────────────────────────────────────────
   router.get('/users', async (req, res) => {
+    if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const accessContext = getRequestAccessContext(req);
     const [users, vacancies] = await Promise.all([
       prisma.appUser.findMany({
@@ -2436,6 +2454,7 @@ export function adminRouter(prisma) {
     const manageableScopeOptions = getManageableScopeOptions(req, vacancies);
     res.render('users', {
       role: req.userRole,
+      canManageUsers: canManageRecruiterUsers(req),
       users,
       vacancies,
       manageableScopeOptions,
@@ -2450,6 +2469,7 @@ export function adminRouter(prisma) {
   });
 
   router.post('/users/create', express.urlencoded({ extended: true }), async (req, res) => {
+    if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const password = typeof req.body.password === 'string' ? req.body.password : '';
     if (password.length < 6) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('La contrasena inicial debe tener al menos 6 caracteres.'));
@@ -2494,6 +2514,7 @@ export function adminRouter(prisma) {
   });
 
   router.post('/users/:id/reset-password', express.urlencoded({ extended: true }), async (req, res) => {
+    if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const { id } = req.params;
     const newPassword = typeof req.body.newPassword === 'string' ? req.body.newPassword : '';
     if (newPassword.length < 6) {
@@ -2543,6 +2564,7 @@ export function adminRouter(prisma) {
   });
 
   router.post('/users/:id/reset-recovery-code', express.urlencoded({ extended: true }), async (req, res) => {
+    if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const { id } = req.params;
     const accessContext = getRequestAccessContext(req);
     const user = await prisma.appUser.findUnique({
@@ -2589,6 +2611,7 @@ export function adminRouter(prisma) {
   });
 
   router.post('/users/:id/toggle', express.urlencoded({ extended: true }), async (req, res) => {
+    if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const { id } = req.params;
     const accessContext = getRequestAccessContext(req);
     const user = await prisma.appUser.findUnique({
@@ -2660,6 +2683,7 @@ export function adminRouter(prisma) {
       vacancies,
       operations,
       role: req.userRole,
+      canManageUsers: canManageRecruiterUsers(req),
       successMsg,
       errorMsg,
       pendingCvMigrationCount,
