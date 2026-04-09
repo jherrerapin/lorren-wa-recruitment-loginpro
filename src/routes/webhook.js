@@ -912,10 +912,38 @@ async function finalizeCandidateAfterCv(prisma, candidate, from) {
 
 export async function saveInboundMessage(prisma, candidateId, message, body, type, phone) {
   const waMessageId = message?.id || null;
-  const insertResult = await prisma.message.createMany({
-    data: [{ candidateId, waMessageId, direction: MessageDirection.INBOUND, messageType: type, body, rawPayload: sanitizeForRawPayload(message) }],
-    skipDuplicates: true
-  });
+  const messageData = {
+    candidateId,
+    waMessageId,
+    direction: MessageDirection.INBOUND,
+    messageType: type,
+    body,
+    rawPayload: sanitizeForRawPayload(message)
+  };
+  let insertResult;
+
+  try {
+    insertResult = await prisma.message.createMany({
+      data: [messageData],
+      skipDuplicates: true
+    });
+  } catch (error) {
+    const messageTypeMismatch = /invalid input value for enum "MessageType"/i.test(String(error?.message || ''));
+    if (!messageTypeMismatch || type === MessageType.UNKNOWN) throw error;
+
+    console.warn('[INBOUND_MESSAGE_TYPE_FALLBACK]', JSON.stringify({
+      phone: phone || null,
+      candidateId,
+      waMessageId,
+      requestedType: type,
+      persistedType: MessageType.UNKNOWN
+    }));
+
+    insertResult = await prisma.message.createMany({
+      data: [{ ...messageData, messageType: MessageType.UNKNOWN }],
+      skipDuplicates: true
+    });
+  }
 
   if (insertResult.count === 0) {
     console.log('[INBOUND_DUPLICATE_IGNORED]', JSON.stringify({
