@@ -219,6 +219,12 @@ function formatDateTimeCO(value) {
   }).format(date);
 }
 
+function timeValue(value) {
+  if (!value) return 0;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
 function formatTimeCO(value) {
   if (!value) return '';
   const date = value instanceof Date ? value : new Date(value);
@@ -463,7 +469,13 @@ function buildManageableUsersWhere(accessContext = {}) {
 
 function isManualAttentionCandidate(candidate) {
   if (!candidate?.botPaused) return false;
-  return !isFemaleHumanReviewCandidate(candidate);
+  if (isFemaleHumanReviewCandidate(candidate)) return false;
+  const attentionAt = Math.max(
+    timeValue(candidate?.lastInboundAt),
+    timeValue(candidate?.botPausedAt)
+  );
+  if (!attentionAt) return true;
+  return attentionAt > timeValue(candidate?.devLastSeenAt);
 }
 
 function withFlashMessage(returnTo, type, message) {
@@ -759,8 +771,17 @@ async function getOutboundWindowStatus(prisma, candidateId, now = new Date()) {
     select: { createdAt: true }
   });
   const lastInboundAt = lastInbound?.createdAt || null;
-  const isOpen = Boolean(lastInboundAt) && (now.getTime() - new Date(lastInboundAt).getTime()) <= WHATSAPP_WINDOW_MS;
-  return { hasInbound: Boolean(lastInboundAt), lastInboundAt, isOpen };
+  const expiresAt = lastInboundAt ? new Date(new Date(lastInboundAt).getTime() + WHATSAPP_WINDOW_MS) : null;
+  const remainingMs = expiresAt ? (expiresAt.getTime() - now.getTime()) : 0;
+  const isOpen = remainingMs > 0;
+  return {
+    hasInbound: Boolean(lastInboundAt),
+    lastInboundAt,
+    isOpen,
+    expiresAt,
+    remainingMs,
+    expiringSoon: isOpen && remainingMs <= (2 * 60 * 60 * 1000)
+  };
 }
 
 function toHexPreview(buffer, maxBytes = 16) {
@@ -870,7 +891,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
               medicalRestrictions: true, transportMode: true,
               interviewNotes: true,
       cvOriginalName: true, cvMimeType: true, cvStorageKey: true, gender: true,
-              botPaused: true, botPauseReason: true,
+              botPaused: true, botPausedAt: true, botPauseReason: true,
               currentStep: true,
               lastInboundAt: true,
               lastOutboundAt: true,
@@ -891,7 +912,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
           interviewNotes: true,
           cvOriginalName: true, cvMimeType: true, cvStorageKey: true,
           gender: true, createdAt: true,
-          botPaused: true, botPauseReason: true,
+          botPaused: true, botPausedAt: true, botPauseReason: true,
           currentStep: true,
           lastInboundAt: true,
           lastOutboundAt: true,
@@ -920,7 +941,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
         medicalRestrictions: true, transportMode: true,
         interviewNotes: true,
         cvOriginalName: true, cvMimeType: true, cvStorageKey: true, createdAt: true,
-        gender: true, botPaused: true, botPauseReason: true,
+        gender: true, botPaused: true, botPausedAt: true, botPauseReason: true,
         currentStep: true,
         lastInboundAt: true,
         lastOutboundAt: true,
@@ -1186,6 +1207,7 @@ async function fetchMonitorMessages(prisma) {
           currentStep: true,
           gender: true,
           botPaused: true,
+          botPausedAt: true,
           botPauseReason: true
         }
       }
@@ -1255,9 +1277,10 @@ export function adminRouter(prisma) {
           cvOriginalName: true,
           cvStorageKey: true,
           gender: true,
-          botPaused: true,
-          botPauseReason: true,
-          lastInboundAt: true,
+            botPaused: true,
+            botPausedAt: true,
+            botPauseReason: true,
+            lastInboundAt: true,
           lastOutboundAt: true,
           devLastSeenAt: true,
           vacancy: { select: { city: true } }
@@ -2144,6 +2167,7 @@ export function adminRouter(prisma) {
       gender: true,
       interviewNotes: true,
       botPaused: true,
+      botPausedAt: true,
       botPauseReason: true,
         cvData: true,
         cvOriginalName: true,

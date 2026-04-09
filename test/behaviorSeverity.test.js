@@ -161,3 +161,63 @@ test('dashboard severe regression: contador global y contratados quedan separado
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('dashboard severe regression: la alerta manual solo muestra chats no revisados por dev', async () => {
+  const reviewedCandidate = dashboardCandidate({
+    id: 'cand-reviewed',
+    fullName: 'Revisado Manual',
+    status: 'REGISTRADO',
+    botPaused: true,
+    botPauseReason: 'Duda posterior requiere intervencion manual',
+    lastInboundAt: new Date('2026-04-08T12:05:00.000Z'),
+    botPausedAt: new Date('2026-04-08T12:06:00.000Z'),
+    devLastSeenAt: new Date('2026-04-08T12:10:00.000Z')
+  });
+  const pendingCandidate = dashboardCandidate({
+    id: 'cand-pending',
+    fullName: 'Pendiente Manual',
+    status: 'REGISTRADO',
+    botPaused: true,
+    botPauseReason: 'Duda posterior requiere intervencion manual',
+    lastInboundAt: new Date('2026-04-08T12:08:00.000Z'),
+    botPausedAt: new Date('2026-04-08T12:09:00.000Z'),
+    devLastSeenAt: new Date('2026-04-08T12:07:00.000Z')
+  });
+
+  const prisma = createDashboardPrismaMock({
+    candidateCount: 2,
+    vacancies: [
+      {
+        id: 'vac-iba-2',
+        title: 'Auxiliar Cargue y Descargue',
+        role: 'Auxiliar de cargue y descargue',
+        city: 'Ibague',
+        acceptingApplications: true,
+        isActive: true,
+        schedulingEnabled: false,
+        interviewBookings: [],
+        candidates: [reviewedCandidate, pendingCandidate]
+      }
+    ]
+  });
+
+  const server = await createServer(prisma, {
+    userRole: 'dev',
+    userSource: 'env'
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl);
+    const response = await fetch(`${baseUrl}/admin?city=Ibague&date=2026-04-08`, {
+      headers: { Cookie: cookie }
+    });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Hay 1 chat/);
+    assert.match(html, /Atencion manual pendiente[\s\S]*\(1\)/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

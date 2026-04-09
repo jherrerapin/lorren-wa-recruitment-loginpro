@@ -1,8 +1,14 @@
 import { sendTextMessage } from './whatsapp.js';
-import { canScheduleReminderPolicy, isWithinWhatsappWindow } from './reminderPolicy.js';
+import {
+  canScheduleReminderPolicy,
+  canSendInterviewKeepalivePolicy,
+  getWhatsappWindowState,
+} from './reminderPolicy.js';
 import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import { formatInterviewDate } from './interviewScheduler.js';
 
 const REMINDER_DELAY_MS = 25 * 60 * 1000;
+const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 
 function hasValue(value) {
   return value !== undefined && value !== null && value !== '';
@@ -120,6 +126,87 @@ async function storeOutbound(prisma, candidateId, body, metadata = {}) {
   });
 }
 
+async function findActiveInterviewBooking(prisma, candidateId) {
+  if (typeof prisma?.interviewBooking?.findFirst !== 'function') return null;
+  return prisma.interviewBooking.findFirst({
+    where: {
+      candidateId,
+      status: { in: ['SCHEDULED', 'CONFIRMED'] }
+    },
+    orderBy: { scheduledAt: 'asc' },
+    select: {
+      scheduledAt: true
+    }
+  });
+}
+
+function buildInterviewKeepaliveText(candidate = {}, booking = null) {
+  if (candidate.currentStep === 'SCHEDULED') {
+    const scheduledDate = booking?.scheduledAt ? formatInterviewDate(new Date(booking.scheduledAt)) : null;
+    if (scheduledDate) {
+      return `Tu entrevista sigue programada para ${scheduledDate}. Si necesitas ajustar algo o confirmar que sigues disponible, respóndeme por aquí para mantener este chat activo.`;
+    }
+    return 'Tu proceso de entrevista sigue activo. Si necesitas ajustar algo o confirmarme que sigues disponible, respóndeme por aquí para mantener este chat abierto.';
+  }
+
+  return 'Sigo pendiente de tu confirmación para la entrevista. Si sigues interesado, respóndeme por aquí con un sí o dime si necesitas otro horario para mantener tu proceso activo.';
+}
+
+async function hasInterviewKeepaliveSinceLastInbound(prisma, candidateId, lastInboundAt) {
+  if (!lastInboundAt || typeof prisma?.message?.findMany !== 'function') return false;
+  const recentOutbounds = await prisma.message.findMany({
+    where: {
+      candidateId,
+      direction: 'OUTBOUND',
+      createdAt: { gte: lastInboundAt }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20
+  });
+
+  return recentOutbounds.some((message) => message?.rawPayload?.source === INTERVIEW_KEEPALIVE_SOURCE);
+}
+
+async function runInterviewKeepaliveDispatcher(prisma, now = new Date()) {
+  if (typeof prisma?.candidate?.findMany !== 'function') return;
+
+  const candidates = await prisma.candidate.findMany({
+    where: {
+      currentStep: { in: ['SCHEDULING', 'SCHEDULED'] },
+      botPaused: false
+    },
+    take: 200
+  });
+
+  for (const candidate of candidates) {
+    if (!canSendInterviewKeepalivePolicy(candidate, now)) continue;
+    if (await hasInterviewKeepaliveSinceLastInbound(prisma, candidate.id, candidate.lastInboundAt)) continue;
+
+    const booking = candidate.currentStep === 'SCHEDULED'
+      ? await findActiveInterviewBooking(prisma, candidate.id)
+      : null;
+    const body = buildInterviewKeepaliveText(candidate, booking);
+    const windowState = getWhatsappWindowState(candidate.lastInboundAt, now);
+
+    await sendTextMessage(candidate.phone, body);
+    await storeOutbound(prisma, candidate.id, body, {
+      source: INTERVIEW_KEEPALIVE_SOURCE,
+      windowExpiresAt: windowState.expiresAt?.toISOString?.() || null
+    });
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        lastOutboundAt: now
+      }
+    });
+    console.log('[REMINDER_TRACE]', JSON.stringify({
+      candidateId: candidate.id,
+      event: 'interview_window_keepalive_sent',
+      currentStep: candidate.currentStep
+    }));
+  }
+}
+
 export async function runReminderDispatcher(prisma, { now = new Date() } = {}) {
   const dueCandidates = await prisma.candidate.findMany({
     where: {
@@ -130,7 +217,7 @@ export async function runReminderDispatcher(prisma, { now = new Date() } = {}) {
   });
 
   for (const candidate of dueCandidates) {
-    const shouldSkip = !canScheduleReminder(candidate) || !isWithinWhatsappWindow(candidate.lastInboundAt);
+    const shouldSkip = !canScheduleReminder(candidate) || !getWhatsappWindowState(candidate.lastInboundAt, now).isOpen;
     if (shouldSkip) {
       await prisma.candidate.update({
         where: { id: candidate.id },
@@ -154,4 +241,6 @@ export async function runReminderDispatcher(prisma, { now = new Date() } = {}) {
     });
     console.log('[REMINDER_TRACE]', JSON.stringify({ candidateId: candidate.id, event: 'reminder_sent' }));
   }
+
+  await runInterviewKeepaliveDispatcher(prisma, now);
 }

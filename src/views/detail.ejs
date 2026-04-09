@@ -149,6 +149,7 @@
       { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
       { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
     ]; %>
+    <% const interviewWindowManaged = ['SCHEDULING', 'SCHEDULED'].includes(candidate.currentStep); %>
 
     <% if (cvSuccess) { %>
       <div class="alert alert-success"><%= cvSuccess %></div>
@@ -238,6 +239,11 @@
           <span style="color:#1f7a38;">Activo</span>
         <% } %>
       </div>
+      <% if (role === 'dev' && outboundWindow?.expiringSoon && interviewWindowManaged) { %>
+        <div class="alert alert-error" style="background:#fff7ed;border-color:#fdba74;color:#9a3412;">
+          La ventana de 24h estÃ¡ por vencer para este candidato. El sistema intentarÃ¡ enviar un mensaje de continuidad antes del cierre para incentivar respuesta y sostener el contacto.
+        </div>
+      <% } %>
       <form method="post" action="/admin/candidates/<%= candidate.id %>/status" class="status-form">
         <input type="hidden" name="returnTo" value="<%= returnToPath || '/admin' %>" />
         <select name="status">
@@ -486,6 +492,10 @@
             <div class="info-item">
               <label>Estado ventana WhatsApp (24h)</label>
               <span><%= outboundWindow.isOpen ? 'Abierta' : 'Vencida' %></span>
+            </div>
+            <div class="info-item">
+              <label>Vence la ventana</label>
+              <span><%= outboundWindow.expiresAt ? formatDateTimeCO(outboundWindow.expiresAt) : 'Sin referencia' %></span>
             </div>
           </div>
         <% } %>
