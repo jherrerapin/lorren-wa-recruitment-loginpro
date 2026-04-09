@@ -183,6 +183,37 @@ export const conversationCases = [
     }
   },
   {
+    id: 'inactive-vacancy-offers-registration-for-future-openings',
+    steps: ['Estoy en Ibague y me interesa coordinador de operaciones'],
+    candidate: candidateDefaults({ currentStep: 'MENU' }),
+    vacancies: [
+      ...baseVacancies,
+      {
+        id: 'vac-iba-inactive',
+        title: 'Coordinador de Operaciones Ibague',
+        role: 'Coordinador de operaciones',
+        city: 'Ibague',
+        operationId: OP_IBA.id,
+        operation: OP_IBA,
+        operationAddress: 'Zona aeropuerto',
+        requirements: 'Experiencia liderando equipos',
+        conditions: 'Salario a convenir',
+        roleDescription: 'Liderazgo operativo',
+        requiredDocuments: 'Documento de identidad',
+        acceptingApplications: false,
+        isActive: true,
+        schedulingEnabled: false,
+        updatedAt: new Date('2026-04-07T12:45:00.000Z')
+      }
+    ],
+    operations: [OP_IBA, OP_BOG],
+    expect: {
+      candidate: { vacancyId: 'vac-iba-inactive', currentStep: 'GREETING_SENT' },
+      lastReplyIncludes: ['no esta activa', 'dejar tu perfil registrado'],
+      lastReplyNotIncludes: ['cuentame desde que ciudad', 'enviame por favor estos datos']
+    }
+  },
+  {
     id: 'bus-and-independent-recognized',
     steps: ['independiente - bus'],
     candidate: candidateDefaults({ currentStep: 'COLLECTING_DATA', vacancyId: 'vac-post' }),
@@ -743,6 +774,81 @@ export const conversationCases = [
         botPauseReason: 'Consulta documental pendiente de validacion manual'
       },
       lastReplyIncludes: ['validar ese caso documental', 'respuesta segura']
+    }
+  },
+  {
+    id: 'done-step-answers-vacancy-question-naturally',
+    steps: ['cual es el salario para esa vacante?'],
+    candidate: candidateDefaults({
+      currentStep: 'DONE',
+      vacancyId: 'vac-post',
+      fullName: 'Kevin Zapata',
+      documentType: 'CC',
+      documentNumber: '1110461482',
+      age: 20,
+      neighborhood: 'Palermo',
+      medicalRestrictions: 'Sin restricciones médicas',
+      transportMode: 'Moto',
+      cvData: Buffer.from('pdf'),
+      cvOriginalName: 'hv.pdf',
+      cvMimeType: 'application/pdf',
+      lastInboundAt: new Date()
+    }),
+    expect: {
+      candidate: { currentStep: 'DONE', botPaused: false },
+      lastReplyIncludes: ['condiciones registradas', 'Pago por turno'],
+      lastReplyNotIncludes: ['ya quedo tu registro completo']
+    }
+  },
+  {
+    id: 'ask-cv-out-of-scope-question-pauses-for-dev-review',
+    steps: ['mi esposa tambien puede entrar conmigo a la operacion?'],
+    candidate: candidateDefaults({
+      currentStep: 'ASK_CV',
+      vacancyId: 'vac-post',
+      fullName: 'Jose Barrero',
+      documentType: 'CC',
+      documentNumber: '1007659598',
+      age: 25,
+      neighborhood: 'Jordan',
+      medicalRestrictions: 'Sin restricciones médicas',
+      transportMode: 'Moto',
+      lastInboundAt: new Date()
+    }),
+    expect: {
+      candidate: {
+        currentStep: 'ASK_CV',
+        botPaused: true,
+        botPauseReason: 'Duda posterior requiere intervencion manual'
+      },
+      lastReplyIncludes: ['seguimiento humano', 'respuesta segura'],
+      lastReplyNotIncludes: ['hoja de vida', 'enviame por favor estos datos']
+    }
+  },
+  {
+    id: 'scheduled-question-uses-context-instead-of-repeating-flow',
+    steps: ['cual es la direccion exacta de la entrevista?'],
+    candidate: candidateDefaults({
+      currentStep: 'SCHEDULED',
+      vacancyId: 'vac-sched',
+      fullName: 'Carlos Perez',
+      gender: 'MALE',
+      documentType: 'CC',
+      documentNumber: '555444333',
+      age: 29,
+      locality: 'Funza',
+      medicalRestrictions: 'Sin restricciones medicas',
+      transportMode: 'Bicicleta',
+      cvData: Buffer.from('pdf'),
+      cvOriginalName: 'hv.pdf',
+      cvMimeType: 'application/pdf',
+      lastInboundAt: new Date()
+    }),
+    interviewSlots: schedulingSlots,
+    expect: {
+      candidate: { botPaused: false },
+      lastReplyIncludes: ['direccion de entrevista', 'Calle 80 # 10-20'],
+      lastReplyNotIncludes: ['enviame tus datos', 'hoja de vida']
     }
   }
 ];

@@ -946,7 +946,10 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
       .filter((candidate) => candidate.interviewBookings.length > 0)
       .map((candidate) => candidate.id));
     const approvedCandidatesBase = candidatesWithFlags
-      .filter((candidate) => ['APROBADO', 'CONTRATADO'].includes(normalizeCandidateStatusForUI(candidate.status)))
+      .filter((candidate) => normalizeCandidateStatusForUI(candidate.status) === 'APROBADO')
+      .filter((candidate) => !v.schedulingEnabled || !bookedCandidateIds.has(candidate.id));
+    const contractedCandidatesBase = candidatesWithFlags
+      .filter((candidate) => normalizeCandidateStatusForUI(candidate.status) === 'CONTRATADO')
       .filter((candidate) => !v.schedulingEnabled || !bookedCandidateIds.has(candidate.id));
     const pendingReviewCandidates = candidatesWithFlags
       .filter((candidate) => ['NUEVO', 'REGISTRADO'].includes(normalizeCandidateStatusForUI(candidate.status)));
@@ -967,6 +970,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
     const registeredComplete = filterDashboardCandidates(registeredCompleteBase);
     const completeWithoutCv = filterDashboardCandidates(completeWithoutCvBase);
     const approvedCandidates = filterDashboardCandidates(approvedCandidatesBase);
+    const contractedCandidates = filterDashboardCandidates(contractedCandidatesBase);
     const filteredBookingsToday = normalizeInterviewBookings(v.interviewBookings)
       .map(b => ({
         ...b,
@@ -984,6 +988,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
       registeredComplete.sort(compareCandidatesByRecentInbound);
       completeWithoutCv.sort(compareCandidatesByRecentInbound);
       approvedCandidates.sort(compareCandidatesByRecentInbound);
+      contractedCandidates.sort(compareCandidatesByRecentInbound);
     }
 
     const enriched = {
@@ -992,7 +997,8 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
       registeredNoBooking,
       registeredComplete,
       completeWithoutCv,
-      approvedCandidates
+      approvedCandidates,
+      contractedCandidates
     };
 
     citiesMap.get(city).push(enriched);
@@ -1187,15 +1193,19 @@ async function fetchMonitorMessages(prisma) {
   });
 }
 
-async function loadBotChatCount(prisma, accessContext = null) {
-  return prisma.candidate.count({
-    where: {
-      ...buildCandidateAccessWhere(accessContext || { scope: 'ALL', isDev: true }),
-      messages: {
-        some: {}
-      }
-    }
-  });
+async function loadBotChatCount(prisma) {
+  if (typeof prisma?.candidate?.count === 'function') {
+    return prisma.candidate.count();
+  }
+
+  if (typeof prisma?.candidate?.findMany === 'function') {
+    const candidates = await prisma.candidate.findMany({
+      select: { id: true }
+    });
+    return Array.isArray(candidates) ? candidates.length : 0;
+  }
+
+  return 0;
 }
 
 export function adminRouter(prisma) {
@@ -1215,7 +1225,7 @@ export function adminRouter(prisma) {
     const vacancyFiltersById = normalizeVacancyDashboardFilters(req.query);
     const candidateSearch = normalizeCandidateSearch(req.query);
     const vacancySearchById = normalizeVacancySearches(req.query);
-    const botChatCount = await loadBotChatCount(prisma, accessContext);
+    const botChatCount = await loadBotChatCount(prisma);
     const canUseLegacyScope = requestedStatus
       && ADMIN_STATUS_SCOPES.has(requestedStatus)
       && (req.userRole === 'dev' || RECRUITER_STATUS_SCOPES.has(requestedStatus));
