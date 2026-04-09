@@ -94,6 +94,54 @@
     .action-btn-warn { border-color: #fcd34d; background: #fef3c7; color: #b45309; }
     .action-btn-danger { border-color: #fca5a5; background: #fee2e2; color: #b8322b; }
     .action-btn-neutral { border-color: #cbd5e1; background: #eef2f7; color: #475569; }
+    @media (max-width: 900px) {
+      .navbar {
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        padding: 10px 16px;
+      }
+      .container { margin: 16px 12px 36px; }
+      .card { padding: 16px; }
+      .info-grid,
+      .edit-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .messages-list { max-height: none; }
+    }
+    @media (max-width: 680px) {
+      .navbar { height: auto; }
+      .navbar form {
+        width: 100%;
+        margin-left: 0 !important;
+      }
+      .navbar form button { width: 100%; }
+      .container { margin: 12px; }
+      .header-line { align-items: flex-start; }
+      .info-grid,
+      .edit-form { grid-template-columns: 1fr; }
+      .field-group-full { grid-column: auto; }
+      .status-form,
+      .form-actions,
+      .inline-upload,
+      .cv-actions,
+      .booking-head,
+      .booking-actions,
+      .booking-manual form {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .status-form select,
+      .status-form button,
+      .btn-primary,
+      .btn-secondary,
+      .btn-danger,
+      .btn-wa,
+      .btn-cv {
+        width: 100%;
+        text-align: center;
+      }
+      .btn-cv { margin-left: 0; }
+      .msg { max-width: 100%; }
+      .booking-manual .field-group { min-width: 0; }
+    }
   </style>
 </head>
 <body>

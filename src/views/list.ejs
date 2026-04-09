@@ -365,16 +365,109 @@
     .filter-note { font-size: 12px; color: var(--text-muted); }
 
     /* ── Responsive ── */
+    @media (max-width: 960px) {
+      .navbar {
+        flex-wrap: wrap;
+        height: auto;
+        padding: 10px 16px;
+        gap: 10px 16px;
+      }
+      .navbar .spacer { display: none; }
+      .navbar form { width: 100%; }
+      .navbar .btn-logout {
+        width: 100%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .page { padding: 18px 14px 42px; }
+      .header-metrics { width: 100%; }
+      .metric-pill {
+        flex: 1 1 220px;
+        min-width: 0;
+      }
+      .date-strip {
+        width: 100%;
+        flex-wrap: wrap;
+      }
+      .city-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding-bottom: 6px;
+        scrollbar-width: thin;
+      }
+      .city-tab { flex: 0 0 auto; }
+      .vacancy-header,
+      .section-header,
+      .legacy-header {
+        align-items: flex-start;
+      }
+      .candidate-row {
+        grid-template-columns: minmax(0, 1fr) 110px 90px auto;
+      }
+      .candidate-phone { grid-column: 1 / -1; }
+      .candidate-note { max-width: none; }
+      .filter-field {
+        flex: 1 1 180px;
+        min-width: 0;
+      }
+    }
     @media (max-width: 768px) {
       .page { padding: 16px 12px 40px; }
-      .candidate-row { grid-template-columns: 1fr auto; }
+      .page-header {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .header-metrics { width: 100%; }
+      .metric-pill { width: 100%; }
+      .date-strip { align-items: stretch; }
+      .date-strip input[type="date"],
+      .date-strip .btn-today {
+        width: 100%;
+      }
+      .vacancy-header {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 14px;
+      }
+      .vacancy-meta,
+      .vacancy-badges,
+      .section-count {
+        width: 100%;
+      }
+      .section,
+      .legacy-header {
+        padding: 14px;
+      }
+      .vacancy-filter-bar { margin: 0 14px 14px; }
+      .filter-strip {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .filter-field { width: 100%; }
+      .bookings-table,
+      .legacy-table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .candidate-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        align-items: flex-start;
+        padding: 12px;
+        border: 1px solid var(--border-soft);
+        background: var(--surface);
+      }
       .candidate-row .candidate-doc,
-      .candidate-row .candidate-phone { display: none; }
-      .bookings-table th:nth-child(3),
-      .bookings-table td:nth-child(3) { display: none; }
-      .bookings-table th:nth-child(4),
-      .bookings-table td:nth-child(4) { display: none; }
-      .page-header { flex-direction: column; align-items: flex-start; }
+      .candidate-row .candidate-phone { display: block; }
+      .candidate-phone a { font-size: 13px; }
+      .action-stack { width: 100%; }
+      .export-bar { flex-direction: column; }
+      .export-btn {
+        width: 100%;
+        text-align: center;
+      }
     }
   </style>
 </head>
