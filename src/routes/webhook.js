@@ -1915,6 +1915,7 @@ export function webhookRouter(prisma) {
 
         if (message.type === 'text') {
           const body = message.text?.body || '';
+          const cleanText = normalizeText(body);
           const inbound = await saveInboundMessage(prisma, candidate.id, message, body, MessageType.TEXT, from);
           if (!inbound.isNew) continue;
 
@@ -2065,4 +2066,3 @@ export function webhookRouter(prisma) {
 
   return router;
 }
-
