@@ -439,7 +439,7 @@
       const interviewWindowManaged = ['SCHEDULING','SCHEDULED'].includes(candidate.currentStep);
     %>
 
-    <%- /* Alertas */ %>
+    <%# Alertas %>
     <% if (cvSuccess) { %><div class="alert alert-success"><%= cvSuccess %></div><% } %>
     <% if (cvError) { %><div class="alert alert-error"><%= cvError %></div><% } %>
     <% if (outboundSuccess) { %><div class="alert alert-success"><%= outboundSuccess %></div><% } %>
@@ -641,7 +641,7 @@
     <div class="card">
       <h2>Entrevistas</h2>
 
-      <%- /* Panel de asignación manual */ %>
+      <%# Panel de asignación manual %>
       <% if (canRenderManualSchedulePanel) { %>
         <div class="booking-manual">
           <div style="font-weight:700;color:#2c3e50;margin-bottom:4px;">Asignar horario manualmente</div>
@@ -676,7 +676,7 @@
         <p style="margin-bottom:12px;color:#64748b;font-size:14px;">La vacante no tiene agenda automática habilitada.</p>
       <% } %>
 
-      <%- /* Lista de bookings */ %>
+      <%# Lista de bookings %>
       <% if (!candidate.interviewBookings || candidate.interviewBookings.length === 0) { %>
         <p style="font-size:14px;color:#64748b;">Este candidato aún no tiene entrevistas registradas.</p>
       <% } else { %>
@@ -698,11 +698,11 @@
                 <div class="booking-status <%= bookingUi.cls %>"><%= bookingUi.text %></div>
               </div>
 
-              <%--
+              <%#
                 MOMENTOS DEL PROCESO:
                 1. Confirmación (por el candidato vía bot, estado CONFIRMED)
                 2. Asistencia (por el reclutador, estado ATTENDED / NO_SHOW / NO_RESPONSE)
-              --%>
+              %>
               <div class="booking-moments">
                 <div class="moment-row">
                   <span class="moment-label">Confirmó cita:</span>
@@ -726,7 +726,7 @@
                 </div>
               </div>
 
-              <%- /* Sección de acciones del reclutador */ %>
+              <%# Sección de acciones del reclutador %>
               <div class="booking-section">
                 <div class="booking-section-label">Registrar asistencia</div>
                 <div class="booking-actions" data-booking-group="<%= booking.id %>">
@@ -747,7 +747,7 @@
                     </form>
                   <% } %>
 
-                  <%- /* Reagendamiento (reclutador) */ %>
+                  <%# Reagendamiento (reclutador) %>
                   <% if (!isDevRole && candidate.vacancy && candidate.vacancy.schedulingEnabled) { %>
                     <details class="booking-reschedule">
                       <summary class="action-btn action-btn-warn">Reagendó</summary>
@@ -773,7 +773,7 @@
                     </details>
                   <% } %>
 
-                  <%- /* Eliminar agendamiento (solo dev) */ %>
+                  <%# Eliminar agendamiento (solo dev) %>
                   <% if (isDevRole) { %>
                     <form method="post" action="/admin/interviews/<%= booking.id %>/delete"
                       onsubmit="return confirm('¿Eliminar este agendamiento? No se puede deshacer.');">

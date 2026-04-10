@@ -564,10 +564,12 @@
   const currentAdminReturnPath = isLegacyMode ? currentLegacyPath : currentDashboardPath;
 
   function candidateWhatsappHref(candidate) {
+    if (!candidate || !candidate.id) return currentAdminReturnPath;
     return '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(currentAdminReturnPath);
   }
 
   function candidateDetailHref(candidate) {
+    if (!candidate || !candidate.id) return currentAdminReturnPath;
     return '/admin/candidates/' + candidate.id + '?returnTo=' + encodeURIComponent(currentAdminReturnPath);
   }
 
@@ -1645,7 +1647,6 @@
 
 </body>
 </html>
-
 
 
 
