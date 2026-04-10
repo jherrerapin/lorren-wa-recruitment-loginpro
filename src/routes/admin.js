@@ -19,7 +19,7 @@ import {
   candidateLastMessageDirection,
   candidateHasCv,
   deriveCandidateStatusForUI,
-  exportFilenameByScope,
+  exportFilenameByScopeAndVacancy,
   filterCandidatesByScope,
   isOperationallyCompleteWithoutCv,
   isOperationallyRegistered,
@@ -1389,10 +1389,17 @@ export function adminRouter(prisma) {
   router.get('/export', async (req, res) => {
     const accessContext = getRequestAccessContext(req);
     const scope = normalizeString(req.query.scope) || 'all';
+    const vacancyId = normalizeString(req.query.vacancyId);
     if (!EXPORT_SCOPES.has(scope)) return res.status(400).send('Scope inválido.');
+    if (!vacancyId) return res.status(400).send('Debes seleccionar una vacante para exportar.');
+    const vacancy = await ensureVacancyIdAccess(prisma, req, vacancyId, res, '/admin');
+    if (!vacancy) return;
 
     const allCandidates = await prisma.candidate.findMany({
-      where: buildCandidateAccessWhere(accessContext),
+      where: {
+        ...buildCandidateAccessWhere(accessContext),
+        vacancyId
+      },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -1506,7 +1513,7 @@ export function adminRouter(prisma) {
         linkCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
       });
     });
-    const filename = exportFilenameByScope(scope);
+    const filename = exportFilenameByScopeAndVacancy(scope, vacancy);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     await workbook.xlsx.write(res);
@@ -2880,4 +2887,3 @@ export function adminRouter(prisma) {
 
   return router;
 }
-

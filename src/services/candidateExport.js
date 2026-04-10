@@ -151,3 +151,28 @@ export function exportFilenameByScope(scope = 'all') {
   const today = formatDateForFilenameCO();
   return `candidatos_${scopeLabelByKey[safeScope]}_${today}.xlsx`;
 }
+
+export function exportFilenameByScopeAndVacancy(scope = 'all', vacancy = {}) {
+  const safeScope = ['all', 'registered', 'missing_cv_complete', 'approved', 'new', 'contacted', 'contracted', 'rejected'].includes(scope)
+    ? scope
+    : 'all';
+  const scopeLabelByKey = {
+    registered: 'registrados',
+    missing_cv_complete: 'pendientes_hv',
+    approved: 'aprobados',
+    new: 'nuevos',
+    contacted: 'contactados',
+    contracted: 'contratados',
+    rejected: 'rechazados',
+    all: 'todos'
+  };
+  const rawVacancyLabel = [vacancy?.title, vacancy?.role, vacancy?.city].filter(Boolean).join('_');
+  const vacancyLabel = String(rawVacancyLabel || 'vacante')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase() || 'vacante';
+  const today = formatDateForFilenameCO();
+  return `candidatos_${scopeLabelByKey[safeScope]}_${vacancyLabel}_${today}.xlsx`;
+}
