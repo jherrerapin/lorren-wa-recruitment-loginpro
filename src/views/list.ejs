@@ -740,13 +740,7 @@
   <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Mostrando <%= candidates.length %> candidato(s) <%= summaryLabel %></p>
 
   <div class="export-bar" style="border-radius:8px 8px 0 0;border:1px solid var(--border);margin-bottom:-1px;">
-    <a href="/admin/export?scope=registered" class="export-btn">↓ Descargar registrados</a>
-    <a href="/admin/export?scope=missing_cv_complete" class="export-btn">↓ Descargar pendientes HV</a>
-    <a href="/admin/export?scope=approved" class="export-btn">↓ Descargar aprobados</a>
-    <a href="/admin/export?scope=contacted" class="export-btn">↓ Contactados</a>
-    <a href="/admin/export?scope=rejected" class="export-btn">↓ Rechazados</a>
-    <a href="/admin/export?scope=all" class="export-btn">↓ Todos</a>
-    <a href="/admin/export?scope=contracted" class="export-btn">Contratados</a>
+    <span class="filter-note" style="padding:10px 12px;">La descarga Excel ahora se realiza desde cada vacante.</span>
     <a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a>
   </div>
 
@@ -1289,7 +1283,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (filteredCompleteWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 20 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredCompleteWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 20 %> más — <a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>
@@ -1399,7 +1393,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (filteredCompleteWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 25 %> más — <a href="/admin/export?scope=missing_cv_complete" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredCompleteWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 25 %> más — <a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>
@@ -1516,11 +1510,11 @@
         </div>
 
         <div class="export-bar">
-          <a href="/admin/export?scope=registered" class="export-btn">↓ Descargar registrados</a>
-          <a href="/admin/export?scope=missing_cv_complete" class="export-btn">↓ Descargar pendientes HV</a>
-          <a href="/admin/export?scope=approved" class="export-btn">↓ Descargar aprobados</a>
-          <a href="/admin/export?scope=all" class="export-btn">↓ Descargar todos</a>
-          <a href="/admin/export?scope=contracted" class="export-btn">Contratados</a>
+          <a href="/admin/export?scope=registered&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar registrados</a>
+          <a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar pendientes HV</a>
+          <a href="/admin/export?scope=approved&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar aprobados</a>
+          <a href="/admin/export?scope=all&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar todos</a>
+          <a href="/admin/export?scope=contracted&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">Contratados</a>
           <a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a>
           <a href="/admin/vacancies" class="export-btn" style="margin-left:auto;">⚙️ Gestionar vacantes</a>
         </div>
@@ -1628,7 +1622,6 @@
 
 </body>
 </html>
-
 
 
 
