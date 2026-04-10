@@ -1002,6 +1002,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
         formattedDateTime: formatDateTimeCO(b.scheduledAt),
         isFemaleHumanReview: isFemaleHumanReviewCandidate(b.candidate)
       }))
+      .filter((booking) => Boolean(booking?.candidate?.id))
       .filter((booking) => (
         !shouldFilterCandidates || applyRecruiterCandidateFilters([booking.candidate], candidateFilters).length > 0
       ));
@@ -1279,6 +1280,12 @@ export function adminRouter(prisma) {
   }).single('cvFile');
 
   router.use(sessionAuth);
+  router.use((req, res, next) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    next();
+  });
 
   // ── Dashboard principal ──────────────────────────────────────
   router.get('/', async (req, res) => {
@@ -2937,4 +2944,3 @@ export function adminRouter(prisma) {
 
   return router;
 }
-
