@@ -417,26 +417,24 @@
       const isDevRole = String(role) === 'dev';
 
       // ── Acciones para el reclutador: solo asistencia (post-entrevista) ──
-      // CONFIRMED lo asigna el bot cuando el candidato confirma el mismo día.
-      // ATTENDED / NO_SHOW / NO_RESPONSE los registra el reclutador DESPUÉS de la cita.
       const recruiterAttendanceActions = [
-        { key: 'attended',     label: '✓ Asistió',     cls: 'action-btn-ok',      status: 'ATTENDED'     },
-        { key: 'no_show',      label: '✗ No asistió',  cls: 'action-btn-danger',  status: 'NO_SHOW'      },
-        { key: 'no_response',  label: '? Sin respuesta', cls: 'action-btn-neutral', status: 'NO_RESPONSE' }
+        { key: 'attended',     label: '✓ Asistió',       cls: 'action-btn-ok',      status: 'ATTENDED'     },
+        { key: 'no_show',      label: '✗ No asistió',    cls: 'action-btn-danger',  status: 'NO_SHOW'      },
+        { key: 'no_response',  label: '? Sin respuesta', cls: 'action-btn-neutral', status: 'NO_RESPONSE'  }
       ];
 
       // Acciones completas para dev
       const devBookingActions = [
-        { key: 'confirmed',    label: 'Confirmada',      cls: 'action-btn-blue',    status: 'CONFIRMED'    },
-        { key: 'attended',     label: '✓ Asistió',      cls: 'action-btn-ok',      status: 'ATTENDED'     },
-        { key: 'no_response',  label: 'No contesta',    cls: 'action-btn-neutral', status: 'NO_RESPONSE'  },
-        { key: 'no_show',      label: '✗ No asistió',  cls: 'action-btn-danger',  status: 'NO_SHOW'      },
-        { key: 'cancelled',    label: 'Canceló',        cls: 'action-btn-neutral', status: 'CANCELLED'    }
+        { key: 'confirmed',    label: 'Confirmada',       cls: 'action-btn-blue',    status: 'CONFIRMED'    },
+        { key: 'attended',     label: '✓ Asistió',       cls: 'action-btn-ok',      status: 'ATTENDED'     },
+        { key: 'no_response',  label: 'No contesta',     cls: 'action-btn-neutral', status: 'NO_RESPONSE'  },
+        { key: 'no_show',      label: '✗ No asistió',   cls: 'action-btn-danger',  status: 'NO_SHOW'      },
+        { key: 'cancelled',    label: 'Canceló',         cls: 'action-btn-neutral', status: 'CANCELLED'    }
       ];
 
       const visibleBookingActions = isDevRole ? devBookingActions : recruiterAttendanceActions;
 
-      const canRenderManualSchedulePanel = candidate.vacancy?.schedulingEnabled &&
+      const canRenderManualSchedulePanel = candidate.vacancy && candidate.vacancy.schedulingEnabled &&
         (isDevRole || !(candidate.interviewBookings || []).some(b => ['SCHEDULED','CONFIRMED'].includes(b.status)));
       const interviewWindowManaged = ['SCHEDULING','SCHEDULED'].includes(candidate.currentStep);
     %>
@@ -520,7 +518,7 @@
           <% } %>
         </div>
       <% } %>
-      <% if (role === 'dev' && outboundWindow?.expiringSoon && interviewWindowManaged) { %>
+      <% if (role === 'dev' && outboundWindow && outboundWindow.expiringSoon && interviewWindowManaged) { %>
         <div class="alert alert-error" style="background:#fff7ed;border-color:#fdba74;color:#9a3412;">
           La ventana de 24h está por vencer. El sistema enviará un mensaje de continuidad para sostener el contacto.
         </div>
@@ -618,7 +616,7 @@
           <label for="vacancyId">Selecciona una vacante</label>
           <select id="vacancyId" name="vacancyId" required>
             <option value="">Selecciona una vacante</option>
-            <% for (const vacancy of availableVacancies || []) { %>
+            <% for (const vacancy of (availableVacancies || [])) { %>
               <option value="<%= vacancy.id %>" <%= candidate.vacancyId === vacancy.id ? 'selected' : '' %>>
                 <%= vacancy.city %> · <%= vacancy.title || vacancy.role %><% if (!vacancy.isActive) { %> · Inactiva<% } %><% if (!vacancy.acceptingApplications) { %> · Sin postulaciones<% } %>
               </option>
@@ -648,7 +646,7 @@
         <div class="booking-manual">
           <div style="font-weight:700;color:#2c3e50;margin-bottom:4px;">Asignar horario manualmente</div>
           <div style="font-size:13px;color:#64748b;margin-bottom:10px;">
-            <% if (candidate.vacancy?.interviewAddress || candidate.vacancy?.operationAddress) { %>
+            <% if (candidate.vacancy && (candidate.vacancy.interviewAddress || candidate.vacancy.operationAddress)) { %>
               Punto: <%= candidate.vacancy.interviewAddress || candidate.vacancy.operationAddress %>
             <% } else { %>
               Usa un horario disponible configurado para esta vacante.
@@ -687,14 +685,14 @@
             <% const bookingUi = bookingStatusLabel[booking.status] || { cls: '', text: booking.status }; %>
             <%
               // Determina acción actualmente seleccionada para este booking
-              const currentActionKey = visibleBookingActions.find(a => booking.status === a.status)?.key || null;
+              const currentActionKey = visibleBookingActions.find(a => booking.status === a.status) ? visibleBookingActions.find(a => booking.status === a.status).key : null;
             %>
             <div class="booking-item">
               <div class="booking-head">
                 <div style="flex:1;min-width:0;">
-                  <div class="booking-title"><%= booking.vacancy?.title || booking.vacancy?.role || 'Vacante sin nombre' %></div>
+                  <div class="booking-title"><%= (booking.vacancy && (booking.vacancy.title || booking.vacancy.role)) ? (booking.vacancy.title || booking.vacancy.role) : 'Vacante sin nombre' %></div>
                   <div class="booking-meta">
-                    <%= formatDateTimeCO(booking.scheduledAt) %><% if (booking.vacancy?.city) { %> · <%= booking.vacancy.city %><% } %>
+                    <%= formatDateTimeCO(booking.scheduledAt) %><% if (booking.vacancy && booking.vacancy.city) { %> · <%= booking.vacancy.city %><% } %>
                   </div>
                 </div>
                 <div class="booking-status <%= bookingUi.cls %>"><%= bookingUi.text %></div>
@@ -752,7 +750,7 @@
                   <% } %>
 
                   <%-- Reagendamiento (reclutador) --%>
-                  <% if (!isDevRole && candidate.vacancy?.schedulingEnabled) { %>
+                  <% if (!isDevRole && candidate.vacancy && candidate.vacancy.schedulingEnabled) { %>
                     <details class="booking-reschedule">
                       <summary class="action-btn action-btn-warn">Reagendó</summary>
                       <div class="booking-reschedule-panel">
@@ -808,7 +806,7 @@
           </div>
           <div class="info-item">
             <label>Tamaño (bytes)</label>
-            <span><%= cvSizeBytes || 0 %></span>
+            <span><%= typeof cvSizeBytes !== 'undefined' ? cvSizeBytes : 0 %></span>
           </div>
         </div>
       <% } %>
@@ -912,7 +910,7 @@
           </div>
           <div class="field-group">
             <label for="age">Edad</label>
-            <input id="age" name="age" type="number" min="0" value="<%= candidate.age ?? '' %>" />
+            <input id="age" name="age" type="number" min="0" value="<%= candidate.age != null ? candidate.age : '' %>" />
           </div>
           <% if (role === 'dev') { %>
           <div class="field-group">
@@ -975,15 +973,19 @@
     <div class="card">
       <h2>Historial de conversación</h2>
       <div class="messages-list">
-        <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
-        <% for (const m of sorted) { %>
-          <% const isBot = m.direction === 'OUTBOUND'; %>
-          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
-            <div class="msg-header">
-              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
+        <% if (candidate.messages && candidate.messages.length) { %>
+          <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
+          <% for (const m of sorted) { %>
+            <% const isBot = m.direction === 'OUTBOUND'; %>
+            <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
+              <div class="msg-header">
+                <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
+              </div>
+              <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
             </div>
-            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
-          </div>
+          <% } %>
+        <% } else { %>
+          <p style="color:#64748b;font-size:14px;">No hay mensajes registrados.</p>
         <% } %>
       </div>
     </div>
@@ -997,7 +999,7 @@
   (function () {
     function applyBookingRadio(bookingId, selectedKey) {
       document.querySelectorAll('.booking-action-btn[data-booking-id="' + bookingId + '"]').forEach(function (b) {
-        const isCurrent = b.dataset.actionKey === selectedKey;
+        var isCurrent = b.dataset.actionKey === selectedKey;
         b.disabled = selectedKey !== null && !isCurrent;
         if (isCurrent) {
           b.setAttribute('data-selected', 'true');
@@ -1008,6 +1010,14 @@
     }
 
     document.querySelectorAll('.booking-action-btn').forEach(function (btn) {
+      // Aplicar estado inicial desde servidor
+      if (btn.getAttribute('data-selected') === 'true') {
+        var bookingId = btn.dataset.bookingId;
+        document.querySelectorAll('.booking-action-btn[data-booking-id="' + bookingId + '"]').forEach(function (b) {
+          if (b !== btn) b.disabled = true;
+        });
+      }
+
       btn.addEventListener('click', function (e) {
         var bookingId  = this.dataset.bookingId;
         var actionKey  = this.dataset.actionKey;
