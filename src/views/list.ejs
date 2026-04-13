@@ -821,12 +821,16 @@
   const bookingStatusLabel = {
     SCHEDULED:   { cls: 'booking-status-scheduled',   icon: '🕐', text: 'Agendado' },
     CONFIRMED:   { cls: 'booking-status-confirmed',   icon: '✅', text: 'Confirmada' },
+    ATTENDED:    { cls: 'booking-status-confirmed',   icon: '🙌', text: 'Asistió' },
     RESCHEDULED: { cls: 'booking-status-rescheduled', icon: '🔄', text: 'Reagendado' },
+    NO_RESPONSE: { cls: 'booking-status-cancelled',   icon: '📵', text: 'No contesta' },
     NO_SHOW:     { cls: 'booking-status-no_show',     icon: '❌', text: 'No asistió' },
     CANCELLED:   { cls: 'booking-status-cancelled',   icon: '🚫', text: 'Canceló' }
   };
   const bookingActions = [
-    { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
+    { key: 'confirmed', label: 'Confirmada', cls: 'action-btn-ok', status: 'CONFIRMED' },
+    { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'ATTENDED' },
+    { key: 'no_response', label: 'No contesta', cls: 'action-btn-neutral', status: 'NO_RESPONSE' },
     { key: 'no_show', label: 'No asistió', cls: 'action-btn-danger', status: 'NO_SHOW' },
     { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
     { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
