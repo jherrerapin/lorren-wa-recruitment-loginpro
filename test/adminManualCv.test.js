@@ -4,6 +4,27 @@ import express from 'express';
 import path from 'node:path';
 import { adminRouter } from '../src/routes/admin.js';
 
+const ORIGINAL_R2_ENV = {
+  R2_ENDPOINT: process.env.R2_ENDPOINT,
+  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+  R2_BUCKET: process.env.R2_BUCKET,
+};
+
+test.before(() => {
+  delete process.env.R2_ENDPOINT;
+  delete process.env.R2_ACCESS_KEY_ID;
+  delete process.env.R2_SECRET_ACCESS_KEY;
+  delete process.env.R2_BUCKET;
+});
+
+test.after(() => {
+  for (const [key, value] of Object.entries(ORIGINAL_R2_ENV)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
 const SAMPLE_PDF_BYTES = Buffer.from(
   '%PDF-1.1\n' +
   '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' +
