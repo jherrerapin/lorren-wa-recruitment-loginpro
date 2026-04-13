@@ -192,7 +192,7 @@
       CANCELLED:   { cls: 'booking-status-cancelled', text: 'Canceló' }
     }; %>
     <% const bookingActions = [
-      { key: 'attended', label: 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
+      { key: role === 'dev' ? 'confirmed' : 'attended', label: role === 'dev' ? 'Confirmada' : 'Asistió', cls: 'action-btn-ok', status: 'CONFIRMED' },
       { key: 'no_show', label: 'No asistió', cls: 'action-btn-danger', status: 'NO_SHOW' },
       { key: 'cancelled', label: 'Canceló', cls: 'action-btn-neutral', status: 'CANCELLED' },
       { key: 'rescheduled', label: 'Reagendó', cls: 'action-btn-warn', status: 'RESCHEDULED' }
