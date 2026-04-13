@@ -435,7 +435,7 @@ export const conversationCases = [
     }),
     expect: {
       candidate: {
-        medicalRestrictions: 'Sin restricciones mÃ©dicas',
+        medicalRestrictions: 'Sin restricciones médicas',
         currentStep: 'ASK_CV'
       },
       lastReplyIncludes: ['hoja de vida'],
