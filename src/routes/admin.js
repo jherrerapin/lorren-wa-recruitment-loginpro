@@ -29,7 +29,7 @@ import { sendTextMessage } from '../services/whatsapp.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
 import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
-import { listOfferableSlots, createBooking, cancelCandidateBookings } from '../services/interviewScheduler.js';
+import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';
 import { getReminderMissingItems } from '../services/reminder.js';
 import { clearCandidateCvStorage, resolveCandidateCvBuffer, storeCandidateCv } from '../services/cvStorage.js';
 import { isStorageConfigured } from '../services/storage.js';
@@ -523,6 +523,7 @@ function formatAdminEventLabel(event = {}) {
   if (normalizedType === 'WHATSAPP_OPENED') return 'Abrio WhatsApp del candidato';
   if (normalizedType === 'INTERVIEW_ASSIGNED') return 'Asigno entrevista manualmente';
   if (normalizedType === 'INTERVIEW_STATUS_CHANGED') return 'Actualizo estado de entrevista';
+  if (normalizedType === 'INTERVIEW_MANUAL_REMINDER_SENT') return 'Envio recordatorio manual de entrevista';
   if (normalizedType === 'DEV_NOTES_UPDATED') return 'Actualizo observaciones dev';
   if (normalizedType === 'GENDER_UPDATED') return 'Actualizo genero del candidato';
   if (normalizedType === 'BOT_PAUSED') return 'Pauso el bot';
@@ -845,6 +846,15 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
       rawPayload
     }
   });
+}
+
+function buildManualInterviewReminderText(booking) {
+  const scheduledAt = booking?.scheduledAt ? new Date(booking.scheduledAt) : null;
+  const formattedDate = scheduledAt ? formatInterviewDate(scheduledAt) : null;
+  if (!formattedDate) {
+    return 'Te envio este recordatorio manual de entrevista por si no te llego el automatico. Si necesitas ajustar algo, respondeme por este medio.';
+  }
+  return `Te envio este recordatorio manual de tu entrevista para ${formattedDate}, idealmente una hora antes. Si necesitas ajustar algo, respondeme por este medio.`;
 }
 
 async function buildDashboardData(prisma, dateStr, options = {}) {
@@ -1762,6 +1772,57 @@ export function adminRouter(prisma) {
     });
 
     return res.redirect(withFlashMessage(returnTo, 'success', 'Entrevista actualizada correctamente.'));
+  });
+
+  router.post('/interviews/:id/manual-reminder', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const returnTo = safeAdminReturnPath(req.body.returnTo || req.get('referer') || '/admin');
+
+    const booking = await prisma.interviewBooking.findUnique({
+      where: { id },
+      include: {
+        candidate: {
+          include: {
+            vacancy: {
+              select: {
+                city: true
+              }
+            }
+          }
+        }
+      }
+    });
+    if (!booking || !booking.candidate) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Entrevista no encontrada.'));
+    }
+    if (!await ensureCandidateIdAccess(prisma, req, booking.candidateId, res, returnTo)) return;
+    if (!ACTIVE_BOOKING_STATUSES.includes(booking.status)) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Solo puedes enviar recordatorio para entrevistas activas.'));
+    }
+
+    const window = await getOutboundWindowStatus(prisma, booking.candidateId);
+    if (!window.isOpen) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'La ventana de 24h de WhatsApp está vencida. No se puede enviar mensaje.'));
+    }
+
+    const body = buildManualInterviewReminderText(booking);
+    try {
+      await sendAdminOutboundMessage(prisma, booking.candidate, body, {
+        source: 'admin_manual_interview_reminder',
+        interviewBookingId: booking.id
+      });
+      await logCandidateAdminEvent(prisma, {
+        candidateId: booking.candidateId,
+        actorRole: req.userRole,
+        eventType: 'INTERVIEW_MANUAL_REMINDER_SENT',
+        eventLabel: 'Envio recordatorio manual de entrevista',
+        note: booking?.scheduledAt ? `Horario: ${formatInterviewDate(new Date(booking.scheduledAt))}` : null
+      });
+      return res.redirect(withFlashMessage(returnTo, 'success', 'Recordatorio manual enviado correctamente.'));
+    } catch (err) {
+      console.error('[manual_interview_reminder]', err);
+      return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible enviar el recordatorio manual.'));
+    }
   });
 
   router.post('/interviews/:id/delete', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {

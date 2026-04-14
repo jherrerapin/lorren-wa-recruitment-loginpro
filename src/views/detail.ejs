@@ -478,6 +478,16 @@
                   </form>
                 <% } %>
                 <% if (String(role) === 'dev') { %>
+                  <form method="post" action="/admin/interviews/<%= booking.id %>/manual-reminder">
+                    <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
+                    <button
+                      type="submit"
+                      class="action-btn action-btn-warn"
+                      <%= !['SCHEDULED', 'CONFIRMED'].includes(booking.status) ? 'disabled title="Solo disponible para entrevistas activas"' : '' %>
+                    >
+                      Recordatorio manual (1h antes)
+                    </button>
+                  </form>
                   <form method="post" action="/admin/interviews/<%= booking.id %>/delete" onsubmit="return confirm('¿Seguro que deseas eliminar este agendamiento? Esta acción no se puede deshacer.');">
                     <input type="hidden" name="returnTo" value="<%= detailReturnTo %>" />
                     <button type="submit" class="action-btn action-btn-danger">Eliminar agendamiento</button>
@@ -682,4 +692,3 @@
   </div>
 </body>
 </html>
-
