@@ -52,6 +52,7 @@ const FIELD_LABELS = {
 };
 
 const USE_CONVERSATION_ENGINE = process.env.USE_CONVERSATION_ENGINE === 'true';
+const FORWARD_MEDIA_TO = process.env.FORWARD_MEDIA_TO;
 
 // ---------------------------------------------------------------------------
 // Rate limiting en memoria por número de teléfono.
@@ -925,7 +926,7 @@ function buildSupervisorImageNotice(phone, fullName, caption) {
 }
 
 async function forwardInboundImageToSupervisor(candidatePhone, fullName, image = {}) {
-  const supervisorPhone = process.env.FORWARD_MEDIA_TO;
+  const supervisorPhone = FORWARD_MEDIA_TO;
   if (!supervisorPhone) {
     console.warn('[MEDIA_FORWARD_MISSING_TARGET]', JSON.stringify({
       candidatePhone,
