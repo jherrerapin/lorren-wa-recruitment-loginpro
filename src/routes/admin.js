@@ -1692,7 +1692,8 @@ export function adminRouter(prisma) {
         prisma,
         candidate.vacancyId,
         candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null,
-        new Date()
+        new Date(),
+        req.userRole === 'dev' ? 0 : undefined
       )).slice(0, 12)
       : [];
     const availableVacancies = req.userRole === 'dev'
@@ -1884,7 +1885,7 @@ export function adminRouter(prisma) {
     return res.redirect(withFlashMessage(returnTo, 'success', 'Agendamiento eliminado correctamente.'));
   });
 
-  router.post('/candidates/:id/interview-assign', express.urlencoded({ extended: true }), async (req, res) => {
+  router.post('/candidates/:id/interview-assign', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const returnTo = safeAdminReturnPath(req.body.returnTo || `/admin/candidates/${id}`);
     try {
@@ -1925,7 +1926,8 @@ export function adminRouter(prisma) {
         prisma,
         candidate.vacancyId,
         candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null,
-        new Date()
+        new Date(),
+        0
       );
 
       const chosenOffer = offerableSlots.find((option) => (

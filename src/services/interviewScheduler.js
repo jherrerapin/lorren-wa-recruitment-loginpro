@@ -129,10 +129,16 @@ function enrichOfferSlot(entry, lastInboundAt, now, skipCount) {
   };
 }
 
-export async function listOfferableSlots(prisma, vacancyId, lastInboundAt, now = new Date()) {
+export async function listOfferableSlots(
+  prisma,
+  vacancyId,
+  lastInboundAt,
+  now = new Date(),
+  minHoursAdvance = MIN_HOURS_ADVANCE
+) {
   const available = await getAvailableSlots(prisma, vacancyId, now);
   return available
-    .filter((entry) => ((entry.date.getTime() - now.getTime()) / 3600000) >= MIN_HOURS_ADVANCE)
+    .filter((entry) => ((entry.date.getTime() - now.getTime()) / 3600000) >= minHoursAdvance)
     .map((entry, index) => enrichOfferSlot(entry, lastInboundAt, now, index));
 }
 
