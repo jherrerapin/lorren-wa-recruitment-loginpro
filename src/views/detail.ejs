@@ -419,7 +419,7 @@
 
     <div class="card">
       <h2>Entrevistas</h2>
-      <% if (candidate.vacancy?.schedulingEnabled) { %>
+      <% if (candidate.vacancy?.schedulingEnabled && role === 'dev') { %>
         <div class="booking-manual">
           <div style="font-weight:700;color:#2c3e50;margin-bottom:6px;">Asignar horario manualmente</div>
           <div style="font-size:13px;color:#64748b;margin-bottom:10px;">
