@@ -1,6 +1,6 @@
 import express from 'express';
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
-import { extractMessages, sendTextMessage } from '../services/whatsapp.js';
+import { extractMessages, sendImageMessage, sendTextMessage } from '../services/whatsapp.js';
 import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { tryOpenAIParse } from '../services/aiParser.js';
 import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
@@ -914,6 +914,39 @@ async function pauseInterviewFlow(prisma, candidateId, reason) {
       botPauseReason: reason,
       reminderScheduledFor: null,
       reminderState: 'CANCELLED'
+    }
+  });
+}
+
+function buildSupervisorImageNotice(phone, fullName, caption) {
+  const candidateLabel = fullName ? `${phone} (${fullName})` : phone;
+  const captionSuffix = caption ? ` Caption: ${caption}` : '';
+  return `Foto recibida de ${candidateLabel}.${captionSuffix}`;
+}
+
+async function forwardInboundImageToSupervisor(candidatePhone, fullName, image = {}) {
+  const supervisorPhone = process.env.FORWARD_MEDIA_TO;
+  if (!supervisorPhone) {
+    console.warn('[MEDIA_FORWARD_MISSING_TARGET]', JSON.stringify({
+      candidatePhone,
+      reason: 'FORWARD_MEDIA_TO missing'
+    }));
+    return;
+  }
+
+  const caption = image?.caption || '';
+  await sendTextMessage(supervisorPhone, buildSupervisorImageNotice(candidatePhone, fullName, caption));
+  await sendImageMessage(supervisorPhone, { id: image?.id }, caption);
+}
+
+async function countRecentInboundDocuments(prisma, candidateId, withinMinutes = 15) {
+  const since = new Date(Date.now() - (withinMinutes * 60 * 1000));
+  return prisma.message.count({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND,
+      messageType: MessageType.DOCUMENT,
+      createdAt: { gte: since }
     }
   });
 }
@@ -1979,7 +2012,20 @@ export function webhookRouter(prisma) {
         debugTrace.cv_detected = message.type === 'document';
 
         try {
+          if (message.type === 'image') {
+            await forwardInboundImageToSupervisor(from, freshCandidate?.fullName || null, message.image || {});
+            await pauseInterviewFlow(prisma, candidate.id, 'Imagen recibida pendiente de revision manual');
+            continue;
+          }
+
           if (message.type === 'document') {
+            const recentDocumentsCount = await countRecentInboundDocuments(prisma, candidate.id, 15);
+            debugTrace.recent_document_count = recentDocumentsCount;
+            if (recentDocumentsCount >= 3) {
+              await pauseInterviewFlow(prisma, candidate.id, 'Multiples documentos recibidos pendiente de revision manual');
+              continue;
+            }
+
             const mimeType = message.document?.mime_type || '';
             const filename = message.document?.filename || 'hoja_de_vida';
             if (!isCvMimeTypeAllowed(mimeType, filename)) {
