@@ -25,7 +25,7 @@ import { think, extractEngineCandidateFields } from '../services/conversationEng
 import { storeCandidateCv } from '../services/cvStorage.js';
 import { applyFieldPolicy } from '../services/policyLayer.js';
 import { analyzeAttachment } from '../services/attachmentAnalyzer.js';
-import { buildPolicyReply } from '../services/responsePolicy.js';
+import { buildContextualReply, deriveAttachmentDecision, shouldEscalateHumanReview } from '../services/contextualReply.js';
 import { isFeatureEnabled } from '../services/featureFlags.js';
 import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
@@ -1008,6 +1008,46 @@ async function pauseForManualQuestionReview(prisma, candidate, from, inboundText
   await pauseInterviewFlow(prisma, candidate.id, reason);
   const body = 'Quiero responderte bien esa duda y necesito validarla con el equipo. Ya deje tu chat marcado para seguimiento humano y te escribimos por este medio apenas tenga una respuesta segura.';
   return reply(prisma, candidate.id, from, body, inboundText, { body, source: 'bot_manual_review', reason });
+}
+
+async function composeContextualAttachmentReply(prisma, {
+  candidate,
+  from,
+  inboundText = '',
+  recentOutbound = [],
+  vacancy = null,
+  activeInterviewBooking = null,
+  attachmentAnalysis = null,
+  missingFields = [],
+  decision = '',
+  fallbackIntent = 'continue_flow',
+  situation = 'continue_flow',
+  requiresHumanReview = false,
+  rawPayload = {}
+} = {}) {
+  const contextual = await buildContextualReply({
+    situation,
+    decision,
+    inboundText,
+    recentMessages: recentOutbound,
+    candidate,
+    vacancy,
+    currentStep: candidate?.currentStep || null,
+    activeInterviewBooking,
+    attachmentAnalysis,
+    missingFields,
+    requiresHumanReview,
+    fallbackIntent
+  });
+  await reply(prisma, candidate.id, from, contextual.text, inboundText, {
+    source: contextual.fallbackUsed ? 'response_policy_fallback' : 'contextual_reply',
+    situation,
+    decision,
+    model: contextual.model,
+    fallbackReason: contextual.fallbackUsed ? contextual.reason : null,
+    ...rawPayload
+  });
+  return contextual;
 }
 
 async function finalizeCandidateAfterCv(prisma, candidate, from) {
@@ -2143,12 +2183,23 @@ export function webhookRouter(prisma) {
               }).catch((error) => console.warn('[ADMIN_FORWARD_IMAGE_QUEUE_ERROR]', error?.message || error));
             }
             if (isFeatureEnabled('FF_ATTACHMENT_ANALYZER', false)) {
-              const policyReply = buildPolicyReply({
-                replyIntent: 'request_cv_pdf_word',
+              const syntheticAnalysis = {
+                classification: 'CV_IMAGE_ONLY',
+                confidence: 0.55,
+                rationale: 'image_without_structured_cv',
+                evidence: ['image']
+              };
+              await composeContextualAttachmentReply(prisma, {
+                candidate: freshCandidate,
+                from,
+                inboundText: message.image?.caption || '',
                 recentOutbound,
-                contextSummary: 'adjunto imagen'
+                situation: 'attachment_resume_photo',
+                decision: 'no_save_cv_request_pdf_docx',
+                attachmentAnalysis: syntheticAnalysis,
+                fallbackIntent: 'request_cv_pdf_word',
+                rawPayload: { replyIntent: 'request_cv_pdf_word' }
               });
-              await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
             } else {
               await forwardInboundImageToSupervisor(from, freshCandidate?.fullName || null, message.image || {});
             }
@@ -2177,7 +2228,21 @@ export function webhookRouter(prisma) {
               debugTrace.cv_invalid_mime = true;
               console.warn('[CV_ERROR]', JSON.stringify({ phone: from, mimeType, filename, reason: 'invalid_mime' }));
               if (!automationBlocked) {
-                await reply(prisma, candidate.id, from, 'Recibí tu archivo, pero por favor envíalo como PDF o Word (.doc/.docx).', '', { source: 'bot_flow' });
+                await composeContextualAttachmentReply(prisma, {
+                  candidate: freshCandidate,
+                  from,
+                  inboundText: filename,
+                  recentOutbound,
+                  situation: 'attachment_other_doc',
+                  decision: 'reject_non_supported_format_request_pdf_docx',
+                  attachmentAnalysis: {
+                    classification: 'OTHER',
+                    confidence: 0.99,
+                    rationale: 'invalid_mime',
+                    evidence: [mimeType || 'unknown_mime']
+                  },
+                  fallbackIntent: 'request_cv_pdf_word'
+                });
               }
             } else {
               try {
@@ -2202,19 +2267,24 @@ export function webhookRouter(prisma) {
                   debugTrace.cv_saved = true;
                 } else {
                   debugTrace.cv_saved = false;
-                  if (analysis.classification === 'CV_IMAGE_ONLY') {
-                    const policyReply = buildPolicyReply({ replyIntent: 'request_cv_pdf_word', recentOutbound, contextSummary: 'adjunto imagen de hoja de vida' });
-                    await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
-                  } else if (analysis.classification === 'ID_DOC') {
-                    const policyReply = buildPolicyReply({ replyIntent: 'attachment_id_doc', recentOutbound, contextSummary: 'adjunto documento de identidad' });
-                    await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
+                  const requiresHumanReview = shouldEscalateHumanReview({ attachmentAnalysis: analysis })
+                    || (recentDocumentsCount >= 4 && analysis.classification === 'UNREADABLE');
+                  if (requiresHumanReview) {
+                    await pauseForManualQuestionReview(prisma, freshCandidate, from, filename || '');
                   } else {
-                    const policyReply = buildPolicyReply({
-                      replyIntent: analysis.classification === 'UNREADABLE' ? 'attachment_unreadable' : 'request_missing_cv',
+                    const attachmentDecision = deriveAttachmentDecision(analysis.classification);
+                    await composeContextualAttachmentReply(prisma, {
+                      candidate: freshCandidate,
+                      from,
+                      inboundText: filename,
                       recentOutbound,
-                      contextSummary: 'adjunto archivo'
+                      situation: attachmentDecision.situation,
+                      decision: 'attachment_not_saved_request_valid_cv',
+                      attachmentAnalysis: analysis,
+                      fallbackIntent: attachmentDecision.fallbackIntent,
+                      requiresHumanReview: false,
+                      rawPayload: { replyIntent: attachmentDecision.fallbackIntent }
                     });
-                    await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
                   }
                   continue;
                 }
@@ -2254,7 +2324,18 @@ export function webhookRouter(prisma) {
                     if (afterCvSave.currentStep !== ConversationStep.COLLECTING_DATA && afterCvSave.currentStep !== ConversationStep.CONFIRMING_DATA) {
                       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
                     }
-                    await reply(prisma, candidate.id, from, `Hoja de vida recibida. Aún necesito estos datos para completar tu registro: ${missing.join(', ')}`, '', { source: 'bot_flow' });
+                    await composeContextualAttachmentReply(prisma, {
+                      candidate: afterCvSave,
+                      from,
+                      inboundText: filename,
+                      recentOutbound,
+                      vacancy: afterCvVacancy,
+                      situation: 'request_missing_data',
+                      decision: 'cv_saved_request_remaining_fields',
+                      attachmentAnalysis: analysis,
+                      missingFields: missing,
+                      fallbackIntent: 'request_missing_data'
+                    });
                   }
                 }
               } catch (error) {

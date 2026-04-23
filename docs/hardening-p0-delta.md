@@ -6,13 +6,12 @@ Este delta refina componentes existentes sin rehacer arquitectura:
 - **Extractor estructurado**: se reforzó el prompt de extracción para evitar `fullName` falsos (saludos), evitar edad desde direcciones (ej. "calle 80") y exigir evidencia/coherencia por campo con salida strict JSON Schema.
 - **Policy layer**: endurece bloqueo de saludo como nombre, bloqueo de dirección como edad y protección anti-autodescarte para campos críticos con evidencia débil.
 - **Policy layer**: la inferencia de género débil pasa a revisión (`weak_gender_inference`) y no se persiste para decisiones duras.
-- **Response policy**: ahora usa variantes por intención, control de repetición semántica y salida con `text + intent`.
-- **Response policy**: se añadió intención explícita `request_missing_data` y selección con anti-repetición sobre outbound reciente.
-- **Response policy**: agrega contexto corto de adjunto/pregunta para evitar respuestas rígidas y repetitivas.
+- **AI-first contextual replies**: se agrega `contextualReply` como capa principal de redacción por situación (`replySituation`) usando `gpt-5.4-mini-2026-03-17`.
+- **Response policy**: queda relegada a fallback defensivo cuando el modelo falla, responde vacío o repite semánticamente outbound reciente.
 - **Attachment analyzer**: pipeline híbrida PDF/DOCX + fallback multimodal con Responses API, sin tratar automáticamente toda imagen como HV en foto.
 - **Attachment analyzer**: se fija política explícita para `.doc` legacy: no se procesa con `mammoth`, se clasifica como `OTHER` (`unsupported_doc_format`) y se solicita reenviar HV en PDF o DOCX para evitar falsos `CV_VALID`.
-- **Webhook**: integra `responsePolicy` para respuestas de adjuntos, guarda clasificación en `AttachmentAnalysis` y evita pausar automáticamente el bot por recepción de media.
-- **Webhook**: ahora pasa outbound reciente al `responsePolicy` para variar respuestas de adjuntos sin repetir frase exacta.
+- **Webhook**: enruta adjuntos y continuidad de faltantes por `contextualReply` como vía principal; mantiene decisiones de negocio deterministas (guardar/no guardar HV, update de estado y booking).
+- **Webhook**: reduce mensajes hardcodeados en adjuntos/follow-up y usa `responsePolicy` solo como respaldo técnico.
 - **Reminder/keepalive**: recordatorio operativo ajustado a una hora y encolado con JobQueue (cuando `FF_POSTGRES_JOB_QUEUE=true`); keepalive se corta como política permanente al detectar entrevista vencida, reminder ya intentado o booking inactivo (sin depender de rollout adicional).
 - **Job worker**: el job `INTERVIEW_REMINDER` procesa por `candidateId` (payload) para evitar ejecuciones amplias no deterministas.
 - **JobQueue**: se agrega `completedAt` para trazabilidad de finalización en jobs `DONE` y `FAILED` terminales.
@@ -24,6 +23,28 @@ Este delta refina componentes existentes sin rehacer arquitectura:
 - Formalizar que keepalive no debe ejecutarse después de entrevista vencida ni en bookings cerrados/intentados.
 - Cubrir explícitamente con tests: `.doc` no válido como HV, anti-repetición con contexto de pregunta+adjunto, dispatcher por `candidateId`, y guardas de keepalive.
 - Sin cambios de `ConversationStep`, sin cambios SaaS/tenant/RLS, sin rehacer webhook/conversationEngine ni extractor estructurado.
+
+## Cierre P0: AI-first replies y adjuntos
+
+- **Situación conversacional explícita**: cada respuesta se redacta desde una situación (`attachment_resume_photo`, `attachment_id_doc`, `attachment_other_doc`, `attachment_unreadable`, `request_missing_data`, etc.), no desde plantillas quemadas.
+- **Attachment understanding vs attachment classification**:
+  - `attachmentAnalyzer` sigue clasificando.
+  - La clasificación alimenta la decisión determinista y la situación conversacional.
+  - La redacción final sale del modelo contextual.
+- **Reglas deterministas conservadas**:
+  - `CV_VALID` guarda HV.
+  - `CV_IMAGE_ONLY`, `ID_DOC`, `OTHER`, `UNREADABLE` no guardan HV final.
+  - Ningún media pausa bot por defecto.
+- **Fallback policy**:
+  - Si Responses API falla, no responde, o repite semánticamente, se usa `responsePolicy`.
+  - Se conserva continuidad operativa sin romper flujo.
+- **Criterio de escalamiento humano**:
+  - Escala solo cuando hay baja confianza real (`UNREADABLE/OTHER` con confianza muy baja), contradicción o pregunta imposible de resolver con reglas/contexto disponible.
+  - En escalamiento se evita inventar respuestas; se usa la lógica existente de intervención humana.
+- **Eliminación práctica de respuestas quemadas**:
+  - Las plantillas dejan de ser mecanismo principal.
+  - Outbound reciente se usa como guardrail anti-repetición.
+  - Se prioriza respuesta natural contextual antes de retomar el paso del proceso.
 
 ## Feature flags relevantes (fallback false)
 
