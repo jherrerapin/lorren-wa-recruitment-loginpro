@@ -73,7 +73,7 @@ test('imagen no se clasifica automáticamente como CV_IMAGE_ONLY', async () => {
 test('responsePolicy mantiene intención para pedir HV en PDF/Word', () => {
   const result = buildPolicyReply({ replyIntent: 'request_cv_pdf_word', recentOutbound: [] });
   assert.equal(result.intent, 'request_cv_pdf_word');
-  assert.match(result.text, /PDF|Word/i);
+  assert.match(result.text, /PDF|DOCX/i);
 });
 
 test('responsePolicy soporta request_missing_data con intención determinista', () => {
@@ -83,12 +83,34 @@ test('responsePolicy soporta request_missing_data con intención determinista', 
 });
 
 test('responsePolicy evita repetición fuerte incluso por similitud semántica', () => {
-  const repeated = 'Perfecto, para seguir me falta tu HV en PDF o Word (.doc/.docx).';
+  const repeated = 'Perfecto, para seguir me falta tu HV en PDF o DOCX.';
   const result = buildPolicyReply({
     replyIntent: 'request_cv_pdf_word',
-    recentOutbound: [{ body: 'Perfecto para seguir me falta tu hoja de vida en PDF o Word doc docx' }]
+    recentOutbound: [{ body: 'Perfecto para seguir me falta tu hoja de vida en PDF o DOCX' }]
   });
   assert.notEqual(result.text, repeated);
+});
+
+test('responsePolicy usa contexto de pregunta para evitar tono mecánico con adjunto', () => {
+  const result = buildPolicyReply({
+    replyIntent: 'request_missing_cv',
+    recentOutbound: [{ body: 'Gracias. Ese documento no corresponde a la hoja de vida. Por favor envíame tu HV en PDF o DOCX.' }],
+    contextSummary: 'pregunta sobre horario y adjunto archivo'
+  });
+
+  assert.match(result.text, /Respondo tu pregunta y seguimos\./i);
+  assert.notMatch(result.text, /^Gracias\. Ese documento no corresponde/i);
+});
+
+test('.doc se clasifica como OTHER y no se trata como CV válido', async () => {
+  const result = await analyzeAttachment({
+    buffer: Buffer.from('contenido binario doc legacy'),
+    mimeType: 'application/msword',
+    filename: 'hv.doc'
+  });
+
+  assert.equal(result.classification, 'OTHER');
+  assert.equal(result.rationale, 'unsupported_doc_format');
 });
 
 test('campo crítico ambiguo activa protección de autodescarte', () => {
@@ -163,6 +185,45 @@ test('keepalive se corta si entrevista inactiva o reminder ya intentado', async 
   try {
     await runReminderDispatcher(prisma, { now });
     assert.equal(whatsappMock.sentMessages.length, 0);
+  } finally {
+    restoreAxios();
+  }
+});
+
+test('runReminderDispatcher dirigido por candidateId procesa solo el candidato esperado', async () => {
+  process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
+  process.env.META_ACCESS_TOKEN = 'meta-access-token';
+  const now = new Date('2026-04-23T21:00:00.000Z');
+  const prisma = createMockPrisma({
+    candidates: [
+      {
+        id: 'cand-target',
+        phone: '573111111111',
+        status: 'NUEVO',
+        currentStep: 'ASK_CV',
+        reminderState: 'SCHEDULED',
+        reminderScheduledFor: new Date('2026-04-23T20:00:00.000Z'),
+        lastInboundAt: new Date('2026-04-23T19:00:00.000Z')
+      },
+      {
+        id: 'cand-other',
+        phone: '573222222222',
+        status: 'NUEVO',
+        currentStep: 'ASK_CV',
+        reminderState: 'SCHEDULED',
+        reminderScheduledFor: new Date('2026-04-23T20:00:00.000Z'),
+        lastInboundAt: new Date('2026-04-23T19:00:00.000Z')
+      }
+    ]
+  });
+  const whatsappMock = createWhatsappMock();
+  const restoreAxios = installOpenAIMock({ whatsappMock });
+  try {
+    await runReminderDispatcher(prisma, { now, candidateId: 'cand-target' });
+    assert.equal(whatsappMock.sentMessages.length, 1);
+    assert.equal(whatsappMock.sentMessages[0].to, '573111111111');
+    assert.equal(prisma.state.candidates.find((c) => c.id === 'cand-target')?.reminderState, 'SENT');
+    assert.equal(prisma.state.candidates.find((c) => c.id === 'cand-other')?.reminderState, 'SCHEDULED');
   } finally {
     restoreAxios();
   }

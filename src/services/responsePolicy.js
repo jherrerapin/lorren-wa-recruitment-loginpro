@@ -1,23 +1,23 @@
 const INTENT_VARIANTS = {
   request_cv_pdf_word: [
-    'Gracias por enviarlo. Para continuar necesito tu hoja de vida en PDF o Word (.doc/.docx).',
-    'Te ayudo con eso: envíame la hoja de vida en PDF o en Word para poder registrarla.',
-    'Perfecto, para seguir me falta tu HV en PDF o Word (.doc/.docx).'
+    'Gracias por enviarlo. Para continuar necesito tu hoja de vida en PDF o DOCX.',
+    'Te ayudo con eso: envíame la hoja de vida en PDF o en DOCX para poder registrarla.',
+    'Perfecto, para seguir me falta tu HV en PDF o DOCX.'
   ],
   request_missing_cv: [
-    'Gracias. Ese documento no corresponde a la hoja de vida. Por favor envíame tu HV en PDF o Word.',
-    'Recibido. Aún me falta tu hoja de vida; compártela en formato PDF o Word, por favor.',
-    'Gracias por compartirlo. Para avanzar necesito tu hoja de vida en PDF o Word (.doc/.docx).'
+    'Gracias. Ese documento no corresponde a la hoja de vida. Por favor envíame tu HV en PDF o DOCX.',
+    'Recibido. Aún me falta tu hoja de vida; compártela en formato PDF o DOCX, por favor.',
+    'Gracias por compartirlo. Para avanzar necesito tu hoja de vida en PDF o DOCX.'
   ],
   attachment_id_doc: [
-    'Recibí tu documento de identidad. Ahora envíame tu hoja de vida en PDF o Word para continuar.',
-    'Gracias por la cédula. Para seguir con la postulación necesito tu HV en PDF o Word.',
-    'Documento de identidad recibido. Me falta la hoja de vida en PDF o Word (.doc/.docx).'
+    'Recibí tu documento de identidad. Ahora envíame tu hoja de vida en PDF o DOCX para continuar.',
+    'Gracias por la cédula. Para seguir con la postulación necesito tu HV en PDF o DOCX.',
+    'Documento de identidad recibido. Me falta la hoja de vida en PDF o DOCX.'
   ],
   attachment_unreadable: [
-    'No pude leer bien el archivo. ¿Puedes reenviarlo en PDF o Word (.doc/.docx)?',
-    'El archivo llegó ilegible. Por favor vuelve a enviarlo en PDF o Word para revisarlo.',
-    'Tu archivo no se pudo procesar correctamente; compártemelo de nuevo en PDF o Word.'
+    'No pude leer bien el archivo. ¿Puedes reenviarlo en PDF o DOCX?',
+    'El archivo llegó ilegible. Por favor vuelve a enviarlo en PDF o DOCX para revisarlo.',
+    'Tu archivo no se pudo procesar correctamente; compártemelo de nuevo en PDF o DOCX.'
   ],
   answer_question_then_continue: [
     'Claro, te confirmo eso. Si te parece, después continuamos con el dato pendiente.',

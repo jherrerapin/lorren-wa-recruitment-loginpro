@@ -130,7 +130,17 @@ export async function analyzeAttachment({ buffer, mimeType = '', filename = '' }
     return buildResult({ ...classifyFromText(text, 'pdf'), attachmentKind: 'pdf', extractedText: text });
   }
 
-  if (mime.includes('word') || name.endsWith('.docx') || name.endsWith('.doc')) {
+  if (mime === 'application/msword' || name.endsWith('.doc')) {
+    return buildResult({
+      attachmentKind: 'doc',
+      classification: 'OTHER',
+      confidence: 0.99,
+      rationale: 'unsupported_doc_format',
+      evidence: ['unsupported_doc_format']
+    });
+  }
+
+  if (mime.includes('word') || name.endsWith('.docx')) {
     const parsed = await mammoth.extractRawText({ buffer }).catch(() => ({ value: '' }));
     const text = String(parsed?.value || '').slice(0, 6000);
     if (process.env.OPENAI_API_KEY) {

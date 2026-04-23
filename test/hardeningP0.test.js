@@ -43,13 +43,13 @@ test('género femenino explícito se persiste con evidencia sólida', () => {
 });
 
 test('responsePolicy evita repetición fuerte en consecutivos', () => {
-  const repeated = 'Gracias por enviarlo. Para continuar necesito tu hoja de vida en PDF o Word (.doc/.docx).';
+  const repeated = 'Gracias por enviarlo. Para continuar necesito tu hoja de vida en PDF o DOCX.';
   const reply = buildPolicyReply({
     replyIntent: 'request_cv_pdf_word',
     recentOutbound: [{ body: repeated }]
   });
 
   assert.notEqual(reply.text, repeated);
-  assert.match(reply.text, /PDF|Word/i);
+  assert.match(reply.text, /PDF|DOCX/i);
   assert.equal(reply.intent, 'request_cv_pdf_word');
 });

@@ -162,10 +162,9 @@ test('runReminderDispatcher envia keepalive de entrevista antes de que venza la 
   }
 });
 
-test('keepalive se corta cuando la entrevista ya pasó con flag activa', async () => {
+test('keepalive se corta cuando la entrevista ya pasó', async () => {
   process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
   process.env.META_ACCESS_TOKEN = 'meta-access-token';
-  process.env.FF_STOP_KEEPALIVE_AFTER_INTERVIEW = 'true';
 
   const now = new Date('2026-04-08T21:00:00.000Z');
   const prisma = createMockPrisma({
@@ -196,7 +195,60 @@ test('keepalive se corta cuando la entrevista ya pasó con flag activa', async (
     await runReminderDispatcher(prisma, { now });
     assert.equal(whatsappMock.sentMessages.length, 0);
   } finally {
-    delete process.env.FF_STOP_KEEPALIVE_AFTER_INTERVIEW;
+    restoreAxios();
+  }
+});
+
+test('keepalive no corre si booking está inactivo o ventana cerrada por reminder', async () => {
+  process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
+  process.env.META_ACCESS_TOKEN = 'meta-access-token';
+
+  const now = new Date('2026-04-08T21:00:00.000Z');
+  const prisma = createMockPrisma({
+    candidates: [{
+      id: 'cand-interview-closed-status',
+      phone: '573000000001',
+      status: 'REGISTRADO',
+      currentStep: 'SCHEDULED',
+      reminderState: 'NONE',
+      lastInboundAt: new Date('2026-04-08T20:00:00.000Z'),
+      botPaused: false
+    }, {
+      id: 'cand-interview-window-closed',
+      phone: '573000000002',
+      status: 'REGISTRADO',
+      currentStep: 'SCHEDULED',
+      reminderState: 'NONE',
+      lastInboundAt: new Date('2026-04-08T20:00:00.000Z'),
+      botPaused: false
+    }],
+    interviewBookings: [{
+      id: 'booking-closed-status',
+      candidateId: 'cand-interview-closed-status',
+      vacancyId: 'vac',
+      slotId: 'slot',
+      scheduledAt: new Date('2026-04-08T23:00:00.000Z'),
+      status: 'CANCELLED',
+      reminderSentAt: null,
+      reminderWindowClosed: false
+    }, {
+      id: 'booking-window-closed',
+      candidateId: 'cand-interview-window-closed',
+      vacancyId: 'vac',
+      slotId: 'slot',
+      scheduledAt: new Date('2026-04-08T23:00:00.000Z'),
+      status: 'SCHEDULED',
+      reminderSentAt: null,
+      reminderWindowClosed: true
+    }]
+  });
+  const whatsappMock = createWhatsappMock();
+  const restoreAxios = installOpenAIMock({ whatsappMock });
+
+  try {
+    await runReminderDispatcher(prisma, { now });
+    assert.equal(whatsappMock.sentMessages.length, 0);
+  } finally {
     restoreAxios();
   }
 });

@@ -12,7 +12,6 @@ export function getHardeningFlags() {
     policyLayer: isFeatureEnabled('FF_POLICY_LAYER', false),
     postgresJobQueue: isFeatureEnabled('FF_POSTGRES_JOB_QUEUE', false),
     attachmentAnalyzer: isFeatureEnabled('FF_ATTACHMENT_ANALYZER', false),
-    stopKeepaliveAfterInterview: isFeatureEnabled('FF_STOP_KEEPALIVE_AFTER_INTERVIEW', false),
     semanticShortMemory: isFeatureEnabled('FF_SEMANTIC_SHORT_MEMORY', false),
     asyncAdminMediaForward: isFeatureEnabled('FF_ASYNC_ADMIN_MEDIA_FORWARD', false)
   };
