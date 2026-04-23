@@ -25,6 +25,7 @@ import { think, extractEngineCandidateFields } from '../services/conversationEng
 import { storeCandidateCv } from '../services/cvStorage.js';
 import { applyFieldPolicy } from '../services/policyLayer.js';
 import { analyzeAttachment } from '../services/attachmentAnalyzer.js';
+import { buildPolicyReply } from '../services/responsePolicy.js';
 import { isFeatureEnabled } from '../services/featureFlags.js';
 import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
@@ -2057,10 +2058,10 @@ export function webhookRouter(prisma) {
               }).catch((error) => console.warn('[ADMIN_FORWARD_IMAGE_QUEUE_ERROR]', error?.message || error));
             }
             if (isFeatureEnabled('FF_ATTACHMENT_ANALYZER', false)) {
-              await reply(prisma, candidate.id, from, 'Gracias. Si tu hoja de vida está en foto, envíamela en PDF o Word (.doc/.docx) para poder procesarla.', '', { source: 'attachment_analyzer' });
+              const policyReply = buildPolicyReply({ replyIntent: 'request_cv_pdf_word', recentOutbound: [] });
+              await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
             } else {
               await forwardInboundImageToSupervisor(from, freshCandidate?.fullName || null, message.image || {});
-              await pauseInterviewFlow(prisma, candidate.id, 'Imagen recibida pendiente de revision manual');
             }
             continue;
           }
@@ -2078,8 +2079,7 @@ export function webhookRouter(prisma) {
             const recentDocumentsCount = await countRecentInboundDocuments(prisma, candidate.id, 15);
             debugTrace.recent_document_count = recentDocumentsCount;
             if (recentDocumentsCount >= 3) {
-              await pauseInterviewFlow(prisma, candidate.id, 'Multiples documentos recibidos pendiente de revision manual');
-              continue;
+              debugTrace.attachment_high_volume = true;
             }
 
             const mimeType = message.document?.mime_type || '';
@@ -2107,11 +2107,14 @@ export function webhookRouter(prisma) {
                 } else {
                   debugTrace.cv_saved = false;
                   if (analysis.classification === 'CV_IMAGE_ONLY') {
-                    await reply(prisma, candidate.id, from, 'Gracias. Esa hoja de vida está en imagen. Envíamela en PDF o Word (.doc/.docx), por favor.', '', { source: 'attachment_analyzer' });
+                    const policyReply = buildPolicyReply({ replyIntent: 'request_cv_pdf_word', recentOutbound: [] });
+                    await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
                   } else if (analysis.classification === 'ID_DOC') {
-                    await reply(prisma, candidate.id, from, 'Recibí tu documento, pero aún me falta tu hoja de vida en PDF o Word (.doc/.docx).', '', { source: 'attachment_analyzer' });
+                    const policyReply = buildPolicyReply({ replyIntent: 'attachment_id_doc', recentOutbound: [] });
+                    await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
                   } else {
-                    await reply(prisma, candidate.id, from, 'Ese archivo no parece ser la hoja de vida. Compárteme tu HV en PDF o Word para continuar.', '', { source: 'attachment_analyzer' });
+                    const policyReply = buildPolicyReply({ replyIntent: analysis.classification === 'UNREADABLE' ? 'attachment_unreadable' : 'request_missing_cv', recentOutbound: [] });
+                    await reply(prisma, candidate.id, from, policyReply.text, '', { source: 'attachment_analyzer', replyIntent: policyReply.intent });
                   }
                   continue;
                 }

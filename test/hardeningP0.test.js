@@ -49,6 +49,7 @@ test('responsePolicy evita repetición fuerte en consecutivos', () => {
     recentOutbound: [{ body: repeated }]
   });
 
-  assert.notEqual(reply, repeated);
-  assert.match(reply, /PDF|Word/i);
+  assert.notEqual(reply.text, repeated);
+  assert.match(reply.text, /PDF|Word/i);
+  assert.equal(reply.intent, 'request_cv_pdf_word');
 });

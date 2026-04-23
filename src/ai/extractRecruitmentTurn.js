@@ -19,7 +19,18 @@ function fallbackResult() {
       medicalRestrictions: null,
       experienceInfo: null
     },
-    fieldEvidence: {},
+    fieldEvidence: {
+      fullName: { snippet: null, confidence: 0, source: 'fallback' },
+      age: { snippet: null, confidence: 0, source: 'fallback' },
+      documentType: { snippet: null, confidence: 0, source: 'fallback' },
+      documentNumber: { snippet: null, confidence: 0, source: 'fallback' },
+      gender: { snippet: null, confidence: 0, source: 'fallback' },
+      locality: { snippet: null, confidence: 0, source: 'fallback' },
+      neighborhood: { snippet: null, confidence: 0, source: 'fallback' },
+      transportMode: { snippet: null, confidence: 0, source: 'fallback' },
+      medicalRestrictions: { snippet: null, confidence: 0, source: 'fallback' },
+      experienceInfo: { snippet: null, confidence: 0, source: 'fallback' }
+    },
     conflicts: [],
     attachment: { mentioned: false, kindHint: null },
     replyIntent: 'continue_flow'

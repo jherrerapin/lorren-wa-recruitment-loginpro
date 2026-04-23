@@ -9,7 +9,7 @@ import { formatInterviewDate } from './interviewScheduler.js';
 import { isFeatureEnabled } from './featureFlags.js';
 import { enqueueJob, JOB_TYPES } from './jobQueue.js';
 
-const REMINDER_DELAY_MS = 25 * 60 * 1000;
+const REMINDER_DELAY_MS = 60 * 60 * 1000;
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 
 function hasValue(value) {
@@ -97,7 +97,7 @@ export async function scheduleReminderForCandidate(prisma, candidateId, now = ne
     }
   });
 
-  if (isFeatureEnabled('FF_POSTGRES_JOB_QUEUE', false) && prisma?.jobQueue?.create) {
+  if (prisma?.jobQueue?.create && isFeatureEnabled('FF_POSTGRES_JOB_QUEUE', false)) {
     await enqueueJob(prisma, {
       type: JOB_TYPES.INTERVIEW_REMINDER,
       payload: { candidateId },
