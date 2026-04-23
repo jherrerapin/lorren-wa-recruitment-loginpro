@@ -1,0 +1,33 @@
+{
+  "name": "lorren-wa-recruitment-loginpro",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "prisma generate && prisma migrate deploy && node src/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.866.0",
+    "@aws-sdk/s3-request-presigner": "^3.866.0",
+    "@prisma/client": "^6.6.0",
+    "axios": "^1.9.0",
+    "bcrypt": "^5.1.1",
+    "connect-pg-simple": "^10.0.0",
+    "cookie-parser": "^1.4.7",
+    "ejs": "^3.1.10",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "prisma": "^6.6.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

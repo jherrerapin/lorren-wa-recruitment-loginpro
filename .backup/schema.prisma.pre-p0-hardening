@@ -1,0 +1,269 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CandidateStatus {
+  NUEVO
+  REGISTRADO
+  VALIDANDO
+  APROBADO
+  RECHAZADO
+  CONTACTADO
+  CONTRATADO
+}
+
+enum AppUserRole {
+  DEV
+  ADMIN
+}
+
+enum UserAccessScope {
+  ALL
+  CITY
+  VACANCY
+}
+
+enum ConversationStep {
+  MENU
+  GREETING_SENT
+  COLLECTING_DATA
+  CONFIRMING_DATA
+  ASK_CV
+  DONE
+  SCHEDULING
+  SCHEDULED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  DOCUMENT
+  IMAGE
+  INTERACTIVE
+  UNKNOWN
+}
+
+enum ReminderState {
+  NONE
+  SCHEDULED
+  SENT
+  CANCELLED
+  SKIPPED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNKNOWN
+}
+
+enum ExperienceRequirement {
+  YES
+  NO
+  INDIFFERENT
+}
+
+enum BookingStatus {
+  SCHEDULED
+  CONFIRMED
+  ATTENDED
+  NO_RESPONSE
+  RESCHEDULED
+  NO_SHOW
+  CANCELLED
+}
+
+model City {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  operations Operation[]
+}
+
+model Operation {
+  id        String    @id @default(cuid())
+  name      String
+  cityId    String
+  city      City      @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  vacancies Vacancy[]
+  @@unique([name, cityId])
+}
+
+model Vacancy {
+  id                    String                @id @default(cuid())
+  title                 String
+  key                   String                @unique
+  role                  String
+  roleDescription       String?
+  city                  String
+  operationAddress      String
+  interviewAddress      String?
+  requirements          String
+  conditions            String
+  requiredDocuments     String?
+  minAge                Int?
+  maxAge                Int?
+  experienceRequired    ExperienceRequirement @default(INDIFFERENT)
+  experienceTimeText    String?
+  minExperienceMonths   Int?
+  maxExperienceMonths   Int?
+  imageData             Bytes?
+  imageMimeType         String?
+  zoneFilterEnabled     Boolean               @default(false)
+  zoneContext           String?
+  schedulingEnabled     Boolean               @default(false)
+  acceptingApplications Boolean               @default(true)
+  isActive              Boolean               @default(true)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  operationId           String?
+  operation             Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  candidates            Candidate[]
+  interviewSlots        InterviewSlot[]
+  interviewBookings     InterviewBooking[]
+  accessUsers           AppUser[]
+}
+
+model InterviewSlot {
+  id            String             @id @default(cuid())
+  vacancyId     String
+  vacancy       Vacancy            @relation(fields: [vacancyId], references: [id])
+  dayOfWeek     Int?
+  specificDate  DateTime?
+  startTime     String
+  maxCandidates Int                @default(10)
+  isActive      Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  bookings      InterviewBooking[]
+}
+
+model InterviewBooking {
+  id                   String        @id @default(cuid())
+  candidateId          String
+  candidate            Candidate     @relation(fields: [candidateId], references: [id])
+  vacancyId            String
+  vacancy              Vacancy       @relation(fields: [vacancyId], references: [id])
+  slotId               String
+  slot                 InterviewSlot @relation(fields: [slotId], references: [id])
+  scheduledAt          DateTime
+  status               BookingStatus @default(SCHEDULED)
+  reminderSentAt       DateTime?
+  reminderWindowClosed Boolean       @default(false)
+  reminderResponse     String?
+  notes                String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+}
+
+model Candidate {
+  id                     String            @id @default(cuid())
+  phone                  String            @unique
+  vacancyId              String?
+  vacancy                Vacancy?          @relation(fields: [vacancyId], references: [id])
+  fullName               String?
+  documentType           String?
+  documentNumber         String?
+  age                    Int?
+  gender                 Gender            @default(UNKNOWN)
+  neighborhood           String?
+  locality               String?
+  zoneViable             Boolean?
+  experienceInfo         String?
+  experienceTime         String?
+  medicalRestrictions    String?
+  transportMode          String?
+  rejectionReason        String?
+  rejectionDetails       String?
+  zone                   String?
+  experienceSummary      String?
+  availability           String?
+  status                 CandidateStatus   @default(NUEVO)
+  currentStep            ConversationStep  @default(MENU)
+  cvOriginalName         String?
+  cvMimeType             String?
+  cvStorageKey           String?
+  cvData                 Bytes?
+  multilineWindowUntil   DateTime?
+  multilineBatchVersion  Int               @default(0)
+  lastInboundAt          DateTime?
+  lastOutboundAt         DateTime?
+  devLastSeenAt          DateTime?
+  lastReminderAt         DateTime?
+  reminderScheduledFor   DateTime?
+  reminderState          ReminderState     @default(NONE)
+  botPaused              Boolean           @default(false)
+  botPausedAt            DateTime?
+  botPausedBy            String?
+  botPauseReason         String?
+  botResumeMode          String?
+  potentialDuplicate     Boolean           @default(false)
+  potentialDuplicateAt   DateTime?
+  potentialDuplicateNote String?
+  interviewNotes         String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  messages               Message[]
+  interviewBookings      InterviewBooking[]
+  adminEvents            CandidateAdminEvent[]
+}
+
+model Message {
+  id          String           @id @default(cuid())
+  candidateId String
+  candidate   Candidate        @relation(fields: [candidateId], references: [id])
+  waMessageId String?          @unique
+  direction   MessageDirection
+  messageType MessageType
+  body        String?
+  rawPayload  Json?
+  respondedAt DateTime?
+  createdAt   DateTime         @default(now())
+}
+
+model CandidateAdminEvent {
+  id          String    @id @default(cuid())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  actorRole   String
+  eventType   String
+  eventLabel  String
+  fromValue   String?
+  toValue     String?
+  note        String?
+  createdAt   DateTime  @default(now())
+  @@index([candidateId, createdAt])
+}
+
+model AppUser {
+  id                  String          @id @default(cuid())
+  username            String          @unique
+  passwordHash        String
+  recoveryCodeHash    String?
+  role                AppUserRole     @default(ADMIN)
+  accessScope         UserAccessScope @default(ALL)
+  scopeCity           String?
+  scopeVacancyId      String?
+  scopeVacancy        Vacancy?        @relation(fields: [scopeVacancyId], references: [id], onDelete: SetNull)
+  recoveryPhone       String?
+  recoveryEmail       String?
+  createdByUsername   String?
+  lastPasswordResetAt DateTime?
+  isActive            Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  @@index([accessScope, scopeCity])
+  @@index([scopeVacancyId])
+}
