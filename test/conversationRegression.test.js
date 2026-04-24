@@ -4,10 +4,10 @@ import {
   alignCandidateLocationFields,
   getCandidateResidenceValue,
   getResidenceFieldConfig,
-  looksLikeNoMedicalRestrictionsText,
   normalizeCandidateFields,
   parseNaturalData
 } from '../src/services/candidateData.js';
+import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
 
 const BOGOTA_VACANCY = {
   city: 'Bogota',
@@ -18,7 +18,7 @@ const BOGOTA_VACANCY = {
   }
 };
 
-test('regresion real: mensaje aislado de saludo no produce ubicacion candidata', () => {
+test('regresion real: fragmento conversacional aislado no produce ubicacion candidata', () => {
   const parsed = parseNaturalData('Tardes');
   const normalized = normalizeCandidateFields(parsed);
 
@@ -41,23 +41,34 @@ test('regresion real: Bogota usa localidad como residencia principal', () => {
   assert.equal(getCandidateResidenceValue(aligned, BOGOTA_VACANCY), 'Suba');
 });
 
-test('regresion real: respuesta informal de salud se entiende como sin restricciones medicas', () => {
-  const examples = [
-    'No tengo q pena',
-    'No tengo qué pena',
-    'Estoy BN de salud',
-    'Estoy bien de salud',
-    'bien de salud'
-  ];
+test('regresion real: si la IA entiende una respuesta contextual, el parser local no la bloquea', async () => {
+  const understanding = await conversationUnderstanding('respuesta corta del candidato sobre su estado de salud', {
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['medicalRestrictions'],
+      lastBotQuestion: 'Indica si tienes alguna restricción médica.'
+    },
+    aiResult: {
+      status: 'ok',
+      intent: 'continue_flow',
+      parsedFields: {
+        medicalRestrictions: 'Sin restricciones médicas'
+      },
+      extraction: {
+        fieldEvidence: {
+          medicalRestrictions: {
+            snippet: 'respuesta corta del candidato sobre su estado de salud',
+            confidence: 0.93,
+            source: 'model_context'
+          }
+        }
+      }
+    }
+  });
 
-  for (const example of examples) {
-    const parsed = parseNaturalData(example);
-    const normalized = normalizeCandidateFields(parsed);
-    const detected = normalized.medicalRestrictions
-      || (looksLikeNoMedicalRestrictionsText(example, { allowImplicit: true }) ? 'Sin restricciones médicas' : undefined);
-
-    assert.equal(detected, 'Sin restricciones médicas', example);
-  }
+  assert.equal(understanding.candidateFields.medicalRestrictions, 'Sin restricciones médicas');
+  assert.equal(understanding.intent, 'provide_data');
+  assert.equal(understanding.fieldConfidence.medicalRestrictions, 0.93);
 });
 
 test('regresion real: bloque de datos del candidato queda normalizado', () => {
