@@ -29,8 +29,36 @@ function baseUnderstanding() {
   };
 }
 
-function detectCorrectionIntent(text = '') {
-  return /\b(corrijo|correccion|corrijo|de hecho|mejor|actualizo|quise decir|perdon|perd[oó]n)\b/i.test(String(text || ''));
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function compactFields(fields = {}) {
+  return Object.fromEntries(
+    Object.entries(fields || {}).filter(([, value]) => hasValue(value))
+  );
+}
+
+function normalizeAiFields(aiFields = {}) {
+  const normalized = normalizeCandidateFields(compactFields(aiFields));
+  return compactFields(normalized);
+}
+
+function buildConfidenceFromEvidence(fields = {}, evidence = {}) {
+  const confidence = {};
+  for (const field of Object.keys(fields || {})) {
+    const fieldEvidence = evidence?.[field];
+    confidence[field] = Number.isFinite(Number(fieldEvidence?.confidence))
+      ? Number(fieldEvidence.confidence)
+      : 0.85;
+  }
+  return confidence;
+}
+
+function detectCorrectionIntent(text = '', aiResult = {}) {
+  const extraction = aiResult?.extraction || {};
+  if (Array.isArray(extraction.conflicts) && extraction.conflicts.length) return true;
+  return ['provide_correction', 'confirm_correction'].includes(String(aiResult?.intent || '').toLowerCase());
 }
 
 function findTransportContradiction(candidateFields = {}) {
@@ -45,22 +73,35 @@ function findTransportContradiction(candidateFields = {}) {
 export async function conversationUnderstanding(text, options = {}) {
   const input = String(text || '');
   const understanding = baseUnderstanding();
-  const aiFields = options.aiResult?.parsedFields || {};
-
-  const localParsed = parseNaturalData(input);
-  const normalized = normalizeCandidateFields(localParsed);
+  const aiResult = options.aiResult || null;
+  const aiFields = aiResult?.parsedFields || {};
+  const aiCandidateFields = normalizeAiFields(aiFields);
+  const aiEvidence = aiResult?.extraction?.fieldEvidence || {};
   const aiCity = typeof aiFields.city === 'string' ? aiFields.city.trim() || null : null;
   const aiRoleHint = typeof aiFields.roleHint === 'string' ? aiFields.roleHint.trim() || null : null;
-  const localRoleHint = detectRoleHintFromText(input);
+  const extractionWasUseful = aiResult?.status === 'ok' && (Object.keys(aiCandidateFields).length > 0 || aiCity || aiRoleHint || aiResult.intent);
 
-  understanding.candidateFields = normalized;
-  understanding.intent = Object.keys(normalized).length ? 'provide_data' : 'unknown';
-  understanding.suggestedNextAction = Object.keys(normalized).length ? 'collect_or_confirm' : 'ask_for_clarification';
+  if (extractionWasUseful) {
+    understanding.candidateFields = aiCandidateFields;
+    understanding.intent = Object.keys(aiCandidateFields).length ? 'provide_data' : (aiResult.intent || 'unknown');
+    understanding.suggestedNextAction = Object.keys(aiCandidateFields).length ? 'collect_or_confirm' : 'ask_for_clarification';
+    understanding.fieldConfidence = buildConfidenceFromEvidence(aiCandidateFields, aiEvidence);
+  } else {
+    const localParsed = parseNaturalData(input);
+    const normalized = normalizeCandidateFields(localParsed);
+    understanding.candidateFields = compactFields(normalized);
+    understanding.intent = Object.keys(understanding.candidateFields).length ? 'provide_data' : 'unknown';
+    understanding.suggestedNextAction = Object.keys(understanding.candidateFields).length ? 'collect_or_confirm' : 'ask_for_clarification';
+    for (const field of Object.keys(understanding.candidateFields)) {
+      understanding.fieldConfidence[field] = 0.7;
+    }
+  }
 
   if (aiCity) {
     understanding.cityDetection = { detected: true, value: aiCity, confidence: 0.85 };
   }
 
+  const localRoleHint = extractionWasUseful ? null : detectRoleHintFromText(input);
   if (aiRoleHint || localRoleHint) {
     const value = aiRoleHint || localRoleHint;
     understanding.vacancyDetection = {
@@ -70,30 +111,17 @@ export async function conversationUnderstanding(text, options = {}) {
     };
   }
 
-  if (
-    understanding.intent === 'unknown'
-    && (understanding.cityDetection.detected || understanding.vacancyDetection.detected)
-    && /\b(vacante|cargo|empleo|trabajo|interes|aplicar|postular|continuar)\b/i.test(input)
-  ) {
-    understanding.intent = 'apply_intent';
-    understanding.suggestedNextAction = 'resolve_vacancy';
-  }
-
-  if (detectCorrectionIntent(input)) {
+  if (detectCorrectionIntent(input, aiResult)) {
     understanding.intent = 'provide_correction';
-    understanding.corrections.push({ source: 'text', reason: 'explicit_correction_phrase' });
+    understanding.corrections.push({ source: aiResult?.status === 'ok' ? 'ai_extraction' : 'text', reason: 'correction_or_conflict_detected' });
   }
 
-  const contradiction = findTransportContradiction(normalized);
+  const contradiction = findTransportContradiction(understanding.candidateFields);
   if (contradiction) understanding.contradictions.push(contradiction);
 
-  for (const field of Object.keys(normalized)) {
-    understanding.fieldConfidence[field] = 0.9;
-  }
-
   if (typeof options.aiParser === 'function') {
-    const aiResult = await options.aiParser(input);
-    if (aiResult?.intent) understanding.intent = aiResult.intent;
+    const secondaryAiResult = await options.aiParser(input, options.context || {});
+    if (secondaryAiResult?.intent) understanding.intent = secondaryAiResult.intent;
   }
 
   return understanding;

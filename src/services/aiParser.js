@@ -114,13 +114,13 @@ function modelSupportsTemperature(model = '') {
   return n ? !REASONING_MODELS.some((b) => n.startsWith(b)) : false;
 }
 
-export async function tryOpenAIParse(text) {
+export async function tryOpenAIParse(text, context = {}) {
   if (!process.env.OPENAI_API_KEY) {
     return { used: false, status: 'disabled', intent: null, parsedFields: {} };
   }
 
   if (isFeatureEnabled('FF_RESPONSES_EXTRACTOR', false)) {
-    const extracted = await extractRecruitmentTurn({ text });
+    const extracted = await extractRecruitmentTurn({ text, context });
     const extraction = extracted?.extraction || {};
     return {
       used: extracted.used,

@@ -2,7 +2,7 @@ import axios from 'axios';
 import { RECRUITMENT_EXTRACTION_SCHEMA } from './recruitmentExtractionSchema.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
-const MODEL = 'gpt-5.4-mini-2026-03-17';
+const MODEL = process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17';
 
 function fallbackResult() {
   return {
@@ -53,6 +53,20 @@ function parseStructuredOutput(data = {}) {
   return null;
 }
 
+function buildContextPayload(text = '', context = {}) {
+  return {
+    candidateMessage: String(text || '').slice(0, 3000),
+    conversationContext: {
+      currentStep: context.currentStep || null,
+      pendingFields: Array.isArray(context.pendingFields) ? context.pendingFields : [],
+      lastBotQuestion: context.lastBotQuestion || null,
+      recentConversation: Array.isArray(context.recentConversation) ? context.recentConversation.slice(-12) : [],
+      vacancy: context.vacancy || null,
+      candidateKnownData: context.candidateKnownData || null
+    }
+  };
+}
+
 export async function extractRecruitmentTurn({ text = '', context = {} } = {}) {
   if (!process.env.OPENAI_API_KEY) return { used: false, status: 'disabled', extraction: fallbackResult() };
 
@@ -64,14 +78,18 @@ export async function extractRecruitmentTurn({ text = '', context = {} } = {}) {
         content: [
           {
             type: 'input_text',
-            text: `Extrae entidades de reclutamiento y evidencia verificable. Responde SOLO JSON valido bajo schema estricto.
-Reglas criticas:
-- Nunca guardes saludos/frases comunes como fullName (ej: "hola", "buenas", "mucho gusto").
-- Nunca inferir age desde direcciones como "calle 80", "carrera 7", "apto 302".
-- En gender, prioriza evidencia explicita ("soy mujer", "candidata", "soy hombre"). No fuerces inferencia debil.
-- Cada campo debe traer evidencia con snippet, source y confidence coherente.
-- Si hay ambiguedad real, deja field en null y agrega conflicts con alternatives.
-- No converses ni agregues texto fuera del JSON.`
+            text: `Eres el módulo de comprensión conversacional de un reclutador por WhatsApp.
+Tu tarea no es responder al candidato; tu tarea es entender el turno completo y devolver datos estructurados bajo el schema.
+
+Principios de interpretación:
+- Usa el mensaje actual junto con el contexto de conversación, especialmente la última pregunta del bot, el paso actual y los campos pendientes.
+- Interpreta respuestas implícitas cuando el candidato responde a una pregunta anterior, aunque no repita el nombre técnico del campo.
+- Distingue entre intención conversacional, datos del candidato, correcciones, dudas y adjuntos.
+- No persistas como dato un fragmento que solo cumple función conversacional dentro del turno.
+- No infieras datos sensibles o excluyentes sin evidencia verificable en el mensaje o en el contexto.
+- Si el turno es ambiguo, deja el campo en null y registra el conflicto en vez de inventar.
+- Cada campo que no sea null debe traer evidencia: snippet tomado del candidato, source y confidence.
+- Devuelve solo JSON válido bajo el schema estricto.`
           }
         ]
       },
@@ -80,7 +98,7 @@ Reglas criticas:
         content: [
           {
             type: 'input_text',
-            text: JSON.stringify({ text: String(text || '').slice(0, 3000), context })
+            text: JSON.stringify(buildContextPayload(text, context))
           }
         ]
       }
