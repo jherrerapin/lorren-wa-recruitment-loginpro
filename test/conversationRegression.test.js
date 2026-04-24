@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyFieldPolicy } from '../src/services/policyLayer.js';
 import {
   alignCandidateLocationFields,
   getCandidateResidenceValue,
@@ -19,31 +18,13 @@ const BOGOTA_VACANCY = {
   }
 };
 
-test('regresion real: no guarda saludos como barrio/localidad', () => {
-  const policyResult = applyFieldPolicy({
-    fields: {
-      neighborhood: 'Tardes',
-      locality: 'Tardes',
-      zone: 'Tardes'
-    },
-    fieldEvidence: {
-      neighborhood: { confidence: 0.95, snippet: 'Tardes', source: 'model' },
-      locality: { confidence: 0.95, snippet: 'Tardes', source: 'model' },
-      zone: { confidence: 0.95, snippet: 'Tardes', source: 'model' }
-    }
-  });
+test('regresion real: mensaje aislado de saludo no produce ubicacion candidata', () => {
+  const parsed = parseNaturalData('Tardes');
+  const normalized = normalizeCandidateFields(parsed);
 
-  assert.equal(policyResult.persistedFields.neighborhood, undefined);
-  assert.equal(policyResult.persistedFields.locality, undefined);
-  assert.equal(policyResult.persistedFields.zone, undefined);
-  assert.deepEqual(
-    policyResult.blocked.map((item) => item.reason),
-    [
-      'conversational_noise_as_location',
-      'conversational_noise_as_location',
-      'conversational_noise_as_location'
-    ]
-  );
+  assert.equal(normalized.neighborhood, undefined);
+  assert.equal(normalized.locality, undefined);
+  assert.equal(normalized.zone, undefined);
 });
 
 test('regresion real: Bogota usa localidad como residencia principal', () => {
