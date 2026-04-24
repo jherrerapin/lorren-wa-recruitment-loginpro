@@ -1,21 +1,34 @@
 const CRITICAL_DISCARD_FIELDS = new Set(['age', 'documentType', 'documentNumber', 'gender']);
-const GREETING_REGEX = /^(hola|buenas|buenos\s+dias|buenas\s+tardes|buenas\s+noches|mucho\s+gusto|si\s+claro|por\s+pdf|gracias|ok|listo|como estas)/i;
+const RESIDENCE_FIELDS = new Set(['neighborhood', 'locality', 'zone']);
+const GREETING_REGEX = /^(hola|buenas|buenos\s+dias|buenos\s+días|buenas\s+tardes|buenas\s+noches|tardes|noches|dias|días|mucho\s+gusto|si\s+claro|por\s+pdf|gracias|ok|listo|como estas|cómo estás)$/i;
+const CONVERSATIONAL_NOISE_REGEX = /^(hola|buenas|buenos\s+dias|buenos\s+días|buenas\s+tardes|buenas\s+noches|tardes|noches|dias|días|gracias|ok|listo|vale|bueno|buena|bn|si|sí|sii|sip|correcto|correcta|perfecto)$/i;
 const ADDRESS_AGE_REGEX = /\b(calle|cra|carrera|avenida|av\.?|mz|manzana|torre|apto|barrio|localidad)\s*\d+/i;
 const AGE_CONTEXT_REGEX = /\b(tengo|edad|anos|años|cumpli|cumplo|soy de)\b/i;
+
+function normalizePolicyText(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
 
 function hasStrongEvidence(evidence = {}) {
   return Number(evidence.confidence || 0) >= 0.75 && typeof evidence.snippet === 'string' && evidence.snippet.trim().length >= 2;
 }
 
 function appearsLikeName(value) {
-  const normalized = String(value || '')
-    .trim()
-    .replace(/\s+/g, ' ');
+  const normalized = normalizePolicyText(value);
   if (!normalized) return false;
   if (GREETING_REGEX.test(normalized)) return false;
   const parts = normalized.split(' ');
   if (parts.length < 2) return false;
   return parts.every((part) => /^[a-záéíóúñü.'-]+$/i.test(part) && part.length >= 2);
+}
+
+function appearsLikeConversationalNoise(value, evidence = {}) {
+  const normalizedValue = normalizePolicyText(value);
+  const normalizedSnippet = normalizePolicyText(evidence.snippet || '');
+  return CONVERSATIONAL_NOISE_REGEX.test(normalizedValue)
+    || (normalizedSnippet && CONVERSATIONAL_NOISE_REGEX.test(normalizedSnippet));
 }
 
 function hasReliableGenderEvidence(value, evidence = {}) {
@@ -43,6 +56,12 @@ export function applyFieldPolicy(extraction = {}, currentCandidate = {}) {
 
     if (field === 'fullName' && !appearsLikeName(value)) {
       blocked.push({ field, reason: 'greeting_as_name', value, evidence });
+      continue;
+    }
+
+    if (RESIDENCE_FIELDS.has(field) && appearsLikeConversationalNoise(value, evidence)) {
+      blocked.push({ field, reason: 'conversational_noise_as_location', value, evidence });
+      protectedDiscardFields.push(field);
       continue;
     }
 
