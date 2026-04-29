@@ -5,7 +5,7 @@ function sessionAuth(req, res, next) {
   const role = req.session?.userRole;
   if (!role) return res.redirect('/login');
   req.userRole = role;
-  if (role !== 'dev') return res.redirect('/admin');
+  if (!['dev', 'admin'].includes(role)) return res.redirect('/admin');
   return next();
 }
 

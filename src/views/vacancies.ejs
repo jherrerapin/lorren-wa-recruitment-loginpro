@@ -194,7 +194,7 @@
   <a href="/admin">Panel</a>
   <a href="/admin/vacancies" class="nav-active">Vacantes</a>
   <% if (canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
-  <% if (role === 'dev') { %>
+  <% if (role === 'dev' || role === 'admin') { %>
     <a href="/admin/locations">Ciudades</a>
   <% } %>
   <% if (role === 'dev') { %>
@@ -324,7 +324,7 @@
           <div class="form-group full">
             <label for="c-operation">Operación / Zona <span style="color:var(--red)">*</span></label>
             <% if (operations.length === 0) { %>
-              <div class="no-ops-warn">⚠️ No hay operaciones configuradas.<% if (role === 'dev') { %> <a href="/admin/locations" style="color:var(--amber);font-weight:700;">Crea ciudades y operaciones primero →</a><% } %></div>
+              <div class="no-ops-warn">⚠️ No hay operaciones configuradas.<% if (role === 'dev' || role === 'admin') { %> <a href="/admin/locations" style="color:var(--amber);font-weight:700;">Crea ciudades y operaciones primero →</a><% } %></div>
               <input type="hidden" name="operationId" value="" />
             <% } else { %>
             <select id="c-operation" name="operationId" required>
@@ -487,7 +487,7 @@
           <div class="form-group full">
             <label for="e-operation">Operación / Zona</label>
             <% if (operations.length === 0) { %>
-              <div class="no-ops-warn">⚠️ Sin operaciones.<% if (role === 'dev') { %> <a href="/admin/locations" style="color:var(--amber);font-weight:700;">Configurar →</a><% } %></div>
+              <div class="no-ops-warn">⚠️ Sin operaciones.<% if (role === 'dev' || role === 'admin') { %> <a href="/admin/locations" style="color:var(--amber);font-weight:700;">Configurar →</a><% } %></div>
               <input type="hidden" name="operationId" value="" />
             <% } else { %>
             <select id="e-operation" name="operationId">
