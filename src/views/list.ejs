@@ -1220,6 +1220,7 @@
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const registeredNoBookingNote = candidateObservationSnippet(c); %>
                     <% if (registeredNoBookingNote) { %><div class="candidate-note">Observaciones: <%= registeredNoBookingNote %></div><% } %>
+                    <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                     <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= formatCandidatePhone(c.phone) %></a></div>
@@ -1272,6 +1273,7 @@
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const completeWithoutCvNote = candidateObservationSnippet(c); %>
                     <% if (completeWithoutCvNote) { %><div class="candidate-note">Observaciones: <%= completeWithoutCvNote %></div><% } %>
+                    <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                     <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= formatCandidatePhone(c.phone) %></a></div>
@@ -1329,6 +1331,7 @@
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const registeredCompleteNote = candidateObservationSnippet(c); %>
                     <% if (registeredCompleteNote) { %><div class="candidate-note">Observaciones: <%= registeredCompleteNote %></div><% } %>
+                    <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                     <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
                   </div>
                     <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= formatCandidatePhone(c.phone) %></a></div>
@@ -1382,6 +1385,7 @@
                     <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
                     <% const cvOnlyNote = candidateObservationSnippet(c); %>
                     <% if (cvOnlyNote) { %><div class="candidate-note">Observaciones: <%= cvOnlyNote %></div><% } %>
+                    <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                     <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= formatCandidatePhone(c.phone) %></a></div>
@@ -1437,6 +1441,7 @@
                     <% if (approvedCandidateMeta) { %><div class="candidate-extra"><%= approvedCandidateMeta %></div><% } %>
                     <% const approvedCandidateNote = candidateObservationSnippet(c); %>
                     <% if (approvedCandidateNote) { %><div class="candidate-note">Observaciones: <%= approvedCandidateNote %></div><% } %>
+                    <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                     <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>Tel. <%= formatCandidatePhone(c.phone) %></a></div>
@@ -1484,6 +1489,7 @@
                     <% if (contractedCandidateMeta) { %><div class="candidate-extra"><%= contractedCandidateMeta %></div><% } %>
                     <% const contractedCandidateNote = candidateObservationSnippet(c); %>
                     <% if (contractedCandidateNote) { %><div class="candidate-note">Observaciones: <%= contractedCandidateNote %></div><% } %>
+                    <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                     <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
                   </div>
                   <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>Tel. <%= formatCandidatePhone(c.phone) %></a></div>
