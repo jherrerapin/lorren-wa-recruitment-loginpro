@@ -771,6 +771,7 @@
               </div>
             <% } %>
             <% if (role === 'dev') { %>
+              <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
               <div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div>
             <% } %>
             <% const legacyCandidateNote = candidateObservationSnippet(c); %>
@@ -1545,6 +1546,7 @@
             <td style="font-weight:600;">
               <%= c.fullName || '—' %>
               <% if (role === 'dev') { %>
+                <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                 <div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div>
               <% } %>
             </td>
@@ -1590,6 +1592,7 @@
                 </div>
               <% } %>
               <% if (role === 'dev') { %>
+                <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
                 <div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div>
               <% } %>
               <% const orphanCandidateNote = candidateObservationSnippet(c); %>

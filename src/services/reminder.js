@@ -25,7 +25,7 @@ function hasValue(value) {
 
 function buildRequiredFields(candidate = {}) {
   const residenceConfig = getResidenceFieldConfig(candidate?.vacancy);
-  return [
+  const fields = [
     ['fullName', 'nombre completo'],
     ['documentType', 'tipo de documento'],
     ['documentNumber', 'número de documento'],
@@ -34,6 +34,16 @@ function buildRequiredFields(candidate = {}) {
     ['medicalRestrictions', 'restricciones médicas'],
     ['transportMode', 'medio de transporte']
   ];
+
+  if (candidate?.vacancy?.experienceRequired === 'YES') {
+    fields.push(['experienceInfo', 'experiencia']);
+    const timeLabel = candidate?.vacancy?.experienceTimeText
+      ? `tiempo de experiencia (${candidate.vacancy.experienceTimeText})`
+      : 'tiempo de experiencia';
+    fields.push(['experienceTime', timeLabel]);
+  }
+
+  return fields;
 }
 
 function formatList(items = []) {

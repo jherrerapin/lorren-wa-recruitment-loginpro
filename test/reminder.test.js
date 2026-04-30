@@ -89,6 +89,43 @@ test('buildReminderText pide localidad para vacantes de Bogota', () => {
   assert.doesNotMatch(text, /barrio/i);
 });
 
+
+test('buildReminderText incluye experiencia cuando la vacante la exige', () => {
+  const text = buildReminderText({
+    fullName: 'Laura Gomez',
+    documentType: 'CC',
+    documentNumber: '123456789',
+    age: 29,
+    locality: 'Suba',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    cvData: {},
+    experienceInfo: null,
+    experienceTime: null,
+    vacancy: {
+      city: 'Bogota',
+      experienceRequired: 'YES',
+      experienceTimeText: 'mínimo 6 meses'
+    }
+  });
+
+  assert.match(text, /experiencia/i);
+  assert.match(text, /tiempo de experiencia/i);
+  assert.match(text, /mínimo 6 meses/i);
+});
+
+test('canScheduleReminder permite paso SCHEDULING cuando no hay entrevista agendada', () => {
+  const candidate = {
+    status: 'REGISTRADO',
+    currentStep: 'SCHEDULING',
+    reminderState: 'NONE',
+    lastInboundAt: new Date(),
+    botPaused: false
+  };
+
+  assert.equal(canScheduleReminderPolicy(candidate), true);
+});
+
 test('runReminderDispatcher envía recordatorio contextualizado según lo que falta', async () => {
   process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
   process.env.META_ACCESS_TOKEN = 'meta-access-token';
