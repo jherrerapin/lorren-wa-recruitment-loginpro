@@ -363,6 +363,7 @@ REGLAS CRITICAS:
 - extractedFields tiene peso real: guarda correcciones y datos nuevos aunque no esten solo en save_fields.
 - Si haces una pregunta y pides algo en el mismo mensaje, responde primero la duda y luego retoma el siguiente paso.
 - Si no hubo progreso real, no repitas la misma estructura del bot anterior; reformula y aporta algo mas util.
+- Nunca pidas el genero de forma directa; solo inferir si el candidato lo expresa claramente.
 - Si el mensaje del candidato suena a cierre humano, desistimiento o pausa, adaptate al contexto.
 
 Devuelve SOLO el JSON. Sin texto antes ni despues.`;
@@ -438,6 +439,9 @@ function buildLoopGuardReply({ candidate = {}, currentStep = '', recentMessages 
   }
 
   if (!candidate?.vacancyId) {
+    if (!getCoreFieldGaps(candidate).length) {
+      return 'Ya tengo tus datos principales registrados. Si quieres actualizar vacante o ciudad, dime el ajuste puntual y lo hago sin pedirte todo de nuevo.';
+    }
     return 'Para ubicar bien tu proceso, cuentame desde que ciudad nos escribes y para que vacante o cargo aplicas.';
   }
 
