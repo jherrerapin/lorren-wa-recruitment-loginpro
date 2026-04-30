@@ -622,6 +622,24 @@ function normalizeBinaryData(value) {
   return Buffer.from(value);
 }
 
+function buildLastBotFlowIssue(messages = []) {
+  const issues = new Set(['engine_fallback', 'engine_suppressed', 'bot_manual_review']);
+  const lastIssueMessage = [...(messages || [])]
+    .reverse()
+    .find((message) => {
+      if (message?.direction !== 'OUTBOUND') return false;
+      const source = String(message?.rawPayload?.source || '').trim();
+      return issues.has(source);
+    });
+
+  if (!lastIssueMessage) return null;
+  return {
+    source: String(lastIssueMessage.rawPayload?.source || ''),
+    reason: normalizeString(lastIssueMessage.rawPayload?.reason) || 'Sin detalle técnico registrado',
+    createdAt: lastIssueMessage.createdAt || null
+  };
+}
+
 function parseInterviewAssignment(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -1738,6 +1756,9 @@ export function adminRouter(prisma) {
       lastInboundAt: outboundWindow?.lastInboundAt || candidate.lastInboundAt || null,
       hasNewInbound: candidateHasUnreadInbound(candidate)
     };
+    const lastBotFlowIssue = req.userRole === 'dev'
+      ? buildLastBotFlowIssue(candidate.messages || [])
+      : null;
 
     const cvSuccess = normalizeString(req.query.cvSuccess);
     const cvError   = normalizeString(req.query.cvError);
@@ -1757,6 +1778,7 @@ export function adminRouter(prisma) {
       availableVacancies,
       availableInterviewSlots,
       adminEvents,
+      lastBotFlowIssue,
       returnToPath,
       outboundWindow, cvSuccess, cvError,
       outboundSuccess, outboundError, botPauseSuccess, botPauseError,
@@ -2272,7 +2294,7 @@ export function adminRouter(prisma) {
         cvMimeType: true,
         cvStorageKey: true,
         currentStep: true,
-        vacancy: { select: { city: true } }
+        vacancy: { select: { city: true, experienceRequired: true } }
       }
     });
 
@@ -2291,8 +2313,13 @@ export function adminRouter(prisma) {
       locality:            residenceInput,
       medicalRestrictions: normalizeString(raw.medicalRestrictions),
       transportMode:       normalizeString(raw.transportMode),
+      experienceInfo:      normalizeString(raw.experienceInfo),
+      experienceTime:      normalizeString(raw.experienceTime),
     });
     candidateCoreFields = alignCandidateLocationFields(candidateCoreFields, existingCandidate.vacancy, { clearAlternate: true });
+    if (existingCandidate.vacancy?.experienceRequired === 'YES' && !candidateCoreFields.experienceTime) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'Para esta vacante debes diligenciar el tiempo de experiencia del candidato.'));
+    }
     const adminStatusFields = {
       rejectionReason:  normalizeString(raw.rejectionReason),
       rejectionDetails: normalizeString(raw.rejectionDetails),

@@ -293,6 +293,7 @@
 
     <div class="card">
       <h2>Estado del candidato</h2>
+      <% if (role === 'dev') { %>
       <div style="margin-bottom:12px;font-size:14px;">
         <strong>Bot:</strong>
         <% if (candidate.botPaused) { %>
@@ -302,6 +303,15 @@
           <span style="color:#1f7a38;">Activo</span>
         <% } %>
       </div>
+      <% } %>
+      <% if (role === 'dev' && lastBotFlowIssue) { %>
+        <div class="alert alert-error" style="margin-bottom:12px;">
+          <strong>Último bloqueo de flujo:</strong>
+          <div>Origen: <code><%= lastBotFlowIssue.source %></code></div>
+          <div>Motivo: <%= lastBotFlowIssue.reason %></div>
+          <div>Fecha: <%= lastBotFlowIssue.createdAt ? formatDateTimeCO(lastBotFlowIssue.createdAt) : 'Sin fecha' %></div>
+        </div>
+      <% } %>
       <% if (role === 'dev' && outboundWindow?.expiringSoon && interviewWindowManaged) { %>
         <div class="alert alert-error" style="background:#fff7ed;border-color:#fdba74;color:#9a3412;">
               La ventana de 24h está por vencer para este candidato. El sistema intentará enviar un mensaje de continuidad antes del cierre para incentivar respuesta y sostener el contacto.
@@ -654,6 +664,20 @@
             <label for="transportMode">Medio de transporte</label>
             <input id="transportMode" name="transportMode" type="text" value="<%= candidate.transportMode || '' %>" />
           </div>
+          <% if (vacancyRequiresExperience) { %>
+          <div class="field-group">
+            <label for="experienceInfo">Experiencia</label>
+            <select id="experienceInfo" name="experienceInfo">
+              <option value="" <%= !candidate.experienceInfo ? 'selected' : '' %>>Sin definir</option>
+              <option value="Sí" <%= candidate.experienceInfo === 'Sí' ? 'selected' : '' %>>Sí</option>
+              <option value="No" <%= candidate.experienceInfo === 'No' ? 'selected' : '' %>>No</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="experienceTime"><%= candidate?.vacancy?.experienceTimeText ? `Tiempo de experiencia (${candidate.vacancy.experienceTimeText})` : 'Tiempo de experiencia' %></label>
+            <input id="experienceTime" name="experienceTime" type="text" value="<%= candidate.experienceTime || '' %>" required />
+          </div>
+          <% } %>
           <div class="field-group">
             <label for="statusEdit">Estado</label>
             <select id="statusEdit" name="status">
