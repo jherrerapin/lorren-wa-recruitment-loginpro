@@ -131,10 +131,11 @@ function hasStrongAgeEvidence(text = '', parsed = {}, evidenceByField = {}) {
   const age = Number(parsed?.age);
   if (!Number.isFinite(age)) return false;
   const ageEvidence = evidenceByField.age || {};
-  if (Number(ageEvidence.confidence || 0) >= 0.85) return true;
   const n = normalizeComparableText(text);
+  if (/\b(trabajador(?:es)?|personas?|operarios?|empleados?|grupo?s?|turno?s?)\b/.test(n) && /\b(mayor(?:es)?\s+a\s+\d{1,2}|mas\s+de\s+\d{1,2})\b/.test(n)) return false;
   if (/\b(calle|carrera|cra|avenida|av)\s+\d+/.test(n)) return false;
-  return /\b(tengo|edad|anos|años|cumpli|cumplo|soy de)\b/.test(n);
+  if (/\b(tengo|edad|anos|años|cumpli|cumplo|soy de)\b/.test(n)) return true;
+  return Number(ageEvidence.confidence || 0) >= 0.92 && /\bedad\b/.test(n);
 }
 function shouldRejectByRequirements(text, parsed = {}, evidenceByField = {}) {
   const n = normalizeComparableText(text);
@@ -518,6 +519,10 @@ function isSchedulingConfirmationIntent(text = '') {
 function isSchedulingRescheduleIntent(text = '') {
   const n = normalizeComparableText(text);
   return /\b(otro horario|otra hora|otro dia|otro dia|reagend|cambiar horario|no puedo|no me queda|no me sirve|mas tarde|mas temprano|otra opcion)\b/.test(n);
+}
+function isApplicationFollowUpQuestion(text = '') {
+  const n = normalizeComparableText(text);
+  return /\b(me postule|me postule para|me habia postulado|quisiera saber que ha pasado|que ha pasado con mi postulacion|como va mi postulacion|estado de mi postulacion|qued[eo] en que|si hay novedad)\b/.test(n);
 }
 
 function getPrimaryEngineAction(actions = []) {
@@ -1600,7 +1605,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     && !isDocumentValidationQuestion(cleanText)
   );
 
-  if (resolvedIntent === 'faq' || isFAQ(cleanText)) {
+  if ((resolvedIntent === 'faq' || isFAQ(cleanText)) && candidate.currentStep !== ConversationStep.DONE) {
     if (currentVacancy) return replyWithVacancyContext(candidate, currentVacancy);
     return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });
   }
@@ -1736,6 +1741,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   if (candidate.currentStep === ConversationStep.DONE) {
+    if (isApplicationFollowUpQuestion(cleanText)) {
+      const body = 'Gracias por escribirnos. Tu postulación ya está registrada y tu hoja de vida también. Si hay novedades del proceso, te contactaremos por este medio.';
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_done_followup' });
+    }
     if (hasDataIntent) {
       const { updatedCandidate: updated, decisions } = await applyDecisionsAndUpdate();
       if (decisions.persistedFields.length) {

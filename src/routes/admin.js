@@ -2315,6 +2315,7 @@ export function adminRouter(prisma) {
       transportMode:       normalizeString(raw.transportMode),
       experienceInfo:      normalizeString(raw.experienceInfo),
       experienceTime:      normalizeString(raw.experienceTime),
+      experienceSummary:   normalizeString(raw.experienceSummary),
     });
     candidateCoreFields = alignCandidateLocationFields(candidateCoreFields, existingCandidate.vacancy, { clearAlternate: true });
     if (existingCandidate.vacancy?.experienceRequired === 'YES' && candidateCoreFields.experienceInfo === 'Sí' && !candidateCoreFields.experienceTime) {

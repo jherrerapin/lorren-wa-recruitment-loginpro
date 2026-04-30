@@ -111,6 +111,20 @@ export const conversationCases = [
     }
   },
   {
+    id: 'experience-headcount-number-does-not-trigger-age-rejection',
+    steps: ['En operaciones logisticas mas de 12 años, y manejo de personal grupos mayores a 56 trabajadores por turno'],
+    candidate: candidateDefaults({ currentStep: 'COLLECTING_DATA', vacancyId: 'vac-post', age: 42 }),
+    expect: {
+      candidate: {
+        age: 42,
+        experienceInfo: 'Sí',
+        experienceTime: '12 años'
+      },
+      notStatus: 'RECHAZADO',
+      lastReplyNotIncludes: ['no es posible continuar con tu postulacion', 'edad fuera del rango']
+    }
+  },
+  {
     id: 'fragmented-data-consolidation',
     steps: ['juan perez', 'cc 1234567890', '28 años', 'barrio jordan', 'sin restricciones medicas', 'cicla'],
     candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post' }),
@@ -787,6 +801,33 @@ export const conversationCases = [
         botPauseReason: 'Consulta documental pendiente de validacion manual'
       },
       lastReplyIncludes: ['validar ese caso documental', 'respuesta segura']
+    }
+  },
+  {
+    id: 'done-step-followup-about-previous-application-gets-status-ack',
+    steps: ['Yo me había postulado para un empleo con ustedes quisiera saber que ha pasado'],
+    candidate: candidateDefaults({
+      currentStep: 'DONE',
+      vacancyId: 'vac-post',
+      status: 'REGISTRADO',
+      fullName: 'Sergio Andres Cortes Osorio',
+      documentType: 'CC',
+      documentNumber: '1075662931',
+      age: 35,
+      neighborhood: 'Nueva Castilla',
+      medicalRestrictions: 'Sin restricciones médicas',
+      transportMode: 'Bus',
+      experienceInfo: 'Sí',
+      experienceTime: '5 años',
+      cvData: Buffer.from('pdf'),
+      cvOriginalName: 'sergio-hv.pdf',
+      cvMimeType: 'application/pdf',
+      lastInboundAt: new Date()
+    }),
+    expect: {
+      candidate: { currentStep: 'DONE', status: 'REGISTRADO' },
+      lastReplyIncludes: ['postulación ya está registrada', 'te contactaremos por este medio'],
+      lastReplyNotIncludes: ['dejo tu perfil registrado', 'puedo tomar tus datos y tu hoja de vida']
     }
   },
   {

@@ -116,6 +116,16 @@ test('extrae tiempo de experiencia solo con contexto laboral', () => {
   assert.equal(normalized.experienceTime, '2 años');
 });
 
+test('no toma la edad como tiempo de experiencia en bloque multilinea', () => {
+  const parsed = parseNaturalData(`35 años
+si tengo experiencia
+5 años en una distribuidora de auxiliar de bodega`);
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.age, 35);
+  assert.equal(normalized.experienceInfo, 'Sí');
+  assert.equal(normalized.experienceTime, '5 años');
+});
+
 test('captura resumen de experiencia cuando describe funciones', () => {
   const parsed = parseNaturalData('Experiencia de más de 10 años en manejo de personal, programación de turnos y coordinación de empaque y despacho');
   const normalized = normalizeCandidateFields(parsed);

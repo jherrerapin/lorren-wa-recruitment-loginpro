@@ -9,7 +9,8 @@ const CANDIDATE_FIELDS = [
   'medicalRestrictions',
   'transportMode',
   'experienceInfo',
-  'experienceTime'
+  'experienceTime',
+  'experienceSummary'
 ];
 
 export { CANDIDATE_FIELDS };
@@ -187,6 +188,8 @@ function isIncompleteFieldValue(field, value) {
       return ['pendiente', 'tal vez'].includes(normalized);
     case 'experienceTime':
       return !/\d/.test(normalized);
+    case 'experienceSummary':
+      return normalized.length < 12;
     default:
       return false;
   }
@@ -223,6 +226,8 @@ function canConsolidateField(field, currentValue, nextValue) {
       return currentNormalized !== nextNormalized;
     case 'experienceTime':
       return currentNormalized.length < nextNormalized.length || (!/\d/.test(currentNormalized) && /\d/.test(nextNormalized));
+    case 'experienceSummary':
+      return currentNormalized.length < nextNormalized.length;
     default:
       return false;
   }

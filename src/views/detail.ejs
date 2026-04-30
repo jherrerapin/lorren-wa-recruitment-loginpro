@@ -265,6 +265,10 @@
           <label><%= candidate?.vacancy?.experienceTimeText ? `Tiempo de experiencia (${candidate.vacancy.experienceTimeText})` : 'Tiempo de experiencia' %></label>
           <span><%= candidate.experienceTime || '—' %></span>
         </div>
+        <div class="info-item">
+          <label>Contexto de experiencia</label>
+          <span><%= candidate.experienceSummary || '—' %></span>
+        </div>
         <% } %>
         <div class="info-item" style="grid-column: 1 / -1;">
           <label>Observaciones</label>
@@ -676,6 +680,10 @@
           <div class="field-group">
             <label for="experienceTime"><%= candidate?.vacancy?.experienceTimeText ? `Tiempo de experiencia (${candidate.vacancy.experienceTimeText})` : 'Tiempo de experiencia' %></label>
             <input id="experienceTime" name="experienceTime" type="text" value="<%= candidate.experienceTime || '' %>" <%= candidate.experienceInfo === 'Sí' ? 'required' : '' %> />
+          </div>
+          <div class="field-group field-group-full">
+            <label for="experienceSummary">Contexto de experiencia</label>
+            <textarea id="experienceSummary" name="experienceSummary" rows="3" placeholder="Ej: coordinación de turnos, manejo de personal, operación logística..."><%= candidate.experienceSummary || '' %></textarea>
           </div>
           <% } %>
           <div class="field-group">

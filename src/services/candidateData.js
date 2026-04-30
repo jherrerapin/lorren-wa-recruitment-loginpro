@@ -513,14 +513,38 @@ function detectRobustExperienceTime(text = '') {
     }
   }
 
-  const duration = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/i)?.[1];
-  if (!duration) return null;
-
-  const hasWorkContext = /\b(experien|trabaj|labor|cargo|oficio)\b/.test(compact);
+  const durationRegex = /\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/gi;
+  const hasGlobalWorkContext = /\b(experien|trabaj|labor|cargo|oficio)\b/.test(compact);
   const hasShortAffirmativeContext = /\bsi\s+tengo\s+/.test(compact);
-  if (!hasWorkContext && !hasShortAffirmativeContext) return null;
+  let bestDuration = null;
+  let bestScore = -1;
 
-  return normalizeExperienceDuration(duration);
+  for (const match of compact.matchAll(durationRegex)) {
+    const duration = match?.[1];
+    if (!duration) continue;
+    const start = match.index || 0;
+    const left = compact.slice(Math.max(0, start - 24), start);
+    const right = compact.slice(start + duration.length, Math.min(compact.length, start + duration.length + 28));
+    const nearContext = `${left} ${right}`;
+    const durationUnitLooksLikeYears = /\ba/.test(duration);
+    const looksLikeAgeSnippet = durationUnitLooksLikeYears
+      && /\b(?:edad|tengo|soy\s+de)\s*$/.test(left)
+      && !/\b(experien|trabaj|labor|cargo|oficio)\b/.test(nearContext);
+    if (looksLikeAgeSnippet) continue;
+
+    const hasLocalWorkContext = /\b(experien|trabaj|labor|cargo|oficio)\b/.test(nearContext);
+    const startsText = start < 2;
+    const looksStandaloneYears = durationUnitLooksLikeYears && startsText && !hasLocalWorkContext;
+    let score = hasLocalWorkContext ? 3 : (hasShortAffirmativeContext ? 2 : (hasGlobalWorkContext ? 1 : 0));
+    if (looksStandaloneYears) score -= 2;
+    if (score < 1) continue;
+    if (score > bestScore) {
+      bestScore = score;
+      bestDuration = duration;
+    }
+  }
+
+  return bestDuration ? normalizeExperienceDuration(bestDuration) : null;
 }
 
 function detectExperienceSummary(text = '') {
