@@ -235,6 +235,7 @@ model Candidate {
   interviewBookings      InterviewBooking[]
   adminEvents            CandidateAdminEvent[]
   attachmentAnalyses     AttachmentAnalysis[]
+  openAIUsageLogs        OpenAIUsageLog[]
 }
 
 model Message {
@@ -317,4 +318,29 @@ model AttachmentAnalysis {
   createdAt      DateTime                 @default(now())
 
   @@index([candidateId, createdAt])
+}
+
+model OpenAIUsageLog {
+  id                    String    @id @default(cuid())
+  candidateId           String?
+  candidate             Candidate? @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  messageId             String?
+  phoneHash             String?
+  modelRequested        String
+  modelReturned         String?
+  usageType             String    @default("unknown")
+  inputTokens           Int       @default(0)
+  outputTokens          Int       @default(0)
+  cachedInputTokens     Int       @default(0)
+  totalTokens           Int       @default(0)
+  dataSharingEnabled    Boolean   @default(false)
+  privacyMaskingEnabled Boolean   @default(true)
+  sensitiveDataDetected Boolean   @default(false)
+  redactionSummary      Json?
+  openAIResponseId      String?
+  createdAt             DateTime  @default(now())
+
+  @@index([candidateId, createdAt])
+  @@index([modelRequested, createdAt])
+  @@index([usageType, createdAt])
 }
