@@ -3,32 +3,64 @@
  * ──────────────────────────────────────────────────────────────────────
  *
  * Genera respuestas de texto natural usando OpenAI, en vez de mensajes
- * estáticos. El bot se comporta como un reclutador humano que:
+ * estáticos.
  *
- *  • Responde preguntas sobre la vacante basándose en la info del DB.
- *  • Solicita datos que faltan de forma natural y contextual.
- *  • Ofrece horarios de entrevista de forma conversacional.
- *  • Nunca "quema" frases fijas; varía el lenguaje según el contexto.
- *  • Si el candidato se presenta o saluda, responde con amabilidad y
- *    LUEGO solicita datos — no interrumpe saludos con un formulario.
- *
- * Principios de diseño:
- *  - Conciso: máx 3 oraciones por respuesta (WhatsApp no es un email).
- *  - Humano: evita listas de viñetas y lenguaje corporativo frío.
- *  - Contextual: usa el nombre del candidato si ya lo tiene.
- *  - Sin mencionar nunca que es un bot, a menos que el candidato pregunte.
+ * Ajuste privacidad:
+ * - El inbound del candidato se enmascara antes de OpenAI.
+ * - No se envía nombre completo; solo primer nombre cuando ya existe.
+ * - Se registra consumo de tokens cuando se recibe prisma en los parámetros.
  */
 
 import axios from 'axios';
+import { buildOpenAIPrivacyMetadata, maskTextForOpenAI } from './openaiPrivacy.js';
+import { logOpenAIUsage } from './openaiUsageLogger.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5.5-2026-04-23';
+
+function firstName(fullName) {
+  return typeof fullName === 'string' && fullName.trim()
+    ? fullName.trim().split(/\s+/)[0]
+    : null;
+}
+
+function maskTextList(list = []) {
+  return list.map((item) => maskTextForOpenAI(String(item || '')).sanitizedText);
+}
+
+function resolvePrisma(options = {}) {
+  return options.prisma || options.db || null;
+}
+
+async function postOpenAI({ payload, timeout, prisma, candidate, usageType, privacy }) {
+  const response = await axios.post(
+    OPENAI_URL,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      timeout
+    }
+  );
+
+  await logOpenAIUsage(prisma, {
+    responseData: response.data,
+    modelRequested: payload.model,
+    usageType,
+    candidate,
+    privacy
+  });
+
+  return response;
+}
 
 /**
  * Construye el system prompt del reclutador con el contexto de la vacante.
  */
 function buildSystemPrompt(vacancy, candidate, conversationContext) {
-  const candidateName = candidate?.fullName ? candidate.fullName.split(' ')[0] : null;
+  const candidateName = firstName(candidate?.fullName);
 
   const vacancyBlock = vacancy ? [
     `Vacante: ${vacancy.title || vacancy.role}`,
@@ -52,6 +84,7 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
     'Respondé SIEMPRE en menos de 3 oraciones, de forma conversacional y variada.',
     'Si el candidato se presenta, respondé al saludo con calidez ANTES de pedir datos.',
     'Variá el lenguaje: no siempre el mismo saludo ni la misma forma de pedir un dato.',
+    'Privacidad: si ves etiquetas como [DOCUMENTO], [TELEFONO], [EMAIL] o [NOMBRE_CANDIDATO], no intentes reconstruir esos datos.',
     `\n--- INFORMACIÓN DE LA VACANTE ---\n${vacancyBlock}`,
     candidateName ? `\n--- CANDIDATO ---\nNombre: ${candidateName} (usá su nombre cuando sea natural, no en cada mensaje)` : '',
     `\n--- CONTEXTO DEL FLUJO ---\n${conversationContext}`
@@ -67,12 +100,14 @@ export async function generateNaturalReply({
   inboundText,
   conversationContext,
   recentBotMessages = [],
-  fallbackText = null
+  fallbackText = null,
+  prisma = null
 }) {
   if (!process.env.OPENAI_API_KEY) {
     return fallbackText || 'Te lei, dame un momento y continuo contigo.';
   }
 
+  const privacy = maskTextForOpenAI(inboundText);
   const systemPrompt = buildSystemPrompt(vacancy, candidate, conversationContext);
 
   const messages = [
@@ -82,29 +117,26 @@ export async function generateNaturalReply({
   if (recentBotMessages.length) {
     messages.push({
       role: 'assistant',
-      content: `[Mensajes previos que ya envié, NO repetir]: ${recentBotMessages.slice(-8).join(' | ')}`
+      content: `[Mensajes previos que ya envié, NO repetir]: ${maskTextList(recentBotMessages).slice(-8).join(' | ')}`
     });
   }
 
-  messages.push({ role: 'user', content: String(inboundText || '') });
+  messages.push({ role: 'user', content: privacy.sanitizedText });
 
   try {
-    const response = await axios.post(
-      OPENAI_URL,
-      {
+    const response = await postOpenAI({
+      payload: {
         model: DEFAULT_MODEL,
         messages,
         max_completion_tokens: 220,
         temperature: 0.78
       },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 14000
-      }
-    );
+      timeout: 14000,
+      prisma: resolvePrisma({ prisma }),
+      candidate,
+      usageType: 'natural_reply',
+      privacy: buildOpenAIPrivacyMetadata(privacy)
+    });
 
     const content = response.data?.choices?.[0]?.message?.content;
     if (typeof content === 'string' && content.trim()) return content.trim();
@@ -118,11 +150,12 @@ export async function generateNaturalReply({
  * Genera el mensaje de bienvenida inicial cuando el candidato escribe por
  * primera vez.
  */
-export async function generateGreeting(vacancies, inboundText, resolvedVacancyId) {
+export async function generateGreeting(vacancies, inboundText, resolvedVacancyId, options = {}) {
   if (!process.env.OPENAI_API_KEY) {
     return '¡Hola! Gracias por comunicarte con LoginPro. ¿Para cuál vacante y ciudad te interesa aplicar?';
   }
 
+  const privacy = maskTextForOpenAI(inboundText);
   const resolved = vacancies.find((v) => v.id === resolvedVacancyId);
 
   let systemPrompt;
@@ -132,6 +165,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       'Saludá de forma cálida y natural, mencioná brevemente la vacante disponible.',
       'Luego indicá que necesitás los datos del candidato para continuar.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real, no como un sistema.',
+      'No reconstruyas datos personales si el texto contiene etiquetas de privacidad.',
       `Vacante: ${resolved.role} en ${resolved.city}.`,
       `Condiciones principales: ${resolved.conditions?.split('\n').slice(0, 3).join(', ')}`
     ].join(' ');
@@ -142,30 +176,28 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       'El candidato te escribe. Saludá de forma cálida y preguntá de forma natural',
       'por cuál vacante y ciudad se comunica. NO los ofrezcas como catálogo.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real.',
+      'No reconstruyas datos personales si el texto contiene etiquetas de privacidad.',
       `Vacantes activas disponibles: ${vacancyList || 'ninguna por el momento'}`
     ].join(' ');
   }
 
   try {
-    const response = await axios.post(
-      OPENAI_URL,
-      {
+    const response = await postOpenAI({
+      payload: {
         model: DEFAULT_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: inboundText }
+          { role: 'user', content: privacy.sanitizedText }
         ],
         max_completion_tokens: 160,
         temperature: 0.78
       },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 12000
-      }
-    );
+      timeout: 12000,
+      prisma: resolvePrisma(options),
+      candidate: options.candidate || null,
+      usageType: 'natural_greeting',
+      privacy: buildOpenAIPrivacyMetadata(privacy)
+    });
 
     const content = response.data?.choices?.[0]?.message?.content;
     if (typeof content === 'string' && content.trim()) return content.trim();
@@ -186,47 +218,47 @@ export async function generateInterviewOffer({
   vacancy,
   candidateName,
   requiredDocuments,
-  isReschedule = false
+  isReschedule = false,
+  prisma = null,
+  candidate = null
 }) {
   const docsLine = requiredDocuments || vacancy?.requiredDocuments
     ? `Debe traer: ${requiredDocuments || vacancy.requiredDocuments}.`
     : '';
 
   if (!process.env.OPENAI_API_KEY) {
-    const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
+    const name = firstName(candidateName) ? ` ${firstName(candidateName)}` : '';
     return isReschedule
       ? `Entonces te ofrezco el ${formattedDate}. ¿Te queda bien ese horario? ${docsLine}`.trim()
       : `Perfecto${name}. Te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim();
   }
 
+  const candidateFirstName = firstName(candidateName);
   const systemPrompt = [
     'Sos un reclutador humano de LoginPro en WhatsApp.',
     isReschedule
       ? 'El candidato rechazó el horario anterior. Ofrecé el nuevo de forma natural y empática.'
       : 'Ofrecé el horario de entrevista de forma amable y directa.',
-    candidateName ? `Nombre del candidato: ${candidateName.split(' ')[0]}.` : '',
+    candidateFirstName ? `Nombre del candidato: ${candidateFirstName}.` : '',
     docsLine ? `Indicá también: ${docsLine}` : '',
     'Preguntá si el horario le queda bien. Máx 2 oraciones. Sin viñetas ni Markdown. Soná humano.',
     `Horario a ofrecer: ${formattedDate}`
   ].filter(Boolean).join(' ');
 
   try {
-    const response = await axios.post(
-      OPENAI_URL,
-      {
+    const response = await postOpenAI({
+      payload: {
         model: DEFAULT_MODEL,
         messages: [{ role: 'system', content: systemPrompt }],
         max_completion_tokens: 120,
         temperature: 0.78
       },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
-      }
-    );
+      timeout: 10000,
+      prisma: resolvePrisma({ prisma }),
+      candidate,
+      usageType: 'interview_offer',
+      privacy: { privacyMaskingEnabled: true, sensitiveDataDetected: Boolean(candidateName), redactionSummary: candidateName ? ['nombre'] : [] }
+    });
 
     const content = response.data?.choices?.[0]?.message?.content;
     if (typeof content === 'string' && content.trim()) return content.trim();
@@ -234,7 +266,7 @@ export async function generateInterviewOffer({
     // fallback
   }
 
-  const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
+  const name = firstName(candidateName) ? ` ${firstName(candidateName)}` : '';
   return isReschedule
     ? `Entonces te ofrezco el ${formattedDate}. ¿Te queda bien? ${docsLine}`.trim()
     : `Listo${name}, te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim();
@@ -243,10 +275,11 @@ export async function generateInterviewOffer({
 /**
  * Genera el mensaje de confirmación final de entrevista agendada.
  */
-export async function generateBookingConfirmation({ formattedDate, vacancy, candidateName }) {
+export async function generateBookingConfirmation({ formattedDate, vacancy, candidateName, prisma = null, candidate = null }) {
   const address = vacancy?.interviewAddress || vacancy?.operationAddress || '';
   const docs = vacancy?.requiredDocuments || '';
-  const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
+  const candidateFirstName = firstName(candidateName);
+  const name = candidateFirstName ? ` ${candidateFirstName}` : '';
 
   if (!process.env.OPENAI_API_KEY) {
     return [
@@ -260,7 +293,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
   const systemPrompt = [
     'Sos un reclutador humano de LoginPro en WhatsApp.',
     'Confirmá la entrevista agendada de forma cálida y clara.',
-    candidateName ? `Nombre: ${candidateName.split(' ')[0]}.` : '',
+    candidateFirstName ? `Nombre: ${candidateFirstName}.` : '',
     `Fecha/hora: ${formattedDate}.`,
     address ? `Dirección: ${address}.` : '',
     docs ? `Documentación a traer: ${docs}.` : '',
@@ -269,22 +302,19 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
   ].filter(Boolean).join(' ');
 
   try {
-    const response = await axios.post(
-      OPENAI_URL,
-      {
+    const response = await postOpenAI({
+      payload: {
         model: DEFAULT_MODEL,
         messages: [{ role: 'system', content: systemPrompt }],
         max_completion_tokens: 160,
         temperature: 0.78
       },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 12000
-      }
-    );
+      timeout: 12000,
+      prisma: resolvePrisma({ prisma }),
+      candidate,
+      usageType: 'booking_confirmation',
+      privacy: { privacyMaskingEnabled: true, sensitiveDataDetected: Boolean(candidateName), redactionSummary: candidateName ? ['nombre'] : [] }
+    });
 
     const content = response.data?.choices?.[0]?.message?.content;
     if (typeof content === 'string' && content.trim()) return content.trim();
