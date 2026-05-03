@@ -140,7 +140,8 @@ export async function tryOpenAIParse(text, context = {}) {
       intent: extraction.replyIntent || null,
       parsedFields: extraction.fields || {},
       extraction,
-      model: extracted.model || 'gpt-5.4-mini-2026-03-17'
+      model: extracted.model || 'gpt-5.4-mini-2026-03-17',
+      usage: extracted.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
     };
   }
 
