@@ -79,6 +79,18 @@ function extractTextFromChatCompletion(data = {}) {
   return '{}';
 }
 
+function extractUsage(responseData = {}) {
+  const usage = responseData?.usage || {};
+  const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+  const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+  const totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
+  return {
+    input_tokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    output_tokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    total_tokens: Number.isFinite(totalTokens) ? totalTokens : 0
+  };
+}
+
 function parseModelJson(rawText = '{}') {
   const t = String(rawText || '').trim();
   if (!t) return {};
@@ -166,6 +178,7 @@ export async function tryOpenAIParse(text, context = {}) {
       intent: parsed.intent || null,
       parsedFields: parsed,
       model,
+      usage: extractUsage(response.data),
       temperature_omitted: !useTemp,
       temperature_value: useTemp ? temp.value : null
     };
@@ -178,6 +191,7 @@ export async function tryOpenAIParse(text, context = {}) {
     return {
       used: true, status: 'error',
       intent: null, parsedFields: {}, model,
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
       temperature_omitted: !useTemp,
       temperature_value: useTemp ? temp.value : null,
       error: wrapped
