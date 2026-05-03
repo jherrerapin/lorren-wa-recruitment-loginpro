@@ -722,6 +722,22 @@ export function parseNaturalData(text = '') {
   return result;
 }
 
+const NON_RESIDENCE_NEIGHBORHOOD_TOKENS = new Set(['hola', 'buenas', 'buenos', 'dias', 'tardes', 'noches']);
+
+function looksLikeGreetingLocation(value = '') {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return false;
+  const tokens = normalized.split(' ').filter(Boolean);
+  if (!tokens.length) return false;
+  return tokens.every((token) => NON_RESIDENCE_NEIGHBORHOOD_TOKENS.has(token));
+}
+
 export function normalizeCandidateFields(fields = {}) {
   const normalized = {};
 
@@ -736,8 +752,8 @@ export function normalizeCandidateFields(fields = {}) {
     const age = Number.parseInt(String(fields.age), 10);
     if (Number.isFinite(age)) normalized.age = age;
   }
-  if (fields.neighborhood) normalized.neighborhood = capitalizeWords(fields.neighborhood);
-  if (fields.locality) normalized.locality = capitalizeWords(fields.locality);
+  if (fields.neighborhood && !looksLikeGreetingLocation(fields.neighborhood)) normalized.neighborhood = capitalizeWords(fields.neighborhood);
+  if (fields.locality && !looksLikeGreetingLocation(fields.locality)) normalized.locality = capitalizeWords(fields.locality);
   if (fields.medicalRestrictions) normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
   if (fields.transportMode) normalized.transportMode = normalizeTransportMode(fields.transportMode);
   if (fields.experienceInfo) normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || capitalizeWords(fields.experienceInfo);

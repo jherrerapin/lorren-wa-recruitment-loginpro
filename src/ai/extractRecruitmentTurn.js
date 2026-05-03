@@ -4,6 +4,18 @@ import { RECRUITMENT_EXTRACTION_SCHEMA } from './recruitmentExtractionSchema.js'
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MODEL = process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17';
 
+function extractUsage(data = {}) {
+  const usage = data?.usage || {};
+  const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+  const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+  const totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
+  return {
+    input_tokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    output_tokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    total_tokens: Number.isFinite(totalTokens) ? totalTokens : 0
+  };
+}
+
 function fallbackResult() {
   return {
     turnType: 'OTHER',
@@ -134,9 +146,10 @@ Principios de interpretación:
         fields: { ...base.fields, ...(parsed?.fields || {}) },
         fieldEvidence: { ...base.fieldEvidence, ...(parsed?.fieldEvidence || {}) },
       },
-      model: MODEL
+      model: MODEL,
+      usage: extractUsage(response.data)
     };
   } catch (error) {
-    return { used: true, status: 'error', extraction: fallbackResult(), model: MODEL, error };
+    return { used: true, status: 'error', extraction: fallbackResult(), model: MODEL, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }, error };
   }
 }

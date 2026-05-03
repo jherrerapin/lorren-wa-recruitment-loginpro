@@ -718,8 +718,20 @@
     <% if (role === 'dev') { %>
     <div class="card">
       <h2>Historial de conversación</h2>
+      <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
+      <% const conversationTokenTotals = sorted.reduce((acc, msg) => {
+        const trace = msg?.rawPayload?.debugTrace;
+        if (!trace) return acc;
+        acc.input += Number(trace.openai_input_tokens || 0);
+        acc.output += Number(trace.openai_output_tokens || 0);
+        acc.total += Number(trace.openai_total_tokens || 0);
+        return acc;
+      }, { input: 0, output: 0, total: 0 }); %>
+      <div class="msg-meta" style="margin:0 0 10px 0;font-size:12px;color:#334155;">
+        TOK conversación in/out/tot:
+        <strong><%= conversationTokenTotals.input %>/<%= conversationTokenTotals.output %>/<%= conversationTokenTotals.total %></strong>
+      </div>
       <div class="messages-list">
-        <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
         <% for (const m of sorted) { %>
           <% const isBot = m.direction === 'OUTBOUND'; %>
 	          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
