@@ -640,6 +640,15 @@ function buildLastBotFlowIssue(messages = []) {
   };
 }
 
+function sumConversationTokenUsage(messages = []) {
+  return (messages || []).reduce((acc, message) => {
+    const trace = message?.rawPayload?.debugTrace || {};
+    acc.input += Number(trace.openai_input_tokens || 0);
+    acc.output += Number(trace.openai_output_tokens || 0);
+    return acc;
+  }, { input: 0, output: 0 });
+}
+
 function parseInterviewAssignment(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -1282,6 +1291,26 @@ async function loadBotChatCount(prisma) {
   return 0;
 }
 
+async function loadDailyTokenTotals(prisma, dayYmd) {
+  if (!dayYmd || typeof prisma?.message?.findMany !== 'function') {
+    return { input: 0, output: 0 };
+  }
+  const dayStart = new Date(`${dayYmd}T00:00:00-05:00`);
+  const dayEnd = new Date(dayStart.getTime() + (24 * 60 * 60 * 1000));
+  const messages = await prisma.message.findMany({
+    where: {
+      createdAt: {
+        gte: dayStart,
+        lt: dayEnd
+      }
+    },
+    select: {
+      rawPayload: true
+    }
+  });
+  return sumConversationTokenUsage(messages);
+}
+
 export function adminRouter(prisma) {
   const router = express.Router();
   const cvUpload = multer({
@@ -1300,6 +1329,10 @@ export function adminRouter(prisma) {
     const candidateSearch = normalizeCandidateSearch(req.query);
     const vacancySearchById = normalizeVacancySearches(req.query);
     const botChatCount = await loadBotChatCount(prisma);
+    const dashboardDate = isValidDateString(normalizeString(req.query.date)) ? normalizeString(req.query.date) : todayCO();
+    const dailyTokenTotals = req.userRole === 'dev'
+      ? await loadDailyTokenTotals(prisma, dashboardDate)
+      : { input: 0, output: 0 };
     const canUseLegacyScope = requestedStatus
       && ADMIN_STATUS_SCOPES.has(requestedStatus)
       && (req.userRole === 'dev' || RECRUITER_STATUS_SCOPES.has(requestedStatus));
@@ -1375,6 +1408,7 @@ export function adminRouter(prisma) {
         adminFilters,
         candidateSearch,
         botChatCount,
+        dailyTokenTotals,
         vacancyFiltersById: {},
         vacancySearchById: {}
       });
@@ -1401,6 +1435,7 @@ export function adminRouter(prisma) {
       errorMsg: normalizeString(req.query.error),
       isFemaleHumanReviewCandidate,
       botChatCount,
+      dailyTokenTotals,
       adminFilters,
       candidateSearch: null,
       vacancyFiltersById,
@@ -1757,6 +1792,9 @@ export function adminRouter(prisma) {
     const lastBotFlowIssue = req.userRole === 'dev'
       ? buildLastBotFlowIssue(candidate.messages || [])
       : null;
+    const conversationTokenTotals = req.userRole === 'dev'
+      ? sumConversationTokenUsage(candidate.messages || [])
+      : { input: 0, output: 0 };
 
     const cvSuccess = normalizeString(req.query.cvSuccess);
     const cvError   = normalizeString(req.query.cvError);
@@ -1777,6 +1815,7 @@ export function adminRouter(prisma) {
       availableInterviewSlots,
       adminEvents,
       lastBotFlowIssue,
+      conversationTokenTotals,
       returnToPath,
       outboundWindow, cvSuccess, cvError,
       outboundSuccess, outboundError, botPauseSuccess, botPauseError,
