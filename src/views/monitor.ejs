@@ -71,6 +71,7 @@
             <% if (isFemaleHumanReviewCandidate(m.candidate)) { %><br><span class="human-flag">Rev. humana</span><% } %>
           </span>
           <span class="msg-trace"><% if (m.rawPayload && m.rawPayload.debugTrace) { %>AI:<%= m.rawPayload.debugTrace.openai_status %>/<%= m.rawPayload.debugTrace.openai_intent || "-" %>
+TOK in/out/tot:<%= Number(m.rawPayload.debugTrace.openai_input_tokens || 0) %>/<%= Number(m.rawPayload.debugTrace.openai_output_tokens || 0) %>/<%= Number(m.rawPayload.debugTrace.openai_total_tokens || 0) %>
 P:<%= (m.rawPayload.debugTrace.persisted_fields || []).join(",") || "-" %>
 CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_detected ? "detected" : "-") %><% } else { %>-<% } %></span>
         </div>
@@ -93,7 +94,10 @@ CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_
             const body = (m.body || '(archivo)').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             const trace = m.debugTrace;
             const traceTxt = trace
-              ? ('AI:' + (trace.openai_status || '-') + '/' + (trace.openai_intent || '-') + '\nP:' + ((trace.persisted_fields || []).join(',') || '-') + '\nCV:' + (trace.cv_saved ? 'saved' : (trace.cv_detected ? 'detected' : '-'))).replace(/</g, '&lt;').replace(/>/g, '&gt;')
+              ? ('AI:' + (trace.openai_status || '-') + '/' + (trace.openai_intent || '-')
+                + '\nTOK in/out/tot:' + Number(trace.openai_input_tokens || 0) + '/' + Number(trace.openai_output_tokens || 0) + '/' + Number(trace.openai_total_tokens || 0)
+                + '\nP:' + ((trace.persisted_fields || []).join(',') || '-')
+                + '\nCV:' + (trace.cv_saved ? 'saved' : (trace.cv_detected ? 'detected' : '-'))).replace(/</g, '&lt;').replace(/>/g, '&gt;')
               : '-';
             return '<div class="msg-row">'
               + '<span class="msg-time">' + ts + '</span>'

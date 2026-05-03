@@ -722,15 +722,21 @@
         <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
         <% for (const m of sorted) { %>
           <% const isBot = m.direction === 'OUTBOUND'; %>
-          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
-            <div class="msg-header">
-              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
-            </div>
-            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
-          </div>
-        <% } %>
-      </div>
-    </div>
+	          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
+	            <div class="msg-header">
+	              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
+	            </div>
+	            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
+              <% if (m.rawPayload && m.rawPayload.debugTrace) { %>
+                <div class="msg-meta" style="margin-top:6px;font-size:12px;color:#475569;">
+                  AI: <%= m.rawPayload.debugTrace.openai_status || '-' %>/<%= m.rawPayload.debugTrace.openai_intent || '-' %> ·
+                  TOK in/out/tot: <%= Number(m.rawPayload.debugTrace.openai_input_tokens || 0) %>/<%= Number(m.rawPayload.debugTrace.openai_output_tokens || 0) %>/<%= Number(m.rawPayload.debugTrace.openai_total_tokens || 0) %>
+                </div>
+              <% } %>
+	          </div>
+	        <% } %>
+	      </div>
+	    </div>
     <% } %>
   </div>
 </body>
