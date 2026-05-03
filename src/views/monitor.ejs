@@ -93,9 +93,7 @@ CV:<%= m.rawPayload.debugTrace.cv_saved ? "saved" : (m.rawPayload.debugTrace.cv_
             const body = (m.body || '(archivo)').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             const trace = m.debugTrace;
             const traceTxt = trace
-              ? ('AI:' + (trace.openai_status || '-') + '/' + (trace.openai_intent || '-')
-                + '\nP:' + ((trace.persisted_fields || []).join(',') || '-')
-                + '\nCV:' + (trace.cv_saved ? 'saved' : (trace.cv_detected ? 'detected' : '-'))).replace(/</g, '&lt;').replace(/>/g, '&gt;')
+              ? ('AI:' + (trace.openai_status || '-') + '/' + (trace.openai_intent || '-') + '\nP:' + ((trace.persisted_fields || []).join(',') || '-') + '\nCV:' + (trace.cv_saved ? 'saved' : (trace.cv_detected ? 'detected' : '-'))).replace(/</g, '&lt;').replace(/>/g, '&gt;')
               : '-';
             return '<div class="msg-row">'
               + '<span class="msg-time">' + ts + '</span>'
