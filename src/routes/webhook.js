@@ -752,6 +752,13 @@ function mergeFieldSource(sourceByField, field, source) {
   sourceByField[field] = sourceByField[field] ? 'merged' : source;
 }
 
+function sumTokenUsage(current = {}, next = {}) {
+  const input = Number(current.input_tokens || 0) + Number(next.input_tokens || 0);
+  const output = Number(current.output_tokens || 0) + Number(next.output_tokens || 0);
+  const total = Number(current.total_tokens || 0) + Number(next.total_tokens || 0);
+  return { input_tokens: input, output_tokens: output, total_tokens: total };
+}
+
 function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {}, aiFields = {}) {
   if (!USE_CONVERSATION_ENGINE) return false;
   if (!candidate || !cleanText) return false;
@@ -804,8 +811,11 @@ async function previewEngineCandidateFields(prisma, candidate, inboundText, prov
     currentStep: candidate.currentStep || ConversationStep.MENU,
   });
 
-  if (preview?.fallback) return {};
-  return extractEngineCandidateFields(preview.actions, preview.extractedFields);
+  if (preview?.fallback) return { fields: {}, usage: preview?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
+  return {
+    fields: extractEngineCandidateFields(preview.actions, preview.extractedFields),
+    usage: preview?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+  };
 }
 
 function shouldUsePrimaryConversationEngine(candidate, inboundText = '') {
@@ -836,6 +846,10 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     options.debugTrace.engine_primary = true;
     options.debugTrace.engine_actions = (engineResult.actions || []).map((action) => action?.type).filter(Boolean);
     options.debugTrace.engine_loop_guard = Boolean(engineResult.loopGuardApplied);
+    const usage = engineResult?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+    options.debugTrace.openai_input_tokens = Number(options.debugTrace.openai_input_tokens || 0) + Number(usage.input_tokens || 0);
+    options.debugTrace.openai_output_tokens = Number(options.debugTrace.openai_output_tokens || 0) + Number(usage.output_tokens || 0);
+    options.debugTrace.openai_total_tokens = Number(options.debugTrace.openai_total_tokens || 0) + Number(usage.total_tokens || 0);
   }
 
   if (engineResult.suppressed) {
@@ -1244,11 +1258,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   const understanding = await conversationUnderstanding(cleanText, { aiResult });
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
-  const rawEngineFields = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields)
+  const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields)
     ? await previewEngineCandidateFields(prisma, candidate, cleanText, currentVacancy)
-    : {};
-  const engineFields = rawEngineFields && typeof rawEngineFields === 'object'
-    ? normalizeCandidateFields(rawEngineFields)
+    : { fields: {}, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
+  const engineFields = rawEnginePreview?.fields && typeof rawEnginePreview.fields === 'object'
+    ? normalizeCandidateFields(rawEnginePreview.fields)
     : {};
   const sourceByField = {};
   const evidenceByField = {};
@@ -1294,6 +1308,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   debugTrace.openai_temperature_omitted = typeof aiResult.temperature_omitted === 'boolean'
     ? aiResult.temperature_omitted
     : debugTrace.openai_temperature_omitted;
+  const combinedUsage = sumTokenUsage(aiResult?.usage || {}, rawEnginePreview?.usage || {});
+  debugTrace.openai_input_tokens = combinedUsage.input_tokens;
+  debugTrace.openai_output_tokens = combinedUsage.output_tokens;
+  debugTrace.openai_total_tokens = combinedUsage.total_tokens;
   const resolvedIntent = aiResult.intent || understanding.intent || fallbackIntent;
   const vacancyHints = {
     city: aiFields.city || understanding.cityDetection?.value || null,

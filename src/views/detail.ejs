@@ -715,22 +715,27 @@
       </form>
     </div>
 
-    <% if (role === 'dev') { %>
-    <div class="card">
-      <h2>Historial de conversación</h2>
-      <div class="messages-list">
-        <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
-        <% for (const m of sorted) { %>
+	    <% if (role === 'dev') { %>
+	    <div class="card">
+	      <h2>Historial de conversación</h2>
+        <div style="margin:0 0 12px 0;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;font-size:13px;">
+          <strong>Tokens totales de la conversación</strong><br>
+          Entrada: <strong><%= Number(conversationTokenTotals?.input || 0) %></strong> &middot;
+          Salida: <strong><%= Number(conversationTokenTotals?.output || 0) %></strong>
+        </div>
+	      <div class="messages-list">
+	        <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
+	        <% for (const m of sorted) { %>
           <% const isBot = m.direction === 'OUTBOUND'; %>
-          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
-            <div class="msg-header">
-              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
-            </div>
-            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
-          </div>
-        <% } %>
-      </div>
-    </div>
+	          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
+	            <div class="msg-header">
+	              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
+	            </div>
+	            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
+	          </div>
+	        <% } %>
+	      </div>
+	    </div>
     <% } %>
   </div>
 </body>

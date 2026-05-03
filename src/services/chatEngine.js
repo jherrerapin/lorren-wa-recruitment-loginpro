@@ -50,6 +50,7 @@ export async function runChatEngine({
       fallback: false,
       fallbackReason: null,
       loopGuardApplied: false,
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
       suppressed: true,
       suppressedReason: 'manual_human_outbound_detected',
     };
@@ -93,6 +94,7 @@ export async function runChatEngine({
     fallback: result.fallback,
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),
+    usage: result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
     suppressed: false,
     suppressedReason: null,
   };

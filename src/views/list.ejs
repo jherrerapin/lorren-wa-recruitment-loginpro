@@ -656,6 +656,13 @@
     </div>
     <a href="/admin" style="font-size:13px;color:var(--teal);font-weight:600;text-decoration:none;">← Ver por vacante</a>
   </div>
+  <% if (role === 'dev') { %>
+    <div style="margin:0 0 14px 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px;">
+      <strong>Tokens totales del día</strong> (<%= selectedDate %>)<br>
+      Entrada: <strong><%= Number(dailyTokenTotals?.input || 0) %></strong> &middot;
+      Salida: <strong><%= Number(dailyTokenTotals?.output || 0) %></strong>
+    </div>
+  <% } %>
 
   <% if (successMsg) { %>
     <div class="alert alert-success"><%= successMsg %></div>
@@ -902,6 +909,13 @@
       </div>
     </form>
   </div>
+  <% if (role === 'dev') { %>
+    <div style="margin:0 0 14px 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px;">
+      <strong>Tokens totales del día</strong> (<%= selectedDate %>)<br>
+      Entrada: <strong><%= Number(dailyTokenTotals?.input || 0) %></strong> &middot;
+      Salida: <strong><%= Number(dailyTokenTotals?.output || 0) %></strong>
+    </div>
+  <% } %>
 
   <% if (successMsg) { %>
     <div class="alert alert-success"><%= successMsg %></div>
@@ -1630,6 +1644,5 @@
 
 </body>
 </html>
-
 
 

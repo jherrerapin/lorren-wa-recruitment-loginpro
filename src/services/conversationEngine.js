@@ -26,6 +26,18 @@ const CORE_PROFILE_FIELDS = [
   'transportMode'
 ];
 
+function extractUsage(responseData = {}) {
+  const usage = responseData?.usage || {};
+  const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+  const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+  const totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
+  return {
+    input_tokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    output_tokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    total_tokens: Number.isFinite(totalTokens) ? totalTokens : 0
+  };
+}
+
 function hasValue(value) {
   return value !== undefined && value !== null && value !== '';
 }
@@ -557,7 +569,8 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
         raw,
         fallback: true,
         fallbackReason: 'invalid_engine_json',
-        loopGuardApplied: false
+        loopGuardApplied: false,
+        usage: extractUsage(response.data)
       };
     }
 
@@ -579,7 +592,8 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
       ...decision,
       raw,
       fallback: false,
-      fallbackReason: null
+      fallbackReason: null,
+      usage: extractUsage(response.data)
     };
   } catch (error) {
     console.error('[ENGINE_ERROR]', {
@@ -594,7 +608,8 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
       raw: null,
       fallback: true,
       fallbackReason: error?.code || error?.message || 'engine_error',
-      loopGuardApplied: false
+      loopGuardApplied: false,
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
     };
   }
 }

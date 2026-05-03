@@ -69,6 +69,18 @@ function buildContextPayload(text = '', context = {}) {
   };
 }
 
+function extractUsage(responseData = {}) {
+  const usage = responseData?.usage || {};
+  const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+  const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+  const totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
+  return {
+    input_tokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    output_tokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+    total_tokens: Number.isFinite(totalTokens) ? totalTokens : 0
+  };
+}
+
 export async function extractRecruitmentTurn({ text = '', context = {} } = {}) {
   if (!process.env.OPENAI_API_KEY) return { used: false, status: 'disabled', extraction: fallbackResult() };
 
@@ -134,9 +146,17 @@ Principios de interpretación:
         fields: { ...base.fields, ...(parsed?.fields || {}) },
         fieldEvidence: { ...base.fieldEvidence, ...(parsed?.fieldEvidence || {}) },
       },
-      model: MODEL
+      model: MODEL,
+      usage: extractUsage(response.data)
     };
   } catch (error) {
-    return { used: true, status: 'error', extraction: fallbackResult(), model: MODEL, error };
+    return {
+      used: true,
+      status: 'error',
+      extraction: fallbackResult(),
+      model: MODEL,
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      error
+    };
   }
 }
