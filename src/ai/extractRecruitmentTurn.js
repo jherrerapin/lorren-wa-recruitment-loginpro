@@ -17,7 +17,8 @@ function fallbackResult() {
       neighborhood: null,
       transportMode: null,
       medicalRestrictions: null,
-      experienceInfo: null
+      experienceInfo: null,
+      experienceTime: null
     },
     fieldEvidence: {
       fullName: { snippet: null, confidence: 0, source: 'fallback' },
@@ -29,7 +30,8 @@ function fallbackResult() {
       neighborhood: { snippet: null, confidence: 0, source: 'fallback' },
       transportMode: { snippet: null, confidence: 0, source: 'fallback' },
       medicalRestrictions: { snippet: null, confidence: 0, source: 'fallback' },
-      experienceInfo: { snippet: null, confidence: 0, source: 'fallback' }
+      experienceInfo: { snippet: null, confidence: 0, source: 'fallback' },
+      experienceTime: { snippet: null, confidence: 0, source: 'fallback' }
     },
     conflicts: [],
     attachment: { mentioned: false, kindHint: null },

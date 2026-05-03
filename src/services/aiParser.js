@@ -119,7 +119,7 @@ export async function tryOpenAIParse(text, context = {}) {
     return { used: false, status: 'disabled', intent: null, parsedFields: {} };
   }
 
-  if (isFeatureEnabled('FF_RESPONSES_EXTRACTOR', false)) {
+  if (isFeatureEnabled('FF_RESPONSES_EXTRACTOR', true)) {
     const extracted = await extractRecruitmentTurn({ text, context });
     const extraction = extracted?.extraction || {};
     return {

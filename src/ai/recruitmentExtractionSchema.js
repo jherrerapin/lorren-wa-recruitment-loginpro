@@ -19,9 +19,10 @@ export const RECRUITMENT_EXTRACTION_SCHEMA = {
           neighborhood: { type: ['string', 'null'] },
           transportMode: { type: ['string', 'null'] },
           medicalRestrictions: { type: ['string', 'null'] },
-          experienceInfo: { type: ['string', 'null'] }
+          experienceInfo: { type: ['string', 'null'] },
+          experienceTime: { type: ['string', 'null'] }
         },
-        required: ['fullName', 'age', 'documentType', 'documentNumber', 'gender', 'locality', 'neighborhood', 'transportMode', 'medicalRestrictions', 'experienceInfo']
+        required: ['fullName', 'age', 'documentType', 'documentNumber', 'gender', 'locality', 'neighborhood', 'transportMode', 'medicalRestrictions', 'experienceInfo', 'experienceTime']
       },
       fieldEvidence: {
         type: 'object',
@@ -36,7 +37,8 @@ export const RECRUITMENT_EXTRACTION_SCHEMA = {
           neighborhood: { $ref: '#/$defs/evidence' },
           transportMode: { $ref: '#/$defs/evidence' },
           medicalRestrictions: { $ref: '#/$defs/evidence' },
-          experienceInfo: { $ref: '#/$defs/evidence' }
+          experienceInfo: { $ref: '#/$defs/evidence' },
+          experienceTime: { $ref: '#/$defs/evidence' }
         }
       },
       conflicts: {
@@ -45,7 +47,7 @@ export const RECRUITMENT_EXTRACTION_SCHEMA = {
           type: 'object',
           additionalProperties: false,
           properties: {
-            field: { type: 'string', enum: ['fullName', 'age', 'documentType', 'documentNumber', 'gender', 'locality', 'neighborhood', 'transportMode', 'medicalRestrictions', 'experienceInfo'] },
+            field: { type: 'string', enum: ['fullName', 'age', 'documentType', 'documentNumber', 'gender', 'locality', 'neighborhood', 'transportMode', 'medicalRestrictions', 'experienceInfo', 'experienceTime'] },
             reason: { type: 'string' },
             alternatives: { type: 'array', items: { type: 'string' } }
           },

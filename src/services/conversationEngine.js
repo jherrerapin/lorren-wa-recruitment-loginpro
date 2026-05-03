@@ -188,9 +188,9 @@ function buildGenderFlowInstruction(candidate, vacancy) {
 
   if (gender === 'UNKNOWN') {
     return `GENERO: No determinado.
-Detecta el genero de forma natural durante la conversacion.
-Si el mensaje dice claramente "soy mujer", "candidata", "señora", "soy hombre" o "candidato", extraelo sin esperar otra confirmacion.
-Si el nombre completo sugiere con mucha claridad que es mujer u hombre, puedes inferirlo; si no es claro, preguntalo cuando sea natural.
+Detecta el genero usando comprension semantica del turno completo y del historial reciente, no por coincidencia literal de una palabra.
+Si hay evidencia clara y consistente en contexto, extraelo sin esperar otra confirmacion.
+Si la evidencia es ambigua, no infieras: preguntalo cuando sea natural.
 Extraelo en extractedFields como "gender": "MALE" | "FEMALE" | "OTHER".`;
   }
 

@@ -828,9 +828,7 @@ function normalizeCandidateSnapshot(candidate) {
     ...candidate,
     phoneDisplay: formatPhoneForDisplay(candidate.phone),
     status: deriveCandidateStatusForUI({ ...candidate, transportMode: normalizedTransport || normalizeString(candidate.transportMode) }),
-    transportMode: normalizedTransport || normalizeString(candidate.transportMode),
-    experienceInfo: null,
-    experienceTime: null
+    transportMode: normalizedTransport || normalizeString(candidate.transportMode)
   };
 }
 
