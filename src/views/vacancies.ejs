@@ -275,8 +275,6 @@
                 const badgeTxt = isOpen ? 'Abierta'    : (isPaused ? 'Pausada'     : 'Inactiva');
                 const modeIcon = v.schedulingEnabled ? 'Agenda' : 'HV';
                 const modeTxt  = v.schedulingEnabled ? 'Con entrevista' : 'Solo HV';
-                const toggleClass = isOpen ? 'btn-danger' : 'btn-secondary';
-                const toggleLabel = isOpen ? 'Pausar'     : (isPaused ? 'Reabrir'  : 'Activar');
                 const opLabel = v.operation ? (v.operation.city.name + ' > ' + v.operation.name) : (v.city || '-');
               %>
               <tr>
@@ -290,9 +288,24 @@
                 <td>
                   <div style="display:flex;gap:6px;flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-sm" onclick="openEdit(<%= JSON.stringify(v) %>)">Editar</button>
-                    <form method="post" action="/admin/vacancies/<%= v.id %>/toggle" style="display:inline;">
-                      <button type="submit" class="btn <%= toggleClass %> btn-sm"><%= toggleLabel %></button>
-                    </form>
+                    <% if (!isPaused) { %>
+                      <form method="post" action="/admin/vacancies/<%= v.id %>/toggle" style="display:inline;">
+                        <input type="hidden" name="state" value="review" />
+                        <button type="submit" class="btn btn-secondary btn-sm">Solo revisar HV</button>
+                      </form>
+                    <% } %>
+                    <% if (!isOpen) { %>
+                      <form method="post" action="/admin/vacancies/<%= v.id %>/toggle" style="display:inline;">
+                        <input type="hidden" name="state" value="open" />
+                        <button type="submit" class="btn btn-primary btn-sm">Revisar y recibir HV</button>
+                      </form>
+                    <% } %>
+                    <% if (!isClosed) { %>
+                      <form method="post" action="/admin/vacancies/<%= v.id %>/toggle" style="display:inline;">
+                        <input type="hidden" name="state" value="closed" />
+                        <button type="submit" class="btn btn-danger btn-sm">Desactivar</button>
+                      </form>
+                    <% } %>
                     <form method="post" action="/admin/vacancies/<%= v.id %>/delete" style="display:inline;" onsubmit="return confirm('¿Seguro que deseas eliminar esta vacante?');">
                       <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
                     </form>
@@ -397,8 +410,8 @@
           <div class="full">
             <div class="toggle-row" id="c-toggle-row">
               <div class="toggle-row-body">
-                <div class="toggle-row-title">Vacante activa</div>
-                <div class="toggle-row-desc">Habilita la vacante en el sistema. El bot enruta candidatos hacia ella.</div>
+                <div class="toggle-row-title">Vacante visible para revisión</div>
+                <div class="toggle-row-desc">Permite ver esta vacante y sus hojas de vida en el panel. La recepción se define abajo.</div>
               </div>
               <label class="toggle-switch" aria-label="Activar vacante">
                 <input type="checkbox" id="c-isActive" onchange="syncActiveState('c-isActive','c-flow','c-toggle-row')" />
@@ -407,19 +420,26 @@
             </div>
           </div>
           <div class="full">
-            <p style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Flujo del bot</p>
-            <div class="mode-group" id="c-flow" role="radiogroup" aria-label="Flujo del bot">
+            <p style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Modo de la vacante</p>
+            <div class="mode-group" id="c-flow" role="radiogroup" aria-label="Modo de la vacante">
               <label class="mode-option mode-disabled">
-                <input type="radio" name="c_vacancyFlow" value="apply_only" checked disabled />
+                <input type="radio" name="c_vacancyFlow" value="review_only" checked disabled />
                 <div class="mode-option-body">
-                  <div class="mode-option-title">📋 Solo postulación</div>
+                  <div class="mode-option-title">👀 Solo revisar hojas de vida</div>
+                  <div class="mode-option-desc">La vacante aparece en el panel para revisar candidatos existentes, pero el bot no recibe nuevas hojas de vida.</div>
+                </div>
+              </label>
+              <label class="mode-option mode-disabled">
+                <input type="radio" name="c_vacancyFlow" value="apply_only" disabled />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">📋 Revisar y recibir HV</div>
                   <div class="mode-option-desc">El bot recolecta datos y hoja de vida. Cierra con "quedaste registrado, te contactamos". Sin entrevista.</div>
                 </div>
               </label>
               <label class="mode-option mode-disabled">
                 <input type="radio" name="c_vacancyFlow" value="apply_schedule" disabled />
                 <div class="mode-option-body">
-                  <div class="mode-option-title">🗓️ Postulación + entrevista</div>
+                  <div class="mode-option-title">🗓️ Revisar, recibir HV y agendar</div>
                   <div class="mode-option-desc">El bot recolecta datos, hoja de vida y agenda la entrevista automáticamente (candidatas femeninas siempre siguen flujo solo postulación).</div>
                 </div>
               </label>
@@ -559,8 +579,8 @@
           <div class="full">
             <div class="toggle-row" id="e-toggle-row">
               <div class="toggle-row-body">
-                <div class="toggle-row-title">Vacante activa</div>
-                <div class="toggle-row-desc">Habilita la vacante en el sistema. El bot enruta candidatos hacia ella.</div>
+                <div class="toggle-row-title">Vacante visible para revisión</div>
+                <div class="toggle-row-desc">Permite ver esta vacante y sus hojas de vida en el panel. La recepción se define abajo.</div>
               </div>
               <label class="toggle-switch" aria-label="Activar vacante">
                 <input type="checkbox" id="e-isActive" onchange="syncActiveState('e-isActive','e-flow','e-toggle-row')" />
@@ -569,19 +589,26 @@
             </div>
           </div>
           <div class="full">
-            <p style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Flujo del bot</p>
-            <div class="mode-group" id="e-flow" role="radiogroup" aria-label="Flujo del bot">
+            <p style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Modo de la vacante</p>
+            <div class="mode-group" id="e-flow" role="radiogroup" aria-label="Modo de la vacante">
+              <label class="mode-option">
+                <input type="radio" name="e_vacancyFlow" value="review_only" />
+                <div class="mode-option-body">
+                  <div class="mode-option-title">👀 Solo revisar hojas de vida</div>
+                  <div class="mode-option-desc">La vacante aparece en el panel para revisar candidatos existentes, pero el bot no recibe nuevas hojas de vida.</div>
+                </div>
+              </label>
               <label class="mode-option">
                 <input type="radio" name="e_vacancyFlow" value="apply_only" />
                 <div class="mode-option-body">
-                  <div class="mode-option-title">📋 Solo postulación</div>
+                  <div class="mode-option-title">📋 Revisar y recibir HV</div>
                   <div class="mode-option-desc">El bot recolecta datos y hoja de vida. Cierra con "quedaste registrado, te contactamos". Sin entrevista.</div>
                 </div>
               </label>
               <label class="mode-option">
                 <input type="radio" name="e_vacancyFlow" value="apply_schedule" />
                 <div class="mode-option-body">
-                  <div class="mode-option-title">🗓️ Postulación + entrevista</div>
+                  <div class="mode-option-title">🗓️ Revisar, recibir HV y agendar</div>
                   <div class="mode-option-desc">El bot recolecta datos, hoja de vida y agenda la entrevista automáticamente (candidatas femeninas siempre siguen flujo solo postulación).</div>
                 </div>
               </label>
@@ -638,7 +665,10 @@
     const flowGroup = document.getElementById(flowGroupId);
     const config = document.getElementById(scheduleConfigId);
     if (!config) return;
-    const flowVal = flowGroup.querySelector('input[type=radio]:checked')?.value || 'apply_only';
+    const checkedFlow = flowGroup.querySelector('input[type=radio]:checked:not(:disabled)')
+      || flowGroup.querySelector('input[type=radio]:checked')
+      || flowGroup.querySelector('input[type=radio]:not(:disabled)');
+    const flowVal = checkedFlow?.value || 'apply_only';
     const visible = checkbox.checked && flowVal === 'apply_schedule';
     config.classList.toggle('is-visible', visible);
     config.querySelectorAll('input').forEach((input) => {
@@ -656,7 +686,10 @@
     toggleRow.classList.toggle('is-active', isChecked);
     radios.forEach(r => r.disabled = !isChecked);
     labels.forEach(l => l.classList.toggle('mode-disabled', !isChecked));
-    if (isChecked && !Array.from(radios).some(r => r.checked)) radios[0].checked = true;
+    if (isChecked && !Array.from(radios).some(r => r.checked && !r.disabled)) {
+      const firstEnabled = Array.from(radios).find(r => !r.disabled);
+      if (firstEnabled) firstEnabled.checked = true;
+    }
     syncScheduleConfig(checkboxId, flowGroupId, scheduleConfigId);
   }
 
@@ -729,10 +762,13 @@
     const checkbox  = document.getElementById(checkboxId);
     const flowGroup = document.getElementById(flowGroupId);
     const isActive  = checkbox.checked;
-    const flowVal   = flowGroup.querySelector('input[type=radio]:checked')?.value || 'apply_only';
+    const checkedFlow = flowGroup.querySelector('input[type=radio]:checked:not(:disabled)')
+      || flowGroup.querySelector('input[type=radio]:checked')
+      || flowGroup.querySelector('input[type=radio]:not(:disabled)');
+    const flowVal   = checkedFlow?.value || 'apply_only';
     const fields = {
       isActive,
-      acceptingApplications: isActive,
+      acceptingApplications: isActive && flowVal !== 'review_only',
       schedulingEnabled: isActive && flowVal === 'apply_schedule'
     };
     form.querySelectorAll('input[data-cfg-injected]').forEach(el => el.remove());
@@ -797,7 +833,7 @@
 
     const cb = document.getElementById('e-isActive');
     cb.checked = !!v.isActive;
-    const flow  = v.schedulingEnabled ? 'apply_schedule' : 'apply_only';
+    const flow  = !v.acceptingApplications ? 'review_only' : (v.schedulingEnabled ? 'apply_schedule' : 'apply_only');
     document.getElementById('e-flow').querySelectorAll('input[type=radio]').forEach(r => r.checked = (r.value === flow));
     syncExperienceField('e-exp', 'e-exp-time-group');
     syncActiveState('e-isActive', 'e-flow', 'e-toggle-row', 'e-schedule-config');

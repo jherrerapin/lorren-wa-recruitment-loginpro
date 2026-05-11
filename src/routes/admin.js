@@ -909,6 +909,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
         vacancyAccessWhere,
         {
           OR: [
+            { isActive: true },
             { acceptingApplications: true },
             {
               interviewBookings: {
@@ -2995,16 +2996,35 @@ export function adminRouter(prisma) {
     res.redirect('/admin/vacancies?success=' + encodeURIComponent('Vacante eliminada correctamente.'));
   });
 
-  router.post('/vacancies/:id/toggle', async (req, res) => {
+  router.post('/vacancies/:id/toggle', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const vacancy = await ensureVacancyIdAccess(prisma, req, id, res, '/admin/vacancies');
     if (!vacancy) return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Vacante no encontrada.'));
-    const isCurrentlyOpen = vacancy.isActive && vacancy.acceptingApplications;
+    const targetState = normalizeString(req.body?.state);
+    let data;
+    let msg;
+
+    if (targetState === 'review') {
+      data = { isActive: true, acceptingApplications: false };
+      msg = 'Vacante activa solo para revisar hojas de vida.';
+    } else if (targetState === 'open') {
+      data = { isActive: true, acceptingApplications: true };
+      msg = 'Vacante activa para revisar y recibir hojas de vida.';
+    } else if (targetState === 'closed') {
+      data = { isActive: false, acceptingApplications: false };
+      msg = 'Vacante desactivada.';
+    } else {
+      const isCurrentlyOpen = vacancy.isActive && vacancy.acceptingApplications;
+      data = isCurrentlyOpen
+        ? { isActive: true, acceptingApplications: false }
+        : { isActive: true, acceptingApplications: true };
+      msg = isCurrentlyOpen ? 'Vacante activa solo para revisar hojas de vida.' : 'Vacante activa para revisar y recibir hojas de vida.';
+    }
+
     await prisma.vacancy.update({
       where: { id },
-      data: { isActive: true, acceptingApplications: !isCurrentlyOpen }
+      data
     });
-    const msg = isCurrentlyOpen ? 'Vacante pausada.' : 'Vacante reactivada.';
     res.redirect('/admin/vacancies?success=' + encodeURIComponent(msg));
   });
 
