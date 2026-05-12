@@ -272,11 +272,13 @@
                 const isClosed = !v.isActive;
                 const badgeCls = isOpen ? 'badge-open' : (isPaused ? 'badge-paused' : 'badge-closed');
                 const dotCls   = isOpen ? 'dot-green'  : (isPaused ? 'dot-amber'   : 'dot-red');
-                const badgeTxt = isOpen ? 'Abierta'    : (isPaused ? 'Pausada'     : 'Inactiva');
+                const badgeTxt = isOpen ? 'Abierta'    : (isPaused ? (v.dashboardReviewEnabled ? 'Pausada · en revisión HV' : 'Pausada') : 'Inactiva');
                 const modeIcon = v.schedulingEnabled ? 'Agenda' : 'HV';
                 const modeTxt  = v.schedulingEnabled ? 'Con entrevista' : 'Solo HV';
                 const toggleClass = isOpen ? 'btn-danger' : 'btn-secondary';
                 const toggleLabel = isOpen ? 'Pausar'     : (isPaused ? 'Reabrir'  : 'Activar');
+                const reviewLabel = v.dashboardReviewEnabled ? 'Fin de revisión' : 'Revisar hojas de vida';
+                const reviewClass = v.dashboardReviewEnabled ? 'btn-danger' : 'btn-secondary';
                 const opLabel = v.operation ? (v.operation.city.name + ' > ' + v.operation.name) : (v.city || '-');
               %>
               <tr>
@@ -293,6 +295,11 @@
                     <form method="post" action="/admin/vacancies/<%= v.id %>/toggle" style="display:inline;">
                       <button type="submit" class="btn <%= toggleClass %> btn-sm"><%= toggleLabel %></button>
                     </form>
+                    <% if (isPaused) { %>
+                      <form method="post" action="/admin/vacancies/<%= v.id %>/toggle-review" style="display:inline;">
+                        <button type="submit" class="btn <%= reviewClass %> btn-sm"><%= reviewLabel %></button>
+                      </form>
+                    <% } %>
                     <form method="post" action="/admin/vacancies/<%= v.id %>/delete" style="display:inline;" onsubmit="return confirm('¿Seguro que deseas eliminar esta vacante?');">
                       <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
                     </form>
