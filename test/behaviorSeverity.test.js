@@ -162,6 +162,40 @@ test('dashboard severe regression: contador global y contratados quedan separado
   }
 });
 
+
+test('dashboard severe regression: solo muestra vacantes abiertas o marcadas para revisar hojas de vida', async () => {
+  let capturedVacancyQuery = null;
+  const prisma = createDashboardPrismaMock({ candidateCount: 0, vacancies: [] });
+  prisma.vacancy.findMany = async (query) => {
+    capturedVacancyQuery = query;
+    return [];
+  };
+
+  const server = await createServer(prisma, {
+    userRole: 'admin',
+    userSource: 'db',
+    userAccessScope: 'ALL'
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl);
+    const response = await fetch(`${baseUrl}/admin?date=2026-04-08`, {
+      headers: { Cookie: cookie }
+    });
+    await response.text();
+
+    assert.equal(response.status, 200);
+    const dashboardVisibilityFilter = capturedVacancyQuery?.where?.AND?.[1]?.OR || [];
+    assert.deepEqual(dashboardVisibilityFilter, [
+      { acceptingApplications: true },
+      { isActive: true }
+    ]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('dashboard severe regression: la alerta manual solo muestra chats no revisados por dev', async () => {
   const reviewedCandidate = dashboardCandidate({
     id: 'cand-reviewed',
