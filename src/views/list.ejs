@@ -984,16 +984,15 @@
   <div class="vacancies-grid">
     <% for (const v of activeCityData.vacancies) { %>
       <%
-        const isScheduling = v.schedulingEnabled && v.acceptingApplications;
-        const isReviewOnly = v.isActive && !v.acceptingApplications;
+        const isScheduling = v.schedulingEnabled;
         const isCvOnly     = !v.schedulingEnabled && v.acceptingApplications;
-        const isClosed     = !v.isActive;
+        const isClosed     = !v.acceptingApplications;
         const totalToday   = v.bookingsToday.length;
         const totalPending = v.registeredNoBooking.length + v.registeredComplete.length + v.completeWithoutCv.length;
-        let modeIcon  = isClosed ? '🔴' : (isReviewOnly ? '👀' : (isScheduling ? '🗓️' : '📋'));
-        let modeClass = isClosed ? 'closed' : (isReviewOnly ? 'cv-only' : (isScheduling ? 'scheduling' : 'cv-only'));
-        let modeBadgeClass = isClosed ? 'badge-closed' : (isReviewOnly ? 'badge-cv-only' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only'));
-        let modeBadgeText  = isClosed ? 'Cerrada' : (isReviewOnly ? 'Solo revisión de HV' : (isScheduling ? 'Agendando entrevistas' : 'Recibiendo HV'));
+        let modeIcon  = isClosed ? '🔴' : (isScheduling ? '🗓️' : '📋');
+        let modeClass = isClosed ? 'closed' : (isScheduling ? 'scheduling' : 'cv-only');
+        let modeBadgeClass = isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only');
+        let modeBadgeText  = isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV');
         const currentVacancyFilters = (vacancyFiltersById && vacancyFiltersById[v.id]) || {};
         const currentVacancySearch = (vacancySearchById && vacancySearchById[v.id]) || { field: 'document', text: '' };
         const currentVacancyFilterFields = getVacancyFilterFields(v);
