@@ -422,7 +422,8 @@ async function loadVacancyAccessSnapshot(prisma, vacancyId) {
       title: true,
       city: true,
       isActive: true,
-      acceptingApplications: true
+      acceptingApplications: true,
+      dashboardReviewEnabled: true
     }
   });
 }
@@ -910,6 +911,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
         {
           OR: [
             { acceptingApplications: true },
+            { dashboardReviewEnabled: true },
             {
               interviewBookings: {
                 some: {
@@ -2916,6 +2918,7 @@ export function adminRouter(prisma) {
           isActive: data.isActive,
           acceptingApplications: data.acceptingApplications,
           schedulingEnabled: data.schedulingEnabled,
+          dashboardReviewEnabled: false,
         }
       });
 
@@ -2968,6 +2971,7 @@ export function adminRouter(prisma) {
           isActive: data.isActive,
           acceptingApplications: data.acceptingApplications,
           schedulingEnabled: data.schedulingEnabled,
+          dashboardReviewEnabled: (data.isActive && !data.acceptingApplications) ? currentVacancy.dashboardReviewEnabled : false,
         }
       });
 
@@ -3002,11 +3006,36 @@ export function adminRouter(prisma) {
     const isCurrentlyOpen = vacancy.isActive && vacancy.acceptingApplications;
     await prisma.vacancy.update({
       where: { id },
-      data: { isActive: true, acceptingApplications: !isCurrentlyOpen }
+      data: {
+        isActive: true,
+        acceptingApplications: !isCurrentlyOpen,
+        dashboardReviewEnabled: false
+      }
     });
     const msg = isCurrentlyOpen ? 'Vacante pausada.' : 'Vacante reactivada.';
     res.redirect('/admin/vacancies?success=' + encodeURIComponent(msg));
   });
+
+  router.post('/vacancies/:id/toggle-review', async (req, res) => {
+    const { id } = req.params;
+    const vacancy = await ensureVacancyIdAccess(prisma, req, id, res, '/admin/vacancies');
+    if (!vacancy) return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Vacante no encontrada.'));
+    if (!vacancy.isActive || vacancy.acceptingApplications) {
+      return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Solo puedes revisar hojas de vida de una vacante pausada.'));
+    }
+
+    const nextReviewState = !vacancy.dashboardReviewEnabled;
+    await prisma.vacancy.update({
+      where: { id },
+      data: { dashboardReviewEnabled: nextReviewState }
+    });
+
+    const msg = nextReviewState
+      ? 'Revisión de hojas de vida habilitada en el panel. La vacante sigue pausada ante el bot.'
+      : 'Revisión de hojas de vida finalizada. La vacante pausada se retiró del panel.';
+    res.redirect('/admin/vacancies?success=' + encodeURIComponent(msg));
+  });
+
 
   return router;
 }

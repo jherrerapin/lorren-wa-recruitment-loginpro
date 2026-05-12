@@ -986,13 +986,14 @@
       <%
         const isScheduling = v.schedulingEnabled;
         const isCvOnly     = !v.schedulingEnabled && v.acceptingApplications;
+        const isDashboardReview = Boolean(v.dashboardReviewEnabled && !v.acceptingApplications);
         const isClosed     = !v.acceptingApplications;
         const totalToday   = v.bookingsToday.length;
         const totalPending = v.registeredNoBooking.length + v.registeredComplete.length + v.completeWithoutCv.length;
-        let modeIcon  = isClosed ? '🔴' : (isScheduling ? '🗓️' : '📋');
-        let modeClass = isClosed ? 'closed' : (isScheduling ? 'scheduling' : 'cv-only');
-        let modeBadgeClass = isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only');
-        let modeBadgeText  = isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV');
+        let modeIcon  = isDashboardReview ? '📋' : (isClosed ? '🔴' : (isScheduling ? '🗓️' : '📋'));
+        let modeClass = isDashboardReview ? 'cv-only' : (isClosed ? 'closed' : (isScheduling ? 'scheduling' : 'cv-only'));
+        let modeBadgeClass = isDashboardReview ? 'badge-cv-only' : (isClosed ? 'badge-closed' : (isScheduling ? 'badge-scheduling' : 'badge-cv-only'));
+        let modeBadgeText  = isDashboardReview ? 'Revisión de HV · bot pausado' : (isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV'));
         const currentVacancyFilters = (vacancyFiltersById && vacancyFiltersById[v.id]) || {};
         const currentVacancySearch = (vacancySearchById && vacancySearchById[v.id]) || { field: 'document', text: '' };
         const currentVacancyFilterFields = getVacancyFilterFields(v);
@@ -1052,7 +1053,7 @@
             <div class="vacancy-role"><%= v.role %> &mdash; <%= v.city %></div>
           </div>
           <div class="vacancy-badges">
-            <span class="badge <%= modeBadgeClass %>"><span class="dot dot-<%= isClosed ? 'red' : (isScheduling ? 'green' : 'amber') %>"></span><%= modeBadgeText %></span>
+            <span class="badge <%= modeBadgeClass %>"><span class="dot dot-<%= isDashboardReview ? 'amber' : (isClosed ? 'red' : (isScheduling ? 'green' : 'amber')) %>"></span><%= modeBadgeText %></span>
             <% if (totalToday > 0) { %><span class="badge" style="background:var(--navy);color:#fff;">📅 <%= totalToday %> hoy</span><% } %>
             <% if (totalPending > 0) { %><span class="badge badge-nuevo"><%= totalPending %> pendiente<%= totalPending > 1 ? 's' : '' %></span><% } %>
           </div>
@@ -1507,8 +1508,8 @@
             <div style="display:flex;align-items:center;gap:10px;background:var(--red-light);border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;">
               <span style="font-size:20px;">🔴</span>
               <div>
-                <p style="font-weight:700;color:var(--red);font-size:13px;">Vacante cerrada — no recibe nuevas postulaciones</p>
-                <p style="font-size:12px;color:#991b1b;margin-top:2px;">Los datos históricos siguen disponibles en la vista por estado.</p>
+                <p style="font-weight:700;color:var(--red);font-size:13px;"><%= isDashboardReview ? 'Vacante pausada ante el bot — visible solo para revisión de hojas de vida' : 'Vacante cerrada — no recibe nuevas postulaciones' %></p>
+                <p style="font-size:12px;color:#991b1b;margin-top:2px;"><%= isDashboardReview ? 'Puedes retirarla del panel con Fin de revisión en Gestión de Vacantes.' : 'Los datos históricos siguen disponibles en la vista por estado.' %></p>
               </div>
             </div>
           </div>
