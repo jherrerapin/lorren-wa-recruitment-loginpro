@@ -1,0 +1,2 @@
+ALTER TABLE "Vacancy"
+ADD COLUMN IF NOT EXISTS "dashboardReviewEnabled" BOOLEAN NOT NULL DEFAULT false;

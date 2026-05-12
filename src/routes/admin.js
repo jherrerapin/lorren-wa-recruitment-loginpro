@@ -422,7 +422,8 @@ async function loadVacancyAccessSnapshot(prisma, vacancyId) {
       title: true,
       city: true,
       isActive: true,
-      acceptingApplications: true
+      acceptingApplications: true,
+      dashboardReviewEnabled: true
     }
   });
 }
@@ -909,16 +910,8 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
         vacancyAccessWhere,
         {
           OR: [
-            { isActive: true },
             { acceptingApplications: true },
-            {
-              interviewBookings: {
-                some: {
-                  scheduledAt: { gte: start, lte: end },
-                  status: { in: ALL_BOOKING_STATUSES }
-                }
-              }
-            }
+            { dashboardReviewEnabled: true }
           ]
         }
       ]
@@ -2916,6 +2909,7 @@ export function adminRouter(prisma) {
           experienceTimeText: data.experienceTimeText,
           isActive: data.isActive,
           acceptingApplications: data.acceptingApplications,
+          dashboardReviewEnabled: false,
           schedulingEnabled: data.schedulingEnabled,
         }
       });
@@ -2968,6 +2962,7 @@ export function adminRouter(prisma) {
           experienceTimeText: data.experienceTimeText,
           isActive: data.isActive,
           acceptingApplications: data.acceptingApplications,
+          dashboardReviewEnabled: data.acceptingApplications ? false : currentVacancy.dashboardReviewEnabled,
           schedulingEnabled: data.schedulingEnabled,
         }
       });
@@ -3000,25 +2995,30 @@ export function adminRouter(prisma) {
     const { id } = req.params;
     const vacancy = await ensureVacancyIdAccess(prisma, req, id, res, '/admin/vacancies');
     if (!vacancy) return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Vacante no encontrada.'));
-    const targetState = normalizeString(req.body?.state);
+    const action = normalizeString(req.body?.action);
+    const isCurrentlyOpen = vacancy.isActive && vacancy.acceptingApplications;
+    const isCurrentlyInReview = !vacancy.acceptingApplications && vacancy.dashboardReviewEnabled;
     let data;
     let msg;
 
-    if (targetState === 'review') {
-      data = { isActive: true, acceptingApplications: false };
-      msg = 'Vacante activa solo para revisar hojas de vida.';
-    } else if (targetState === 'open') {
-      data = { isActive: true, acceptingApplications: true };
-      msg = 'Vacante activa para revisar y recibir hojas de vida.';
-    } else if (targetState === 'closed') {
-      data = { isActive: false, acceptingApplications: false };
-      msg = 'Vacante desactivada.';
+    if (action === 'review') {
+      data = { isActive: true, acceptingApplications: false, dashboardReviewEnabled: true };
+      msg = 'Vacante habilitada solo para revisar hojas de vida.';
+    } else if (action === 'end-review') {
+      data = { acceptingApplications: false, dashboardReviewEnabled: false };
+      msg = 'Revisión de hojas de vida finalizada.';
+    } else if (action === 'open') {
+      data = { isActive: true, acceptingApplications: true, dashboardReviewEnabled: false };
+      msg = 'Vacante reactivada.';
+    } else if (isCurrentlyOpen) {
+      data = { acceptingApplications: false, dashboardReviewEnabled: false };
+      msg = 'Vacante pausada.';
+    } else if (isCurrentlyInReview) {
+      data = { acceptingApplications: false, dashboardReviewEnabled: false };
+      msg = 'Revisión de hojas de vida finalizada.';
     } else {
-      const isCurrentlyOpen = vacancy.isActive && vacancy.acceptingApplications;
-      data = isCurrentlyOpen
-        ? { isActive: true, acceptingApplications: false }
-        : { isActive: true, acceptingApplications: true };
-      msg = isCurrentlyOpen ? 'Vacante activa solo para revisar hojas de vida.' : 'Vacante activa para revisar y recibir hojas de vida.';
+      data = { isActive: true, acceptingApplications: true, dashboardReviewEnabled: false };
+      msg = 'Vacante reactivada.';
     }
 
     await prisma.vacancy.update({
