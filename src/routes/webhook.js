@@ -19,6 +19,7 @@ import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInp
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
+import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitizer.js';
 import { shouldBlockAutomation } from '../services/botAutomationPolicy.js';
 import { runChatEngine } from '../services/chatEngine.js';
 import { think, extractEngineCandidateFields } from '../services/conversationEngine.js';
@@ -354,6 +355,32 @@ function buildVacancyCompactSummary(vacancy) {
 function buildNoOperationsAvailableReply(city = null) {
   const location = city ? ` en ${city}` : '';
   return `En este momento no tengo operaciones disponibles${location}. Si quieres, puedes dejar tus datos y tu hoja de vida para tener tu perfil en cuenta si se abre una vacante.`;
+}
+
+function buildGroundedVacancyCatalogReply(vacancies = [], city = null) {
+  const filteredVacancies = city
+    ? vacancies.filter((vacancy) => normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(city))
+    : vacancies;
+
+  if (!filteredVacancies.length) return buildNoOperationsAvailableReply(city);
+
+  const labels = [...new Set(filteredVacancies
+    .map((vacancy) => {
+      const title = vacancy?.title || vacancy?.role;
+      if (!title) return null;
+      const vacancyCity = vacancy.operation?.city?.name || vacancy.city || null;
+      return city || !vacancyCity ? title : `${title} en ${vacancyCity}`;
+    })
+    .filter(Boolean))];
+
+  const visibleLabels = labels.slice(0, 8);
+  const suffix = labels.length > visibleLabels.length ? ` y ${labels.length - visibleLabels.length} mas` : '';
+  const joined = visibleLabels.length === 1
+    ? visibleLabels[0]
+    : `${visibleLabels.slice(0, -1).join(', ')} y ${visibleLabels[visibleLabels.length - 1]}`;
+  const cityText = city ? ` en ${city}` : '';
+
+  return `Por ahora tengo registradas como activas estas vacantes${cityText}: ${joined}${suffix}. Dime desde que ciudad escribes y cual te interesa para contarte solo la informacion registrada de esa vacante.`;
 }
 function buildCityVacancyOptionsReply(city, vacancies = []) {
   const options = [...new Set(
@@ -863,23 +890,19 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
   }
 
   if (engineResult.fallback) {
+    const fallbackReason = engineResult.fallbackReason || 'engine_returned_fallback';
     if (options.debugTrace) {
       options.debugTrace.engine_fallback_used = true;
-      options.debugTrace.engine_fallback_reason = engineResult.fallbackReason || 'engine_returned_fallback';
+      options.debugTrace.engine_fallback_reason = fallbackReason;
       options.debugTrace.openai_status = 'fallback';
     }
     console.warn('[ENGINE_PRIMARY_FALLBACK]', JSON.stringify({
       phone: candidate.phone,
       candidateId: candidate.id,
-      reason: engineResult.fallbackReason || 'engine_returned_fallback'
+      reason: fallbackReason,
+      delegatedToDeterministicFlow: true
     }));
-    const fallbackBody = engineResult.reply || 'Te lei, dame un momento y continuo contigo.';
-    await reply(prisma, candidate.id, from, fallbackBody, inboundText, {
-      body: fallbackBody,
-      source: 'engine_fallback',
-      reason: engineResult.fallbackReason || 'engine_returned_fallback'
-    });
-    return true;
+    return false;
   }
 
   const candidateAfterActions = await prisma.candidate.findUnique({ where: { id: candidate.id } }) || candidate;
@@ -1256,7 +1279,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
   const aiResult = await tryOpenAIParse(cleanText);
   const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};
-  const understanding = await conversationUnderstanding(cleanText, { aiResult });
+  const sanitizerContext = { currentStep: candidate.currentStep };
+  const understanding = await conversationUnderstanding(cleanText, { aiResult, context: sanitizerContext });
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
   const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields)
@@ -1294,6 +1318,18 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
   }
   normalizedData = enrichNormalizedDataFromContext(cleanText, normalizedData, candidate, currentVacancy);
+  const semanticGate = sanitizeCandidateFieldsForConversation({
+    fields: normalizedData,
+    evidence: evidenceByField,
+    text: cleanText,
+    context: sanitizerContext,
+    turnType: aiResult?.extraction?.turnType || null
+  });
+  normalizedData = semanticGate.fields;
+  for (const rejected of semanticGate.rejectedFields) {
+    delete sourceByField[rejected.field];
+    delete evidenceByField[rejected.field];
+  }
   const hasDataIntent = containsCandidateData(cleanText, normalizedData);
   const requiredFields = getRequiredFieldKeys(currentVacancy);
   const hasNonNameProfileFieldCapture = Object.keys(normalizedData).some((field) => (
@@ -1326,6 +1362,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   debugTrace.source_by_field = sourceByField;
   debugTrace.field_evidence = evidenceByField;
   debugTrace.normalized_fields = normalizedData;
+  debugTrace.rejected_fields.push(...semanticGate.rejectedFields);
   debugTrace.vacancy_hint_city = vacancyHints.city;
   debugTrace.vacancy_hint_role = vacancyHints.roleHint;
 
@@ -1529,6 +1566,18 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     return reply(prisma, candidate.id, from, SALUDO_INICIAL, cleanText, { body: SALUDO_INICIAL, source: 'bot_vacancy_prompt' });
+  }
+
+
+  if (
+    !currentVacancy
+    && isVacancyInfoQuestion(cleanText)
+    && !hasMaterialProfileFieldCapture
+  ) {
+    const activeVacancies = await findActiveVacancies(prisma);
+    const body = buildGroundedVacancyCatalogReply(activeVacancies, vacancyHints.city);
+    await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
+    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_catalog' });
   }
 
   if (candidate.currentStep !== ConversationStep.DONE && isNegativeInterest(cleanText)) {

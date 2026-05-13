@@ -1,5 +1,6 @@
 import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
+import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 
 function latestOutboundWasManualHuman(recentMessages = []) {
   const lastOutbound = [...(recentMessages || [])]
@@ -74,12 +75,25 @@ export async function runChatEngine({
     ...(candidateFieldHints && typeof candidateFieldHints === 'object' ? candidateFieldHints : {}),
     ...engineCandidateFields
   };
+  const engineEvidence = Object.fromEntries(
+    Object.keys(candidateFields).map((field) => [
+      field,
+      { snippet: String(inboundText || '').slice(0, 180), confidence: 0.78, source: 'engine' }
+    ])
+  );
+  const sanitized = sanitizeCandidateFieldsForConversation({
+    fields: candidateFields,
+    evidence: engineEvidence,
+    text: inboundText,
+    context: { currentStep },
+    turnType: null
+  });
 
   await act({
     actions,
     candidate,
-    extractedFields,
-    candidateFields,
+    extractedFields: sanitized.fields,
+    candidateFields: sanitized.fields,
     nextStep: result.nextStep,
     nextSlot,
     prisma,
@@ -89,8 +103,9 @@ export async function runChatEngine({
     reply: result.reply,
     actions,
     nextStep: result.nextStep,
-    extractedFields,
-    candidateFields,
+    extractedFields: sanitized.fields,
+    candidateFields: sanitized.fields,
+    rejectedFields: sanitized.rejectedFields,
     fallback: result.fallback,
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),

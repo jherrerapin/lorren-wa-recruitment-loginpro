@@ -96,14 +96,23 @@ export async function extractRecruitmentTurn({ text = '', context = {} } = {}) {
 Tu tarea no es responder al candidato; tu tarea es entender el turno completo y devolver datos estructurados bajo el schema.
 
 Principios de interpretación:
-- Usa el mensaje actual junto con el contexto de conversación, especialmente la última pregunta del bot, el paso actual y los campos pendientes.
-- Interpreta respuestas implícitas cuando el candidato responde a una pregunta anterior, aunque no repita el nombre técnico del campo.
-- Distingue entre intención conversacional, datos del candidato, correcciones, dudas y adjuntos.
-- No persistas como dato un fragmento que solo cumple función conversacional dentro del turno.
-- No infieras datos sensibles o excluyentes sin evidencia verificable en el mensaje o en el contexto.
-- Si el turno es ambiguo, deja el campo en null y registra el conflicto en vez de inventar.
-- Cada campo que no sea null debe traer evidencia: snippet tomado del candidato, source y confidence.
-- Devuelve solo JSON válido bajo el schema estricto.`
+- Usa SIEMPRE candidateMessage junto con conversationContext.currentStep, pendingFields, lastBotQuestion, recentConversation, vacancy y candidateKnownData.
+- Interpreta respuestas implícitas solo cuando el candidato está respondiendo claramente a un campo pendiente o a la última pregunta del bot.
+- Distingue intención conversacional, datos personales, correcciones, dudas y adjuntos. Un saludo, cortesía, confirmación simple, pregunta general o frase de interés NO es un dato personal.
+- No extraigas fullName, neighborhood, locality, gender, documentType, documentNumber ni age desde saludos, cortesías, confirmaciones simples, preguntas generales o frases de interés por la vacante.
+- Si un campo no tiene evidencia textual concreta del candidato en este turno, déjalo en null. No inventes ni completes por plausibilidad.
+- Cada campo no null debe traer fieldEvidence con snippet exacto del mensaje del candidato, confidence realista y source específico. El snippet debe sostener directamente ese campo.
+- Si el turno no responde claramente a un campo pendiente o a lastBotQuestion, deja el campo en null y registra conflicto cuando aplique.
+
+Criterios por campo:
+- fullName: acepta solo identidad personal real. Debe haber contexto de recolección de nombre (pendingFields, lastBotQuestion), una frase explícita como "mi nombre es", "me llamo", "soy [nombre]", o un bloque de datos personales. No conviertas intención, cargo, vacante, saludo ni cortesía en nombre.
+- neighborhood/locality: acepta solo residencia/zona real. Busca evidencia como "vivo en", "resido en", "barrio", "localidad", "zona", "sector", "municipio", o que lastBotQuestion/pendingFields pidan residencia. No confundas cargo, vacante, ciudad de operación ni frase social con barrio/localidad.
+- gender: detecta FEMALE solo con evidencia lingüística suficiente como "soy mujer", "femenino", "candidata", "estoy interesada", "quedo atenta". Detecta MALE con evidencia equivalente como "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento". Nunca infieras género solo por el nombre; si no hay evidencia, usa null o UNKNOWN.
+- age: no confundas edad con números de dirección, calle, carrera, cédula, experiencia ni cantidades de personal.
+- documentType/documentNumber: para avanzar en este flujo solo CC y PPT son válidos. CE, pasaporte u otros pueden mencionarse en conflictos/trazabilidad, pero no los marques como documento válido del proceso.
+- residence: no confundas ciudad desde donde escribe, ciudad de operación o ciudad de la vacante con barrio/localidad de residencia.
+
+Devuelve solo JSON válido bajo el schema estricto.`
           }
         ]
       },

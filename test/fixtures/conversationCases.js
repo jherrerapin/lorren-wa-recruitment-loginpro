@@ -697,6 +697,15 @@ export const conversationCases = [
     }
   },
   {
+    id: 'female-contextual-interest-not-name-or-neighborhood',
+    steps: ['estoy interesada en la vacante'],
+    candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post' }),
+    expect: {
+      candidate: { gender: 'FEMALE' },
+      absentFields: ['fullName', 'neighborhood']
+    }
+  },
+  {
     id: 'no-multiple-templates-mixed',
     steps: ['que requisitos tiene la vacante? si me interesa'],
     candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post' }),

@@ -135,6 +135,23 @@ function getEvidence(field, evidence = {}) {
   };
 }
 
+function evidenceSourceLooksInferential(field, evidence = {}) {
+  const source = normalizeText(getEvidence(field, evidence).source || '');
+  if (!source) return false;
+  if (/\b(name|nombre)\b/.test(source) && /\b(infer|guess|deduc|heuristic)\b/.test(source)) return true;
+  if (/\b(infer|guess|deduc)\b/.test(source) && field === 'gender') return true;
+  return ['name_inference', 'inferred_from_name', 'gender_from_name'].includes(source.replace(/\s+/g, '_'));
+}
+
+function evidenceSnippetIsGrounded(field, evidence = {}, text = '') {
+  const item = getEvidence(field, evidence);
+  if (!item.snippet) return false;
+  const normalizedText = normalizeText(text);
+  const normalizedSnippet = normalizeText(item.snippet);
+  if (!normalizedText || !normalizedSnippet) return false;
+  return normalizedText.includes(normalizedSnippet);
+}
+
 function evidenceIsUsable(field, evidence = {}, options = {}) {
   const item = getEvidence(field, evidence);
   const source = normalizeText(item.source || '');
@@ -166,6 +183,10 @@ function hasAgeEvidence(text = '') {
   return /\b(edad|tengo|anos|ano)\b/.test(normalized) && /\b\d{1,2}\b/.test(normalized);
 }
 
+function hasExperienceEvidence(text = '') {
+  return /\b(experien|trabaj|labor|cargo|oficio)\b/.test(normalizeText(text));
+}
+
 function hasNameEvidenceCue(text = '') {
   const normalized = normalizeText(text);
   return /\b(mi nombre es|nombre completo|me llamo|soy)\b/.test(normalized);
@@ -187,12 +208,17 @@ function looksLikePersonalName(value = '') {
   if (/\d/.test(raw)) return false;
 
   const normalized = normalizeText(raw);
-  if (/\b(auxiliar|vacante|cargo|bodega|cargue|descargue|logistica|operacion|requisitos|documento|cedula|ppt|barrio|localidad|municipio|ciudad|transporte|moto|bicicleta|experiencia)\b/.test(normalized)) {
+  if (/\b(auxiliar|vacante|cargo|bodega|cargue|descargue|logistica|operacion|requisitos|documento|cedula|ppt|barrio|localidad|municipio|ciudad|transporte|moto|bicicleta|experiencia|informacion|info|interes|interesado|interesada|postulacion|trabajo|requisito|favor|gracias)\b/.test(normalized)) {
     return false;
   }
 
   const tokens = raw.split(/\s+/).filter(Boolean);
   if (tokens.length < 2 || tokens.length > 5) return false;
+
+  const semanticNonNameTokens = new Set(['si', 'sii', 'sip', 'ok', 'okay', 'vale', 'listo', 'claro', 'para', 'por', 'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'o', 'que', 'quedo', 'atento', 'atenta', 'buenas', 'buenos', 'dias', 'tardes', 'noches', 'hola', 'cordial', 'saludo']);
+  const normalizedTokens = normalized.split(/\s+/).filter(Boolean);
+  const semanticTokenCount = normalizedTokens.filter((token) => semanticNonNameTokens.has(token)).length;
+  if (semanticNonNameTokens.has(normalizedTokens[0]) || semanticTokenCount === normalizedTokens.length) return false;
 
   return tokens.every((token) => /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/.test(token));
 }
@@ -220,6 +246,10 @@ function sanitizeFullName(value, evidence, text, context, turnType) {
   const groupedIdentityEvidence = hasDocumentEvidence(text) || hasAgeEvidence(text);
   const usableEvidence = evidenceIsUsable('fullName', evidence, { allowLocalParser: true });
 
+  if (getEvidence('fullName', evidence).snippet && !evidenceSnippetIsGrounded('fullName', evidence, text)) {
+    return { ok: false, reason: 'name_evidence_not_grounded_in_candidate_text' };
+  }
+
   if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !identityCue && !groupedIdentityEvidence) {
     return { ok: false, reason: 'conversational_turn_without_identity_evidence' };
   }
@@ -241,6 +271,10 @@ function sanitizeResidence(field, value, evidence, text, context, turnType) {
   const fieldContext = fieldWasPending(field, context) || lastQuestionAskedForField(field, context);
   const residenceCue = hasResidenceEvidenceCue(text);
   const usableEvidence = evidenceIsUsable(field, evidence, { allowLocalParser: true });
+
+  if (getEvidence(field, evidence).snippet && !evidenceSnippetIsGrounded(field, evidence, text)) {
+    return { ok: false, reason: 'residence_evidence_not_grounded_in_candidate_text' };
+  }
 
   if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !residenceCue) {
     return { ok: false, reason: 'conversational_turn_without_residence_evidence' };
@@ -268,6 +302,14 @@ function sanitizeGender(value, evidence, text, context, turnType) {
   const genderCue = hasGenderEvidenceCue(text);
   const usableEvidence = evidenceIsUsable('gender', evidence, { allowLocalParser: true });
 
+  if (evidenceSourceLooksInferential('gender', evidence)) {
+    return { ok: false, reason: 'gender_inferred_from_name' };
+  }
+
+  if (getEvidence('gender', evidence).snippet && !evidenceSnippetIsGrounded('gender', evidence, text)) {
+    return { ok: false, reason: 'gender_evidence_not_grounded_in_candidate_text' };
+  }
+
   if (!genderCue && !fieldContext) {
     return { ok: false, reason: 'gender_without_explicit_linguistic_evidence' };
   }
@@ -278,6 +320,10 @@ function sanitizeGender(value, evidence, text, context, turnType) {
 
   if (!usableEvidence && !genderCue && !fieldContext) {
     return { ok: false, reason: 'missing_gender_evidence' };
+  }
+
+  if (!genderCue && !usableEvidence) {
+    return { ok: false, reason: 'gender_without_textual_evidence' };
   }
 
   return { ok: true };
@@ -304,6 +350,7 @@ function sanitizeAge(value, text) {
     const normalized = normalizeText(text);
     if (!/\b(edad|tengo|anos|ano)\b/.test(normalized)) return { ok: false, reason: 'address_number_not_age' };
   }
+  if (hasExperienceEvidence(text) && !hasAgeEvidence(text)) return { ok: false, reason: 'experience_number_not_age' };
   return { ok: true };
 }
 

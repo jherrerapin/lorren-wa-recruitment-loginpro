@@ -24,6 +24,26 @@ import axios from 'axios';
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
+
+function stripRepeatedOpeningGreeting(reply = '') {
+  const text = String(reply || '').trim();
+  if (!text) return text;
+
+  const withoutGreeting = text.replace(
+    /^(?:[¡!\s]*)(?:hola|buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|cordial\s+saludo)(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,})?\s*[,.:;-]+\s*/i,
+    ''
+  ).trim();
+
+  if (!withoutGreeting) return text;
+  return withoutGreeting.replace(/^([a-záéíóúñ])/, (match) => match.toUpperCase());
+}
+
+function polishReplyForTurn(reply = '', { allowOpeningGreeting = false } = {}) {
+  const text = String(reply || '').replace(/\s+/g, ' ').trim();
+  if (!text) return text;
+  return allowOpeningGreeting ? text : stripRepeatedOpeningGreeting(text);
+}
+
 /**
  * Construye el system prompt del reclutador con el contexto de la vacante.
  */
@@ -49,6 +69,8 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
     'NUNCA usés formato Markdown (negritas, cursivas, etc.).',
     'NUNCA menciones que sos un bot o IA, a menos que el candidato lo pregunte directamente.',
     'NUNCA repitas frases que ya aparecen en la conversación reciente.',
+    'NUNCA inventés cargos, sectores, beneficios, requisitos ni categorías de vacantes: usá solo la información registrada en el contexto.',
+    'Saludá solo cuando sea primer contacto o cuando el candidato acaba de saludar; en confirmaciones, agendamientos, correcciones y seguimiento continuá directo sin abrir con Hola.',
     'Respondé SIEMPRE en menos de 3 oraciones, de forma conversacional y variada.',
     'Si el candidato se presenta, respondé al saludo con calidez ANTES de pedir datos.',
     'Variá el lenguaje: no siempre el mismo saludo ni la misma forma de pedir un dato.',
@@ -107,10 +129,12 @@ export async function generateNaturalReply({
     );
 
     const content = response.data?.choices?.[0]?.message?.content;
-    if (typeof content === 'string' && content.trim()) return content.trim();
-    return fallbackText || 'Te lei, dame un momento y continuo contigo.';
+    if (typeof content === 'string' && content.trim()) {
+      return polishReplyForTurn(content, { allowOpeningGreeting: !recentBotMessages.length });
+    }
+    return polishReplyForTurn(fallbackText || 'Te lei, dame un momento y continuo contigo.', { allowOpeningGreeting: !recentBotMessages.length });
   } catch {
-    return fallbackText || 'Te lei, dame un momento y continuo contigo.';
+    return polishReplyForTurn(fallbackText || 'Te lei, dame un momento y continuo contigo.', { allowOpeningGreeting: !recentBotMessages.length });
   }
 }
 
@@ -132,6 +156,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       'Saludá de forma cálida y natural, mencioná brevemente la vacante disponible.',
       'Luego indicá que necesitás los datos del candidato para continuar.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real, no como un sistema.',
+      'No inventés otras vacantes, cargos, sectores ni requisitos: menciona solo esta vacante registrada.',
       `Vacante: ${resolved.role} en ${resolved.city}.`,
       `Condiciones principales: ${resolved.conditions?.split('\n').slice(0, 3).join(', ')}`
     ].join(' ');
@@ -142,6 +167,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       'El candidato te escribe. Saludá de forma cálida y preguntá de forma natural',
       'por cuál vacante y ciudad se comunica. NO los ofrezcas como catálogo.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real.',
+      'No inventés cargos ni sectores; si no hay ciudad o cargo claro, pedilo antes de afirmar opciones.',
       `Vacantes activas disponibles: ${vacancyList || 'ninguna por el momento'}`
     ].join(' ');
   }
@@ -207,6 +233,7 @@ export async function generateInterviewOffer({
     candidateName ? `Nombre del candidato: ${candidateName.split(' ')[0]}.` : '',
     docsLine ? `Indicá también: ${docsLine}` : '',
     'Preguntá si el horario le queda bien. Máx 2 oraciones. Sin viñetas ni Markdown. Soná humano.',
+    'No abras con saludo ni con "Hola": es una continuación del hilo, no un primer contacto.',
     `Horario a ofrecer: ${formattedDate}`
   ].filter(Boolean).join(' ');
 
@@ -229,15 +256,15 @@ export async function generateInterviewOffer({
     );
 
     const content = response.data?.choices?.[0]?.message?.content;
-    if (typeof content === 'string' && content.trim()) return content.trim();
+    if (typeof content === 'string' && content.trim()) return polishReplyForTurn(content);
   } catch {
     // fallback
   }
 
   const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
-  return isReschedule
+  return polishReplyForTurn(isReschedule
     ? `Entonces te ofrezco el ${formattedDate}. ¿Te queda bien? ${docsLine}`.trim()
-    : `Listo${name}, te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim();
+    : `Listo${name}, te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim());
 }
 
 /**
@@ -249,12 +276,12 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
   const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
 
   if (!process.env.OPENAI_API_KEY) {
-    return [
+    return polishReplyForTurn([
       `Listo${name}, quedaste agendado para el ${formattedDate}.`,
       address ? `La dirección es ${address}.` : '',
       docs ? `Recuerda traer: ${docs}.` : '',
       'Te enviaré un recordatorio una hora antes. ¡Mucha suerte!'
-    ].filter(Boolean).join(' ');
+    ].filter(Boolean).join(' '));
   }
 
   const systemPrompt = [
@@ -265,6 +292,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     address ? `Dirección: ${address}.` : '',
     docs ? `Documentación a traer: ${docs}.` : '',
     'Avisá que le llegará un recordatorio una hora antes.',
+    'No abras con saludo ni con "Hola": el candidato acaba de confirmar el horario y esta respuesta debe continuar el hilo.',
     'Máx 3 oraciones. Sin viñetas ni Markdown. Soná genuino y cercano.'
   ].filter(Boolean).join(' ');
 
@@ -287,15 +315,15 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     );
 
     const content = response.data?.choices?.[0]?.message?.content;
-    if (typeof content === 'string' && content.trim()) return content.trim();
+    if (typeof content === 'string' && content.trim()) return polishReplyForTurn(content);
   } catch {
     // fallback
   }
 
-  return [
+  return polishReplyForTurn([
     `Perfecto${name}, quedaste agendado para el ${formattedDate}.`,
     address ? `Nos vemos en ${address}.` : '',
     docs ? `Recuerda llevar: ${docs}.` : '',
     'Te envío un recordatorio una hora antes. ¡Éxitos!'
-  ].filter(Boolean).join(' ');
+  ].filter(Boolean).join(' '));
 }
