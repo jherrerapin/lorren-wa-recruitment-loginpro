@@ -357,42 +357,11 @@ function buildNoOperationsAvailableReply(city = null) {
   return `En este momento no tengo operaciones disponibles${location}. Si quieres, puedes dejar tus datos y tu hoja de vida para tener tu perfil en cuenta si se abre una vacante.`;
 }
 
-function buildGroundedVacancyCatalogReply(vacancies = [], city = null) {
-  const filteredVacancies = city
-    ? vacancies.filter((vacancy) => normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(city))
-    : vacancies;
-
-  if (!filteredVacancies.length) return buildNoOperationsAvailableReply(city);
-
-  const labels = [...new Set(filteredVacancies
-    .map((vacancy) => {
-      const title = vacancy?.title || vacancy?.role;
-      if (!title) return null;
-      const vacancyCity = vacancy.operation?.city?.name || vacancy.city || null;
-      return city || !vacancyCity ? title : `${title} en ${vacancyCity}`;
-    })
-    .filter(Boolean))];
-
-  const visibleLabels = labels.slice(0, 8);
-  const suffix = labels.length > visibleLabels.length ? ` y ${labels.length - visibleLabels.length} mas` : '';
-  const joined = visibleLabels.length === 1
-    ? visibleLabels[0]
-    : `${visibleLabels.slice(0, -1).join(', ')} y ${visibleLabels[visibleLabels.length - 1]}`;
-  const cityText = city ? ` en ${city}` : '';
-
-  return `Por ahora tengo registradas como activas estas vacantes${cityText}: ${joined}${suffix}. Dime desde que ciudad escribes y cual te interesa para contarte solo la informacion registrada de esa vacante.`;
-}
-function buildCityVacancyOptionsReply(city, vacancies = []) {
-  const options = [...new Set(
-    vacancies
-      .map((vacancy) => vacancy?.title || vacancy?.role)
-      .filter(Boolean)
-  )];
-  if (!options.length) return buildNoOperationsAvailableReply(city);
-  const label = options.length === 1
-    ? options[0]
-    : `${options.slice(0, -1).join(', ')} y ${options[options.length - 1]}`;
-  return `En ${city} tengo estas vacantes activas: ${label}. Dime cual te interesa y te comparto la informacion. Si ninguna te sirve por ahora, igual puedes dejar tus datos y tu hoja de vida para tenerte en cuenta cuando se abra otra opcion.`;
+function buildVacancyInterestPrompt(city = null) {
+  if (city) {
+    return `Ya tengo la ciudad: ${city}. Cuéntame el cargo o la vacante que te interesa para validar esa opción sin mezclarla con otras ciudades.`;
+  }
+  return 'Cuéntame desde qué ciudad nos escribes y para qué vacante o cargo estás interesado, así valido la opción correcta.';
 }
 function buildVacancyQuestionLead(vacancy, text = '') {
   const n = normalizeComparableText(text);
@@ -450,16 +419,13 @@ function buildVacancyContinuePrompt(candidate, vacancy = null) {
 }
 function buildVacancyAssociationPrompt(options = {}) {
   const intro = (options.cvReceived || options.hasCv)
-    ? 'Recibi tu hoja de vida.'
-    : (options.dataCaptured ? 'Ya registre lo que me compartiste.' : 'Con gusto te ayudo.');
-  if (options.city && options.cityVacancyOptions?.length) {
-    return `${intro} Ya tengo que nos escribes desde ${options.city}. ${buildCityVacancyOptionsReply(options.city, options.cityVacancyOptions)}`;
-  }
+    ? 'Recibí tu hoja de vida.'
+    : (options.dataCaptured ? 'Ya registré lo que me compartiste.' : 'Con gusto te ayudo.');
   if (options.city) {
-    return `${intro} Ya tengo que nos escribes desde ${options.city}. Ahora cuentame para que vacante o cargo estas aplicando.`;
+    return `${intro} ${buildVacancyInterestPrompt(options.city)}`;
   }
   const attachment = options.hasCv ? 'Para asociarla correctamente' : 'Para asociar bien tu proceso';
-  return `${intro} ${attachment}, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.`;
+  return `${intro} ${attachment}, ${buildVacancyInterestPrompt().replace(/^Cuéntame/, 'cuéntame')}`;
 }
 function buildQuestionFollowUpReply(vacancy, inboundText = '', followUpText = '') {
   const answer = buildVacancyQuestionLead(vacancy, inboundText);
@@ -1402,11 +1368,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return true;
     }
     if (['city_with_active_vacancies', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
-      const activeVacancies = await findActiveVacancies(prisma);
-      const cityVacancies = activeVacancies.filter((vacancy) => (
-        normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(resolution.city)
-      ));
-      const body = buildCityVacancyOptionsReply(resolution.city, cityVacancies);
+      const body = buildVacancyInterestPrompt(resolution.city);
       await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
       return true;
     }
@@ -1574,10 +1536,16 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     && isVacancyInfoQuestion(cleanText)
     && !hasMaterialProfileFieldCapture
   ) {
-    const activeVacancies = await findActiveVacancies(prisma);
-    const body = buildGroundedVacancyCatalogReply(activeVacancies, vacancyHints.city);
+    const resolution = await resolveVacancyForCandidate();
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_catalog' });
+    if (resolution.resolved && resolution.vacancy) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: { vacancyId: resolution.vacancy.id } });
+      const candidateState = { ...candidate, vacancyId: resolution.vacancy.id, currentStep: ConversationStep.GREETING_SENT };
+      return replyWithVacancyContext(candidateState, resolution.vacancy);
+    }
+    if (await replyFromVacancyResolutionFailure(resolution)) return;
+    const body = buildVacancyInterestPrompt(vacancyHints.city || resolution.city);
+    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
   }
 
   if (candidate.currentStep !== ConversationStep.DONE && isNegativeInterest(cleanText)) {

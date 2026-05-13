@@ -223,15 +223,12 @@ function hasInterestSignal(text = '') {
     .test(normalizeResolverText(text));
 }
 
-function scoreVacancy(vacancy, { text, city, roleHint }) {
+function scoreVacancyRole(vacancy, { text, roleHint }) {
   const vacancyText = [vacancy?.title, vacancy?.role, vacancy?.operation?.name, vacancy?.operationAddress].filter(Boolean).join(' ');
-  const vacancyCity = canonicalVacancyCity(vacancy);
+  const normalizedText = normalizeResolverText(text);
+  const normalizedTitle = normalizeResolverText(vacancy?.title || '');
+  const normalizedRole = normalizeResolverText(vacancy?.role || '');
   let score = 0;
-
-  if (city) {
-    if (!cityMatchesVacancy(vacancy, city)) return -1;
-    score += 4;
-  }
 
   if (roleHint) {
     score += similarityScore(roleHint, vacancyText) * 6;
@@ -239,12 +236,21 @@ function scoreVacancy(vacancy, { text, city, roleHint }) {
     score += similarityScore(text, vacancyText) * 3;
   }
 
-  const normalizedText = normalizeResolverText(text);
-  const normalizedTitle = normalizeResolverText(vacancy?.title || '');
-  const normalizedRole = normalizeResolverText(vacancy?.role || '');
-
   if (normalizedTitle && normalizedText.includes(normalizedTitle)) score += 2;
   if (normalizedRole && normalizedText.includes(normalizedRole)) score += 2;
+
+  return score;
+}
+
+function scoreVacancy(vacancy, { text, city, roleHint }) {
+  let score = 0;
+
+  if (city) {
+    if (!cityMatchesVacancy(vacancy, city)) return -1;
+    score += 4;
+  }
+
+  score += scoreVacancyRole(vacancy, { text, roleHint });
 
   return score;
 }
@@ -289,7 +295,11 @@ function pickBestVacancyMatch(vacancies = [], context = {}) {
   if (!vacancies.length) return null;
 
   const scored = vacancies
-    .map((vacancy) => ({ vacancy, score: scoreVacancy(vacancy, context) }))
+    .map((vacancy) => ({
+      vacancy,
+      score: scoreVacancy(vacancy, context),
+      roleScore: scoreVacancyRole(vacancy, context)
+    }))
     .sort((a, b) => b.score - a.score);
 
   const best = scored[0] || null;
@@ -305,6 +315,17 @@ function isStrongUniqueRoleMatch(match, threshold = 4.5) {
   if (!match?.best) return false;
   if (match.best.score < threshold) return false;
   return !match.runnerUp || match.margin >= 0.75;
+}
+
+function roleEvidenceThreshold(roleHint = '') {
+  const tokenCount = roleHint ? cleanRoleTokens(tokenize(roleHint)).length : 0;
+  if (!tokenCount) return 0;
+  return tokenCount >= 2 ? 3 : 2.5;
+}
+
+function hasEnoughRoleEvidence(match, roleHint = '') {
+  if (!roleHint) return true;
+  return Boolean(match?.best && match.best.roleScore >= roleEvidenceThreshold(roleHint));
 }
 
 export async function resolveVacancyFromText(prisma, text, options = {}) {
@@ -337,23 +358,11 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
 
   const roleTokenCount = roleHint ? cleanRoleTokens(tokenize(roleHint)).length : 0;
   const threshold = roleHint ? (roleTokenCount >= 2 ? 4 : 4.5) : 6;
+  const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
+  const inactiveHasRoleEvidence = hasEnoughRoleEvidence(inactiveMatch, roleHint);
 
   if (city && !matchingCityVacancies.length) {
-    const crossCityActiveMatch = roleHint
-      ? pickBestVacancyMatch(activeVacancies, { text, city: null, roleHint })
-      : null;
-    if (isStrongUniqueRoleMatch(crossCityActiveMatch, threshold)) {
-      return {
-        resolved: true,
-        vacancy: crossCityActiveMatch.best.vacancy,
-        city: canonicalVacancyCity(crossCityActiveMatch.best.vacancy),
-        roleHint,
-        reason: 'matched_active_vacancy_by_role_outside_city'
-      };
-    }
-
-    const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
-    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold) {
+    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold && inactiveHasRoleEvidence) {
       return {
         resolved: true,
         vacancy: inactiveMatch.best.vacancy,
@@ -366,8 +375,7 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   }
 
   if (!activeVacancies.length) {
-    const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
-    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold) {
+    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold && inactiveHasRoleEvidence) {
       return {
         resolved: true,
         vacancy: inactiveMatch.best.vacancy,
@@ -384,11 +392,16 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   }
 
   const { best, runnerUp, margin } = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint });
-  const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
   const effectiveThreshold = roleHint ? threshold : 6;
+  const activeHasRoleEvidence = hasEnoughRoleEvidence({ best }, roleHint);
 
-  if (!best || best.score < effectiveThreshold) {
-    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold) {
+  if (!best || best.score < effectiveThreshold || !activeHasRoleEvidence) {
+    if (
+      inactiveMatch?.best
+      && inactiveMatch.best.score >= threshold
+      && inactiveHasRoleEvidence
+      && (!best || !activeHasRoleEvidence)
+    ) {
       return {
         resolved: true,
         vacancy: inactiveMatch.best.vacancy,
@@ -401,20 +414,6 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
       return { resolved: false, vacancy: null, city, roleHint, reason: 'city_with_active_vacancies' };
     }
     return { resolved: false, vacancy: null, city, roleHint, reason: 'low_confidence_match' };
-  }
-
-  if (
-    inactiveMatch?.best
-    && inactiveMatch.best.score >= threshold
-    && inactiveMatch.best.score >= (best.score + 0.5)
-  ) {
-    return {
-      resolved: true,
-      vacancy: inactiveMatch.best.vacancy,
-      city: city || canonicalVacancyCity(inactiveMatch.best.vacancy),
-      roleHint,
-      reason: 'matched_inactive_vacancy'
-    };
   }
 
   if (runnerUp && margin < 0.75) {
