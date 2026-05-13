@@ -546,7 +546,7 @@
       <% if (!candidate.hasCv) { %>
         <p style="margin-bottom:10px;"><%= role === 'dev' ? 'Este candidato no tiene hoja de vida cargada.' : 'Aún no hay una hoja de vida cargada para este candidato.' %></p>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/cv/upload" enctype="multipart/form-data" class="inline-upload">
-          <input type="file" name="cvFile" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
+          <input type="file" name="cvFile" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
           <button type="submit" class="btn-primary"><%= role === 'dev' ? 'Subir hoja de vida' : 'Cargar hoja de vida' %></button>
         </form>
       <% } else { %>
@@ -557,7 +557,7 @@
         <div class="cv-actions">
           <a href="/admin/candidates/<%= candidate.id %>/cv" class="btn-cv" style="margin:0;">Descargar</a>
           <form method="post" action="/admin/candidates/<%= candidate.id %>/cv/upload" enctype="multipart/form-data" class="inline-upload">
-            <input type="file" name="cvFile" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
+            <input type="file" name="cvFile" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
             <button type="submit" class="btn-primary">Reemplazar</button>
           </form>
           <form method="post" action="/admin/candidates/<%= candidate.id %>/cv/delete">

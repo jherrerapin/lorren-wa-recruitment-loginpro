@@ -4,7 +4,7 @@ import { extractMessages, sendImageMessage, sendTextMessage } from '../services/
 import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { tryOpenAIParse } from '../services/aiParser.js';
 import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
-import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
+import { isCvMimeTypeAllowed, looksLikeCvFilenameText, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
 import {
   alignCandidateLocationFields,
   getCandidateResidenceValue,
@@ -40,8 +40,8 @@ const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué
 
 const DESCARTE_MSG = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque no cumples con uno de los requisitos definidos para esta vacante.';
 const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
-const SOLICITAR_HV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida (HV) en PDF o Word (.doc/.docx) para finalizar tu postulación.';
-const RECORDATORIO_HV = 'Para continuar necesito que adjuntes tu Hoja de vida (HV) en PDF o Word (.doc/.docx). Cuando la envíes, finalizamos tu proceso.';
+const SOLICITAR_HV = '¡Gracias! Ya tengo tus datos. Por favor adjunta tu hoja de vida (HV) como archivo PDF o Word/DOCX para finalizar tu postulación.';
+const RECORDATORIO_HV = 'Para continuar necesito que adjuntes tu hoja de vida (HV) como archivo PDF o Word/DOCX. Cuando la envíes, finalizamos tu proceso.';
 const MENSAJE_FINAL = 'Tu información y hoja de vida quedaron registradas correctamente. El equipo de selección revisará tu perfil y, si el proceso continúa, te contactará por este medio.';
 const MENSAJE_DONE_ACK = '¡Con gusto! Ya quedó tu registro completo. Si surge una novedad, te contactamos por este medio.';
 const MENSAJE_DONE_CV_REPEAT = 'Ya tenemos tu registro completo. Si deseas actualizar tu hoja de vida, puedes enviarla y la adjuntamos a tu postulación.';
@@ -49,6 +49,7 @@ const GUIA_CONTINUAR = 'Puedo ayudarte a continuar con la postulación. Si desea
 const CONFIRMACION_PROMPT = '¿Está correcto? Responde Sí para continuar o envíame la corrección.';
 const INTERVIEW_OFFER_SOURCES = new Set(['interview_offer', 'interview_reschedule']);
 const ASK_VACANCY_FOR_CV = 'Recibi tu hoja de vida. Para asociarla correctamente, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.';
+const TEXT_ONLY_CV_FILENAME_REPLY = 'Para registrar tu hoja de vida necesito que adjuntes el archivo real en PDF o Word/DOCX; escribir solo el nombre del archivo no es suficiente.';
 
 const FIELD_LABELS = {
   fullName: 'el nombre completo',
@@ -412,7 +413,7 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
 function buildVacancyContinuePrompt(candidate, vacancy = null) {
   if (vacancy && !isVacancyOpen(vacancy)) {
     if (candidate.currentStep === ConversationStep.ASK_CV) {
-      return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF o Word.';
+      return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF o Word/DOCX.';
     }
     if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
       const missing = getMissingFields(candidate, vacancy);
@@ -1085,6 +1086,24 @@ async function getRecentOutboundMessages(prisma, candidateId, limit = 6) {
   });
 }
 
+async function hasRecentResumePhotoReply(prisma, candidateId, minutes = 15) {
+  if (!prisma?.message?.findMany) return false;
+  const since = new Date(Date.now() - minutes * 60 * 1000);
+  const recent = await prisma.message.findMany({
+    where: {
+      candidateId,
+      direction: MessageDirection.OUTBOUND,
+      messageType: MessageType.TEXT,
+      createdAt: { gte: since }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 8,
+    select: { body: true, rawPayload: true }
+  });
+  return recent.some((message) => message?.rawPayload?.situation === 'attachment_resume_photo'
+    || (message?.rawPayload?.replyIntent === 'request_cv_pdf_word' && /registrar tu hoja de vida|pdf o word\/docx/i.test(message?.body || '')));
+}
+
 async function pauseForManualQuestionReview(prisma, candidate, from, inboundText = '') {
   const reason = 'Duda posterior requiere intervencion manual';
   await pauseInterviewFlow(prisma, candidate.id, reason);
@@ -1311,6 +1330,14 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   debugTrace.used_multiline_context = Boolean(options.usedMultilineContext);
   debugTrace.consolidated_input_summary = options.consolidatedInputSummary || null;
   let currentVacancy = candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId) : null;
+
+  if (looksLikeCvFilenameText(cleanText)) {
+    debugTrace.cv_text_filename_only = true;
+    return reply(prisma, candidate.id, from, TEXT_ONLY_CV_FILENAME_REPLY, cleanText, {
+      body: TEXT_ONLY_CV_FILENAME_REPLY,
+      source: 'bot_cv_text_filename_rejected'
+    });
+  }
 
   const aiResult = await tryOpenAIParse(cleanText);
   const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};
@@ -2337,11 +2364,15 @@ export function webhookRouter(prisma) {
           if (message.type === 'image') {
             const recentAttachmentsCount = await countRecentInboundAttachments(prisma, candidate.id, 15);
             debugTrace.recent_attachment_count = recentAttachmentsCount;
+            if (await hasRecentResumePhotoReply(prisma, candidate.id, 15)) {
+              debugTrace.attachment_photo_reply_suppressed = true;
+              continue;
+            }
             if (recentAttachmentsCount >= 4) {
               debugTrace.attachment_high_volume = true;
               await pauseInterviewFlow(prisma, candidate.id, 'Multiples adjuntos no procesables requieren revision humana');
               if (!automationBlocked) {
-                await reply(prisma, candidate.id, from, 'Recibí varios adjuntos. Para evitar confundirme, dejo tu caso marcado para revisión del equipo; si tu hoja de vida está en PDF o Word, envíala en un solo archivo.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
+                await reply(prisma, candidate.id, from, 'Recibí varios adjuntos. Para evitar confundirme, dejo tu caso marcado para revisión del equipo; si tu hoja de vida está en PDF o Word/DOCX, envíala en un solo archivo.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
               }
               continue;
             }
@@ -2394,7 +2425,7 @@ export function webhookRouter(prisma) {
               debugTrace.attachment_high_volume = true;
               await pauseInterviewFlow(prisma, candidate.id, 'Multiples documentos no procesables requieren revision humana');
               if (!automationBlocked) {
-                await reply(prisma, candidate.id, from, 'Recibí varios documentos. Para evitar respuestas repetidas, dejo tu caso en revisión; si tu hoja de vida está en PDF o Word, envíala en un solo archivo válido.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
+                await reply(prisma, candidate.id, from, 'Recibí varios documentos. Para evitar respuestas repetidas, dejo tu caso en revisión; si tu hoja de vida está en PDF o Word/DOCX, envíala en un solo archivo válido.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
               }
               continue;
             }

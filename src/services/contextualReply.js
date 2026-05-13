@@ -111,6 +111,18 @@ export function shouldEscalateHumanReview({ attachmentAnalysis = null, contradic
 }
 
 export async function buildContextualReply(context = {}) {
+  if (context.situation === 'attachment_resume_photo') {
+    return {
+      text: 'Gracias. Para poder registrar tu hoja de vida, envíamela como archivo PDF o Word/DOCX. No puedo registrarla en foto.',
+      situation: 'attachment_resume_photo',
+      usedModel: false,
+      fallbackUsed: true,
+      reason: 'deterministic_attachment_resume_photo',
+      intent: 'request_cv_pdf_word',
+      escalateHuman: Boolean(context.requiresHumanReview),
+      model: null
+    };
+  }
   const payloadContext = buildContextPayload(context);
   if (!process.env.OPENAI_API_KEY) return buildFallback(context, 'openai_disabled');
 
@@ -121,7 +133,7 @@ export async function buildContextualReply(context = {}) {
         role: 'system',
         content: [{
           type: 'input_text',
-          text: 'Eres un reclutador humano por WhatsApp. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas, no repitas texto reciente, responde preguntas primero y luego retoma el proceso. No inventes reglas: respeta la decision ya dada por el sistema. Si requiere revision humana, dilo sin improvisar soluciones.'
+          text: 'Eres un reclutador humano por WhatsApp. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas, no repitas texto reciente, responde preguntas primero y luego retoma el proceso. No inventes reglas: respeta la decision ya dada por el sistema. Si requiere revision humana, dilo sin improvisar soluciones. Nunca digas que la hoja de vida puede enviarse en foto, imagen, impresa, Minerva física o como la tenga. Para este canal solo es válida como archivo PDF o DOCX.'
         }]
       },
       {

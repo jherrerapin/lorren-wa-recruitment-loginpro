@@ -10,7 +10,7 @@ test('datos completos sin CV pasan a ASK_CV y no a DONE', () => {
 
 test('en ASK_CV solo se permite cierre con CV válido', () => {
   assert.equal(isCvMimeTypeAllowed('application/pdf'), true);
-  assert.equal(isCvMimeTypeAllowed('application/msword'), true);
+  assert.equal(isCvMimeTypeAllowed('application/msword'), false);
   assert.equal(isCvMimeTypeAllowed('application/vnd.openxmlformats-officedocument.wordprocessingml.document'), true);
   assert.equal(isCvMimeTypeAllowed('image/jpeg'), false);
 });

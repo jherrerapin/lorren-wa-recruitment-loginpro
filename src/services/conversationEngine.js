@@ -315,6 +315,7 @@ PRIORIDADES:
 - Si corrige algo, usa el valor nuevo y no reabras la misma confirmacion.
 - Si detectas un dato incoherente con el contexto reciente, corrigelo o pídelo de forma puntual; no confirmes datos absurdos.
 - Si ya envio la hoja de vida y en este mensaje por fin aclara ciudad o vacante, ubica el proceso, explica brevemente la vacante real y luego sigue solo con lo faltante.
+- Cuando pidas hoja de vida, pide únicamente archivo PDF o Word/DOCX. Nunca digas foto, imagen, impresa, Minerva física ni ‘como la tengas’. Si el candidato envía una foto de la hoja de vida, responde que debe reenviarla en PDF o DOCX.
 - Si expresa no interes, cierra correctamente con "mark_no_interest".
 - Si un humano ya intervino, no respondas encima; usa "pause_bot" o "nothing" segun corresponda.
 
@@ -503,7 +504,7 @@ function hasMeaningfulEngineProgress(decision = {}, currentStep = '') {
 
 function buildLoopGuardReply({ candidate = {}, currentStep = '', recentMessages = [] } = {}) {
   if (currentStep === 'ASK_CV') {
-    return 'Ya revise lo que me enviaste. Cuando puedas, adjunta la hoja de vida en PDF o Word y sigo contigo.';
+    return 'Ya revise lo que me enviaste. Cuando puedas, adjunta la hoja de vida en PDF o Word/DOCX y sigo contigo.';
   }
 
   if (currentStep === 'CONFIRMING_DATA' && !getCoreFieldGaps(candidate).length) {

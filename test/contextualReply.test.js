@@ -76,21 +76,20 @@ test('dos adjuntos seguidos generan respuestas distintas cuando el modelo entreg
   delete process.env.OPENAI_API_KEY;
 });
 
-test('pregunta + adjunto responde natural con foco en la situación', async () => {
+test('foto de HV usa respuesta determinística sin llamar IA', async () => {
   process.env.OPENAI_API_KEY = 'test-key';
 
-  await withAxiosMock(async () => ({
-    data: {
-      output: [{ content: [{ parsed: { reply: 'Sí, el proceso sigue activo. Además, el archivo llegó como foto; envíame la HV en PDF o DOCX.', escalateHuman: false, reason: 'answered_then_continue' } }] }]
-    }
-  }), async () => {
+  await withAxiosMock(async () => {
+    throw new Error('no debe llamar IA para attachment_resume_photo');
+  }, async () => {
     const result = await buildContextualReply({
       situation: 'attachment_resume_photo',
       inboundText: '¿el proceso sigue? te mandé foto de mi hoja de vida',
       recentMessages: [{ body: 'Compárteme tu hoja de vida en PDF o DOCX.' }]
     });
-    assert.match(result.text, /proceso sigue activo/i);
+    assert.equal(result.usedModel, false);
     assert.match(result.text, /PDF|DOCX/i);
+    assert.match(result.text, /No puedo registrarla en foto/i);
   });
 
   delete process.env.OPENAI_API_KEY;
