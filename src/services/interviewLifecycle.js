@@ -1,3 +1,5 @@
+const INTERVIEW_NO_RESPONSE_MINUTES_BEFORE = 5;
+
 const ACTIVE_BOOKING_STATUSES = new Set(['SCHEDULED', 'CONFIRMED']);
 const CLOSED_BOOKING_STATUSES = new Set(['CANCELLED', 'RESCHEDULED', 'NO_RESPONSE', 'ATTENDED', 'NO_SHOW']);
 
@@ -70,8 +72,16 @@ export function detectInterviewIntent({ text = '', booking = null, now = new Dat
   return 'confirm_attendance';
 }
 
-export function shouldMarkNoResponse() {
-  return false;
+export function shouldMarkNoResponse(booking, { now = new Date(), hasReminderReply = false } = {}) {
+  if (!hasActiveInterviewBooking(booking)) return false;
+  if (!booking?.reminderSentAt) return false;
+  if (hasReminderReply) return false;
+  if (!isInterviewSameBogotaDay(booking, now)) return false;
+
+  const scheduledAt = new Date(booking.scheduledAt);
+  const remainingMinutes = (scheduledAt.getTime() - now.getTime()) / (60 * 1000);
+
+  return remainingMinutes > 0 && remainingMinutes <= INTERVIEW_NO_RESPONSE_MINUTES_BEFORE;
 }
 
 export function getInterviewConfirmationWindowHours() {
@@ -79,5 +89,5 @@ export function getInterviewConfirmationWindowHours() {
 }
 
 export function getInterviewNoResponseMinutesBefore() {
-  return 5;
+  return INTERVIEW_NO_RESPONSE_MINUTES_BEFORE;
 }
