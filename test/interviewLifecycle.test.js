@@ -32,27 +32,32 @@ test('aceptar horario crea booking SCHEDULED y no CONFIRMED', async () => {
   assert.equal(booking.status, 'SCHEDULED');
 });
 
-test('"confirmo" demasiado temprano no cambia a confirm_attendance', () => {
-  const now = new Date('2026-04-23T05:00:00.000Z');
+test('"confirmo" el día anterior no cambia a confirm_attendance aunque exista booking', () => {
+  const now = new Date('2026-04-23T18:00:00.000Z');
   const intent = detectInterviewIntent({ text: 'confirmo, si voy', booking: baseBooking, now });
   assert.equal(isWithinInterviewConfirmationWindow(baseBooking, now), false);
   assert.equal(intent, 'none');
 });
 
-test('"confirmo" dentro de ventana válida sí detecta confirm_attendance', () => {
+test('"confirmo" el mismo día de la entrevista sí detecta confirm_attendance', () => {
   const now = new Date('2026-04-24T13:00:00.000Z');
   const intent = detectInterviewIntent({ text: 'sí voy, confirmo asistencia', booking: baseBooking, now });
   assert.equal(isWithinInterviewConfirmationWindow(baseBooking, now), true);
   assert.equal(intent, 'confirm_attendance');
 });
 
-test('detecta intención de cancelación y reagendamiento', () => {
-  const now = new Date('2026-04-24T13:00:00.000Z');
-  assert.equal(detectInterviewIntent({ text: 'quiero cancelar la entrevista', booking: baseBooking, now }), 'cancel_interview');
-  assert.equal(detectInterviewIntent({ text: 'necesito reagendar, dame otro horario', booking: baseBooking, now }), 'reschedule_interview');
+test('detecta cancelación y reagendamiento solo el día de la entrevista', () => {
+  const sameDay = new Date('2026-04-24T13:00:00.000Z');
+  const previousDay = new Date('2026-04-23T18:00:00.000Z');
+
+  assert.equal(detectInterviewIntent({ text: 'quiero cancelar la entrevista', booking: baseBooking, now: sameDay }), 'cancel_interview');
+  assert.equal(detectInterviewIntent({ text: 'necesito reagendar, dame otro horario', booking: baseBooking, now: sameDay }), 'reschedule_interview');
+
+  assert.equal(detectInterviewIntent({ text: 'quiero cancelar la entrevista', booking: baseBooking, now: previousDay }), 'none');
+  assert.equal(detectInterviewIntent({ text: 'necesito reagendar, dame otro horario', booking: baseBooking, now: previousDay }), 'none');
 });
 
-test('marca NO_RESPONSE cuando falta <=10 min desde reminder sin respuesta', () => {
+test('no marca NO_RESPONSE automáticamente aunque falten 5 minutos y no haya respuesta', () => {
   const booking = {
     ...baseBooking,
     reminderSentAt: new Date('2026-04-24T16:55:00.000Z')
@@ -60,9 +65,9 @@ test('marca NO_RESPONSE cuando falta <=10 min desde reminder sin respuesta', () 
 
   assert.equal(
     shouldMarkNoResponse(booking, {
-      now: new Date('2026-04-24T17:51:00.000Z'),
+      now: new Date('2026-04-24T17:55:00.000Z'),
       hasReminderReply: false
     }),
-    true
+    false
   );
 });
