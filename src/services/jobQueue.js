@@ -1,4 +1,5 @@
 export const JOB_TYPES = {
+  CANDIDATE_PROCESS_REMINDER: 'candidate_process_reminder',
   INTERVIEW_REMINDER: 'interview_reminder',
   ADMIN_FORWARD_ATTACHMENT: 'admin_forward_attachment',
   CV_STORAGE_MIGRATION: 'cv_storage_migration'
