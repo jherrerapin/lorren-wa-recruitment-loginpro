@@ -1,13 +1,3 @@
-const INTERVIEW_CONFIRMATION_WINDOW_HOURS = Number.parseInt(
-  process.env.INTERVIEW_CONFIRMATION_WINDOW_HOURS || '6',
-  10
-) || 6;
-
-const INTERVIEW_NO_RESPONSE_MINUTES_BEFORE = Number.parseInt(
-  process.env.INTERVIEW_NO_RESPONSE_MINUTES_BEFORE || '10',
-  10
-) || 10;
-
 const ACTIVE_BOOKING_STATUSES = new Set(['SCHEDULED', 'CONFIRMED']);
 const CLOSED_BOOKING_STATUSES = new Set(['CANCELLED', 'RESCHEDULED', 'NO_RESPONSE', 'ATTENDED', 'NO_SHOW']);
 
@@ -17,6 +7,21 @@ function normalize(text = '') {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .trim();
+}
+
+function toBogotaDateParts(date) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date).map((part) => [part.type, part.value])
+  );
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 export function hasActiveInterviewBooking(booking) {
@@ -32,13 +37,16 @@ export function shouldStopInterviewAutomation(booking, now = new Date()) {
   return false;
 }
 
-export function isWithinInterviewConfirmationWindow(booking, now = new Date()) {
-  if (!hasActiveInterviewBooking(booking)) return false;
+export function isInterviewSameBogotaDay(booking, now = new Date()) {
+  if (!booking?.scheduledAt) return false;
   const scheduledAt = new Date(booking.scheduledAt);
   if (scheduledAt <= now) return false;
-  if (booking.reminderSentAt) return true;
-  const diffHours = (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
-  return diffHours <= INTERVIEW_CONFIRMATION_WINDOW_HOURS;
+  return toBogotaDateParts(scheduledAt) === toBogotaDateParts(now);
+}
+
+export function isWithinInterviewConfirmationWindow(booking, now = new Date()) {
+  if (!hasActiveInterviewBooking(booking)) return false;
+  return isInterviewSameBogotaDay(booking, now);
 }
 
 export function detectInterviewIntent({ text = '', booking = null, now = new Date() } = {}) {
@@ -48,11 +56,11 @@ export function detectInterviewIntent({ text = '', booking = null, now = new Dat
   if (!n) return 'none';
 
   if (/\b(cancel|cancelar|cancelo|ya no voy|no voy|no podre asistir|no podre ir)\b/.test(n)) {
-    return 'cancel_interview';
+    return isInterviewSameBogotaDay(booking, now) ? 'cancel_interview' : 'none';
   }
 
   if (/\b(reagend|reprogram|otro horario|otra hora|otro dia|cambiar horario|mover cita|me pasas otra fecha)\b/.test(n)) {
-    return 'reschedule_interview';
+    return isInterviewSameBogotaDay(booking, now) ? 'reschedule_interview' : 'none';
   }
 
   const hasAffirmativeInterviewSignal = /\b(confirmo|si voy|si ire|alla estare|estare ahi|asistire|nos vemos|confirmada)\b/.test(n);
@@ -62,20 +70,14 @@ export function detectInterviewIntent({ text = '', booking = null, now = new Dat
   return 'confirm_attendance';
 }
 
-export function shouldMarkNoResponse(booking, { now = new Date(), hasReminderReply = false } = {}) {
-  if (!hasActiveInterviewBooking(booking)) return false;
-  if (!booking?.reminderSentAt) return false;
-  if (hasReminderReply) return false;
-  const scheduledAt = new Date(booking.scheduledAt);
-  if (scheduledAt <= now) return false;
-  const remainingMinutes = (scheduledAt.getTime() - now.getTime()) / (60 * 1000);
-  return remainingMinutes <= INTERVIEW_NO_RESPONSE_MINUTES_BEFORE;
+export function shouldMarkNoResponse() {
+  return false;
 }
 
 export function getInterviewConfirmationWindowHours() {
-  return INTERVIEW_CONFIRMATION_WINDOW_HOURS;
+  return 0;
 }
 
 export function getInterviewNoResponseMinutesBefore() {
-  return INTERVIEW_NO_RESPONSE_MINUTES_BEFORE;
+  return 5;
 }
