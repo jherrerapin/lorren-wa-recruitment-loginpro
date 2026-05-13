@@ -1,19 +1,32 @@
 import { PrismaClient } from '@prisma/client';
 import { claimDueJobs, completeJob, failJob, JOB_TYPES } from '../services/jobQueue.js';
-import { runReminderDispatcher } from '../services/reminder.js';
+import {
+  runCandidateProcessReminderDispatcher,
+  runInterviewReminderDispatcher,
+  runReminderDispatcher
+} from '../services/reminder.js';
 import { runAutoCvMigration } from '../services/cvMigration.js';
 
 const prisma = new PrismaClient();
 const POLL_MS = Number.parseInt(process.env.JOB_WORKER_POLL_MS || '5000', 10);
 
 async function runJob(job) {
-  if (job.type === JOB_TYPES.INTERVIEW_REMINDER) {
-    await runReminderDispatcher(prisma, {
+  if (job.type === JOB_TYPES.CANDIDATE_PROCESS_REMINDER) {
+    await runCandidateProcessReminderDispatcher(prisma, {
       now: new Date(),
       candidateId: job?.payload?.candidateId ? String(job.payload.candidateId) : null
     });
     return;
   }
+
+  if (job.type === JOB_TYPES.INTERVIEW_REMINDER) {
+    await runInterviewReminderDispatcher(prisma, {
+      now: new Date(),
+      candidateId: job?.payload?.candidateId ? String(job.payload.candidateId) : null
+    });
+    return;
+  }
+
   if (job.type === JOB_TYPES.CV_STORAGE_MIGRATION) {
     await runAutoCvMigration(prisma);
     return;
@@ -33,6 +46,10 @@ async function tick() {
     } catch (error) {
       await failJob(prisma, job.id, error?.message || 'worker_error');
     }
+  }
+
+  if (!jobs.length) {
+    await runReminderDispatcher(prisma, { now: new Date() });
   }
 }
 
