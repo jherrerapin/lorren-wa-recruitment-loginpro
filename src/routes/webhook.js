@@ -1830,7 +1830,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (candidate.currentStep === ConversationStep.SCHEDULING && isSchedulingConfirmationIntent(cleanText)) {
-      const schedulingGuard = evaluateSchedulingGuard({ candidate, vacancy: currentVacancy, nextSlot, actionType: 'confirm_booking' });
+      const schedulingGuard = evaluateSchedulingGuard({ candidate, vacancy: currentVacancy, nextSlot, actionType: 'confirm_booking', acceptedOfferedSlot: true });
       if (!schedulingGuard.allowed) {
         await pauseInterviewFlow(prisma, candidate.id, `Agendamiento bloqueado: ${schedulingGuard.primaryReason}`);
         const body = schedulingGuard.readiness?.readyForCvRequest

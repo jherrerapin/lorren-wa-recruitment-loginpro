@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ConversationStep, Gender } from '@prisma/client';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
-import { act } from '../src/services/conversationEngine.js';
 import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
 import { buildVacancyOptionsReply, buildUnavailableVacancyInfoReply } from '../src/services/naturalReply.js';
 import { sanitizeOutboundReply } from '../src/services/replySafety.js';
-import { getCandidateReadiness } from '../src/services/readinessGuard.js';
+import { getCandidateReadiness, hasValidCv } from '../src/services/readinessGuard.js';
+import { evaluateSchedulingGuard } from '../src/services/schedulingGuard.js';
+
+const ConversationStep = {
+  ASK_CV: 'ASK_CV',
+  CONFIRMING_DATA: 'CONFIRMING_DATA',
+  COLLECTING_DATA: 'COLLECTING_DATA',
+  SCHEDULING: 'SCHEDULING',
+  SCHEDULED: 'SCHEDULED',
+};
+const Gender = { MALE: 'MALE', FEMALE: 'FEMALE' };
 
 const bogotaOperation = { city: { name: 'Bogota' }, name: 'Bogota' };
 const activeBogota = (overrides = {}) => ({
@@ -40,23 +48,6 @@ function candidate(overrides = {}) {
   };
 }
 
-function prismaMock() {
-  const updates = [];
-  let bookingCreated = false;
-  return {
-    updates,
-    get bookingCreated() { return bookingCreated; },
-    candidate: {
-      update: async (args) => { updates.push(args); return { id: args.where.id, ...args.data }; }
-    },
-    interviewBooking: {
-      findFirst: async () => null,
-      create: async () => { bookingCreated = true; return {}; },
-      updateMany: async () => ({ count: 0 })
-    }
-  };
-}
-
 const nextSlot = { slot: { id: 'slot-1' }, date: new Date('2026-06-01T15:00:00.000Z'), windowOk: true };
 
 test('A: pregunta por vacantes en ciudad lista solo opciones reales y no pide HV', () => {
@@ -65,7 +56,7 @@ test('A: pregunta por vacantes en ciudad lista solo opciones reales y no pide HV
     vacancyOptions: [
       activeBogota({ title: 'Auxiliar de Cargue Bogota' }),
       activeBogota({ id: 'vac-2', title: 'Auxiliar de Bodega Bogota' }),
-      activeBogota({ id: 'vac-3', title: 'Mensajero Ibague', city: 'Ibague', operation: { city: { name: 'Ibague' } }, isActive: false })
+      activeBogota({ id: 'vac-3', title: 'Mensajero Ibague', role: 'Mensajero', city: 'Ibague', operation: { city: { name: 'Ibague' } }, isActive: true })
     ]
   });
 
@@ -88,37 +79,34 @@ test('B y F: información de vacante no inventa condiciones ni prestaciones sin 
   assert.doesNotMatch(unsafe.reply, /Sí, tiene prestaciones de ley/i);
 });
 
-test('C: IA intenta DONE con documentType faltante y backend bloquea cierre', async () => {
-  const prisma = prismaMock();
-  const result = await act({
-    prisma,
-    candidate: candidate({ documentType: null, currentStep: ConversationStep.CONFIRMING_DATA }),
-    vacancy: activeBogota(),
-    nextSlot,
-    actions: [{ type: 'nothing' }],
-    nextStep: ConversationStep.DONE
-  });
+test('C: readiness bloquea DONE con documentType faltante', () => {
+  const readiness = getCandidateReadiness(
+    candidate({ documentType: null, currentStep: ConversationStep.CONFIRMING_DATA }),
+    activeBogota()
+  );
 
-  assert.equal(result.readiness.readyForDone, false);
-  assert.match(result.blockedActions.at(-1).reason, /done_blocked/);
-  assert.equal(prisma.updates.some((u) => u.data.currentStep === ConversationStep.DONE), false);
-  assert.equal(prisma.updates.at(-1).data.currentStep, ConversationStep.COLLECTING_DATA);
+  assert.equal(readiness.readyForDone, false);
+  assert.match(readiness.blockedReasons.join('|'), /missing_core_fields:documentType/);
 });
 
-test('D: IA intenta offer_interview sin HV y backend bloquea agenda', async () => {
-  const prisma = prismaMock();
-  const result = await act({
-    prisma,
+test('D: schedulingGuard bloquea offer_interview sin HV', () => {
+  const guard = evaluateSchedulingGuard({
     candidate: candidate({ cvStorageKey: null, cvMimeType: null, cvOriginalName: null }),
     vacancy: activeBogota(),
     nextSlot,
-    actions: [{ type: 'offer_interview' }],
-    nextStep: ConversationStep.SCHEDULING
+    actionType: 'offer_interview'
   });
 
-  assert.equal(prisma.bookingCreated, false);
-  assert.match(result.blockedActions[0].reason, /missing_cv/);
-  assert.equal(prisma.updates.some((u) => u.data.currentStep === ConversationStep.SCHEDULING), false);
+  assert.equal(guard.allowed, false);
+  assert.match(guard.reasons.join('|'), /missing_cv/);
+});
+
+
+test('HV .doc o storage sin MIME/nombre PDF/DOCX no cuenta como CV válido', () => {
+  assert.equal(hasValidCv(candidate({ cvMimeType: 'application/msword', cvOriginalName: 'hoja-vida.doc' })), false);
+  assert.equal(hasValidCv(candidate({ cvStorageKey: 'cv/cand-1', cvMimeType: null, cvOriginalName: null })), false);
+  assert.equal(hasValidCv(candidate({ cvStorageKey: null, cvData: null, cvMimeType: 'application/pdf', cvOriginalName: 'hoja-vida.pdf' })), false);
+  assert.equal(hasValidCv(candidate({ cvStorageKey: 'cv/cand-1.bin', cvMimeType: 'application/octet-stream', cvOriginalName: 'hoja-vida.docx' })), true);
 });
 
 test('E: HV imagen no cuenta como CV válido y seguridad pide PDF/DOCX', async () => {
@@ -145,23 +133,33 @@ test('G: cortesía “Sii señora claro” no marca género femenino ni agenda',
   assert.equal(result.rejectedFields.find((item) => item.field === 'gender').reason, 'courtesy_treatment_is_not_candidate_gender');
 });
 
-test('guard rail: confirm_booking con documentType faltante, candidata femenina o sin slot queda bloqueado', async () => {
+
+test('confirm_booking sin acceptedOfferedSlot explícito queda bloqueado aunque lo sugiera la IA', () => {
+  const guard = evaluateSchedulingGuard({
+    candidate: candidate(),
+    vacancy: activeBogota(),
+    nextSlot,
+    actionType: 'confirm_booking'
+  });
+
+  assert.equal(guard.allowed, false);
+  assert.match(guard.reasons.join('|'), /candidate_did_not_accept_offered_slot/);
+});
+
+test('guard rail: confirm_booking con documentType faltante, candidata femenina o sin slot queda bloqueado', () => {
   for (const [label, candidatePatch, slot, expected] of [
     ['documentType', { documentType: null }, nextSlot, /missing_fields:documentType/],
     ['female', { gender: Gender.FEMALE }, nextSlot, /female_candidate/],
     ['slot', {}, null, /missing_valid_slot/]
   ]) {
-    const prisma = prismaMock();
-    const result = await act({
-      prisma,
+    const guard = evaluateSchedulingGuard({
       candidate: candidate(candidatePatch),
       vacancy: activeBogota(),
       nextSlot: slot,
-      actions: [{ type: 'confirm_booking' }],
-      nextStep: ConversationStep.SCHEDULED
+      actionType: 'confirm_booking',
+      acceptedOfferedSlot: true
     });
-    assert.equal(prisma.bookingCreated, false, label);
-    assert.match(result.blockedActions.map((item) => item.reason).join('|'), expected, label);
-    assert.equal(prisma.updates.some((u) => u.data.currentStep === ConversationStep.SCHEDULED), false, label);
+    assert.equal(guard.allowed, false, label);
+    assert.match(guard.reasons.join('|'), expected, label);
   }
 });

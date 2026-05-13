@@ -1,4 +1,5 @@
 import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import { isCvMimeTypeAllowed } from './cvFlow.js';
 
 const CORE_FIELDS = [
   'fullName',
@@ -29,18 +30,14 @@ function hasValue(value) {
 }
 
 export function hasValidCv(candidate = {}) {
-  const mime = String(candidate.cvMimeType || '').toLowerCase();
-  const name = String(candidate.cvOriginalName || '').toLowerCase();
-  const hasStoredFile = Boolean(candidate.cvStorageKey || candidate.cvData || candidate.cvOriginalName);
+  const mime = String(candidate.cvMimeType || '').trim().toLowerCase();
+  const filename = String(candidate.cvOriginalName || '').trim();
+  const hasStoredFile = Boolean(candidate.cvStorageKey || candidate.cvData);
+
   if (!hasStoredFile) return false;
   if (mime.startsWith('image/')) return false;
-  if (mime) {
-    return mime.includes('pdf')
-      || mime.includes('word')
-      || mime === 'application/msword'
-      || mime.includes('officedocument.wordprocessingml.document');
-  }
-  return /\.(pdf|docx?|doc)$/i.test(name) || Boolean(candidate.cvStorageKey || candidate.cvData);
+
+  return isCvMimeTypeAllowed(mime, filename);
 }
 
 export function getCandidateReadiness(candidate = {}, vacancy = null, options = {}) {

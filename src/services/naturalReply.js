@@ -369,6 +369,27 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
   ].filter(Boolean).join(' '));
 }
 
+function normalizeCity(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function vacancyCity(vacancy = {}) {
+  return vacancy?.operation?.city?.name || vacancy?.city || null;
+}
+
+function vacancyMatchesCity(vacancy = {}, city = null) {
+  if (!city) return true;
+  const requested = normalizeCity(city);
+  const actual = normalizeCity(vacancyCity(vacancy));
+  return Boolean(requested && actual && requested === actual);
+}
+
 function vacancyLabel(vacancy = {}) {
   return vacancy.title || vacancy.role || null;
 }
@@ -383,6 +404,7 @@ function joinNatural(items = []) {
 export function buildVacancyOptionsReply({ city = null, vacancyOptions = [], hasAskedAvailableVacancies = true } = {}) {
   const activeOptions = (vacancyOptions || [])
     .filter((vacancy) => vacancy?.isActive === true && vacancy?.acceptingApplications === true)
+    .filter((vacancy) => vacancyMatchesCity(vacancy, city))
     .map(vacancyLabel)
     .filter(Boolean);
 

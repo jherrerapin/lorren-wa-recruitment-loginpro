@@ -2,7 +2,7 @@ import { getCandidateReadiness } from './readinessGuard.js';
 
 const BLOCKED_STATUSES = new Set(['RECHAZADO', 'PAUSADO', 'NO_INTERESADO']);
 
-export function evaluateSchedulingGuard({ candidate = {}, vacancy = null, nextSlot = null, actionType = '', acceptedOfferedSlot = true } = {}) {
+export function evaluateSchedulingGuard({ candidate = {}, vacancy = null, nextSlot = null, actionType = '', acceptedOfferedSlot = false } = {}) {
   const readiness = getCandidateReadiness(candidate, vacancy);
   const reasons = [];
 
