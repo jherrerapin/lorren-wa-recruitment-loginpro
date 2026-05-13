@@ -13,6 +13,8 @@ import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
 import { splitFieldDecisions } from './debugTrace.js';
 import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import { getCandidateReadiness } from './readinessGuard.js';
+import { evaluateSchedulingGuard } from './schedulingGuard.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -53,11 +55,7 @@ function buildFieldState(value) {
 }
 
 function getCoreFieldGaps(candidate = {}, vacancy = null) {
-  const gaps = CORE_PROFILE_FIELDS.filter((field) => !hasValue(candidate[field]));
-  if (!hasValue(getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy))) {
-    gaps.push(getResidenceFieldConfig(vacancy || candidate?.vacancy).field);
-  }
-  return gaps;
+  return getCandidateReadiness(candidate, vacancy, { requireCv: false }).missingFields;
 }
 
 function normalizeMedicalRestrictionsLabel(value) {
@@ -101,8 +99,9 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
     UNKNOWN: 'No determinado'
   }[candidate.gender] ?? 'No determinado';
 
-  const hasCv = Boolean(candidate.cvStorageKey || candidate.cvData || candidate.cvOriginalName || candidate.cvMimeType);
-  const coreDataComplete = getCoreFieldGaps(candidate, vacancy).length === 0;
+  const readiness = getCandidateReadiness(candidate, vacancy);
+  const hasCv = readiness.hasValidCv;
+  const coreDataComplete = readiness.coreDataComplete;
   const residenceConfig = getResidenceFieldConfig(vacancy || candidate?.vacancy);
   const residenceValue = getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy);
 
@@ -116,8 +115,11 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
     progress: {
       coreDataComplete,
       hasCv,
-      readyForCvRequest: coreDataComplete && !hasCv,
-      readyForScheduling: coreDataComplete && hasCv,
+      readyForCvRequest: readiness.readyForCvRequest,
+      readyForScheduling: readiness.readyForScheduling,
+      readyForDone: readiness.readyForDone,
+      missingFields: readiness.missingFields,
+      blockedReasons: readiness.blockedReasons,
       femalePipeline: candidate.gender === 'FEMALE'
     },
     profile: {
@@ -293,9 +295,12 @@ ${actionInstruction}
 function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep }) {
   const candidateState = buildCandidateStateForModel(candidate, vacancy, recentMessages);
   const vacancyState = buildVacancyStateForModel(vacancy);
+  const readiness = getCandidateReadiness(candidate, vacancy);
 
-  return `Sos un reclutador del equipo de seleccion de LoginPro atendiendo candidatos por WhatsApp.
-Suena como una persona real del area de seleccion: cercana, clara, agil y humana.
+  return `Sos un reclutador humano de LoginPro atendiendo candidatos por WhatsApp.
+Redactas con libertad, de forma natural y breve; no tienes una plantilla fija.
+La IA puede entender, planear y redactar, pero el backend es la autoridad final sobre datos, avance, cierre, HV, asignacion de vacante y agenda.
+Solo puedes usar los datos estructurados entregados en este prompt; si falta informacion, haces una pregunta concreta y no inventas nada.
 
 COMO RESPONDES:
 - Usa tono colombiano natural.
@@ -330,7 +335,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - Si la vacante exige experiencia (experienceRequired = YES), debes pedir y capturar experiencia (si/no) y tiempo de experiencia.
 - Si la vacante NO exige experiencia, no bloquees el avance por ese dato.
 - Si la vacante aun no esta identificada, no inventes cargos, sectores ni categorias de vacantes; pide ciudad y cargo de interes para consultar una opcion concreta.
-- No listes ni enumeres vacantes activas; primero detecta o pide la ciudad y el cargo de interes, y nunca mezcles opciones de otras ciudades.
+- No inventes catalogos de vacantes. Si el backend te entrega vacancyOptionsByCity filtradas por ciudad y estado activo, puedes mencionarlas de forma natural. Si no se te entregan opciones, pide ciudad o cargo sin afirmar que no existen.
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
 - Si la vacante existe pero esta inactiva o pausada, explica que hoy no se esta recibiendo personal, pero aun puedes pedir datos y hoja de vida para dejar el perfil registrado.
 - Si despues de datos + hoja de vida o despues de una entrevista agendada aparece una pregunta que no puedes responder con la vacante o el historial, usa "pause_bot" con una razon concreta.
@@ -343,6 +348,9 @@ ${JSON.stringify(vacancyState, null, 2)}
 
 ESTADO CURADO DEL CANDIDATO (JSON):
 ${JSON.stringify(candidateState, null, 2)}
+
+READINESS DETERMINISTICO DEL BACKEND (JSON):
+${JSON.stringify(readiness, null, 2)}
 
 ${buildNextSlotContext(nextSlot)}
 
@@ -360,7 +368,10 @@ Devuelve SOLO un objeto JSON con este formato:
   "reply": string,
   "nextStep": string,
   "actions": [ { "type": string, "data": object } ],
-  "extractedFields": object
+  "extractedFields": object,
+  "detectedIntent": string,
+  "uncertainty": number,
+  "needsHumanReview": boolean
 }
 
 nextStep validos: MENU | GREETING_SENT | COLLECTING_DATA | CONFIRMING_DATA | ASK_CV | DONE | SCHEDULING | SCHEDULED
@@ -386,6 +397,7 @@ REGLAS CRITICAS:
 - Si no hubo progreso real, no repitas la misma estructura del bot anterior; reformula y aporta algo mas util.
 - Nunca pidas el genero de forma directa; detectalo solo si el candidato lo expresa con evidencia lingüistica clara y no por el nombre.
 - Si el mensaje del candidato suena a cierre humano, desistimiento o pausa, adaptate al contexto.
+- Nunca propongas DONE, ASK_CV, SCHEDULING, SCHEDULED, offer_interview, confirm_booking ni mark_female_pipeline si READINESS indica campos faltantes o HV faltante; pide el faltante más importante.
 
 Devuelve SOLO el JSON. Sin texto antes ni despues.`;
 }
@@ -700,11 +712,13 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   }
 
   const candidateAfterMerge = { ...candidate, ...persistedFields };
-  const coreFieldGapsAfterMerge = getCoreFieldGaps(candidateAfterMerge);
+  const readinessAfterMerge = getCandidateReadiness(candidateAfterMerge, vacancy);
+  const coreFieldGapsAfterMerge = readinessAfterMerge.missingFields;
   const hasNewCoreData = Object.keys(persistedFields).some((field) => CORE_PROFILE_FIELDS.includes(field));
-  const hasCvAfterMerge = Boolean(candidateAfterMerge.cvStorageKey || candidateAfterMerge.cvData || candidateAfterMerge.cvOriginalName || candidateAfterMerge.cvMimeType);
-  const isVacancyOpenForScheduling = Boolean(vacancy?.schedulingEnabled && vacancy?.isActive && vacancy?.acceptingApplications);
+  const hasCvAfterMerge = readinessAfterMerge.hasValidCv;
+  const blockedActions = [];
   const blockScheduling = (actionType, reason) => {
+    blockedActions.push({ action: actionType, reason });
     console.warn('[ACT_SCHEDULING_BLOCKED]', { action: actionType, reason, candidateId: candidate.id });
     pendingUpdate.reminderScheduledFor = null;
     pendingUpdate.reminderState = 'CANCELLED';
@@ -715,15 +729,12 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
       setStep(ConversationStep.DONE, { terminal: true });
     }
   };
-  const getSchedulingBlockReason = () => {
-    if (candidateAfterMerge.gender === Gender.FEMALE) return 'female_candidate';
-    if (vacancy && !isVacancyOpenForScheduling) return 'vacancy_not_schedulable_or_closed';
-    if (!candidateAfterMerge.vacancyId) return 'missing_vacancy';
-    if (coreFieldGapsAfterMerge.length) return `missing_core_fields:${coreFieldGapsAfterMerge.join(',')}`;
-    if (!hasCvAfterMerge) return 'missing_cv';
-    if (!nextSlot?.slot) return 'missing_valid_slot';
-    return null;
-  };
+  const getSchedulingBlockReason = (actionType) => evaluateSchedulingGuard({
+    candidate: candidateAfterMerge,
+    vacancy,
+    nextSlot,
+    actionType
+  }).primaryReason;
 
   if (Object.keys(persistedFields).length) {
     await prisma.candidate.update({
@@ -794,6 +805,12 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
             ignoreModelNextStep = true;
             break;
           }
+          if (!readinessAfterMerge.readyForDone) {
+            blockedActions.push({ action: action.type, reason: `not_ready_for_done:${readinessAfterMerge.missingForDone.join(',')}` });
+            ignoreModelNextStep = true;
+            setStep(readinessAfterMerge.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA);
+            break;
+          }
           pendingUpdate.gender = Gender.FEMALE;
           pendingUpdate.status = CandidateStatus.REGISTRADO;
           pendingUpdate.botPaused = true;
@@ -815,7 +832,7 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
 
         case 'confirm_booking':
           {
-            const blockReason = getSchedulingBlockReason();
+            const blockReason = getSchedulingBlockReason(action.type);
             if (blockReason) {
               blockScheduling(action.type, blockReason);
               break;
@@ -856,7 +873,7 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
         case 'offer_interview':
         case 'reschedule':
           {
-            const blockReason = getSchedulingBlockReason();
+            const blockReason = getSchedulingBlockReason(action.type);
             if (blockReason) {
               if (blockReason === 'missing_valid_slot') {
                 pendingUpdate.botPaused = true;
@@ -909,7 +926,21 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   }
 
   if (!terminalStep && coreFieldGapsAfterMerge.length && finalStep === ConversationStep.ASK_CV) {
+    blockedActions.push({ action: 'model_next_step', reason: `ask_cv_blocked_missing_fields:${coreFieldGapsAfterMerge.join(',')}` });
     finalStep = ConversationStep.COLLECTING_DATA;
+  }
+
+  if ([ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(finalStep)) {
+    const blockReason = getSchedulingBlockReason('model_next_step');
+    if (blockReason) {
+      blockScheduling('model_next_step', blockReason);
+      finalStep = readinessAfterMerge.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA;
+    }
+  }
+
+  if (finalStep === ConversationStep.DONE && !readinessAfterMerge.readyForDone && candidateAfterMerge.status !== CandidateStatus.RECHAZADO) {
+    blockedActions.push({ action: 'model_next_step', reason: `done_blocked:${readinessAfterMerge.missingForDone.join(',')}` });
+    finalStep = readinessAfterMerge.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA;
   }
 
   if (finalStep && finalStep !== candidate.currentStep) {
@@ -922,6 +953,8 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
       data: pendingUpdate
     }).catch((error) => console.error('[ACT_STEP_UPDATE_ERROR]', error?.message));
   }
+
+  return { readiness: readinessAfterMerge, blockedActions };
 }
 
 export function sanitizeEngineReplyForVacancy(context = {}) {

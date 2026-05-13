@@ -2,6 +2,7 @@ import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { sanitizeOutboundReply } from './replySafety.js';
+import { buildMissingFieldReply } from './readinessGuard.js';
 
 function latestOutboundWasManualHuman(recentMessages = []) {
   const lastOutbound = [...(recentMessages || [])]
@@ -92,7 +93,7 @@ export async function runChatEngine({
     turnType: null
   });
 
-  await act({
+  const actResult = await act({
     actions,
     candidate,
     extractedFields: sanitized.fields,
@@ -103,8 +104,12 @@ export async function runChatEngine({
     prisma,
   });
 
+  const guardedReply = actResult?.blockedActions?.length
+    ? buildMissingFieldReply(actResult.readiness)
+    : result.reply;
+
   const safeReply = sanitizeOutboundReply({
-    reply: result.reply,
+    reply: guardedReply,
     vacancy,
     candidate,
     currentStep,
@@ -119,6 +124,8 @@ export async function runChatEngine({
     candidateFields: sanitized.fields,
     rejectedFields: sanitized.rejectedFields,
     replySafety: safeReply,
+    readiness: actResult?.readiness || null,
+    blockedActions: actResult?.blockedActions || [],
     fallback: result.fallback,
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),

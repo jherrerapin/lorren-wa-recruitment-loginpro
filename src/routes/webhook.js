@@ -32,8 +32,10 @@ import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
 import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
-import { generateBookingConfirmation, generateInterviewOffer } from '../services/naturalReply.js';
+import { buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
+import { getCandidateReadiness, hasValidCv } from '../services/readinessGuard.js';
+import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -292,7 +294,7 @@ function containsCandidateData(text, parsedData = null) {
 
   return hasMeaningfulCandidateData(candidateData);
 }
-function hasHv(candidate) { return Boolean(candidate?.cvStorageKey || candidate?.cvData || candidate?.cvOriginalName || candidate?.cvMimeType); }
+function hasHv(candidate) { return hasValidCv(candidate); }
 
 function resolveInboundMessageType(message = {}) {
   if (message.type === 'text') return MessageType.TEXT;
@@ -356,25 +358,15 @@ function buildVacancyCompactSummary(vacancy) {
 }
 function buildNoOperationsAvailableReply(city = null) {
   const location = city ? ` en ${city}` : '';
-  return `En este momento no tengo operaciones disponibles${location}. Si quieres, puedes dejar tus datos y tu hoja de vida para tener tu perfil en cuenta si se abre una vacante.`;
+  return `En este momento no tengo operaciones disponibles${location}. Si quieres, puedes dejar tus datos y tu hoja de vida en PDF o Word/DOCX para tener tu perfil en cuenta si se abre una vacante.`;
 }
 
-function formatVacancyOptions(vacancies = []) {
-  const options = (vacancies || [])
-    .filter(Boolean)
-    .slice(0, 5)
-    .map((vacancy) => vacancy.title || vacancy.role)
-    .filter(Boolean);
-  if (!options.length) return '';
-  if (options.length === 1) return ` Tengo registrada esta vacante para esa ciudad: ${options[0]}. Confírmame si es esa la vacante a la que quieres aplicar.`;
-  return ` Tengo registradas estas vacantes para esa ciudad: ${options.join(', ')}. Respóndeme el nombre de la vacante que quieres para asignarte la correcta.`;
+function formatVacancyOptions(vacancies = [], city = null) {
+  return buildVacancyOptionsReply({ city: city || 'esa ciudad', vacancyOptions: vacancies });
 }
 
 function buildVacancyInterestPrompt(city = null, cityVacancyOptions = []) {
-  if (city) {
-    return `Ya tengo la ciudad: ${city}.${formatVacancyOptions(cityVacancyOptions)} Si no es ninguna de esas, dime el cargo exacto para no asignarte una vacante incorrecta.`;
-  }
-  return 'Cuéntame desde qué ciudad nos escribes y para qué vacante o cargo estás interesado, así valido primero la ciudad y luego la vacante correcta.';
+  return buildVacancyOptionsReply({ city, vacancyOptions: cityVacancyOptions });
 }
 function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
   const n = normalizeComparableText(text);
@@ -399,8 +391,9 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
   if (/(requisit|document|edad|experien|perfil)/.test(n) && vacancy?.requirements) {
     return `${availabilityLead} Los requisitos registrados para esta vacante son: ${vacancy.requirements}.`;
   }
-  if (/(pago|salario|sueldo|turno|horario|condicion|beneficio|contrato)/.test(n) && vacancy?.conditions) {
-    return `${availabilityLead} Las condiciones registradas para esta vacante son: ${vacancy.conditions}.`;
+  if (/(pago|salario|sueldo|turno|horario|condicion|prestacion|beneficio|contrato)/.test(n)) {
+    if (vacancy?.conditions) return `${availabilityLead} Las condiciones registradas para esta vacante son: ${vacancy.conditions}.`;
+    return buildUnavailableVacancyInfoReply(vacancy);
   }
   if (/(funcion|cargo|labor|hacer|rol)/.test(n)) {
     const description = vacancy?.roleDescription || vacancy?.role || vacancy?.title;
@@ -512,12 +505,7 @@ function buildVacancyReplyNatural(vacancy, candidate, inboundText = '') {
 }
 
 function isSchedulingEligibleCandidate(candidate, vacancy) {
-  return Boolean(
-    vacancy?.schedulingEnabled
-    && vacancy?.isActive
-    && vacancy?.acceptingApplications
-    && candidate?.gender !== 'FEMALE'
-  );
+  return evaluateSchedulingGuard({ candidate, vacancy, nextSlot: { slot: { id: 'eligibility-preview' } }, actionType: 'offer_interview' }).allowed;
 }
 
 function isSchedulingConfirmationIntent(text = '') {
@@ -856,6 +844,7 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     options.debugTrace.engine_primary = true;
     options.debugTrace.engine_actions = (engineResult.actions || []).map((action) => action?.type).filter(Boolean);
     options.debugTrace.engine_loop_guard = Boolean(engineResult.loopGuardApplied);
+    options.debugTrace.blockedActions = engineResult.blockedActions || [];
     const usage = engineResult?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
     options.debugTrace.openai_input_tokens = Number(options.debugTrace.openai_input_tokens || 0) + Number(usage.input_tokens || 0);
     options.debugTrace.openai_output_tokens = Number(options.debugTrace.openai_output_tokens || 0) + Number(usage.output_tokens || 0);
@@ -909,7 +898,9 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
   let body = engineResult.reply;
   let source = 'engine';
 
-  if (primaryAction === 'offer_interview' || primaryAction === 'reschedule') {
+  if (engineResult.blockedActions?.length) {
+    source = 'engine_guard_block';
+  } else if (primaryAction === 'offer_interview' || primaryAction === 'reschedule') {
     body = await buildInterviewOfferReply(candidateAfterActions, vacancy, nextSlot, primaryAction === 'reschedule' || Boolean(nextSlot?.isAlternative));
     source = (primaryAction === 'reschedule' || nextSlot?.isAlternative) ? 'interview_reschedule' : 'interview_offer';
   } else if (primaryAction === 'confirm_booking') {
@@ -1154,7 +1145,9 @@ async function composeContextualAttachmentReply(prisma, {
 async function finalizeCandidateAfterCv(prisma, candidate, from) {
   const vacancy = candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId) : null;
 
-  if (vacancy && !isVacancyOpen(vacancy)) {
+  const readiness = getCandidateReadiness(candidate, vacancy);
+
+  if (vacancy && !isVacancyOpen(vacancy) && readiness.readyForDone) {
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {
@@ -1169,7 +1162,7 @@ async function finalizeCandidateAfterCv(prisma, candidate, from) {
     return reply(prisma, candidate.id, from, body, '', { body, source: 'bot_flow' });
   }
 
-  if (isSchedulingEligibleCandidate(candidate, vacancy)) {
+  if (readiness.readyForScheduling && isSchedulingEligibleCandidate(candidate, vacancy)) {
     const nextSlot = await resolveInterviewSlotContext(prisma, { ...candidate, currentStep: ConversationStep.SCHEDULING }, vacancy);
     if (!nextSlot?.slot) {
       await pauseInterviewFlow(prisma, candidate.id, 'Vacante con agenda habilitada sin slots validos disponibles');
@@ -1189,6 +1182,15 @@ async function finalizeCandidateAfterCv(prisma, candidate, from) {
 
     const body = await buildInterviewOfferReply(candidate, vacancy, nextSlot, false);
     return reply(prisma, candidate.id, from, body, '', buildInterviewReplyPayload(body, 'interview_offer', nextSlot));
+  }
+
+  if (!readiness.readyForDone) {
+    const targetStep = readiness.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA;
+    await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: targetStep } });
+    const body = readiness.readyForCvRequest
+      ? 'Ya tengo tus datos principales. Para cerrar el registro, adjunta tu hoja de vida como archivo PDF o Word/DOCX.'
+      : `Aún me falta un dato para cerrar bien tu registro: ${readiness.missingFieldLabels?.[0] || 'información pendiente'}.`;
+    return reply(prisma, candidate.id, from, body, '', { body, source: 'readiness_guard' });
   }
 
   await prisma.candidate.update({
@@ -1828,9 +1830,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (candidate.currentStep === ConversationStep.SCHEDULING && isSchedulingConfirmationIntent(cleanText)) {
-      if (!nextSlot?.slot) {
-        await pauseInterviewFlow(prisma, candidate.id, 'No se encontro un slot vigente para confirmar');
-        const body = 'No pude confirmar el horario en este momento. El equipo de selección te contactará para terminar el agendamiento.';
+      const schedulingGuard = evaluateSchedulingGuard({ candidate, vacancy: currentVacancy, nextSlot, actionType: 'confirm_booking', acceptedOfferedSlot: true });
+      if (!schedulingGuard.allowed) {
+        await pauseInterviewFlow(prisma, candidate.id, `Agendamiento bloqueado: ${schedulingGuard.primaryReason}`);
+        const body = schedulingGuard.readiness?.readyForCvRequest
+          ? 'Antes de agendar, necesito que adjuntes tu hoja de vida como archivo PDF o Word/DOCX.'
+          : 'No puedo confirmar la entrevista todavía porque falta validar información del proceso. Te pido el dato pendiente o el equipo te contactará para terminar el agendamiento.';
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
