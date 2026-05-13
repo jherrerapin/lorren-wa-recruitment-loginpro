@@ -2,6 +2,9 @@ import axios from 'axios';
 import { RECRUITMENT_EXTRACTION_SCHEMA } from './recruitmentExtractionSchema.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
+// OPENAI_EXTRACTION_MODEL controla únicamente esta capa Responses API:
+// extracción estructurada de turno, datos, género, documento, residencia, adjuntos e intención.
+// No controla redacción conversacional ni acciones de agenda.
 const MODEL = process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17';
 
 function extractUsage(data = {}) {
@@ -107,7 +110,7 @@ Principios de interpretación:
 Criterios por campo:
 - fullName: acepta solo identidad personal real. Debe haber contexto de recolección de nombre (pendingFields, lastBotQuestion), una frase explícita como "mi nombre es", "me llamo", "soy [nombre]", o un bloque de datos personales. No conviertas intención, cargo, vacante, saludo ni cortesía en nombre.
 - neighborhood/locality: acepta solo residencia/zona real. Busca evidencia como "vivo en", "resido en", "barrio", "localidad", "zona", "sector", "municipio", o que lastBotQuestion/pendingFields pidan residencia. No confundas cargo, vacante, ciudad de operación ni frase social con barrio/localidad.
-- gender: detecta FEMALE solo con evidencia lingüística suficiente como "soy mujer", "femenino", "candidata", "estoy interesada", "quedo atenta". Detecta MALE con evidencia equivalente como "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento". Nunca infieras género solo por el nombre; si no hay evidencia, usa null o UNKNOWN.
+- gender: detecta FEMALE solo con evidencia lingüística suficiente como "soy mujer", "sexo femenino", "género femenino", "soy candidata", "estoy interesada", "quedo atenta". Palabras de trato como "sí señora", "gracias señorita" o "sí señor" NO son género del candidato. Detecta MALE con evidencia equivalente como "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento". Nunca infieras género solo por el nombre; si no hay evidencia, usa null o UNKNOWN.
 - age: no confundas edad con números de dirección, calle, carrera, cédula, experiencia ni cantidades de personal.
 - documentType/documentNumber: para avanzar en este flujo solo CC y PPT son válidos. CE, pasaporte u otros pueden mencionarse en conflictos/trazabilidad, pero no los marques como documento válido del proceso.
 - residence: no confundas ciudad desde donde escribe, ciudad de operación o ciudad de la vacante con barrio/localidad de residencia.

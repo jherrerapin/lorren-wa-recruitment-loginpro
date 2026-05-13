@@ -1,6 +1,7 @@
 import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
+import { sanitizeOutboundReply } from './replySafety.js';
 
 function latestOutboundWasManualHuman(recentMessages = []) {
   const lastOutbound = [...(recentMessages || [])]
@@ -41,6 +42,8 @@ export async function runChatEngine({
         reminderState: 'CANCELLED'
       }
     });
+
+    console.warn('[BOT_PAUSED]', JSON.stringify({ candidateId: candidate.id, reason: 'manual_human_outbound_detected' }));
 
     return {
       reply: null,
@@ -96,16 +99,26 @@ export async function runChatEngine({
     candidateFields: sanitized.fields,
     nextStep: result.nextStep,
     nextSlot,
+    vacancy,
     prisma,
   });
 
-  return {
+  const safeReply = sanitizeOutboundReply({
     reply: result.reply,
+    vacancy,
+    candidate,
+    currentStep,
+    source: 'engine'
+  });
+
+  return {
+    reply: safeReply.reply,
     actions,
     nextStep: result.nextStep,
     extractedFields: sanitized.fields,
     candidateFields: sanitized.fields,
     rejectedFields: sanitized.rejectedFields,
+    replySafety: safeReply,
     fallback: result.fallback,
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),
