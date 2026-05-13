@@ -33,6 +33,7 @@ import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVa
 import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
 import { generateBookingConfirmation, generateInterviewOffer } from '../services/naturalReply.js';
+import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -357,13 +358,24 @@ function buildNoOperationsAvailableReply(city = null) {
   return `En este momento no tengo operaciones disponibles${location}. Si quieres, puedes dejar tus datos y tu hoja de vida para tener tu perfil en cuenta si se abre una vacante.`;
 }
 
-function buildVacancyInterestPrompt(city = null) {
-  if (city) {
-    return `Ya tengo la ciudad: ${city}. Cuéntame el cargo o la vacante que te interesa para validar esa opción sin mezclarla con otras ciudades.`;
-  }
-  return 'Cuéntame desde qué ciudad nos escribes y para qué vacante o cargo estás interesado, así valido la opción correcta.';
+function formatVacancyOptions(vacancies = []) {
+  const options = (vacancies || [])
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((vacancy) => vacancy.title || vacancy.role)
+    .filter(Boolean);
+  if (!options.length) return '';
+  if (options.length === 1) return ` Tengo registrada esta vacante para esa ciudad: ${options[0]}. Confírmame si es esa la vacante a la que quieres aplicar.`;
+  return ` Tengo registradas estas vacantes para esa ciudad: ${options.join(', ')}. Respóndeme el nombre de la vacante que quieres para asignarte la correcta.`;
 }
-function buildVacancyQuestionLead(vacancy, text = '') {
+
+function buildVacancyInterestPrompt(city = null, cityVacancyOptions = []) {
+  if (city) {
+    return `Ya tengo la ciudad: ${city}.${formatVacancyOptions(cityVacancyOptions)} Si no es ninguna de esas, dime el cargo exacto para no asignarte una vacante incorrecta.`;
+  }
+  return 'Cuéntame desde qué ciudad nos escribes y para qué vacante o cargo estás interesado, así valido primero la ciudad y luego la vacante correcta.';
+}
+function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
   const n = normalizeComparableText(text);
   const location = buildVacancyLocation(vacancy);
   const operationZone = getVacancyOperationZone(vacancy);
@@ -372,8 +384,11 @@ function buildVacancyQuestionLead(vacancy, text = '') {
     ? `Te cuento sobre ${vacancy?.title || vacancy?.role || 'la vacante'}`
     : `Te cuento sobre ${vacancy?.title || vacancy?.role || 'la vacante'} y te aclaro que por ahora no esta recibiendo personal`;
   if (/(donde|direccion|ubicacion|queda|sector)/.test(n)) {
-    if (vacancy?.schedulingEnabled && interviewAddress) {
-      return `${availabilityLead} La vacante esta registrada para ${location || 'esa operacion'}${operationZone ? `, zona de operacion ${operationZone}` : ''}, y la direccion de entrevista es ${interviewAddress}.`;
+    if (vacancy?.schedulingEnabled && interviewAddress && candidate?.currentStep === ConversationStep.SCHEDULED) {
+      return `${availabilityLead} La dirección de entrevista registrada es ${interviewAddress}.`;
+    }
+    if (vacancy?.schedulingEnabled && interviewAddress && /\b(present|entrevista|cita)\b/.test(n)) {
+      return `${availabilityLead} Primero debo confirmar tu horario de entrevista. Por ahora solo puedo confirmarte que la vacante está registrada para ${location || 'esa operación'}${operationZone ? `, zona de operación ${operationZone}` : ''}.`;
     }
     if (operationZone) {
       return `${availabilityLead} La vacante esta registrada para ${location || 'esa operacion'} y la zona de operacion es ${operationZone}.`;
@@ -422,20 +437,20 @@ function buildVacancyAssociationPrompt(options = {}) {
     ? 'Recibí tu hoja de vida.'
     : (options.dataCaptured ? 'Ya registré lo que me compartiste.' : 'Con gusto te ayudo.');
   if (options.city) {
-    return `${intro} ${buildVacancyInterestPrompt(options.city)}`;
+    return `${intro} ${buildVacancyInterestPrompt(options.city, options.cityVacancyOptions || [])}`;
   }
   const attachment = options.hasCv ? 'Para asociarla correctamente' : 'Para asociar bien tu proceso';
   return `${intro} ${attachment}, ${buildVacancyInterestPrompt().replace(/^Cuéntame/, 'cuéntame')}`;
 }
-function buildQuestionFollowUpReply(vacancy, inboundText = '', followUpText = '') {
-  const answer = buildVacancyQuestionLead(vacancy, inboundText);
+function buildQuestionFollowUpReply(vacancy, inboundText = '', followUpText = '', candidate = null) {
+  const answer = buildVacancyQuestionLead(vacancy, inboundText, candidate);
   return followUpText ? `${answer}\n\n${followUpText}` : answer;
 }
 function buildInactiveVacancyReply(vacancy, candidate, inboundText = '') {
   const continuePrompt = buildVacancyContinuePrompt(candidate, vacancy);
   const summary = buildVacancyCompactSummary(vacancy);
   if (isQuestionLike(inboundText)) {
-    return [buildVacancyQuestionLead(vacancy, inboundText), continuePrompt]
+    return [buildVacancyQuestionLead(vacancy, inboundText, candidate), continuePrompt]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -454,7 +469,7 @@ function shouldEscalateManualCandidateQuestion(candidate = {}, text = '', vacanc
 }
 function buildVacancyReply(vacancy, candidate, inboundText = '') {
   const lines = [];
-  lines.push(isQuestionLike(inboundText) ? buildVacancyQuestionLead(vacancy, inboundText) : 'Hola, gracias por comunicarte con LoginPro.');
+  lines.push(isQuestionLike(inboundText) ? buildVacancyQuestionLead(vacancy, inboundText, candidate) : 'Hola, gracias por comunicarte con LoginPro.');
   lines.push('', 'Te comparto la informacion de la vacante disponible:', '', `*Vacante:* ${vacancy.title || vacancy.role}`);
   if (vacancy.role && vacancy.role !== vacancy.title) lines.push(`*Cargo:* ${vacancy.role}`);
   const location = buildVacancyLocation(vacancy);
@@ -478,7 +493,7 @@ function buildVacancyReplyNatural(vacancy, candidate, inboundText = '') {
   }
 
   if (isQuestionLike(inboundText)) {
-    const lines = [buildVacancyQuestionLead(vacancy, inboundText)];
+    const lines = [buildVacancyQuestionLead(vacancy, inboundText, candidate)];
     if (candidate.currentStep === ConversationStep.GREETING_SENT) lines.push(compactSummary);
     if (![ConversationStep.SCHEDULING, ConversationStep.SCHEDULED, ConversationStep.DONE].includes(candidate.currentStep) && continuePrompt) {
       lines.push(continuePrompt);
@@ -844,14 +859,30 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     options.debugTrace.openai_input_tokens = Number(options.debugTrace.openai_input_tokens || 0) + Number(usage.input_tokens || 0);
     options.debugTrace.openai_output_tokens = Number(options.debugTrace.openai_output_tokens || 0) + Number(usage.output_tokens || 0);
     options.debugTrace.openai_total_tokens = Number(options.debugTrace.openai_total_tokens || 0) + Number(usage.total_tokens || 0);
+    options.debugTrace.response_model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+    options.debugTrace.model_usage = {
+      ...(options.debugTrace.model_usage || {}),
+      responseModel: process.env.OPENAI_MODEL || 'gpt-5-mini',
+      input_tokens: options.debugTrace.openai_input_tokens,
+      output_tokens: options.debugTrace.openai_output_tokens,
+      total_tokens: options.debugTrace.openai_total_tokens
+    };
   }
 
   if (engineResult.suppressed) {
-    console.warn('[ENGINE_SUPPRESSED]', JSON.stringify({
+    console.warn('[BOT_SUPPRESSED]', JSON.stringify({
       phone: candidate.phone,
       candidateId: candidate.id,
       reason: engineResult.suppressedReason || 'suppressed_without_reason'
     }));
+    return true;
+  }
+
+  if (!engineResult.reply && !engineResult.suppressed) {
+    const body = buildSafeFallbackReply();
+    if (options.debugTrace) options.debugTrace.fallbackReason = 'engine_empty_reply';
+    console.warn('[BOT_FALLBACK_REPLY]', JSON.stringify({ phone: candidate.phone, candidateId: candidate.id, reason: 'engine_empty_reply' }));
+    await reply(prisma, candidate.id, from, body, inboundText, { body, source: 'bot_fallback', safetyVacancy: vacancy });
     return true;
   }
 
@@ -888,8 +919,12 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
   }
 
   const rawPayload = source.startsWith('interview_')
-    ? buildInterviewReplyPayload(body, source, nextSlot)
-    : { body, source };
+    ? { ...buildInterviewReplyPayload(body, source, nextSlot), safetyVacancy: vacancy }
+    : { body, source, safetyVacancy: vacancy };
+  if (engineResult.replySafety?.blocked && options.debugTrace) {
+    options.debugTrace.blockedClaims = engineResult.replySafety.blockedClaims;
+    options.debugTrace.replySafetyReason = engineResult.replySafety.reason;
+  }
 
   await reply(prisma, candidate.id, from, body, inboundText, rawPayload);
   return true;
@@ -993,6 +1028,18 @@ async function forwardInboundImageToSupervisor(candidatePhone, fullName, image =
   const caption = image?.caption || '';
   await sendTextMessage(supervisorPhone, buildSupervisorImageNotice(candidatePhone, fullName, caption));
   await sendImageMessage(supervisorPhone, { id: image?.id }, caption);
+}
+
+async function countRecentInboundAttachments(prisma, candidateId, withinMinutes = 15) {
+  const since = new Date(Date.now() - (withinMinutes * 60 * 1000));
+  return prisma.message.count({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND,
+      messageType: { in: [MessageType.DOCUMENT, MessageType.IMAGE] },
+      createdAt: { gte: since }
+    }
+  });
 }
 
 async function countRecentInboundDocuments(prisma, candidateId, withinMinutes = 15) {
@@ -1205,9 +1252,31 @@ async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { bod
   await prisma.candidate.update({ where: { id: candidateId }, data: { lastOutboundAt: new Date() } });
 }
 async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload = { body, source: 'bot_flow' }) {
-  await sleep(getNaturalDelayMs(inboundText, body));
-  await sendTextMessage(to, body);
-  await saveOutboundMessage(prisma, candidateId, body, rawPayload);
+  let finalBody = String(body || '').trim();
+  const safetyVacancy = rawPayload?.safetyVacancy || rawPayload?.vacancyContext || null;
+  const safety = sanitizeOutboundReply({
+    reply: finalBody || buildSafeFallbackReply(),
+    vacancy: safetyVacancy,
+    candidate: { id: candidateId },
+    currentStep: rawPayload?.currentStep || null,
+    source: rawPayload?.source || 'bot_flow'
+  });
+  finalBody = safety.reply || buildSafeFallbackReply();
+  const cleanedPayload = { ...(rawPayload || {}), body: finalBody };
+  delete cleanedPayload.safetyVacancy;
+  delete cleanedPayload.vacancyContext;
+  if (safety.blocked) {
+    cleanedPayload.replySafety = { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason };
+    console.warn('[BOT_REPLY_SAFETY_BLOCKED]', JSON.stringify({ candidateId, blockedClaims: safety.blockedClaims, reason: safety.reason }));
+  }
+  await sleep(getNaturalDelayMs(inboundText, finalBody));
+  try {
+    await sendTextMessage(to, finalBody);
+  } catch (error) {
+    console.error('[BOT_SEND_ERROR]', JSON.stringify({ candidateId, error: error?.message?.slice(0, 200) }));
+    throw error;
+  }
+  await saveOutboundMessage(prisma, candidateId, finalBody, cleanedPayload);
   await scheduleReminderForCandidate(prisma, candidateId);
 }
 
@@ -1315,6 +1384,15 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   debugTrace.openai_input_tokens = combinedUsage.input_tokens;
   debugTrace.openai_output_tokens = combinedUsage.output_tokens;
   debugTrace.openai_total_tokens = combinedUsage.total_tokens;
+  debugTrace.extraction_model = process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17';
+  debugTrace.response_model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+  debugTrace.model_usage = {
+    extractionModel: debugTrace.extraction_model,
+    responseModel: debugTrace.response_model,
+    input_tokens: combinedUsage.input_tokens,
+    output_tokens: combinedUsage.output_tokens,
+    total_tokens: combinedUsage.total_tokens
+  };
   const resolvedIntent = aiResult.intent || understanding.intent || fallbackIntent;
   const vacancyHints = {
     city: aiFields.city || understanding.cityDetection?.value || null,
@@ -1368,7 +1446,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return true;
     }
     if (['city_with_active_vacancies', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
-      const body = buildVacancyInterestPrompt(resolution.city);
+      const cityVacancies = (options.activeVacancies || await findActiveVacancies(prisma)).filter((vacancy) => normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(resolution.city));
+      const body = buildVacancyInterestPrompt(resolution.city, cityVacancies);
       await reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
       return true;
     }
@@ -1385,7 +1464,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
     if (!isVacancyOpen(effectiveVacancy)) {
       const body = buildInactiveVacancyReply(effectiveVacancy, candidateState, cleanText);
-      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context' });
+      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context', safetyVacancy: effectiveVacancy });
     }
     const shouldPreferDeterministicVacancyReply = isQuestionLike(cleanText)
       && [
@@ -1402,7 +1481,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       if (handledByEngine) return;
     }
     const body = buildVacancyReplyNatural(effectiveVacancy, candidateState, cleanText);
-    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context' });
+    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_context', safetyVacancy: effectiveVacancy });
   };
 
   const tryPrimaryEngineReply = async (candidateState = candidate, vacancyState = currentVacancy) => {
@@ -1544,7 +1623,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return replyWithVacancyContext(candidateState, resolution.vacancy);
     }
     if (await replyFromVacancyResolutionFailure(resolution)) return;
-    const body = buildVacancyInterestPrompt(vacancyHints.city || resolution.city);
+    const activeVacancies = await findActiveVacancies(prisma);
+    const promptCity = vacancyHints.city || resolution.city;
+    const cityVacancies = promptCity
+      ? activeVacancies.filter((vacancy) => normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(promptCity))
+      : [];
+    const body = buildVacancyInterestPrompt(promptCity, cityVacancies);
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
   }
 
@@ -1906,7 +1990,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     const latest = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     const followUp = buildConfirmationClarifier(latest, currentVacancy);
     const body = askedVacancyQuestion
-      ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
+      ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp, updated)
       : followUp;
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
   }
@@ -1962,20 +2046,20 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
           const confirmationText = buildConfirmationSummary(updated, {}, currentVacancy);
           const body = askedVacancyQuestion
-            ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
+            ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText, updated)
             : confirmationText;
           return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
         }
         const followUp = buildMissingFieldsReply(updated, normalizedData, currentVacancy);
         const body = askedVacancyQuestion
-          ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
+          ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp, updated)
           : followUp;
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
       const dataPrompt = buildDataRequestPrompt(currentVacancy);
       const body = askedVacancyQuestion
-        ? buildQuestionFollowUpReply(currentVacancy, cleanText, dataPrompt)
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, dataPrompt, candidate)
         : dataPrompt;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
@@ -2008,13 +2092,13 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
         const confirmationText = buildConfirmationSummary(updated, {}, currentVacancy);
         const body = askedVacancyQuestion
-          ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
+          ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText, updated)
           : confirmationText;
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
       const followUp = buildMissingFieldsReply(updated, normalizedData, currentVacancy);
       const body = askedVacancyQuestion
-        ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp, updated)
         : followUp;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
@@ -2070,14 +2154,14 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.CONFIRMING_DATA } });
       const confirmationText = buildConfirmationSummary(updated, {}, currentVacancy);
       const body = askedVacancyQuestion
-        ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText)
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, confirmationText, updated)
         : confirmationText;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
     const followUp = buildMissingFieldsReply(updated, normalizedData, currentVacancy);
     const body = askedVacancyQuestion
-      ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp)
+      ? buildQuestionFollowUpReply(currentVacancy, cleanText, followUp, updated)
       : followUp;
     return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
   }
@@ -2251,6 +2335,16 @@ export function webhookRouter(prisma) {
 
         try {
           if (message.type === 'image') {
+            const recentAttachmentsCount = await countRecentInboundAttachments(prisma, candidate.id, 15);
+            debugTrace.recent_attachment_count = recentAttachmentsCount;
+            if (recentAttachmentsCount >= 4) {
+              debugTrace.attachment_high_volume = true;
+              await pauseInterviewFlow(prisma, candidate.id, 'Multiples adjuntos no procesables requieren revision humana');
+              if (!automationBlocked) {
+                await reply(prisma, candidate.id, from, 'Recibí varios adjuntos. Para evitar confundirme, dejo tu caso marcado para revisión del equipo; si tu hoja de vida está en PDF o Word, envíala en un solo archivo.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
+              }
+              continue;
+            }
             if (canQueueAdminForward) {
               await enqueueJob(prisma, {
                 type: JOB_TYPES.ADMIN_FORWARD_ATTACHMENT,
@@ -2296,8 +2390,13 @@ export function webhookRouter(prisma) {
             }
             const recentDocumentsCount = await countRecentInboundDocuments(prisma, candidate.id, 15);
             debugTrace.recent_document_count = recentDocumentsCount;
-            if (recentDocumentsCount >= 3) {
+            if (recentDocumentsCount >= 4) {
               debugTrace.attachment_high_volume = true;
+              await pauseInterviewFlow(prisma, candidate.id, 'Multiples documentos no procesables requieren revision humana');
+              if (!automationBlocked) {
+                await reply(prisma, candidate.id, from, 'Recibí varios documentos. Para evitar respuestas repetidas, dejo tu caso en revisión; si tu hoja de vida está en PDF o Word, envíala en un solo archivo válido.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
+              }
+              continue;
             }
 
             const mimeType = message.document?.mime_type || '';

@@ -199,7 +199,13 @@ function hasResidenceEvidenceCue(text = '') {
 
 function hasGenderEvidenceCue(text = '') {
   const normalized = normalizeText(text);
-  return /\b(mujer|hombre|femenino|femenina|masculino|masculina|sexo|genero|candidata|candidato|interesada|interesado|atenta|atento|senora|senorita|senor)\b/.test(normalized);
+  return /\b(soy mujer|soy hombre|sexo femenino|sexo masculino|genero femenino|genero masculino|candidata|candidato|interesada|interesado|atenta|atento|femenino|femenina|masculino|masculina)\b/.test(normalized);
+}
+
+function hasOnlyCourtesyTreatmentAsGenderCue(text = '') {
+  const normalized = normalizeText(text);
+  if (!/\b(senora|senorita|senor)\b/.test(normalized)) return false;
+  return !/\b(soy|me considero|sexo|genero)\b.{0,24}\b(senora|senorita|senor|femenino|masculino|mujer|hombre)\b/.test(normalized);
 }
 
 function looksLikePersonalName(value = '') {
@@ -299,6 +305,9 @@ function sanitizeGender(value, evidence, text, context, turnType) {
   if (value === 'UNKNOWN') return { ok: false, reason: 'unknown_gender_is_not_persisted' };
 
   const fieldContext = fieldWasPending('gender', context) || lastQuestionAskedForField('gender', context);
+  if (hasOnlyCourtesyTreatmentAsGenderCue(text)) {
+    return { ok: false, reason: 'courtesy_treatment_is_not_candidate_gender' };
+  }
   const genderCue = hasGenderEvidenceCue(text);
   const usableEvidence = evidenceIsUsable('gender', evidence, { allowLocalParser: true });
 

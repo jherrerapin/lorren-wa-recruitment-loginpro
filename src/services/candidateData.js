@@ -22,11 +22,13 @@ const LOCATION_STOPWORDS = /\b(cc|ti|ce|ppt|pasaporte|documento|cedula|cédula|c
 const ADDRESS_TOKENS = /^(?:calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv|km|kilometro|kilómetro|entrada|salida)$/i;
 const FEMALE_GENDER_PATTERNS = [
   /\b(?:soy|me considero|sexo|genero|género)\s*(?:es|:)?\s*(?:mujer|femenina)\b/i,
-  /\b(?:candidata|senora|señora|senorita|señorita|embarazada)\b/i
+  /\b(?:soy|me considero)\s+(?:candidata|embarazada)\b/i,
+  /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:femenino|femenina)\b/i
 ];
 const MALE_GENDER_PATTERNS = [
   /\b(?:soy|me considero|sexo|genero|género)\s*(?:es|:)?\s*(?:hombre|masculino)\b/i,
-  /\b(?:candidato|senor|señor)\b/i
+  /\b(?:soy|me considero)\s+candidato\b/i,
+  /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:masculino|masculina)\b/i
 ];
 
 const EXTRA_LOCATION_STOPWORDS = /\b(si|sii|sip|ok|okay|vale|listo|correcto|correcta|bueno|buena|bn|interesado|interesada|interesa|cumplo|requisito|requisitos|coordinador|coordinadora|operaciones|operacion|operaci(?:o|Ã³)n|logistica|logistico|ruta|perfil|postulacion)\b/i;

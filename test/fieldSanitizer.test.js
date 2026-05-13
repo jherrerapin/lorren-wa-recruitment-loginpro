@@ -176,3 +176,30 @@ test('rechaza número de experiencia como edad y conserva experienceTime', () =>
   assert.equal(result.fields.experienceTime, '12 años');
   assert.equal(result.rejectedFields[0].field, 'age');
 });
+
+test('no marca mujer por tratamiento de cortesía: Sii Señora claro', () => {
+  const fields = { gender: 'FEMALE' };
+  const result = sanitize({
+    text: 'Sii Señora claro',
+    fields,
+    evidence: evidenceFor(fields, { gender: { snippet: 'Señora', confidence: 0.95 } }),
+    context: { currentStep: 'COLLECTING_DATA' },
+    turnType: 'CONFIRMATION'
+  });
+
+  assert.equal(result.fields.gender, undefined);
+  assert.equal(result.rejectedFields.find((item) => item.field === 'gender').reason, 'courtesy_treatment_is_not_candidate_gender');
+});
+
+test('no marca mujer por gracias señorita', () => {
+  const fields = { gender: 'FEMALE' };
+  const result = sanitize({
+    text: 'gracias señorita',
+    fields,
+    evidence: evidenceFor(fields, { gender: { snippet: 'señorita', confidence: 0.95 } }),
+    context: { currentStep: 'COLLECTING_DATA' },
+    turnType: 'OTHER'
+  });
+
+  assert.equal(result.fields.gender, undefined);
+});

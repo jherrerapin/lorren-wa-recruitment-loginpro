@@ -13,10 +13,14 @@ import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
 import { splitFieldDecisions } from './debugTrace.js';
 import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-const ENGINE_FALLBACK_REPLY = 'Te lei, dame un momento y continuo contigo.';
+// OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
+// redacta reply, nextStep, actions y extractedFields sugeridos. La seguridad final
+// queda en guard rails determinísticos de backend, no en el modelo.
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
+const ENGINE_FALLBACK_REPLY = buildSafeFallbackReply();
 const CORE_PROFILE_FIELDS = [
   'fullName',
   'documentType',
@@ -201,7 +205,7 @@ function buildGenderFlowInstruction(candidate, vacancy) {
   if (gender === 'UNKNOWN') {
     return `GENERO: No determinado.
 Detecta el genero solo con evidencia lingüistica del candidato en el turno o historial reciente; nunca por nombre propio.
-FEMALE cuando haya marcas claras como "soy mujer", "femenino", "candidata", "estoy interesada", "me encuentro interesada", "quedo atenta", "señora", "señorita" o una correccion explícita equivalente.
+FEMALE cuando haya marcas claras como "soy mujer", "femenino", "candidata", "estoy interesada", "me encuentro interesada", "quedo atenta" o una correccion explícita equivalente. Tratos como "sí señora", "gracias señorita" o "sí señor" son cortesía hacia quien atiende y NO son género del candidato.
 MALE cuando haya marcas equivalentes como "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento".
 Si la evidencia es ambigua o solo viene del nombre, NO extraigas genero y NO lo preguntes de forma directa.
 Extraelo en extractedFields como "gender": "MALE" | "FEMALE" | "OTHER" solo cuando exista esa evidencia textual.`;
@@ -670,7 +674,7 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
   }
 }
 
-export async function act({ actions, candidate, extractedFields = {}, candidateFields = {}, nextStep, nextSlot, prisma }) {
+export async function act({ actions, candidate, vacancy = null, extractedFields = {}, candidateFields = {}, nextStep, nextSlot, prisma }) {
   const { normalizeCandidateFields } = await import('./candidateData.js');
   const { cancelCandidateBookings, createBooking } = await import('./interviewScheduler.js');
   const { CandidateStatus, ConversationStep, Gender } = await import('@prisma/client');
@@ -698,6 +702,27 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
   const coreFieldGapsAfterMerge = getCoreFieldGaps(candidateAfterMerge);
   const hasNewCoreData = Object.keys(persistedFields).some((field) => CORE_PROFILE_FIELDS.includes(field));
   const hasCvAfterMerge = Boolean(candidateAfterMerge.cvStorageKey || candidateAfterMerge.cvData || candidateAfterMerge.cvOriginalName || candidateAfterMerge.cvMimeType);
+  const isVacancyOpenForScheduling = Boolean(vacancy?.schedulingEnabled && vacancy?.isActive && vacancy?.acceptingApplications);
+  const blockScheduling = (actionType, reason) => {
+    console.warn('[ACT_SCHEDULING_BLOCKED]', { action: actionType, reason, candidateId: candidate.id });
+    pendingUpdate.reminderScheduledFor = null;
+    pendingUpdate.reminderState = 'CANCELLED';
+    if (reason === 'female_candidate') {
+      pendingUpdate.botPaused = true;
+      pendingUpdate.botPausedAt = new Date();
+      pendingUpdate.botPauseReason = 'Candidata femenina pendiente de revision humana';
+      setStep(ConversationStep.DONE, { terminal: true });
+    }
+  };
+  const getSchedulingBlockReason = () => {
+    if (candidateAfterMerge.gender === Gender.FEMALE) return 'female_candidate';
+    if (vacancy && !isVacancyOpenForScheduling) return 'vacancy_not_schedulable_or_closed';
+    if (!candidateAfterMerge.vacancyId) return 'missing_vacancy';
+    if (coreFieldGapsAfterMerge.length) return `missing_core_fields:${coreFieldGapsAfterMerge.join(',')}`;
+    if (!hasCvAfterMerge) return 'missing_cv';
+    if (!nextSlot?.slot) return 'missing_valid_slot';
+    return null;
+  };
 
   if (Object.keys(persistedFields).length) {
     await prisma.candidate.update({
@@ -788,9 +813,12 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
           break;
 
         case 'confirm_booking':
-          if (!nextSlot?.slot || !candidate.vacancyId) {
-            console.warn('[ACT_SKIPPED]', { action: action.type, reason: 'missing_slot_or_vacancy' });
-            break;
+          {
+            const blockReason = getSchedulingBlockReason();
+            if (blockReason) {
+              blockScheduling(action.type, blockReason);
+              break;
+            }
           }
           await cancelCandidateBookings(
             prisma,
@@ -800,7 +828,7 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
           await createBooking(
             prisma,
             candidate.id,
-            candidate.vacancyId,
+            candidateAfterMerge.vacancyId,
             nextSlot.slot.id,
             nextSlot.date,
             !nextSlot.windowOk
@@ -826,15 +854,19 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
 
         case 'offer_interview':
         case 'reschedule':
-          if (!nextSlot?.slot) {
-            pendingUpdate.botPaused = true;
-            pendingUpdate.botPausedAt = new Date();
-            pendingUpdate.botPauseReason = action.type === 'reschedule'
-              ? 'No hay un siguiente slot valido para reagendar'
-              : 'Vacante con agenda habilitada sin slots validos disponibles';
-            pendingUpdate.reminderScheduledFor = null;
-            pendingUpdate.reminderState = 'CANCELLED';
-            break;
+          {
+            const blockReason = getSchedulingBlockReason();
+            if (blockReason) {
+              if (blockReason === 'missing_valid_slot') {
+                pendingUpdate.botPaused = true;
+                pendingUpdate.botPausedAt = new Date();
+                pendingUpdate.botPauseReason = action.type === 'reschedule'
+                  ? 'No hay un siguiente slot valido para reagendar'
+                  : 'Vacante con agenda habilitada sin slots validos disponibles';
+              }
+              blockScheduling(action.type, blockReason);
+              break;
+            }
           }
           pendingUpdate.reminderScheduledFor = null;
           pendingUpdate.reminderState = 'SKIPPED';
@@ -864,7 +896,11 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
     || null;
 
   if (!finalStep && !ignoreModelNextStep && nextStep && Object.values(ConversationStep).includes(nextStep)) {
-    finalStep = nextStep;
+    if (candidateAfterMerge.gender === Gender.FEMALE && [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(nextStep)) {
+      blockScheduling('model_next_step', 'female_candidate');
+    } else {
+      finalStep = nextStep;
+    }
   }
 
   if (!terminalStep && !coreFieldGapsAfterMerge.length && !hasCvAfterMerge && finalStep === ConversationStep.CONFIRMING_DATA) {
@@ -885,4 +921,8 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
       data: pendingUpdate
     }).catch((error) => console.error('[ACT_STEP_UPDATE_ERROR]', error?.message));
   }
+}
+
+export function sanitizeEngineReplyForVacancy(context = {}) {
+  return sanitizeOutboundReply(context);
 }
