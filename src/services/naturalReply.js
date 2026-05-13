@@ -368,3 +368,46 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     'Te envío un recordatorio una hora antes. ¡Éxitos!'
   ].filter(Boolean).join(' '));
 }
+
+function vacancyLabel(vacancy = {}) {
+  return vacancy.title || vacancy.role || null;
+}
+
+function joinNatural(items = []) {
+  const clean = items.filter(Boolean);
+  if (clean.length <= 1) return clean[0] || '';
+  if (clean.length === 2) return `${clean[0]} y ${clean[1]}`;
+  return `${clean.slice(0, -1).join(', ')} y ${clean[clean.length - 1]}`;
+}
+
+export function buildVacancyOptionsReply({ city = null, vacancyOptions = [], hasAskedAvailableVacancies = true } = {}) {
+  const activeOptions = (vacancyOptions || [])
+    .filter((vacancy) => vacancy?.isActive === true && vacancy?.acceptingApplications === true)
+    .map(vacancyLabel)
+    .filter(Boolean);
+
+  if (!city) {
+    return 'Claro, para revisar opciones reales primero cuéntame desde qué ciudad nos escribes y qué cargo tienes en mente.';
+  }
+
+  if (!activeOptions.length) {
+    return `En este momento no tengo vacantes activas registradas para ${city}. Si quieres, puedo dejar tus datos y tu hoja de vida en PDF o Word/DOCX para tenerte en cuenta cuando se abra una opción.`;
+  }
+
+  if (activeOptions.length === 1) {
+    return `Claro, para ${city} tengo disponible ${activeOptions[0]}. ¿Quieres que te comparta la información de esa vacante?`;
+  }
+
+  const lead = hasAskedAvailableVacancies ? 'Claro' : 'Te cuento';
+  return `${lead}, en ${city} tengo disponibles estas opciones: ${joinNatural(activeOptions)}. ¿Cuál te interesa para compartirte la información completa?`;
+}
+
+export function buildUnavailableVacancyInfoReply(vacancy = {}) {
+  const known = [
+    vacancy.title || vacancy.role ? `la vacante ${vacancy.title || vacancy.role}` : null,
+    vacancy.conditions ? `condiciones registradas: ${vacancy.conditions}` : null,
+    vacancy.requirements ? `requisitos registrados: ${vacancy.requirements}` : null,
+    vacancy.roleDescription ? `descripción registrada: ${vacancy.roleDescription}` : null
+  ].filter(Boolean).join('; ');
+  return `Ese dato no lo tengo registrado para confirmarlo por este medio.${known ? ` Te puedo compartir lo que sí tengo: ${known}.` : ' Te puedo compartir la información que sí tengo de la vacante y continuar con tu proceso.'}`;
+}

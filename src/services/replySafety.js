@@ -4,6 +4,8 @@ const CV_UNSAFE_FALLBACK_REPLY = 'Para continuar, envíame tu hoja de vida como 
 const UNSAFE_CV_REPLY_PATTERNS = [
   /hoja\s+de\s+vida\s+en\s+foto/i,
   /foto\s+de\s+la\s+hoja\s+de\s+vida/i,
+  /imagen\s+de\s+la\s+hoja\s+de\s+vida/i,
+  /foto\s+clara\s+(?:del\s+)?(?:cv|curriculum|hoja\s+de\s+vida)/i,
   /m[aá]ndala\s+en\s+foto/i,
   /puede\s+ser\s+foto/i,
   /\bimpresa\b/i,
@@ -57,6 +59,14 @@ function getInterviewAddress(vacancy = {}) {
   return String(vacancy?.interviewAddress || vacancy?.interview?.address || '').trim();
 }
 
+function cleanCvUnsafeText(value = '') {
+  return String(value || '')
+    .replace(/hoja\s+de\s+vida[^.|;]*/gi, 'hoja de vida en PDF o Word/DOCX')
+    .replace(/\b(foto|imagen|impresa|como\s+la\s+tengas?|minerva\s*1003(?:\s+f[ií]sica)?)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function registeredVacancySummary(vacancy = {}) {
   const lines = [];
   const title = vacancy.title || vacancy.role;
@@ -65,9 +75,8 @@ function registeredVacancySummary(vacancy = {}) {
   if (city) lines.push(`Ciudad: ${city}`);
   if (vacancy.requirements) lines.push(`Requisitos: ${vacancy.requirements}`);
   if (vacancy.conditions) lines.push(`Condiciones: ${vacancy.conditions}`);
-  if (vacancy.requiredDocuments) lines.push(`Documentos requeridos: ${vacancy.requiredDocuments}`);
+  if (vacancy.requiredDocuments) lines.push(`Documentos requeridos: ${cleanCvUnsafeText(vacancy.requiredDocuments)}`);
   if (vacancy.operationAddress) lines.push(`Zona de operación: ${vacancy.operationAddress}`);
-  if (vacancy.interviewAddress) lines.push(`Dirección de entrevista registrada: ${vacancy.interviewAddress}`);
   return lines.join(' | ') || 'no tengo condiciones adicionales registradas para esta vacante';
 }
 
@@ -140,10 +149,13 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
   }
 
   const registeredAddress = normalizeText(getInterviewAddress(vacancy || {}));
+  const canRevealInterviewAddress = currentStep === 'SCHEDULED';
   for (const addressClaim of extractAddressClaims(originalReply)) {
     const normalizedAddress = normalizeText(addressClaim);
     if (normalizedAddress && (!registeredAddress || !registeredAddress.includes(normalizedAddress))) {
       blockedClaims.push(`unregistered_interview_address:${addressClaim}`);
+    } else if (normalizedAddress && registeredAddress && registeredAddress.includes(normalizedAddress) && !canRevealInterviewAddress) {
+      blockedClaims.push(`interview_address_before_confirmed_booking:${addressClaim}`);
     }
   }
 
