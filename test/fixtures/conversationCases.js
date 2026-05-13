@@ -192,8 +192,8 @@ export const conversationCases = [
     ],
     operations: [OP_IBA, OP_BOG],
     expect: {
-      lastReplyIncludes: ['vacantes activas', 'Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones Ibague'],
-      lastReplyNotIncludes: ['enviame por favor estos datos', 'cuentame desde que ciudad']
+      lastReplyIncludes: ['Ya tengo la ciudad: Ibague', 'cargo o la vacante que te interesa'],
+      lastReplyNotIncludes: ['Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones Ibague', 'enviame por favor estos datos', 'cuentame desde que ciudad']
     }
   },
   {
@@ -205,8 +205,8 @@ export const conversationCases = [
         currentStep: 'GREETING_SENT',
         vacancyId: null
       },
-      lastReplyIncludes: ['En Ibague tengo estas vacantes activas', 'Auxiliar de Cargue y Descargue Ibague'],
-      lastReplyNotIncludes: ['Coordinador de Operaciones', 'enviame tus datos', 'te solicitare tus datos']
+      lastReplyIncludes: ['Ya tengo la ciudad: Ibague', 'cargo o la vacante que te interesa'],
+      lastReplyNotIncludes: ['Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones', 'enviame tus datos', 'te solicitare tus datos']
     }
   },
   {
