@@ -19,10 +19,50 @@
  *  - Sin mencionar nunca que es un bot, a menos que el candidato pregunte.
  */
 
-import axios from 'axios';
-
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+
+async function postOpenAi(url, payload, config) {
+  const { default: axios } = await import('axios');
+  return axios.post(url, payload, config);
+}
+
+export function sanitizeRequiredDocumentsForBot(requiredDocuments) {
+  const raw = String(requiredDocuments || '').trim();
+  if (!raw) return '';
+
+  const normalized = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const documents = [];
+  const add = (value) => {
+    if (value && !documents.some((item) => item.toLowerCase() === value.toLowerCase())) documents.push(value);
+  };
+
+  if (/\b(hoja\s+de\s+vida|hv|curriculum|curriculo|minerva\s*1003)\b/.test(normalized)) {
+    add('hoja de vida en PDF o Word/DOCX');
+  }
+
+  if (/\b(cedula|c[eé]dula)\s+original\b/.test(raw.toLowerCase()) || /\bcedula\s+original\b/.test(normalized)) {
+    add('cédula original');
+  }
+
+  const forbiddenTerms = /\b(impresa|foto|imagen|captura|como\s+la\s+tenga|como\s+la\s+tengas|minerva\s*1003(?:\s+fisica)?|f[ií]sica)\b/gi;
+  const cleanedSegments = raw
+    .split(/[,;\n]+|\s+y\s+/i)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .filter((segment) => !/hoja\s+de\s+vida|\bhv\b|curriculum|curr[ií]culo|minerva\s*1003/i.test(segment))
+    .map((segment) => segment.replace(forbiddenTerms, '').replace(/\s{2,}/g, ' ').replace(/\s+(?:o|y)\s*$/i, '').trim())
+    .filter(Boolean)
+    .filter((segment) => !/^(traer|llevar|documentos?|requeridos?)$/i.test(segment));
+
+  for (const segment of cleanedSegments) add(segment);
+
+  return documents.join(' y ');
+}
 
 
 function stripRepeatedOpeningGreeting(reply = '') {
@@ -58,7 +98,7 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
     vacancy.interviewAddress ? `Dirección de entrevista: ${vacancy.interviewAddress}` : null,
     `Requisitos: ${vacancy.requirements}`,
     `Condiciones: ${vacancy.conditions}`,
-    vacancy.requiredDocuments ? `Documentación requerida para la entrevista: ${vacancy.requiredDocuments}` : null,
+    sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments) ? `Documentación requerida para la entrevista: ${sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments)}` : null,
     vacancy.roleDescription ? `Descripción del cargo: ${vacancy.roleDescription}` : null
   ].filter(Boolean).join('\n') : 'La vacante aún no ha sido identificada.';
 
@@ -111,7 +151,7 @@ export async function generateNaturalReply({
   messages.push({ role: 'user', content: String(inboundText || '') });
 
   try {
-    const response = await axios.post(
+    const response = await postOpenAi(
       OPENAI_URL,
       {
         model: DEFAULT_MODEL,
@@ -173,7 +213,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
   }
 
   try {
-    const response = await axios.post(
+    const response = await postOpenAi(
       OPENAI_URL,
       {
         model: DEFAULT_MODEL,
@@ -214,8 +254,9 @@ export async function generateInterviewOffer({
   requiredDocuments,
   isReschedule = false
 }) {
-  const docsLine = requiredDocuments || vacancy?.requiredDocuments
-    ? `Debe traer: ${requiredDocuments || vacancy.requiredDocuments}.`
+  const safeRequiredDocuments = sanitizeRequiredDocumentsForBot(requiredDocuments || vacancy?.requiredDocuments);
+  const docsLine = safeRequiredDocuments
+    ? `Debe traer: ${safeRequiredDocuments}.`
     : '';
 
   if (!process.env.OPENAI_API_KEY) {
@@ -238,7 +279,7 @@ export async function generateInterviewOffer({
   ].filter(Boolean).join(' ');
 
   try {
-    const response = await axios.post(
+    const response = await postOpenAi(
       OPENAI_URL,
       {
         model: DEFAULT_MODEL,
@@ -272,7 +313,7 @@ export async function generateInterviewOffer({
  */
 export async function generateBookingConfirmation({ formattedDate, vacancy, candidateName }) {
   const address = vacancy?.interviewAddress || vacancy?.operationAddress || '';
-  const docs = vacancy?.requiredDocuments || '';
+  const docs = sanitizeRequiredDocumentsForBot(vacancy?.requiredDocuments) || '';
   const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
 
   if (!process.env.OPENAI_API_KEY) {
@@ -297,7 +338,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
   ].filter(Boolean).join(' ');
 
   try {
-    const response = await axios.post(
+    const response = await postOpenAi(
       OPENAI_URL,
       {
         model: DEFAULT_MODEL,

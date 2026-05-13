@@ -26,6 +26,7 @@ import {
   normalizeCandidateStatusForUI
 } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
+import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
 import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
@@ -595,10 +596,10 @@ const BOOKING_STATUS_PRIORITY = {
 };
 
 const ALLOWED_CV_MIMES = new Set([
-  'application/pdf', 'application/msword',
+  'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ]);
-const ALLOWED_CV_EXTENSIONS = new Set(['.pdf', '.doc', '.docx']);
+const ALLOWED_CV_EXTENSIONS = new Set(['.pdf', '.docx']);
 const OUTREACH_DEFAULT_MESSAGE = 'Hola {nombre}, te escribo por tu proceso para la vacante {vacante} en {ciudad}. ¿Podemos continuar?';
 
 function buildCvStatusQuery(type, message) {
@@ -852,15 +853,22 @@ function decorateDashboardCandidate(candidate) {
 
 async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
   const update = buildTechnicalOutboundCandidateUpdate(new Date());
-  await sendTextMessage(candidate.phone, body);
+  const safety = sanitizeOutboundReply({
+    reply: body || buildSafeFallbackReply(),
+    vacancy: candidate?.vacancy || null,
+    candidate,
+    source: rawPayload?.source || 'admin_outbound'
+  });
+  const finalBody = safety.reply || buildSafeFallbackReply();
+  await sendTextMessage(candidate.phone, finalBody);
   await prisma.candidate.update({ where: { id: candidate.id }, data: update });
   await prisma.message.create({
     data: {
       candidateId: candidate.id,
       direction: MessageDirection.OUTBOUND,
       messageType: MessageType.TEXT,
-      body,
-      rawPayload
+      body: finalBody,
+      rawPayload: safety.blocked ? { ...rawPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : rawPayload
     }
   });
 }
@@ -2523,7 +2531,7 @@ export function adminRouter(prisma) {
     }
 
     const templates = {
-      request_hv: 'Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).',
+      request_hv: 'Para continuar tu proceso necesito tu hoja de vida (HV) como archivo PDF o Word/DOCX.',
       reminder: 'Te recuerdo que tu proceso sigue activo. Si deseas continuar, comparte la información faltante o tu Hoja de vida (HV).'
     };
 
@@ -2567,7 +2575,7 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'La ventana de 24h de WhatsApp está vencida. No se puede solicitar la HV.'));
     }
 
-    const body = 'Para continuar tu proceso necesito tu Hoja de vida (HV) en PDF o Word (.doc/.docx).';
+    const body = 'Para continuar tu proceso necesito tu hoja de vida (HV) como archivo PDF o Word/DOCX.';
 
     try {
       await sendAdminOutboundMessage(prisma, candidate, body, {

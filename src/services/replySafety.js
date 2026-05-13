@@ -1,3 +1,24 @@
+
+const CV_UNSAFE_FALLBACK_REPLY = 'Para continuar, envíame tu hoja de vida como archivo PDF o Word/DOCX. No puedo registrarla en foto ni impresa por este medio.';
+
+const UNSAFE_CV_REPLY_PATTERNS = [
+  /hoja\s+de\s+vida\s+en\s+foto/i,
+  /foto\s+de\s+la\s+hoja\s+de\s+vida/i,
+  /m[aá]ndala\s+en\s+foto/i,
+  /puede\s+ser\s+foto/i,
+  /\bimpresa\b/i,
+  /como\s+la\s+tengas/i,
+  /como\s+la\s+tenga/i,
+  /minerva\s*1003/i,
+  /formato\s+minerva\s*1003\s+o\s+impresa/i
+];
+
+function containsUnsafeCvInstruction(reply = '') {
+  const text = String(reply || '');
+  if (!text || text.trim() === CV_UNSAFE_FALLBACK_REPLY) return false;
+  return UNSAFE_CV_REPLY_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 const UNSUPPORTED_VACANCY_FACT_REPLY = 'Sobre ese punto no tengo una condición registrada para confirmarla. Te comparto solo la información registrada de la vacante: {summary}. Si quieres, seguimos con tu proceso.';
 
 function normalizeText(value = '') {
@@ -99,6 +120,15 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
     return { reply: originalReply, blocked: false, blockedClaims: [], reason: null };
   }
 
+  if (containsUnsafeCvInstruction(originalReply)) {
+    return {
+      reply: CV_UNSAFE_FALLBACK_REPLY,
+      blocked: true,
+      blockedClaims: ['unsafe_cv_instruction'],
+      reason: 'unsafe_cv_instruction'
+    };
+  }
+
   const supportedText = collectSupportedText(vacancy || {});
   const normalizedReply = normalizeText(originalReply);
   const blockedClaims = [];
@@ -132,6 +162,8 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
     candidateId: candidate?.id || null
   };
 }
+
+export { CV_UNSAFE_FALLBACK_REPLY };
 
 export function buildSafeFallbackReply() {
   return 'Te leí. Para continuar, confírmame el dato puntual o espera a que el equipo revise tu caso.';

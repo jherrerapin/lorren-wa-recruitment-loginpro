@@ -216,7 +216,7 @@ function buildEngineDecision(systemPrompt, userText) {
     if (affirmative) {
       if (completeAfterMerge && !hasCv) {
         return {
-          reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF o Word.',
+          reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF o Word/DOCX.',
           nextStep: 'ASK_CV',
           actions: [{ type: 'request_cv' }],
           extractedFields: {}
@@ -241,7 +241,7 @@ function buildEngineDecision(systemPrompt, userText) {
     if (Object.keys(parsed).length) {
       if (completeAfterMerge && !hasCv) {
         return {
-          reply: 'Listo, ya actualice ese dato. Ahora enviame tu hoja de vida en PDF o Word.',
+          reply: 'Listo, ya actualice ese dato. Ahora enviame tu hoja de vida en PDF o Word/DOCX.',
           nextStep: 'ASK_CV',
           actions: [{ type: 'save_fields', data: parsed }, { type: 'request_cv' }],
           extractedFields: parsed
@@ -258,7 +258,7 @@ function buildEngineDecision(systemPrompt, userText) {
 
   if (completeAfterMerge && !hasCv) {
     return {
-      reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF o Word.',
+      reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF o Word/DOCX.',
       nextStep: 'ASK_CV',
       actions: Object.keys(parsed).length
         ? [{ type: 'save_fields', data: parsed }, { type: 'request_cv' }]
@@ -295,7 +295,7 @@ function buildEngineDecision(systemPrompt, userText) {
   if (Object.keys(parsed).length) {
     if (completeAfterMerge) {
       return {
-        reply: 'Listo, ya tengo la informacion clave. Cuando puedas, enviame la hoja de vida en PDF o Word.',
+        reply: 'Listo, ya tengo la informacion clave. Cuando puedas, enviame la hoja de vida en PDF o Word/DOCX.',
         nextStep: 'ASK_CV',
         actions: [{ type: 'save_fields', data: parsed }, { type: 'request_cv' }],
         extractedFields: parsed

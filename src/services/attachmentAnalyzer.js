@@ -1,10 +1,27 @@
-import axios from 'axios';
-import pdfParse from 'pdf-parse';
-import mammoth from 'mammoth';
-
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MODEL = 'gpt-5.4-mini-2026-03-17';
 const MIN_TEXT_LENGTH = 80;
+
+async function postResponses(payload) {
+  const { default: axios } = await import('axios');
+  return axios.post(RESPONSES_URL, payload, {
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 15000
+  });
+}
+
+async function parsePdfBuffer(buffer) {
+  const { default: pdfParse } = await import('pdf-parse');
+  return pdfParse(buffer);
+}
+
+async function extractDocxText(buffer) {
+  const { default: mammoth } = await import('mammoth');
+  return mammoth.extractRawText({ buffer });
+}
 
 function buildResult(partial = {}) {
   return {
@@ -89,13 +106,7 @@ async function classifyWithResponses({ mimeType = '', filename = '', textHint = 
   };
 
   try {
-    const response = await axios.post(RESPONSES_URL, payload, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      timeout: 15000
-    });
+    const response = await postResponses(payload);
     const parsed = parseStructuredOutput(response.data);
     return buildResult({
       attachmentKind: mimeType.startsWith('image/') ? 'image' : 'document',
@@ -114,12 +125,17 @@ export async function analyzeAttachment({ buffer, mimeType = '', filename = '' }
   const name = String(filename || '').toLowerCase();
 
   if (mime.startsWith('image/')) {
-    const base64 = buffer ? Buffer.from(buffer).toString('base64') : null;
-    return classifyWithResponses({ mimeType: mime, filename: name, base64 });
+    return buildResult({
+      attachmentKind: 'image',
+      classification: 'CV_IMAGE_ONLY',
+      confidence: 0.55,
+      rationale: 'image_is_not_valid_cv_attachment',
+      evidence: ['image_mime_not_accepted_for_cv']
+    });
   }
 
   if (mime.includes('pdf') || name.endsWith('.pdf')) {
-    const parsed = await pdfParse(buffer).catch(() => ({ text: '' }));
+    const parsed = await parsePdfBuffer(buffer).catch(() => ({ text: '' }));
     const text = String(parsed?.text || '').slice(0, 6000);
     if (process.env.OPENAI_API_KEY) {
       const ai = await classifyWithResponses({ mimeType: mime || 'application/pdf', filename: name, textHint: text });
@@ -141,7 +157,7 @@ export async function analyzeAttachment({ buffer, mimeType = '', filename = '' }
   }
 
   if (mime.includes('word') || name.endsWith('.docx')) {
-    const parsed = await mammoth.extractRawText({ buffer }).catch(() => ({ value: '' }));
+    const parsed = await extractDocxText(buffer).catch(() => ({ value: '' }));
     const text = String(parsed?.value || '').slice(0, 6000);
     if (process.env.OPENAI_API_KEY) {
       const ai = await classifyWithResponses({ mimeType: mime || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: name, textHint: text });

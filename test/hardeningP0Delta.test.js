@@ -60,14 +60,15 @@ test('documento no CV se clasifica OTHER y no CV_VALID', async () => {
   assert.equal(result.classification, 'OTHER');
 });
 
-test('imagen no se clasifica automáticamente como CV_IMAGE_ONLY', async () => {
+test('imagen se clasifica como CV_IMAGE_ONLY pero no como CV_VALID', async () => {
   const result = await analyzeAttachment({
     buffer: Buffer.from('fake-image-content'),
     mimeType: 'image/jpeg',
     filename: 'foto.jpg'
   });
 
-  assert.notEqual(result.classification, 'CV_IMAGE_ONLY');
+  assert.equal(result.classification, 'CV_IMAGE_ONLY');
+  assert.notEqual(result.classification, 'CV_VALID');
 });
 
 test('responsePolicy mantiene intención para pedir HV en PDF/Word', () => {
