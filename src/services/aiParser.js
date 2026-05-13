@@ -34,6 +34,7 @@ Campos que puedes extraer (omite los que no estén presentes o no sean claros):
   "documentType": string,     // CC | TI | CE | PPT | Pasaporte
   "documentNumber": string,   // Solo los dígitos
   "age": number,              // Edad en años — número entero
+  "gender": string,           // MALE | FEMALE | OTHER — solo con evidencia textual, nunca por nombre
   "neighborhood": string,     // Barrio, sector, localidad donde vive
   "medicalRestrictions": string, // Lo que diga el candidato sobre su condición física
   "transportMode": string,    // Moto | Bicicleta | Sin medio de transporte | lo que diga
@@ -53,6 +54,11 @@ Cómo pensar sobre los datos (no son reglas, son criterios de sentido común):
 
 • El nombre puede aparecer al inicio del mensaje, después de "soy", "me llamo",
   o simplemente escrito. Capitaliza bien: "MARIA PEREZ" → "Maria Perez".
+
+• El género solo se extrae si el candidato lo expresa lingüísticamente: "soy mujer",
+  "femenino", "candidata", "estoy interesada", "quedo atenta" → FEMALE;
+  "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento" → MALE.
+  Nunca infieras género por el nombre.
 
 • El barrio puede mencionarse con o sin la palabra "barrio": "vivo en el Salado",
   "del Jordan", "zona norte", "ciudadela Simón Bolívar".

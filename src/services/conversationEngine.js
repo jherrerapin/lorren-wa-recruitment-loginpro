@@ -200,10 +200,11 @@ function buildGenderFlowInstruction(candidate, vacancy) {
 
   if (gender === 'UNKNOWN') {
     return `GENERO: No determinado.
-Detecta el genero usando comprension semantica del turno completo y del historial reciente, no por coincidencia literal de una palabra.
-Si hay evidencia clara y consistente en contexto, extraelo sin esperar otra confirmacion.
-Si la evidencia es ambigua, no infieras: preguntalo cuando sea natural.
-Extraelo en extractedFields como "gender": "MALE" | "FEMALE" | "OTHER".`;
+Detecta el genero solo con evidencia lingüistica del candidato en el turno o historial reciente; nunca por nombre propio.
+FEMALE cuando haya marcas claras como "soy mujer", "femenino", "candidata", "estoy interesada", "me encuentro interesada", "quedo atenta", "señora", "señorita" o una correccion explícita equivalente.
+MALE cuando haya marcas equivalentes como "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento".
+Si la evidencia es ambigua o solo viene del nombre, NO extraigas genero y NO lo preguntes de forma directa.
+Extraelo en extractedFields como "gender": "MALE" | "FEMALE" | "OTHER" solo cuando exista esa evidencia textual.`;
   }
 
   if (gender === 'FEMALE') {
@@ -298,12 +299,13 @@ COMO RESPONDES:
 - No uses listas con vietas, numeracion ni Markdown en la respuesta.
 - No digas que eres un bot o una IA.
 - No repitas frases casi iguales a mensajes recientes del bot.
+- Saluda solo en primer contacto o si el candidato acaba de saludar; en confirmaciones, agenda, correcciones y seguimiento continua directo sin abrir con Hola.
 - No mezcles varias plantillas en una sola respuesta.
 
 PRIORIDADES:
 - Antes de responder, relee el historial reciente completo y el estado curado.
 - Entiende la intencion real del candidato antes de pedir datos.
-- Si el candidato pregunta algo de la vacante, responde eso primero.
+- Si el candidato pregunta algo de la vacante, responde eso primero, pero solo con datos presentes en ESTADO CURADO DE LA VACANTE o historial.
 - Si plantea una objecion, atiendela antes de retomar el flujo.
 - Si ya envio datos en fragmentos, consolidalos.
 - Si corrige algo, usa el valor nuevo y no reabras la misma confirmacion.
@@ -322,6 +324,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No uses la frase "barrio o localidad": pide un solo dato segun la ciudad (Bogota = localidad; otras ciudades = barrio).
 - Si la vacante exige experiencia (experienceRequired = YES), debes pedir y capturar experiencia (si/no) y tiempo de experiencia.
 - Si la vacante NO exige experiencia, no bloquees el avance por ese dato.
+- Si la vacante aun no esta identificada, no inventes cargos, sectores ni categorias de vacantes; pide ciudad o cargo para consultar las opciones registradas.
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
 - Si la vacante existe pero esta inactiva o pausada, explica que hoy no se esta recibiendo personal, pero aun puedes pedir datos y hoja de vida para dejar el perfil registrado.
 - Si despues de datos + hoja de vida o despues de una entrevista agendada aparece una pregunta que no puedes responder con la vacante o el historial, usa "pause_bot" con una razon concreta.
@@ -375,24 +378,76 @@ REGLAS CRITICAS:
 - extractedFields tiene peso real: guarda correcciones y datos nuevos aunque no esten solo en save_fields.
 - Si haces una pregunta y pides algo en el mismo mensaje, responde primero la duda y luego retoma el siguiente paso.
 - Si no hubo progreso real, no repitas la misma estructura del bot anterior; reformula y aporta algo mas util.
-- Nunca pidas el genero de forma directa; solo inferir si el candidato lo expresa claramente.
+- Nunca pidas el genero de forma directa; detectalo solo si el candidato lo expresa con evidencia lingüistica clara y no por el nombre.
 - Si el mensaje del candidato suena a cierre humano, desistimiento o pausa, adaptate al contexto.
 
 Devuelve SOLO el JSON. Sin texto antes ni despues.`;
 }
 
-function parseEngineJson(rawText = '{}') {
-  const text = String(rawText || '').trim();
-  try { return JSON.parse(text); } catch {}
+function findBalancedJsonObject(text = '') {
+  const raw = String(text || '');
+  const start = raw.indexOf('{');
+  if (start < 0) return null;
 
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) {
-    try { return JSON.parse(fenced[1].trim()); } catch {}
+  let depth = 0;
+  let inString = false;
+  let quote = null;
+  let escaped = false;
+
+  for (let index = start; index < raw.length; index += 1) {
+    const char = raw[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        inString = false;
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = true;
+      quote = char;
+      continue;
+    }
+
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    if (depth === 0) return raw.slice(start, index + 1);
   }
 
-  const objectMatch = text.match(/\{[\s\S]*\}/);
-  if (objectMatch) {
-    try { return JSON.parse(objectMatch[0]); } catch {}
+  return null;
+}
+
+function repairLooseJsonObject(candidate = '') {
+  return String(candidate || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_-]*)(\s*:)/g, '$1"$2"$3')
+    .replace(/:\s*'([^']*)'/g, (_match, value) => `: ${JSON.stringify(value)}`);
+}
+
+export function parseEngineJson(rawText = '{}') {
+  const text = String(rawText || '').trim();
+  const candidates = [
+    text,
+    text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim(),
+    findBalancedJsonObject(text)
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate); } catch {}
+    try { return JSON.parse(repairLooseJsonObject(candidate)); } catch {}
   }
 
   return null;
@@ -655,6 +710,7 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
   const pendingUpdate = {};
   let terminalStep = null;
   let requestedStep = null;
+  let ignoreModelNextStep = false;
 
   const setStep = (step, options = {}) => {
     if (!step) return;
@@ -702,6 +758,15 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
           break;
 
         case 'mark_female_pipeline':
+          if (candidateAfterMerge.gender !== Gender.FEMALE) {
+            console.warn('[ACT_SKIPPED]', {
+              action: action.type,
+              reason: 'female_pipeline_without_valid_gender_evidence',
+              candidateId: candidate.id
+            });
+            ignoreModelNextStep = true;
+            break;
+          }
           pendingUpdate.gender = Gender.FEMALE;
           pendingUpdate.status = CandidateStatus.REGISTRADO;
           pendingUpdate.botPaused = true;
@@ -797,7 +862,7 @@ export async function act({ actions, candidate, extractedFields = {}, candidateF
     || requestedStep
     || null;
 
-  if (!finalStep && nextStep && Object.values(ConversationStep).includes(nextStep)) {
+  if (!finalStep && !ignoreModelNextStep && nextStep && Object.values(ConversationStep).includes(nextStep)) {
     finalStep = nextStep;
   }
 

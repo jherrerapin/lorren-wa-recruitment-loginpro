@@ -48,13 +48,6 @@ function detectRoleHint(text = '') {
   return null;
 }
 
-function inferGenderFromName(fullName = '') {
-  const firstName = String(fullName || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
-  if (['maria', 'ana', 'laura', 'paula', 'luisa', 'andrea'].includes(firstName)) return 'FEMALE';
-  if (['juan', 'carlos', 'andres', 'camilo', 'jose', 'william', 'sergio'].includes(firstName)) return 'MALE';
-  return null;
-}
-
 function listMissingCoreFields(candidateState = {}) {
   const profile = candidateState.profile || {};
   return [
@@ -114,8 +107,6 @@ function mergeProfileState(candidateState = {}, extractedFields = {}) {
 
 function buildAiParserResponse(userText) {
   const parsed = normalizeCandidateFields(parseNaturalData(userText));
-  const inferredGender = inferGenderFromName(parsed.fullName);
-  if (inferredGender) parsed.gender = inferredGender;
   const intent = detectConversationIntent(userText, { isDoneStep: false });
   const city = detectCity(userText);
   const roleHint = detectRoleHint(userText);
@@ -131,8 +122,6 @@ function buildEngineDecision(systemPrompt, userText) {
   const candidateState = parseJsonSection(systemPrompt, 'ESTADO CURADO DEL CANDIDATO (JSON):') || {};
   const vacancyState = parseJsonSection(systemPrompt, 'ESTADO CURADO DE LA VACANTE (JSON):') || {};
   const parsed = normalizeCandidateFields(parseNaturalData(userText));
-  const inferredGender = inferGenderFromName(parsed.fullName || candidateState.profile?.fullName?.value);
-  if (inferredGender) parsed.gender = inferredGender;
   const city = detectCity(userText);
   const roleHint = detectRoleHint(userText);
   if (city) parsed.city = city;

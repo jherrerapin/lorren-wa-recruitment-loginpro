@@ -1,5 +1,6 @@
 import { normalizeCandidateFields, parseNaturalData } from './candidateData.js';
 import { detectRoleHintFromText } from './vacancyResolver.js';
+import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 
 const EMPTY_UNDERSTANDING = Object.freeze({
   intent: 'unknown',
@@ -9,6 +10,7 @@ const EMPTY_UNDERSTANDING = Object.freeze({
   corrections: [],
   contradictions: [],
   missingFields: [],
+  rejectedFields: [],
   suggestedNextAction: 'ask_for_clarification',
   fieldConfidence: {},
   replyGuidance: { tone: 'neutral', goal: 'collect_data' }
@@ -23,6 +25,7 @@ function baseUnderstanding() {
     corrections: [],
     contradictions: [],
     missingFields: [],
+    rejectedFields: [],
     suggestedNextAction: EMPTY_UNDERSTANDING.suggestedNextAction,
     fieldConfidence: {},
     replyGuidance: { ...EMPTY_UNDERSTANDING.replyGuidance }
@@ -55,6 +58,16 @@ function buildConfidenceFromEvidence(fields = {}, evidence = {}) {
   return confidence;
 }
 
+function buildLocalEvidence(fields = {}, text = '') {
+  const snippet = String(text || '').slice(0, 180);
+  return Object.fromEntries(
+    Object.keys(fields || {}).map((field) => [
+      field,
+      { snippet, confidence: 0.74, source: 'local_parser' }
+    ])
+  );
+}
+
 function detectCorrectionIntent(text = '', aiResult = {}) {
   const extraction = aiResult?.extraction || {};
   if (Array.isArray(extraction.conflicts) && extraction.conflicts.length) return true;
@@ -75,6 +88,7 @@ export async function conversationUnderstanding(text, options = {}) {
   const understanding = baseUnderstanding();
   const aiResult = options.aiResult || null;
   const aiFields = aiResult?.parsedFields || {};
+  const rawAiCandidateFields = compactFields(aiFields);
   const aiCandidateFields = normalizeAiFields(aiFields);
   const aiEvidence = aiResult?.extraction?.fieldEvidence || {};
   const aiCity = typeof aiFields.city === 'string' ? aiFields.city.trim() || null : null;
@@ -82,18 +96,36 @@ export async function conversationUnderstanding(text, options = {}) {
   const extractionWasUseful = aiResult?.status === 'ok' && (Object.keys(aiCandidateFields).length > 0 || aiCity || aiRoleHint || aiResult.intent);
 
   if (extractionWasUseful) {
-    understanding.candidateFields = aiCandidateFields;
-    understanding.intent = Object.keys(aiCandidateFields).length ? 'provide_data' : (aiResult.intent || 'unknown');
-    understanding.suggestedNextAction = Object.keys(aiCandidateFields).length ? 'collect_or_confirm' : 'ask_for_clarification';
-    understanding.fieldConfidence = buildConfidenceFromEvidence(aiCandidateFields, aiEvidence);
+    const sanitized = sanitizeCandidateFieldsForConversation({
+      fields: rawAiCandidateFields,
+      evidence: aiEvidence,
+      text: input,
+      context: options.context || {},
+      turnType: aiResult?.extraction?.turnType || null
+    });
+    understanding.candidateFields = normalizeAiFields(sanitized.fields);
+    understanding.rejectedFields = sanitized.rejectedFields;
+    understanding.intent = Object.keys(understanding.candidateFields).length ? 'provide_data' : (aiResult.intent || 'unknown');
+    understanding.suggestedNextAction = Object.keys(understanding.candidateFields).length ? 'collect_or_confirm' : 'ask_for_clarification';
+    understanding.fieldConfidence = buildConfidenceFromEvidence(understanding.candidateFields, sanitized.evidence);
   } else {
     const localParsed = parseNaturalData(input);
     const normalized = normalizeCandidateFields(localParsed);
-    understanding.candidateFields = compactFields(normalized);
+    const localCandidateFields = compactFields(normalized);
+    const localEvidence = buildLocalEvidence(localCandidateFields, input);
+    const sanitized = sanitizeCandidateFieldsForConversation({
+      fields: localCandidateFields,
+      evidence: localEvidence,
+      text: input,
+      context: options.context || {},
+      turnType: null
+    });
+    understanding.candidateFields = sanitized.fields;
+    understanding.rejectedFields = sanitized.rejectedFields;
     understanding.intent = Object.keys(understanding.candidateFields).length ? 'provide_data' : 'unknown';
     understanding.suggestedNextAction = Object.keys(understanding.candidateFields).length ? 'collect_or_confirm' : 'ask_for_clarification';
     for (const field of Object.keys(understanding.candidateFields)) {
-      understanding.fieldConfidence[field] = 0.7;
+      understanding.fieldConfidence[field] = Number(sanitized.evidence?.[field]?.confidence) || 0.7;
     }
   }
 
