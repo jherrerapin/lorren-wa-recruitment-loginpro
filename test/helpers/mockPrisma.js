@@ -28,11 +28,14 @@ function matchesCondition(value, condition) {
     if (Object.hasOwn(condition, 'not')) {
       return !matchesCondition(value, condition.not);
     }
-    if (Object.hasOwn(condition, 'lte')) {
-      return normalizeDate(value).getTime() <= normalizeDate(condition.lte).getTime();
+    if (Object.hasOwn(condition, 'lte') && normalizeDate(value).getTime() > normalizeDate(condition.lte).getTime()) {
+      return false;
     }
-    if (Object.hasOwn(condition, 'gte')) {
-      return normalizeDate(value).getTime() >= normalizeDate(condition.gte).getTime();
+    if (Object.hasOwn(condition, 'gte') && normalizeDate(value).getTime() < normalizeDate(condition.gte).getTime()) {
+      return false;
+    }
+    if (Object.hasOwn(condition, 'lte') || Object.hasOwn(condition, 'gte')) {
+      return true;
     }
   }
 

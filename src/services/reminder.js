@@ -5,7 +5,7 @@ import {
   getWhatsappWindowState,
 } from './reminderPolicy.js';
 import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
-import { formatInterviewDate, getInterviewReminderAt } from './interviewScheduler.js';
+import { formatInterviewDate } from './interviewScheduler.js';
 import {
   hasActiveInterviewBooking,
   shouldStopInterviewAutomation,
@@ -14,6 +14,8 @@ import { isFeatureEnabled } from './featureFlags.js';
 import { enqueueJob, JOB_TYPES } from './jobQueue.js';
 
 const REMINDER_DELAY_MS = 60 * 60 * 1000;
+const INTERVIEW_REMINDER_LEAD_MS = 30 * 60 * 1000;
+const INTERVIEW_REMINDER_TOLERANCE_MS = 5 * 60 * 1000;
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 const INTERVIEW_BOOKING_REMINDER_SOURCE = 'interview_booking_reminder';
 
@@ -206,13 +208,37 @@ async function hasInterviewKeepaliveSinceLastInbound(prisma, candidateId, lastIn
   return recentOutbounds.some((message) => message?.rawPayload?.source === INTERVIEW_KEEPALIVE_SOURCE);
 }
 
+function getInterviewReminderWindow(now = new Date()) {
+  const reminderTarget = new Date(now.getTime() + INTERVIEW_REMINDER_LEAD_MS);
+  return {
+    reminderTarget,
+    windowStart: new Date(reminderTarget.getTime() - INTERVIEW_REMINDER_TOLERANCE_MS),
+    windowEnd: new Date(reminderTarget.getTime() + INTERVIEW_REMINDER_TOLERANCE_MS)
+  };
+}
+
 async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), candidateId = null) {
   if (typeof prisma?.interviewBooking?.findMany !== 'function') return;
+
+  const { reminderTarget, windowStart, windowEnd } = getInterviewReminderWindow(now);
+  console.log('[REMINDER_TRACE]', JSON.stringify({
+    event: 'interview_reminder_check_started',
+    now: now.toISOString(),
+    reminderTarget: reminderTarget.toISOString(),
+    windowStart: windowStart.toISOString(),
+    windowEnd: windowEnd.toISOString(),
+    candidateId
+  }));
 
   const candidateBookings = await prisma.interviewBooking.findMany({
     where: {
       ...(candidateId ? { candidateId } : {}),
-      status: { in: ['SCHEDULED', 'CONFIRMED'] }
+      status: { in: ['SCHEDULED', 'CONFIRMED'] },
+      reminderSentAt: null,
+      scheduledAt: {
+        gte: windowStart,
+        lte: windowEnd
+      }
     },
     orderBy: { scheduledAt: 'asc' },
     select: {
@@ -225,34 +251,67 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
     }
   });
 
+  console.log('[REMINDER_TRACE]', JSON.stringify({
+    event: 'interview_reminder_due_bookings_found',
+    now: now.toISOString(),
+    windowStart: windowStart.toISOString(),
+    windowEnd: windowEnd.toISOString(),
+    count: candidateBookings.length
+  }));
+
   for (const booking of candidateBookings) {
     const scheduledAt = new Date(booking.scheduledAt);
-    if (scheduledAt <= now) continue;
-
-    const reminderAt = getInterviewReminderAt(scheduledAt);
-    if (booking.reminderSentAt || reminderAt > now) continue;
+    console.log('[REMINDER_TRACE]', JSON.stringify({
+      event: 'interview_reminder_send_attempt',
+      bookingId: booking.id,
+      candidateId: booking.candidateId,
+      scheduledAt: scheduledAt.toISOString()
+    }));
 
     const candidate = await prisma.candidate.findUnique({ where: { id: booking.candidateId } });
-    if (!candidate || candidate.botPaused || !hasActiveInterviewBooking(booking)) continue;
+    if (!candidate || candidate.botPaused || !hasActiveInterviewBooking(booking)) {
+      console.log('[REMINDER_TRACE]', JSON.stringify({
+        event: 'interview_reminder_skipped',
+        bookingId: booking.id,
+        candidateId: booking.candidateId,
+        reason: !candidate ? 'candidate_not_found' : candidate.botPaused ? 'bot_paused' : 'inactive_booking'
+      }));
+      continue;
+    }
 
     const reminderText = buildInterviewReminderText(booking);
-    await sendTextMessage(candidate.phone, reminderText);
-    await storeOutbound(prisma, candidate.id, reminderText, {
-      source: INTERVIEW_BOOKING_REMINDER_SOURCE,
-      bookingId: booking.id,
-      scheduledAt: scheduledAt.toISOString()
-    });
-    await prisma.interviewBooking.update({
-      where: { id: booking.id },
-      data: {
-        reminderSentAt: now,
-        reminderWindowClosed: true
-      }
-    });
-    await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: { lastOutboundAt: now }
-    });
+    try {
+      await sendTextMessage(candidate.phone, reminderText);
+      await storeOutbound(prisma, candidate.id, reminderText, {
+        source: INTERVIEW_BOOKING_REMINDER_SOURCE,
+        bookingId: booking.id,
+        scheduledAt: scheduledAt.toISOString()
+      });
+      await prisma.interviewBooking.update({
+        where: { id: booking.id },
+        data: {
+          reminderSentAt: now,
+          reminderWindowClosed: true
+        }
+      });
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: { lastOutboundAt: now }
+      });
+      console.log('[REMINDER_TRACE]', JSON.stringify({
+        event: 'interview_reminder_sent',
+        bookingId: booking.id,
+        candidateId: candidate.id,
+        scheduledAt: scheduledAt.toISOString()
+      }));
+    } catch (error) {
+      console.error('[REMINDER_TRACE]', JSON.stringify({
+        event: 'interview_reminder_send_failed',
+        bookingId: booking.id,
+        candidateId: booking.candidateId,
+        error: error?.message || String(error)
+      }));
+    }
   }
 }
 

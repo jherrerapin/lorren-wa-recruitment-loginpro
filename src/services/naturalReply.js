@@ -321,7 +321,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
       `Listo${name}, quedaste agendado para el ${formattedDate}.`,
       address ? `La dirección es ${address}.` : '',
       docs ? `Recuerda traer: ${docs}.` : '',
-      'Te enviaré un recordatorio una hora antes. ¡Mucha suerte!'
+      'Te enviaré un recordatorio 30 minutos antes. ¡Mucha suerte!'
     ].filter(Boolean).join(' '));
   }
 
@@ -332,7 +332,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     `Fecha/hora: ${formattedDate}.`,
     address ? `Dirección: ${address}.` : '',
     docs ? `Documentación a traer: ${docs}.` : '',
-    'Avisá que le llegará un recordatorio una hora antes.',
+    'Avisá que le llegará un recordatorio 30 minutos antes.',
     'No abras con saludo ni con "Hola": el candidato acaba de confirmar el horario y esta respuesta debe continuar el hilo.',
     'Máx 3 oraciones. Sin viñetas ni Markdown. Soná genuino y cercano.'
   ].filter(Boolean).join(' ');
@@ -365,7 +365,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     `Perfecto${name}, quedaste agendado para el ${formattedDate}.`,
     address ? `Nos vemos en ${address}.` : '',
     docs ? `Recuerda llevar: ${docs}.` : '',
-    'Te envío un recordatorio una hora antes. ¡Éxitos!'
+    'Te envío un recordatorio 30 minutos antes. ¡Éxitos!'
   ].filter(Boolean).join(' '));
 }
 

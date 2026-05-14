@@ -5,11 +5,11 @@
  *  1. Solo se ofrecen slots con al menos MIN_HOURS_ADVANCE horas de anticipacion.
  *  2. El scheduler usa hora Colombia de forma consistente para resolver dias y horas.
  *  3. Si el candidato rechaza un horario, se ofrece el siguiente slot valido.
- *  4. El recordatorio operativo de entrevista esta previsto 1 hora antes.
+ *  4. El recordatorio operativo de entrevista esta previsto 30 minutos antes.
  */
 
 const MIN_HOURS_ADVANCE = 6;
-const REMINDER_HOURS_BEFORE = 1;
+const REMINDER_MINUTES_BEFORE = 30;
 const WA_WINDOW_HOURS = 24;
 const COLOMBIA_OFFSET_MS = 5 * 60 * 60 * 1000;
 
@@ -89,7 +89,7 @@ export function calculateWindowExtension(interviewDate, now) {
 }
 
 export function getInterviewReminderAt(interviewDate) {
-  return new Date(interviewDate.getTime() - REMINDER_HOURS_BEFORE * 3600 * 1000);
+  return new Date(interviewDate.getTime() - REMINDER_MINUTES_BEFORE * 60 * 1000);
 }
 
 async function getAvailableSlots(prisma, vacancyId, now) {
