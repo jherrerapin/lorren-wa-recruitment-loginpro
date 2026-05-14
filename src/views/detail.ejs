@@ -734,10 +734,12 @@
       </div>
       <div class="messages-list">
         <% for (const m of sorted) { %>
-          <% const isBot = m.direction === 'OUTBOUND'; %>
-	          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
+          <% const isOutbound = m.direction === 'OUTBOUND'; %>
+          <% const source = m.rawPayload && typeof m.rawPayload.source === 'string' ? m.rawPayload.source : ''; %>
+          <% const isManualOutbound = isOutbound && source.startsWith('admin_'); %>
+	          <div class="msg <%= isOutbound ? 'msg-bot' : 'msg-candidato' %>">
 	            <div class="msg-header">
-	              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
+	              <strong><%= isOutbound ? (isManualOutbound ? 'Equipo' : 'Bot') : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
 	            </div>
 	            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
               <% if (m.rawPayload && m.rawPayload.debugTrace) { %>
