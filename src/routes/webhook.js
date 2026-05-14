@@ -2323,6 +2323,8 @@ export function webhookRouter(prisma) {
           const consolidatedText = consolidateTextMessages(pendingBatch);
           const anchorMessage = pendingBatch[pendingBatch.length - 1];
           const candidateForBatch = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+          if (shouldBlockAutomation(candidateForBatch)) continue;
+
           const debugTrace = createDebugTrace({ phone: from, currentStepBefore: candidateForBatch.currentStep });
 
           try {
