@@ -80,6 +80,17 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeHttpUrl(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+  try {
+    const url = new URL(normalized);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeDigits(value) {
   return String(value || '').replace(/\D+/g, '');
 }
@@ -1415,6 +1426,15 @@ export function adminRouter(prisma) {
       candidateSearch: null,
       vacancyFiltersById,
       vacancySearchById
+    });
+  });
+
+  // ── Operaciones / Despacho (solo dev) ───────────────────────
+  router.get('/operaciones', ensureDevRole, (req, res) => {
+    const dispatchModuleUrl = normalizeHttpUrl(process.env.DISPATCH_MODULE_URL);
+    res.render('operaciones', {
+      role: req.userRole,
+      dispatchModuleUrl
     });
   });
 

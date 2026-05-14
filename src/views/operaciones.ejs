@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Operaciones / Despacho | LoginPro</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --border: #e5e7eb;
+      --text: #1a1d23;
+      --text-muted: #64748b;
+      --navy: #1e2d3d;
+      --teal: #0d7a6b;
+      --teal-hover: #0a5f53;
+      --amber: #b45309;
+      --amber-light: #fef3c7;
+      --green: #047857;
+      --green-light: #d1fae5;
+      --shadow: 0 14px 40px rgba(15, 23, 42, .08);
+      --radius: 14px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+    .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; height: 52px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 500; padding: 4px 2px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
+    .navbar a:hover { color: #fff; border-bottom-color: rgba(255,255,255,.3); }
+    .navbar a.nav-active { color: #fff; border-bottom-color: #4fd1c5; }
+    .navbar .brand img { height: 28px; display: block; }
+    .navbar .spacer { flex: 1; }
+    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 5px 12px !important; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
+    .btn-logout:hover { border-color: rgba(255,255,255,.6) !important; color: #fff !important; }
+    .page { max-width: 1100px; margin: 0 auto; padding: 34px 24px 48px; }
+    .eyebrow { color: var(--teal); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }
+    .hero { background: linear-gradient(135deg, #ffffff 0%, #f0fdfa 100%); border: 1px solid var(--border); border-radius: 22px; padding: 30px; box-shadow: var(--shadow); display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 28px; align-items: center; }
+    .hero h1 { color: var(--navy); font-size: 30px; line-height: 1.12; margin-bottom: 14px; }
+    .hero p { color: var(--text-muted); font-size: 15px; line-height: 1.65; max-width: 720px; }
+    .status-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+    .status-label { color: var(--text-muted); display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+    .status-ready { display: inline-flex; align-items: center; gap: 8px; color: var(--green); background: var(--green-light); border-radius: 999px; padding: 8px 12px; font-size: 13px; font-weight: 800; }
+    .content-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 20px; margin-top: 22px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; box-shadow: 0 8px 24px rgba(15, 23, 42, .05); }
+    .card h2 { color: var(--navy); font-size: 17px; margin-bottom: 12px; }
+    .feature-list { list-style: none; display: grid; gap: 10px; color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+    .feature-list li { display: flex; gap: 10px; align-items: flex-start; }
+    .feature-list li::before { content: '✓'; color: var(--teal); font-weight: 900; }
+    .action-box { background: var(--surface-soft); border: 1px dashed #b6c7d6; border-radius: var(--radius); padding: 18px; }
+    .btn-primary { display: inline-flex; justify-content: center; align-items: center; width: 100%; margin-top: 14px; background: var(--teal); color: #fff; text-decoration: none; border-radius: 10px; padding: 12px 16px; font-size: 14px; font-weight: 800; transition: background .15s, transform .15s; }
+    .btn-primary:hover { background: var(--teal-hover); transform: translateY(-1px); }
+    .pending { margin-top: 14px; color: var(--amber); background: var(--amber-light); border-radius: 10px; padding: 12px 14px; font-size: 14px; font-weight: 700; }
+    .note { margin-top: 12px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+    @media (max-width: 760px) {
+      .navbar { height: auto; min-height: 52px; flex-wrap: wrap; padding: 10px 16px; gap: 12px; }
+      .navbar .spacer { display: none; }
+      .navbar form { width: 100%; }
+      .btn-logout { width: 100%; }
+      .hero, .content-grid { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 24px; }
+      .page { padding: 22px 14px 36px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro">
+      <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+    </a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <a href="/admin/monitor">Monitor</a>
+    <span class="spacer"></span>
+    <form method="post" action="/logout">
+      <button type="submit" class="btn-logout">Cerrar sesión</button>
+    </form>
+  </nav>
+
+  <main class="page">
+    <section class="hero" aria-labelledby="dispatch-title">
+      <div>
+        <div class="eyebrow">Sección DEV-only</div>
+        <h1 id="dispatch-title">Sistema de asignación de personal por operación</h1>
+        <p>Módulo operativo para solicitudes, asignaciones, novedades y reemplazos. Este acceso prepara el anclaje seguro de <strong>opera-dispatch</strong> sin fusionar su código ni alterar el flujo actual del bot de reclutamiento.</p>
+      </div>
+      <aside class="status-card" aria-label="Estado del módulo">
+        <span class="status-label">Estado</span>
+        <span class="status-ready">Preparado para integración</span>
+      </aside>
+    </section>
+
+    <section class="content-grid">
+      <div class="card">
+        <h2>Alcance inicial</h2>
+        <ul class="feature-list">
+          <li>Acceso visible únicamente para sesiones con rol DEV.</li>
+          <li>Anclaje externo mediante la variable opcional <code>DISPATCH_MODULE_URL</code>.</li>
+          <li>Sin cambios en Prisma, WhatsApp, FSM ni lógica de reclutamiento.</li>
+        </ul>
+      </div>
+      <div class="card action-box">
+        <h2>Abrir despacho</h2>
+        <% if (dispatchModuleUrl) { %>
+          <p class="note">El módulo de despacho está configurado como servicio externo.</p>
+          <a class="btn-primary" href="<%= dispatchModuleUrl %>" target="_blank" rel="noopener noreferrer">Abrir módulo de despacho</a>
+        <% } else { %>
+          <div class="pending">Módulo pendiente de despliegue</div>
+          <p class="note">Configura <code>DISPATCH_MODULE_URL</code> cuando el despliegue de opera-dispatch esté disponible.</p>
+        <% } %>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
