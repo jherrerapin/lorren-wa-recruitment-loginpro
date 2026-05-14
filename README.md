@@ -29,7 +29,8 @@ Chatbot de reclutamiento por WhatsApp para captar candidatos de pautas publicada
 ## Endpoints
 - `/health` — Health check (consulta la base de datos)
 - `/webhook` — Webhook de WhatsApp (GET verificación, POST mensajes)
-- `/admin` — Panel administrativo (protegido con Basic Auth)
+- `/admin` — Panel administrativo (protegido con sesiones)
+- `/admin/operaciones` — Acceso DEV-only al anclaje externo de Operaciones / Despacho
 
 ## Roles de acceso al panel
 
@@ -47,6 +48,17 @@ El panel administrativo tiene dos roles con diferentes niveles de acceso:
 - Todo lo del reclutador
 - Historial de conversación en el detalle del candidato
 - Monitor en tiempo real de mensajes (`/admin/monitor`)
+- Acceso a Operaciones / Despacho (`/admin/operaciones`) solo como anclaje seguro del módulo externo
+
+## Operaciones / Despacho
+
+La ruta `/admin/operaciones` está protegida para el perfil DEV. Un reclutador normal no ve el enlace en la navegación y, si intenta escribir la URL manualmente, recibe un rechazo seguro `403` sin contenido del módulo.
+
+La integración de `opera-dispatch` se hace primero como acceso anclado mediante URL externa, no como código fusionado dentro de este repositorio. Esto permite publicar el punto de entrada en el panel actual sin copiar archivos, mover código entre repositorios, agregar dependencias, cambiar Prisma ni alterar el bot.
+
+Configura `DISPATCH_MODULE_URL` solo cuando exista un despliegue del módulo de despacho. Debe ser una URL `https://` o `http://`; si está vacía o no es válida, la pantalla DEV muestra el estado “Módulo pendiente de despliegue”.
+
+El bot de WhatsApp, el webhook, la FSM, los servicios de WhatsApp y la lógica de reclutamiento no se modifican por esta sección.
 
 ## Variables de entorno
 | Variable | Descripción |
@@ -60,6 +72,7 @@ El panel administrativo tiene dos roles con diferentes niveles de acceso:
 | `ADMIN_PASS` | Contraseña del reclutador para el panel administrativo |
 | `DEV_USER` | Usuario del desarrollador para el panel administrativo |
 | `DEV_PASS` | Contraseña del desarrollador para el panel administrativo |
+| `DISPATCH_MODULE_URL` | URL opcional `https://` o `http://` del despliegue externo de opera-dispatch para abrirlo desde `/admin/operaciones` (solo DEV). Si está vacía o no es válida, se informa que el módulo está pendiente de despliegue. |
 
 ## Obtener un token de acceso permanente de Meta (System User Access Token)
 
