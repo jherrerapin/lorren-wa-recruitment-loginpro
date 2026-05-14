@@ -23,7 +23,7 @@ function completeCandidate(overrides = {}) {
   };
 }
 
-function createPrismaMock(candidates) {
+function createPrismaMock(candidates, vacancies = []) {
   return {
     candidate: {
       async findMany() {
@@ -43,14 +43,14 @@ function createPrismaMock(candidates) {
     },
     vacancy: {
       async findMany() {
-        return [];
+        return vacancies.map((v) => ({ ...v }));
       }
     }
   };
 }
 
-async function createServer(candidates) {
-  const prisma = createPrismaMock(candidates);
+async function createServer(candidates, vacancies = []) {
+  const prisma = createPrismaMock(candidates, vacancies);
   const app = express();
   const sessions = new Map();
 
@@ -158,6 +158,46 @@ test('recruiter no ve pestaña de nuevos ni candidatos incompletos en status=all
     assert.match(html, /Aprob Legacy/);
     assert.match(html, /Carlos Contactado/);
     assert.doesNotMatch(html, /Nuevo Incompleto/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
+test('GET /admin muestra hojas de vida de vacante pausada en revisión', async () => {
+  const registeredCandidate = completeCandidate({
+    id: 'ibague-registered',
+    status: 'REGISTRADO',
+    fullName: 'Laura Ibague',
+    vacancyId: 'vac-ibague-coordinador',
+    interviewBookings: []
+  });
+  const server = await createServer([], [
+    {
+      id: 'vac-ibague-coordinador',
+      title: 'Coordinador de operaciones',
+      city: 'Ibagué',
+      isActive: true,
+      acceptingApplications: false,
+      dashboardReviewEnabled: true,
+      schedulingEnabled: false,
+      interviewBookings: [],
+      candidates: [registeredCandidate]
+    }
+  ]);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const cookie = await loginAndGetCookie(baseUrl);
+    const response = await fetch(`${baseUrl}/admin?city=${encodeURIComponent('Ibagué')}`, { headers: { Cookie: cookie } });
+    const html = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(html, /Coordinador de operaciones/);
+    assert.match(html, /Revisi[oó]n de HV · bot pausado/);
+    assert.match(html, /Modo <strong>revisi[oó]n de hojas de vida<\/strong> con bot pausado\./);
+    assert.match(html, /Laura Ibague/);
+    assert.match(html, /✓ HV/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
