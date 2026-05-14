@@ -28,7 +28,7 @@ import {
 import { sendTextMessage } from '../services/whatsapp.js';
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
-import { buildTechnicalOutboundCandidateUpdate } from '../services/adminOutboundPolicy.js';
+import { buildManualInterventionCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
 import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';
 import { getReminderMissingItems } from '../services/reminder.js';
@@ -863,7 +863,10 @@ function decorateDashboardCandidate(candidate) {
 }
 
 async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
-  const update = buildTechnicalOutboundCandidateUpdate(new Date());
+  const update = buildManualInterventionCandidateUpdate({
+    pausedBy: rawPayload?.sentBy || 'dashboard',
+    reason: rawPayload?.pauseReason || 'Conversacion tomada manualmente desde dashboard'
+  });
   const safety = sanitizeOutboundReply({
     reply: body || buildSafeFallbackReply(),
     vacancy: candidate?.vacancy || null,
