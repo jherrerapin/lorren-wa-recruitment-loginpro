@@ -28,7 +28,7 @@ import {
 import { sendTextMessage } from '../services/whatsapp.js';
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
-import { buildManualInterventionCandidateUpdate } from '../services/adminOutboundPolicy.js';
+import { buildManualInterventionCandidateUpdate, buildManualWhatsAppOpenCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
 import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';
 import { getReminderMissingItems } from '../services/reminder.js';
@@ -2131,9 +2131,10 @@ export function adminRouter(prisma) {
 
     await prisma.candidate.update({
       where: { id },
-      data: req.userRole === 'dev'
-        ? { devLastSeenAt: new Date() }
-        : { status: 'CONTACTADO' }
+      data: buildManualWhatsAppOpenCandidateUpdate({
+        role: req.userRole,
+        pausedBy: req.username || req.userRole || 'dashboard'
+      })
     });
     if (req.userRole !== 'dev' && candidate.status !== 'CONTACTADO') {
       await logCandidateAdminEvent(prisma, {

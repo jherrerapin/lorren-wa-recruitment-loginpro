@@ -20,3 +20,18 @@ export function buildManualInterventionCandidateUpdate({
     botResumeMode: 'manual_resume_dashboard'
   };
 }
+
+export function buildManualWhatsAppOpenCandidateUpdate({
+  now = new Date(),
+  role = 'dev',
+  pausedBy = role || 'dashboard',
+  reason = 'Conversacion tomada manualmente por apertura de WhatsApp desde dashboard'
+} = {}) {
+  const update = buildManualInterventionCandidateUpdate({ now, pausedBy, reason });
+  if (role === 'dev') {
+    update.devLastSeenAt = now;
+  } else {
+    update.status = 'CONTACTADO';
+  }
+  return update;
+}
