@@ -986,8 +986,9 @@
     <% for (const v of activeCityData.vacancies) { %>
       <%
         const isScheduling = v.schedulingEnabled;
-        const isCvOnly     = !v.schedulingEnabled && v.acceptingApplications;
         const isDashboardReview = Boolean(v.dashboardReviewEnabled && !v.acceptingApplications);
+        const isCvOnly     = !v.schedulingEnabled && v.acceptingApplications;
+        const showCvReviewSections = !v.schedulingEnabled && (v.acceptingApplications || isDashboardReview);
         const isClosed     = !v.acceptingApplications;
         const totalToday   = v.bookingsToday.length;
         const totalPending = v.registeredNoBooking.length + v.registeredComplete.length + v.completeWithoutCv.length;
@@ -1292,13 +1293,13 @@
           </div>
           <% } %>
 
-          <% if (isCvOnly) { %>
+          <% if (showCvReviewSections) { %>
           <div class="section">
             <div class="section-header">
               <span class="section-title">📥&nbsp; Registrados completos</span>
               <span class="section-count"><%= filteredRegisteredComplete.length %></span>
             </div>
-            <div class="cv-only-notice"><span class="icon">⚠️</span><p>Modo <strong>solo recepción de hojas de vida</strong>.<span> El agendamiento está deshabilitado para esta vacante.</span></p></div>
+            <div class="cv-only-notice"><span class="icon">⚠️</span><p>Modo <strong><%= isDashboardReview ? 'revisión de hojas de vida' : 'solo recepción de hojas de vida' %></strong><%= isDashboardReview ? ' con bot pausado' : '' %>.<span> El agendamiento está deshabilitado para esta vacante.</span></p></div>
             <% if (filteredRegisteredComplete.length === 0) { %>
               <div class="empty-state"><div class="empty-icon">📭</div><p><%= vacancyFiltersActive ? 'No hay candidatos que coincidan con este filtro.' : 'Aún no hay candidatos registrados.' %></p></div>
             <% } else { %>
@@ -1347,7 +1348,7 @@
           </div>
           <% } %>
 
-          <% if (isCvOnly && v.completeWithoutCv.length > 0) { %>
+          <% if (showCvReviewSections && v.completeWithoutCv.length > 0) { %>
           <div class="section">
             <div class="section-header">
               <span class="section-title">📄&nbsp; Completos pendientes de HV</span>
