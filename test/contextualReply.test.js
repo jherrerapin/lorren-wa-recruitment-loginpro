@@ -120,12 +120,11 @@ test('contextual reply envía solo datos de vacante asignada incluyendo document
     const parsed = JSON.parse(raw);
     assert.equal(parsed.vacancy.title, 'Auxiliar logístico');
     assert.equal(parsed.vacancy.conditions, 'Turnos rotativos registrados');
-    assert.match(parsed.vacancy.interviewDocumentation, /hoja de vida en PDF o Word\/DOCX/i);
-    assert.match(parsed.vacancy.interviewDocumentation, /cédula original/i);
-    assert.doesNotMatch(parsed.vacancy.interviewDocumentation, /foto|impresa|como la tenga|minerva/i);
+    assert.match(parsed.vacancy.interviewDocumentation, /hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+    assert.doesNotMatch(parsed.vacancy.interviewDocumentation, /PDF|DOCX/i);
     return {
       data: {
-        output: [{ content: [{ parsed: { reply: 'La documentación registrada es hoja de vida en PDF o Word/DOCX y cédula original.', escalateHuman: false, reason: 'ok' } }] }]
+        output: [{ content: [{ parsed: { reply: 'La documentación registrada es hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original.', escalateHuman: false, reason: 'ok' } }] }]
       }
     };
   }, async () => {

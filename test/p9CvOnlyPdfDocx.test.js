@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildPolicyReply } from '../src/services/responsePolicy.js';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
 import { looksLikeCvFilenameText } from '../src/services/cvFlow.js';
-import { sanitizeRequiredDocumentsForBot, generateInterviewOffer } from '../src/services/naturalReply.js';
+import { sanitizeRequiredDocumentsForBot, generateInterviewOffer, generateBookingConfirmation, preserveConfiguredInterviewDocuments } from '../src/services/naturalReply.js';
 import { CV_UNSAFE_FALLBACK_REPLY, sanitizeOutboundReply } from '../src/services/replySafety.js';
 import { buildVacancyStateForModel } from '../src/services/conversationEngine.js';
 
@@ -46,21 +46,49 @@ test('texto con nombre de archivo no cuenta como HV adjunta', () => {
   assert.match(reply, /archivo real en PDF o Word\/DOCX/i);
 });
 
-test('sanitizeRequiredDocumentsForBot limpia requiredDocuments contaminado', async () => {
+test('documentos de entrevista salen de la configuración de la vacante sin forzar PDF/DOCX', async () => {
   const requiredDocuments = 'Traer hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original.';
   const sanitized = sanitizeRequiredDocumentsForBot(requiredDocuments);
-  assert.match(sanitized, /hoja de vida en PDF o Word\/DOCX/i);
-  assert.match(sanitized, /cédula original/i);
-  assertNoForbiddenHvTerms(sanitized);
+  assert.match(sanitized, /hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.doesNotMatch(sanitized, /PDF|DOCX/i);
 
   const reply = await generateInterviewOffer({
     formattedDate: 'jueves 14 de mayo a las 9:00 a. m.',
     vacancy: { requiredDocuments },
     candidateName: 'Ana Perez'
   });
-  assert.match(reply, /hoja de vida en PDF o Word\/DOCX/i);
-  assert.match(reply, /cédula original/i);
-  assertNoForbiddenHvTerms(reply);
+  assert.match(reply, /Debe traer: hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.doesNotMatch(reply, /PDF|DOCX/i);
+
+  const confirmation = await generateBookingConfirmation({
+    formattedDate: 'jueves 14 de mayo a las 9:00 a. m.',
+    vacancy: { requiredDocuments },
+    candidateName: 'Ana Perez'
+  });
+  assert.match(confirmation, /Recuerda traer: hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.doesNotMatch(confirmation, /PDF|DOCX/i);
+});
+
+test('caso Alfonso usa documentos configurados de la vacante, no formato de carga de HV', async () => {
+  const reply = await generateInterviewOffer({
+    formattedDate: 'sábado 16 de mayo a las 10:00 a. m.',
+    vacancy: { requiredDocuments: 'Hoja de vida\nCédula original' },
+    candidateName: 'Alfonso Perez'
+  });
+
+  assert.match(reply, /Debe traer: Hoja de vida y Cédula original/i);
+  assert.doesNotMatch(reply, /PDF|DOCX/i);
+});
+
+
+test('si la IA intenta agregar PDF/DOCX en documentación de entrevista, se restaura lo configurado', () => {
+  const reply = preserveConfiguredInterviewDocuments(
+    'Alfonso, te compartimos entrevista para el sábado 16 de mayo a las 10:00 a.m.; debe traer hoja de vida en PDF o Word/DOCX y cédula original. ¿Te queda bien ese horario?',
+    'Hoja de vida y cédula original'
+  );
+
+  assert.match(reply, /debe traer Hoja de vida y cédula original/i);
+  assert.doesNotMatch(reply, /PDF|DOCX/i);
 });
 
 test('estado de vacante para el motor expone documentación de entrevista saneada', () => {
@@ -73,9 +101,8 @@ test('estado de vacante para el motor expone documentación de entrevista sanead
     requiredDocuments: 'Hoja de vida Minerva 1003 física o impresa, como la tenga, y cédula original'
   });
 
-  assert.match(state.interviewDocumentation, /hoja de vida en PDF o Word\/DOCX/i);
-  assert.match(state.interviewDocumentation, /cédula original/i);
-  assert.doesNotMatch(state.interviewDocumentation, /foto|impresa|como la tenga|minerva/i);
+  assert.match(state.interviewDocumentation, /Hoja de vida Minerva 1003 física o impresa, como la tenga, y cédula original/i);
+  assert.doesNotMatch(state.interviewDocumentation, /PDF|DOCX/i);
 });
 
 test('replySafety bloquea salida peligrosa sobre HV', () => {

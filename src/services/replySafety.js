@@ -15,9 +15,32 @@ const UNSAFE_CV_REPLY_PATTERNS = [
   /formato\s+minerva\s*1003\s+o\s+impresa/i
 ];
 
-function containsUnsafeCvInstruction(reply = '') {
+function isConfiguredInterviewDocumentReply(reply = '', vacancy = null) {
+  const configuredDocuments = String(vacancy?.requiredDocuments || '').trim();
+  if (!configuredDocuments) return false;
+
+  const text = String(reply || '');
+  if (!/\b(?:entrevista|traer|llevar|recuerda|documentaci[oó]n|documentos?)\b/i.test(text)) return false;
+
+  const normalizedReply = normalizeText(text);
+  const normalizedDocuments = normalizeText(configuredDocuments);
+  const configuredSensitiveTerms = [
+    'foto',
+    'imagen',
+    'impresa',
+    'como la tenga',
+    'como la tengas',
+    'minerva 1003'
+  ].filter((term) => normalizedDocuments.includes(normalizeText(term)));
+
+  return configuredSensitiveTerms.length > 0
+    && configuredSensitiveTerms.some((term) => normalizedReply.includes(normalizeText(term)));
+}
+
+function containsUnsafeCvInstruction(reply = '', vacancy = null) {
   const text = String(reply || '');
   if (!text || text.trim() === CV_UNSAFE_FALLBACK_REPLY) return false;
+  if (isConfiguredInterviewDocumentReply(text, vacancy)) return false;
   return UNSAFE_CV_REPLY_PATTERNS.some((pattern) => pattern.test(text));
 }
 
@@ -59,14 +82,6 @@ function getInterviewAddress(vacancy = {}) {
   return String(vacancy?.interviewAddress || vacancy?.interview?.address || '').trim();
 }
 
-function cleanCvUnsafeText(value = '') {
-  return String(value || '')
-    .replace(/hoja\s+de\s+vida[^.|;]*/gi, 'hoja de vida en PDF o Word/DOCX')
-    .replace(/\b(foto|imagen|impresa|como\s+la\s+tengas?|minerva\s*1003(?:\s+f[ií]sica)?)\b/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
 function registeredVacancySummary(vacancy = {}) {
   const lines = [];
   const title = vacancy.title || vacancy.role;
@@ -75,7 +90,7 @@ function registeredVacancySummary(vacancy = {}) {
   if (city) lines.push(`Ciudad: ${city}`);
   if (vacancy.requirements) lines.push(`Requisitos: ${vacancy.requirements}`);
   if (vacancy.conditions) lines.push(`Condiciones: ${vacancy.conditions}`);
-  if (vacancy.requiredDocuments) lines.push(`Documentos requeridos: ${cleanCvUnsafeText(vacancy.requiredDocuments)}`);
+  if (vacancy.requiredDocuments) lines.push(`Documentos requeridos: ${vacancy.requiredDocuments}`);
   if (vacancy.operationAddress) lines.push(`Zona de operación: ${vacancy.operationAddress}`);
   return lines.join(' | ') || 'no tengo condiciones adicionales registradas para esta vacante';
 }
@@ -131,7 +146,7 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
     return { reply: originalReply, blocked: false, blockedClaims: [], reason: null };
   }
 
-  if (containsUnsafeCvInstruction(originalReply)) {
+  if (containsUnsafeCvInstruction(originalReply, vacancy)) {
     return {
       reply: CV_UNSAFE_FALLBACK_REPLY,
       blocked: true,

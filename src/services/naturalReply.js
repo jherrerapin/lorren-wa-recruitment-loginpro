@@ -31,37 +31,26 @@ export function sanitizeRequiredDocumentsForBot(requiredDocuments) {
   const raw = String(requiredDocuments || '').trim();
   if (!raw) return '';
 
-  const normalized = raw
+  const documents = raw
+    .split(/\n+|;+/)
+    .map((segment) => segment
+      .replace(/^\s*(?:debe(?:s)?\s+)?(?:traer|llevar)\s*:?\s*/i, '')
+      .replace(/[.。]+$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim())
+    .filter(Boolean);
+
+  const normalizeDocumentLabel = (value) => String(value || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.。]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const documents = [];
-  const add = (value) => {
-    if (value && !documents.some((item) => item.toLowerCase() === value.toLowerCase())) documents.push(value);
-  };
-
-  if (/\b(hoja\s+de\s+vida|hv|curriculum|curriculo|minerva\s*1003)\b/.test(normalized)) {
-    add('hoja de vida en PDF o Word/DOCX');
-  }
-
-  if (/\b(cedula|c[eé]dula)\s+original\b/.test(raw.toLowerCase()) || /\bcedula\s+original\b/.test(normalized)) {
-    add('cédula original');
-  }
-
-  const forbiddenTerms = /\b(impresa|foto|imagen|captura|como\s+la\s+tenga|como\s+la\s+tengas|minerva\s*1003(?:\s+fisica)?|f[ií]sica)\b/gi;
-  const cleanedSegments = raw
-    .split(/[,;\n]+|\s+y\s+/i)
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .filter((segment) => !/hoja\s+de\s+vida|\bhv\b|curriculum|curr[ií]culo|minerva\s*1003/i.test(segment))
-    .map((segment) => segment.replace(forbiddenTerms, '').replace(/\s{2,}/g, ' ').replace(/\s+(?:o|y)\s*$/i, '').trim())
-    .filter(Boolean)
-    .filter((segment) => !/^(traer|llevar|documentos?|requeridos?)$/i.test(segment));
-
-  for (const segment of cleanedSegments) add(segment);
-
-  return documents.join(' y ');
+  return documents
+    .filter((document, index) => documents.findIndex((item) => normalizeDocumentLabel(item) === normalizeDocumentLabel(document)) === index)
+    .join(' y ');
 }
 
 
@@ -82,6 +71,21 @@ function polishReplyForTurn(reply = '', { allowOpeningGreeting = false } = {}) {
   const text = String(reply || '').replace(/\s+/g, ' ').trim();
   if (!text) return text;
   return allowOpeningGreeting ? text : stripRepeatedOpeningGreeting(text);
+}
+
+export function preserveConfiguredInterviewDocuments(reply = '', configuredDocuments = '') {
+  const text = String(reply || '').trim();
+  const documents = String(configuredDocuments || '').trim();
+  if (!text || !documents || /\b(?:PDF|DOCX)\b/i.test(documents)) return text;
+
+  return text.replace(
+    /hoja\s+de\s+vida\s+en\s+PDF\s+o\s+(?:Word\/)?DOCX(?:\s+y\s+c[eé]dula\s+original)?/gi,
+    documents
+  );
+}
+
+function polishInterviewReply(reply = '', configuredDocuments = '', options = {}) {
+  return preserveConfiguredInterviewDocuments(polishReplyForTurn(reply, options), configuredDocuments);
 }
 
 /**
@@ -274,7 +278,8 @@ export async function generateInterviewOffer({
       ? 'El candidato rechazó el horario anterior. Ofrecé el nuevo de forma natural y empática.'
       : 'Ofrecé el horario de entrevista de forma amable y directa.',
     candidateName ? `Nombre del candidato: ${candidateName.split(' ')[0]}.` : '',
-    docsLine ? `Indicá también esta documentación configurada para entrevista, sin agregar documentos no registrados: ${docsLine}` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
+    docsLine ? `Indicá también esta documentación configurada para entrevista, usando exactamente esta información y sin agregar documentos no registrados: ${docsLine}` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
+    docsLine ? 'No conviertas la hoja de vida configurada a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
     'Preguntá si el horario le queda bien. Máx 2 oraciones. Sin viñetas ni Markdown. Soná humano.',
     'No abras con saludo ni con "Hola": es una continuación del hilo, no un primer contacto.',
     `Horario a ofrecer: ${formattedDate}`
@@ -299,15 +304,15 @@ export async function generateInterviewOffer({
     );
 
     const content = response.data?.choices?.[0]?.message?.content;
-    if (typeof content === 'string' && content.trim()) return polishReplyForTurn(content);
+    if (typeof content === 'string' && content.trim()) return polishInterviewReply(content, safeRequiredDocuments);
   } catch {
     // fallback
   }
 
   const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
-  return polishReplyForTurn(isReschedule
+  return polishInterviewReply(isReschedule
     ? `Entonces te ofrezco el ${formattedDate}. ¿Te queda bien? ${docsLine}`.trim()
-    : `Listo${name}, te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim());
+    : `Listo${name}, te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim(), safeRequiredDocuments);
 }
 
 /**
@@ -319,12 +324,12 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
   const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
 
   if (!process.env.OPENAI_API_KEY) {
-    return polishReplyForTurn([
+    return polishInterviewReply([
       `Listo${name}, quedaste agendado para el ${formattedDate}.`,
       address ? `La dirección es ${address}.` : '',
       docs ? `Recuerda traer: ${docs}.` : '',
       'Te enviaré un recordatorio 30 minutos antes. ¡Mucha suerte!'
-    ].filter(Boolean).join(' '));
+    ].filter(Boolean).join(' '), docs);
   }
 
   const systemPrompt = [
@@ -334,6 +339,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     `Fecha/hora: ${formattedDate}.`,
     address ? `Dirección: ${address}.` : '',
     docs ? `Documentación configurada para entrevista: ${docs}.` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
+    docs ? 'No conviertas la hoja de vida configurada a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
     'Avisá que le llegará un recordatorio 30 minutos antes.',
     'No abras con saludo ni con "Hola": el candidato acaba de confirmar el horario y esta respuesta debe continuar el hilo.',
     'Máx 3 oraciones. Sin viñetas ni Markdown. Soná genuino y cercano.'
@@ -358,17 +364,17 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     );
 
     const content = response.data?.choices?.[0]?.message?.content;
-    if (typeof content === 'string' && content.trim()) return polishReplyForTurn(content);
+    if (typeof content === 'string' && content.trim()) return polishInterviewReply(content, docs);
   } catch {
     // fallback
   }
 
-  return polishReplyForTurn([
+  return polishInterviewReply([
     `Perfecto${name}, quedaste agendado para el ${formattedDate}.`,
     address ? `Nos vemos en ${address}.` : '',
-    docs ? `Recuerda llevar: ${docs}.` : '',
+    docs ? `Recuerda traer: ${docs}.` : '',
     'Te envío un recordatorio 30 minutos antes. ¡Éxitos!'
-  ].filter(Boolean).join(' '));
+  ].filter(Boolean).join(' '), docs);
 }
 
 function normalizeCity(value = '') {
