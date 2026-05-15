@@ -1,7 +1,7 @@
 import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
 import { isCvMimeTypeAllowed } from './cvFlow.js';
 
-const CORE_FIELDS = [
+export const CORE_FIELDS = [
   'fullName',
   'documentType',
   'documentNumber',
@@ -25,6 +25,43 @@ const FIELD_LABELS = {
   vacancyId: 'vacante asignada'
 };
 
+
+export function getRequiredCandidateFieldKeys(vacancy = null) {
+  const residenceConfig = getResidenceFieldConfig(vacancy);
+  const fields = [
+    'fullName',
+    'documentType',
+    'documentNumber',
+    'age',
+    residenceConfig.field,
+    'medicalRestrictions',
+    'transportMode'
+  ];
+
+  if (vacancy?.experienceRequired === 'YES') {
+    fields.push('experienceInfo', 'experienceTime');
+  }
+
+  return fields;
+}
+
+export function getFieldLabel(field, vacancy = null) {
+  if (field === 'locality' || field === 'neighborhood') {
+    return getResidenceFieldConfig(vacancy).articleLabel;
+  }
+  if (field === 'experienceTime' && vacancy?.experienceTimeText) {
+    return `tiempo de experiencia (${vacancy.experienceTimeText})`;
+  }
+  if (field === 'experienceInfo') return 'experiencia (si o no)';
+  return FIELD_LABELS[field] || field;
+}
+
+export function getMissingFieldLabels(candidate = {}, vacancy = null) {
+  return getCandidateReadiness(candidate, vacancy, { requireCv: false })
+    .missingFields
+    .map((field) => getFieldLabel(field, vacancy));
+}
+
 function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== '';
 }
@@ -42,18 +79,15 @@ export function hasValidCv(candidate = {}) {
 
 export function getCandidateReadiness(candidate = {}, vacancy = null, options = {}) {
   const missingFields = [];
-  for (const field of CORE_FIELDS) {
+  const vacancyContext = vacancy || candidate?.vacancy || candidate;
+  const residenceConfig = getResidenceFieldConfig(vacancyContext);
+
+  for (const field of getRequiredCandidateFieldKeys(vacancyContext)) {
+    if (field === residenceConfig.field) {
+      if (!hasValue(getCandidateResidenceValue(candidate, vacancyContext))) missingFields.push(field);
+      continue;
+    }
     if (!hasValue(candidate[field])) missingFields.push(field);
-  }
-
-  const residenceConfig = getResidenceFieldConfig(vacancy || candidate?.vacancy || candidate);
-  if (!hasValue(getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy || candidate))) {
-    missingFields.push(residenceConfig.field);
-  }
-
-  if (vacancy?.experienceRequired === 'YES') {
-    if (!hasValue(candidate.experienceInfo)) missingFields.push('experienceInfo');
-    if (!hasValue(candidate.experienceTime)) missingFields.push('experienceTime');
   }
 
   const requireCv = options.requireCv !== false;
@@ -70,7 +104,7 @@ export function getCandidateReadiness(candidate = {}, vacancy = null, options = 
     coreDataComplete: missingFields.length === 0,
     hasValidCv: validCv,
     missingFields,
-    missingFieldLabels: missingFields.map((field) => FIELD_LABELS[field] || field),
+    missingFieldLabels: missingFields.map((field) => getFieldLabel(field, vacancyContext)),
     readyForCvRequest: missingFields.length === 0 && !validCv,
     readyForScheduling: missingFields.length === 0 && validCv && Boolean(candidate.vacancyId || vacancy?.id),
     readyForDone: missingForDone.length === 0,
@@ -81,7 +115,7 @@ export function getCandidateReadiness(candidate = {}, vacancy = null, options = 
 
 export function getFirstMissingFieldLabel(readiness = {}) {
   const field = readiness.missingFields?.[0] || readiness.missingForDone?.[0] || null;
-  return field ? (FIELD_LABELS[field] || field) : null;
+  return field ? (readiness.missingFieldLabels?.[0] || FIELD_LABELS[field] || field) : null;
 }
 
 export function buildMissingFieldReply(readiness = {}) {

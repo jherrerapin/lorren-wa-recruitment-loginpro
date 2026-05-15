@@ -35,3 +35,9 @@ test('bloquea dirección de entrevista no registrada', () => {
   assert.equal(result.blocked, true);
   assert.ok(result.blockedClaims.some((claim) => claim.startsWith('unregistered_interview_address')));
 });
+
+test('bloquea horario especifico no registrado', () => {
+  const result = sanitizeOutboundReply({ reply: 'El horario es de 8 a 5 de lunes a viernes.', vacancy: baseVacancy });
+  assert.equal(result.blocked, true);
+  assert.ok(result.blockedClaims.includes('horario_especifico'));
+});

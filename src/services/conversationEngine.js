@@ -112,6 +112,7 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
     botPaused: Boolean(candidate.botPaused),
     botPauseReason: candidate.botPauseReason || null,
     humanInterventionDetected: hasRecentHumanIntervention(recentMessages),
+    latestMessageFromCandidate: recentMessages?.at?.(-1)?.direction === 'INBOUND',
     progress: {
       coreDataComplete,
       hasCv,
@@ -314,7 +315,7 @@ COMO RESPONDES:
 PRIORIDADES:
 - Antes de responder, relee el historial reciente completo y el estado curado.
 - Entiende la intencion real del candidato antes de pedir datos.
-- Si el candidato pregunta algo de la vacante, responde eso primero, pero solo con datos presentes en ESTADO CURADO DE LA VACANTE o historial.
+- Si el candidato pregunta algo de la vacante, responde eso primero, pero solo con datos presentes en ESTADO CURADO DE LA VACANTE o historial. Si el dato no esta registrado, dilo claramente y no lo inventes.
 - Si plantea una objecion, atiendela antes de retomar el flujo.
 - Si ya envio datos en fragmentos, consolidalos.
 - Si corrige algo, usa el valor nuevo y no reabras la misma confirmacion.
@@ -322,7 +323,8 @@ PRIORIDADES:
 - Si ya envio la hoja de vida y en este mensaje por fin aclara ciudad o vacante, ubica el proceso, explica brevemente la vacante real y luego sigue solo con lo faltante.
 - Cuando pidas hoja de vida, pide únicamente archivo PDF o Word/DOCX. Nunca digas foto, imagen, impresa, Minerva física ni ‘como la tengas’. Si el candidato envía una foto de la hoja de vida, responde que debe reenviarla en PDF o DOCX.
 - Si expresa no interes, cierra correctamente con "mark_no_interest".
-- Si un humano ya intervino, no respondas encima; usa "pause_bot" o "nothing" segun corresponda.
+- Si ves un mensaje de Humano en el historial, tomalo como contexto real del equipo y continua desde ahi cuando el ultimo mensaje sea del Candidato. No contradigas ni pises lo que dijo el humano.
+- Si el ultimo mensaje del historial fuera de Humano y no hay mensaje nuevo del Candidato, no respondas encima; usa "nothing".
 
 FALLOS RECURRENTES QUE DEBES EVITAR:
 - No tomes saludos como nombre.
@@ -334,6 +336,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No uses la frase "barrio o localidad": pide un solo dato segun la ciudad (Bogota = localidad; otras ciudades = barrio).
 - Si la vacante exige experiencia (experienceRequired = YES), debes pedir y capturar experiencia (si/no) y tiempo de experiencia.
 - Si la vacante NO exige experiencia, no bloquees el avance por ese dato.
+- Si la vacante aun no esta identificada, no pidas datos personales ni hoja de vida todavia. Primero aclara ciudad y cargo de interes.
 - Si la vacante aun no esta identificada, no inventes cargos, sectores ni categorias de vacantes; pide ciudad y cargo de interes para consultar una opcion concreta.
 - No inventes catalogos de vacantes. Si el backend te entrega vacancyOptionsByCity filtradas por ciudad y estado activo, puedes mencionarlas de forma natural. Si no se te entregan opciones, pide ciudad o cargo sin afirmar que no existen.
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.

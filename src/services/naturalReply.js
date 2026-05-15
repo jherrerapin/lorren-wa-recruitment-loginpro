@@ -91,13 +91,13 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
   const candidateName = candidate?.fullName ? candidate.fullName.split(' ')[0] : null;
 
   const vacancyBlock = vacancy ? [
-    `Vacante: ${vacancy.title || vacancy.role}`,
-    `Cargo: ${vacancy.role}`,
-    `Ciudad: ${vacancy.city}`,
+    vacancy.title || vacancy.role ? `Vacante: ${vacancy.title || vacancy.role}` : null,
+    vacancy.role ? `Cargo: ${vacancy.role}` : null,
+    vacancy.city || vacancy.operation?.city?.name ? `Ciudad: ${vacancy.city || vacancy.operation?.city?.name}` : null,
     vacancy.operationAddress ? `Zona de operación: ${vacancy.operationAddress}` : null,
     vacancy.interviewAddress ? `Dirección de entrevista: ${vacancy.interviewAddress}` : null,
-    `Requisitos: ${vacancy.requirements}`,
-    `Condiciones: ${vacancy.conditions}`,
+    vacancy.requirements ? `Requisitos: ${vacancy.requirements}` : null,
+    vacancy.conditions ? `Condiciones: ${vacancy.conditions}` : null,
     sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments) ? `Documentación requerida para la entrevista: ${sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments)}` : null,
     vacancy.roleDescription ? `Descripción del cargo: ${vacancy.roleDescription}` : null
   ].filter(Boolean).join('\n') : 'La vacante aún no ha sido identificada.';
@@ -109,7 +109,8 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
     'NUNCA usés formato Markdown (negritas, cursivas, etc.).',
     'NUNCA menciones que sos un bot o IA, a menos que el candidato lo pregunte directamente.',
     'NUNCA repitas frases que ya aparecen en la conversación reciente.',
-    'NUNCA inventés cargos, sectores, beneficios, requisitos ni categorías de vacantes: usá solo la información registrada en el contexto.',
+    'NUNCA inventés cargos, sectores, salarios, horarios, beneficios, requisitos, documentos ni categorías de vacantes: usá solo la información registrada en el contexto.',
+    'Si el candidato pregunta por un dato que no aparece en la información de la vacante ni en el historial, decí de forma natural que no lo tienes registrado; no lo completes por intuición.',
     'Saludá solo cuando sea primer contacto o cuando el candidato acaba de saludar; en confirmaciones, agendamientos, correcciones y seguimiento continuá directo sin abrir con Hola.',
     'Respondé SIEMPRE en menos de 3 oraciones, de forma conversacional y variada.',
     'Si el candidato se presenta, respondé al saludo con calidez ANTES de pedir datos.',
@@ -197,8 +198,8 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       'Luego indicá que necesitás los datos del candidato para continuar.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real, no como un sistema.',
       'No inventés otras vacantes, cargos, sectores ni requisitos: menciona solo esta vacante registrada.',
-      `Vacante: ${resolved.role} en ${resolved.city}.`,
-      `Condiciones principales: ${resolved.conditions?.split('\n').slice(0, 3).join(', ')}`
+      `Vacante: ${resolved.role || resolved.title} en ${resolved.city || resolved.operation?.city?.name}.`,
+      resolved.conditions ? `Condiciones principales: ${resolved.conditions.split('\n').slice(0, 3).join(', ')}` : 'No menciones condiciones si no están registradas.'
     ].join(' ');
   } else {
     const vacancyList = vacancies.map((v) => `${v.role} en ${v.city}`).join(', ');
@@ -420,8 +421,12 @@ export function buildVacancyOptionsReply({ city = null, vacancyOptions = [], has
     return `Claro, para ${city} tengo disponible ${activeOptions[0]}. ¿Quieres que te comparta la información de esa vacante?`;
   }
 
+  if (activeOptions.length > 3) {
+    return `Claro, en ${city} hay varias opciones activas. Para ubicarte bien sin confundirte, dime el cargo puntual que tienes en mente.`;
+  }
+
   const lead = hasAskedAvailableVacancies ? 'Claro' : 'Te cuento';
-  return `${lead}, en ${city} tengo disponibles estas opciones: ${joinNatural(activeOptions)}. ¿Cuál te interesa para compartirte la información completa?`;
+  return `${lead}, en ${city} tengo ${joinNatural(activeOptions)}. ¿Cuál de esas te interesa?`;
 }
 
 export function buildUnavailableVacancyInfoReply(vacancy = {}) {

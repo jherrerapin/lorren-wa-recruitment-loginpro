@@ -94,6 +94,7 @@ const CLAIM_PATTERNS = [
   { key: 'auxilio_transporte', regex: /\bauxilio\s+de\s+transporte\b/ },
   { key: 'seguridad_social', regex: /\bseguridad\s+social\b|\b(?:eps|arl|afp)\b|\bcaja\s+de\s+compensaci(?:o|ó)n\b/ },
   { key: 'turnos', regex: /\bturnos?\s+(?:rotativos?|fijos?|nocturnos?|diurnos?)\b|\bhorario\s+(?:rotativo|fijo|nocturno|diurno)\b/ },
+  { key: 'horario_especifico', regex: /\b(?:horario|turno)\b\s*(?:de|es|:)\s*(?:de\s+)?(?:\d{1,2}|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|diurno|nocturno)/ },
   { key: 'horas_extra', regex: /\bhoras?\s+extra\b|\btiempo\s+extra\b/ }
 ];
 
@@ -111,6 +112,7 @@ function claimIsSupported(claim, supportedText) {
     auxilio_transporte: ['auxilio de transporte'],
     seguridad_social: ['seguridad social', 'eps', 'arl', 'afp', 'caja de compensacion'],
     turnos: ['turnos rotativos', 'turnos fijos', 'turnos nocturnos', 'turnos diurnos', 'horario'],
+    horario_especifico: ['horario', 'turno', 'lunes', 'martes', 'miercoles', 'miércoles', 'jueves', 'viernes', 'sabado', 'sábado', 'domingo'],
     horas_extra: ['horas extra', 'tiempo extra']
   };
   if (claim === 'salario_especifico') return /\b(?:salario|sueldo)\b\s*(?:de|es|:)?\s*\$?\s*\d[\d.,]*/.test(supportedText);
