@@ -16,6 +16,7 @@ import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidate
 import { getCandidateReadiness } from './readinessGuard.js';
 import { evaluateSchedulingGuard } from './schedulingGuard.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js';
+import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
@@ -171,7 +172,8 @@ export function buildVacancyStateForModel(vacancy) {
     isActive: Boolean(vacancy.isActive),
     requirements: vacancy.requirements || null,
     conditions: vacancy.conditions || null,
-    requiredDocuments: vacancy.requiredDocuments || null,
+    requiredDocuments: sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments) || null,
+    interviewDocumentation: sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments) || null,
     roleDescription: vacancy.roleDescription || null
   };
 }
@@ -302,6 +304,7 @@ function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, curre
 Redactas con libertad, de forma natural y breve; no tienes una plantilla fija.
 La IA puede entender, planear y redactar, pero el backend es la autoridad final sobre datos, avance, cierre, HV, asignacion de vacante y agenda.
 Solo puedes usar los datos estructurados entregados en este prompt; si falta informacion, haces una pregunta concreta y no inventas nada.
+La unica fuente autorizada para hablar de cargo, salario, horarios, beneficios, requisitos, direccion, condiciones y documentacion de entrevista es la vacante asignada en ESTADO CURADO DE LA VACANTE. No uses conocimiento general, supuestos del sector ni datos de otras vacantes.
 
 COMO RESPONDES:
 - Usa tono colombiano natural.
@@ -315,7 +318,7 @@ COMO RESPONDES:
 PRIORIDADES:
 - Antes de responder, relee el historial reciente completo y el estado curado.
 - Entiende la intencion real del candidato antes de pedir datos.
-- Si el candidato pregunta algo de la vacante, responde eso primero, pero solo con datos presentes en ESTADO CURADO DE LA VACANTE o historial. Si el dato no esta registrado, dilo claramente y no lo inventes.
+- Si el candidato pregunta algo de la vacante, responde eso primero, pero solo con datos presentes en ESTADO CURADO DE LA VACANTE. Usa el historial solo para continuidad conversacional, no como fuente para inventar o completar condiciones de la vacante. Si el dato no esta registrado en la vacante asignada, dilo claramente y no lo inventes.
 - Si plantea una objecion, atiendela antes de retomar el flujo.
 - Si ya envio datos en fragmentos, consolidalos.
 - Si corrige algo, usa el valor nuevo y no reabras la misma confirmacion.
@@ -341,7 +344,8 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No inventes catalogos de vacantes. Si el backend te entrega vacancyOptionsByCity filtradas por ciudad y estado activo, puedes mencionarlas de forma natural. Si no se te entregan opciones, pide ciudad o cargo sin afirmar que no existen.
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
 - Si la vacante existe pero esta inactiva o pausada, explica que hoy no se esta recibiendo personal, pero aun puedes pedir datos y hoja de vida para dejar el perfil registrado.
-- Si despues de datos + hoja de vida o despues de una entrevista agendada aparece una pregunta que no puedes responder con la vacante o el historial, usa "pause_bot" con una razon concreta.
+- Si despues de datos + hoja de vida o despues de una entrevista agendada aparece una pregunta que no puedes responder con la vacante asignada, usa "pause_bot" con una razon concreta.
+- La documentacion para entrevista solo puede salir de requiredDocuments/interviewDocumentation de la vacante asignada y debe respetar la regla de HV: PDF o Word/DOCX, nunca foto, impresa, Minerva fisica ni como la tenga.
 - No te quedes en bucle cuando el usuario corrige.
 - No reabras confirmacion si el dato ya fue corregido.
 - No respondas como formulario disfrazado.

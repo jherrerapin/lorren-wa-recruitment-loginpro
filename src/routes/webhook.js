@@ -32,7 +32,7 @@ import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
 import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
-import { buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer } from '../services/naturalReply.js';
+import { buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
 import { getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
@@ -317,6 +317,8 @@ function buildVacancyCompactSummary(vacancy) {
   ];
   if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
   else if (vacancy.requirements) parts.push(`Los requisitos principales son ${vacancy.requirements}.`);
+  const requiredDocs = sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments);
+  if (requiredDocs) parts.push(`Para la entrevista la documentación configurada es ${requiredDocs}.`);
   return parts.join(' ');
 }
 function buildNoOperationsAvailableReply(city = null) {
@@ -433,6 +435,8 @@ function buildVacancyReply(vacancy, candidate, inboundText = '') {
   if (location) lines.push(`*Ciudad / operacion:* ${location}`);
   if (getVacancyOperationZone(vacancy)) lines.push(`*Zona de operacion:* ${getVacancyOperationZone(vacancy)}`);
   if (vacancy.schedulingEnabled && getVacancyInterviewAddress(vacancy)) lines.push(`*Direccion de entrevista:* ${getVacancyInterviewAddress(vacancy)}`);
+  const requiredDocs = sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments);
+  if (requiredDocs) lines.push(`*Documentacion para entrevista:* ${requiredDocs}`);
   if (!isVacancyOpen(vacancy)) lines.push('*Estado:* En este momento no estamos recibiendo personal para esta vacante.');
   if (vacancy.roleDescription) lines.push(`*Descripcion del cargo:* ${vacancy.roleDescription}`);
   if (vacancy.requirements) lines.push(`*Requisitos:* ${vacancy.requirements}`);
