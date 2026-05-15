@@ -27,6 +27,7 @@ import {
 } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
+import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
 import { buildManualInterventionCandidateUpdate, buildManualWhatsAppOpenCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
@@ -133,11 +134,13 @@ function buildManualVacancyInfoMessage(vacancy) {
   const operationArea = buildVacancySection('Zona de operación', vacancy.operationAddress);
   const requirements = buildVacancySection('Requisitos', vacancy.requirements);
   const conditions = buildVacancySection('Condiciones', vacancy.conditions);
+  const requiredDocuments = buildVacancySection('Documentación para entrevista', sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments));
 
   if (description) lines.push(description);
   if (operationArea) lines.push(operationArea);
   if (requirements) lines.push(requirements);
   if (conditions) lines.push(conditions);
+  if (requiredDocuments) lines.push(requiredDocuments);
 
   lines.push(
     vacancy.acceptingApplications

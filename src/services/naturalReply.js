@@ -109,8 +109,9 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
     'NUNCA usés formato Markdown (negritas, cursivas, etc.).',
     'NUNCA menciones que sos un bot o IA, a menos que el candidato lo pregunte directamente.',
     'NUNCA repitas frases que ya aparecen en la conversación reciente.',
-    'NUNCA inventés cargos, sectores, salarios, horarios, beneficios, requisitos, documentos ni categorías de vacantes: usá solo la información registrada en el contexto.',
-    'Si el candidato pregunta por un dato que no aparece en la información de la vacante ni en el historial, decí de forma natural que no lo tienes registrado; no lo completes por intuición.',
+    'NUNCA inventés cargos, sectores, salarios, horarios, beneficios, requisitos, documentos ni categorías de vacantes: usá solo la información registrada en la vacante asignada dentro del contexto.',
+    'La documentación para entrevista solo puede salir del campo Documentación requerida para la entrevista de la vacante asignada; si no aparece allí, decí que no la tienes registrada.',
+    'Si el candidato pregunta por un dato que no aparece en la información de la vacante asignada, decí de forma natural que no lo tienes registrado; no lo completes por intuición ni por historial.',
     'Saludá solo cuando sea primer contacto o cuando el candidato acaba de saludar; en confirmaciones, agendamientos, correcciones y seguimiento continuá directo sin abrir con Hola.',
     'Respondé SIEMPRE en menos de 3 oraciones, de forma conversacional y variada.',
     'Si el candidato se presenta, respondé al saludo con calidez ANTES de pedir datos.',
@@ -197,7 +198,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       'Saludá de forma cálida y natural, mencioná brevemente la vacante disponible.',
       'Luego indicá que necesitás los datos del candidato para continuar.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real, no como un sistema.',
-      'No inventés otras vacantes, cargos, sectores ni requisitos: menciona solo esta vacante registrada.',
+      'No inventés otras vacantes, cargos, sectores, requisitos ni documentación: menciona solo esta vacante registrada.',
       `Vacante: ${resolved.role || resolved.title} en ${resolved.city || resolved.operation?.city?.name}.`,
       resolved.conditions ? `Condiciones principales: ${resolved.conditions.split('\n').slice(0, 3).join(', ')}` : 'No menciones condiciones si no están registradas.'
     ].join(' ');
@@ -208,7 +209,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       'El candidato te escribe. Saludá de forma cálida y preguntá de forma natural',
       'por cuál vacante y ciudad se comunica. NO los ofrezcas como catálogo.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real.',
-      'No inventés cargos ni sectores; si no hay ciudad o cargo claro, pedilo antes de afirmar opciones.',
+      'No inventés cargos, sectores ni documentación; si no hay ciudad o cargo claro, pedilo antes de afirmar opciones.',
       `Vacantes activas disponibles: ${vacancyList || 'ninguna por el momento'}`
     ].join(' ');
   }
@@ -273,7 +274,7 @@ export async function generateInterviewOffer({
       ? 'El candidato rechazó el horario anterior. Ofrecé el nuevo de forma natural y empática.'
       : 'Ofrecé el horario de entrevista de forma amable y directa.',
     candidateName ? `Nombre del candidato: ${candidateName.split(' ')[0]}.` : '',
-    docsLine ? `Indicá también: ${docsLine}` : '',
+    docsLine ? `Indicá también esta documentación configurada para entrevista, sin agregar documentos no registrados: ${docsLine}` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
     'Preguntá si el horario le queda bien. Máx 2 oraciones. Sin viñetas ni Markdown. Soná humano.',
     'No abras con saludo ni con "Hola": es una continuación del hilo, no un primer contacto.',
     `Horario a ofrecer: ${formattedDate}`
@@ -332,7 +333,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     candidateName ? `Nombre: ${candidateName.split(' ')[0]}.` : '',
     `Fecha/hora: ${formattedDate}.`,
     address ? `Dirección: ${address}.` : '',
-    docs ? `Documentación a traer: ${docs}.` : '',
+    docs ? `Documentación configurada para entrevista: ${docs}.` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
     'Avisá que le llegará un recordatorio 30 minutos antes.',
     'No abras con saludo ni con "Hola": el candidato acaba de confirmar el horario y esta respuesta debe continuar el hilo.',
     'Máx 3 oraciones. Sin viñetas ni Markdown. Soná genuino y cercano.'

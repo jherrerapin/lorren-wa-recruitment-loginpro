@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { buildPolicyReply } from './responsePolicy.js';
+import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export const CONTEXTUAL_REPLY_MODEL = 'gpt-5.4-mini-2026-03-17';
@@ -59,7 +60,15 @@ function buildContextPayload(context = {}) {
     vacancy: {
       id: context.vacancy?.id || null,
       title: context.vacancy?.title || context.vacancy?.role || null,
-      city: context.vacancy?.city || context.vacancy?.operation?.city?.name || null
+      role: context.vacancy?.role || context.vacancy?.title || null,
+      city: context.vacancy?.city || context.vacancy?.operation?.city?.name || null,
+      operationAddress: context.vacancy?.operationAddress || null,
+      interviewAddress: context.vacancy?.interviewAddress || null,
+      requirements: context.vacancy?.requirements || null,
+      conditions: context.vacancy?.conditions || null,
+      requiredDocuments: sanitizeRequiredDocumentsForBot(context.vacancy?.requiredDocuments) || null,
+      interviewDocumentation: sanitizeRequiredDocumentsForBot(context.vacancy?.requiredDocuments) || null,
+      roleDescription: context.vacancy?.roleDescription || null
     },
     activeInterviewBooking: context.activeInterviewBooking
       ? {
@@ -133,7 +142,7 @@ export async function buildContextualReply(context = {}) {
         role: 'system',
         content: [{
           type: 'input_text',
-          text: 'Eres un reclutador humano por WhatsApp. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas, no repitas texto reciente, responde preguntas primero y luego retoma el proceso. No inventes reglas: respeta la decision ya dada por el sistema. Si requiere revision humana, dilo sin improvisar soluciones. Nunca digas que la hoja de vida puede enviarse en foto, imagen, impresa, Minerva física o como la tenga. Para este canal solo es válida como archivo PDF o DOCX.'
+          text: 'Eres un reclutador humano por WhatsApp. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas, no repitas texto reciente, responde preguntas primero y luego retoma el proceso. No inventes reglas: respeta la decision ya dada por el sistema. Para cualquier dato de la vacante, usa exclusivamente la vacante asignada incluida en el JSON del usuario, incluida la documentacion de entrevista configurada; no uses conocimiento general, supuestos ni datos de otras vacantes. Si el dato no esta en esa vacante, di que no lo tienes registrado. Si requiere revision humana, dilo sin improvisar soluciones. Nunca digas que la hoja de vida puede enviarse en foto, imagen, impresa, Minerva física o como la tenga. Para este canal solo es válida como archivo PDF o DOCX.'
         }]
       },
       {

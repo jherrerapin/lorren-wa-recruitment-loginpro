@@ -112,6 +112,39 @@ test('si el modelo falla, responsePolicy actúa como fallback', async () => {
   delete process.env.OPENAI_API_KEY;
 });
 
+test('contextual reply envía solo datos de vacante asignada incluyendo documentación de entrevista saneada', async () => {
+  process.env.OPENAI_API_KEY = 'test-key';
+
+  await withAxiosMock(async (_url, payload) => {
+    const raw = payload?.input?.[1]?.content?.[0]?.text || '{}';
+    const parsed = JSON.parse(raw);
+    assert.equal(parsed.vacancy.title, 'Auxiliar logístico');
+    assert.equal(parsed.vacancy.conditions, 'Turnos rotativos registrados');
+    assert.match(parsed.vacancy.interviewDocumentation, /hoja de vida en PDF o Word\/DOCX/i);
+    assert.match(parsed.vacancy.interviewDocumentation, /cédula original/i);
+    assert.doesNotMatch(parsed.vacancy.interviewDocumentation, /foto|impresa|como la tenga|minerva/i);
+    return {
+      data: {
+        output: [{ content: [{ parsed: { reply: 'La documentación registrada es hoja de vida en PDF o Word/DOCX y cédula original.', escalateHuman: false, reason: 'ok' } }] }]
+      }
+    };
+  }, async () => {
+    const result = await buildContextualReply({
+      situation: 'continue_flow',
+      inboundText: '¿qué documentos llevo?',
+      vacancy: {
+        title: 'Auxiliar logístico',
+        conditions: 'Turnos rotativos registrados',
+        requiredDocuments: 'Traer hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original.'
+      },
+      recentMessages: []
+    });
+    assert.equal(result.usedModel, true);
+  });
+
+  delete process.env.OPENAI_API_KEY;
+});
+
 test('si hay baja confianza real, se marca escalamiento humano', () => {
   const escalate = shouldEscalateHumanReview({
     attachmentAnalysis: { classification: 'UNREADABLE', confidence: 0.1 }
