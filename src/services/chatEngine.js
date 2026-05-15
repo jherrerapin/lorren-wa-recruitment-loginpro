@@ -4,13 +4,18 @@ import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply } from './readinessGuard.js';
 
-function latestOutboundWasManualHuman(recentMessages = []) {
-  const lastOutbound = [...(recentMessages || [])]
+function latestOutboundWasManualHumanWithoutLaterInbound(recentMessages = []) {
+  const messages = recentMessages || [];
+  const lastOutboundIndex = [...messages]
+    .map((message, index) => ({ message, index }))
     .reverse()
-    .find((message) => message?.direction === 'OUTBOUND');
+    .find((entry) => entry.message?.direction === 'OUTBOUND')?.index;
 
-  if (!lastOutbound) return false;
-  return hasRecentHumanIntervention([lastOutbound]);
+  if (lastOutboundIndex === undefined) return false;
+  const lastOutbound = messages[lastOutboundIndex];
+  if (!hasRecentHumanIntervention([lastOutbound])) return false;
+
+  return !messages.slice(lastOutboundIndex + 1).some((message) => message?.direction === 'INBOUND');
 }
 
 /**
@@ -32,13 +37,14 @@ export async function runChatEngine({
 }) {
   const currentStep = candidate.currentStep || ConversationStep.MENU;
 
-  if (!candidate.botPaused && latestOutboundWasManualHuman(recentMessages)) {
+  if (!candidate.botPaused && latestOutboundWasManualHumanWithoutLaterInbound(recentMessages)) {
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {
         botPaused: true,
         botPausedAt: new Date(),
         botPauseReason: 'Intervencion humana detectada en el chat',
+        botResumeMode: 'awaiting_inbound_after_human_intervention',
         reminderScheduledFor: null,
         reminderState: 'CANCELLED'
       }

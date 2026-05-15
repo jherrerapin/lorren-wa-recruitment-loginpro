@@ -20,7 +20,7 @@ import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../servic
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
 import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitizer.js';
-import { shouldBlockAutomation } from '../services/botAutomationPolicy.js';
+import { buildInboundResumeUpdate, shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../services/botAutomationPolicy.js';
 import { runChatEngine } from '../services/chatEngine.js';
 import { think, extractEngineCandidateFields } from '../services/conversationEngine.js';
 import { storeCandidateCv } from '../services/cvStorage.js';
@@ -34,7 +34,7 @@ import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAva
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
 import { buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
-import { getCandidateReadiness, hasValidCv } from '../services/readinessGuard.js';
+import { getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -152,46 +152,16 @@ function shouldRejectByRequirements(text, parsed = {}, evidenceByField = {}) {
   return { reject: false };
 }
 function getRequiredFieldKeys(vacancy = null) {
-  const residenceConfig = getResidenceFieldConfig(vacancy);
-  return [
-    'fullName',
-    'documentType',
-    'documentNumber',
-    'age',
-    residenceConfig.field,
-    'medicalRestrictions',
-    'transportMode'
-  ];
+  return getRequiredCandidateFieldKeys(vacancy);
 }
 function getFieldLabel(field, vacancy = null) {
-  if (field === 'locality' || field === 'neighborhood') {
-    return getResidenceFieldConfig(vacancy).articleLabel;
-  }
-  return FIELD_LABELS[field] || field;
+  return getReadinessFieldLabel(field, vacancy) || FIELD_LABELS[field] || field;
 }
 function buildResidenceMissingField(candidate, vacancy = null) {
   return getCandidateResidenceValue(candidate, vacancy) ? null : getResidenceFieldConfig(vacancy).label;
 }
 function getMissingFieldsForVacancy(candidate, vacancy = null) {
-  const m = [];
-  if (!candidate.fullName) m.push('nombre completo');
-  if (!candidate.documentType) m.push('tipo de documento');
-  if (!candidate.documentNumber) m.push('numero de documento');
-  if (!candidate.age) m.push('edad');
-  const missingResidence = buildResidenceMissingField(candidate, vacancy);
-  if (missingResidence) m.push(missingResidence);
-  if (!candidate.medicalRestrictions) m.push('restricciones medicas');
-  if (!candidate.transportMode) m.push('medio de transporte');
-  if (vacancy?.experienceRequired === 'YES') {
-    if (!candidate.experienceInfo) m.push('experiencia (si o no)');
-    if (!candidate.experienceTime) {
-      const timeLabel = vacancy?.experienceTimeText
-        ? `tiempo de experiencia (${vacancy.experienceTimeText})`
-        : 'tiempo de experiencia';
-      m.push(timeLabel);
-    }
-  }
-  return m;
+  return getMissingFieldLabels(candidate, vacancy);
 }
 function formatFieldListForVacancy(fields = [], vacancy = null) {
   const labels = fields
@@ -203,15 +173,8 @@ function formatFieldListForVacancy(fields = [], vacancy = null) {
   return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
 }
 function buildDataRequestPrompt(vacancy = null) {
-  const residenceConfig = getResidenceFieldConfig(vacancy);
-  const base = `Perfecto. Enviame por favor estos datos para continuar: nombre completo, tipo de documento, numero de documento, edad, ${residenceConfig.label}, si tienes restricciones medicas y que medio de transporte tienes.`;
-  if (vacancy?.experienceRequired === 'YES') {
-    const timeLabel = vacancy?.experienceTimeText
-      ? `tiempo de experiencia (${vacancy.experienceTimeText})`
-      : 'tiempo de experiencia';
-    return `${base} Tambien confirmame si tienes experiencia (si o no) y tu ${timeLabel}. Puedes enviarlos en un solo mensaje, como te sea mas facil.`;
-  }
-  return `${base} Puedes enviarlos en un solo mensaje, como te sea mas facil.`;
+  const missing = getMissingFieldLabels({}, vacancy);
+  return `Perfecto, ya tengo clara la vacante. Para seguir, enviame estos datos en un solo mensaje si puedes: ${missing.join(', ')}.`;
 }
 function getMissingFields(candidate, vacancy = null) {
   return getMissingFieldsForVacancy(candidate, vacancy);
@@ -1267,6 +1230,26 @@ async function attachDebugTrace(prisma, messageId, debugTrace) {
   const current = await prisma.message.findUnique({ where: { id: messageId }, select: { rawPayload: true } });
   await prisma.message.update({ where: { id: messageId }, data: { rawPayload: { ...(current?.rawPayload || {}), debugTrace } } });
 }
+
+async function prepareCandidateForInboundAutomation(prisma, candidate = {}) {
+  if (!candidate?.botPaused) return candidate;
+  if (shouldBlockAutomation(candidate, { direction: 'INBOUND' })) return candidate;
+  if (!shouldResumeAutomationOnInbound(candidate)) return candidate;
+
+  const resumed = await prisma.candidate.update({
+    where: { id: candidate.id },
+    data: buildInboundResumeUpdate(new Date())
+  });
+
+  console.info('[BOT_RESUMED_BY_INBOUND]', JSON.stringify({
+    candidateId: candidate.id,
+    previousReason: candidate.botPauseReason || null,
+    previousResumeMode: candidate.botResumeMode || null
+  }));
+
+  return resumed;
+}
+
 async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
   const payload = { body, source: 'bot_flow', ...(rawPayload || {}) };
   await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload: payload } });
@@ -2304,8 +2287,9 @@ export function webhookRouter(prisma) {
 
           await cancelReminderOnInbound(prisma, candidate.id);
 
-          const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-          if (shouldBlockAutomation(freshCandidate)) continue;
+          let freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+          freshCandidate = await prepareCandidateForInboundAutomation(prisma, freshCandidate);
+          if (shouldBlockAutomation(freshCandidate, { direction: 'INBOUND' })) continue;
 
           const scheduling = await scheduleMultilineWindow(prisma, candidate.id, {
             currentStep: freshCandidate.currentStep,
@@ -2322,8 +2306,9 @@ export function webhookRouter(prisma) {
 
           const consolidatedText = consolidateTextMessages(pendingBatch);
           const anchorMessage = pendingBatch[pendingBatch.length - 1];
-          const candidateForBatch = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-          if (shouldBlockAutomation(candidateForBatch)) continue;
+          let candidateForBatch = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+          candidateForBatch = await prepareCandidateForInboundAutomation(prisma, candidateForBatch);
+          if (shouldBlockAutomation(candidateForBatch, { direction: 'INBOUND' })) continue;
 
           const debugTrace = createDebugTrace({ phone: from, currentStepBefore: candidateForBatch.currentStep });
 
@@ -2358,8 +2343,9 @@ export function webhookRouter(prisma) {
 
         await cancelReminderOnInbound(prisma, candidate.id);
 
-        const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-        const automationBlocked = shouldBlockAutomation(freshCandidate);
+        let freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
+        freshCandidate = await prepareCandidateForInboundAutomation(prisma, freshCandidate);
+        const automationBlocked = shouldBlockAutomation(freshCandidate, { direction: 'INBOUND' });
         const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
         debugTrace.cv_detected = message.type === 'document';
         const recentOutbound = await getRecentOutboundMessages(prisma, candidate.id);
