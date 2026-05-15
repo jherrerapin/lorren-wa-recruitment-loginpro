@@ -867,13 +867,17 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
     pausedBy: rawPayload?.sentBy || 'dashboard',
     reason: rawPayload?.pauseReason || 'Conversacion tomada manualmente desde dashboard'
   });
-  const safety = sanitizeOutboundReply({
-    reply: body || buildSafeFallbackReply(),
-    vacancy: candidate?.vacancy || null,
-    candidate,
-    source: rawPayload?.source || 'admin_outbound'
-  });
-  const finalBody = safety.reply || buildSafeFallbackReply();
+  const preserveExactBody = rawPayload?.preserveExactBody === true;
+  const originalBody = String(body || '');
+  const safety = preserveExactBody
+    ? { reply: originalBody, blocked: false, blockedClaims: [], reason: null }
+    : sanitizeOutboundReply({
+      reply: originalBody || buildSafeFallbackReply(),
+      vacancy: candidate?.vacancy || null,
+      candidate,
+      source: rawPayload?.source || 'admin_outbound'
+    });
+  const finalBody = preserveExactBody ? originalBody : (safety.reply || buildSafeFallbackReply());
   await sendTextMessage(candidate.phone, finalBody);
   await prisma.candidate.update({ where: { id: candidate.id }, data: update });
   await prisma.message.create({
@@ -2533,7 +2537,7 @@ export function adminRouter(prisma) {
   router.post('/candidates/:id/outbound', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const action = normalizeString(req.body.action);
-    const customBody = normalizeString(req.body.customBody);
+    const customBody = typeof req.body.customBody === 'string' ? req.body.customBody : '';
 
     const candidate = await prisma.candidate.findUnique({
       where: { id },
@@ -2561,7 +2565,7 @@ export function adminRouter(prisma) {
 
     let body;
     if (action === 'free_text') {
-      if (!customBody) return res.redirect(`/admin/candidates/${id}?outboundError=El mensaje no puede estar vacío.`);
+      if (!customBody.trim()) return res.redirect(`/admin/candidates/${id}?outboundError=El mensaje no puede estar vacío.`);
       body = customBody;
     } else if (action === 'request_missing_data') {
       body = buildMissingDataRequestMessage(candidate);
@@ -2576,7 +2580,8 @@ export function adminRouter(prisma) {
     try {
       await sendAdminOutboundMessage(prisma, candidate, body, {
         source: 'admin_outbound',
-        action: action || 'free_text'
+        action: action || 'free_text',
+        preserveExactBody: action === 'free_text'
       });
       res.redirect(`/admin/candidates/${id}?outboundSuccess=` + encodeURIComponent('Mensaje enviado correctamente.'));
     } catch (err) {
