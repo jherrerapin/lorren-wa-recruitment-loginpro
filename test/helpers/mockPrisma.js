@@ -158,6 +158,13 @@ export function createMockPrisma(initialState = {}) {
   };
 
   const messageApi = {
+    async findFirst({ where, orderBy, select } = {}) {
+      let rows = state.messages.filter((message) => matchesWhere(message, where));
+      rows = sortRows(rows, orderBy);
+      const first = rows[0] || null;
+      if (!first) return null;
+      return applySelect(first, select);
+    },
     async findMany({ where, orderBy, take, select } = {}) {
       let rows = state.messages.filter((message) => matchesWhere(message, where));
       rows = sortRows(rows, orderBy);
