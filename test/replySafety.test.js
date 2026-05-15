@@ -30,6 +30,16 @@ test('bloquea pagos quincenales y contrato directo no soportados', () => {
   assert.ok(result.blockedClaims.includes('pagos_quincenales'));
 });
 
+
+test('permite documentos de entrevista sensibles si están configurados en la vacante', () => {
+  const vacancy = { ...baseVacancy, requiredDocuments: 'Hoja de vida Minerva 1003 o impresa y cédula original' };
+  const result = sanitizeOutboundReply({
+    reply: 'Para la entrevista recuerda traer Hoja de vida Minerva 1003 o impresa y cédula original.',
+    vacancy
+  });
+  assert.equal(result.blocked, false);
+});
+
 test('bloquea dirección de entrevista no registrada', () => {
   const result = sanitizeOutboundReply({ reply: 'Preséntate en Calle 100 # 20-30 mañana.', vacancy: baseVacancy });
   assert.equal(result.blocked, true);
