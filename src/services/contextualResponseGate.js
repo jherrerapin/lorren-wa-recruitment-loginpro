@@ -27,6 +27,7 @@ const ACTIVE_BOOKING_STATUSES = new Set(['SCHEDULED', 'CONFIRMED']);
 const LOGISTIC_INTENTS = new Set([
   'ASK_INTERVIEW_ADDRESS',
   'ASK_INTERVIEW_TIME',
+  'ASK_INTERVIEW_AVAILABILITY',
   'ASK_INTERVIEW_CONTACT_PERSON',
   'ASK_REQUIRED_DOCUMENTS'
 ]);
@@ -151,6 +152,10 @@ function buildLogisticsReply({ semanticIntent, vacancy = null, activeInterviewBo
     return `Tu entrevista está registrada para ${formatInterviewDate(new Date(activeInterviewBooking.scheduledAt))}.`;
   }
 
+  if (semanticIntent === 'ASK_INTERVIEW_AVAILABILITY') {
+    return null;
+  }
+
   if (semanticIntent === 'ASK_REQUIRED_DOCUMENTS') {
     const documents = sanitizeRequiredDocumentsForBot(vacancy?.requiredDocuments || '');
     if (!documents) return null;
@@ -169,6 +174,9 @@ export function buildSafeInformationGapReply(semanticIntent = 'UNCLEAR') {
   }
   if (semanticIntent === 'ASK_REQUIRED_DOCUMENTS') {
     return 'Gracias por preguntar. Por ahora no tengo documentos adicionales confirmados en la información de la vacante.';
+  }
+  if (semanticIntent === 'ASK_INTERVIEW_AVAILABILITY') {
+    return 'Gracias por preguntar. Tengo registrada tu entrevista, pero no tengo confirmados horarios adicionales en la información disponible.';
   }
   return 'Gracias por escribir. Ya tengo el contexto de tu proceso registrado y no veo un dato adicional confirmado para responderte con precisión.';
 }
@@ -192,8 +200,11 @@ export function inferContextualSemanticIntent({
 
   const normalized = normalize(text);
   if (isQuestion) {
-    const hasInterviewTopic = /\b(entrevista|cita|presentar|llegar|asistir|ir)\b/.test(normalized);
+    const hasInterviewTopic = /\b(entrevist\w*|cita|presentar|llegar|asistir|ir)\b/.test(normalized);
     if (/\b(direccion|ubicacion|donde|queda|lugar|sede)\b/.test(normalized)) return 'ASK_INTERVIEW_ADDRESS';
+    if (/\b(?:solo|unicamente)\b.*\b(?:10|diez|hora|horario|entrevista|cita)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_AVAILABILITY';
+    if (/\b(?:mas|otros?|disponibles?|cupos?|espacios?|horarios?)\b.*\b(?:despues|luego|tarde|adelante|10|diez)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_AVAILABILITY';
+    if (/\b(?:despues|luego|mas tarde)\b.*\b(?:10|diez|hora|horario|entrevista|cita)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_AVAILABILITY';
     if (/\b(hora|horario|cuando|fecha|dia)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_TIME';
     if (/\b(quien|persona|contacto|preguntar|recibe|recepcion)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_CONTACT_PERSON';
     if (/\b(document|llevar|requisit)\b/.test(normalized)) return 'ASK_REQUIRED_DOCUMENTS';
@@ -245,6 +256,16 @@ export function evaluateContextualResponseGate({
   }
 
   if (activeBooking && candidate.currentStep === 'SCHEDULED') {
+    if (semanticIntent === 'ASK_INTERVIEW_AVAILABILITY') {
+      return decision({
+        shouldReply: false,
+        allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
+        reason: 'Candidate asked about interview slot availability beyond the confirmed appointment; this requires human validation before replying.',
+        responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
+        requiresHumanReview: true
+      });
+    }
+
     if (LOGISTIC_INTENTS.has(semanticIntent)) {
       const reply = buildLogisticsReply({ semanticIntent, vacancy, activeInterviewBooking: activeBooking });
       if (reply) {

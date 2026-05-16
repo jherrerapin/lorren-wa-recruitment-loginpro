@@ -2350,8 +2350,12 @@ export function webhookRouter(prisma) {
         const from = message.from;
         if (!from) continue;
 
-        if (isSupervisorPhone(from) && message.type === 'text') {
-          await handleSupervisorInbound(prisma, message);
+        if (isSupervisorPhone(from)) {
+          if (message.type === 'text') {
+            await handleSupervisorInbound(prisma, message);
+          } else {
+            console.info('[ADMIN_SUPERVISOR_NON_TEXT_IGNORED]', JSON.stringify({ type: message.type || 'unknown', from }));
+          }
           continue;
         }
 

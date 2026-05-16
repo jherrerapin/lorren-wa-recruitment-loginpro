@@ -21,6 +21,61 @@ export function isSupervisorPhone(phone = '') {
   return String(phone || '').replace(/\D/g, '') === getSupervisorPhone();
 }
 
+
+async function getOrCreateSupervisorCandidate(prisma) {
+  const supervisorPhone = getSupervisorPhone();
+  return prisma.candidate.upsert({
+    where: { phone: supervisorPhone },
+    update: {},
+    create: { phone: supervisorPhone, fullName: 'Administrador del sistema' }
+  });
+}
+
+async function saveSupervisorThreadOutbound(prisma, body, rawPayload = {}) {
+  const supervisor = await getOrCreateSupervisorCandidate(prisma);
+  return saveSupervisorOutbound(prisma, supervisor.id, body, rawPayload);
+}
+
+function normalizeAckText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isBareSupervisorAcknowledgement(value = '') {
+  const n = normalizeAckText(value);
+  if (!n) return true;
+  return /^(ok|okay|listo|perfecto|vale|dale|bueno|gracias|muchas gracias|super|excelente|entendido|de acuerdo|correcto|si|sí|sii|esta bien|muy bien)$/.test(n);
+}
+
+function isManualCandidateOutbound(message = {}) {
+  const payload = message.rawPayload || {};
+  const source = String(payload.source || payload.sourceCategory || '').toLowerCase();
+  if (payload.target === 'admin_supervisor') return false;
+  return payload.actor === 'RECRUITER'
+    || source === 'manual_authorized'
+    || source === 'admin_outbound'
+    || source.startsWith('admin_manual_')
+    || source.startsWith('admin_');
+}
+
+async function hasManualCandidateOutboundAfter(prisma, candidateId, createdAt) {
+  const message = await prisma.message.findFirst({
+    where: {
+      candidateId,
+      direction: MessageDirection.OUTBOUND,
+      messageType: MessageType.TEXT,
+      createdAt: { gte: createdAt || new Date(0) }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+  return Boolean(message && isManualCandidateOutbound(message));
+}
+
 function formatCandidateLabel(candidate = {}) {
   return candidate?.fullName ? `${candidate.phone} (${candidate.fullName})` : candidate?.phone;
 }
@@ -96,8 +151,10 @@ export async function notifySupervisorAttachment(prisma, candidate, { mediaType,
   const position = sequence ? ` (${sequence}${total ? ` de ${total}` : ''})` : '';
   const body = `${mediaType === 'document' ? 'Documento' : 'Adjunto'}${position} recibido de ${label}${caption ? `: ${caption}` : ''}`;
   await sendTextMessage(supervisorPhone, body);
-  await saveSupervisorOutbound(prisma, candidate.id, body, {
+  await saveSupervisorThreadOutbound(prisma, body, {
     source: 'admin_attachment_forward_notice',
+    candidateId: candidate.id,
+    candidatePhone: candidate.phone,
     mediaType,
     mediaId: media?.id || null,
     fileName: media?.filename || null,
@@ -288,11 +345,7 @@ async function addSupervisorKnowledge(prisma, candidate, content, tags = 'admin_
 export async function handleSupervisorInbound(prisma, message = {}) {
   const supervisorPhone = getSupervisorPhone();
   const body = String(message?.text?.body || '').trim();
-  const supervisor = await prisma.candidate.upsert({
-    where: { phone: supervisorPhone },
-    update: {},
-    create: { phone: supervisorPhone, fullName: 'Administrador del sistema' }
-  });
+  const supervisor = await getOrCreateSupervisorCandidate(prisma);
 
   await prisma.message.createMany({
     data: [{
@@ -314,6 +367,19 @@ export async function handleSupervisorInbound(prisma, message = {}) {
 
   const { request, candidate } = pending;
   const payload = request.rawPayload || {};
+
+  if (isBareSupervisorAcknowledgement(body)) {
+    const resolvedByManualOutbound = await hasManualCandidateOutboundAfter(prisma, candidate.id, request.createdAt);
+    if (resolvedByManualOutbound) {
+      await prisma.message.update({
+        where: { id: request.id },
+        data: { rawPayload: { ...payload, resolved: true, resolvedAt: new Date().toISOString(), resolvedBy: 'manual_candidate_outbound_ack' } }
+      });
+      return { handled: true, action: 'ack_resolved_after_manual_outbound', candidateId: candidate.id };
+    }
+    return { handled: true, action: 'ack_ignored_pending_request', candidateId: candidate.id };
+  }
+
   const candidateQuestion = payload.inboundText || '';
   let candidateReplyResult = null;
   let candidateReply = '';
