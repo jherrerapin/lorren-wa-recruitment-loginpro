@@ -30,8 +30,14 @@
     button { border:0; border-radius:8px; padding:9px 14px; font-weight:800; cursor:pointer; }
     .btn-primary { background:#0d7a6b; color:white; }
     .btn-secondary { background:#e2e8f0; color:#334155; }
+    .btn-danger { background:#dc2626; color:white; }
     .entry { border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-top:12px; background:#f8fafc; }
     .entry-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start; }
+    .entry-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .entry-actions form { margin:0; }
+    .entry-edit { margin-top:12px; padding-top:12px; border-top:1px solid #e2e8f0; }
+    .entry-edit .grid { grid-template-columns:160px 1fr; }
+    .entry-edit textarea { min-height:90px; }
     .pill { display:inline-block; padding:3px 8px; border-radius:999px; background:#e0f2fe; color:#075985; font-size:12px; font-weight:800; }
     .pill-off { background:#fee2e2; color:#991b1b; }
     .meta { color:#64748b; font-size:12px; margin-top:4px; }
@@ -108,12 +114,48 @@
               <% if (entry.tags) { %><span class="pill"><%= entry.tags %></span><% } %>
               <div class="meta">Actualizado: <%= formatDateTimeCO(entry.updatedAt) %> · Por: <%= entry.updatedBy || entry.createdBy || 'dev' %></div>
             </div>
-            <form method="post" action="/admin/bot-knowledge/<%= entry.id %>/toggle">
-              <input type="hidden" name="isActive" value="<%= entry.isActive ? 'false' : 'true' %>" />
-              <button type="submit" class="btn-secondary"><%= entry.isActive ? 'Pausar' : 'Activar' %></button>
-            </form>
+            <div class="entry-actions">
+              <form method="post" action="/admin/bot-knowledge/<%= entry.id %>/toggle">
+                <input type="hidden" name="isActive" value="<%= entry.isActive ? 'false' : 'true' %>" />
+                <button type="submit" class="btn-secondary"><%= entry.isActive ? 'Pausar' : 'Activar' %></button>
+              </form>
+              <form method="post" action="/admin/bot-knowledge/<%= entry.id %>/delete" onsubmit="return confirm('¿Seguro que deseas eliminar este aprendizaje? Esta acción no se puede deshacer.');">
+                <button type="submit" class="btn-danger">Eliminar</button>
+              </form>
+            </div>
           </div>
           <div class="content"><%= entry.content %></div>
+          <form class="entry-edit" method="post" action="/admin/bot-knowledge/<%= entry.id %>/update">
+            <input type="hidden" name="candidateId" value="<%= entry.candidateId || '' %>" />
+            <div class="grid">
+              <div>
+                <label for="scope-<%= entry.id %>">Alcance</label>
+                <select id="scope-<%= entry.id %>" name="scope">
+                  <option value="GLOBAL" <%= entry.scope === 'GLOBAL' ? 'selected' : '' %>>Global</option>
+                  <option value="VACANCY" <%= entry.scope === 'VACANCY' ? 'selected' : '' %>>Vacante</option>
+                  <option value="CANDIDATE" <%= entry.scope === 'CANDIDATE' ? 'selected' : '' %>>Candidato</option>
+                </select>
+              </div>
+              <div>
+                <label for="vacancyId-<%= entry.id %>">Vacante (solo si el alcance es vacante)</label>
+                <select id="vacancyId-<%= entry.id %>" name="vacancyId">
+                  <option value="">Sin vacante específica</option>
+                  <% for (const vacancy of vacancies) { %>
+                    <option value="<%= vacancy.id %>" <%= entry.vacancyId === vacancy.id ? 'selected' : '' %>><%= vacancy.city %> — <%= vacancy.title || vacancy.role %> <%= vacancy.isActive && vacancy.acceptingApplications ? '' : '(pausada/inactiva)' %></option>
+                  <% } %>
+                </select>
+              </div>
+              <div>
+                <label for="tags-<%= entry.id %>">Etiquetas</label>
+                <input id="tags-<%= entry.id %>" name="tags" value="<%= entry.tags || '' %>" placeholder="tono, objeciones, agenda" />
+              </div>
+              <div>
+                <label for="content-<%= entry.id %>">Información para alimentar a Lórren</label>
+                <textarea id="content-<%= entry.id %>" name="content" required><%= entry.content || '' %></textarea>
+              </div>
+            </div>
+            <div class="actions"><button type="submit" class="btn-primary">Guardar cambios</button></div>
+          </form>
         </article>
       <% } %>
     </section>
