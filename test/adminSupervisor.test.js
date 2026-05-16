@@ -19,6 +19,22 @@ function withWhatsappMock(fn) {
         return { data: whatsappMock.handleSend(url, payload, config) };
       }
       if (String(url).includes('api.openai.com/v1/responses')) {
+        const schemaName = payload?.text?.format?.name;
+        if (schemaName === 'supervisor_inbound_decision') {
+          const userPayload = JSON.parse(payload.input?.[1]?.content?.[0]?.text || '{}');
+          const alreadyAnswered = Boolean(userPayload.conversationState?.manualOutboundAfterRequest);
+          return {
+            data: {
+              output: [{
+                content: [{
+                  parsed: alreadyAnswered
+                    ? { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'admin_validates_prior_manual_answer', confidence: 0.94 }
+                    : { action: 'ANSWER_CANDIDATE', candidateInstruction: userPayload.adminMessage || '', reason: 'admin_provides_candidate_answer', confidence: 0.91 }
+                }]
+              }]
+            }
+          };
+        }
         return {
           data: {
             output: [{
@@ -108,7 +124,7 @@ test('escala duda al administrador, aplica respuesta al candidato y crea aprendi
   assert.match(prisma.state.botKnowledge[0].content, /Respuesta sugerida por Lorren/);
 }));
 
-test('acuse corto del administrador después de intervención manual no se reenvía al candidato', withWhatsappMock(async (whatsappMock) => {
+test('acuse interno contextual del administrador después de intervención manual no se reenvía al candidato', withWhatsappMock(async (whatsappMock) => {
   const requestCreatedAt = new Date('2026-05-16T14:00:00.000Z');
   const prisma = createMockPrisma({
     candidates: [{
@@ -157,11 +173,12 @@ test('acuse corto del administrador después de intervención manual no se reenv
     text: { body: 'perfecto' }
   });
 
-  assert.equal(result.action, 'ack_resolved_after_manual_outbound');
+  assert.equal(result.action, 'internal_ack_resolved_after_manual_outbound');
   assert.equal(whatsappMock.sentMessages.length, 0);
   const request = await prisma.message.findUnique({ where: { id: 'manual-request-1' } });
   assert.equal(request.rawPayload.resolved, true);
-  assert.equal(request.rawPayload.resolvedBy, 'manual_candidate_outbound_ack');
+  assert.equal(request.rawPayload.resolvedBy, 'manual_candidate_outbound_confirmed_by_supervisor_context');
+  assert.equal(request.rawPayload.supervisorDecision.action, 'INTERNAL_ACK');
   assert.equal(prisma.state.messages.some((message) => message.rawPayload?.source === 'admin_supervisor_answer'), false);
 }));
 

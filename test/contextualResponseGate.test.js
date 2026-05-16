@@ -201,12 +201,12 @@ test('fuentes manuales autorizadas se distinguen de salidas automáticas', () =>
   assert.equal(isManualOutboundSource('bot_flow'), false);
 });
 
-test('pregunta por horarios después de las 10 se escala al administrador sin respuesta automática', () => {
+test('pregunta contextual no respondible con la cita activa se escala al administrador sin respuesta automática', () => {
   const semanticIntent = inferContextualSemanticIntent({
     text: '¿Solo hay entrevistas a las 10 o hay más después de las 10?',
     isQuestion: true
   });
-  assert.equal(semanticIntent, 'ASK_INTERVIEW_AVAILABILITY');
+  assert.equal(semanticIntent, 'ASK_APPLICATION_STATUS');
 
   const result = evaluateContextualResponseGate({
     candidate: completeCandidate({ currentStep: 'SCHEDULED' }),
@@ -219,5 +219,5 @@ test('pregunta por horarios después de las 10 se escala al administrador sin re
   assert.equal(result.shouldReply, false);
   assert.equal(result.requiresHumanReview, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
-  assert.match(result.reason, /availability|human validation/i);
+  assert.match(result.reason, /not answerable|human validation/i);
 });
