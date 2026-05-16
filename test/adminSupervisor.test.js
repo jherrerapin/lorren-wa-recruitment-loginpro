@@ -101,8 +101,12 @@ test('notifica revisión manual con motivo técnico en inglés como alerta inter
 
   assert.equal(whatsappMock.sentMessages.length, 1);
   assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
-  assert.match(whatsappMock.sentMessages[0].body, /Lórren requiere apoyo del administrador/);
-  assert.match(whatsappMock.sentMessages[0].body, /Motivo: El candidato tiene una entrevista activa y preguntó por una persona o punto de contacto al llegar; falta validar ese dato\./);
+  assert.match(whatsappMock.sentMessages[0].body, /Apoyo Lórren/);
+  assert.match(whatsappMock.sentMessages[0].body, /Número: 573001234567/);
+  assert.match(whatsappMock.sentMessages[0].body, /Nombre: Candidata Localizada/);
+  assert.match(whatsappMock.sentMessages[0].body, /Entrevista agendada: Sí/);
+  assert.match(whatsappMock.sentMessages[0].body, /Candidato: ¿Con quién pregunto al llegar\?/);
+  assert.doesNotMatch(whatsappMock.sentMessages[0].body, /Motivo:/);
   assert.doesNotMatch(whatsappMock.sentMessages[0].body, /Candidate has an active appointment/);
 
   const manualRequest = prisma.state.messages.find((message) => message.rawPayload?.source === 'admin_manual_review_request');
@@ -113,6 +117,44 @@ test('notifica revisión manual con motivo técnico en inglés como alerta inter
   assert.equal(manualRequest.rawPayload.neverSendToCandidate, true);
   assert.equal(manualRequest.rawPayload.language, 'es-CO');
   assert.equal(manualRequest.rawPayload.target, 'admin_supervisor');
+}));
+
+
+test('notificación manual indica entrevista agendada desde reserva activa sin ampliar el motivo', withWhatsappMock(async (whatsappMock) => {
+  const prisma = createMockPrisma({
+    candidates: [{
+      id: 'cand-booked',
+      phone: '573001112244',
+      fullName: 'Candidato Agendado',
+      currentStep: 'ASK_CV'
+    }, {
+      id: 'admin-candidate',
+      phone: '3052982551',
+      fullName: 'Administrador del sistema'
+    }],
+    interviewBookings: [{
+      id: 'booking-active',
+      candidateId: 'cand-booked',
+      vacancyId: 'vac-1',
+      slotId: 'slot-1',
+      scheduledAt: new Date('2026-05-20T15:00:00.000Z'),
+      status: 'CONFIRMED'
+    }]
+  });
+  const candidate = await prisma.candidate.findUnique({ where: { id: 'cand-booked' } });
+
+  await notifySupervisorManualReview(prisma, candidate, {
+    reason: 'Consulta documental pendiente de validacion manual',
+    inboundText: '¿Debo llevar copia de la cédula?'
+  });
+
+  assert.match(whatsappMock.sentMessages[0].body, /Número: 573001112244/);
+  assert.match(whatsappMock.sentMessages[0].body, /Nombre: Candidato Agendado/);
+  assert.match(whatsappMock.sentMessages[0].body, /Entrevista agendada: Sí/);
+  assert.match(whatsappMock.sentMessages[0].body, /Candidato: ¿Debo llevar copia de la cédula\?/);
+  assert.doesNotMatch(whatsappMock.sentMessages[0].body, /Consulta documental pendiente/);
+  const manualRequest = prisma.state.messages.find((message) => message.rawPayload?.source === 'admin_manual_review_request');
+  assert.equal(manualRequest.rawPayload.hasScheduledInterview, true);
 }));
 
 test('escala duda al administrador, aplica respuesta al candidato y crea aprendizaje', withWhatsappMock(async (whatsappMock) => {
@@ -244,7 +286,11 @@ test('notificación de adjunto queda en hilo del administrador y no en chat del 
   });
 
   assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
-  assert.match(whatsappMock.sentMessages[0].body, /Documento recibido de 573204657596 \(Alexander Guzman\)/);
+  assert.match(whatsappMock.sentMessages[0].body, /Documento/);
+  assert.match(whatsappMock.sentMessages[0].body, /Número: 573204657596/);
+  assert.match(whatsappMock.sentMessages[0].body, /Nombre: Alexander Guzman/);
+  assert.match(whatsappMock.sentMessages[0].body, /Entrevista agendada: No/);
+  assert.match(whatsappMock.sentMessages[0].body, /Archivo: hv\.pdf/);
   assert.equal(whatsappMock.sentMessages.some((message) => message.to === '573204657596'), false);
   const notice = prisma.state.messages.find((message) => message.rawPayload?.source === 'admin_attachment_forward_notice');
   assert.equal(notice.candidateId, 'admin-candidate');
@@ -272,7 +318,11 @@ test('notificación de audio recibido se reenvía al administrador y no al candi
   });
 
   assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
-  assert.match(whatsappMock.sentMessages[0].body, /Audio recibido de 573209998877 \(María Audio\): audio\/ogg/);
+  assert.match(whatsappMock.sentMessages[0].body, /Audio/);
+  assert.match(whatsappMock.sentMessages[0].body, /Número: 573209998877/);
+  assert.match(whatsappMock.sentMessages[0].body, /Nombre: María Audio/);
+  assert.match(whatsappMock.sentMessages[0].body, /Entrevista agendada: No/);
+  assert.match(whatsappMock.sentMessages[0].body, /Archivo: audio\/ogg/);
   assert.equal(whatsappMock.sentMessages[1].to, '3052982551');
   assert.equal(whatsappMock.sentMessages[1].payload.type, 'audio');
   assert.equal(whatsappMock.sentMessages[1].payload.audio.id, 'audio-1');
