@@ -51,3 +51,11 @@ test('bloquea horario especifico no registrado', () => {
   assert.equal(result.blocked, true);
   assert.ok(result.blockedClaims.includes('horario_especifico'));
 });
+
+
+test('no reescribe mensaje manual autorizado con restricciones de bot automático', () => {
+  const manual = 'La vacante tiene prestaciones de ley y pagos quincenales.';
+  const result = sanitizeOutboundReply({ reply: manual, vacancy: baseVacancy, source: 'admin_outbound' });
+  assert.equal(result.blocked, false);
+  assert.equal(result.reply, manual);
+});

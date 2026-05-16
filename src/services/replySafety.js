@@ -140,10 +140,21 @@ function extractAddressClaims(reply = '') {
   return matches.map((match) => match.trim());
 }
 
+export function isManualAuthorizedSource(source = '') {
+  const normalized = String(source || '').trim();
+  if (!normalized) return false;
+  if (normalized === 'MANUAL_AUTHORIZED' || normalized === 'manual_authorized') return true;
+  return normalized === 'admin_outbound' || normalized.toLowerCase().startsWith('admin_manual_');
+}
+
 export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null, currentStep = null, source = 'unknown' } = {}) {
   const originalReply = String(reply || '').trim();
   if (!originalReply) {
     return { reply: originalReply, blocked: false, blockedClaims: [], reason: null };
+  }
+
+  if (isManualAuthorizedSource(source)) {
+    return { reply: originalReply, blocked: false, blockedClaims: [], reason: null, source };
   }
 
   if (containsUnsafeCvInstruction(originalReply, vacancy)) {
