@@ -221,3 +221,24 @@ test('pregunta contextual no respondible con la cita activa se escala al adminis
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
   assert.match(result.reason, /not answerable|human validation/i);
 });
+
+test('reporte de inconveniente para llegar a cita activa se escala sin respuesta automática', () => {
+  const semanticIntent = inferContextualSemanticIntent({
+    text: 'Ola buenos días 👋 Que pena tuve un inconveniente, no conozco muy bien la ciudad, me tocó transbordar y me perdí',
+    isQuestion: false
+  });
+  assert.equal(semanticIntent, 'REPORT_ARRIVAL_PROBLEM');
+
+  const result = evaluateContextualResponseGate({
+    candidate: completeCandidate({ currentStep: 'SCHEDULED' }),
+    vacancy: vacancy({ schedulingEnabled: true }),
+    activeInterviewBooking: { id: 'booking-1', status: 'SCHEDULED', scheduledAt: new Date('2026-05-16T15:00:00.000Z') },
+    recentMessages: [],
+    semanticIntent
+  });
+
+  assert.equal(result.shouldReply, false);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
+  assert.match(result.reason, /arrival issue|human validation/i);
+});

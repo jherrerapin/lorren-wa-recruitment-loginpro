@@ -890,6 +890,42 @@ export const conversationCases = [
     }
   },
   {
+    id: 'scheduled-arrival-problem-pauses-for-manual-review-without-reply',
+    steps: ['Ola buenos días 👋 Que pena la verdad tuve un inconveniente es que la verdad no conozco muy bien la ciudad y PS me tocó transbordar y me perdí'],
+    candidate: candidateDefaults({
+      currentStep: 'SCHEDULED',
+      vacancyId: 'vac-sched',
+      fullName: 'Candidato Citado',
+      documentType: 'CC',
+      documentNumber: '1000000000',
+      age: 28,
+      locality: 'Bogota',
+      medicalRestrictions: 'Sin restricciones medicas',
+      transportMode: 'Bus',
+      cvData: Buffer.from('pdf'),
+      cvOriginalName: 'hv.pdf',
+      cvMimeType: 'application/pdf',
+      lastInboundAt: new Date()
+    }),
+    interviewBookings: [{
+      id: 'booking-arrival-issue',
+      candidateId: 'candidate-1',
+      vacancyId: 'vac-sched',
+      slotId: 'slot-1',
+      scheduledAt: new Date('2026-05-16T15:00:00.000Z'),
+      status: 'SCHEDULED',
+      reminderWindowClosed: false
+    }],
+    expect: {
+      candidate: {
+        currentStep: 'SCHEDULED',
+        botPaused: true,
+        botPauseReason: 'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.'
+      },
+      exactOutboundCount: 0
+    }
+  },
+  {
     id: 'scheduled-question-uses-context-instead-of-repeating-flow',
     steps: ['cual es la direccion exacta de la entrevista?'],
     candidate: candidateDefaults({

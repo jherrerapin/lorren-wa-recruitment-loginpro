@@ -330,12 +330,12 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
     }));
 
     const candidate = await prisma.candidate.findUnique({ where: { id: booking.candidateId } });
-    if (!candidate || candidate.botPaused || !hasActiveInterviewBooking(booking)) {
+    if (!candidate || !hasActiveInterviewBooking(booking)) {
       console.log('[REMINDER_TRACE]', JSON.stringify({
         event: 'interview_reminder_skipped',
         bookingId: booking.id,
         candidateId: booking.candidateId,
-        reason: !candidate ? 'candidate_not_found' : candidate.botPaused ? 'bot_paused' : 'inactive_booking'
+        reason: !candidate ? 'candidate_not_found' : 'inactive_booking'
       }));
       continue;
     }
