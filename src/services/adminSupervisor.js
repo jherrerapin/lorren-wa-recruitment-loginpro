@@ -92,8 +92,30 @@ async function hasManualCandidateOutboundAfter(prisma, candidateId, createdAt) {
   return Boolean(message && isManualCandidateOutbound(message));
 }
 
-function formatCandidateLabel(candidate = {}) {
-  return candidate?.fullName ? `${candidate.phone} (${candidate.fullName})` : candidate?.phone;
+function formatCandidateName(candidate = {}) {
+  return String(candidate?.fullName || 'Sin nombre').trim() || 'Sin nombre';
+}
+
+function hasScheduledInterviewFromCandidate(candidate = {}) {
+  return candidate?.currentStep === 'SCHEDULED' || candidate?.status === 'SCHEDULED';
+}
+
+async function hasScheduledInterview(prisma, candidate = {}) {
+  if (candidate?.id && prisma?.interviewBooking?.findFirst) {
+    const booking = await prisma.interviewBooking.findFirst({
+      where: {
+        candidateId: candidate.id,
+        status: { in: ['SCHEDULED', 'CONFIRMED'] }
+      },
+      select: { id: true }
+    }).catch(() => null);
+    if (booking) return true;
+  }
+  return hasScheduledInterviewFromCandidate(candidate);
+}
+
+function formatInterviewStatus(hasInterview) {
+  return hasInterview ? 'Sí' : 'No';
 }
 
 async function saveSupervisorOutbound(prisma, candidateId, body, rawPayload = {}) {
@@ -144,14 +166,15 @@ export async function ensureSupervisorWindowOpen(prisma, { now = new Date() } = 
 
 export async function notifySupervisorManualReview(prisma, candidate, { reason = 'Intervención humana requerida', inboundText = '', reviewType = 'question', extra = {} } = {}) {
   const supervisorPhone = getSupervisorPhone();
-  const label = formatCandidateLabel(candidate);
   const publicReason = localizeManualReviewReason(reason, reviewType, extra);
+  const scheduledInterview = await hasScheduledInterview(prisma, candidate);
   const body = [
-    'Lórren requiere apoyo del administrador.',
-    `Candidato: ${label}`,
-    `Motivo: ${publicReason}`,
-    inboundText ? `Mensaje del candidato: ${inboundText}` : null,
-    'Responde por este chat con la información que Lórren debe enviar al candidato. Lórren no le escribirá al candidato mientras espera esta respuesta.'
+    'Apoyo Lórren',
+    `Número: ${candidate?.phone || ''}`,
+    `Nombre: ${formatCandidateName(candidate)}`,
+    `Entrevista agendada: ${formatInterviewStatus(scheduledInterview)}`,
+    inboundText ? `Candidato: ${inboundText}` : null,
+    'Responder con info para el candidato.'
   ].filter(Boolean).join('\n');
 
   await sendTextMessage(supervisorPhone, body);
@@ -164,16 +187,24 @@ export async function notifySupervisorManualReview(prisma, candidate, { reason =
     reason: publicReason,
     technicalReason: reason,
     inboundText,
+    hasScheduledInterview: scheduledInterview,
     resolved: false
   });
 }
 
 export async function notifySupervisorAttachment(prisma, candidate, { mediaType, media = {}, caption = '', sequence = null, total = null } = {}) {
   const supervisorPhone = getSupervisorPhone();
-  const label = formatCandidateLabel(candidate);
-  const position = sequence ? ` (${sequence}${total ? ` de ${total}` : ''})` : '';
-  const typeLabel = mediaType === 'document' ? 'Documento' : (mediaType === 'audio' ? 'Audio' : 'Adjunto');
-  const body = `${typeLabel}${position} recibido de ${label}${caption ? `: ${caption}` : ''}`;
+  const scheduledInterview = await hasScheduledInterview(prisma, candidate);
+  const position = sequence ? ` ${sequence}${total ? `/${total}` : ''}` : '';
+  const typeLabel = mediaType === 'document' ? 'Documento' : (mediaType === 'audio' ? 'Audio' : (mediaType === 'image' ? 'Foto' : 'Adjunto'));
+  const displayCaption = media?.filename || caption;
+  const body = [
+    `${typeLabel}${position}`,
+    `Número: ${candidate?.phone || ''}`,
+    `Nombre: ${formatCandidateName(candidate)}`,
+    `Entrevista agendada: ${formatInterviewStatus(scheduledInterview)}`,
+    displayCaption ? `Archivo: ${displayCaption}` : null
+  ].filter(Boolean).join('\n');
   await sendTextMessage(supervisorPhone, body);
   await saveSupervisorThreadOutbound(prisma, body, {
     source: 'admin_attachment_forward_notice',
@@ -182,12 +213,13 @@ export async function notifySupervisorAttachment(prisma, candidate, { mediaType,
     mediaType,
     mediaId: media?.id || null,
     fileName: media?.filename || null,
-    mimeType: media?.mime_type || null
+    mimeType: media?.mime_type || null,
+    hasScheduledInterview: scheduledInterview
   });
   if (mediaType === 'document' && media?.id) {
-    await sendDocumentMessage(supervisorPhone, { id: media.id, filename: media.filename }, caption || media.filename || 'documento');
+    await sendDocumentMessage(supervisorPhone, { id: media.id, filename: media.filename });
   } else if (mediaType === 'image' && media?.id) {
-    await sendImageMessage(supervisorPhone, { id: media.id }, caption || '');
+    await sendImageMessage(supervisorPhone, { id: media.id });
   } else if (mediaType === 'audio' && media?.id) {
     await sendAudioMessage(supervisorPhone, { id: media.id });
   }
@@ -274,13 +306,10 @@ async function classifySupervisorInboundDecision({ adminMessage = '', candidateQ
             candidateQuestion,
             pendingReview: {
               reviewType: payload?.manualReviewType || 'question',
-              reason: payload?.reason || null,
-              createdForCandidateMessage: payload?.inboundText || null
+              hasScheduledInterview: Boolean(payload?.hasScheduledInterview)
             },
             candidate: {
-              fullName: candidate?.fullName || null,
-              currentStep: candidate?.currentStep || null,
-              status: candidate?.status || null
+              hasScheduledInterview: Boolean(payload?.hasScheduledInterview || hasScheduledInterviewFromCandidate(candidate))
             },
             conversationState: {
               manualOutboundAfterRequest
@@ -355,12 +384,9 @@ async function buildAiSupervisorCandidateReply({ candidateQuestion = '', adminIn
             candidateQuestion,
             adminInstruction: normalizedInstruction,
             candidate: {
-              fullName: candidate?.fullName || null,
-              currentStep: candidate?.currentStep || null,
-              status: candidate?.status || null
+              hasScheduledInterview: Boolean(payload?.hasScheduledInterview || hasScheduledInterviewFromCandidate(candidate))
             },
-            reviewType: payload?.manualReviewType || 'question',
-            reason: payload?.reason || null
+            reviewType: payload?.manualReviewType || 'question'
           })
         }]
       }
