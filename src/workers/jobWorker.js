@@ -39,7 +39,9 @@ async function runJob(job) {
 }
 
 async function tick() {
-  const jobs = await claimDueJobs(prisma, { limit: 20, now: new Date() });
+  const now = new Date();
+  const jobs = await claimDueJobs(prisma, { limit: 20, now });
+
   for (const job of jobs) {
     try {
       await runJob(job);
@@ -49,11 +51,11 @@ async function tick() {
     }
   }
 
-  if (!jobs.length) {
-    const now = new Date();
-    await ensureSupervisorWindowOpen(prisma, { now }).catch((error) => console.warn('[ADMIN_WINDOW_KEEPALIVE_ERROR]', error?.message || error));
-    await runReminderDispatcher(prisma, { now });
-  }
+  await ensureSupervisorWindowOpen(prisma, { now }).catch((error) =>
+    console.warn('[ADMIN_WINDOW_KEEPALIVE_ERROR]', error?.message || error)
+  );
+
+  await runReminderDispatcher(prisma, { now });
 }
 
 setInterval(() => {

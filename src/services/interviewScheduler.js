@@ -5,11 +5,11 @@
  *  1. Solo se ofrecen slots con al menos MIN_HOURS_ADVANCE horas de anticipacion.
  *  2. El scheduler usa hora Colombia de forma consistente para resolver dias y horas.
  *  3. Si el candidato rechaza un horario, se ofrece el siguiente slot valido.
- *  4. El recordatorio operativo de entrevista esta previsto 40 minutos antes.
+ *  4. El recordatorio operativo de entrevista esta previsto 15 minutos antes.
  */
 
 const MIN_HOURS_ADVANCE = 6;
-const REMINDER_MINUTES_BEFORE = 40;
+const REMINDER_MINUTES_BEFORE = 15;
 const WA_WINDOW_HOURS = 24;
 const COLOMBIA_OFFSET_MS = 5 * 60 * 60 * 1000;
 
