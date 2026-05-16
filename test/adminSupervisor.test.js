@@ -250,3 +250,35 @@ test('notificación de adjunto queda en hilo del administrador y no en chat del 
   assert.equal(notice.candidateId, 'admin-candidate');
   assert.equal(notice.rawPayload.candidateId, 'cand-attachment');
 }));
+
+test('notificación de audio recibido se reenvía al administrador y no al candidato', withWhatsappMock(async (whatsappMock) => {
+  const prisma = createMockPrisma({
+    candidates: [{
+      id: 'cand-audio',
+      phone: '573209998877',
+      fullName: 'María Audio'
+    }, {
+      id: 'admin-candidate',
+      phone: '3052982551',
+      fullName: 'Administrador del sistema'
+    }]
+  });
+  const candidate = await prisma.candidate.findUnique({ where: { id: 'cand-audio' } });
+
+  await notifySupervisorAttachment(prisma, candidate, {
+    mediaType: 'audio',
+    media: { id: 'audio-1', mime_type: 'audio/ogg' },
+    caption: 'audio/ogg'
+  });
+
+  assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
+  assert.match(whatsappMock.sentMessages[0].body, /Audio recibido de 573209998877 \(María Audio\): audio\/ogg/);
+  assert.equal(whatsappMock.sentMessages[1].to, '3052982551');
+  assert.equal(whatsappMock.sentMessages[1].payload.type, 'audio');
+  assert.equal(whatsappMock.sentMessages[1].payload.audio.id, 'audio-1');
+  assert.equal(whatsappMock.sentMessages.some((message) => message.to === '573209998877'), false);
+  const notice = prisma.state.messages.find((message) => message.rawPayload?.source === 'admin_attachment_forward_notice');
+  assert.equal(notice.candidateId, 'admin-candidate');
+  assert.equal(notice.rawPayload.candidateId, 'cand-audio');
+  assert.equal(notice.rawPayload.mediaType, 'audio');
+}));

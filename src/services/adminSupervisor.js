@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { MessageDirection, MessageType } from '@prisma/client';
-import { sendDocumentMessage, sendImageMessage, sendTextMessage } from './whatsapp.js';
+import { sendAudioMessage, sendDocumentMessage, sendImageMessage, sendTextMessage } from './whatsapp.js';
 import { normalizeKnowledgeContent } from './botKnowledge.js';
 import { isCvMimeTypeAllowed } from './cvFlow.js';
 import { fetchMediaMetadata, downloadMedia } from './media.js';
@@ -172,7 +172,8 @@ export async function notifySupervisorAttachment(prisma, candidate, { mediaType,
   const supervisorPhone = getSupervisorPhone();
   const label = formatCandidateLabel(candidate);
   const position = sequence ? ` (${sequence}${total ? ` de ${total}` : ''})` : '';
-  const body = `${mediaType === 'document' ? 'Documento' : 'Adjunto'}${position} recibido de ${label}${caption ? `: ${caption}` : ''}`;
+  const typeLabel = mediaType === 'document' ? 'Documento' : (mediaType === 'audio' ? 'Audio' : 'Adjunto');
+  const body = `${typeLabel}${position} recibido de ${label}${caption ? `: ${caption}` : ''}`;
   await sendTextMessage(supervisorPhone, body);
   await saveSupervisorThreadOutbound(prisma, body, {
     source: 'admin_attachment_forward_notice',
@@ -187,6 +188,8 @@ export async function notifySupervisorAttachment(prisma, candidate, { mediaType,
     await sendDocumentMessage(supervisorPhone, { id: media.id, filename: media.filename }, caption || media.filename || 'documento');
   } else if (mediaType === 'image' && media?.id) {
     await sendImageMessage(supervisorPhone, { id: media.id }, caption || '');
+  } else if (mediaType === 'audio' && media?.id) {
+    await sendAudioMessage(supervisorPhone, { id: media.id });
   }
 }
 
