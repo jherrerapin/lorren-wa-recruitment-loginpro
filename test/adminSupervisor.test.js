@@ -28,8 +28,8 @@ function withWhatsappMock(fn) {
               output: [{
                 content: [{
                   parsed: alreadyAnswered
-                    ? { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'admin_validates_prior_manual_answer', confidence: 0.94 }
-                    : { action: 'ANSWER_CANDIDATE', candidateInstruction: userPayload.adminMessage || '', reason: 'admin_provides_candidate_answer', confidence: 0.91 }
+                    ? { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'acuse_interno_del_administrador', confidence: 0.94 }
+                    : { action: 'ANSWER_CANDIDATE', candidateInstruction: userPayload.adminMessage || '', reason: 'respuesta_del_administrador_para_el_candidato', confidence: 0.91 }
                 }]
               }]
             }
@@ -77,6 +77,42 @@ test('mantiene ventana de administrador con punto antes de 24 horas', withWhatsa
   assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
   assert.equal(whatsappMock.sentMessages[0].body, '.');
   assert.ok(prisma.state.messages.some((message) => message.rawPayload?.source === 'admin_window_keepalive_dot'));
+}));
+
+
+test('notifica revisión manual con motivo técnico en inglés como alerta interna en español', withWhatsappMock(async (whatsappMock) => {
+  const technicalReason = 'Candidate has an active appointment and asked a question that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.';
+  const prisma = createMockPrisma({
+    candidates: [{
+      id: 'cand-localized',
+      phone: '573001234567',
+      fullName: 'Candidata Localizada',
+      botPaused: false,
+      currentStep: 'SCHEDULED'
+    }]
+  });
+  const candidate = await prisma.candidate.findUnique({ where: { id: 'cand-localized' } });
+
+  await notifySupervisorManualReview(prisma, candidate, {
+    reason: technicalReason,
+    inboundText: '¿Con quién pregunto al llegar?',
+    extra: { semanticIntent: 'ASK_INTERVIEW_CONTACT_PERSON' }
+  });
+
+  assert.equal(whatsappMock.sentMessages.length, 1);
+  assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
+  assert.match(whatsappMock.sentMessages[0].body, /Lórren requiere apoyo del administrador/);
+  assert.match(whatsappMock.sentMessages[0].body, /Motivo: El candidato tiene una entrevista activa y preguntó por una persona o punto de contacto al llegar; falta validar ese dato\./);
+  assert.doesNotMatch(whatsappMock.sentMessages[0].body, /Candidate has an active appointment/);
+
+  const manualRequest = prisma.state.messages.find((message) => message.rawPayload?.source === 'admin_manual_review_request');
+  assert.ok(manualRequest);
+  assert.equal(manualRequest.rawPayload.technicalReason, technicalReason);
+  assert.equal(manualRequest.rawPayload.reason, 'El candidato tiene una entrevista activa y preguntó por una persona o punto de contacto al llegar; falta validar ese dato.');
+  assert.equal(manualRequest.rawPayload.visibility, 'internal');
+  assert.equal(manualRequest.rawPayload.neverSendToCandidate, true);
+  assert.equal(manualRequest.rawPayload.language, 'es-CO');
+  assert.equal(manualRequest.rawPayload.target, 'admin_supervisor');
 }));
 
 test('escala duda al administrador, aplica respuesta al candidato y crea aprendizaje', withWhatsappMock(async (whatsappMock) => {

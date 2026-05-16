@@ -748,7 +748,15 @@
     <% if (role === 'dev') { %>
     <div class="card">
       <h2>Historial de conversación</h2>
-      <% const sorted = candidate.messages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
+      <% const visibleMessages = (candidate.messages || []).filter((m) => {
+        const payload = m.rawPayload || {};
+        return payload.target !== 'admin_supervisor'
+          && payload.visibility !== 'internal'
+          && payload.neverSendToCandidate !== true
+          && payload.source !== 'admin_manual_review_request'
+          && !String(m.body || '').includes('Responde por este chat con la información que Lórren debe enviar al candidato');
+      }); %>
+      <% const sorted = visibleMessages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
       <% const conversationTokenTotals = sorted.reduce((acc, msg) => {
         const trace = msg?.rawPayload?.debugTrace;
         if (!trace) return acc;

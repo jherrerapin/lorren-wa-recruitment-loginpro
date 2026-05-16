@@ -1284,8 +1284,8 @@ async function loadOperations(prisma, options = {}) {
   }
 }
 
-async function fetchMonitorMessages(prisma) {
-  return prisma.message.findMany({
+export async function fetchMonitorMessages(prisma) {
+  const messages = await prisma.message.findMany({
     orderBy: { createdAt: 'desc' },
     take: 100,
     include: {
@@ -1301,6 +1301,14 @@ async function fetchMonitorMessages(prisma) {
         }
       }
     }
+  });
+
+  return messages.filter((m) => {
+    const payload = m.rawPayload || {};
+    return payload.target !== 'admin_supervisor'
+      && payload.visibility !== 'internal'
+      && payload.neverSendToCandidate !== true
+      && payload.source !== 'admin_manual_review_request';
   });
 }
 
