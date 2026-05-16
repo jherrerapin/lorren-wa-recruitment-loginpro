@@ -76,6 +76,28 @@ export async function sendDocumentMessage(to, document, caption = '') {
   return response.data;
 }
 
+export async function sendAudioMessage(to, audio) {
+  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'audio',
+    audio: {
+      id: audio?.id
+    }
+  };
+
+  const response = await axios.post(url, payload, {
+    headers: {
+      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 15000
+  });
+
+  return response.data;
+}
+
 export function extractMessages(payload) {
   const entry = payload?.entry?.[0];
   const change = entry?.changes?.[0];

@@ -272,6 +272,7 @@ function buildInboundBody(message = {}) {
   if (message.type === 'text') return message.text?.body || '';
   if (message.type === 'document') return message.document?.filename || '';
   if (message.type === 'image') return message.image?.caption || '';
+  if (message.type === 'audio') return '[Audio recibido]';
   if (message.type === 'interactive') {
     return message.interactive?.button_reply?.title
       || message.interactive?.list_reply?.title
@@ -2492,6 +2493,24 @@ export function webhookRouter(prisma) {
             continue;
           }
 
+          if (message.type === 'audio') {
+            if (canQueueAdminForward) {
+              await enqueueJob(prisma, {
+                type: JOB_TYPES.ADMIN_FORWARD_ATTACHMENT,
+                payload: { phone: from, candidateId: candidate.id, mediaType: 'audio', audio: message.audio || {} },
+                runAt: new Date(),
+                dedupeKey: `admin-audio:${candidate.id}:${message.id || Date.now()}`,
+                maxAttempts: 4
+              }).catch((error) => console.warn('[ADMIN_FORWARD_AUDIO_QUEUE_ERROR]', error?.message || error));
+            }
+            await notifySupervisorAttachment(prisma, freshCandidate, {
+              mediaType: 'audio',
+              media: message.audio || {},
+              caption: message.audio?.mime_type || ''
+            }).catch((error) => console.warn('[ADMIN_SUPERVISOR_AUDIO_ERROR]', error?.message || error));
+            continue;
+          }
+
           if (message.type === 'document') {
             if (canQueueAdminForward) {
               await enqueueJob(prisma, {
@@ -2657,7 +2676,7 @@ export function webhookRouter(prisma) {
           } else if (!automationBlocked && freshCandidate.currentStep === ConversationStep.DONE) {
             await reply(prisma, candidate.id, from, MENSAJE_DONE_CV_REPEAT, '', { source: 'bot_cv_request' });
           } else if (!automationBlocked) {
-            await reply(prisma, candidate.id, from, 'Por ahora solo puedo procesar mensajes de texto para continuar con tu registro.', '', { source: 'bot_flow' });
+            await reply(prisma, candidate.id, from, 'Recibí tu mensaje. Para continuar el registro, envíame la información solicitada por escrito o la hoja de vida en PDF/Word si aplica.', '', { source: 'bot_flow' });
           }
         } finally {
           const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });
