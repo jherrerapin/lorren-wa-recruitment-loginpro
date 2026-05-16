@@ -21,6 +21,38 @@ export function isSupervisorPhone(phone = '') {
   return String(phone || '').replace(/\D/g, '') === getSupervisorPhone();
 }
 
+function includesAny(value = '', terms = []) {
+  const normalized = String(value || '').toLowerCase();
+  return terms.some((term) => normalized.includes(String(term).toLowerCase()));
+}
+
+export function localizeManualReviewReason(reason = '', reviewType = 'question', extra = {}) {
+  const semanticIntent = Array.isArray(extra?.semanticIntent)
+    ? extra.semanticIntent.join(' ')
+    : String(extra?.semanticIntent || '');
+  const normalizedReason = String(reason || '').toLowerCase();
+  const normalizedIntent = semanticIntent.toUpperCase();
+
+  if (normalizedIntent.includes('ASK_INTERVIEW_ADDRESS')) {
+    return 'El candidato tiene una entrevista activa y pidió información de dirección que debe validarse con la información disponible.';
+  }
+  if (normalizedIntent.includes('ASK_INTERVIEW_CONTACT_PERSON')) {
+    return 'El candidato tiene una entrevista activa y preguntó por una persona o punto de contacto al llegar; falta validar ese dato.';
+  }
+  if (normalizedIntent.includes('ASK_REQUIRED_DOCUMENTS')) {
+    return 'El candidato tiene una entrevista activa y preguntó por documentos o requisitos; falta validar la información exacta.';
+  }
+  if (includesAny(normalizedReason, ['active appointment', 'appointment', 'interview', 'not answerable'])) {
+    return 'El candidato tiene una entrevista activa y envió una duda o novedad que Lórren no puede responder con seguridad desde la vacante o la cita registrada.';
+  }
+  if (normalizedReason.includes('vacancy')) {
+    return 'Se requiere validar información de la vacante antes de responder al candidato.';
+  }
+  if (normalizedReason.includes('document')) {
+    return 'El candidato envió o preguntó por documentos y se requiere validación del equipo.';
+  }
+  return 'Se requiere apoyo del equipo para responder con precisión al candidato.';
+}
 
 async function getOrCreateSupervisorCandidate(prisma) {
   const supervisorPhone = getSupervisorPhone();
@@ -73,9 +105,12 @@ async function saveSupervisorOutbound(prisma, candidateId, body, rawPayload = {}
       messageType: MessageType.TEXT,
       body,
       rawPayload: {
-        target: 'admin_supervisor',
-        supervisorPhone: getSupervisorPhone(),
         ...rawPayload,
+        target: 'admin_supervisor',
+        visibility: 'internal',
+        neverSendToCandidate: true,
+        language: 'es-CO',
+        supervisorPhone: getSupervisorPhone(),
         body
       }
     }
@@ -107,27 +142,29 @@ export async function ensureSupervisorWindowOpen(prisma, { now = new Date() } = 
   return true;
 }
 
-export async function notifySupervisorManualReview(prisma, candidate, { reason = 'Intervencion humana requerida', inboundText = '', reviewType = 'question', extra = {} } = {}) {
+export async function notifySupervisorManualReview(prisma, candidate, { reason = 'Intervención humana requerida', inboundText = '', reviewType = 'question', extra = {} } = {}) {
   const supervisorPhone = getSupervisorPhone();
   const label = formatCandidateLabel(candidate);
+  const publicReason = localizeManualReviewReason(reason, reviewType, extra);
   const body = [
-    'Lórren requiere apoyo humano.',
+    'Lórren requiere apoyo del administrador.',
     `Candidato: ${label}`,
-    `Motivo: ${reason}`,
-    inboundText ? `Mensaje/duda del candidato: ${inboundText}` : null,
-    'Responde por este chat con la información que Lórren debe enviar al candidato. Lórren no avisará al candidato mientras espera.'
+    `Motivo: ${publicReason}`,
+    inboundText ? `Mensaje del candidato: ${inboundText}` : null,
+    'Responde por este chat con la información que Lórren debe enviar al candidato. Lórren no le escribirá al candidato mientras espera esta respuesta.'
   ].filter(Boolean).join('\n');
 
   await sendTextMessage(supervisorPhone, body);
   await saveSupervisorThreadOutbound(prisma, body, {
+    ...extra,
     source: 'admin_manual_review_request',
     manualReviewType: reviewType,
     candidateId: candidate.id,
     candidatePhone: candidate.phone,
-    reason,
+    reason: publicReason,
+    technicalReason: reason,
     inboundText,
-    resolved: false,
-    ...extra
+    resolved: false
   });
 }
 
@@ -193,13 +230,13 @@ function normalizeCandidateInstruction(value = '') {
 
 function fallbackSupervisorInboundDecision({ adminMessage = '', manualOutboundAfterRequest = false } = {}) {
   const normalized = normalizeCandidateInstruction(adminMessage);
-  if (!normalized) return { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'empty_message', confidence: 1, fallbackUsed: true };
+  if (!normalized) return { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'mensaje_vacio', confidence: 1, fallbackUsed: true };
   const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
   const hasExplicitDetail = /\d|[:@]|\?|¿/.test(normalized);
   if (manualOutboundAfterRequest && tokenCount <= 3 && !hasExplicitDetail) {
-    return { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'manual_outbound_already_resolved_low_detail', confidence: 0.68, fallbackUsed: true };
+    return { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'respuesta_manual_previa_ya_resolvio_el_caso', confidence: 0.68, fallbackUsed: true };
   }
-  return { action: 'ANSWER_CANDIDATE', candidateInstruction: normalized, reason: 'fallback_treat_as_candidate_instruction', confidence: 0.5, fallbackUsed: true };
+  return { action: 'ANSWER_CANDIDATE', candidateInstruction: normalized, reason: 'respuesta_para_enviar_al_candidato', confidence: 0.5, fallbackUsed: true };
 }
 
 async function classifySupervisorInboundDecision({ adminMessage = '', candidateQuestion = '', candidate = {}, payload = {}, manualOutboundAfterRequest = false } = {}) {
@@ -220,7 +257,8 @@ async function classifySupervisorInboundDecision({ adminMessage = '', candidateQ
             'No uses longitud del texto como criterio único. Una frase corta puede ser instrucción si aporta decisión para el candidato, y una frase larga puede ser nota interna.',
             'Si ya existe una respuesta manual posterior a la solicitud y el nuevo mensaje solo valida internamente que quedó bien, clasifícalo como INTERNAL_ACK.',
             'Si el caso es de varios documentos y el administrador señala cuál guardar, clasifícalo como DOCUMENT_SELECTION.',
-            'Si el mensaje contiene la información que Lórren debe transmitir al candidato o una orden explícita de responderle, clasifícalo como ANSWER_CANDIDATE.'
+            'Si el mensaje contiene la información que Lórren debe transmitir al candidato o una orden explícita de responderle, clasifícalo como ANSWER_CANDIDATE.',
+            'El campo reason debe estar siempre en español.'
           ].join(' ')
         }]
       },
@@ -277,7 +315,7 @@ async function classifySupervisorInboundDecision({ adminMessage = '', candidateQ
   return {
     action: parsed.action,
     candidateInstruction: normalizeCandidateInstruction(parsed.candidateInstruction || normalized),
-    reason: parsed.reason || 'ai_decision',
+    reason: parsed.reason || 'decision_del_modelo',
     confidence: Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : 0,
     fallbackUsed: false
   };
@@ -459,7 +497,7 @@ export async function handleSupervisorInbound(prisma, message = {}) {
       supervisorDecision = {
         action: 'DOCUMENT_SELECTION',
         candidateInstruction: body,
-        reason: 'admin_selected_document_to_store_as_cv',
+        reason: 'documento_seleccionado_por_administrador_para_guardar_como_hoja_de_vida',
         confidence: 1,
         fallbackUsed: true
       };
