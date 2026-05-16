@@ -36,22 +36,6 @@ async function saveSupervisorThreadOutbound(prisma, body, rawPayload = {}) {
   return saveSupervisorOutbound(prisma, supervisor.id, body, rawPayload);
 }
 
-function normalizeAckText(value = '') {
-  return String(value || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9ñ\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isBareSupervisorAcknowledgement(value = '') {
-  const n = normalizeAckText(value);
-  if (!n) return true;
-  return /^(ok|okay|listo|perfecto|vale|dale|bueno|gracias|muchas gracias|super|excelente|entendido|de acuerdo|correcto|si|sí|sii|esta bien|muy bien)$/.test(n);
-}
-
 function isManualCandidateOutbound(message = {}) {
   const payload = message.rawPayload || {};
   const source = String(payload.source || payload.sourceCategory || '').toLowerCase();
@@ -202,6 +186,98 @@ function parseStructuredOutput(data = {}) {
 
 function normalizeCandidateInstruction(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+}
+
+function fallbackSupervisorInboundDecision({ adminMessage = '', manualOutboundAfterRequest = false } = {}) {
+  const normalized = normalizeCandidateInstruction(adminMessage);
+  if (!normalized) return { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'empty_message', confidence: 1, fallbackUsed: true };
+  const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
+  const hasExplicitDetail = /\d|[:@]|\?|¿/.test(normalized);
+  if (manualOutboundAfterRequest && tokenCount <= 3 && !hasExplicitDetail) {
+    return { action: 'INTERNAL_ACK', candidateInstruction: '', reason: 'manual_outbound_already_resolved_low_detail', confidence: 0.68, fallbackUsed: true };
+  }
+  return { action: 'ANSWER_CANDIDATE', candidateInstruction: normalized, reason: 'fallback_treat_as_candidate_instruction', confidence: 0.5, fallbackUsed: true };
+}
+
+async function classifySupervisorInboundDecision({ adminMessage = '', candidateQuestion = '', candidate = {}, payload = {}, manualOutboundAfterRequest = false } = {}) {
+  const normalized = normalizeCandidateInstruction(adminMessage);
+  if (!process.env.OPENAI_API_KEY) return fallbackSupervisorInboundDecision({ adminMessage: normalized, manualOutboundAfterRequest });
+
+  const response = await axios.post(RESPONSES_URL, {
+    model: SUPERVISOR_REPLY_MODEL,
+    input: [
+      {
+        role: 'system',
+        content: [{
+          type: 'input_text',
+          text: [
+            'Eres el módulo de coordinación entre administrador, Lórren y candidato.',
+            'Tu tarea es decidir la intención operativa del mensaje del administrador según el contexto completo, no por palabras sueltas.',
+            'Clasifica si el administrador está: dando una instrucción o información para responder al candidato; dejando un acuse interno porque ya intervino por otro canal; o seleccionando cuál documento del candidato debe guardarse como hoja de vida.',
+            'No uses longitud del texto como criterio único. Una frase corta puede ser instrucción si aporta decisión para el candidato, y una frase larga puede ser nota interna.',
+            'Si ya existe una respuesta manual posterior a la solicitud y el nuevo mensaje solo valida internamente que quedó bien, clasifícalo como INTERNAL_ACK.',
+            'Si el caso es de varios documentos y el administrador señala cuál guardar, clasifícalo como DOCUMENT_SELECTION.',
+            'Si el mensaje contiene la información que Lórren debe transmitir al candidato o una orden explícita de responderle, clasifícalo como ANSWER_CANDIDATE.'
+          ].join(' ')
+        }]
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'input_text',
+          text: JSON.stringify({
+            adminMessage: normalized,
+            candidateQuestion,
+            pendingReview: {
+              reviewType: payload?.manualReviewType || 'question',
+              reason: payload?.reason || null,
+              createdForCandidateMessage: payload?.inboundText || null
+            },
+            candidate: {
+              fullName: candidate?.fullName || null,
+              currentStep: candidate?.currentStep || null,
+              status: candidate?.status || null
+            },
+            conversationState: {
+              manualOutboundAfterRequest
+            }
+          })
+        }]
+      }
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'supervisor_inbound_decision',
+        strict: true,
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            action: { type: 'string', enum: ['ANSWER_CANDIDATE', 'INTERNAL_ACK', 'DOCUMENT_SELECTION'] },
+            candidateInstruction: { type: 'string' },
+            reason: { type: 'string' },
+            confidence: { type: 'number', minimum: 0, maximum: 1 }
+          },
+          required: ['action', 'candidateInstruction', 'reason', 'confidence']
+        }
+      }
+    }
+  }, {
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }
+  });
+
+  const parsed = parseStructuredOutput(response.data) || {};
+  if (!['ANSWER_CANDIDATE', 'INTERNAL_ACK', 'DOCUMENT_SELECTION'].includes(parsed.action)) {
+    return fallbackSupervisorInboundDecision({ adminMessage: normalized, manualOutboundAfterRequest });
+  }
+  return {
+    action: parsed.action,
+    candidateInstruction: normalizeCandidateInstruction(parsed.candidateInstruction || normalized),
+    reason: parsed.reason || 'ai_decision',
+    confidence: Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : 0,
+    fallbackUsed: false
+  };
 }
 
 async function buildAiSupervisorCandidateReply({ candidateQuestion = '', adminInstruction = '', candidate = {}, payload = {} } = {}) {
@@ -368,39 +444,70 @@ export async function handleSupervisorInbound(prisma, message = {}) {
   const { request, candidate } = pending;
   const payload = request.rawPayload || {};
 
-  if (isBareSupervisorAcknowledgement(body)) {
-    const resolvedByManualOutbound = await hasManualCandidateOutboundAfter(prisma, candidate.id, request.createdAt);
-    if (resolvedByManualOutbound) {
-      await prisma.message.update({
-        where: { id: request.id },
-        data: { rawPayload: { ...payload, resolved: true, resolvedAt: new Date().toISOString(), resolvedBy: 'manual_candidate_outbound_ack' } }
-      });
-      return { handled: true, action: 'ack_resolved_after_manual_outbound', candidateId: candidate.id };
-    }
-    return { handled: true, action: 'ack_ignored_pending_request', candidateId: candidate.id };
-  }
-
   const candidateQuestion = payload.inboundText || '';
+  const manualOutboundAfterRequest = await hasManualCandidateOutboundAfter(prisma, candidate.id, request.createdAt);
+  let supervisorDecision = null;
   let candidateReplyResult = null;
   let candidateReply = '';
 
   if (payload.manualReviewType === 'multiple_documents') {
     const selected = await saveSelectedDocumentAsCv(prisma, candidate, body).catch((error) => ({ saved: false, reason: error?.message || 'save_failed' }));
     if (selected.saved) {
+      supervisorDecision = {
+        action: 'DOCUMENT_SELECTION',
+        candidateInstruction: body,
+        reason: 'admin_selected_document_to_store_as_cv',
+        confidence: 1,
+        fallbackUsed: true
+      };
       candidateReply = 'Recibí los documentos. Dejé guardada tu hoja de vida; para el proceso solo necesito la hoja de vida.';
       candidateReplyResult = { text: candidateReply, model: null, fallbackUsed: true, reason: 'multiple_documents_selected' };
     }
   }
 
+  if (!supervisorDecision) {
+    supervisorDecision = await classifySupervisorInboundDecision({
+      adminMessage: body,
+      candidateQuestion,
+      candidate,
+      payload,
+      manualOutboundAfterRequest
+    }).catch((error) => {
+      console.warn('[ADMIN_SUPERVISOR_DECISION_ERROR]', error?.message || error);
+      return fallbackSupervisorInboundDecision({ adminMessage: body, manualOutboundAfterRequest });
+    });
+  }
+
+  if (supervisorDecision.action === 'INTERNAL_ACK') {
+    await prisma.message.update({
+      where: { id: request.id },
+      data: {
+        rawPayload: {
+          ...payload,
+          resolved: Boolean(manualOutboundAfterRequest),
+          resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
+          resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
+          supervisorDecision
+        }
+      }
+    });
+    return {
+      handled: true,
+      action: manualOutboundAfterRequest ? 'internal_ack_resolved_after_manual_outbound' : 'internal_ack_kept_pending',
+      candidateId: candidate.id
+    };
+  }
+
   if (!candidateReply) {
+    const adminInstruction = supervisorDecision.candidateInstruction || body;
     candidateReplyResult = await buildAiSupervisorCandidateReply({
       candidateQuestion,
-      adminInstruction: body,
+      adminInstruction,
       candidate,
       payload
     }).catch((error) => {
       console.warn('[ADMIN_SUPERVISOR_AI_REPLY_ERROR]', error?.message || error);
-      return { text: normalizeCandidateInstruction(body), model: SUPERVISOR_REPLY_MODEL, fallbackUsed: true, reason: 'ai_error' };
+      return { text: normalizeCandidateInstruction(adminInstruction), model: SUPERVISOR_REPLY_MODEL, fallbackUsed: true, reason: 'ai_error' };
     });
     candidateReply = candidateReplyResult.text;
   }
@@ -419,7 +526,8 @@ export async function handleSupervisorInbound(prisma, message = {}) {
         aiModel: candidateReplyResult?.model || null,
         aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
         aiReason: candidateReplyResult?.reason || null,
-        requestMessageId: request.id
+        requestMessageId: request.id,
+        supervisorDecision
       }
     }
   });

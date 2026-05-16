@@ -202,9 +202,6 @@ export function inferContextualSemanticIntent({
   if (isQuestion) {
     const hasInterviewTopic = /\b(entrevist\w*|cita|presentar|llegar|asistir|ir)\b/.test(normalized);
     if (/\b(direccion|ubicacion|donde|queda|lugar|sede)\b/.test(normalized)) return 'ASK_INTERVIEW_ADDRESS';
-    if (/\b(?:solo|unicamente)\b.*\b(?:10|diez|hora|horario|entrevista|cita)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_AVAILABILITY';
-    if (/\b(?:mas|otros?|disponibles?|cupos?|espacios?|horarios?)\b.*\b(?:despues|luego|tarde|adelante|10|diez)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_AVAILABILITY';
-    if (/\b(?:despues|luego|mas tarde)\b.*\b(?:10|diez|hora|horario|entrevista|cita)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_AVAILABILITY';
     if (/\b(hora|horario|cuando|fecha|dia)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_TIME';
     if (/\b(quien|persona|contacto|preguntar|recibe|recepcion)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_CONTACT_PERSON';
     if (/\b(document|llevar|requisit)\b/.test(normalized)) return 'ASK_REQUIRED_DOCUMENTS';
@@ -261,6 +258,16 @@ export function evaluateContextualResponseGate({
         shouldReply: false,
         allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
         reason: 'Candidate asked about interview slot availability beyond the confirmed appointment; this requires human validation before replying.',
+        responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
+        requiresHumanReview: true
+      });
+    }
+
+    if (semanticIntent === 'ASK_APPLICATION_STATUS') {
+      return decision({
+        shouldReply: false,
+        allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
+        reason: 'Candidate has an active appointment and asked a question that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
         responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
         requiresHumanReview: true
       });
