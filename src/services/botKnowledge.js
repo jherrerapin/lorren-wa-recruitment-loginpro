@@ -50,10 +50,13 @@ export function formatBotKnowledgeForPrompt(entries = []) {
       if (!content) return null;
       const tags = normalizeKnowledgeContent(entry?.tags).replace(/\n/g, ', ');
       const label = `${index + 1}. alcance=${entry?.scope || 'GLOBAL'}${tags ? `; etiquetas=${tags}` : ''}`;
-      return `${label}\n${content}`;
+      return `${label}\nContexto curado a considerar seriamente, sin copiarlo literal ni tratarlo como plantilla:\n${content}`;
     })
     .filter(Boolean);
 
   if (!active.length) return 'Sin aprendizajes manuales activos.';
-  return active.join('\n---\n');
+  return [
+    'Usa estos aprendizajes como memoria contextual prioritaria: interpreta la intención operativa, adapta el criterio y el tono, y nunca los pegues textualmente en la respuesta al candidato.',
+    active.join('\n---\n')
+  ].join('\n');
 }

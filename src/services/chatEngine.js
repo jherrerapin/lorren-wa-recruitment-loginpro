@@ -122,9 +122,11 @@ export async function runChatEngine({
     currentStep,
     source: 'engine'
   });
+  const hasSilentManualPause = !String(safeReply.reply || '').trim()
+    && actions.some((action) => action?.type === 'pause_bot');
   const noUsefulReply = !String(safeReply.reply || '').trim()
     && actions.length
-    && actions.every((action) => action?.type === 'nothing');
+    && (hasSilentManualPause || actions.every((action) => action?.type === 'nothing'));
 
   return {
     reply: safeReply.reply,
@@ -141,6 +143,8 @@ export async function runChatEngine({
     loopGuardApplied: Boolean(result.loopGuardApplied),
     usage: result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
     suppressed: noUsefulReply,
-    suppressedReason: noUsefulReply ? 'engine_nothing_no_reply' : null,
+    suppressedReason: noUsefulReply
+      ? (hasSilentManualPause ? 'engine_pause_bot_no_reply' : 'engine_nothing_no_reply')
+      : null,
   };
 }

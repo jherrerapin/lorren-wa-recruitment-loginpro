@@ -48,5 +48,7 @@ test('formatBotKnowledgeForPrompt no convierte aprendizajes en plantilla literal
     { scope: 'GLOBAL', tags: 'tono', content: 'Si solo agradece, no insistir.' }
   ]);
   assert.match(text, /alcance=GLOBAL/);
+  assert.match(text, /memoria contextual prioritaria/);
+  assert.match(text, /sin copiarlo literal/);
   assert.match(text, /Si solo agradece/);
 });

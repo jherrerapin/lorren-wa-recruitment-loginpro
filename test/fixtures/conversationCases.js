@@ -809,7 +809,8 @@ export const conversationCases = [
         botPaused: true,
         botPauseReason: 'Consulta documental pendiente de validacion manual'
       },
-      lastReplyIncludes: ['validar ese caso documental', 'respuesta segura']
+      exactOutboundCount: 0,
+      lastReplyNotIncludes: ['validar ese caso documental', 'respuesta segura', 'seguimiento humano']
     }
   },
   {
@@ -884,8 +885,8 @@ export const conversationCases = [
         botPaused: true,
         botPauseReason: 'Duda posterior requiere intervencion manual'
       },
-      lastReplyIncludes: ['seguimiento humano', 'respuesta segura'],
-      lastReplyNotIncludes: ['hoja de vida', 'enviame por favor estos datos']
+      exactOutboundCount: 0,
+      lastReplyNotIncludes: ['seguimiento humano', 'respuesta segura', 'hoja de vida', 'enviame por favor estos datos']
     }
   },
   {

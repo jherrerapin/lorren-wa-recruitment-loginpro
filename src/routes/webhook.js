@@ -1042,11 +1042,17 @@ async function hasRecentResumePhotoReply(prisma, candidateId, minutes = 15) {
     || (message?.rawPayload?.replyIntent === 'request_cv_pdf_word' && /registrar tu hoja de vida|pdf o word\/docx/i.test(message?.body || '')));
 }
 
-async function pauseForManualQuestionReview(prisma, candidate, from, inboundText = '') {
-  const reason = 'Duda posterior requiere intervencion manual';
+async function pauseSilentlyForManualReview(prisma, candidate, reason, inboundText = '') {
   await pauseInterviewFlow(prisma, candidate.id, reason);
-  const body = 'Quiero responderte bien esa duda y necesito validarla con el equipo. Ya deje tu chat marcado para seguimiento humano y te escribimos por este medio apenas tenga una respuesta segura.';
-  return reply(prisma, candidate.id, from, body, inboundText, { body, source: 'bot_manual_review', reason });
+  console.info('[BOT_MANUAL_REVIEW_SILENT]', JSON.stringify({
+    candidateId: candidate.id,
+    reason,
+    inboundPreview: String(inboundText || '').slice(0, 140)
+  }));
+}
+
+async function pauseForManualQuestionReview(prisma, candidate, from, inboundText = '') {
+  return pauseSilentlyForManualReview(prisma, candidate, 'Duda posterior requiere intervencion manual', inboundText);
 }
 
 async function composeContextualAttachmentReply(prisma, {
@@ -1645,9 +1651,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     && isSchedulingEligibleCandidate(candidate, currentVacancy)
     && isDocumentValidationQuestion(cleanText)
   ) {
-    await pauseInterviewFlow(prisma, candidate.id, 'Consulta documental pendiente de validacion manual');
-    const body = 'Voy a validar ese caso documental con el equipo antes de confirmarte algo. Te escribimos por este medio apenas tenga una respuesta segura.';
-    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+    return pauseSilentlyForManualReview(prisma, candidate, 'Consulta documental pendiente de validacion manual', cleanText);
   }
 
   if (
@@ -1827,9 +1831,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (isDocumentValidationQuestion(cleanText)) {
-      await pauseInterviewFlow(prisma, candidate.id, 'Consulta documental pendiente de validacion manual');
-      const body = 'Voy a validar ese caso documental con el equipo antes de confirmarte algo. Te escribimos por este medio apenas tenga una respuesta segura.';
-      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
+      return pauseSilentlyForManualReview(prisma, candidate, 'Consulta documental pendiente de validacion manual', cleanText);
     }
 
     if (isQuestionLike(cleanText)) {
