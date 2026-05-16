@@ -17,6 +17,7 @@ import { getCandidateReadiness } from './readinessGuard.js';
 import { evaluateSchedulingGuard } from './schedulingGuard.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js';
 import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
+import { formatBotKnowledgeForPrompt, loadBotKnowledgeForContext } from './botKnowledge.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
@@ -295,7 +296,7 @@ ${actionInstruction}
 - Si la vacante es solo postulacion, nunca menciones entrevistas.`;
 }
 
-function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep }) {
+function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep, botKnowledge = [] }) {
   const candidateState = buildCandidateStateForModel(candidate, vacancy, recentMessages);
   const vacancyState = buildVacancyStateForModel(vacancy);
   const readiness = getCandidateReadiness(candidate, vacancy);
@@ -304,20 +305,22 @@ function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, curre
 Redactas con libertad, de forma natural y breve; no tienes una plantilla fija.
 La IA puede entender, planear y redactar, pero el backend es la autoridad final sobre datos, avance, cierre, HV, asignacion de vacante y agenda.
 Solo puedes usar los datos estructurados entregados en este prompt; si falta informacion, haces una pregunta concreta y no inventas nada.
-La unica fuente autorizada para hablar de cargo, salario, horarios, beneficios, requisitos, direccion, condiciones y documentacion de entrevista es la vacante asignada en ESTADO CURADO DE LA VACANTE. No uses conocimiento general, supuestos del sector ni datos de otras vacantes.
+La unica fuente autorizada para hablar de cargo, salario, horarios, beneficios, requisitos, direccion, condiciones y documentacion de entrevista es la vacante asignada en ESTADO CURADO DE LA VACANTE. Los APRENDIZAJES MANUALES DEV sirven para ajustar tono, contexto, reglas de conversacion y aclaraciones operativas; no reemplazan datos sensibles ni inventan condiciones de vacante. No uses conocimiento general, supuestos del sector ni datos de otras vacantes.
 
 COMO RESPONDES:
 - Usa tono colombiano natural.
 - Maximo 3 oraciones por respuesta.
 - No uses listas con vietas, numeracion ni Markdown en la respuesta.
-- No digas que eres un bot o una IA.
+- No digas que eres un bot o una IA, salvo si el candidato pregunta directamente quien eres, como te llamas o si eres bot. En ese caso responde con naturalidad que eres Lórren, el asistente de selección de LoginPro, sin insistir en ello ni repetirlo en otros turnos.
 - No repitas frases casi iguales a mensajes recientes del bot.
 - Saluda solo en primer contacto o si el candidato acaba de saludar; en confirmaciones, agenda, correcciones y seguimiento continua directo sin abrir con Hola.
 - No mezcles varias plantillas en una sola respuesta.
+- No respondas por obligación si el mensaje no requiere respuesta útil; usa la acción "nothing" y reply vacío cuando corresponda.
 
 PRIORIDADES:
 - Antes de responder, relee el historial reciente completo y el estado curado.
-- Entiende la intencion real del candidato antes de pedir datos.
+- Entiende la intencion real, el momento del proceso y la emoción del candidato antes de pedir datos.
+- Si el candidato pregunta tu nombre, identidad o si eres bot, responde una sola vez que eres Lórren, asistente de selección de LoginPro, y luego continúa solo si aporta valor.
 - Si el candidato pregunta algo de la vacante, responde eso primero, pero solo con datos presentes en ESTADO CURADO DE LA VACANTE. Usa el historial solo para continuidad conversacional, no como fuente para inventar o completar condiciones de la vacante. Si el dato no esta registrado en la vacante asignada, dilo claramente y no lo inventes.
 - Si plantea una objecion, atiendela antes de retomar el flujo.
 - Si ya envio datos en fragmentos, consolidalos.
@@ -328,6 +331,9 @@ PRIORIDADES:
 - Si expresa no interes, cierra correctamente con "mark_no_interest".
 - Si ves un mensaje de Humano en el historial, tomalo como contexto real del equipo y continua desde ahi cuando el ultimo mensaje sea del Candidato. No contradigas ni pises lo que dijo el humano.
 - Si el ultimo mensaje del historial fuera de Humano y no hay mensaje nuevo del Candidato, no respondas encima; usa "nothing".
+
+APRENDIZAJES MANUALES DEV (curados por el equipo; aplicalos como memoria contextual, no como texto literal):
+${formatBotKnowledgeForPrompt(botKnowledge)}
 
 FALLOS RECURRENTES QUE DEBES EVITAR:
 - No tomes saludos como nombre.
@@ -349,6 +355,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No te quedes en bucle cuando el usuario corrige.
 - No reabras confirmacion si el dato ya fue corregido.
 - No respondas como formulario disfrazado.
+- No uses frases de relleno como "Ya tengo la información principal; voy a revisar el siguiente paso del proceso". Si ya tienes información, avanza con una pregunta concreta, una confirmación necesaria o no respondas.
 
 ESTADO CURADO DE LA VACANTE (JSON):
 ${JSON.stringify(vacancyState, null, 2)}
@@ -523,22 +530,22 @@ function hasMeaningfulEngineProgress(decision = {}, currentStep = '') {
 
 function buildLoopGuardReply({ candidate = {}, currentStep = '', recentMessages = [] } = {}) {
   if (currentStep === 'ASK_CV') {
-    return 'Ya revise lo que me enviaste. Cuando puedas, adjunta la hoja de vida en PDF o Word/DOCX y sigo contigo.';
+    return 'Recibí lo que enviaste. Para registrarlo bien, adjunta la hoja de vida en PDF o Word/DOCX.';
   }
 
   if (currentStep === 'CONFIRMING_DATA' && !getCoreFieldGaps(candidate).length) {
-    return 'Ya tome nota de lo que corregiste. Si ves otro ajuste puntual me lo escribes y, si no, sigo con el siguiente paso.';
+    return 'Corrección recibida. Si hay otro ajuste puntual, escríbemelo; si no, seguimos con lo que falta.';
   }
 
   if (!candidate?.vacancyId) {
     if (!getCoreFieldGaps(candidate).length) {
-      return 'Ya tengo tus datos principales registrados. Si quieres actualizar vacante o ciudad, dime el ajuste puntual y lo hago sin pedirte todo de nuevo.';
+      return 'Tus datos principales están registrados. Si necesitas cambiar vacante o ciudad, dime el ajuste puntual sin volver a enviarlo todo.';
     }
     return 'Para ubicar bien tu proceso, cuentame desde que ciudad nos escribes y para que vacante o cargo aplicas.';
   }
 
   if (getCoreFieldGaps(candidate).length) {
-    return 'Ya te lei. Comparteme solo el dato que falta o el ajuste puntual y avanzamos.';
+    return 'Te leo. Compárteme solo el dato faltante o el ajuste puntual para avanzar.';
   }
 
   const lastOutbound = [...recentMessages]
@@ -596,7 +603,7 @@ function mapEngineGender(rawGender, Gender) {
   return mapping[String(rawGender).toUpperCase()] || null;
 }
 
-export async function think({ inboundText, candidate, vacancy, recentMessages = [], nextSlot = null, currentStep }) {
+export async function think({ inboundText, candidate, vacancy, recentMessages = [], nextSlot = null, currentStep, prisma = null }) {
   const fallbackReply = ENGINE_FALLBACK_REPLY;
 
   if (!process.env.OPENAI_API_KEY) {
@@ -617,13 +624,14 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
     const temperature = parseOptionalTemperature();
     const useTemperature = temperature.value !== null && modelSupportsTemperature(model);
 
+    const botKnowledge = await loadBotKnowledgeForContext(prisma, { candidate, vacancy });
     const response = await axios.post(
       OPENAI_URL,
       {
         model,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep }) },
+          { role: 'system', content: buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep, botKnowledge }) },
           { role: 'user', content: String(inboundText || '') }
         ],
         max_completion_tokens: 650,

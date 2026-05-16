@@ -74,6 +74,7 @@ export async function runChatEngine({
     recentMessages,
     nextSlot,
     currentStep,
+    prisma,
   });
 
   const actions = Array.isArray(result.actions) ? result.actions : [];
@@ -121,6 +122,9 @@ export async function runChatEngine({
     currentStep,
     source: 'engine'
   });
+  const noUsefulReply = !String(safeReply.reply || '').trim()
+    && actions.length
+    && actions.every((action) => action?.type === 'nothing');
 
   return {
     reply: safeReply.reply,
@@ -136,7 +140,7 @@ export async function runChatEngine({
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),
     usage: result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-    suppressed: false,
-    suppressedReason: null,
+    suppressed: noUsefulReply,
+    suppressedReason: noUsefulReply ? 'engine_nothing_no_reply' : null,
   };
 }

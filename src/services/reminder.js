@@ -8,13 +8,14 @@ import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidate
 import { formatInterviewDate } from './interviewScheduler.js';
 import {
   hasActiveInterviewBooking,
+  shouldMarkNoResponse,
   shouldStopInterviewAutomation,
 } from './interviewLifecycle.js';
 import { isFeatureEnabled } from './featureFlags.js';
 import { enqueueJob, JOB_TYPES } from './jobQueue.js';
 
 const REMINDER_DELAY_MS = 60 * 60 * 1000;
-const INTERVIEW_REMINDER_LEAD_MS = 30 * 60 * 1000;
+const INTERVIEW_REMINDER_LEAD_MS = 60 * 60 * 1000;
 const INTERVIEW_REMINDER_TOLERANCE_MS = 5 * 60 * 1000;
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 const INTERVIEW_BOOKING_REMINDER_SOURCE = 'interview_booking_reminder';
@@ -87,7 +88,7 @@ export function buildReminderText(candidate = {}) {
 
 function buildInterviewReminderText(booking = {}) {
   const scheduledDate = booking?.scheduledAt ? formatInterviewDate(new Date(booking.scheduledAt)) : 'el horario acordado';
-  return `Hola, te escribo para recordarte tu entrevista de LoginPro programada para ${scheduledDate}. Si sigues disponible, responde por este medio.`;
+  return `Hola, te recuerdo tu entrevista de LoginPro programada para ${scheduledDate}. Si sigues disponible, respóndeme por aquí para confirmar asistencia; si necesitas cambiarla, también me puedes avisar.`;
 }
 
 export function canScheduleReminder(candidate) {
@@ -206,6 +207,65 @@ async function hasInterviewKeepaliveSinceLastInbound(prisma, candidateId, lastIn
   });
 
   return recentOutbounds.some((message) => message?.rawPayload?.source === INTERVIEW_KEEPALIVE_SOURCE);
+}
+
+async function hasReminderReplyAfterSentAt(prisma, booking) {
+  if (!booking?.candidateId || !booking?.reminderSentAt || typeof prisma?.message?.findMany !== 'function') return false;
+  const replies = await prisma.message.findMany({
+    where: {
+      candidateId: booking.candidateId,
+      direction: 'INBOUND',
+      createdAt: { gte: booking.reminderSentAt }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 5
+  });
+  return replies.length > 0;
+}
+
+async function runInterviewNoResponseDispatcher(prisma, now = new Date(), candidateId = null) {
+  if (typeof prisma?.interviewBooking?.findMany !== 'function' || typeof prisma?.interviewBooking?.update !== 'function') return;
+
+  const windowEnd = new Date(now.getTime() + 5 * 60 * 1000);
+  const bookings = await prisma.interviewBooking.findMany({
+    where: {
+      ...(candidateId ? { candidateId } : {}),
+      status: { in: ['SCHEDULED', 'CONFIRMED'] },
+      reminderSentAt: { not: null },
+      scheduledAt: {
+        gte: now,
+        lte: windowEnd
+      }
+    },
+    orderBy: { scheduledAt: 'asc' },
+    select: {
+      id: true,
+      candidateId: true,
+      scheduledAt: true,
+      status: true,
+      reminderSentAt: true,
+      reminderWindowClosed: true
+    }
+  });
+
+  for (const booking of bookings) {
+    const hasReminderReply = await hasReminderReplyAfterSentAt(prisma, booking);
+    if (!shouldMarkNoResponse(booking, { now, hasReminderReply })) continue;
+
+    await prisma.interviewBooking.update({
+      where: { id: booking.id },
+      data: {
+        status: 'NO_RESPONSE',
+        reminderWindowClosed: true
+      }
+    });
+    console.log('[REMINDER_TRACE]', JSON.stringify({
+      event: 'interview_marked_no_response',
+      bookingId: booking.id,
+      candidateId: booking.candidateId,
+      scheduledAt: new Date(booking.scheduledAt).toISOString()
+    }));
+  }
 }
 
 function getInterviewReminderWindow(now = new Date()) {
@@ -397,6 +457,7 @@ export async function runCandidateProcessReminderDispatcher(prisma, { now = new 
 
 export async function runInterviewReminderDispatcher(prisma, { now = new Date(), candidateId = null } = {}) {
   await runInterviewBookingReminderDispatcher(prisma, now, candidateId);
+  await runInterviewNoResponseDispatcher(prisma, now, candidateId);
   await runInterviewKeepaliveDispatcher(prisma, now, candidateId);
 }
 

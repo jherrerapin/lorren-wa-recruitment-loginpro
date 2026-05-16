@@ -54,21 +54,27 @@ export function isWithinInterviewConfirmationWindow(booking, now = new Date()) {
 export function detectInterviewIntent({ text = '', booking = null, now = new Date() } = {}) {
   if (!hasActiveInterviewBooking(booking)) return 'none';
 
-  const n = normalize(text);
+  const n = normalize(text)
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!n) return 'none';
 
-  if (/\b(cancel|cancelar|cancelo|ya no voy|no voy|no podre asistir|no podre ir)\b/.test(n)) {
-    return isInterviewSameBogotaDay(booking, now) ? 'cancel_interview' : 'none';
+  const reminderContext = Boolean(booking?.reminderSentAt || booking?.reminderWindowClosed);
+
+  if (/\b(cancel|cancelar|cancelo|ya no voy|no voy|no asistire|no puedo asistir|no puedo ir|no podre asistir|no podre ir|no alcanzo|no estoy disponible)\b/.test(n)) {
+    return 'cancel_interview';
   }
 
-  if (/\b(reagend|reprogram|otro horario|otra hora|otro dia|cambiar horario|mover cita|me pasas otra fecha)\b/.test(n)) {
-    return isInterviewSameBogotaDay(booking, now) ? 'reschedule_interview' : 'none';
+  if (/\b(reagend|reprogram|otro horario|otra hora|otro dia|otra fecha|cambiar horario|cambiar la cita|mover cita|mas tarde|me pasas otra fecha)\b/.test(n)) {
+    return 'reschedule_interview';
   }
 
-  const hasAffirmativeInterviewSignal = /\b(confirmo|si voy|si ire|alla estare|estare ahi|asistire|nos vemos|confirmada)\b/.test(n);
-  if (!hasAffirmativeInterviewSignal) return 'none';
+  const hasStrongAffirmativeInterviewSignal = /\b(confirmo|confirmada|confirmado|si voy|si ire|si asistire|alla estare|estare ahi|asistire|nos vemos|cuenten conmigo)\b/.test(n);
+  const hasShortReminderAffirmation = reminderContext && /^(si|sí|sii|claro|ok|okay|dale|listo|perfecto|confirmo|alla estare|voy)$/.test(n);
+  if (!hasStrongAffirmativeInterviewSignal && !hasShortReminderAffirmation) return 'none';
 
-  if (!isWithinInterviewConfirmationWindow(booking, now)) return 'none';
+  if (!reminderContext && !isWithinInterviewConfirmationWindow(booking, now)) return 'none';
   return 'confirm_attendance';
 }
 

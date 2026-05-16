@@ -46,18 +46,18 @@ test('"confirmo" el mismo día de la entrevista sí detecta confirm_attendance',
   assert.equal(intent, 'confirm_attendance');
 });
 
-test('detecta cancelación y reagendamiento solo el día de la entrevista', () => {
+test('detecta cancelación y reagendamiento con intención explícita aunque sea antes del día de la entrevista', () => {
   const sameDay = new Date('2026-04-24T13:00:00.000Z');
   const previousDay = new Date('2026-04-23T18:00:00.000Z');
 
   assert.equal(detectInterviewIntent({ text: 'quiero cancelar la entrevista', booking: baseBooking, now: sameDay }), 'cancel_interview');
   assert.equal(detectInterviewIntent({ text: 'necesito reagendar, dame otro horario', booking: baseBooking, now: sameDay }), 'reschedule_interview');
 
-  assert.equal(detectInterviewIntent({ text: 'quiero cancelar la entrevista', booking: baseBooking, now: previousDay }), 'none');
-  assert.equal(detectInterviewIntent({ text: 'necesito reagendar, dame otro horario', booking: baseBooking, now: previousDay }), 'none');
+  assert.equal(detectInterviewIntent({ text: 'quiero cancelar la entrevista', booking: baseBooking, now: previousDay }), 'cancel_interview');
+  assert.equal(detectInterviewIntent({ text: 'necesito reagendar, dame otro horario', booking: baseBooking, now: previousDay }), 'reschedule_interview');
 });
 
-test('no marca NO_RESPONSE automáticamente aunque falten 5 minutos y no haya respuesta', () => {
+test('marca NO_RESPONSE faltando 5 minutos si no hubo respuesta al reminder', () => {
   const booking = {
     ...baseBooking,
     reminderSentAt: new Date('2026-04-24T16:55:00.000Z')
@@ -68,6 +68,6 @@ test('no marca NO_RESPONSE automáticamente aunque falten 5 minutos y no haya re
       now: new Date('2026-04-24T17:55:00.000Z'),
       hasReminderReply: false
     }),
-    false
+    true
   );
 });

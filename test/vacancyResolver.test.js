@@ -106,3 +106,20 @@ test('resolveVacancyFromText solo usa inactiva si las activas de la ciudad no co
   assert.equal(resolution.vacancy.id, 'vac-iba-coord-inactive');
   assert.equal(resolution.reason, 'matched_inactive_vacancy');
 });
+
+
+test('detectRoleHintFromText ignora cargos incoherentes no configurados como ginecologo', () => {
+  const roleHint = detectRoleHintFromText('busco trabajo como ginecologo', { city: 'Ibague' });
+  assert.equal(roleHint, null);
+});
+
+test('resolveVacancyFromText no asigna vacante por cargo incoherente aunque haya una sola activa', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Estoy en Ibague y busco para ginecologo', {
+    activeVacancies: [activeIbagueVacancy],
+    allVacancies: [activeIbagueVacancy]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.city, 'Ibague');
+  assert.equal(resolution.reason, 'city_with_active_vacancies');
+});

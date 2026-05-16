@@ -82,9 +82,9 @@ Este delta refina componentes existentes sin rehacer arquitectura:
   - Cancelación explícita: `booking.status = CANCELLED` + `reminderResponse` con evidencia textual.
   - Reagendamiento explícito: `booking.status = RESCHEDULED` + `reminderResponse`, conservando oferta de nuevo slot cuando hay wiring.
 
-- **Política NO_RESPONSE (10 minutos antes)**:
-  - Configurable por `INTERVIEW_NO_RESPONSE_MINUTES_BEFORE` (default `10`).
-  - Si reminder ya salió y no existe respuesta inbound del candidato, al entrar en umbral se marca `NO_RESPONSE`.
+- **Política NO_RESPONSE (5 minutos antes)**:
+  - Regla operativa: faltando 5 minutos para la entrevista.
+  - Si el recordatorio ya salió y no existe respuesta inbound posterior del candidato, al entrar en el umbral se marca `NO_RESPONSE`.
   - Luego de `NO_RESPONSE`, no se insiste con keepalive ni nuevos recordatorios automáticos para esa entrevista.
 
 - **Keepalive y cero insistencia post-entrevista**:

@@ -31,12 +31,12 @@ const INTENT_VARIANTS = {
   ],
   continue_flow: [
     'Perfecto, gracias. Continúo con tu postulación y te pido el siguiente dato enseguida.',
-    'Excelente, con eso seguimos avanzando en tu registro.',
-    '¡Listo! Continuemos con el siguiente paso de tu postulación.'
+    'Gracias, eso ayuda a avanzar con tu registro.',
+    'Listo, seguimos con lo puntual que falta para tu postulación.'
   ],
   request_missing_data: [
     'Para continuar necesito este dato pendiente. En cuanto me lo compartas, seguimos.',
-    'Vamos bien. Solo me falta ese dato para avanzar con tu postulación.',
+    'Vamos bien; compárteme ese dato puntual y seguimos.',
     'Gracias. Compárteme ese dato faltante y continúo de inmediato con tu proceso.'
   ]
 };
@@ -69,8 +69,8 @@ function isStrongRepeat(candidateReply, recentOutbound = []) {
 function buildContextSuffix(contextSummary = '') {
   const normalized = normalize(contextSummary);
   if (!normalized) return '';
-  if (normalized.includes('pregunta')) return ' Respondo tu pregunta y seguimos.';
-  if (normalized.includes('adjunto') || normalized.includes('archivo')) return ' Ya revise el adjunto que enviaste.';
+  if (normalized.includes('pregunta')) return ' Te respondo eso primero.';
+  if (normalized.includes('adjunto') || normalized.includes('archivo')) return ' Recibí el adjunto que enviaste.';
   return '';
 }
 
