@@ -7,6 +7,12 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeRecordId(value) {
+  const id = normalizeString(value);
+  if (!id || id.length > 128 || !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  return id;
+}
+
 function ensureDevRole(req, res, next) {
   if (req.session?.userRole === 'dev') return next();
   return res.redirect('/admin?error=' + encodeURIComponent('Solo desarrollo puede gestionar aprendizajes de Lórren.'));
@@ -23,7 +29,7 @@ export function botKnowledgeCrudRouter(prisma) {
   router.use(express.urlencoded({ extended: true }));
 
   router.post('/:id/update', async (req, res) => {
-    const id = normalizeString(req.params.id);
+    const id = normalizeRecordId(req.params.id);
     const scope = normalizeKnowledgeScope(req.body.scope);
     const content = normalizeKnowledgeContent(req.body.content);
     const tags = normalizeKnowledgeContent(req.body.tags);
@@ -56,7 +62,7 @@ export function botKnowledgeCrudRouter(prisma) {
   });
 
   router.post('/:id/delete', async (req, res) => {
-    const id = normalizeString(req.params.id);
+    const id = normalizeRecordId(req.params.id);
     if (!id) return res.redirect(redirectWith('error', 'Aprendizaje inválido.'));
 
     try {

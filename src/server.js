@@ -9,6 +9,7 @@ import cookieParser from 'cookie-parser';
 import { PrismaClient } from '@prisma/client';
 import { webhookRouter } from './routes/webhook.js';
 import { adminRouter } from './routes/admin.js';
+import { botKnowledgeCrudRouter } from './routes/botKnowledgeCrud.js';
 import { locationsRouter } from './routes/locations.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -272,6 +273,7 @@ app.post('/logout', destroySession);
 app.get('/logout', destroySession);
 
 app.use('/webhook', webhookRouter(prisma));
+app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/admin', adminRouter(prisma));
 app.use('/admin/locations', locationsRouter(prisma));
 
