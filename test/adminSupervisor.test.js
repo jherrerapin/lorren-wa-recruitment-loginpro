@@ -4,7 +4,7 @@ import axios from 'axios';
 import { MessageDirection } from '@prisma/client';
 import { createMockPrisma } from './helpers/mockPrisma.js';
 import { createWhatsappMock } from './helpers/mockWhatsapp.js';
-import { ensureSupervisorWindowOpen, handleSupervisorInbound, notifySupervisorManualReview } from '../src/services/adminSupervisor.js';
+import { ensureSupervisorWindowOpen, handleSupervisorInbound, notifySupervisorAttachment, notifySupervisorManualReview } from '../src/services/adminSupervisor.js';
 
 function withWhatsappMock(fn) {
   return async () => {
@@ -106,4 +106,89 @@ test('escala duda al administrador, aplica respuesta al candidato y crea aprendi
   assert.equal(prisma.state.botKnowledge.length, 1);
   assert.match(prisma.state.botKnowledge[0].content, /Instruccion validada por administrador/);
   assert.match(prisma.state.botKnowledge[0].content, /Respuesta sugerida por Lorren/);
+}));
+
+test('acuse corto del administrador después de intervención manual no se reenvía al candidato', withWhatsappMock(async (whatsappMock) => {
+  const requestCreatedAt = new Date('2026-05-16T14:00:00.000Z');
+  const prisma = createMockPrisma({
+    candidates: [{
+      id: 'cand-ack',
+      phone: '573204657596',
+      fullName: 'Alexander Guzman',
+      botPaused: true,
+      currentStep: 'SCHEDULED'
+    }, {
+      id: 'admin-candidate',
+      phone: '3052982551',
+      fullName: 'Administrador del sistema'
+    }],
+    messages: [{
+      id: 'manual-request-1',
+      candidateId: 'cand-ack',
+      direction: MessageDirection.OUTBOUND,
+      messageType: 'TEXT',
+      body: 'Lórren requiere apoyo humano.',
+      createdAt: requestCreatedAt,
+      rawPayload: {
+        target: 'admin_supervisor',
+        source: 'admin_manual_review_request',
+        inboundText: '¿Solo hay entrevistas a las 10?',
+        resolved: false
+      }
+    }, {
+      id: 'manual-outbound-1',
+      candidateId: 'cand-ack',
+      direction: MessageDirection.OUTBOUND,
+      messageType: 'TEXT',
+      body: 'Hay más horarios disponibles, ya te confirmamos por este medio.',
+      createdAt: new Date('2026-05-16T14:02:00.000Z'),
+      rawPayload: {
+        actor: 'RECRUITER',
+        source: 'admin_outbound',
+        sourceCategory: 'MANUAL_AUTHORIZED'
+      }
+    }]
+  });
+
+  const result = await handleSupervisorInbound(prisma, {
+    id: 'wamid-admin-perfecto',
+    from: '3052982551',
+    type: 'text',
+    text: { body: 'perfecto' }
+  });
+
+  assert.equal(result.action, 'ack_resolved_after_manual_outbound');
+  assert.equal(whatsappMock.sentMessages.length, 0);
+  const request = await prisma.message.findUnique({ where: { id: 'manual-request-1' } });
+  assert.equal(request.rawPayload.resolved, true);
+  assert.equal(request.rawPayload.resolvedBy, 'manual_candidate_outbound_ack');
+  assert.equal(prisma.state.messages.some((message) => message.rawPayload?.source === 'admin_supervisor_answer'), false);
+}));
+
+test('notificación de adjunto queda en hilo del administrador y no en chat del candidato', withWhatsappMock(async (whatsappMock) => {
+  const prisma = createMockPrisma({
+    candidates: [{
+      id: 'cand-attachment',
+      phone: '573204657596',
+      fullName: 'Alexander Guzman'
+    }, {
+      id: 'admin-candidate',
+      phone: '3052982551',
+      fullName: 'Administrador del sistema'
+    }]
+  });
+  const candidate = await prisma.candidate.findUnique({ where: { id: 'cand-attachment' } });
+
+  await notifySupervisorAttachment(prisma, candidate, {
+    mediaType: 'document',
+    media: { id: 'media-1', filename: 'hv.pdf', mime_type: 'application/pdf' },
+    caption: 'hv.pdf'
+  });
+
+  assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
+  assert.match(whatsappMock.sentMessages[0].body, /Documento recibido de 573204657596 \(Alexander Guzman\)/);
+  assert.equal(whatsappMock.sentMessages.some((message) => message.to === '573204657596'), false);
+  const notice = prisma.state.messages.find((message) => message.rawPayload?.source === 'admin_attachment_forward_notice');
+  assert.equal(notice.candidateId, 'admin-candidate');
+  assert.equal(notice.rawPayload.candidateId, 'cand-attachment');
 }));

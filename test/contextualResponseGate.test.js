@@ -200,3 +200,24 @@ test('fuentes manuales autorizadas se distinguen de salidas automáticas', () =>
   assert.equal(isManualOutboundSource('admin_manual_vacancy_info'), true);
   assert.equal(isManualOutboundSource('bot_flow'), false);
 });
+
+test('pregunta por horarios después de las 10 se escala al administrador sin respuesta automática', () => {
+  const semanticIntent = inferContextualSemanticIntent({
+    text: '¿Solo hay entrevistas a las 10 o hay más después de las 10?',
+    isQuestion: true
+  });
+  assert.equal(semanticIntent, 'ASK_INTERVIEW_AVAILABILITY');
+
+  const result = evaluateContextualResponseGate({
+    candidate: completeCandidate({ currentStep: 'SCHEDULED' }),
+    vacancy: vacancy({ schedulingEnabled: true }),
+    activeInterviewBooking: { id: 'booking-1', status: 'SCHEDULED', scheduledAt: new Date('2026-05-16T15:00:00.000Z') },
+    recentMessages: [],
+    semanticIntent
+  });
+
+  assert.equal(result.shouldReply, false);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
+  assert.match(result.reason, /availability|human validation/i);
+});
