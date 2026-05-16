@@ -31,6 +31,9 @@ const LOGISTIC_INTENTS = new Set([
   'ASK_INTERVIEW_CONTACT_PERSON',
   'ASK_REQUIRED_DOCUMENTS'
 ]);
+const APPOINTMENT_MANUAL_REVIEW_INTENTS = new Set([
+  'REPORT_ARRIVAL_PROBLEM'
+]);
 const APPOINTMENT_ACTION_INTENTS = new Set([
   'CONFIRM_ATTENDANCE',
   'CANCEL_ATTENDANCE',
@@ -194,11 +197,12 @@ export function inferContextualSemanticIntent({
   if (interviewIntent === 'reschedule_interview') return 'REQUEST_RESCHEDULE';
   if (hasCvAttachment || resolvedIntent === 'cv_intent') return 'SEND_CV';
   if (['post_completion_ack', 'thanks', 'farewell'].includes(resolvedIntent)) return resolvedIntent === 'farewell' ? 'FAREWELL' : 'ACKNOWLEDGEMENT';
+  const normalized = normalize(text);
+  if (/\b(me\s+perdi|estoy\s+perdid[oa]|me\s+desubique|no\s+conozco|transbord|inconveniente|me\s+demor[eo]|voy\s+tarde|llego\s+tarde|retrasad[oa]|no\s+alcanzo|se\s+me\s+hizo\s+tarde)\b/.test(normalized)) return 'REPORT_ARRIVAL_PROBLEM';
   if (resolvedIntent === 'confirmation_yes') return 'SOFT_CONFIRMATION';
   if (resolvedIntent === 'faq') return 'ASK_APPLICATION_STATUS';
   if (hasDataIntent) return 'PROVIDE_EXTRA_DATA';
 
-  const normalized = normalize(text);
   if (isQuestion) {
     const hasInterviewTopic = /\b(entrevist\w*|cita|presentar|llegar|asistir|ir)\b/.test(normalized);
     if (/\b(direccion|ubicacion|donde|queda|lugar|sede)\b/.test(normalized)) return 'ASK_INTERVIEW_ADDRESS';
@@ -268,6 +272,16 @@ export function evaluateContextualResponseGate({
         shouldReply: false,
         allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
         reason: 'Candidate has an active appointment and asked a question that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
+        responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
+        requiresHumanReview: true
+      });
+    }
+
+    if (APPOINTMENT_MANUAL_REVIEW_INTENTS.has(semanticIntent)) {
+      return decision({
+        shouldReply: false,
+        allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
+        reason: 'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
         responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
         requiresHumanReview: true
       });

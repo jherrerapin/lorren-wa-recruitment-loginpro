@@ -100,6 +100,11 @@ test('escala duda al administrador, aplica respuesta al candidato y crea aprendi
   assert.equal(whatsappMock.sentMessages.length, 1);
   assert.equal(whatsappMock.sentMessages[0].to, '3052982551');
   assert.match(whatsappMock.sentMessages[0].body, /¿El turno es nocturno\?/);
+  const manualRequest = prisma.state.messages.find((message) => message.rawPayload?.source === 'admin_manual_review_request');
+  const supervisorCandidate = prisma.state.candidates.find((item) => item.phone === '3052982551');
+  assert.equal(manualRequest.candidateId, supervisorCandidate.id);
+  assert.equal(manualRequest.rawPayload.candidateId, 'cand-1');
+  assert.equal(prisma.state.messages.some((message) => message.candidateId === 'cand-1' && message.rawPayload?.source === 'admin_manual_review_request'), false);
 
   const result = await handleSupervisorInbound(prisma, {
     id: 'wamid-admin-1',

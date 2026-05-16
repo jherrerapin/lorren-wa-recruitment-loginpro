@@ -119,9 +119,11 @@ export async function notifySupervisorManualReview(prisma, candidate, { reason =
   ].filter(Boolean).join('\n');
 
   await sendTextMessage(supervisorPhone, body);
-  await saveSupervisorOutbound(prisma, candidate.id, body, {
+  await saveSupervisorThreadOutbound(prisma, body, {
     source: 'admin_manual_review_request',
     manualReviewType: reviewType,
+    candidateId: candidate.id,
+    candidatePhone: candidate.phone,
     reason,
     inboundText,
     resolved: false,
@@ -163,7 +165,8 @@ async function findPendingManualRequest(prisma) {
   for (const message of recentRequests) {
     const payload = message.rawPayload || {};
     if (payload.target === 'admin_supervisor' && payload.source === 'admin_manual_review_request' && payload.resolved !== true) {
-      const candidate = await prisma.candidate.findUnique({ where: { id: message.candidateId } });
+      const reviewCandidateId = payload.candidateId || message.candidateId;
+      const candidate = await prisma.candidate.findUnique({ where: { id: reviewCandidateId } });
       if (candidate?.botPaused) return { request: message, candidate };
     }
   }
