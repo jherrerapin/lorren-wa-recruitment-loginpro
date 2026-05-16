@@ -62,16 +62,18 @@ export function detectInterviewIntent({ text = '', booking = null, now = new Dat
 
   const reminderContext = Boolean(booking?.reminderSentAt || booking?.reminderWindowClosed);
 
-  if (/\b(cancel|cancelar|cancelo|ya no voy|no voy|no asistire|no puedo asistir|no puedo ir|no podre asistir|no podre ir|no alcanzo|no estoy disponible)\b/.test(n)) {
+  const hasCancellationSignal = /\b(cancel|cancelar|cancelo|cancele|cancelada|cancelado|ya no voy|no voy|no asistire|no asistir[eé]|no puedo asistir|no puedo ir|no podre asistir|no podr[eé] asistir|no podre ir|no podr[eé] ir|no alcanzo|no estoy disponible|no me presento|no puedo presentarme|imposible asistir|se me dificulta asistir|se me complica asistir)\b/.test(n);
+  if (hasCancellationSignal) {
     return 'cancel_interview';
   }
 
-  if (/\b(reagend|reprogram|otro horario|otra hora|otro dia|otra fecha|cambiar horario|cambiar la cita|mover cita|mas tarde|me pasas otra fecha)\b/.test(n)) {
+  const hasRescheduleSignal = /\b(reagend|reprogram|aplazar|posponer|otro horario|otra hora|otro dia|otro d[ií]a|otra fecha|cambiar horario|cambiar la cita|cambiarla|mover cita|mas tarde|m[aá]s tarde|mas temprano|m[aá]s temprano|me pasas otra fecha|puede ser manana|puede ser ma[ñn]ana|podemos cambiar|puedo cambiar|me queda mejor|llego tarde|voy tarde|no llego a tiempo)\b/.test(n);
+  if (hasRescheduleSignal) {
     return 'reschedule_interview';
   }
 
-  const hasStrongAffirmativeInterviewSignal = /\b(confirmo|confirmada|confirmado|si voy|si ire|si asistire|alla estare|estare ahi|asistire|nos vemos|cuenten conmigo)\b/.test(n);
-  const hasShortReminderAffirmation = reminderContext && /^(si|sí|sii|claro|ok|okay|dale|listo|perfecto|confirmo|alla estare|voy)$/.test(n);
+  const hasStrongAffirmativeInterviewSignal = /\b(confirmo|confirmada|confirmado|confirmo asistencia|confirmo mi asistencia|te confirmo|si voy|s[ií] voy|si ire|s[ií] ire|si asistire|s[ií] asistire|si puedo asistir|s[ií] puedo asistir|voy a asistir|voy para alla|voy para all[aá]|voy en camino|alla estare|all[aá] estare|ahi estare|ah[ií] estare|estare ahi|estar[eé] ahi|estar[eé] all[aá]|estare puntual|estar[eé] puntual|asistire|asistir[eé]|me presento|nos vemos|cuenten conmigo|cuenta conmigo)\b/.test(n);
+  const hasShortReminderAffirmation = reminderContext && /^(si|s[ií]|sii|claro|ok|okay|vale|dale|listo|perfecto|confirmo|confirmada|confirmado|alla estare|all[aá] estare|ahi estare|ah[ií] estare|voy|voy en camino)$/.test(n);
   if (!hasStrongAffirmativeInterviewSignal && !hasShortReminderAffirmation) return 'none';
 
   if (!reminderContext && !isWithinInterviewConfirmationWindow(booking, now)) return 'none';

@@ -324,8 +324,8 @@ function buildEngineDecision(systemPrompt, userText) {
 function buildNaturalReply(systemPrompt = '') {
   const dateMatch = systemPrompt.match(/Horario a ofrecer:\s*([^\n.]+)/i) || systemPrompt.match(/Fecha\/hora:\s*([^\n.]+)/i);
   const dateText = dateMatch?.[1]?.trim() || 'el horario disponible';
-  if (/confirm[aá].*entrevista agendada/i.test(systemPrompt) || /recordatorio (?:una hora|1 hora|30 minutos) antes/i.test(systemPrompt)) {
-    return `Listo, tu entrevista quedo agendada para ${dateText}. Te escribimos 1 hora antes para recordarte.`;
+  if (/confirm[aá].*entrevista agendada/i.test(systemPrompt) || /recordatorio (?:una hora|1 hora|50 minutos|40 minutos|30 minutos) antes/i.test(systemPrompt)) {
+    return `Listo, tu entrevista quedo agendada para ${dateText}. Te escribimos 40 minutos antes para recordarte.`;
   }
   return `Perfecto, te puedo ofrecer ${dateText}. Me confirmas si te sirve.`;
 }

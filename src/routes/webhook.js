@@ -1819,7 +1819,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           where: { id: activeBooking.id },
           data: {
             status: 'CANCELLED',
-            reminderResponse: cleanText
+            reminderResponse: cleanText,
+            reminderWindowClosed: true
           }
         });
       }
@@ -1840,7 +1841,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           where: { id: activeBooking.id },
           data: {
             status: 'RESCHEDULED',
-            reminderResponse: cleanText
+            reminderResponse: cleanText,
+            reminderWindowClosed: true
           }
         });
       }
@@ -1867,7 +1869,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         where: { id: activeBooking.id },
         data: {
           status: 'CONFIRMED',
-          reminderResponse: cleanText
+          reminderResponse: cleanText,
+          reminderWindowClosed: true
         }
       });
       const body = `Perfecto, gracias por confirmar asistencia. Te esperamos ${nextSlot?.formattedDate || 'en el horario acordado'}.`;

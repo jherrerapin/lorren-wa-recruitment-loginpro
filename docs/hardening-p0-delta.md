@@ -12,7 +12,7 @@ Este delta refina componentes existentes sin rehacer arquitectura:
 - **Attachment analyzer**: se fija política explícita para `.doc` legacy: no se procesa con `mammoth`, se clasifica como `OTHER` (`unsupported_doc_format`) y se solicita reenviar HV en PDF o DOCX para evitar falsos `CV_VALID`.
 - **Webhook**: enruta adjuntos y continuidad de faltantes por `contextualReply` como vía principal; mantiene decisiones de negocio deterministas (guardar/no guardar HV, update de estado y booking).
 - **Webhook**: reduce mensajes hardcodeados en adjuntos/follow-up y usa `responsePolicy` solo como respaldo técnico.
-- **Reminder/keepalive**: recordatorio operativo ajustado a una hora y encolado con JobQueue (cuando `FF_POSTGRES_JOB_QUEUE=true`); keepalive se corta como política permanente al detectar entrevista vencida, reminder ya intentado o booking inactivo (sin depender de rollout adicional).
+- **Reminder/keepalive**: recordatorio operativo ajustado a 40 minutos y encolado con JobQueue (cuando `FF_POSTGRES_JOB_QUEUE=true`); keepalive se corta como política permanente al detectar entrevista vencida, reminder ya intentado o booking inactivo (sin depender de rollout adicional).
 - **Job worker**: el job `INTERVIEW_REMINDER` procesa por `candidateId` (payload) para evitar ejecuciones amplias no deterministas.
 - **JobQueue**: se agrega `completedAt` para trazabilidad de finalización en jobs `DONE` y `FAILED` terminales.
 - **Tests**: se amplían casos delta para saludo/nombre, calle 80/edad, género explícito vs ambiguo, no repetición fuerte, reminder + corte keepalive y clasificación de adjuntos.
@@ -65,7 +65,7 @@ Este delta refina componentes existentes sin rehacer arquitectura:
   - Un “confirmo” temprano, fuera de ventana y sin reminder enviado, **no** cambia estado.
 
 - **Recordatorio real de entrevista**:
-  - Se ejecuta a `scheduledAt - 1 hora`.
+  - Se ejecuta a `scheduledAt - 40 minutos`.
   - Marca `reminderSentAt` y cierra keepalive (`reminderWindowClosed=true`).
   - Solo envía si booking está activo (`SCHEDULED`/`CONFIRMED`), no vencido y sin reminder previo.
   - El copy es explícitamente de entrevista (no de faltantes/HV).
