@@ -36,6 +36,7 @@ import { getReminderMissingItems } from '../services/reminder.js';
 import { clearCandidateCvStorage, resolveCandidateCvBuffer, storeCandidateCv } from '../services/cvStorage.js';
 import { isStorageConfigured } from '../services/storage.js';
 import { loadPendingCvMigrationCount, migrateCandidateCvBatch } from '../services/cvMigration.js';
+import { normalizeKnowledgeContent, normalizeKnowledgeScope } from '../services/botKnowledge.js';
 import {
   buildCandidateAccessWhere,
   buildUniqueRecruiterUsername,
@@ -1689,6 +1690,68 @@ export function adminRouter(prisma) {
     });
   });
 
+
+  router.get('/bot-knowledge', ensureDevRole, async (req, res) => {
+    const success = normalizeString(req.query.success);
+    const error = normalizeString(req.query.error);
+    const entries = await prisma.botKnowledge.findMany({
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+      take: 100
+    }).catch(() => []);
+    const vacancies = await prisma.vacancy.findMany({
+      orderBy: [{ city: 'asc' }, { title: 'asc' }],
+      select: { id: true, title: true, city: true, role: true, isActive: true, acceptingApplications: true }
+    }).catch(() => []);
+
+    res.render('botKnowledge', {
+      role: req.userRole,
+      canManageUsers: canManageRecruiterUsers(req),
+      entries,
+      vacancies,
+      success,
+      error,
+      formatDateTimeCO
+    });
+  });
+
+  router.post('/bot-knowledge', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const scope = normalizeKnowledgeScope(req.body.scope);
+    const content = normalizeKnowledgeContent(req.body.content);
+    const tags = normalizeKnowledgeContent(req.body.tags);
+    const vacancyId = scope === 'VACANCY' ? normalizeString(req.body.vacancyId) : null;
+    const candidateId = scope === 'CANDIDATE' ? normalizeString(req.body.candidateId) : null;
+
+    if (!content) {
+      return res.redirect('/admin/bot-knowledge?error=' + encodeURIComponent('El aprendizaje no puede estar vacío.'));
+    }
+    if (scope === 'VACANCY' && !vacancyId) {
+      return res.redirect('/admin/bot-knowledge?error=' + encodeURIComponent('Selecciona una vacante para el aprendizaje de vacante.'));
+    }
+
+    await prisma.botKnowledge.create({
+      data: {
+        scope,
+        content,
+        tags: tags || null,
+        vacancyId,
+        candidateId,
+        createdBy: req.username || req.userRole || 'dev',
+        updatedBy: req.username || req.userRole || 'dev'
+      }
+    });
+
+    res.redirect('/admin/bot-knowledge?success=' + encodeURIComponent('Aprendizaje agregado a Lórren.'));
+  });
+
+  router.post('/bot-knowledge/:id/toggle', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const isActive = req.body.isActive === 'true';
+    await prisma.botKnowledge.update({
+      where: { id: req.params.id },
+      data: { isActive, updatedBy: req.username || req.userRole || 'dev' }
+    }).catch(() => null);
+    res.redirect('/admin/bot-knowledge?success=' + encodeURIComponent(isActive ? 'Aprendizaje activado.' : 'Aprendizaje pausado.'));
+  });
+
   router.get('/candidates/:id', async (req, res) => {
     const returnToPath = safeAdminReturnPath(req.query.returnTo || '/admin');
     const accessContext = getRequestAccessContext(req);
@@ -1804,6 +1867,8 @@ export function adminRouter(prisma) {
     const outboundError   = normalizeString(req.query.outboundError);
     const botPauseSuccess = normalizeString(req.query.botPauseSuccess);
     const botPauseError   = normalizeString(req.query.botPauseError);
+    const botKnowledgeSuccess = normalizeString(req.query.botKnowledgeSuccess);
+    const botKnowledgeError = normalizeString(req.query.botKnowledgeError);
     const bookingSuccess  = normalizeString(req.query.bookingSuccess || req.query.success);
     const bookingError    = normalizeString(req.query.bookingError || req.query.error);
 
@@ -1820,6 +1885,7 @@ export function adminRouter(prisma) {
       returnToPath,
       outboundWindow, cvSuccess, cvError,
       outboundSuccess, outboundError, botPauseSuccess, botPauseError,
+      botKnowledgeSuccess, botKnowledgeError,
       bookingSuccess, bookingError, isFemaleHumanReviewCandidate
     });
   });
@@ -2466,6 +2532,30 @@ export function adminRouter(prisma) {
   });
 
   // ── CV: descargar ────────────────────────────────────────────
+
+  router.post('/candidates/:id/bot-knowledge', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
+    const { id } = req.params;
+    const content = normalizeKnowledgeContent(req.body.content);
+    const tags = normalizeKnowledgeContent(req.body.tags);
+    const candidate = await prisma.candidate.findUnique({ where: { id }, select: { id: true, vacancyId: true } });
+    if (!candidate) return res.redirect(`/admin/candidates/${id}?botKnowledgeError=` + encodeURIComponent('Candidato no encontrado.'));
+    if (!content) return res.redirect(`/admin/candidates/${id}?botKnowledgeError=` + encodeURIComponent('El aprendizaje no puede estar vacío.'));
+
+    await prisma.botKnowledge.create({
+      data: {
+        scope: 'CANDIDATE',
+        content,
+        tags: tags || null,
+        candidateId: candidate.id,
+        vacancyId: candidate.vacancyId || null,
+        createdBy: req.username || req.userRole || 'dev',
+        updatedBy: req.username || req.userRole || 'dev'
+      }
+    });
+
+    res.redirect(`/admin/candidates/${id}?botKnowledgeSuccess=` + encodeURIComponent('Aprendizaje agregado a Lórren para este candidato.'));
+  });
+
   router.get('/candidates/:id/cv', async (req, res) => {
     const candidate = await prisma.candidate.findUnique({ where: { id: req.params.id } });
     if (!candidate) return res.status(404).send('CV no encontrado.');

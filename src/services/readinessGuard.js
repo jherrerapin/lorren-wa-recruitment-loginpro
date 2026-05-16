@@ -121,7 +121,7 @@ export function getFirstMissingFieldLabel(readiness = {}) {
 export function buildMissingFieldReply(readiness = {}) {
   if (!readiness?.missingFields?.length) {
     if (!readiness?.hasValidCv) return 'Para continuar, adjunta tu hoja de vida como archivo PDF o Word/DOCX.';
-    return 'Ya tengo la información principal; voy a revisar el siguiente paso del proceso.';
+    return 'La información principal está lista; sigo con el punto concreto que falta para avanzar.';
   }
   const label = getFirstMissingFieldLabel(readiness);
   return `Para avanzar de forma correcta, confírmame por favor ${label}.`;

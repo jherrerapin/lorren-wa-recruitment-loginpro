@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shouldMarkNoResponse } from '../src/services/interviewLifecycle.js';
 
-test('no cambia estado de entrevista automaticamente por falta de respuesta al recordatorio', () => {
+test('marca NO_RESPONSE faltando 5 minutos si no respondió al recordatorio', () => {
   const booking = {
     id: 'booking-pending-reply',
     status: 'SCHEDULED',
@@ -16,5 +16,5 @@ test('no cambia estado de entrevista automaticamente por falta de respuesta al r
     hasReminderReply: false
   });
 
-  assert.equal(result, false);
+  assert.equal(result, true);
 });

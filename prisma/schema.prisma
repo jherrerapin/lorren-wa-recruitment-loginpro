@@ -319,3 +319,21 @@ model AttachmentAnalysis {
 
   @@index([candidateId, createdAt])
 }
+
+model BotKnowledge {
+  id          String   @id @default(cuid())
+  scope       String   @default("GLOBAL")
+  content     String
+  tags        String?
+  vacancyId   String?
+  candidateId String?
+  isActive    Boolean  @default(true)
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([scope, isActive, updatedAt])
+  @@index([vacancyId, isActive])
+  @@index([candidateId, isActive])
+}

@@ -155,6 +155,7 @@
     <% if (role === 'dev') { %>
       <a href="/admin/operaciones">Operaciones / Despacho</a>
       <a href="/admin/monitor">Monitor</a>
+      <a href="/admin/bot-knowledge">Aprendizajes Lórren</a>
     <% } %>
     <form method="post" action="/logout" style="margin-left:auto;">
       <button type="submit" style="background:transparent;border:1px solid #ecf0f1;color:#ecf0f1;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:13px;">Cerrar sesión</button>
@@ -224,6 +225,12 @@
     <% } %>
     <% if (bookingSuccess) { %>
       <div class="alert alert-success"><%= bookingSuccess %></div>
+    <% } %>
+    <% if (botKnowledgeSuccess) { %>
+      <div class="alert alert-success"><%= botKnowledgeSuccess %></div>
+    <% } %>
+    <% if (botKnowledgeError) { %>
+      <div class="alert alert-error"><%= botKnowledgeError %></div>
     <% } %>
     <% if (bookingError) { %>
       <div class="alert alert-error"><%= bookingError %></div>
@@ -567,6 +574,28 @@
         </div>
       <% } %>
     </div>
+
+
+    <% if (role === 'dev') { %>
+      <div class="card">
+        <h2>Alimentar a Lórren sobre este candidato</h2>
+        <p style="margin:0 0 12px;color:#64748b;font-size:13px;">Agrega contexto curado para que Lórren lo use como memoria de este proceso. Escribe criterios o hechos útiles; no pegues frases para repetir literalmente.</p>
+        <form method="post" action="/admin/candidates/<%= candidate.id %>/bot-knowledge" class="edit-form">
+          <div class="field-group">
+            <label for="botKnowledgeTags">Etiquetas</label>
+            <input id="botKnowledgeTags" name="tags" type="text" placeholder="contexto, tono, objeción" />
+          </div>
+          <div class="field-group field-group-full">
+            <label for="botKnowledgeContent">Información manual para el bot</label>
+            <textarea id="botKnowledgeContent" name="content" rows="4" placeholder="Ej: El candidato pidió trato breve; si solo agradece, no insistir con mensajes adicionales." required></textarea>
+          </div>
+          <div class="form-actions field-group-full">
+            <button type="submit" class="btn-primary">Guardar aprendizaje para Lórren</button>
+            <a href="/admin/bot-knowledge" class="btn-secondary">Ver aprendizajes globales</a>
+          </div>
+        </form>
+      </div>
+    <% } %>
 
     <% if (role === 'dev') { %>
       <div class="card">

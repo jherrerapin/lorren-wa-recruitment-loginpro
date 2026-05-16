@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { listOfferableSlots } from '../src/services/interviewScheduler.js';
+import { getInterviewReminderAt, listOfferableSlots } from '../src/services/interviewScheduler.js';
 
 function buildPrismaWithSlots(slots) {
   return {
@@ -49,4 +49,10 @@ test('listOfferableSlots permite horario del mismo dia cuando es asignacion manu
   const offers = await listOfferableSlots(prisma, 'vac-1', null, now, 0);
   assert.equal(offers.length, 1);
   assert.equal(offers[0].slot.id, 'slot-hoy');
+});
+
+
+test('getInterviewReminderAt calcula recordatorio 1 hora antes de la entrevista', () => {
+  const interviewDate = new Date('2026-04-08T22:00:00.000Z');
+  assert.equal(getInterviewReminderAt(interviewDate).toISOString(), '2026-04-08T21:00:00.000Z');
 });

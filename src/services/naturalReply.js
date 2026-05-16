@@ -111,14 +111,15 @@ function buildSystemPrompt(vacancy, candidate, conversationContext) {
     'Tu forma de comunicarte es cercana, directa y sin formalismos innecesarios — como un colombiano de RRHH que trata bien a la gente.',
     'NUNCA usés listas con viñetas ni numeración en tu respuesta.',
     'NUNCA usés formato Markdown (negritas, cursivas, etc.).',
-    'NUNCA menciones que sos un bot o IA, a menos que el candidato lo pregunte directamente.',
-    'NUNCA repitas frases que ya aparecen en la conversación reciente.',
+    'NUNCA menciones que sos un bot o IA, salvo si el candidato pregunta directamente quién sos, cómo te llamás o si sos bot; en ese caso respondé que sos Lórren, asistente de selección de LoginPro, y no lo repitas en otros turnos.',
+    'NUNCA repitas frases que ya aparecen en la conversación reciente ni uses muletillas como "Ya tengo la información principal; voy a revisar el siguiente paso del proceso".',
     'NUNCA inventés cargos, sectores, salarios, horarios, beneficios, requisitos, documentos ni categorías de vacantes: usá solo la información registrada en la vacante asignada dentro del contexto.',
     'La documentación para entrevista solo puede salir del campo Documentación requerida para la entrevista de la vacante asignada; si no aparece allí, decí que no la tienes registrada.',
     'Si el candidato pregunta por un dato que no aparece en la información de la vacante asignada, decí de forma natural que no lo tienes registrado; no lo completes por intuición ni por historial.',
     'Saludá solo cuando sea primer contacto o cuando el candidato acaba de saludar; en confirmaciones, agendamientos, correcciones y seguimiento continuá directo sin abrir con Hola.',
     'Respondé SIEMPRE en menos de 3 oraciones, de forma conversacional y variada.',
     'Si el candidato se presenta, respondé al saludo con calidez ANTES de pedir datos.',
+    'No respondás a cada mensaje por reflejo: si no hay nada útil que aportar, sé breve o dejá que el flujo determinístico avance.',
     'Variá el lenguaje: no siempre el mismo saludo ni la misma forma de pedir un dato.',
     `\n--- INFORMACIÓN DE LA VACANTE ---\n${vacancyBlock}`,
     candidateName ? `\n--- CANDIDATO ---\nNombre: ${candidateName} (usá su nombre cuando sea natural, no en cada mensaje)` : '',
@@ -246,7 +247,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
   }
 
   return resolved
-    ? `¡Hola! Gracias por comunicarte con LoginPro. Tenemos disponible la vacante de ${resolved.role} en ${resolved.city}. Para continuar necesito pedirte unos datos, ¿te parece bien?`
+    ? `¡Hola! Gracias por comunicarte con LoginPro. Tengo ubicada la vacante de ${resolved.role} en ${resolved.city}. Te comparto la información principal y, si te interesa, avanzamos con los datos necesarios.`
     : '¡Hola! Gracias por comunicarte con LoginPro. ¿Para cuál vacante y ciudad te estás comunicando?';
 }
 
@@ -328,7 +329,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
       `Listo${name}, quedaste agendado para el ${formattedDate}.`,
       address ? `La dirección es ${address}.` : '',
       docs ? `Recuerda traer: ${docs}.` : '',
-      'Te enviaré un recordatorio 30 minutos antes. ¡Mucha suerte!'
+      'Te enviaré un recordatorio 1 hora antes. ¡Mucha suerte!'
     ].filter(Boolean).join(' '), docs);
   }
 
@@ -340,7 +341,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     address ? `Dirección: ${address}.` : '',
     docs ? `Documentación configurada para entrevista: ${docs}.` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
     docs ? 'No conviertas la hoja de vida configurada a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
-    'Avisá que le llegará un recordatorio 30 minutos antes.',
+    'Avisá que le llegará un recordatorio 1 hora antes.',
     'No abras con saludo ni con "Hola": el candidato acaba de confirmar el horario y esta respuesta debe continuar el hilo.',
     'Máx 3 oraciones. Sin viñetas ni Markdown. Soná genuino y cercano.'
   ].filter(Boolean).join(' ');
@@ -373,7 +374,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     `Perfecto${name}, quedaste agendado para el ${formattedDate}.`,
     address ? `Nos vemos en ${address}.` : '',
     docs ? `Recuerda traer: ${docs}.` : '',
-    'Te envío un recordatorio 30 minutos antes. ¡Éxitos!'
+    'Te envío un recordatorio 1 hora antes. ¡Éxitos!'
   ].filter(Boolean).join(' '), docs);
 }
 
@@ -421,7 +422,7 @@ export function buildVacancyOptionsReply({ city = null, vacancyOptions = [], has
   }
 
   if (!activeOptions.length) {
-    return `En este momento no tengo vacantes activas registradas para ${city}. Si quieres, puedo dejar tus datos y tu hoja de vida en PDF o Word/DOCX para tenerte en cuenta cuando se abra una opción.`;
+    return `En este momento no tengo vacantes activas registradas para ${city}. Si viste una publicidad, dime el cargo exacto o envíame más contexto y reviso sin asumir una vacante.`;
   }
 
   if (activeOptions.length === 1) {
