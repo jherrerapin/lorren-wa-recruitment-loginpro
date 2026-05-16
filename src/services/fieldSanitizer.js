@@ -199,7 +199,8 @@ function hasResidenceEvidenceCue(text = '') {
 
 function hasGenderEvidenceCue(text = '') {
   const normalized = normalizeText(text);
-  return /\b(soy mujer|soy hombre|sexo femenino|sexo masculino|genero femenino|genero masculino|candidata|candidato|interesada|interesado|atenta|atento|femenino|femenina|masculino|masculina)\b/.test(normalized);
+  return /\b(soy mujer|soy hombre|me considero mujer|me considero hombre|me identifico como mujer|me identifico como hombre|sexo femenino|sexo masculino|genero femenino|genero masculino|candidata|candidato|interesada|interesado|atenta|atento|postulada|postulado|inscrita|inscrito|registrada|registrado|dispuesta|dispuesto|apta|apto|femenino|femenina|masculino|masculina)\b/.test(normalized)
+    || /\b(me postulo|me presento|aplico|me inscribo) como (mujer|hombre|candidata|candidato)\b/.test(normalized);
 }
 
 function hasOnlyCourtesyTreatmentAsGenderCue(text = '') {

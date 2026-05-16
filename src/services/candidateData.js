@@ -21,24 +21,30 @@ const INDEPENDENT_VARIANTS = ['independiente'];
 const LOCATION_STOPWORDS = /\b(cc|ti|ce|ppt|pasaporte|documento|cedula|cédula|ciudadania|ciudadanía|numero|número|edad|experiencia|experiencias|restriccion|restricciones|medica|medicas|salud|transporte|moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|bus|nombre|hoja de vida|hv|cv|trabajo|trabajando|independiente|corrijo|cuento|sin|no|auxiliar|cargue|descargue|bodega|operativo|operativa|vacante|cargo|anuncio|turno|turnos|disponibilidad)\b/i;
 const ADDRESS_TOKENS = /^(?:calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv|km|kilometro|kilómetro|entrada|salida)$/i;
 const FEMALE_GENDER_PATTERNS = [
-  /\b(?:soy|me considero|sexo|genero|género)\s*(?:es|:)?\s*(?:mujer|femenina)\b/i,
-  /\b(?:soy|me considero)\s+(?:candidata|embarazada)\b/i,
-  /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:femenino|femenina)\b/i
+  /\b(?:soy|me considero|me identifico como|sexo|genero|género)\s*(?:es|:)?\s*(?:mujer|femenina)\b/i,
+  /\b(?:soy|me considero|me identifico como)\s+(?:una\s+)?(?:mujer|candidata|femenina|embarazada|madre)\b/i,
+  /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:femenino|femenina|mujer)\b/i,
+  /\b(?:me postulo|me presento|aplico|me inscribo)\s+como\s+(?:mujer|candidata)\b/i
 ];
 const MALE_GENDER_PATTERNS = [
-  /\b(?:soy|me considero|sexo|genero|género)\s*(?:es|:)?\s*(?:hombre|masculino)\b/i,
-  /\b(?:soy|me considero)\s+candidato\b/i,
-  /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:masculino|masculina)\b/i
+  /\b(?:soy|me considero|me identifico como|sexo|genero|género)\s*(?:es|:)?\s*(?:hombre|masculino)\b/i,
+  /\b(?:soy|me considero|me identifico como)\s+(?:un\s+)?(?:hombre|candidato|masculino)\b/i,
+  /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:masculino|masculina|hombre)\b/i,
+  /\b(?:me postulo|me presento|aplico|me inscribo)\s+como\s+(?:hombre|candidato)\b/i
 ];
 
 const EXTRA_LOCATION_STOPWORDS = /\b(si|sii|sip|ok|okay|vale|listo|correcto|correcta|bueno|buena|bn|interesado|interesada|interesa|cumplo|requisito|requisitos|coordinador|coordinadora|operaciones|operacion|operaci(?:o|Ã³)n|logistica|logistico|ruta|perfil|postulacion)\b/i;
 const EXTRA_FEMALE_GENDER_PATTERNS = [
-  /\b(?:estoy|me encuentro)\s+interesada\b/i,
-  /\bquedo\s+atenta\b/i
+  /\b(?:estoy|me encuentro|me siento|sigo|quedo|me quedo)\s+(?:muy\s+)?(?:interesada|atenta|postulada|inscrita|registrada|dispuesta|apta|lista)\b/i,
+  /^(?:hola|buenas(?:\s+(?:tardes|noches))?|buenos\s+dias|buenos\s+días)?[\s,.¡!]*(?:me encuentro\s+|estoy\s+)?interesada(?:\s+en\s+(?:la\s+)?(?:vacante|oferta|postulacion|postulación|cargo|trabajo))?[\s,.¡!]*$/i,
+  /\b(?:quedo|estare|estaré|me mantengo)\s+(?:muy\s+)?atenta\b/i,
+  /\b(?:ya\s+)?(?:estoy|quedo|me encuentro)\s+(?:postulada|inscrita|registrada)\b/i
 ];
 const EXTRA_MALE_GENDER_PATTERNS = [
-  /\b(?:estoy|me encuentro)\s+interesado\b/i,
-  /\bquedo\s+atento\b/i
+  /\b(?:estoy|me encuentro|me siento|sigo|quedo|me quedo)\s+(?:muy\s+)?(?:interesado|atento|postulado|inscrito|registrado|dispuesto|apto|listo)\b/i,
+  /^(?:hola|buenas(?:\s+(?:tardes|noches))?|buenos\s+dias|buenos\s+días)?[\s,.¡!]*(?:me encuentro\s+|estoy\s+)?interesado(?:\s+en\s+(?:la\s+)?(?:vacante|oferta|postulacion|postulación|cargo|trabajo))?[\s,.¡!]*$/i,
+  /\b(?:quedo|estare|estaré|me mantengo)\s+(?:muy\s+)?atento\b/i,
+  /\b(?:ya\s+)?(?:estoy|quedo|me encuentro)\s+(?:postulado|inscrito|registrado)\b/i
 ];
 const NO_MEDICAL_RESTRICTION_PATTERNS = [
   /^(?:sin\s+restriccion(?:es)?(?:\s+medicas?)?|ninguna\s+restriccion(?:\s+medica)?|ninguna)$/i,

@@ -23,10 +23,12 @@ function hasReliableGenderEvidence(value, evidence = {}) {
   const snippet = String(evidence.snippet || '').toLowerCase();
   const confidence = Number(evidence.confidence || 0);
   if (!['FEMALE', 'MALE', 'OTHER'].includes(String(value || '').toUpperCase())) return false;
+
+  const hasExplicitCandidateGender = /\b(soy mujer|soy hombre|me considero mujer|me considero hombre|me identifico como mujer|me identifico como hombre|sexo femenino|sexo masculino|genero femenino|género femenino|genero masculino|género masculino|soy candidata|soy candidato|estoy interesada|estoy interesado|interesada en la vacante|interesado en la vacante|quedo atenta|quedo atento|postulada|postulado|inscrita|inscrito|registrada|registrado|me postulo como candidata|me postulo como candidato|femenin|masculin)\b/.test(snippet);
+  if (!hasExplicitCandidateGender) return false;
   if (confidence >= 0.9) return true;
-  if (!source.includes('responses') && !source.includes('model')) return false;
-  return /\b(soy mujer|soy hombre|candidata|candidato|femenin|masculin|señora|senora|señor|senor)\b/.test(snippet)
-    && confidence >= 0.75;
+  if (!source.includes('responses') && !source.includes('model') && !source.includes('openai') && !source.includes('local')) return false;
+  return confidence >= 0.75;
 }
 
 export function applyFieldPolicy(extraction = {}, currentCandidate = {}) {
