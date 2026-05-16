@@ -243,6 +243,19 @@ test('detecta genero femenino por lenguaje y no lo persiste como nombre', () => 
   assert.equal(normalized.fullName, undefined);
 });
 
+test('detecta genero femenino por interes sin verbo auxiliar', () => {
+  const parsed = parseNaturalData('Interesada en la vacante');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.gender, 'FEMALE');
+  assert.equal(normalized.fullName, undefined);
+});
+
+test('detecta genero femenino por postulacion auto-referida', () => {
+  const parsed = parseNaturalData('Hola, ya estoy postulada para el cargo');
+  const normalized = normalizeCandidateFields(parsed);
+  assert.equal(normalized.gender, 'FEMALE');
+});
+
 test('prioriza moto cuando el candidato reporta bicicleta y moto', () => {
   const parsed = parseNaturalData('Medio de transporte bicicleta y moto');
   const normalized = normalizeCandidateFields(parsed);

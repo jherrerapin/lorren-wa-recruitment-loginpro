@@ -210,8 +210,8 @@ function buildGenderFlowInstruction(candidate, vacancy) {
   if (gender === 'UNKNOWN') {
     return `GENERO: No determinado.
 Detecta el genero solo con evidencia lingüistica del candidato en el turno o historial reciente; nunca por nombre propio.
-FEMALE cuando haya marcas claras como "soy mujer", "femenino", "candidata", "estoy interesada", "me encuentro interesada", "quedo atenta" o una correccion explícita equivalente. Tratos como "sí señora", "gracias señorita" o "sí señor" son cortesía hacia quien atiende y NO son género del candidato.
-MALE cuando haya marcas equivalentes como "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento".
+FEMALE cuando haya marcas claras como "soy mujer", "femenino", "candidata", "estoy interesada", "me encuentro interesada", "interesada en la vacante", "quedo atenta", "estoy postulada", "me postulo como candidata" o una correccion explícita equivalente. Tratos como "sí señora", "gracias señorita" o "sí señor" son cortesía hacia quien atiende y NO son género del candidato.
+MALE cuando haya marcas equivalentes como "soy hombre", "masculino", "candidato", "estoy interesado", "interesado en la vacante", "quedo atento", "estoy postulado", "me postulo como candidato".
 Si la evidencia es ambigua o solo viene del nombre, NO extraigas genero y NO lo preguntes de forma directa.
 Extraelo en extractedFields como "gender": "MALE" | "FEMALE" | "OTHER" solo cuando exista esa evidencia textual.`;
   }

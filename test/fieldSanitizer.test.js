@@ -137,6 +137,19 @@ test('acepta género femenino contextual y no convierte interés en nombre o bar
   assert.equal(result.fields.neighborhood, undefined);
 });
 
+test('acepta género femenino por postulacion lingüística auto-referida', () => {
+  const fields = { gender: 'FEMALE' };
+  const result = sanitize({
+    text: 'Hola, ya estoy postulada para el cargo',
+    fields,
+    evidence: evidenceFor(fields, { gender: { snippet: 'estoy postulada', confidence: 0.94 } }),
+    context: { currentStep: 'GREETING_SENT' },
+    turnType: 'OTHER'
+  });
+
+  assert.equal(result.fields.gender, 'FEMALE');
+});
+
 test('rechaza género inferido solo por nombre y conserva nombre pendiente', () => {
   const fields = { fullName: 'Maria Perez', gender: 'FEMALE' };
   const result = sanitize({

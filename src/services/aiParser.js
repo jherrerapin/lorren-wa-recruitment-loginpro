@@ -56,8 +56,8 @@ Cómo pensar sobre los datos (no son reglas, son criterios de sentido común):
   o simplemente escrito. Capitaliza bien: "MARIA PEREZ" → "Maria Perez".
 
 • El género solo se extrae si el candidato lo expresa lingüísticamente: "soy mujer",
-  "femenino", "candidata", "estoy interesada", "quedo atenta" → FEMALE;
-  "soy hombre", "masculino", "candidato", "estoy interesado", "quedo atento" → MALE.
+  "femenino", "candidata", "estoy interesada", "interesada en la vacante", "quedo atenta", "estoy postulada", "me postulo como candidata" → FEMALE;
+  "soy hombre", "masculino", "candidato", "estoy interesado", "interesado en la vacante", "quedo atento", "estoy postulado", "me postulo como candidato" → MALE.
   Nunca infieras género por el nombre.
 
 • El barrio puede mencionarse con o sin la palabra "barrio": "vivo en el Salado",

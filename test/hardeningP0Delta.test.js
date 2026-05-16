@@ -37,6 +37,16 @@ test('género femenino explícito se persiste con evidencia sólida', () => {
   assert.equal(result.persistedFields.gender, 'FEMALE');
 });
 
+test('tratamiento de cortesia no cuenta como evidencia de genero aunque tenga alta confianza', () => {
+  const result = applyFieldPolicy({
+    fields: { gender: 'FEMALE' },
+    fieldEvidence: { gender: { snippet: 'sí señora', confidence: 0.95, source: 'responses_extractor' } }
+  });
+
+  assert.equal(result.persistedFields.gender, undefined);
+  assert.equal(result.reviewQueue[0]?.reason, 'weak_gender_inference');
+});
+
 test('género ambiguo no debe usarse para decisiones duras', () => {
   const result = applyFieldPolicy({
     fields: { gender: 'FEMALE' },
