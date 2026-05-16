@@ -2,7 +2,9 @@ import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { sanitizeOutboundReply } from './replySafety.js';
-import { buildMissingFieldReply } from './readinessGuard.js';
+import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
+import { detectConversationIntent } from './conversationIntent.js';
+import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
 
 function latestOutboundWasManualHumanWithoutLaterInbound(recentMessages = []) {
   const messages = recentMessages || [];
@@ -36,6 +38,50 @@ export async function runChatEngine({
   candidateFieldHints = {},
 }) {
   const currentStep = candidate.currentStep || ConversationStep.MENU;
+  const activeInterviewBooking = nextSlot?.isConfirmedBooking
+    ? { status: 'SCHEDULED', scheduledAt: nextSlot.date }
+    : null;
+  const readiness = getCandidateReadiness(candidate, vacancy);
+  const shouldEvaluateGate = Boolean(
+    currentStep === ConversationStep.SCHEDULED
+    || currentStep === ConversationStep.DONE
+    || (vacancy && !vacancy.schedulingEnabled && readiness.readyForDone)
+  );
+
+  if (shouldEvaluateGate) {
+    const resolvedIntent = detectConversationIntent(inboundText, { isDoneStep: currentStep === ConversationStep.DONE });
+    const semanticIntent = inferContextualSemanticIntent({
+      text: inboundText,
+      resolvedIntent,
+      isQuestion: /[?¿]/.test(String(inboundText || '')),
+      hasDataIntent: resolvedIntent === 'provide_data'
+    });
+    const gateDecision = evaluateContextualResponseGate({
+      candidate,
+      vacancy,
+      activeInterviewBooking,
+      recentMessages,
+      semanticIntent,
+      readiness
+    });
+
+    if (gateDecision.allowedAction !== ContextualAllowedAction.CONTINUE_FLOW) {
+      return {
+        reply: gateDecision.reply,
+        actions: [],
+        nextStep: currentStep,
+        extractedFields: {},
+        candidateFields: {},
+        fallback: false,
+        fallbackReason: null,
+        loopGuardApplied: false,
+        usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+        suppressed: !gateDecision.shouldReply,
+        suppressedReason: gateDecision.shouldReply ? null : gateDecision.reason,
+        contextualGate: gateDecision
+      };
+    }
+  }
 
   if (!candidate.botPaused && latestOutboundWasManualHumanWithoutLaterInbound(recentMessages)) {
     await prisma.candidate.update({

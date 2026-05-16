@@ -884,13 +884,18 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
   const finalBody = preserveExactBody ? originalBody : (safety.reply || buildSafeFallbackReply());
   await sendTextMessage(candidate.phone, finalBody);
   await prisma.candidate.update({ where: { id: candidate.id }, data: update });
+  const authorizedPayload = {
+    actor: 'RECRUITER',
+    sourceCategory: 'MANUAL_AUTHORIZED',
+    ...rawPayload
+  };
   await prisma.message.create({
     data: {
       candidateId: candidate.id,
       direction: MessageDirection.OUTBOUND,
       messageType: MessageType.TEXT,
       body: finalBody,
-      rawPayload: safety.blocked ? { ...rawPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : rawPayload
+      rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
     }
   });
 }

@@ -37,6 +37,7 @@ import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/reply
 import { getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
+import { ContextualAllowedAction, evaluateContextualResponseGate, inferContextualSemanticIntent } from '../services/contextualResponseGate.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -1011,6 +1012,17 @@ async function saveAttachmentAnalysis(prisma, candidateId, inboundMessageId, att
   });
 }
 
+async function getRecentConversationMessages(prisma, candidateId, limit = 10) {
+  if (!prisma?.message?.findMany) return [];
+  const messages = await prisma.message.findMany({
+    where: { candidateId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: { direction: true, body: true, rawPayload: true, createdAt: true }
+  });
+  return messages.reverse();
+}
+
 async function getRecentOutboundMessages(prisma, candidateId, limit = 6) {
   if (!prisma?.message?.findMany) return [];
   return prisma.message.findMany({
@@ -1573,6 +1585,64 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       looksLikeNoMedicalRestrictionsText(cleanText, { allowImplicit: true })
       || isMedicalRestrictionsClarificationRequest(cleanText)
     );
+
+  const contextualReadiness = getCandidateReadiness(candidate, currentVacancy);
+  const shouldEvaluateContextualGate = Boolean(
+    candidate.currentStep === ConversationStep.SCHEDULED
+    || candidate.currentStep === ConversationStep.DONE
+    || (currentVacancy && !currentVacancy.schedulingEnabled && contextualReadiness.readyForDone)
+    || (!contextualReadiness.missingFields.length && contextualReadiness.hasValidCv && candidate.vacancyId)
+  );
+
+  if (shouldEvaluateContextualGate) {
+    const activeBookingForGate = await loadActiveInterviewBooking(prisma, candidate.id);
+    const interviewIntentForGate = detectInterviewIntent({ text: cleanText, booking: activeBookingForGate, now: new Date() });
+    const semanticIntentForGate = inferContextualSemanticIntent({
+      text: cleanText,
+      resolvedIntent,
+      interviewIntent: interviewIntentForGate,
+      isQuestion: isQuestionLike(cleanText),
+      hasDataIntent
+    });
+    const recentMessagesForGate = await getRecentConversationMessages(prisma, candidate.id, 10);
+    const gateDecision = evaluateContextualResponseGate({
+      candidate,
+      vacancy: currentVacancy,
+      activeInterviewBooking: activeBookingForGate,
+      recentMessages: recentMessagesForGate,
+      semanticIntent: semanticIntentForGate,
+      readiness: contextualReadiness
+    });
+    debugTrace.contextual_response_gate = {
+      shouldReply: gateDecision.shouldReply,
+      allowedAction: gateDecision.allowedAction,
+      reason: gateDecision.reason,
+      responsePurpose: gateDecision.responsePurpose,
+      requiresHumanReview: gateDecision.requiresHumanReview,
+      semanticIntent: semanticIntentForGate
+    };
+
+    if (gateDecision.allowedAction !== ContextualAllowedAction.CONTINUE_FLOW) {
+      if (gateDecision.requiresHumanReview) {
+        await pauseSilentlyForManualReview(prisma, candidate, gateDecision.reason, cleanText, {
+          reviewType: 'contextual_response_gate',
+          extra: { allowedAction: gateDecision.allowedAction, semanticIntent: semanticIntentForGate }
+        });
+      }
+      if (!gateDecision.shouldReply) return;
+      if (gateDecision.reply) {
+        return reply(prisma, candidate.id, from, gateDecision.reply, cleanText, {
+          body: gateDecision.reply,
+          source: 'contextual_response_gate',
+          actor: 'BOT',
+          responsePurpose: gateDecision.responsePurpose,
+          allowedAction: gateDecision.allowedAction,
+          currentStep: candidate.currentStep,
+          safetyVacancy: currentVacancy
+        });
+      }
+    }
+  }
 
   if (candidate.currentStep === ConversationStep.MENU) {
     const resolution = currentVacancy && candidate.vacancyId
