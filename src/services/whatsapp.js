@@ -46,6 +46,36 @@ export async function sendImageMessage(to, image, caption = '') {
   return response.data;
 }
 
+export async function sendDocumentMessage(to, document, caption = '') {
+  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'document',
+    document: {
+      id: document?.id
+    }
+  };
+
+  if (document?.filename) {
+    payload.document.filename = document.filename;
+  }
+
+  if (caption) {
+    payload.document.caption = caption;
+  }
+
+  const response = await axios.post(url, payload, {
+    headers: {
+      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 15000
+  });
+
+  return response.data;
+}
+
 export function extractMessages(payload) {
   const entry = payload?.entry?.[0];
   const change = entry?.changes?.[0];

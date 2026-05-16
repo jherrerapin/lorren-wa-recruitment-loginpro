@@ -6,6 +6,7 @@ import {
   runReminderDispatcher
 } from '../services/reminder.js';
 import { runAutoCvMigration } from '../services/cvMigration.js';
+import { ensureSupervisorWindowOpen } from '../services/adminSupervisor.js';
 
 const prisma = new PrismaClient();
 const POLL_MS = Number.parseInt(process.env.JOB_WORKER_POLL_MS || '5000', 10);
@@ -49,7 +50,9 @@ async function tick() {
   }
 
   if (!jobs.length) {
-    await runReminderDispatcher(prisma, { now: new Date() });
+    const now = new Date();
+    await ensureSupervisorWindowOpen(prisma, { now }).catch((error) => console.warn('[ADMIN_WINDOW_KEEPALIVE_ERROR]', error?.message || error));
+    await runReminderDispatcher(prisma, { now });
   }
 }
 

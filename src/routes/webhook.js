@@ -36,6 +36,7 @@ import { buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBoo
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
 import { getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
+import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -1042,8 +1043,14 @@ async function hasRecentResumePhotoReply(prisma, candidateId, minutes = 15) {
     || (message?.rawPayload?.replyIntent === 'request_cv_pdf_word' && /registrar tu hoja de vida|pdf o word\/docx/i.test(message?.body || '')));
 }
 
-async function pauseSilentlyForManualReview(prisma, candidate, reason, inboundText = '') {
+async function pauseSilentlyForManualReview(prisma, candidate, reason, inboundText = '', options = {}) {
   await pauseInterviewFlow(prisma, candidate.id, reason);
+  await notifySupervisorManualReview(prisma, candidate, {
+    reason,
+    inboundText,
+    reviewType: options.reviewType || 'question',
+    extra: options.extra || {}
+  }).catch((error) => console.warn('[ADMIN_SUPERVISOR_NOTIFY_ERROR]', error?.message || error));
   console.info('[BOT_MANUAL_REVIEW_SILENT]', JSON.stringify({
     candidateId: candidate.id,
     reason,
@@ -2273,6 +2280,11 @@ export function webhookRouter(prisma) {
         const from = message.from;
         if (!from) continue;
 
+        if (isSupervisorPhone(from) && message.type === 'text') {
+          await handleSupervisorInbound(prisma, message);
+          continue;
+        }
+
         if (!checkRateLimit(from)) continue;
 
         const candidate = await prisma.candidate.upsert({ where: { phone: from }, update: {}, create: { phone: from } });
@@ -2376,6 +2388,11 @@ export function webhookRouter(prisma) {
                 maxAttempts: 4
               }).catch((error) => console.warn('[ADMIN_FORWARD_IMAGE_QUEUE_ERROR]', error?.message || error));
             }
+            await notifySupervisorAttachment(prisma, freshCandidate, {
+              mediaType: 'image',
+              media: message.image || {},
+              caption: message.image?.caption || ''
+            }).catch((error) => console.warn('[ADMIN_SUPERVISOR_IMAGE_ERROR]', error?.message || error));
             if (isFeatureEnabled('FF_ATTACHMENT_ANALYZER', false)) {
               const syntheticAnalysis = {
                 classification: 'CV_IMAGE_ONLY',
@@ -2394,8 +2411,6 @@ export function webhookRouter(prisma) {
                 fallbackIntent: 'request_cv_pdf_word',
                 rawPayload: { replyIntent: 'request_cv_pdf_word' }
               });
-            } else {
-              await forwardInboundImageToSupervisor(from, freshCandidate?.fullName || null, message.image || {});
             }
             continue;
           }
@@ -2412,15 +2427,23 @@ export function webhookRouter(prisma) {
             }
             const recentDocumentsCount = await countRecentInboundDocuments(prisma, candidate.id, 15);
             debugTrace.recent_document_count = recentDocumentsCount;
-            if (recentDocumentsCount >= 4) {
-              debugTrace.attachment_high_volume = true;
-              await pauseInterviewFlow(prisma, candidate.id, 'Multiples documentos no procesables requieren revision humana');
-              if (!automationBlocked) {
-                await reply(prisma, candidate.id, from, 'Recibí varios documentos. Para evitar respuestas repetidas, dejo tu caso en revisión; si tu hoja de vida está en PDF o Word/DOCX, envíala en un solo archivo válido.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
-              }
+            await notifySupervisorAttachment(prisma, freshCandidate, {
+              mediaType: 'document',
+              media: message.document || {},
+              caption: message.document?.filename || '',
+              sequence: recentDocumentsCount
+            }).catch((error) => console.warn('[ADMIN_SUPERVISOR_DOCUMENT_ERROR]', error?.message || error));
+            if (recentDocumentsCount >= 2) {
+              debugTrace.attachment_multiple_documents = true;
+              await pauseSilentlyForManualReview(
+                prisma,
+                freshCandidate,
+                'Multiples documentos requieren seleccion humana de hoja de vida',
+                message.document?.filename || '',
+                { reviewType: 'multiple_documents', extra: { recentDocumentsCount } }
+              );
               continue;
             }
-
             const mimeType = message.document?.mime_type || '';
             const filename = message.document?.filename || 'hoja_de_vida';
             if (!isCvMimeTypeAllowed(mimeType, filename)) {

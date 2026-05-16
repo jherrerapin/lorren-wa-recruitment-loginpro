@@ -105,7 +105,8 @@ export function createMockPrisma(initialState = {}) {
     vacancies: clone(initialState.vacancies || []),
     interviewSlots: clone(initialState.interviewSlots || []),
     interviewBookings: clone(initialState.interviewBookings || []),
-    operations: clone(initialState.operations || [])
+    operations: clone(initialState.operations || []),
+    botKnowledge: clone(initialState.botKnowledge || [])
   };
 
   let messageSequence = state.messages.length;
@@ -180,6 +181,23 @@ export function createMockPrisma(initialState = {}) {
       };
       state.messages.push(row);
       return clone(row);
+    },
+    async createMany({ data = [], skipDuplicates = false } = {}) {
+      let count = 0;
+      for (const item of data) {
+        if (skipDuplicates && item.waMessageId && state.messages.some((message) => message.waMessageId === item.waMessageId)) {
+          continue;
+        }
+        const row = {
+          id: item.id || `message-${++messageSequence}`,
+          createdAt: item.createdAt || new Date(),
+          respondedAt: item.respondedAt ?? null,
+          ...item
+        };
+        state.messages.push(row);
+        count += 1;
+      }
+      return { count };
     },
     async updateMany({ where, data } = {}) {
       const rows = state.messages.filter((message) => matchesWhere(message, where));
@@ -268,12 +286,34 @@ export function createMockPrisma(initialState = {}) {
     }
   };
 
+
+  const botKnowledgeApi = {
+    async create({ data } = {}) {
+      const row = {
+        id: data.id || `knowledge-${state.botKnowledge.length + 1}`,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...data
+      };
+      state.botKnowledge.push(row);
+      return clone(row);
+    },
+    async findMany({ where, orderBy, take, select } = {}) {
+      let rows = state.botKnowledge.filter((item) => matchesWhere(item, where));
+      rows = sortRows(rows, orderBy);
+      if (take) rows = rows.slice(0, take);
+      return rows.map((row) => applySelect(row, select));
+    }
+  };
+
   return {
     state,
     candidate: candidateApi,
     message: messageApi,
     vacancy: vacancyApi,
     interviewBooking: bookingApi,
-    interviewSlot: slotApi
+    interviewSlot: slotApi,
+    botKnowledge: botKnowledgeApi
   };
 }
