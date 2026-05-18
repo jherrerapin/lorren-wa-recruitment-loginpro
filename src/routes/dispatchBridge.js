@@ -53,6 +53,40 @@ function serviceRequestServiceData(service) {
   };
 }
 
+function redirectClientOperations(clientId, message) {
+  const suffix = message ? `?message=${encodeURIComponent(message)}` : '';
+  return `/admin/operaciones/clientes/${clientId}/operaciones${suffix}`;
+}
+function buildWorkerData(body) {
+  return {
+    fullName: normalizeString(body.fullName),
+    phone: normalizeString(body.phone),
+    documentType: normalizeString(body.documentType),
+    documentNumber: normalizeString(body.documentNumber),
+    residenceCity: normalizeString(body.residenceCity),
+    residenceLocality: normalizeString(body.residenceLocality),
+    transportMode: normalizeString(body.transportMode),
+    operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
+    notes: normalizeString(body.notes)
+  };
+}
+async function replaceWorkerRelations(workerId, body) {
+  const cityIds = normalizeStringList(body.cityIds);
+  const vacancyIds = normalizeStringList(body.vacancyIds);
+  await prisma.$transaction([
+    prisma.dispatchWorkerCity.deleteMany({ where: { workerId } }),
+    prisma.dispatchWorkerVacancy.deleteMany({ where: { workerId } }),
+    ...(cityIds.length ? [prisma.dispatchWorkerCity.createMany({ data: cityIds.map((cityId) => ({ workerId, cityId })), skipDuplicates: true })] : []),
+    ...(vacancyIds.length ? [prisma.dispatchWorkerVacancy.createMany({ data: vacancyIds.map((vacancyId) => ({ workerId, vacancyId })), skipDuplicates: true })] : [])
+  ]);
+}
+async function findManualWorkerOr404(workerId) {
+  return prisma.dispatchWorker.findFirst({
+    where: { id: workerId, source: 'MANUAL' },
+    include: { cities: true, vacancies: true }
+  });
+}
+
 export function dispatchBridgeRouter() {
   const router = express.Router();
   router.get('/', requireOps, (_req, res) => renderOperationsDashboard(res));
@@ -71,8 +105,29 @@ export function dispatchBridgeRouter() {
   });
   router.post('/clientes', requireOps, async (req, res) => {
     const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre requerido');
-    await prisma.dispatchClient.create({ data: { name, publicToken: randomBytes(24).toString('hex'), nit: normalizeString(req.body.nit), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), contactEmail: normalizeString(req.body.contactEmail), notes: normalizeString(req.body.notes), createdByUsername: req.session?.username || req.username || null } });
+    await prisma.dispatchClient.create({ data: { name, publicToken: randomBytes(24).toString('hex'), nit: normalizeString(req.body.nit), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), contactEmail: normalizeString(req.body.contactEmail), notes: normalizeString(req.body.notes), isActive: normalizeString(req.body.isActive) !== 'false', createdByUsername: req.session?.username || req.username || null } });
     return res.redirect('/admin/operaciones/clientes');
+  });
+  router.get('/clientes/:clientId/editar', requireOps, async (req, res) => {
+    const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId } });
+    if (!client) return res.status(404).send('Cliente no encontrado');
+    const clients = await prisma.dispatchClient.findMany({ include: { _count: { select: { operationPoints: true, services: true } } }, orderBy: { createdAt: 'desc' } });
+    return res.render('operacionesClientes', { clients, editClient: client, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message), baseUrl: `${req.protocol}://${req.get('host')}` });
+  });
+  router.post('/clientes/:clientId/editar', requireOps, async (req, res) => {
+    const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre requerido');
+    await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data: { name, nit: normalizeString(req.body.nit), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), contactEmail: normalizeString(req.body.contactEmail), notes: normalizeString(req.body.notes), isActive: normalizeString(req.body.isActive) !== 'false' } });
+    return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent('Cliente actualizado.')}`);
+  });
+  router.post('/clientes/:clientId/toggle', requireOps, async (req, res) => {
+    const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId }, select: { id: true, isActive: true } });
+    if (!client) return res.status(404).send('Cliente no encontrado');
+    await prisma.dispatchClient.update({ where: { id: client.id }, data: { isActive: !client.isActive } });
+    return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent(client.isActive ? 'Cliente desactivado.' : 'Cliente reactivado.')}`);
+  });
+  router.post('/clientes/:clientId/eliminar', requireOps, async (req, res) => {
+    await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data: { isActive: false } });
+    return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent('Cliente eliminado del flujo activo.')}`);
   });
   router.get('/clientes/:clientId/operaciones', requireOps, async (req, res) => {
     const client = await prisma.dispatchClient.findUnique({
@@ -83,28 +138,59 @@ export function dispatchBridgeRouter() {
       }
     });
     if (!client) return res.status(404).send('Cliente no encontrado');
-    return res.render('operacionesClienteOperaciones', { client, role: req.session?.userRole || req.userRole, baseUrl: `${req.protocol}://${req.get('host')}` });
+    return res.render('operacionesClienteOperaciones', { client, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message), baseUrl: `${req.protocol}://${req.get('host')}` });
   });
   router.post('/clientes/:clientId/operaciones', requireOps, async (req, res) => {
     const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId }, select: { id: true } });
     if (!client) return res.status(404).send('Cliente no encontrado');
     const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre requerido');
-    await prisma.dispatchOperationPoint.create({ data: { clientId: client.id, name, cityName: normalizeString(req.body.cityName), address: normalizeString(req.body.address), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), notes: normalizeString(req.body.notes), publicToken: randomBytes(24).toString('hex'), createdByUsername: req.session?.username || req.username || null } });
-    return res.redirect(`/admin/operaciones/clientes/${client.id}/operaciones`);
+    await prisma.dispatchOperationPoint.create({ data: { clientId: client.id, name, cityName: normalizeString(req.body.cityName), address: normalizeString(req.body.address), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), notes: normalizeString(req.body.notes), isActive: normalizeString(req.body.isActive) !== 'false', publicToken: randomBytes(24).toString('hex'), createdByUsername: req.session?.username || req.username || null } });
+    return res.redirect(redirectClientOperations(client.id, 'Operación creada.'));
+  });
+  router.post('/clientes/:clientId/operaciones/:operationId/editar', requireOps, async (req, res) => {
+    const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre requerido');
+    const operation = await prisma.dispatchOperationPoint.findFirst({ where: { id: req.params.operationId, clientId: req.params.clientId }, select: { id: true } });
+    if (!operation) return res.status(404).send('Operación no encontrada');
+    await prisma.dispatchOperationPoint.update({ where: { id: operation.id }, data: { name, cityName: normalizeString(req.body.cityName), address: normalizeString(req.body.address), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), notes: normalizeString(req.body.notes), isActive: normalizeString(req.body.isActive) !== 'false' } });
+    return res.redirect(redirectClientOperations(req.params.clientId, 'Operación actualizada.'));
+  });
+  router.post('/clientes/:clientId/operaciones/:operationId/toggle', requireOps, async (req, res) => {
+    const operation = await prisma.dispatchOperationPoint.findFirst({ where: { id: req.params.operationId, clientId: req.params.clientId }, select: { id: true, isActive: true } });
+    if (!operation) return res.status(404).send('Operación no encontrada');
+    await prisma.dispatchOperationPoint.update({ where: { id: operation.id }, data: { isActive: !operation.isActive } });
+    return res.redirect(redirectClientOperations(req.params.clientId, operation.isActive ? 'Operación desactivada.' : 'Operación reactivada.'));
+  });
+  router.post('/clientes/:clientId/operaciones/:operationId/eliminar', requireOps, async (req, res) => {
+    const operation = await prisma.dispatchOperationPoint.findFirst({ where: { id: req.params.operationId, clientId: req.params.clientId }, select: { id: true } });
+    if (!operation) return res.status(404).send('Operación no encontrada');
+    await prisma.dispatchOperationPoint.update({ where: { id: operation.id }, data: { isActive: false } });
+    return res.redirect(redirectClientOperations(req.params.clientId, 'Operación eliminada del flujo activo.'));
   });
   router.post('/clientes/:clientId/servicios', requireOps, async (req, res) => {
     const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId }, select: { id: true } });
     if (!client) return res.status(404).send('Cliente no encontrado');
     const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre del servicio requerido');
-    await prisma.dispatchClientService.create({
-      data: {
-        clientId: client.id,
-        name,
-        description: normalizeString(req.body.description),
-        createdByUsername: req.session?.username || req.username || null
-      }
-    });
-    return res.redirect(`/admin/operaciones/clientes/${client.id}/operaciones`);
+    await prisma.dispatchClientService.create({ data: { clientId: client.id, name, description: normalizeString(req.body.description), isActive: normalizeString(req.body.isActive) !== 'false', createdByUsername: req.session?.username || req.username || null } });
+    return res.redirect(redirectClientOperations(client.id, 'Servicio creado.'));
+  });
+  router.post('/clientes/:clientId/servicios/:serviceId/editar', requireOps, async (req, res) => {
+    const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre del servicio requerido');
+    const service = await prisma.dispatchClientService.findFirst({ where: { id: req.params.serviceId, clientId: req.params.clientId }, select: { id: true } });
+    if (!service) return res.status(404).send('Servicio no encontrado');
+    await prisma.dispatchClientService.update({ where: { id: service.id }, data: { name, description: normalizeString(req.body.description), isActive: normalizeString(req.body.isActive) !== 'false' } });
+    return res.redirect(redirectClientOperations(req.params.clientId, 'Servicio actualizado.'));
+  });
+  router.post('/clientes/:clientId/servicios/:serviceId/toggle', requireOps, async (req, res) => {
+    const service = await prisma.dispatchClientService.findFirst({ where: { id: req.params.serviceId, clientId: req.params.clientId }, select: { id: true, isActive: true } });
+    if (!service) return res.status(404).send('Servicio no encontrado');
+    await prisma.dispatchClientService.update({ where: { id: service.id }, data: { isActive: !service.isActive } });
+    return res.redirect(redirectClientOperations(req.params.clientId, service.isActive ? 'Servicio desactivado.' : 'Servicio reactivado.'));
+  });
+  router.post('/clientes/:clientId/servicios/:serviceId/eliminar', requireOps, async (req, res) => {
+    const service = await prisma.dispatchClientService.findFirst({ where: { id: req.params.serviceId, clientId: req.params.clientId }, select: { id: true } });
+    if (!service) return res.status(404).send('Servicio no encontrado');
+    await prisma.dispatchClientService.update({ where: { id: service.id }, data: { isActive: false } });
+    return res.redirect(redirectClientOperations(req.params.clientId, 'Servicio eliminado del flujo activo.'));
   });
 
   router.get('/asignaciones', requireOps, async (req, res) => {
@@ -172,16 +258,38 @@ export function dispatchBridgeRouter() {
   router.get('/personal', requireOps, async (req, res) => { const operationalCityId = normalizeString(req.query.operationalCityId); const vacancyId = normalizeString(req.query.vacancyId); const status = normalizeString(req.query.status); const workers = await prisma.dispatchWorker.findMany({ where: { ...(status ? { operationalStatus: status } : {}), ...(operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {}), ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}) }, include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } }); const cities = await prisma.city.findMany({ orderBy: { name: 'asc' } }); const vacancies = await prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }); return res.render('operacionesPersonal', { pageTitle: 'Personal operativo', subtitle: 'Equipo disponible para asignación.', activeSection: 'personal', workers, cities, vacancies, filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', status: status || '' }, message: normalizeString(req.query.message), role: req.userRole, canAccessDispatch: req.canAccessDispatch }); });
   router.get('/personal/nuevo', requireOps, async (req, res) => {
     const [cities, vacancies] = await Promise.all([prisma.city.findMany({ orderBy: { name: 'asc' } }), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } })]);
-    return res.render('operacionesPersonalNuevo', { cities, vacancies, role: req.session?.userRole || req.userRole });
+    return res.render('operacionesPersonalNuevo', { cities, vacancies, worker: null, mode: 'create', formAction: '/admin/operaciones/personal/nuevo', role: req.session?.userRole || req.userRole });
   });
   router.post('/personal/nuevo', requireOps, async (req, res) => {
-    const fullName = normalizeString(req.body.fullName); if (!fullName) return res.status(400).send('Nombre requerido');
-    const cityIds = normalizeStringList(req.body.cityIds); const vacancyIds = normalizeStringList(req.body.vacancyIds);
-    const worker = await prisma.dispatchWorker.create({ data: { fullName, phone: normalizeString(req.body.phone), documentType: normalizeString(req.body.documentType), documentNumber: normalizeString(req.body.documentNumber), residenceCity: normalizeString(req.body.residenceCity), residenceLocality: normalizeString(req.body.residenceLocality), transportMode: normalizeString(req.body.transportMode), notes: normalizeString(req.body.notes), source: 'MANUAL', operationalStatus: 'ACTIVE' } });
-    if (cityIds.length) await prisma.dispatchWorkerCity.createMany({ data: cityIds.map((cityId) => ({ workerId: worker.id, cityId })), skipDuplicates: true });
-    if (vacancyIds.length) await prisma.dispatchWorkerVacancy.createMany({ data: vacancyIds.map((vacancyId) => ({ workerId: worker.id, vacancyId })), skipDuplicates: true });
-    return res.redirect('/admin/operaciones/personal');
+    const workerData = buildWorkerData(req.body); if (!workerData.fullName) return res.status(400).send('Nombre requerido');
+    const worker = await prisma.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
+    await replaceWorkerRelations(worker.id, req.body);
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual creado.')}`);
   });
+  router.get('/personal/:workerId/editar', requireOps, async (req, res) => {
+    const [worker, cities, vacancies] = await Promise.all([findManualWorkerOr404(req.params.workerId), prisma.city.findMany({ orderBy: { name: 'asc' } }), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } })]);
+    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    return res.render('operacionesPersonalNuevo', { cities, vacancies, worker, mode: 'edit', formAction: `/admin/operaciones/personal/${worker.id}/editar`, role: req.session?.userRole || req.userRole });
+  });
+  router.post('/personal/:workerId/editar', requireOps, async (req, res) => {
+    const existing = await findManualWorkerOr404(req.params.workerId); if (!existing) return res.status(404).send('Auxiliar manual no encontrado');
+    const workerData = buildWorkerData(req.body); if (!workerData.fullName) return res.status(400).send('Nombre requerido');
+    await prisma.dispatchWorker.update({ where: { id: existing.id }, data: workerData });
+    await replaceWorkerRelations(existing.id, req.body);
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual actualizado.')}`);
+  });
+  router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
+    const worker = await findManualWorkerOr404(req.params.workerId); if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    const nextStatus = worker.operationalStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: nextStatus } });
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(nextStatus === 'ACTIVE' ? 'Auxiliar manual reactivado.' : 'Auxiliar manual desactivado.')}`);
+  });
+  router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
+    const worker = await findManualWorkerOr404(req.params.workerId); if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'INACTIVE' } });
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual eliminado del flujo activo.')}`);
+  });
+
 
   router.post('/sync-contratados', requireOps, requireDev, async (_req, res) => { const registered = await prisma.candidate.findMany({ where: { status: 'REGISTRADO' }, select: { id: true } }); for (const candidate of registered) await upsertDispatchWorkerFromCandidate(prisma, candidate.id); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Modo prueba: sincronización completada con ${registered.length} candidatos registrados procesados.`)}`); });
   router.get('/novedades', requireOps, (_req, res) => renderOperationsDashboard(res, { pageTitle: 'Novedades operativas', activeSection: 'novedades' }));

@@ -23,13 +23,15 @@
       <div>
         <div class="eyebrow">Operaciones por cliente</div>
         <h1><%= client.name %></h1>
-        <p>Crea puntos de servicio y servicios por cliente. Comparte el link público del cliente para que seleccione la operación y el servicio al registrar solicitudes.</p>
+        <p>Crea, edita, desactiva o reactiva operaciones y servicios. Comparte el link público del cliente para que seleccione operación y servicio al registrar solicitudes.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/clientes">Volver a clientes</a>
         <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Solicitudes de servicio</a>
       </div>
     </section>
+
+    <% if (message) { %><div class="alert"><%= message %></div><% } %>
 
     <section class="grid-2">
       <article class="card">
@@ -42,6 +44,7 @@
               <div class="field"><label for="address">Dirección</label><input id="address" name="address" placeholder="Dirección del punto" /></div>
               <div class="field"><label for="contactName">Contacto operativo</label><input id="contactName" name="contactName" placeholder="Nombre del encargado" /></div>
               <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" placeholder="Número de contacto" /></div>
+              <div class="field"><label for="isActive">Estado</label><select id="isActive" name="isActive"><option value="true">Activo</option><option value="false">Inactivo</option></select></div>
               <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Condiciones de ingreso, horarios, requisitos o indicaciones"></textarea></div>
             </div>
             <div class="form-actions"><button class="btn btn-primary" type="submit">Crear operación</button></div>
@@ -50,7 +53,7 @@
       </article>
 
       <article class="card">
-        <div class="card-head"><h2>Operaciones registradas</h2><p>Comparte el link público del cliente; los links antiguos por operación se mantienen temporalmente y redirigen al formulario del cliente.</p></div>
+        <div class="card-head"><h2>Operaciones registradas</h2><p>Los links antiguos por operación se mantienen temporalmente y redirigen al formulario del cliente.</p></div>
         <div class="card-body">
           <% const clientLink = baseUrl + '/operaciones/cliente/' + client.publicToken; %>
           <div class="copy-row" style="margin-bottom:16px;">
@@ -69,6 +72,22 @@
                     <span><strong>Contacto:</strong> <%= op.contactName || '—' %> · <%= op.contactPhone || 'Sin teléfono' %></span>
                     <span><strong>Estado:</strong> <span class="pill <%= op.isActive ? 'pill-green' : 'pill-amber' %>"><%= op.isActive ? 'Activo' : 'Inactivo' %></span></span>
                   </div>
+                  <details class="crud-details"><summary>Editar operación</summary>
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/editar" class="form-grid compact-form">
+                      <div class="field full"><label>Nombre</label><input name="name" required value="<%= op.name %>" /></div>
+                      <div class="field"><label>Ciudad</label><input name="cityName" value="<%= op.cityName || '' %>" /></div>
+                      <div class="field"><label>Dirección</label><input name="address" value="<%= op.address || '' %>" /></div>
+                      <div class="field"><label>Contacto</label><input name="contactName" value="<%= op.contactName || '' %>" /></div>
+                      <div class="field"><label>Teléfono</label><input name="contactPhone" value="<%= op.contactPhone || '' %>" /></div>
+                      <div class="field"><label>Estado</label><select name="isActive"><option value="true" <%= op.isActive ? 'selected' : '' %>>Activo</option><option value="false" <%= !op.isActive ? 'selected' : '' %>>Inactivo</option></select></div>
+                      <div class="field full"><label>Notas</label><textarea name="notes"><%= op.notes || '' %></textarea></div>
+                      <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar operación</button></div>
+                    </form>
+                  </details>
+                  <div class="actions stack-actions">
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/toggle"><button class="btn" type="submit"><%= op.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/eliminar"><button class="btn" type="submit">Eliminar</button></form>
+                  </div>
                   <div class="muted" style="margin-top:12px;">Link antiguo por operación compatible temporalmente: <%= legacyLink %></div>
                 </article>
               <% }) %>
@@ -85,6 +104,7 @@
           <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/servicios">
             <div class="form-grid">
               <div class="field full"><label for="serviceName">Nombre del servicio</label><input id="serviceName" name="name" required placeholder="Ej: Cargue y descargue" /></div>
+              <div class="field"><label for="serviceActive">Estado</label><select id="serviceActive" name="isActive"><option value="true">Activo</option><option value="false">Inactivo</option></select></div>
               <div class="field full"><label for="serviceDescription">Descripción</label><textarea id="serviceDescription" name="description" placeholder="Detalles, alcance o condiciones del servicio"></textarea></div>
             </div>
             <div class="form-actions"><button class="btn btn-primary" type="submit">Crear servicio</button></div>
@@ -103,6 +123,18 @@
                   <div class="item-meta">
                     <span><strong>Descripción:</strong> <%= service.description || '—' %></span>
                     <span><strong>Estado:</strong> <span class="pill <%= service.isActive ? 'pill-green' : 'pill-amber' %>"><%= service.isActive ? 'Activo' : 'Inactivo' %></span></span>
+                  </div>
+                  <details class="crud-details"><summary>Editar servicio</summary>
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/servicios/<%= service.id %>/editar" class="form-grid compact-form">
+                      <div class="field full"><label>Nombre</label><input name="name" required value="<%= service.name %>" /></div>
+                      <div class="field"><label>Estado</label><select name="isActive"><option value="true" <%= service.isActive ? 'selected' : '' %>>Activo</option><option value="false" <%= !service.isActive ? 'selected' : '' %>>Inactivo</option></select></div>
+                      <div class="field full"><label>Descripción</label><textarea name="description"><%= service.description || '' %></textarea></div>
+                      <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar servicio</button></div>
+                    </form>
+                  </details>
+                  <div class="actions stack-actions">
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/servicios/<%= service.id %>/toggle"><button class="btn" type="submit"><%= service.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/servicios/<%= service.id %>/eliminar"><button class="btn" type="submit">Eliminar</button></form>
                   </div>
                 </article>
               <% }) %>
