@@ -11,6 +11,7 @@ import { webhookRouter } from './routes/webhook.js';
 import { adminRouter } from './routes/admin.js';
 import { botKnowledgeCrudRouter } from './routes/botKnowledgeCrud.js';
 import { locationsRouter } from './routes/locations.js';
+import { dispatchBridgeRouter } from './routes/dispatchBridge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -274,6 +275,7 @@ app.get('/logout', destroySession);
 
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
+app.use('/admin/operaciones', dispatchBridgeRouter());
 app.use('/admin', adminRouter(prisma));
 app.use('/admin/locations', locationsRouter(prisma));
 
@@ -287,4 +289,3 @@ app.use((err, _req, res, next) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server listening on ${port}`));
-
