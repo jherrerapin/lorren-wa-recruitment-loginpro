@@ -59,6 +59,7 @@ function sessionAuth(req, res, next) {
   req.userAccessCity = req.session?.userAccessCity || null;
   req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
   req.userSource = req.session?.userSource || null;
+  req.canAccessDispatch = Boolean(req.session?.canAccessDispatch);
   return next();
 }
 
@@ -1456,7 +1457,7 @@ export function adminRouter(prisma) {
   router.get('/monitor', ensureDevRole, async (req, res) => {
     try {
       const messages = await fetchMonitorMessages(prisma);
-      res.render('monitor', { messages, formatDateTimeCO, role: req.userRole, isFemaleHumanReviewCandidate });
+      res.render('monitor', { messages, formatDateTimeCO, role: req.userRole, canAccessDispatch: req.canAccessDispatch, isFemaleHumanReviewCandidate });
     } catch (err) {
       console.error('[monitor]', err);
       res.status(500).json({ error: 'internal_server_error' });
@@ -1708,6 +1709,7 @@ export function adminRouter(prisma) {
 
     res.render('botKnowledge', {
       role: req.userRole,
+      canAccessDispatch: req.canAccessDispatch,
       canManageUsers: canManageRecruiterUsers(req),
       entries,
       vacancies,
@@ -2747,6 +2749,7 @@ export function adminRouter(prisma) {
     const manageableScopeOptions = getManageableScopeOptions(req, vacancies);
     res.render('users', {
       role: req.userRole,
+      canAccessDispatch: req.canAccessDispatch,
       canManageUsers: canManageRecruiterUsers(req),
       users,
       vacancies,
@@ -2768,6 +2771,7 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('La contrasena inicial debe tener al menos 6 caracteres.'));
     }
 
+    const canAccessDispatch = req.body.canAccessDispatch === 'true';
     const scopeResolution = await resolveRequestedUserScope(prisma, req, req.body);
     if (scopeResolution.error) {
       return res.redirect('/admin/users?error=' + encodeURIComponent(scopeResolution.error));
@@ -2791,6 +2795,7 @@ export function adminRouter(prisma) {
         accessScope: scopeResolution.accessScope,
         scopeCity: scopeResolution.scopeCity,
         scopeVacancyId: scopeResolution.scopeVacancyId,
+        canAccessDispatch,
         recoveryPhone: normalizeString(req.body.recoveryPhone),
         recoveryEmail: normalizeString(req.body.recoveryEmail),
         createdByUsername: req.username || req.userRole || 'system',
@@ -2976,6 +2981,7 @@ export function adminRouter(prisma) {
       vacancies,
       operations,
       role: req.userRole,
+      canAccessDispatch: req.canAccessDispatch,
       canManageUsers: canManageRecruiterUsers(req),
       successMsg,
       errorMsg,

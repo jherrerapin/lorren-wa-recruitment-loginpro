@@ -47,7 +47,7 @@
     </a>
     <a href="/admin">Candidatos</a>
     <a href="/admin/vacancies">Vacantes</a>
-    <a href="/admin/operaciones">Operaciones / Despacho</a>
+    <% if (role === 'dev' || canAccessDispatch) { %><a href="/admin/operaciones">Operaciones / Despacho</a><% } %>
     <a href="/admin/monitor">Monitor</a>
     <a href="/admin/bot-knowledge">Aprendizajes Lórren</a>
     <form method="post" action="/logout" style="margin-left:auto;">

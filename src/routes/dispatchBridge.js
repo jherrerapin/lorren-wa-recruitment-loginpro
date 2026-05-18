@@ -13,7 +13,8 @@ function isOpsUser(req) {
 
 function canUseOps(req) {
   const role = req.session?.userRole || req.userRole;
-  return role === 'dev' || isOpsUser(req);
+  const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch);
+  return role === 'dev' || canAccessDispatch || isOpsUser(req);
 }
 
 function requireOps(req, res, next) {
