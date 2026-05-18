@@ -295,6 +295,42 @@ const destroySession = (req, res) => {
 app.post('/logout', destroySession);
 app.get('/logout', destroySession);
 
+app.get('/admin/users/create-operations', (req, res) => {
+  if (!req.session?.userRole) return res.redirect('/login');
+  if (req.session.userRole !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
+
+  return res.send(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crear usuario de Operaciones / Despacho | LoginPro</title>
+</head>
+<body>
+  <main>
+    <h1>Crear usuario de Operaciones / Despacho</h1>
+    <p>Este formulario crea un usuario limitado al módulo Operaciones / Despacho.</p>
+    <form method="post" action="/admin/users/create-operations">
+      <div>
+        <label for="password">Contraseña inicial</label>
+        <input id="password" name="password" type="password" required minlength="6" autocomplete="new-password" />
+      </div>
+      <div>
+        <label for="recoveryPhone">Teléfono de recuperación</label>
+        <input id="recoveryPhone" name="recoveryPhone" type="tel" autocomplete="tel" />
+      </div>
+      <div>
+        <label for="recoveryEmail">Email de recuperación</label>
+        <input id="recoveryEmail" name="recoveryEmail" type="email" autocomplete="email" />
+      </div>
+      <button type="submit">Crear usuario de Operaciones / Despacho</button>
+    </form>
+    <p><a href="/admin/users">Volver a Usuarios</a></p>
+  </main>
+</body>
+</html>`);
+});
+
 app.post('/admin/users/create-operations', express.urlencoded({ extended: true }), async (req, res) => {
   if (req.session?.userRole !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
   const password = typeof req.body.password === 'string' ? req.body.password : '';
