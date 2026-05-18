@@ -43,7 +43,13 @@ export function dispatchBridgeRouter() {
   const router = express.Router();
   router.get('/', requireOps, (_req, res) => renderOperationsDashboard(res));
   router.get('/abrir', requireOps, (_req, res) => renderOperationsDashboard(res));
-  router.get('/solicitudes', requireOps, (_req, res) => renderOperationsDashboard(res, { pageTitle: 'Solicitudes operativas', activeSection: 'solicitudes' }));
+  router.get('/solicitudes', requireOps, async (req, res) => {
+    const serviceRequests = await prisma.dispatchServiceRequest.findMany({
+      include: { assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } },
+      orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }]
+    });
+    return res.render('operacionesSolicitudes', { serviceRequests, role: req.session?.userRole || req.userRole });
+  });
 
   router.get('/clientes', requireOps, async (req, res) => {
     const clients = await prisma.dispatchClient.findMany({ include: { _count: { select: { operationPoints: true } } }, orderBy: { createdAt: 'desc' } });
