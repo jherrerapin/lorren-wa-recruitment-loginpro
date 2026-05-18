@@ -1,13 +1,232 @@
-<!doctype html><html><head><meta charset='utf-8'><title>Asignaciones</title><style>.worker-list{max-height:calc(100vh - 360px);overflow-y:auto}.request-list{max-height:calc(100vh - 360px);overflow-y:auto}</style></head><body>
-<nav><a href='/admin'><img src='/public/logo-loginpro.svg' alt='LoginPro'></a></nav>
-<header><a href='/admin/operaciones'>Volver a Operaciones</a> <a href='/admin/operaciones/asignaciones'>Solicitudes de servicio</a> <a href='/admin/operaciones/clientes'>Clientes</a> <a href='/admin/operaciones/personal'>Personal operativo</a></header>
-<div class='worker-list'>
-<% workers.forEach((worker)=>{ %><article draggable="true" data-worker-id='<%= worker.id %>'><strong><%= worker.fullName %></strong><div><%= worker.phone||'-' %></div><div><%= worker.residenceLocality||'-' %></div><div><%= worker.transportMode||'-' %></div></article><% }) %>
-</div>
-<div class='request-list'>
-<% serviceRequests.forEach((request)=>{ %><article><strong><%= request.clientName %></strong><div><%= request.operationPointName||'-' %></div><div><%= new Date(request.serviceDate).toISOString().slice(0,10) %> <%= request.startTime||'-' %>-<%= request.endTime||'-' %></div><div><%= request.requiredWorkers %>/<%= request.assignments.length %></div><div><%= request.status %></div><a href='/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar'>Editar</a></article><% }) %>
-</div>
-<% if (role === 'dev') { %><details><summary>Crear solicitud interna</summary><p>Uso interno. Para clientes, usa el link público de la operación.</p><form method='post' action='/admin/operaciones/asignaciones/solicitudes'><input name='clientName' required><input type='date' name='serviceDate' required><input type='number' name='requiredWorkers' min='1' required><button>Crear nueva solicitud interna</button></form></details><% } %>
-<div id='assignmentDropZone'></div>
-<form id='assignForm' method='post' action='/admin/operaciones/asignaciones/assign'><input type='hidden' name='serviceRequestId' value='<%= selectedServiceRequestId %>'><input type='hidden' id='assignWorkerId' name='workerId'></form>
-<form method='post' action='/admin/operaciones/asignaciones/unassign'></form></body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Asignación operativa — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .board-layout { display: grid; grid-template-columns: 360px minmax(300px, 1fr) 390px; gap: 16px; align-items: start; }
+    .board-panel { background: #fff; border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-sm); overflow: hidden; min-height: 420px; }
+    .board-panel-head { padding: 16px 18px; border-bottom: 1px solid #edf2f7; background: #fff; }
+    .board-panel-head h2 { color: var(--navy); font-size: 16px; margin-bottom: 4px; }
+    .board-panel-head p { color: var(--muted); font-size: 13px; }
+    .filters { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid #edf2f7; background: var(--surface-2); }
+    .filters-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .worker-list, .request-list { max-height: calc(100vh - 360px); min-height: 360px; overflow-y: auto; padding: 12px; display: grid; gap: 10px; align-content: start; }
+    .worker-card, .request-card, .assigned-card { border: 1px solid var(--border); border-radius: 14px; background: #fff; padding: 12px; box-shadow: var(--shadow-sm); }
+    .worker-card { cursor: grab; }
+    .worker-card:active { cursor: grabbing; }
+    .worker-card strong, .request-card strong, .assigned-card strong { color: var(--navy); display: block; font-size: 14px; margin-bottom: 4px; }
+    .meta { color: var(--muted); font-size: 12px; display: grid; gap: 2px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 900; background: var(--blue-soft); color: var(--blue); }
+    .request-card { text-decoration: none; color: inherit; display: block; }
+    .request-card:hover, .request-card.active { border-color: var(--teal); box-shadow: var(--shadow); }
+    .request-card.active { background: #f0fdfa; }
+    .request-card .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .status-pill { display: inline-flex; border-radius: 999px; padding: 4px 8px; font-size: 10px; font-weight: 900; background: var(--amber-soft); color: var(--amber); white-space: nowrap; }
+    .status-pill.complete { background: var(--green-soft); color: var(--green); }
+    .assignment-body { padding: 16px; display: grid; gap: 14px; }
+    .selected-summary { border: 1px solid var(--border); background: var(--surface-2); border-radius: 14px; padding: 14px; }
+    .drop-zone { border: 2px dashed #b6c2d2; border-radius: 16px; padding: 22px; min-height: 118px; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); background: #fbfdff; font-weight: 800; }
+    .drop-zone.drag-over { border-color: var(--teal); background: #f0fdfa; color: var(--teal); }
+    .assigned-list { display: grid; gap: 10px; }
+    .assigned-card { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .internal-request { margin-top: 16px; }
+    .internal-request summary { cursor: pointer; font-weight: 900; color: var(--navy); }
+    .internal-request[open] { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-sm); }
+    @media (max-width: 1180px) { .board-layout { grid-template-columns: 1fr; } .worker-list, .request-list { max-height: 480px; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Tablero de asignación</div>
+        <h1>Asignación operativa</h1>
+        <p>Selecciona una solicitud, filtra auxiliares disponibles y arrástralos al panel de asignación.</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
+        <a class="btn" href="/admin/operaciones/solicitudes">Solicitudes de servicio</a>
+        <a class="btn" href="/admin/operaciones/clientes">Clientes</a>
+        <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
+      </div>
+    </section>
+
+    <% if (message) { %><div class="section-note"><%= message %></div><% } %>
+
+    <section class="board-layout">
+      <aside class="board-panel workers-panel">
+        <div class="board-panel-head">
+          <h2>Auxiliares disponibles</h2>
+          <p>Filtra y arrastra auxiliares hacia la solicitud seleccionada.</p>
+        </div>
+        <form class="filters" method="get" action="/admin/operaciones/asignaciones">
+          <input type="hidden" name="serviceRequestId" value="<%= selectedServiceRequestId %>" />
+          <div class="field"><label for="q">Buscar</label><input id="q" name="q" value="<%= filters.q %>" placeholder="Nombre, documento o teléfono" /></div>
+          <div class="filters-row">
+            <div class="field"><label for="operationalCityId">Ciudad</label><select id="operationalCityId" name="operationalCityId"><option value="">Todas</option><% cities.forEach((city)=>{ %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %></select></div>
+            <div class="field"><label for="locality">Localidad</label><select id="locality" name="locality"><option value="">Todas</option><% localities.forEach((item)=>{ %><option value="<%= item %>" <%= filters.locality===item?'selected':'' %>><%= item %></option><% }) %></select></div>
+          </div>
+          <div class="filters-row">
+            <div class="field"><label for="transportMode">Transporte</label><select id="transportMode" name="transportMode"><option value="">Todos</option><% transportModes.forEach((item)=>{ %><option value="<%= item %>" <%= filters.transportMode===item?'selected':'' %>><%= item %></option><% }) %></select></div>
+            <div class="field"><label for="vacancyId">Perfil</label><select id="vacancyId" name="vacancyId"><option value="">Todos</option><% vacancies.forEach((vacancy)=>{ %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %></option><% }) %></select></div>
+          </div>
+          <button class="btn btn-primary" type="submit">Filtrar auxiliares</button>
+        </form>
+
+        <div class="worker-list">
+          <% if (!workers.length) { %>
+            <div class="empty"><strong>No hay auxiliares con esos filtros.</strong>Ajusta los filtros o registra personal operativo.</div>
+          <% } %>
+          <% workers.forEach((worker)=>{ %>
+            <article class="worker-card" draggable="true" data-worker-id="<%= worker.id %>">
+              <strong><%= worker.fullName %></strong>
+              <div class="meta">
+                <span>Tel: <%= worker.phone || '-' %></span>
+                <span>Doc: <%= [worker.documentType, worker.documentNumber].filter(Boolean).join(' ') || '-' %></span>
+                <span>Ubicación: <%= worker.residenceCity || '-' %> · <%= worker.residenceLocality || '-' %></span>
+                <span>Transporte: <%= worker.transportMode || '-' %></span>
+              </div>
+              <div class="chips">
+                <% worker.cities.slice(0,3).forEach((entry)=>{ %><span class="chip"><%= entry.city.name %></span><% }) %>
+                <% worker.vacancies.slice(0,2).forEach((entry)=>{ %><span class="chip"><%= entry.vacancy.title %></span><% }) %>
+              </div>
+            </article>
+          <% }) %>
+        </div>
+      </aside>
+
+      <aside class="board-panel requests-panel">
+        <div class="board-panel-head">
+          <h2>Solicitudes de servicio</h2>
+          <p>Elige la solicitud sobre la que vas a trabajar.</p>
+        </div>
+        <div class="request-list">
+          <% if (!serviceRequests.length) { %>
+            <div class="empty"><strong>No hay solicitudes.</strong>Crea clientes y comparte links públicos para recibir solicitudes.</div>
+          <% } %>
+          <% serviceRequests.forEach((request)=>{ const assignedCount = request.assignments.length; const complete = request.status === 'ASSIGNMENT_COMPLETE'; %>
+            <a class="request-card <%= selectedServiceRequestId===request.id?'active':'' %>" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">
+              <div class="top"><strong><%= request.clientName %></strong><span class="status-pill <%= complete ? 'complete' : '' %>"><%= request.status %></span></div>
+              <div class="meta">
+                <span><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></span>
+                <span><%= new Date(request.serviceDate).toISOString().slice(0,10) %> · <%= request.startTime || '-' %> - <%= request.endTime || '-' %></span>
+                <span>Asignados: <%= assignedCount %> / <%= request.requiredWorkers %></span>
+              </div>
+              <div class="form-actions"><a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a></div>
+            </a>
+          <% }) %>
+        </div>
+      </aside>
+
+      <aside class="board-panel assignment-panel">
+        <div class="board-panel-head">
+          <h2>Asignación</h2>
+          <p>Arrastra auxiliares aquí para guardar la asignación.</p>
+        </div>
+        <div class="assignment-body">
+          <% if (selectedServiceRequest) { %>
+            <div class="selected-summary">
+              <strong><%= selectedServiceRequest.clientName %></strong>
+              <div class="meta">
+                <span><%= selectedServiceRequest.operationPointName || 'Sin punto' %> · <%= selectedServiceRequest.cityName || 'Sin ciudad' %></span>
+                <span><%= new Date(selectedServiceRequest.serviceDate).toISOString().slice(0,10) %> · <%= selectedServiceRequest.startTime || '-' %> - <%= selectedServiceRequest.endTime || '-' %></span>
+                <span>Requeridos: <%= selectedServiceRequest.requiredWorkers %> · Asignados: <%= selectedServiceRequest.assignments.length %></span>
+              </div>
+            </div>
+            <div id="assignmentDropZone" class="drop-zone">Arrastra un auxiliar aquí para asignarlo a esta solicitud.</div>
+            <form id="assignForm" method="post" action="/admin/operaciones/asignaciones/assign">
+              <input type="hidden" name="serviceRequestId" value="<%= selectedServiceRequestId %>" />
+              <input type="hidden" id="assignWorkerId" name="workerId" />
+            </form>
+            <div class="assigned-list">
+              <% if (!selectedServiceRequest.assignments.length) { %><div class="empty"><strong>Sin auxiliares asignados.</strong>Arrastra auxiliares disponibles para cubrir la solicitud.</div><% } %>
+              <% selectedServiceRequest.assignments.forEach((assignment)=>{ %>
+                <article class="assigned-card">
+                  <div><strong><%= assignment.worker.fullName %></strong><div class="meta"><span><%= assignment.worker.phone || '-' %></span><span><%= assignment.status %></span></div></div>
+                  <form method="post" action="/admin/operaciones/asignaciones/unassign">
+                    <input type="hidden" name="assignmentId" value="<%= assignment.id %>" />
+                    <input type="hidden" name="serviceRequestId" value="<%= selectedServiceRequestId %>" />
+                    <button class="btn" type="submit">Quitar</button>
+                  </form>
+                </article>
+              <% }) %>
+            </div>
+          <% } else { %>
+            <div class="empty"><strong>Selecciona una solicitud.</strong>Necesitas una solicitud activa antes de asignar auxiliares.</div>
+            <div id="assignmentDropZone" class="drop-zone">Selecciona una solicitud antes de asignar auxiliares.</div>
+          <% } %>
+        </div>
+      </aside>
+    </section>
+
+    <% if (role === 'dev') { %>
+      <details class="internal-request">
+        <summary>Crear solicitud interna de prueba</summary>
+        <p class="muted" style="margin:8px 0 14px;">Uso interno temporal. Para clientes, usa el link público de la operación.</p>
+        <form method="post" action="/admin/operaciones/asignaciones/solicitudes">
+          <div class="form-grid">
+            <div class="field"><label>Cliente</label><input name="clientName" required /></div>
+            <div class="field"><label>Operación / punto</label><input name="operationPointName" /></div>
+            <div class="field"><label>Ciudad</label><input name="cityName" /></div>
+            <div class="field"><label>Dirección</label><input name="address" /></div>
+            <div class="field"><label>Fecha</label><input type="date" name="serviceDate" required /></div>
+            <div class="field"><label>Auxiliares requeridos</label><input type="number" name="requiredWorkers" min="1" required /></div>
+            <div class="field"><label>Hora inicio</label><input name="startTime" /></div>
+            <div class="field"><label>Hora fin</label><input name="endTime" /></div>
+            <div class="field full"><label>Notas</label><textarea name="notes"></textarea></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-primary" type="submit">Crear solicitud interna</button></div>
+        </form>
+      </details>
+    <% } %>
+  </main>
+
+  <script>
+    const dropZone = document.getElementById('assignmentDropZone');
+    const assignForm = document.getElementById('assignForm');
+    const assignWorkerId = document.getElementById('assignWorkerId');
+    const hasSelectedRequest = Boolean('<%= selectedServiceRequestId %>');
+
+    document.querySelectorAll('.worker-card[draggable="true"]').forEach((card) => {
+      card.addEventListener('dragstart', (event) => {
+        event.dataTransfer.setData('text/plain', card.dataset.workerId);
+      });
+    });
+
+    if (dropZone) {
+      dropZone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        dropZone.classList.add('drag-over');
+      });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+      dropZone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (!hasSelectedRequest || !assignForm || !assignWorkerId) {
+          alert('Selecciona una solicitud antes de asignar auxiliares.');
+          return;
+        }
+        const workerId = event.dataTransfer.getData('text/plain');
+        if (!workerId) return;
+        assignWorkerId.value = workerId;
+        assignForm.submit();
+      });
+    }
+  </script>
+</body>
+</html>
