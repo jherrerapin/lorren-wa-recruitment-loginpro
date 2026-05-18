@@ -285,7 +285,25 @@ model DispatchClient {
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
   operationPoints   DispatchOperationPoint[]
+  services          DispatchClientService[]
   @@index([name])
+  @@index([isActive])
+}
+
+model DispatchClientService {
+  id                String                   @id @default(cuid())
+  clientId          String
+  client            DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name              String
+  description       String?
+  isActive          Boolean                  @default(true)
+  createdByUsername String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  serviceRequests   DispatchServiceRequest[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
   @@index([isActive])
 }
 
@@ -355,6 +373,9 @@ model DispatchServiceRequest {
   createdByUsername  String?
   operationPointId   String?
   operationPoint     DispatchOperationPoint? @relation(fields: [operationPointId], references: [id], onDelete: SetNull)
+  serviceId          String?
+  service            DispatchClientService?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  serviceName        String?
   requestedByName    String?
   requestedByPhone   String?
   requestedByEmail   String?
@@ -368,6 +389,7 @@ model DispatchServiceRequest {
   @@index([status])
   @@index([cityName])
   @@index([operationPointId])
+  @@index([serviceId])
   @@index([source])
 }
 

@@ -23,13 +23,13 @@
 
       <div class="public-body">
         <% if (success) { %>
-          <div class="success-box">Solicitud registrada correctamente para <strong><%= operationPoint.name %></strong>. El equipo operativo revisará la asignación.</div>
+          <div class="success-box">Solicitud registrada correctamente para <strong><%= operationPoint.name %></strong><% if (service) { %> en el servicio <strong><%= service.name %></strong><% } %>. El equipo operativo revisará la asignación.</div>
         <% } else { %>
           <div class="card" style="box-shadow:none;margin-bottom:18px;">
             <div class="card-body">
               <div class="eyebrow">Cliente</div>
               <h2 style="color:var(--navy);margin-bottom:6px;"><%= client.name %></h2>
-              <p class="muted">Selecciona la operación o punto de servicio donde se requiere el personal.</p>
+              <p class="muted">Selecciona la operación y el servicio donde se requiere el personal.</p>
             </div>
           </div>
 
@@ -41,6 +41,15 @@
                   <option value="">Selecciona una operación</option>
                   <% operationPoints.forEach((op)=>{ %>
                     <option value="<%= op.id %>"><%= op.name %><% if (op.cityName) { %> — <%= op.cityName %><% } %><% if (op.address) { %> · <%= op.address %><% } %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <div class="field full">
+                <label for="serviceId">Servicio solicitado</label>
+                <select id="serviceId" name="serviceId" <%= services.length ? 'required' : '' %>>
+                  <option value=""><%= services.length ? 'Selecciona un servicio' : 'Sin servicios configurados para este cliente' %></option>
+                  <% services.forEach((item)=>{ %>
+                    <option value="<%= item.id %>"><%= item.name %><% if (item.description) { %> — <%= item.description %><% } %></option>
                   <% }) %>
                 </select>
               </div>

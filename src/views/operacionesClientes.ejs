@@ -64,7 +64,7 @@
                   </div>
                 </td>
                 <td><span class="pill <%= c.isActive ? 'pill-green' : 'pill-amber' %>"><%= c.isActive ? 'Activo' : 'Inactivo' %></span></td>
-                <td><a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Ver operaciones</a></td>
+                <td><a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Ver operaciones y servicios</a><div class="muted"><%= c._count?.operationPoints || 0 %> operaciones · <%= c._count?.services || 0 %> servicios</div></td>
               </tr><% }) %>
             </tbody></table>
           <% } %>

@@ -35,6 +35,7 @@
           <div class="form-grid">
             <div class="field"><label for="clientName">Cliente</label><input id="clientName" name="clientName" value="<%= serviceRequest.clientName %>" required /></div>
             <div class="field"><label for="operationPointName">Operación / punto</label><input id="operationPointName" name="operationPointName" value="<%= serviceRequest.operationPointName || '' %>" /></div>
+            <div class="field"><label for="serviceId">Servicio del cliente</label><select id="serviceId" name="serviceId"><option value="">Sin servicio</option><% clients.forEach((client)=>{ if (client.services.length) { %><optgroup label="<%= client.name %>"><% client.services.forEach((service)=>{ %><option value="<%= service.id %>" <%= serviceRequest.serviceId===service.id?'selected':'' %>><%= service.name %></option><% }) %></optgroup><% } }) %></select><% if (serviceRequest.serviceName && !serviceRequest.serviceId) { %><div class="muted">Servicio actual: <%= serviceRequest.serviceName %></div><% } %></div>
             <div class="field"><label for="cityName">Ciudad</label><input id="cityName" name="cityName" value="<%= serviceRequest.cityName || '' %>" /></div>
             <div class="field"><label for="address">Dirección</label><input id="address" name="address" value="<%= serviceRequest.address || '' %>" /></div>
             <div class="field"><label for="serviceDate">Fecha servicio</label><input id="serviceDate" type="date" name="serviceDate" value="<%= new Date(serviceRequest.serviceDate).toISOString().slice(0,10) %>" required /></div>
