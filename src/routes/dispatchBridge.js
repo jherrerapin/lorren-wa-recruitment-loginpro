@@ -63,6 +63,22 @@ function requireOps(req, res, next) {
 }
 
 
+
+async function recalculateServiceRequestStatus(serviceRequestId) {
+  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: serviceRequestId },
+    select: { id: true, requiredWorkers: true }
+  });
+  if (!serviceRequest) return;
+
+  const assignedCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId } });
+  let status = 'PENDING_ASSIGNMENT';
+  if (assignedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
+  else if (assignedCount > 0) status = 'ASSIGNMENT_PARTIAL';
+
+  await prisma.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
+}
+
 function requireDev(req, res, next) {
   const role = req.session?.userRole || req.userRole;
   if (role !== 'dev') return res.status(403).send('Solo DEV');
@@ -132,7 +148,9 @@ export function dispatchBridgeRouter() {
       ...(status ? { operationalStatus: status } : {})
     };
 
-    const [cities, vacancies, transportModeRows, localityRows] = await Promise.all([
+    const serviceRequestId = normalizeString(req.query.serviceRequestId);
+
+    const [cities, vacancies, transportModeRows, localityRows, serviceRequests] = await Promise.all([
       prisma.city.findMany({ orderBy: { name: 'asc' } }),
       prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }),
       prisma.dispatchWorker.findMany({ select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }),
@@ -141,13 +159,25 @@ export function dispatchBridgeRouter() {
         select: { residenceLocality: true },
         distinct: ['residenceLocality'],
         orderBy: { residenceLocality: 'asc' }
+      }),
+      prisma.dispatchServiceRequest.findMany({
+        include: { assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } },
+        orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }]
       })
     ]);
+
+    const selectedServiceRequest = serviceRequestId
+      ? serviceRequests.find((item) => item.id === serviceRequestId) || null
+      : serviceRequests[0] || null;
 
     return res.render('operacionesAsignaciones', {
       workers,
       cities,
       vacancies,
+      serviceRequests,
+      selectedServiceRequest,
+      selectedServiceRequestId: selectedServiceRequest?.id || '',
+      message: normalizeString(req.query.message),
       filters: {
         q: q || '',
         operationalCityId: operationalCityId || '',
@@ -161,6 +191,74 @@ export function dispatchBridgeRouter() {
       role: req.session?.userRole || req.userRole,
       canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
     });
+  });
+
+  router.post('/asignaciones/solicitudes', requireOps, async (req, res) => {
+    const clientName = normalizeString(req.body.clientName);
+    const serviceDateRaw = normalizeString(req.body.serviceDate);
+    const requiredWorkersRaw = Number(req.body.requiredWorkers);
+
+    if (!clientName || !serviceDateRaw || !Number.isFinite(requiredWorkersRaw) || requiredWorkersRaw < 1) {
+      return res.status(400).send('Datos inválidos para crear solicitud operativa');
+    }
+
+    const created = await prisma.dispatchServiceRequest.create({
+      data: {
+        clientName,
+        operationPointName: normalizeString(req.body.operationPointName),
+        cityName: normalizeString(req.body.cityName),
+        address: normalizeString(req.body.address),
+        serviceDate: new Date(serviceDateRaw),
+        startTime: normalizeString(req.body.startTime),
+        endTime: normalizeString(req.body.endTime),
+        requiredWorkers: Math.max(1, Math.trunc(requiredWorkersRaw)),
+        notes: normalizeString(req.body.notes),
+        status: 'PENDING_ASSIGNMENT',
+        createdByUsername: req.session?.username || req.username || null
+      }
+    });
+
+    return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${created.id}`);
+  });
+
+  router.post('/asignaciones/assign', requireOps, async (req, res) => {
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    const workerId = normalizeString(req.body.workerId);
+    if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos');
+
+    const [serviceRequest, worker] = await Promise.all([
+      prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true } }),
+      prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })
+    ]);
+
+    if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado');
+
+    const exists = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } });
+    if (exists) {
+      return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}&message=${encodeURIComponent('El auxiliar ya estaba asignado.')}`);
+    }
+
+    await prisma.dispatchAssignment.create({
+      data: {
+        serviceRequestId,
+        workerId,
+        status: 'ASSIGNED',
+        createdByUsername: req.session?.username || req.username || null
+      }
+    });
+
+    await recalculateServiceRequestStatus(serviceRequestId);
+    return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}`);
+  });
+
+  router.post('/asignaciones/unassign', requireOps, async (req, res) => {
+    const assignmentId = normalizeString(req.body.assignmentId);
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos');
+
+    await prisma.dispatchAssignment.delete({ where: { id: assignmentId } });
+    await recalculateServiceRequestStatus(serviceRequestId);
+    return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}`);
   });
 
 
