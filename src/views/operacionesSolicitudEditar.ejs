@@ -1,4 +1,56 @@
-<!doctype html><html><head><meta charset='utf-8'><title>Editar solicitud</title></head><body>
-<h1>Editar solicitud</h1>
-<form method='post' action='/admin/operaciones/asignaciones/solicitudes/<%= serviceRequest.id %>/editar'>
-<input name='clientName' value='<%= serviceRequest.clientName %>'><input name='operationPointName' value='<%= serviceRequest.operationPointName||"" %>'><input name='cityName' value='<%= serviceRequest.cityName||"" %>'><input name='address' value='<%= serviceRequest.address||"" %>'><input type='date' name='serviceDate' value='<%= new Date(serviceRequest.serviceDate).toISOString().slice(0,10) %>'><input name='startTime' value='<%= serviceRequest.startTime||"" %>'><input name='endTime' value='<%= serviceRequest.endTime||"" %>'><input type='number' name='requiredWorkers' min='1' value='<%= serviceRequest.requiredWorkers %>'><textarea name='notes'><%= serviceRequest.notes||"" %></textarea><input name='status' value='<%= serviceRequest.status %>'><button>Guardar</button></form></body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Editar solicitud — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Solicitudes de servicio</div>
+        <h1>Editar solicitud</h1>
+        <p>Actualiza los datos operativos de la solicitud antes o durante el proceso de asignación.</p>
+      </div>
+      <div class="actions"><a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= serviceRequest.id %>">Volver a asignación</a></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Datos de la solicitud</h2>
+        <p>Los cambios quedan disponibles inmediatamente en el tablero de asignación.</p>
+      </div>
+      <div class="card-body">
+        <form method="post" action="/admin/operaciones/asignaciones/solicitudes/<%= serviceRequest.id %>/editar">
+          <div class="form-grid">
+            <div class="field"><label for="clientName">Cliente</label><input id="clientName" name="clientName" value="<%= serviceRequest.clientName %>" required /></div>
+            <div class="field"><label for="operationPointName">Operación / punto</label><input id="operationPointName" name="operationPointName" value="<%= serviceRequest.operationPointName || '' %>" /></div>
+            <div class="field"><label for="cityName">Ciudad</label><input id="cityName" name="cityName" value="<%= serviceRequest.cityName || '' %>" /></div>
+            <div class="field"><label for="address">Dirección</label><input id="address" name="address" value="<%= serviceRequest.address || '' %>" /></div>
+            <div class="field"><label for="serviceDate">Fecha servicio</label><input id="serviceDate" type="date" name="serviceDate" value="<%= new Date(serviceRequest.serviceDate).toISOString().slice(0,10) %>" required /></div>
+            <div class="field"><label for="requiredWorkers">Auxiliares requeridos</label><input id="requiredWorkers" type="number" name="requiredWorkers" min="1" value="<%= serviceRequest.requiredWorkers %>" required /></div>
+            <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" name="startTime" value="<%= serviceRequest.startTime || '' %>" placeholder="Ej: 08:00" /></div>
+            <div class="field"><label for="endTime">Hora fin</label><input id="endTime" name="endTime" value="<%= serviceRequest.endTime || '' %>" placeholder="Ej: 17:00" /></div>
+            <div class="field"><label for="status">Estado</label><input id="status" name="status" value="<%= serviceRequest.status %>" /></div>
+            <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes"><%= serviceRequest.notes || '' %></textarea></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar cambios</button><a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= serviceRequest.id %>">Cancelar</a></div>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
