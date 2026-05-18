@@ -59,16 +59,10 @@ test('operations view keeps pending-state fallback when dispatch url is absent',
     'La vista debe informar que el modulo esta pendiente cuando no existe DISPATCH_MODULE_URL.'
   );
 
-  assert.match(
+  assert.doesNotMatch(
     operationsView,
-    /target=['"]_blank['"]/,
-    'El modulo externo debe abrir en una nueva pestaña.'
-  );
-
-  assert.match(
-    operationsView,
-    /rel=['"]noopener noreferrer['"]/,
-    'El enlace externo debe usar noopener noreferrer.'
+    /target=['"]_blank['"]|rel=['"]noopener noreferrer['"]/, 
+    'El modulo externo debe abrir en la misma pestaña del panel, no en una nueva.'
   );
 });
 
@@ -97,7 +91,7 @@ test('dev-only navigation links are not exposed unconditionally', () => {
 
     assert.match(
       beforeLink,
-      /role\s*===\s*['"]dev['"]|role\s*==\s*['"]dev['"]/,
+      /role\s*===\s*['"]dev['"]|role\s*==\s*['"]dev['"]/, 
       `${viewPath} debe envolver el enlace de Operaciones / Despacho en una condicion de rol dev.`
     );
   }
