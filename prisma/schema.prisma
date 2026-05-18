@@ -292,11 +292,55 @@ model DispatchWorker {
 
   cities            DispatchWorkerCity[]
   vacancies         DispatchWorkerVacancy[]
+  assignments       DispatchAssignment[]
 
   @@index([candidateId])
   @@index([documentNumber])
   @@index([phone])
   @@index([operationalStatus])
+}
+
+model DispatchServiceRequest {
+  id                 String               @id @default(cuid())
+  clientName         String
+  operationPointName String?
+  cityName           String?
+  address            String?
+  serviceDate        DateTime
+  startTime          String?
+  endTime            String?
+  requiredWorkers    Int                  @default(1)
+  status             String               @default("PENDING_ASSIGNMENT")
+  notes              String?
+  createdByUsername  String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  assignments        DispatchAssignment[]
+
+  @@index([serviceDate])
+  @@index([status])
+  @@index([cityName])
+}
+
+model DispatchAssignment {
+  id                String                 @id @default(cuid())
+  serviceRequestId  String
+  serviceRequest    DispatchServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  workerId          String
+  worker            DispatchWorker         @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  status            String                 @default("ASSIGNED")
+  notes             String?
+  createdByUsername String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@unique([serviceRequestId, workerId])
+  @@index([serviceRequestId])
+  @@index([workerId])
+  @@index([status])
 }
 
 model DispatchWorkerCity {
