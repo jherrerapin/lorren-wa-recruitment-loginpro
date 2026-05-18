@@ -104,7 +104,30 @@ export function dispatchBridgeRouter() {
     const created = await prisma.dispatchServiceRequest.create({ data: { clientName, operationPointName: normalizeString(req.body.operationPointName), cityName: normalizeString(req.body.cityName), address: normalizeString(req.body.address), serviceDate: new Date(serviceDateRaw), startTime: normalizeString(req.body.startTime), endTime: normalizeString(req.body.endTime), requiredWorkers: Math.max(1, Math.trunc(requiredWorkersRaw)), notes: normalizeString(req.body.notes), status: 'PENDING_ASSIGNMENT', source: 'INTERNAL', createdByUsername: req.session?.username || req.username || null } });
     return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${created.id}`);
   });
-  router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const exists = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (exists) return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}&message=${encodeURIComponent('El auxiliar ya estaba asignado.')}`); await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'ASSIGNED', createdByUsername: req.session?.username || req.username || null } }); await recalculateServiceRequestStatus(serviceRequestId); return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}`); });
+  router.post('/asignaciones/assign', requireOps, async (req, res) => {
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    const workerId = normalizeString(req.body.workerId);
+    if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos');
+
+    const [serviceRequest, worker] = await Promise.all([
+      prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }),
+      prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })
+    ]);
+    if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado');
+
+    const assignedCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId } });
+    if (assignedCount >= serviceRequest.requiredWorkers) {
+      await recalculateServiceRequestStatus(serviceRequestId);
+      return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}&message=${encodeURIComponent('La solicitud ya tiene el numero de auxiliares requerido.')}`);
+    }
+
+    const exists = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } });
+    if (exists) return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}&message=${encodeURIComponent('El auxiliar ya estaba asignado.')}`);
+
+    await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'ASSIGNED', createdByUsername: req.session?.username || req.username || null } });
+    await recalculateServiceRequestStatus(serviceRequestId);
+    return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}`);
+  });
   router.post('/asignaciones/unassign', requireOps, async (req, res) => { const assignmentId = normalizeString(req.body.assignmentId); const serviceRequestId = normalizeString(req.body.serviceRequestId); if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos'); await prisma.dispatchAssignment.delete({ where: { id: assignmentId } }); await recalculateServiceRequestStatus(serviceRequestId); return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}`); });
 
   router.get('/personal', requireOps, async (req, res) => { const operationalCityId = normalizeString(req.query.operationalCityId); const vacancyId = normalizeString(req.query.vacancyId); const status = normalizeString(req.query.status); const workers = await prisma.dispatchWorker.findMany({ where: { ...(status ? { operationalStatus: status } : {}), ...(operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {}), ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}) }, include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } }); const cities = await prisma.city.findMany({ orderBy: { name: 'asc' } }); const vacancies = await prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }); return res.render('operacionesPersonal', { pageTitle: 'Personal operativo', subtitle: 'Equipo disponible para asignación.', activeSection: 'personal', workers, cities, vacancies, filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', status: status || '' }, message: normalizeString(req.query.message), role: req.userRole, canAccessDispatch: req.canAccessDispatch }); });
