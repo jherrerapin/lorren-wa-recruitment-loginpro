@@ -60,10 +60,56 @@ export function dispatchBridgeRouter() {
     });
   });
 
-  router.get('/asignaciones', requireOps, (_req, res) => {
-    return renderOperationsDashboard(res, {
-      pageTitle: 'Asignaciones operativas',
-      activeSection: 'asignaciones'
+  router.get('/asignaciones', requireOps, async (req, res) => {
+    const q = normalizeString(req.query.q);
+    const operationalCityId = normalizeString(req.query.operationalCityId);
+    const vacancyId = normalizeString(req.query.vacancyId);
+    const transportMode = normalizeString(req.query.transportMode);
+    const locality = normalizeString(req.query.locality);
+    const status = normalizeString(req.query.status);
+
+    const workers = await prisma.dispatchWorker.findMany({
+      where: {
+        ...(q ? {
+          OR: [
+            { fullName: { contains: q, mode: 'insensitive' } },
+            { documentNumber: { contains: q, mode: 'insensitive' } },
+            { phone: { contains: q, mode: 'insensitive' } }
+          ]
+        } : {}),
+        ...(operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {}),
+        ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}),
+        ...(transportMode ? { transportMode } : {}),
+        ...(locality ? { residenceLocality: locality } : {}),
+        ...(status ? { operationalStatus: status } : {})
+      },
+      include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const [cities, vacancies, transportModeRows, localityRows] = await Promise.all([
+      prisma.city.findMany({ orderBy: { name: 'asc' } }),
+      prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }),
+      prisma.dispatchWorker.findMany({ select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }),
+      prisma.dispatchWorker.findMany({ select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } })
+    ]);
+
+    return res.render('operacionesAsignaciones', {
+      workers,
+      cities,
+      vacancies,
+      filters: {
+        q: q || '',
+        operationalCityId: operationalCityId || '',
+        vacancyId: vacancyId || '',
+        transportMode: transportMode || '',
+        locality: locality || '',
+        status: status || ''
+      },
+      transportModes: transportModeRows.map((row) => row.transportMode).filter(Boolean),
+      localities: localityRows.map((row) => row.residenceLocality).filter(Boolean),
+      role: req.session?.userRole || req.userRole,
+      canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
     });
   });
 
