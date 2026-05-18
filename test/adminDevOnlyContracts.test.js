@@ -85,6 +85,34 @@ test('operations view keeps pending-state fallback and opens dispatch through br
   );
 });
 
+test('operations view presents dispatch as an integrated LoginPro module', () => {
+  const operationsView = readSource('src/views/operaciones.ejs');
+
+  assert.match(
+    operationsView,
+    /Operaciones \/ Despacho/,
+    'La vista debe nombrar el modulo como Operaciones / Despacho.'
+  );
+
+  assert.match(
+    operationsView,
+    /Módulo del panel LoginPro|Modulo del panel LoginPro/,
+    'La vista debe comunicar que es un modulo del panel LoginPro.'
+  );
+
+  assert.match(
+    operationsView,
+    /Acceso operativo autorizado/,
+    'La vista debe comunicar acceso operativo autorizado.'
+  );
+
+  assert.doesNotMatch(
+    operationsView,
+    /módulo externo temporal|modulo externo temporal|Módulo externo conectado|Modulo externo conectado|Anclaje externo|sistema separado/i,
+    'La vista no debe presentar Operaciones / Despacho como sistema separado o modulo externo temporal.'
+  );
+});
+
 test('operations-only users are redirected to operations and blocked from recruitment admin', () => {
   const serverSource = readSource('src/server.js');
 
