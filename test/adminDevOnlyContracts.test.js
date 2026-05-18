@@ -64,6 +64,15 @@ test('admin user creation restricts canAccessDispatch to DEV in backend', () => 
   assert.match(adminSource, /buildUniqueRecruiterUsername/);
 });
 
+
+
+test('operations dashboard uses updated LoginPro logo asset', () => {
+  const operationsView = readSource('src/views/operacionesDashboard.ejs');
+
+  assert.match(operationsView, /<img src=["']\/public\/logo-loginpro\.svg["'] alt=["']LoginPro["'] \/>/);
+  assert.doesNotMatch(operationsView, /\/public\/loginpro\.png/);
+});
+
 test('users view has one form with dispatch checkbox and no operations-only form', () => {
   const usersView = readSource('src/views/users.ejs');
 
@@ -71,7 +80,7 @@ test('users view has one form with dispatch checkbox and no operations-only form
   assert.match(usersView, /id=["']canAccessDispatch["']/);
   assert.match(usersView, /value=["']true["']/);
   assert.match(usersView, /Permitir acceso a Operaciones \/ Despacho/);
-  assert.match(usersView, /El usuario podrá entrar al panel operativo además del alcance de reclutamiento seleccionado\./);
+  assert.match(usersView, /Permite entrar al panel operativo además del alcance de reclutamiento seleccionado\./);
   assert.match(usersView, /<%\s*if\s*\(role\s*===\s*['\"]dev['\"]\)\s*{\s*%>[\s\S]*id=["']canAccessDispatch["'][\s\S]*<%\s*}\s*%>/);
   assert.match(usersView, /<%= user\.canAccessDispatch \? 'Operaciones \/ Despacho' : 'Reclutamiento' %>/);
   assert.doesNotMatch(usersView, /Crear usuario de Operaciones \/ Despacho/);
