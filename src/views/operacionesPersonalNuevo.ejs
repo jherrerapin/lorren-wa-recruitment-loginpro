@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Crear auxiliar manual — LoginPro</title>
+  <title><%= mode === 'edit' ? 'Editar auxiliar manual' : 'Crear auxiliar manual' %> — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
 </head>
@@ -22,8 +22,8 @@
     <section class="hero">
       <div>
         <div class="eyebrow">Personal operativo</div>
-        <h1>Crear auxiliar manual</h1>
-        <p>Registra personal operativo que no viene del flujo de candidatos del bot.</p>
+        <h1><%= mode === 'edit' ? 'Editar auxiliar manual' : 'Crear auxiliar manual' %></h1>
+        <p><%= mode === 'edit' ? 'Actualiza datos, ciudades operativas, perfiles y estado del auxiliar manual.' : 'Registra personal operativo que no viene del flujo de candidatos del bot.' %></p>
       </div>
       <div class="actions"><a class="btn" href="/admin/operaciones/personal">Volver a personal</a></div>
     </section>
@@ -31,21 +31,23 @@
     <section class="card">
       <div class="card-head"><h2>Datos del auxiliar</h2><p>Define información básica, ciudades operativas y perfiles habilitados.</p></div>
       <div class="card-body">
-        <form method="post" action="/admin/operaciones/personal/nuevo">
+        <% const w = worker || {}; const selectedCityIds = new Set((w.cities || []).map((entry)=>entry.cityId)); const selectedVacancyIds = new Set((w.vacancies || []).map((entry)=>entry.vacancyId)); %>
+        <form method="post" action="<%= formAction %>">
           <div class="form-grid">
-            <div class="field full"><label for="fullName">Nombre completo</label><input id="fullName" name="fullName" required placeholder="Nombre y apellido" /></div>
-            <div class="field"><label for="phone">Teléfono</label><input id="phone" name="phone" placeholder="Celular" /></div>
-            <div class="field"><label for="documentType">Tipo documento</label><input id="documentType" name="documentType" placeholder="CC, PPT..." /></div>
-            <div class="field"><label for="documentNumber">Número documento</label><input id="documentNumber" name="documentNumber" /></div>
-            <div class="field"><label for="residenceCity">Ciudad residencia</label><input id="residenceCity" name="residenceCity" /></div>
-            <div class="field"><label for="residenceLocality">Localidad / barrio</label><input id="residenceLocality" name="residenceLocality" /></div>
-            <div class="field"><label for="transportMode">Medio de transporte</label><input id="transportMode" name="transportMode" placeholder="Moto, transporte público..." /></div>
-            <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Disponibilidad, restricciones o comentarios"></textarea></div>
-            <div class="field"><label for="cityIds">Ciudades operativas</label><select id="cityIds" name="cityIds" multiple size="7"><% cities.forEach((c)=>{ %><option value="<%= c.id %>"><%= c.name %></option><% }) %></select></div>
-            <div class="field"><label for="vacancyIds">Vacantes / perfiles</label><select id="vacancyIds" name="vacancyIds" multiple size="7"><% vacancies.forEach((v)=>{ %><option value="<%= v.id %>"><%= v.title %></option><% }) %></select></div>
+            <div class="field full"><label for="fullName">Nombre completo</label><input id="fullName" name="fullName" required value="<%= w.fullName || '' %>" placeholder="Nombre y apellido" /></div>
+            <div class="field"><label for="phone">Teléfono</label><input id="phone" name="phone" value="<%= w.phone || '' %>" placeholder="Celular" /></div>
+            <div class="field"><label for="documentType">Tipo documento</label><input id="documentType" name="documentType" value="<%= w.documentType || '' %>" placeholder="CC, PPT..." /></div>
+            <div class="field"><label for="documentNumber">Número documento</label><input id="documentNumber" name="documentNumber" value="<%= w.documentNumber || '' %>" /></div>
+            <div class="field"><label for="residenceCity">Ciudad residencia</label><input id="residenceCity" name="residenceCity" value="<%= w.residenceCity || '' %>" /></div>
+            <div class="field"><label for="residenceLocality">Localidad / barrio</label><input id="residenceLocality" name="residenceLocality" value="<%= w.residenceLocality || '' %>" /></div>
+            <div class="field"><label for="transportMode">Medio de transporte</label><input id="transportMode" name="transportMode" value="<%= w.transportMode || '' %>" placeholder="Moto, transporte público..." /></div>
+            <div class="field"><label for="operationalStatus">Estado operativo</label><select id="operationalStatus" name="operationalStatus"><option value="ACTIVE" <%= w.operationalStatus !== 'INACTIVE' ? 'selected' : '' %>>Activo</option><option value="INACTIVE" <%= w.operationalStatus === 'INACTIVE' ? 'selected' : '' %>>Inactivo</option></select></div>
+            <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Disponibilidad, restricciones o comentarios"><%= w.notes || '' %></textarea></div>
+            <div class="field"><label for="cityIds">Ciudades operativas</label><select id="cityIds" name="cityIds" multiple size="7"><% cities.forEach((c)=>{ %><option value="<%= c.id %>" <%= selectedCityIds.has(c.id) ? 'selected' : '' %>><%= c.name %></option><% }) %></select></div>
+            <div class="field"><label for="vacancyIds">Vacantes / perfiles</label><select id="vacancyIds" name="vacancyIds" multiple size="7"><% vacancies.forEach((v)=>{ %><option value="<%= v.id %>" <%= selectedVacancyIds.has(v.id) ? 'selected' : '' %>><%= v.title %></option><% }) %></select></div>
           </div>
           <div class="section-note" style="margin-top:14px;">Puedes seleccionar varias ciudades y varios perfiles manteniendo presionada la tecla Ctrl o Cmd.</div>
-          <div class="form-actions"><button class="btn btn-primary" type="submit">Crear auxiliar</button><a class="btn" href="/admin/operaciones/personal">Cancelar</a></div>
+          <div class="form-actions"><button class="btn btn-primary" type="submit"><%= mode === 'edit' ? 'Guardar auxiliar' : 'Crear auxiliar' %></button><a class="btn" href="/admin/operaciones/personal">Cancelar</a></div>
         </form>
       </div>
     </section>
