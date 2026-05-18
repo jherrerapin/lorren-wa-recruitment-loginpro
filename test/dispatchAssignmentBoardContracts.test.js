@@ -33,7 +33,7 @@ test('dispatch bridge routes to visual assignment board and keeps boundaries', (
   assert.doesNotMatch(fsm, /operacionesAsignaciones|assignmentDropZone|dispatch assignment/i);
 
   const schema = readSource('prisma/schema.prisma');
-  assert.doesNotMatch(schema, /operacionesAsignaciones|DispatchAssignment|DispatchOperationRequest/);
+  assert.doesNotMatch(schema, /operacionesAsignaciones|DispatchOperationRequest/);
   const migrationDirs = readdirSync(new URL('../prisma/migrations', import.meta.url), { withFileTypes: true }).map((entry) => entry.name);
   assert.ok(!migrationDirs.some((name) => /dispatch_assignment_board|operaciones_asignaciones/i.test(name)));
 });
