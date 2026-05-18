@@ -207,14 +207,16 @@
             <input id="recoveryEmail" name="recoveryEmail" type="email" />
           </div>
 
-          <div class="field full">
-            <label>Permisos del panel</label>
-            <label class="checkbox-label" for="canAccessDispatch">
-              <input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" />
-              Permitir acceso a Operaciones / Despacho
-            </label>
-            <span class="hint">El usuario podrá entrar al panel operativo además del alcance de reclutamiento seleccionado.</span>
-          </div>
+          <% if (role === 'dev') { %>
+            <div class="field full">
+              <label>Permisos del panel</label>
+              <label class="checkbox-label" for="canAccessDispatch">
+                <input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" />
+                Permitir acceso a Operaciones / Despacho
+              </label>
+              <span class="hint">El usuario podrá entrar al panel operativo además del alcance de reclutamiento seleccionado.</span>
+            </div>
+          <% } %>
 
           <div class="full actions">
             <button class="btn btn-primary" type="submit">Crear usuario</button>
