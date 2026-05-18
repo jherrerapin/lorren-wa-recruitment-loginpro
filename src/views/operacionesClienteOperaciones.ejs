@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Operaciones cliente</title></head><body>
+<nav><a href='/admin'><img src='/public/logo-loginpro.svg' alt='LoginPro'></a></nav>
+<h1><%= client.name %></h1>
+<form method='post' action='/admin/operaciones/clientes/<%= client.id %>/operaciones'>
+<input name='name' required placeholder='Nombre operación'><input name='cityName'><input name='address'><input name='contactName'><input name='contactPhone'><textarea name='notes'></textarea><button>Crear operación</button></form>
+<% client.operationPoints.forEach((op)=>{ const link = baseUrl + '/operaciones/solicitud/' + op.publicToken; %>
+<div><strong><%= op.name %></strong> <span><%= op.cityName||'-' %></span> <span><%= op.address||'-' %></span> <span><%= op.contactName||'-' %></span> <span><%= op.contactPhone||'-' %></span>
+<a href='/operaciones/solicitud/<%= op.publicToken %>'>/operaciones/solicitud/<%= op.publicToken %></a>
+<button type='button' onclick="navigator.clipboard.writeText('<%= link %>')">Copiar link</button>
+<span><%= op.isActive?'Activo':'Inactivo' %></span></div>
+<% }) %>
+</body></html>

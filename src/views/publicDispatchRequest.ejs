@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Solicitud de servicio</title></head><body>
+<% if (success) { %><h1>Solicitud registrada correctamente.</h1><% } else { %>
+<h2><%= operationPoint.client.name %></h2><h3><%= operationPoint.name %></h3><p><%= operationPoint.cityName||'-' %> <%= operationPoint.address||'' %></p>
+<form method='post'>
+<input name='requestedByName' required placeholder='Nombre de quien solicita'><input name='requestedByPhone'><input name='requestedByEmail' type='email'>
+<input type='date' name='serviceDate' required><input name='startTime'><input name='endTime'><input type='number' min='1' name='requiredWorkers' required>
+<textarea name='notes'></textarea><button>Enviar solicitud</button></form><% } %>
+</body></html>

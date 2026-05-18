@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Clientes</title></head><body>
+<nav><a href='/admin'><img src='/public/logo-loginpro.svg' alt='LoginPro'></a></nav>
+<h1>Clientes</h1><p>Gestiona clientes y operaciones para solicitudes de servicio.</p>
+<form method='post' action='/admin/operaciones/clientes'>
+<input name='name' required placeholder='Nombre'><input name='nit' placeholder='NIT'><input name='contactName'><input name='contactPhone'><input name='contactEmail'><textarea name='notes'></textarea><button>Crear cliente</button></form>
+<table><tr><th>Nombre</th><th>NIT</th><th>Contacto</th><th>Teléfono</th><th>Correo</th><th>Estado</th><th>Acciones</th></tr>
+<% clients.forEach((c)=>{ %><tr><td><%= c.name %></td><td><%= c.nit||'-' %></td><td><%= c.contactName||'-' %></td><td><%= c.contactPhone||'-' %></td><td><%= c.contactEmail||'-' %></td><td><%= c.isActive?'Activo':'Inactivo' %></td><td><a href='/admin/operaciones/clientes/<%= c.id %>/operaciones'>Ver operaciones</a> <a href='/admin/operaciones/clientes/<%= c.id %>/operaciones'>Crear operación</a></td></tr><% }) %>
+</table></body></html>

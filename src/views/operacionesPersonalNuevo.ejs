@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Crear auxiliar manual</title></head><body>
+<h1>Crear auxiliar manual</h1>
+<form method='post' action='/admin/operaciones/personal/nuevo'>
+<input name='fullName' required><input name='phone'><input name='documentType'><input name='documentNumber'><input name='residenceCity'><input name='residenceLocality'><input name='transportMode'><textarea name='notes'></textarea>
+<select name='cityIds' multiple><% cities.forEach((c)=>{ %><option value='<%= c.id %>'><%= c.name %></option><% }) %></select>
+<select name='vacancyIds' multiple><% vacancies.forEach((v)=>{ %><option value='<%= v.id %>'><%= v.title %></option><% }) %></select>
+<button>Crear</button></form></body></html>
