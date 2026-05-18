@@ -53,11 +53,11 @@ export function dispatchBridgeRouter() {
 
   router.get('/clientes', requireOps, async (req, res) => {
     const clients = await prisma.dispatchClient.findMany({ include: { _count: { select: { operationPoints: true } } }, orderBy: { createdAt: 'desc' } });
-    return res.render('operacionesClientes', { clients, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message) });
+    return res.render('operacionesClientes', { clients, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message), baseUrl: `${req.protocol}://${req.get('host')}` });
   });
   router.post('/clientes', requireOps, async (req, res) => {
     const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre requerido');
-    await prisma.dispatchClient.create({ data: { name, nit: normalizeString(req.body.nit), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), contactEmail: normalizeString(req.body.contactEmail), notes: normalizeString(req.body.notes), createdByUsername: req.session?.username || req.username || null } });
+    await prisma.dispatchClient.create({ data: { name, publicToken: randomBytes(24).toString('hex'), nit: normalizeString(req.body.nit), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), contactEmail: normalizeString(req.body.contactEmail), notes: normalizeString(req.body.notes), createdByUsername: req.session?.username || req.username || null } });
     return res.redirect('/admin/operaciones/clientes');
   });
   router.get('/clientes/:clientId/operaciones', requireOps, async (req, res) => {
@@ -126,15 +126,15 @@ export function dispatchBridgeRouter() {
 
   router.get('/solicitud/:publicToken', async (req, res) => {
     const operationPoint = await prisma.dispatchOperationPoint.findFirst({ where: { publicToken: req.params.publicToken, isActive: true }, include: { client: true } });
-    if (!operationPoint) return res.status(404).send('Link no disponible');
-    return res.render('publicDispatchRequest', { operationPoint, success: false });
+    if (!operationPoint?.client?.isActive) return res.status(404).send('Link no disponible');
+    return res.redirect(`/operaciones/cliente/${operationPoint.client.publicToken}`);
   });
   router.post('/solicitud/:publicToken', async (req, res) => {
-    const operationPoint = await prisma.dispatchOperationPoint.findFirst({ where: { publicToken: req.params.publicToken, isActive: true }, include: { client: true } });
-    if (!operationPoint) return res.status(404).send('Link no disponible');
+    const operationPoint = await prisma.dispatchOperationPoint.findFirst({ where: { publicToken: req.params.publicToken, isActive: true }, include: { client: { include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } } } } } });
+    if (!operationPoint?.client?.isActive) return res.status(404).send('Link no disponible');
     const requiredWorkersRaw = Number(req.body.requiredWorkers);
     await prisma.dispatchServiceRequest.create({ data: { operationPointId: operationPoint.id, clientName: operationPoint.client.name, operationPointName: operationPoint.name, cityName: operationPoint.cityName, address: operationPoint.address, serviceDate: new Date(req.body.serviceDate), startTime: normalizeString(req.body.startTime), endTime: normalizeString(req.body.endTime), requiredWorkers: Number.isFinite(requiredWorkersRaw) ? Math.max(1, Math.trunc(requiredWorkersRaw)) : 1, notes: normalizeString(req.body.notes), requestedByName: normalizeString(req.body.requestedByName), requestedByPhone: normalizeString(req.body.requestedByPhone), requestedByEmail: normalizeString(req.body.requestedByEmail), source: 'PUBLIC_LINK', status: 'PENDING_ASSIGNMENT' } });
-    return res.render('publicDispatchRequest', { operationPoint, success: true });
+    return res.render('publicDispatchRequest', { client: operationPoint.client, operationPoints: operationPoint.client.operationPoints, operationPoint, success: true });
   });
 
   return router;

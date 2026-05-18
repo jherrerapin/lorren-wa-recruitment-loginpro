@@ -17,25 +17,33 @@
           <p>Tu solicitud fue enviada correctamente al equipo de Operaciones / Despacho.</p>
         <% } else { %>
           <h1>Solicitud de servicio</h1>
-          <p>Completa los datos para solicitar personal operativo en este punto de servicio.</p>
+          <p>Completa los datos y selecciona la operación para solicitar personal operativo.</p>
         <% } %>
       </div>
 
       <div class="public-body">
         <% if (success) { %>
-          <div class="success-box">Solicitud registrada correctamente. El equipo operativo revisará la asignación.</div>
+          <div class="success-box">Solicitud registrada correctamente para <strong><%= operationPoint.name %></strong>. El equipo operativo revisará la asignación.</div>
         <% } else { %>
           <div class="card" style="box-shadow:none;margin-bottom:18px;">
             <div class="card-body">
-              <div class="eyebrow">Cliente y operación</div>
-              <h2 style="color:var(--navy);margin-bottom:6px;"><%= operationPoint.client.name %></h2>
-              <p class="muted"><strong><%= operationPoint.name %></strong></p>
-              <p class="muted"><%= operationPoint.cityName || '-' %> <%= operationPoint.address || '' %></p>
+              <div class="eyebrow">Cliente</div>
+              <h2 style="color:var(--navy);margin-bottom:6px;"><%= client.name %></h2>
+              <p class="muted">Selecciona la operación o punto de servicio donde se requiere el personal.</p>
             </div>
           </div>
 
           <form method="post">
             <div class="form-grid">
+              <div class="field full">
+                <label for="operationPointId">Operación / punto de servicio</label>
+                <select id="operationPointId" name="operationPointId" required>
+                  <option value="">Selecciona una operación</option>
+                  <% operationPoints.forEach((op)=>{ %>
+                    <option value="<%= op.id %>"><%= op.name %><% if (op.cityName) { %> — <%= op.cityName %><% } %><% if (op.address) { %> · <%= op.address %><% } %></option>
+                  <% }) %>
+                </select>
+              </div>
               <div class="field full"><label for="requestedByName">Nombre de quien solicita</label><input id="requestedByName" name="requestedByName" required placeholder="Nombre completo" /></div>
               <div class="field"><label for="requestedByPhone">Teléfono</label><input id="requestedByPhone" name="requestedByPhone" placeholder="Número de contacto" /></div>
               <div class="field"><label for="requestedByEmail">Correo</label><input id="requestedByEmail" name="requestedByEmail" type="email" placeholder="correo@empresa.com" /></div>
