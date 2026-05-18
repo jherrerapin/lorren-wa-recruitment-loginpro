@@ -6,18 +6,6 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
-function normalizeHttpUrl(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return null;
-
-  try {
-    const url = new URL(normalized);
-    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
 function isOpsUser(req) {
   const username = normalizeString(req.session?.username || req.username);
   return Boolean(username?.startsWith('operaciones-despacho'));
@@ -35,21 +23,45 @@ function requireOps(req, res, next) {
   return next();
 }
 
+function renderOperationsDashboard(res, options = {}) {
+  return res.render('operacionesDashboard', {
+    pageTitle: 'Operaciones / Despacho',
+    subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.',
+    activeSection: 'dashboard',
+    ...options
+  });
+}
+
 export function dispatchBridgeRouter() {
   const router = express.Router();
 
   router.get('/', requireOps, (_req, res) => {
-    return res.redirect('/admin/operaciones/abrir');
+    return renderOperationsDashboard(res);
   });
 
   router.get('/abrir', requireOps, (_req, res) => {
-    const dispatchModuleUrl = normalizeHttpUrl(process.env.DISPATCH_MODULE_URL);
+    return renderOperationsDashboard(res);
+  });
 
-    if (!dispatchModuleUrl) {
-      return res.status(503).send('Panel operativo no configurado.');
-    }
+  router.get('/solicitudes', requireOps, (_req, res) => {
+    return renderOperationsDashboard(res, {
+      pageTitle: 'Solicitudes operativas',
+      activeSection: 'solicitudes'
+    });
+  });
 
-    return res.redirect(dispatchModuleUrl);
+  router.get('/asignaciones', requireOps, (_req, res) => {
+    return renderOperationsDashboard(res, {
+      pageTitle: 'Asignaciones operativas',
+      activeSection: 'asignaciones'
+    });
+  });
+
+  router.get('/novedades', requireOps, (_req, res) => {
+    return renderOperationsDashboard(res, {
+      pageTitle: 'Novedades operativas',
+      activeSection: 'novedades'
+    });
   });
 
   return router;

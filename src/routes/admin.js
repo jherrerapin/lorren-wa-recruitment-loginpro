@@ -82,17 +82,6 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
-function normalizeHttpUrl(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return null;
-  try {
-    const url = new URL(normalized);
-    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
 function normalizeDigits(value) {
   return String(value || '').replace(/\D+/g, '');
 }
@@ -1455,10 +1444,11 @@ export function adminRouter(prisma) {
 
   // ── Operaciones / Despacho (solo dev) ───────────────────────
   router.get('/operaciones', ensureDevRole, (req, res) => {
-    const dispatchModuleUrl = normalizeHttpUrl(process.env.DISPATCH_MODULE_URL);
-    res.render('operaciones', {
+    res.render('operacionesDashboard', {
       role: req.userRole,
-      dispatchModuleUrl
+      pageTitle: 'Operaciones / Despacho',
+      subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.',
+      activeSection: 'dashboard'
     });
   });
 

@@ -29,65 +29,85 @@ test('operations entry is protected by the bridge router', () => {
   );
 });
 
-test('dispatch module url is sanitized before redirecting', () => {
+test('operations dashboard renders natively without external dispatch navigation', () => {
   const bridgeSource = readSource('src/routes/dispatchBridge.js');
+  const dashboardView = readSource('src/views/operacionesDashboard.ejs');
 
   assert.match(
     bridgeSource,
-    /function\s+normalizeHttpUrl\s*\(/,
-    'Debe existir normalizeHttpUrl para validar DISPATCH_MODULE_URL.'
+    /router\.get\(\s*['"]\/['"]\s*,\s*requireOps[\s\S]*?renderOperationsDashboard\(res\)/,
+    'GET /admin/operaciones debe renderizar el dashboard nativo.'
   );
 
   assert.match(
     bridgeSource,
-    /\['http:',\s*'https:'\]\.includes\(url\.protocol\)/,
-    'DISPATCH_MODULE_URL solo debe aceptar protocolos http y https.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /normalizeHttpUrl\(process\.env\.DISPATCH_MODULE_URL\)/,
-    'La ruta puente debe pasar DISPATCH_MODULE_URL por normalizeHttpUrl antes de redirigir.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /res\.redirect\(dispatchModuleUrl\)/,
-    'La ruta puente debe redirigir a la URL validada del módulo.'
-  );
-});
-
-test('dispatch bridge opens operations directly without rendering the intermediate view', () => {
-  const bridgeSource = readSource('src/routes/dispatchBridge.js');
-
-  assert.match(
-    bridgeSource,
-    /router\.get\(\s*['"]\/['"]\s*,\s*requireOps[\s\S]*?res\.redirect\(['"]\/admin\/operaciones\/abrir['"]\)/,
-    'GET /admin/operaciones debe redirigir directamente a /admin/operaciones/abrir.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /router\.get\(\s*['"]\/abrir['"]\s*,\s*requireOps/,
-    'GET /admin/operaciones/abrir debe mantenerse protegido por requireOps.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /status\(503\)\.send\(['"]Panel operativo no configurado\.['"]\)/,
-    'Si DISPATCH_MODULE_URL no es valida, /abrir debe responder 503 con texto simple.'
+    /router\.get\(\s*['"]\/abrir['"]\s*,\s*requireOps[\s\S]*?renderOperationsDashboard\(res\)/,
+    'GET /admin/operaciones/abrir debe renderizar nativo o permanecer interno.'
   );
 
   assert.doesNotMatch(
     bridgeSource,
-    /res\.render\(['"]operaciones['"]/,
-    'El router puente ya no debe renderizar operaciones.ejs en el flujo normal.'
+    /DISPATCH_MODULE_URL|dispatchModuleUrl|normalizeHttpUrl|res\.redirect\(dispatchModuleUrl\)/,
+    'El router nativo no debe depender de DISPATCH_MODULE_URL ni redirigir a URLs externas.'
   );
 
-  assert.doesNotMatch(
+  for (const route of ['solicitudes', 'asignaciones', 'novedades']) {
+    assert.match(
+      bridgeSource,
+      new RegExp(`router\\.get\\(\\s*['"]\\/${route}['"]\\s*,\\s*requireOps[\\s\\S]*?renderOperationsDashboard\\(res`),
+      `GET /admin/operaciones/${route} debe renderizar una vista nativa protegida.`
+    );
+  }
+
+  assert.match(
+    dashboardView,
+    /<h1><%= pageTitle %><\/h1>/,
+    'La vista debe mostrar el titulo de la seccion nativa.'
+  );
+
+  assert.match(
     bridgeSource,
-    /redirect\(['"]\/admin\/operaciones['"]\)/,
-    '/abrir no debe devolver a la pantalla intermedia cuando falta DISPATCH_MODULE_URL.'
+    /Gestión operativa de solicitudes, asignaciones, novedades y reemplazos\./,
+    'La ruta debe enviar el subtitulo de gestion operativa nativa.'
+  );
+
+  for (const text of [
+    'Solicitudes del día',
+    'Pendientes de asignación',
+    'Asignación completa',
+    'Novedades abiertas',
+    'Operaciones del día',
+    'Cliente / punto',
+    'Fecha',
+    'Hora',
+    'Estado',
+    'Requeridos',
+    'Asignados',
+    'Acciones',
+    'No hay operaciones registradas para la fecha seleccionada.',
+    'Nueva solicitud',
+    'Ver asignaciones',
+    'Ver novedades'
+  ]) {
+    assert.match(dashboardView, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `La vista debe contener: ${text}`);
+  }
+
+  for (const href of [
+    '/admin',
+    '/admin/vacancies',
+    '/admin/operaciones',
+    '/admin/monitor',
+    '/admin/operaciones/solicitudes',
+    '/admin/operaciones/asignaciones',
+    '/admin/operaciones/novedades'
+  ]) {
+    assert.match(dashboardView, new RegExp(`href=["']${href}["']`), `La vista debe enlazar ${href}.`);
+  }
+
+  assert.doesNotMatch(
+    dashboardView,
+    /target=["']_blank["']|módulo externo|DISPATCH_MODULE_URL|opera-dispatch-web|pendiente de despliegue|Estado de conexión|Módulo del panel LoginPro disponible|Continuar a Operaciones \/ Despacho|Abrir Operaciones \/ Despacho/i,
+    'La vista nativa no debe contener enlaces externos ni textos de pantalla puente.'
   );
 });
 
@@ -136,7 +156,7 @@ test('operations-only users are redirected to operations and blocked from recrui
 
   assert.match(
     serverSource,
-    /res\.redirect\(isOperationsOnlyUsername\(sessionPayload\.username\)\s*\?\s*['"]\/admin\/operaciones\/abrir['"]\s*:\s*['"]\/admin['"]\)/,
+    /res\.redirect\(isOperationsOnlyUsername\(sessionPayload\.username\)\s*\?\s*['"]\/admin\/operaciones['"]\s*:\s*['"]\/admin['"]\)/,
     'El login debe redirigir usuarios operativos directamente a Operaciones / Despacho.'
   );
 
@@ -219,20 +239,20 @@ test('dev-only navigation links are not exposed unconditionally', () => {
 
   for (const viewPath of views) {
     const viewSource = readSource(viewPath);
-    const operationsIndex = viewSource.indexOf('/admin/operaciones/abrir');
+    const operationsIndex = viewSource.indexOf('/admin/operaciones');
 
     assert.notEqual(
       operationsIndex,
       -1,
-      `${viewPath} debe conservar el enlace directo de Operaciones / Despacho para DEV.`
+      `${viewPath} debe conservar el enlace nativo de Operaciones / Despacho para DEV.`
     );
 
-    const directOperationsLink = new RegExp(`<a[^>]+href=[\"']\/admin\/operaciones\/abrir[\"'][^>]*>\\s*Operaciones \/ Despacho`);
+    const directOperationsLink = new RegExp(`<a[^>]+href=[\"']\/admin\/operaciones[\"'][^>]*>\\s*Operaciones \/ Despacho`);
     const operationsLinkMatch = viewSource.match(directOperationsLink);
 
     assert.ok(
       operationsLinkMatch,
-      `${viewPath} debe enlazar Operaciones / Despacho directamente a /admin/operaciones/abrir.`
+      `${viewPath} debe enlazar Operaciones / Despacho directamente a /admin/operaciones.`
     );
 
     assert.doesNotMatch(
