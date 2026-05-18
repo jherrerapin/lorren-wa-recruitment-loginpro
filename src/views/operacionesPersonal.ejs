@@ -1,0 +1,22 @@
+<!doctype html><html lang="es"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title><%= pageTitle %></title><link rel="stylesheet" href="/styles.css" /></head><body>
+<nav class="top-nav">
+  <a href="/admin">Dashboard</a>
+  <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+  <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+</nav>
+<main class="container">
+  <h1><%= pageTitle %></h1>
+  <p><%= subtitle %></p>
+  <% if (message) { %><p><strong><%= message %></strong></p><% } %>
+  <% if (role === 'dev') { %><form method="post" action="/admin/operaciones/sync-contratados"><button type="submit" class="btn">Sincronizar contratados</button></form><% } %>
+  <form method="get" action="/admin/operaciones/personal" style="margin: 16px 0;">
+    <select name="operationalCityId"><option value="">Todas las ciudades operativas</option><% cities.forEach((city) => { %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %></select>
+    <select name="vacancyId"><option value="">Todas las vacantes</option><% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %></option><% }) %></select>
+    <select name="status"><option value="">Todos los estados</option><option value="ACTIVE" <%= filters.status==='ACTIVE'?'selected':'' %>>ACTIVE</option></select>
+    <button type="submit" class="btn">Filtrar</button>
+  </form>
+  <% if (!workers.length) { %><p>No hay personal operativo registrado.</p><% } else { %>
+  <table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes/perfiles</th><th>Origen</th><th>Estado</th></tr></thead><tbody>
+    <% workers.forEach((w) => { %><tr><td><%= w.fullName %></td><td><%= w.phone || '-' %></td><td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td><td><%= w.residenceCity || '-' %></td><td><%= w.cities.map((entry) => entry.city.name).join(', ') || '-' %></td><td><%= w.vacancies.map((entry) => entry.vacancy.title).join(', ') || '-' %></td><td><%= w.source %></td><td><%= w.operationalStatus %></td></tr><% }) %>
+  </tbody></table><% } %>
+</main></body></html>
