@@ -270,6 +270,45 @@ model CandidateAdminEvent {
 
 
 
+
+model DispatchClient {
+  id                String                   @id @default(cuid())
+  name              String
+  nit               String?
+  contactName       String?
+  contactPhone      String?
+  contactEmail      String?
+  notes             String?
+  isActive          Boolean                  @default(true)
+  createdByUsername String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  operationPoints   DispatchOperationPoint[]
+  @@index([name])
+  @@index([isActive])
+}
+
+model DispatchOperationPoint {
+  id                String                   @id @default(cuid())
+  clientId          String
+  client            DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name              String
+  cityName          String?
+  address           String?
+  contactName       String?
+  contactPhone      String?
+  publicToken       String                   @unique
+  isActive          Boolean                  @default(true)
+  notes             String?
+  createdByUsername String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  serviceRequests   DispatchServiceRequest[]
+  @@index([clientId])
+  @@index([cityName])
+  @@index([isActive])
+}
+
 model DispatchWorker {
   id                String                 @id @default(cuid())
   candidateId       String?                @unique
@@ -313,6 +352,12 @@ model DispatchServiceRequest {
   status             String               @default("PENDING_ASSIGNMENT")
   notes              String?
   createdByUsername  String?
+  operationPointId   String?
+  operationPoint     DispatchOperationPoint? @relation(fields: [operationPointId], references: [id], onDelete: SetNull)
+  requestedByName    String?
+  requestedByPhone   String?
+  requestedByEmail   String?
+  source             String               @default("INTERNAL")
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
@@ -321,6 +366,8 @@ model DispatchServiceRequest {
   @@index([serviceDate])
   @@index([status])
   @@index([cityName])
+  @@index([operationPointId])
+  @@index([source])
 }
 
 model DispatchAssignment {

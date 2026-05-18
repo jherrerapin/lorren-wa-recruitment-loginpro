@@ -95,6 +95,7 @@
         <p class="subtitle"><%= subtitle %></p>
       </div>
       <div class="hero-actions">
+        <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">Crear auxiliar manual</a>
         <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
         <% if (role === 'dev') { %>
           <form method="post" action="/admin/operaciones/sync-contratados">
