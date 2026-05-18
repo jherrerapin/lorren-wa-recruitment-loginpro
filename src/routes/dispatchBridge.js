@@ -18,17 +18,35 @@ function normalizeHttpUrl(value) {
   }
 }
 
-function requireDevSession(req, res, next) {
+function isOpsUser(req) {
+  const username = normalizeString(req.session?.username || req.username);
+  return Boolean(username?.startsWith('operaciones-despacho'));
+}
+
+function canUseOps(req) {
+  const role = req.session?.userRole || req.userRole;
+  return role === 'dev' || isOpsUser(req);
+}
+
+function requireOps(req, res, next) {
   const role = req.session?.userRole || req.userRole;
   if (!role) return res.redirect('/login');
-  if (role !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
+  if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
   return next();
 }
 
 export function dispatchBridgeRouter() {
   const router = express.Router();
 
-  router.get('/abrir', requireDevSession, (req, res) => {
+  router.get('/', requireOps, (req, res) => {
+    const dispatchModuleUrl = normalizeHttpUrl(process.env.DISPATCH_MODULE_URL);
+    return res.render('operaciones', {
+      role: req.session?.userRole || req.userRole,
+      dispatchModuleUrl
+    });
+  });
+
+  router.get('/abrir', requireOps, (req, res) => {
     const dispatchModuleUrl = normalizeHttpUrl(process.env.DISPATCH_MODULE_URL);
 
     if (!dispatchModuleUrl) {
