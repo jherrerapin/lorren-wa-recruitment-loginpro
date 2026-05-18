@@ -32,6 +32,10 @@ Chatbot de reclutamiento por WhatsApp para captar candidatos de pautas publicada
 - `/admin` — Panel administrativo (protegido con sesiones)
 - `/admin/operaciones` — Acceso DEV-only al anclaje externo de Operaciones / Despacho
 
+## QA y regresión
+
+Antes de nuevos cambios funcionales del bot, usa el checklist en `docs/qa/01_auditoria_regresion_bot_actual.md` para validar login, webhook, flujo candidato, citas, supervisión administrativa, archivos, audios, aprendizajes de Lórren y acceso DEV-only a Operaciones / Despacho.
+
 ## Roles de acceso al panel
 
 El panel administrativo tiene dos roles con diferentes niveles de acceso:
