@@ -133,6 +133,11 @@
         <h1>Usuarios de reclutamiento</h1>
         <p>Desde aquí puedes crear reclutadores con alcance total, por ciudad o por vacante, asignar contraseña inicial y regenerar su código de recuperación.</p>
       </div>
+      <% if (role === 'dev') { %>
+        <div class="actions">
+          <a class="btn btn-secondary" href="/admin/users/create-operations">Crear usuario de Operaciones / Despacho</a>
+        </div>
+      <% } %>
     </div>
 
     <% if (successMsg) { %>

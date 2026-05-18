@@ -74,13 +74,13 @@ test('operations view keeps pending-state fallback and opens dispatch through br
 
   assert.match(
     operationsView,
-    /href=['"]\/admin\/operaciones\/abrir['"]/, 
+    /href=['"]\/admin\/operaciones\/abrir['"]/,
     'La vista debe abrir Dispatch por la ruta puente del panel.'
   );
 
   assert.doesNotMatch(
     operationsView,
-    /target=['"]_blank['"]|rel=['"]noopener noreferrer['"]/, 
+    /target=['"]_blank['"]|rel=['"]noopener noreferrer['"]/,
     'El modulo externo debe abrir en la misma pestaña del panel, no en una nueva.'
   );
 });
@@ -113,29 +113,65 @@ test('operations-only users are redirected to operations and blocked from recrui
   );
 });
 
-test('dev can create operations-only users without changing the database schema', () => {
+test('dev can open and submit operations-only user creation without changing the database schema', () => {
   const serverSource = readSource('src/server.js');
+  const usersView = readSource('src/views/users.ejs');
 
   assert.match(
     serverSource,
-    /app\.post\(\s*['"]\/admin\/users\/create-operations['"]/, 
+    /app\.get\(\s*['"]\/admin\/users\/create-operations['"]/,
+    'Debe existir un formulario GET para crear usuarios de Operaciones desde el panel.'
+  );
+
+  assert.match(
+    serverSource,
+    /if\s*\(\s*!req\.session\?\.userRole\s*\)\s*return\s+res\.redirect\(['"]\/login['"]\)/,
+    'El formulario GET debe redirigir a /login cuando no hay sesión.'
+  );
+
+  assert.match(
+    serverSource,
+    /req\.session\.userRole\s*!==\s*['"]dev['"]/,
+    'El formulario GET debe estar restringido a DEV.'
+  );
+
+  assert.match(
+    serverSource,
+    /app\.post\(\s*['"]\/admin\/users\/create-operations['"]/,
     'Debe existir un endpoint para crear usuarios de Operaciones desde el panel.'
   );
 
   assert.match(
     serverSource,
-    /req\.session\?\.userRole\s*!==\s*['"]dev['"]/, 
+    /req\.session\?\.userRole\s*!==\s*['"]dev['"]/,
     'La creación de usuarios operativos debe estar restringida a DEV.'
   );
 
   assert.match(
     serverSource,
-    /role:\s*['"]ADMIN['"][\s\S]*?accessScope:\s*['"]ALL['"]/, 
+    /role:\s*['"]ADMIN['"][\s\S]*?accessScope:\s*['"]ALL['"]/,
     'El usuario operativo se crea como AppUser existente, sin migración nueva.'
+  );
+
+  const operationsCreateIndex = usersView.indexOf('/admin/users/create-operations');
+
+  assert.notEqual(
+    operationsCreateIndex,
+    -1,
+    'La vista de usuarios debe enlazar el formulario de Operaciones / Despacho.'
+  );
+
+  const beforeLink = usersView.slice(Math.max(0, operationsCreateIndex - 250), operationsCreateIndex);
+
+  assert.match(
+    beforeLink,
+    /role\s*===\s*['"]dev['"]|role\s*==\s*['"]dev['"]/,
+    'El enlace para crear usuarios operativos debe mostrarse solo para DEV.'
   );
 });
 
 test('dev-only navigation links are not exposed unconditionally', () => {
+  const serverSource = readSource('src/routes/admin.js');
   const views = [
     'src/views/list.ejs',
     'src/views/vacancies.ejs',
@@ -157,10 +193,14 @@ test('dev-only navigation links are not exposed unconditionally', () => {
     );
 
     const beforeLink = viewSource.slice(Math.max(0, operationsIndex - 250), operationsIndex);
+    const isMonitorDevOnlyView = viewPath === 'src/views/monitor.ejs'
+      && /router\.get\(\s*['"]\/monitor['"]\s*,\s*ensureDevRole/.test(serverSource);
+
+    if (isMonitorDevOnlyView) continue;
 
     assert.match(
       beforeLink,
-      /role\s*===\s*['"]dev['"]|role\s*==\s*['"]dev['"]/, 
+      /role\s*===\s*['"]dev['"]|role\s*==\s*['"]dev['"]/,
       `${viewPath} debe envolver el enlace de Operaciones / Despacho en una condicion de rol dev.`
     );
   }
