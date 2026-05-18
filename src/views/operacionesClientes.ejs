@@ -1,8 +1,83 @@
-<!doctype html><html><head><meta charset='utf-8'><title>Clientes</title></head><body>
-<nav><a href='/admin'><img src='/public/logo-loginpro.svg' alt='LoginPro'></a></nav>
-<h1>Clientes</h1><p>Gestiona clientes y operaciones para solicitudes de servicio.</p>
-<form method='post' action='/admin/operaciones/clientes'>
-<input name='name' required placeholder='Nombre'><input name='nit' placeholder='NIT'><input name='contactName'><input name='contactPhone'><input name='contactEmail'><textarea name='notes'></textarea><button>Crear cliente</button></form>
-<table><tr><th>Nombre</th><th>NIT</th><th>Contacto</th><th>Teléfono</th><th>Correo</th><th>Estado</th><th>Acciones</th></tr>
-<% clients.forEach((c)=>{ %><tr><td><%= c.name %></td><td><%= c.nit||'-' %></td><td><%= c.contactName||'-' %></td><td><%= c.contactPhone||'-' %></td><td><%= c.contactEmail||'-' %></td><td><%= c.isActive?'Activo':'Inactivo' %></td><td><a href='/admin/operaciones/clientes/<%= c.id %>/operaciones'>Ver operaciones</a> <a href='/admin/operaciones/clientes/<%= c.id %>/operaciones'>Crear operación</a></td></tr><% }) %>
-</table></body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clientes — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Gestión comercial operativa</div>
+        <h1>Clientes</h1>
+        <p>Gestiona clientes y crea sus operaciones o puntos de servicio para generar links públicos de solicitud.</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
+        <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Solicitudes de servicio</a>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <div class="card-head">
+          <h2>Crear cliente</h2>
+          <p>Registra la empresa o cliente que solicitará servicios operativos.</p>
+        </div>
+        <div class="card-body">
+          <form method="post" action="/admin/operaciones/clientes">
+            <div class="form-grid">
+              <div class="field full"><label for="name">Nombre del cliente</label><input id="name" name="name" required placeholder="Ej: Opera Logística" /></div>
+              <div class="field"><label for="nit">NIT</label><input id="nit" name="nit" placeholder="Opcional" /></div>
+              <div class="field"><label for="contactName">Contacto</label><input id="contactName" name="contactName" placeholder="Nombre del contacto" /></div>
+              <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" placeholder="Celular o fijo" /></div>
+              <div class="field"><label for="contactEmail">Correo</label><input id="contactEmail" name="contactEmail" type="email" placeholder="correo@cliente.com" /></div>
+              <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Condiciones, observaciones o información relevante"></textarea></div>
+            </div>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">Crear cliente</button></div>
+          </form>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Clientes registrados</h2>
+          <p>Desde cada cliente puedes crear operaciones y copiar el link público de solicitud.</p>
+        </div>
+        <div class="table-wrap">
+          <% if (!clients.length) { %>
+            <div class="empty"><strong>No hay clientes registrados.</strong>Crea el primer cliente para iniciar el flujo de solicitudes.</div>
+          <% } else { %>
+            <table class="table">
+              <thead><tr><th>Cliente</th><th>Contacto</th><th>Estado</th><th>Acciones</th></tr></thead>
+              <tbody>
+                <% clients.forEach((c)=>{ %>
+                  <tr>
+                    <td><strong><%= c.name %></strong><div class="muted">NIT: <%= c.nit || '—' %></div></td>
+                    <td><%= c.contactName || '—' %><div class="muted"><%= c.contactPhone || 'Sin teléfono' %> · <%= c.contactEmail || 'Sin correo' %></div></td>
+                    <td><span class="pill <%= c.isActive ? 'pill-green' : 'pill-amber' %>"><%= c.isActive ? 'Activo' : 'Inactivo' %></span></td>
+                    <td><a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Ver operaciones</a></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          <% } %>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
