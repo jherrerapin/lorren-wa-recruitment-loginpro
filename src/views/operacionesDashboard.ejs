@@ -5,141 +5,63 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title><%= pageTitle %> — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #f4f5f7; --surface: #ffffff; --surface-2: #f9fafb;
-      --border: #e1e4e8; --border-soft: #eaecef;
-      --text: #1a1d23; --text-muted: #6b7280; --text-faint: #9ca3af;
-      --navy: #1e2d3d; --teal: #0d7a6b; --teal-light: #e6f4f1; --teal-hover: #0a5f53;
-      --green: #16a34a; --green-light: #dcfce7;
-      --amber: #b45309; --amber-light: #fef3c7;
-      --blue: #1d4ed8; --blue-light: #dbeafe;
-      --purple: #7c3aed; --purple-light: #ede9fe;
-      --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
-      --shadow-md: 0 4px 12px rgba(0,0,0,.10);
-      --radius: 8px; --radius-lg: 12px;
-      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
-    .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; height: 52px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
-    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 500; padding: 4px 2px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
-    .navbar a:hover { color: #fff; border-bottom-color: rgba(255,255,255,.3); }
-    .navbar a.nav-active { color: #fff; border-bottom-color: #4fd1c5; }
-    .navbar .brand img { height: 28px; display: block; }
-    .navbar .spacer { flex: 1; }
-    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 5px 12px !important; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
-    .btn-logout:hover { border-color: rgba(255,255,255,.6) !important; color: #fff !important; }
-    .page { max-width: 1180px; margin: 0 auto; padding: 28px 20px 60px; }
-    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
-    .page-header h1 { font-size: 22px; font-weight: 700; color: var(--navy); }
-    .page-header .sub { color: var(--text-muted); margin-top: 4px; }
-    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--navy); text-decoration: none; font-weight: 700; font-size: 13px; box-shadow: var(--shadow-sm); }
-    .btn:hover { border-color: var(--teal); color: var(--teal); }
-    .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
-    .btn-primary:hover { background: var(--teal-hover); color: #fff; }
-    .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
-    .card .label { color: var(--text-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-    .card .value { color: var(--navy); font-size: 28px; font-weight: 800; margin-top: 8px; }
-    .card .hint { color: var(--text-faint); font-size: 12px; margin-top: 2px; }
-    .card.teal { border-top: 4px solid var(--teal); }
-    .card.amber { border-top: 4px solid var(--amber); }
-    .card.green { border-top: 4px solid var(--green); }
-    .card.purple { border-top: 4px solid var(--purple); }
-    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
-    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
-    .panel-head h2 { color: var(--navy); font-size: 16px; }
-    .panel-head p { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--border-soft); }
-    th { background: var(--surface-2); color: var(--text-muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
-    .empty { padding: 32px 20px; text-align: center; color: var(--text-muted); }
-    .empty strong { display: block; color: var(--navy); margin-bottom: 4px; }
-    @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .navbar { gap: 12px; overflow-x: auto; } }
-    @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } .panel { overflow-x: auto; } .page-header { align-items: stretch; } .actions { width: 100%; } .btn { flex: 1; } }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .summary-card { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow-sm); border-top: 4px solid var(--teal); }
+    .summary-card.amber { border-top-color: var(--amber); }
+    .summary-card.green { border-top-color: var(--green); }
+    .summary-card.blue { border-top-color: var(--blue); }
+    .summary-card .label { color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
+    .summary-card .value { color: var(--navy); font-size: 28px; font-weight: 900; margin-top: 7px; }
+    .summary-card .hint { color: var(--muted); font-size: 12px; }
+    .ops-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .shortcut { display: block; background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px; color: var(--text); text-decoration: none; box-shadow: var(--shadow-sm); }
+    .shortcut:hover { border-color: var(--teal); box-shadow: var(--shadow); }
+    .shortcut strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 5px; }
+    .shortcut span { color: var(--muted); font-size: 13px; }
+    @media (max-width: 900px) { .summary-grid, .ops-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 640px) { .summary-grid, .ops-shortcuts { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <nav class="navbar">
-    <a href="/admin" class="brand"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
     <a href="/admin/vacancies">Vacantes</a>
     <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
     <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
     <span class="spacer"></span>
-    <a href="/logout" class="btn-logout">Cerrar sesión</a>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
   <main class="page">
-    <header class="page-header">
+    <section class="hero">
       <div>
+        <div class="eyebrow">Panel operativo</div>
         <h1><%= pageTitle %></h1>
-        <p class="sub"><%= subtitle %></p>
+        <p><%= subtitle %></p>
       </div>
-      <div class="actions" aria-label="Acciones operativas">
+      <div class="actions" aria-label="Acciones principales de operaciones">
         <a class="btn btn-primary" href="/admin/operaciones/clientes">Clientes</a>
-        <a class="btn" href="/admin/operaciones/asignaciones">Solicitudes de servicio</a>
-        <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
-        <a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a>
-        <a class="btn" href="/admin/operaciones/asignaciones">Ver asignaciones</a>
-        <a class="btn" href="/admin/operaciones/novedades">Ver novedades</a>
+        <a class="btn" href="/admin/operaciones/solicitudes">Solicitudes de servicio</a>
+        <a class="btn" href="/admin/operaciones/asignaciones">Asignación de auxiliares</a>
         <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
       </div>
-    </header>
-
-    <section class="cards" aria-label="Resumen operativo">
-      <article class="card teal">
-        <div class="label">Solicitudes del día</div>
-        <div class="value">0</div>
-        <div class="hint">Registradas para la fecha seleccionada</div>
-      </article>
-      <article class="card amber">
-        <div class="label">Pendientes de asignación</div>
-        <div class="value">0</div>
-        <div class="hint">Solicitudes que requieren gestión</div>
-      </article>
-      <article class="card green">
-        <div class="label">Asignación completa</div>
-        <div class="value">0</div>
-        <div class="hint">Servicios con cobertura confirmada</div>
-      </article>
-      <article class="card purple">
-        <div class="label">Novedades abiertas</div>
-        <div class="value">0</div>
-        <div class="hint">Casos operativos en seguimiento</div>
-      </article>
     </section>
 
-    <section class="panel" aria-labelledby="operations-table-title">
-      <div class="panel-head">
-        <div>
-          <h2 id="operations-table-title">Operaciones del día</h2>
-          <p>Seguimiento diario de solicitudes, asignaciones y novedades.</p>
-        </div>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Cliente / punto</th>
-            <th>Fecha</th>
-            <th>Hora</th>
-            <th>Estado</th>
-            <th>Requeridos</th>
-            <th>Asignados</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td colspan="7" class="empty">
-              <strong>No hay operaciones registradas para la fecha seleccionada.</strong>
-              Usa las acciones superiores para iniciar la gestión operativa.
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <section class="summary-grid" aria-label="Resumen operativo">
+      <article class="summary-card"><div class="label">Solicitudes del día</div><div class="value">0</div><div class="hint">Registradas para la fecha seleccionada</div></article>
+      <article class="summary-card amber"><div class="label">Pendientes</div><div class="value">0</div><div class="hint">Solicitudes que requieren gestión</div></article>
+      <article class="summary-card green"><div class="label">Asignación completa</div><div class="value">0</div><div class="hint">Servicios con cobertura confirmada</div></article>
+      <article class="summary-card blue"><div class="label">Novedades abiertas</div><div class="value">0</div><div class="hint">Casos operativos en seguimiento</div></article>
+    </section>
+
+    <section class="ops-shortcuts" aria-label="Módulos de Operaciones">
+      <a class="shortcut" href="/admin/operaciones/clientes"><strong>Clientes y operaciones</strong><span>Crea clientes, puntos operativos y links públicos de solicitud.</span></a>
+      <a class="shortcut" href="/admin/operaciones/solicitudes"><strong>Solicitudes de servicio</strong><span>Consulta solicitudes creadas por clientes o internas.</span></a>
+      <a class="shortcut" href="/admin/operaciones/asignaciones"><strong>Asignación de auxiliares</strong><span>Arrastra auxiliares disponibles y guarda asignaciones.</span></a>
+      <a class="shortcut" href="/admin/operaciones/personal"><strong>Personal operativo</strong><span>Consulta, sincroniza o crea auxiliares manualmente.</span></a>
     </section>
   </main>
 </body>
