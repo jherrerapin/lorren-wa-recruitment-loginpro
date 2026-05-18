@@ -51,40 +51,40 @@
   <main class="page">
     <section class="hero" aria-labelledby="dispatch-title">
       <div>
-        <div class="eyebrow">Sección DEV-only</div>
-        <h1 id="dispatch-title">Sistema de asignación de personal por operación</h1>
-        <p>Módulo operativo para solicitudes, asignaciones, novedades y reemplazos. Este acceso ancla <strong>opera-dispatch</strong> al panel principal sin fusionar código ni alterar el bot.</p>
+        <div class="eyebrow">Acceso operativo autorizado</div>
+        <h1 id="dispatch-title">Operaciones / Despacho</h1>
+        <p><strong>Módulo del panel LoginPro</strong> para solicitudes, asignaciones, novedades y reemplazos. Usa este acceso operativo autorizado para continuar la gestión de despacho desde el dashboard.</p>
       </div>
       <aside class="card" aria-label="Estado del módulo">
         <span class="status-label">Estado de conexión</span>
         <% if (dispatchModuleUrl) { %>
-          <span class="pill connected">Módulo externo conectado</span>
-          <p class="module-url"><strong>URL actual:</strong><br><%= dispatchModuleUrl %></p>
+          <span class="pill connected">Módulo del panel LoginPro disponible</span>
+          <p class="module-url"><strong>Operaciones / Despacho:</strong><br><%= dispatchModuleUrl %></p>
         <% } else { %>
-          <span class="pill pending">Pendiente de despliegue</span>
-          <p class="module-url">No existe una URL válida en <code>DISPATCH_MODULE_URL</code>.</p>
+          <span class="pill pending">Módulo pendiente de despliegue</span>
+          <p class="module-url">Operaciones / Despacho queda disponible cuando <code>DISPATCH_MODULE_URL</code> tenga una URL válida.</p>
         <% } %>
       </aside>
     </section>
 
     <section class="grid">
       <div class="card">
-        <h2>Alcance inicial</h2>
+        <h2>Acceso y alcance</h2>
         <ul>
-          <li>Acceso visible únicamente para sesiones con rol DEV.</li>
-          <li>Anclaje externo mediante <code>DISPATCH_MODULE_URL</code>.</li>
+          <li>Acceso operativo autorizado para DEV y usuarios operaciones-despacho.</li>
+          <li>Operaciones / Despacho funciona como módulo del panel LoginPro.</li>
+          <li>Apertura en la misma pestaña mediante <code>/admin/operaciones/abrir</code>.</li>
           <li>Sin cambios en Prisma, WhatsApp, FSM ni lógica de reclutamiento.</li>
-          <li>La autenticación unificada queda para una fase posterior.</li>
         </ul>
       </div>
       <div class="card action-box">
-        <h2>Abrir despacho</h2>
+        <h2>Continuar a Operaciones / Despacho</h2>
         <% if (dispatchModuleUrl) { %>
-          <p class="note">El módulo de despacho está configurado y se abrirá desde una ruta puente DEV-only.</p>
-          <a class="btn-primary" href="/admin/operaciones/abrir">Abrir módulo de despacho</a>
+          <p class="note">Acceso operativo autorizado desde el panel LoginPro.</p>
+          <a class="btn-primary" href="/admin/operaciones/abrir">Abrir Operaciones / Despacho</a>
         <% } else { %>
           <div class="notice pending">Módulo pendiente de despliegue</div>
-          <p class="note">Configura <code>DISPATCH_MODULE_URL</code> cuando el despliegue de opera-dispatch esté disponible.</p>
+          <p class="note">Configura <code>DISPATCH_MODULE_URL</code> cuando el despliegue de Operaciones / Despacho esté disponible.</p>
         <% } %>
       </div>
     </section>
