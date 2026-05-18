@@ -44,7 +44,7 @@ test('dispatch module url is sanitized before rendering operations view', () => 
   );
 });
 
-test('operations view keeps pending-state fallback when dispatch url is absent', () => {
+test('operations view keeps pending-state fallback and opens dispatch through bridge route', () => {
   const operationsView = readSource('src/views/operaciones.ejs');
 
   assert.match(
@@ -59,10 +59,51 @@ test('operations view keeps pending-state fallback when dispatch url is absent',
     'La vista debe informar que el modulo esta pendiente cuando no existe DISPATCH_MODULE_URL.'
   );
 
+  assert.match(
+    operationsView,
+    /href=['"]\/admin\/operaciones\/abrir['"]/, 
+    'La vista debe abrir Dispatch por la ruta puente DEV-only.'
+  );
+
   assert.doesNotMatch(
     operationsView,
     /target=['"]_blank['"]|rel=['"]noopener noreferrer['"]/, 
     'El modulo externo debe abrir en la misma pestaña del panel, no en una nueva.'
+  );
+});
+
+test('dispatch bridge route remains dev-only and sanitizes destination url', () => {
+  const serverSource = readSource('src/server.js');
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
+
+  assert.match(
+    serverSource,
+    /app\.use\(\s*['"]\/admin\/operaciones['"]\s*,\s*dispatchBridgeRouter\(\)\s*\)/,
+    'El router puente debe montarse bajo /admin/operaciones antes del adminRouter general.'
+  );
+
+  assert.match(
+    bridgeSource,
+    /function\s+requireDevSession\s*\([^)]*\)\s*{[\s\S]*?role\s*!==\s*['"]dev['"][\s\S]*?403/,
+    'La ruta puente debe rechazar usuarios no DEV con 403.'
+  );
+
+  assert.match(
+    bridgeSource,
+    /router\.get\(\s*['"]\/abrir['"]\s*,\s*requireDevSession\s*,/,
+    'GET /admin/operaciones/abrir debe usar requireDevSession.'
+  );
+
+  assert.match(
+    bridgeSource,
+    /normalizeHttpUrl\(process\.env\.DISPATCH_MODULE_URL\)/,
+    'La ruta puente debe validar DISPATCH_MODULE_URL antes de redirigir.'
+  );
+
+  assert.match(
+    bridgeSource,
+    /res\.redirect\(dispatchModuleUrl\)/,
+    'La ruta puente debe redirigir a la URL validada del módulo.'
   );
 });
 
