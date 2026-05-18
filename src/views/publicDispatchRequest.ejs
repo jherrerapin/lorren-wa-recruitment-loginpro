@@ -1,8 +1,55 @@
-<!doctype html><html><head><meta charset='utf-8'><title>Solicitud de servicio</title></head><body>
-<% if (success) { %><h1>Solicitud registrada correctamente.</h1><% } else { %>
-<h2><%= operationPoint.client.name %></h2><h3><%= operationPoint.name %></h3><p><%= operationPoint.cityName||'-' %> <%= operationPoint.address||'' %></p>
-<form method='post'>
-<input name='requestedByName' required placeholder='Nombre de quien solicita'><input name='requestedByPhone'><input name='requestedByEmail' type='email'>
-<input type='date' name='serviceDate' required><input name='startTime'><input name='endTime'><input type='number' min='1' name='requiredWorkers' required>
-<textarea name='notes'></textarea><button>Enviar solicitud</button></form><% } %>
-</body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Solicitud de servicio — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+</head>
+<body>
+  <main class="public-shell">
+    <section class="public-card">
+      <div class="public-head">
+        <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+        <% if (success) { %>
+          <h1>Solicitud registrada</h1>
+          <p>Tu solicitud fue enviada correctamente al equipo de Operaciones / Despacho.</p>
+        <% } else { %>
+          <h1>Solicitud de servicio</h1>
+          <p>Completa los datos para solicitar personal operativo en este punto de servicio.</p>
+        <% } %>
+      </div>
+
+      <div class="public-body">
+        <% if (success) { %>
+          <div class="success-box">Solicitud registrada correctamente. El equipo operativo revisará la asignación.</div>
+        <% } else { %>
+          <div class="card" style="box-shadow:none;margin-bottom:18px;">
+            <div class="card-body">
+              <div class="eyebrow">Cliente y operación</div>
+              <h2 style="color:var(--navy);margin-bottom:6px;"><%= operationPoint.client.name %></h2>
+              <p class="muted"><strong><%= operationPoint.name %></strong></p>
+              <p class="muted"><%= operationPoint.cityName || '-' %> <%= operationPoint.address || '' %></p>
+            </div>
+          </div>
+
+          <form method="post">
+            <div class="form-grid">
+              <div class="field full"><label for="requestedByName">Nombre de quien solicita</label><input id="requestedByName" name="requestedByName" required placeholder="Nombre completo" /></div>
+              <div class="field"><label for="requestedByPhone">Teléfono</label><input id="requestedByPhone" name="requestedByPhone" placeholder="Número de contacto" /></div>
+              <div class="field"><label for="requestedByEmail">Correo</label><input id="requestedByEmail" name="requestedByEmail" type="email" placeholder="correo@empresa.com" /></div>
+              <div class="field"><label for="serviceDate">Fecha del servicio</label><input id="serviceDate" type="date" name="serviceDate" required /></div>
+              <div class="field"><label for="requiredWorkers">Cantidad de auxiliares</label><input id="requiredWorkers" type="number" min="1" name="requiredWorkers" required value="1" /></div>
+              <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" name="startTime" placeholder="Ej: 08:00" /></div>
+              <div class="field"><label for="endTime">Hora fin</label><input id="endTime" name="endTime" placeholder="Ej: 17:00" /></div>
+              <div class="field full"><label for="notes">Observaciones</label><textarea id="notes" name="notes" placeholder="Describe condiciones, requisitos de ingreso o detalles del servicio"></textarea></div>
+            </div>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">Enviar solicitud</button></div>
+          </form>
+        <% } %>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
