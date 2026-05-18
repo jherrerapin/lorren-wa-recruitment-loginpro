@@ -2772,7 +2772,7 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('La contrasena inicial debe tener al menos 6 caracteres.'));
     }
 
-    const canAccessDispatch = req.body.canAccessDispatch === 'true';
+    const canAccessDispatch = req.userRole === 'dev' && req.body.canAccessDispatch === 'true';
     const scopeResolution = await resolveRequestedUserScope(prisma, req, req.body);
     if (scopeResolution.error) {
       return res.redirect('/admin/users?error=' + encodeURIComponent(scopeResolution.error));

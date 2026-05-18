@@ -55,11 +55,11 @@ test('operations bridge allows DEV or canAccessDispatch and still protects sessi
   );
 });
 
-test('admin user creation stores canAccessDispatch on normal recruiter users', () => {
+test('admin user creation restricts canAccessDispatch to DEV in backend', () => {
   const adminSource = readSource('src/routes/admin.js');
 
   assert.match(adminSource, /router\.post\(\s*['"]\/users\/create['"]/);
-  assert.match(adminSource, /const\s+canAccessDispatch\s*=\s*req\.body\.canAccessDispatch\s*===\s*['"]true['"]/);
+  assert.match(adminSource, /const\s+canAccessDispatch\s*=\s*req\.userRole\s*===\s*['"]dev['"]\s*&&\s*req\.body\.canAccessDispatch\s*===\s*['"]true['"]/);
   assert.match(adminSource, /prisma\.appUser\.create\([\s\S]*?data:\s*{[\s\S]*?username,[\s\S]*?role:\s*['"]ADMIN['"][\s\S]*?canAccessDispatch,/);
   assert.match(adminSource, /buildUniqueRecruiterUsername/);
 });
@@ -72,6 +72,7 @@ test('users view has one form with dispatch checkbox and no operations-only form
   assert.match(usersView, /value=["']true["']/);
   assert.match(usersView, /Permitir acceso a Operaciones \/ Despacho/);
   assert.match(usersView, /El usuario podrá entrar al panel operativo además del alcance de reclutamiento seleccionado\./);
+  assert.match(usersView, /<%\s*if\s*\(role\s*===\s*['\"]dev['\"]\)\s*{\s*%>[\s\S]*id=["']canAccessDispatch["'][\s\S]*<%\s*}\s*%>/);
   assert.match(usersView, /<%= user\.canAccessDispatch \? 'Operaciones \/ Despacho' : 'Reclutamiento' %>/);
   assert.doesNotMatch(usersView, /Crear usuario de Operaciones \/ Despacho/);
   assert.doesNotMatch(usersView, /\/admin\/users\/create-operations/);
