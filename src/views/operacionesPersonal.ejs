@@ -98,7 +98,7 @@
         <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
         <% if (role === 'dev') { %>
           <form method="post" action="/admin/operaciones/sync-contratados">
-            <button type="submit" class="btn btn-primary">Sincronizar contratados</button>
+            <button type="submit" class="btn btn-primary">Sincronizar registrados</button>
           </form>
         <% } %>
       </div>
@@ -147,7 +147,7 @@
       <% if (!workers.length) { %>
         <div class="empty">
           <strong>No hay personal operativo registrado.</strong>
-          Cambia candidatos a contratado o sincroniza contratados existentes para alimentar este listado.
+          Para pruebas, sincroniza candidatos registrados y revisa este listado antes de asignar auxiliares.
         </div>
       <% } else { %>
         <div class="table-wrap">

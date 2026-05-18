@@ -147,9 +147,9 @@ export function dispatchBridgeRouter() {
   });
 
   router.post('/sync-contratados', requireOps, requireDev, async (_req, res) => {
-    const contracted = await prisma.candidate.findMany({ where: { status: 'CONTRATADO' }, select: { id: true } });
-    for (const candidate of contracted) await upsertDispatchWorkerFromCandidate(prisma, candidate.id);
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Sincronización completada: ${contracted.length} contratados procesados.`)}`);
+    const registered = await prisma.candidate.findMany({ where: { status: 'REGISTRADO' }, select: { id: true } });
+    for (const candidate of registered) await upsertDispatchWorkerFromCandidate(prisma, candidate.id);
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Modo prueba: sincronización completada con ${registered.length} candidatos registrados procesados.`)}`);
   });
 
   router.get('/novedades', requireOps, (_req, res) => {
