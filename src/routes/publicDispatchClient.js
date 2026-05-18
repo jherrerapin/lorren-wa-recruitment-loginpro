@@ -14,6 +14,10 @@ async function findClientByPublicToken(publicToken) {
       operationPoints: {
         where: { isActive: true },
         orderBy: { name: 'asc' }
+      },
+      services: {
+        where: { isActive: true },
+        orderBy: { name: 'asc' }
       }
     }
   });
@@ -26,6 +30,10 @@ async function findClientByPublicToken(publicToken) {
       client: {
         include: {
           operationPoints: {
+            where: { isActive: true },
+            orderBy: { name: 'asc' }
+          },
+          services: {
             where: { isActive: true },
             orderBy: { name: 'asc' }
           }
@@ -56,7 +64,9 @@ export function publicDispatchClientRouter() {
     return res.render('publicDispatchRequest', {
       client,
       operationPoints: client.operationPoints,
+      services: client.services,
       operationPoint: null,
+      service: null,
       success: false
     });
   });
@@ -68,6 +78,10 @@ export function publicDispatchClientRouter() {
     const operationPointId = normalizeString(req.body.operationPointId);
     const operationPoint = client.operationPoints.find((item) => item.id === operationPointId);
     if (!operationPoint) return res.status(400).send('Debes seleccionar una operación válida.');
+
+    const serviceId = normalizeString(req.body.serviceId);
+    const selectedService = client.services.find((item) => item.id === serviceId) || null;
+    if (client.services.length && !selectedService) return res.status(400).send('Debes seleccionar un servicio válido.');
 
     const requiredWorkersRaw = Number(req.body.requiredWorkers);
     const serviceDate = normalizeString(req.body.serviceDate);
@@ -82,6 +96,8 @@ export function publicDispatchClientRouter() {
         operationPointName: operationPoint.name,
         cityName: operationPoint.cityName,
         address: operationPoint.address,
+        serviceId: selectedService?.id || null,
+        serviceName: selectedService?.name || null,
         serviceDate: new Date(serviceDate),
         startTime: normalizeString(req.body.startTime),
         endTime: normalizeString(req.body.endTime),
@@ -98,7 +114,9 @@ export function publicDispatchClientRouter() {
     return res.render('publicDispatchRequest', {
       client,
       operationPoints: client.operationPoints,
+      services: client.services,
       operationPoint,
+      service: selectedService,
       success: true
     });
   });

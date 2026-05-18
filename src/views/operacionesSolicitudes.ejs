@@ -46,7 +46,7 @@
             <tbody>
               <% serviceRequests.forEach((request) => { %>
                 <tr>
-                  <td><strong><%= request.clientName %></strong><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div></td>
+                  <td><strong><%= request.clientName %></strong><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div><div class="muted">Servicio: <%= request.serviceName || request.service?.name || 'Sin servicio' %></div></td>
                   <td><%= new Date(request.serviceDate).toISOString().slice(0,10) %></td>
                   <td><%= request.startTime || '-' %> - <%= request.endTime || '-' %></td>
                   <td><%= request.requiredWorkers %></td>

@@ -23,7 +23,7 @@
       <div>
         <div class="eyebrow">Operaciones por cliente</div>
         <h1><%= client.name %></h1>
-        <p>Crea puntos de servicio. Comparte el link público del cliente para que seleccione la operación al registrar solicitudes.</p>
+        <p>Crea puntos de servicio y servicios por cliente. Comparte el link público del cliente para que seleccione la operación y el servicio al registrar solicitudes.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/clientes">Volver a clientes</a>
@@ -70,6 +70,40 @@
                     <span><strong>Estado:</strong> <span class="pill <%= op.isActive ? 'pill-green' : 'pill-amber' %>"><%= op.isActive ? 'Activo' : 'Inactivo' %></span></span>
                   </div>
                   <div class="muted" style="margin-top:12px;">Link antiguo por operación compatible temporalmente: <%= legacyLink %></div>
+                </article>
+              <% }) %>
+            </div>
+          <% } %>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid-2" style="margin-top:18px;">
+      <article class="card">
+        <div class="card-head"><h2>Crear servicio</h2><p>Define los servicios disponibles para este cliente y sus solicitudes operativas.</p></div>
+        <div class="card-body">
+          <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/servicios">
+            <div class="form-grid">
+              <div class="field full"><label for="serviceName">Nombre del servicio</label><input id="serviceName" name="name" required placeholder="Ej: Cargue y descargue" /></div>
+              <div class="field full"><label for="serviceDescription">Descripción</label><textarea id="serviceDescription" name="description" placeholder="Detalles, alcance o condiciones del servicio"></textarea></div>
+            </div>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">Crear servicio</button></div>
+          </form>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>Servicios registrados</h2><p>Estos servicios aparecerán como opciones seleccionables al crear solicitudes.</p></div>
+        <div class="card-body">
+          <% if (!client.services.length) { %><div class="empty"><strong>No hay servicios registrados.</strong>Crea al menos un servicio para que el cliente lo seleccione en el formulario público.</div><% } else { %>
+            <div class="list">
+              <% client.services.forEach((service)=>{ %>
+                <article class="item-card">
+                  <h3><%= service.name %></h3>
+                  <div class="item-meta">
+                    <span><strong>Descripción:</strong> <%= service.description || '—' %></span>
+                    <span><strong>Estado:</strong> <span class="pill <%= service.isActive ? 'pill-green' : 'pill-amber' %>"><%= service.isActive ? 'Activo' : 'Inactivo' %></span></span>
+                  </div>
                 </article>
               <% }) %>
             </div>
