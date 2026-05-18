@@ -38,19 +38,15 @@ function requireOps(req, res, next) {
 export function dispatchBridgeRouter() {
   const router = express.Router();
 
-  router.get('/', requireOps, (req, res) => {
-    const dispatchModuleUrl = normalizeHttpUrl(process.env.DISPATCH_MODULE_URL);
-    return res.render('operaciones', {
-      role: req.session?.userRole || req.userRole,
-      dispatchModuleUrl
-    });
+  router.get('/', requireOps, (_req, res) => {
+    return res.redirect('/admin/operaciones/abrir');
   });
 
-  router.get('/abrir', requireOps, (req, res) => {
+  router.get('/abrir', requireOps, (_req, res) => {
     const dispatchModuleUrl = normalizeHttpUrl(process.env.DISPATCH_MODULE_URL);
 
     if (!dispatchModuleUrl) {
-      return res.redirect('/admin/operaciones');
+      return res.status(503).send('Panel operativo no configurado.');
     }
 
     return res.redirect(dispatchModuleUrl);

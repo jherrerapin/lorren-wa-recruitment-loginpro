@@ -57,59 +57,65 @@ test('dispatch module url is sanitized before redirecting', () => {
   );
 });
 
-test('operations view keeps pending-state fallback and opens dispatch through bridge route', () => {
-  const operationsView = readSource('src/views/operaciones.ejs');
+test('dispatch bridge opens operations directly without rendering the intermediate view', () => {
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
 
   assert.match(
-    operationsView,
-    /if\s*\(dispatchModuleUrl\)/,
-    'La vista debe condicionar el boton externo a la existencia de dispatchModuleUrl.'
+    bridgeSource,
+    /router\.get\(\s*['"]\/['"]\s*,\s*requireOps[\s\S]*?res\.redirect\(['"]\/admin\/operaciones\/abrir['"]\)/,
+    'GET /admin/operaciones debe redirigir directamente a /admin/operaciones/abrir.'
   );
 
   assert.match(
-    operationsView,
-    /Módulo pendiente de despliegue|Modulo pendiente de despliegue/,
-    'La vista debe informar que el modulo esta pendiente cuando no existe DISPATCH_MODULE_URL.'
+    bridgeSource,
+    /router\.get\(\s*['"]\/abrir['"]\s*,\s*requireOps/,
+    'GET /admin/operaciones/abrir debe mantenerse protegido por requireOps.'
   );
 
   assert.match(
-    operationsView,
-    /href=['"]\/admin\/operaciones\/abrir['"]/,
-    'La vista debe abrir Dispatch por la ruta puente del panel.'
+    bridgeSource,
+    /status\(503\)\.send\(['"]Panel operativo no configurado\.['"]\)/,
+    'Si DISPATCH_MODULE_URL no es valida, /abrir debe responder 503 con texto simple.'
   );
 
   assert.doesNotMatch(
-    operationsView,
-    /target=['"]_blank['"]|rel=['"]noopener noreferrer['"]/,
-    'El modulo externo debe abrir en la misma pestaña del panel, no en una nueva.'
+    bridgeSource,
+    /res\.render\(['"]operaciones['"]/,
+    'El router puente ya no debe renderizar operaciones.ejs en el flujo normal.'
+  );
+
+  assert.doesNotMatch(
+    bridgeSource,
+    /redirect\(['"]\/admin\/operaciones['"]\)/,
+    '/abrir no debe devolver a la pantalla intermedia cuando falta DISPATCH_MODULE_URL.'
   );
 });
 
-test('operations view presents dispatch as an integrated LoginPro module', () => {
-  const operationsView = readSource('src/views/operaciones.ejs');
+test('operations access remains limited to DEV or operations-dispatch users', () => {
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
 
   assert.match(
-    operationsView,
-    /Operaciones \/ Despacho/,
-    'La vista debe nombrar el modulo como Operaciones / Despacho.'
+    bridgeSource,
+    /function\s+requireOps\s*\([^)]*\)\s*{[\s\S]*?!role[\s\S]*?redirect\(['"]\/login['"]\)[\s\S]*?!canUseOps\(req\)[\s\S]*?403/,
+    'La ruta de Operaciones debe exigir sesión y permiso operativo.'
   );
 
   assert.match(
-    operationsView,
-    /Módulo del panel LoginPro|Modulo del panel LoginPro/,
-    'La vista debe comunicar que es un modulo del panel LoginPro.'
+    bridgeSource,
+    /role\s*===\s*['"]dev['"]\s*\|\|\s*isOpsUser\(req\)/,
+    'Operaciones debe permitir DEV o usuario operativo limitado.'
   );
 
   assert.match(
-    operationsView,
-    /Acceso operativo autorizado/,
-    'La vista debe comunicar acceso operativo autorizado.'
+    bridgeSource,
+    /startsWith\(['"]operaciones-despacho['"]\)/,
+    'Los usuarios operativos deben identificarse por el prefijo operaciones-despacho.'
   );
 
   assert.doesNotMatch(
-    operationsView,
-    /módulo externo temporal|modulo externo temporal|Módulo externo conectado|Modulo externo conectado|Anclaje externo|sistema separado/i,
-    'La vista no debe presentar Operaciones / Despacho como sistema separado o modulo externo temporal.'
+    bridgeSource,
+    /role\s*===\s*['"]admin['"]|role\s*!==\s*['"]recruiter['"]/,
+    'Un reclutador/admin normal no debe quedar autorizado por el rol.'
   );
 });
 
@@ -130,8 +136,8 @@ test('operations-only users are redirected to operations and blocked from recrui
 
   assert.match(
     serverSource,
-    /res\.redirect\(isOperationsOnlyUsername\(sessionPayload\.username\)\s*\?\s*['"]\/admin\/operaciones['"]\s*:\s*['"]\/admin['"]\)/,
-    'El login debe redirigir usuarios operativos directamente a Operaciones.'
+    /res\.redirect\(isOperationsOnlyUsername\(sessionPayload\.username\)\s*\?\s*['"]\/admin\/operaciones\/abrir['"]\s*:\s*['"]\/admin['"]\)/,
+    'El login debe redirigir usuarios operativos directamente a Operaciones / Despacho.'
   );
 
   assert.match(
@@ -207,24 +213,41 @@ test('dev-only navigation links are not exposed unconditionally', () => {
     'src/views/users.ejs',
     'src/views/locations.ejs',
     'src/views/outreachApproved.ejs',
-    'src/views/monitor.ejs'
+    'src/views/monitor.ejs',
+    'src/views/botKnowledge.ejs'
   ];
 
   for (const viewPath of views) {
     const viewSource = readSource(viewPath);
-    const operationsIndex = viewSource.indexOf('/admin/operaciones');
+    const operationsIndex = viewSource.indexOf('/admin/operaciones/abrir');
 
     assert.notEqual(
       operationsIndex,
       -1,
-      `${viewPath} debe conservar el enlace de Operaciones / Despacho para DEV.`
+      `${viewPath} debe conservar el enlace directo de Operaciones / Despacho para DEV.`
+    );
+
+    const directOperationsLink = new RegExp(`<a[^>]+href=[\"']\/admin\/operaciones\/abrir[\"'][^>]*>\\s*Operaciones \/ Despacho`);
+    const operationsLinkMatch = viewSource.match(directOperationsLink);
+
+    assert.ok(
+      operationsLinkMatch,
+      `${viewPath} debe enlazar Operaciones / Despacho directamente a /admin/operaciones/abrir.`
+    );
+
+    assert.doesNotMatch(
+      operationsLinkMatch[0],
+      /target=[\"']_blank[\"']/,
+      `${viewPath} debe abrir Operaciones / Despacho en la misma pestaña.`
     );
 
     const beforeLink = viewSource.slice(Math.max(0, operationsIndex - 250), operationsIndex);
-    const isMonitorDevOnlyView = viewPath === 'src/views/monitor.ejs'
-      && /router\.get\(\s*['"]\/monitor['"]\s*,\s*ensureDevRole/.test(serverSource);
+    const isDevOnlyView = [
+      'src/views/monitor.ejs',
+      'src/views/botKnowledge.ejs'
+    ].includes(viewPath) && new RegExp(`router\\.get\\(\\s*['\"]\/${viewPath.includes('monitor') ? 'monitor' : 'bot-knowledge'}['\"]\\s*,\\s*ensureDevRole`).test(serverSource);
 
-    if (isMonitorDevOnlyView) continue;
+    if (isDevOnlyView) continue;
 
     assert.match(
       beforeLink,
