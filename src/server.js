@@ -67,6 +67,40 @@ function buildLoginViewModel(overrides = {}) {
   };
 }
 
+function renderOperationsUserForm() {
+  return `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crear usuario de Operaciones | LoginPro</title>
+  <style>
+    body{margin:0;background:#f5f7fa;color:#1a1d23;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+    .nav{height:52px;background:#1e2d3d;display:flex;align-items:center;gap:18px;padding:0 24px}
+    .nav a{color:#cbd5e0;text-decoration:none;font-size:13px;font-weight:600}.nav a:hover{color:#fff}
+    .page{max-width:720px;margin:0 auto;padding:34px 20px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:24px;box-shadow:0 8px 24px rgba(15,23,42,.06)}
+    h1{font-size:24px;color:#1e2d3d;margin:0 0 10px}p{color:#64748b;line-height:1.55}.field{display:flex;flex-direction:column;gap:6px;margin-top:16px}label{font-size:12px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}input{border:1px solid #d1d5db;border-radius:10px;padding:11px 12px;font-size:14px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.btn{border:0;border-radius:10px;padding:11px 14px;font-size:14px;font-weight:800;cursor:pointer;text-decoration:none}.primary{background:#0d7a6b;color:#fff}.secondary{background:#f1f5f9;color:#1e2d3d;border:1px solid #dbe3ea}.note{background:#eef6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:12px;padding:12px 14px;margin-top:16px;font-size:13px;font-weight:600}
+  </style>
+</head>
+<body>
+  <nav class="nav"><a href="/admin">Panel</a><a href="/admin/users">Usuarios</a><a href="/admin/operaciones">Operaciones / Despacho</a></nav>
+  <main class="page">
+    <section class="card">
+      <h1>Crear usuario de Operaciones / Despacho</h1>
+      <p>Este usuario inicia sesion en LoginPro y queda limitado al modulo Operaciones / Despacho. No podra navegar candidatos, vacantes ni monitor.</p>
+      <div class="note">El nombre se genera automaticamente como operaciones-despacho, operaciones-despacho-2, etc.</div>
+      <form method="post" action="/admin/users/create-operations">
+        <div class="field"><label for="password">Contrasena inicial</label><input id="password" name="password" type="password" minlength="6" required></div>
+        <div class="field"><label for="recoveryPhone">Telefono de recuperacion</label><input id="recoveryPhone" name="recoveryPhone" type="text"></div>
+        <div class="field"><label for="recoveryEmail">Correo de recuperacion</label><input id="recoveryEmail" name="recoveryEmail" type="email"></div>
+        <div class="actions"><button class="btn primary" type="submit">Crear usuario</button><a class="btn secondary" href="/admin/users">Volver a usuarios</a></div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
 function mapDbRoleToSessionRole(role) {
   return role === 'DEV' ? 'dev' : 'admin';
 }
@@ -295,11 +329,16 @@ const destroySession = (req, res) => {
 app.post('/logout', destroySession);
 app.get('/logout', destroySession);
 
+app.get('/admin/users/create-operations', (req, res) => {
+  if (req.session?.userRole !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
+  return res.send(renderOperationsUserForm());
+});
+
 app.post('/admin/users/create-operations', express.urlencoded({ extended: true }), async (req, res) => {
   if (req.session?.userRole !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
   const password = typeof req.body.password === 'string' ? req.body.password : '';
   if (password.length < 6) {
-    return res.redirect('/admin/users?error=' + encodeURIComponent('La contraseña inicial debe tener al menos 6 caracteres.'));
+    return res.redirect('/admin/users/create-operations?error=1');
   }
   const username = await buildUniqueOperationsUsername();
   const passwordHash = await bcrypt.hash(password, 10);
