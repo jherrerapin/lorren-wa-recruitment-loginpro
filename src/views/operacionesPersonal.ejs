@@ -1,22 +1,195 @@
-<!doctype html><html lang="es"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title><%= pageTitle %></title><link rel="stylesheet" href="/styles.css" /></head><body>
-<nav class="top-nav">
-  <a href="/admin">Dashboard</a>
-  <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
-  <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
-</nav>
-<main class="container">
-  <h1><%= pageTitle %></h1>
-  <p><%= subtitle %></p>
-  <% if (message) { %><p><strong><%= message %></strong></p><% } %>
-  <% if (role === 'dev') { %><form method="post" action="/admin/operaciones/sync-contratados"><button type="submit" class="btn">Sincronizar contratados</button></form><% } %>
-  <form method="get" action="/admin/operaciones/personal" style="margin: 16px 0;">
-    <select name="operationalCityId"><option value="">Todas las ciudades operativas</option><% cities.forEach((city) => { %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %></select>
-    <select name="vacancyId"><option value="">Todas las vacantes</option><% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %></option><% }) %></select>
-    <select name="status"><option value="">Todos los estados</option><option value="ACTIVE" <%= filters.status==='ACTIVE'?'selected':'' %>>ACTIVE</option></select>
-    <button type="submit" class="btn">Filtrar</button>
-  </form>
-  <% if (!workers.length) { %><p>No hay personal operativo registrado.</p><% } else { %>
-  <table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes/perfiles</th><th>Origen</th><th>Estado</th></tr></thead><tbody>
-    <% workers.forEach((w) => { %><tr><td><%= w.fullName %></td><td><%= w.phone || '-' %></td><td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td><td><%= w.residenceCity || '-' %></td><td><%= w.cities.map((entry) => entry.city.name).join(', ') || '-' %></td><td><%= w.vacancies.map((entry) => entry.vacancy.title).join(', ') || '-' %></td><td><%= w.source %></td><td><%= w.operationalStatus %></td></tr><% }) %>
-  </tbody></table><% } %>
-</main></body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= pageTitle %> — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f4f5f7;
+      --surface: #ffffff;
+      --surface-2: #f9fafb;
+      --border: #e1e4e8;
+      --text: #1a1d23;
+      --muted: #6b7280;
+      --navy: #1e2d3d;
+      --teal: #0d7a6b;
+      --teal-hover: #0a5f53;
+      --green: #166534;
+      --green-light: #dcfce7;
+      --blue: #1d4ed8;
+      --blue-light: #dbeafe;
+      --amber: #92400e;
+      --amber-light: #fef3c7;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+      --shadow-md: 0 10px 28px rgba(15,23,42,.08);
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; }
+    .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; min-height: 52px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 600; padding: 4px 2px; border-bottom: 2px solid transparent; }
+    .navbar a:hover, .navbar a.nav-active { color: #fff; border-bottom-color: #4fd1c5; }
+    .navbar .brand img { height: 28px; display: block; }
+    .navbar .spacer { flex: 1; }
+    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 6px 12px !important; border-radius: 7px; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .page { max-width: 1240px; margin: 0 auto; padding: 28px 20px 60px; display: grid; gap: 18px; }
+    .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; background: linear-gradient(135deg, #fff 0%, #f0fdfa 100%); border: 1px solid var(--border); border-radius: 18px; padding: 24px; box-shadow: var(--shadow-md); }
+    .eyebrow { color: var(--teal); font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+    h1 { color: var(--navy); font-size: 28px; line-height: 1.15; margin-bottom: 8px; }
+    .subtitle { color: var(--muted); line-height: 1.6; max-width: 720px; }
+    .hero-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 9px 14px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); }
+    .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+    .btn-primary:hover { background: var(--teal-hover); }
+    .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
+    .alert { border: 1px solid #bfdbfe; background: var(--blue-light); color: var(--blue); border-radius: 12px; padding: 12px 14px; font-size: 13px; font-weight: 700; }
+    .filters-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow-sm); }
+    .filters-head { margin-bottom: 14px; }
+    .filters-head h2 { color: var(--navy); font-size: 16px; margin-bottom: 3px; }
+    .filters-head p { color: var(--muted); font-size: 13px; }
+    .filters-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: end; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+    select { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--text); font-size: 14px; outline: none; }
+    select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid #eaecef; flex-wrap: wrap; }
+    .panel-head h2 { color: var(--navy); font-size: 17px; }
+    .panel-head p { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 980px; }
+    th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid #eaecef; vertical-align: top; }
+    th { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+    td { color: var(--text); font-size: 13px; }
+    .muted { color: var(--muted); }
+    .worker-name { color: var(--navy); font-weight: 800; }
+    .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 800; margin: 2px 4px 2px 0; }
+    .pill-green { color: var(--green); background: var(--green-light); }
+    .pill-blue { color: var(--blue); background: var(--blue-light); }
+    .pill-amber { color: var(--amber); background: var(--amber-light); }
+    .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
+    .empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 6px; }
+    @media (max-width: 900px) { .navbar { flex-wrap: wrap; height: auto; padding: 10px 16px; } .navbar .spacer { display: none; } .filters-grid { grid-template-columns: 1fr 1fr; } .hero { padding: 20px; } }
+    @media (max-width: 640px) { .page { padding: 18px 14px 42px; } .filters-grid { grid-template-columns: 1fr; } .hero-actions, .btn { width: 100%; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Equipo operativo</div>
+        <h1><%= pageTitle %></h1>
+        <p class="subtitle"><%= subtitle %></p>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
+        <% if (role === 'dev') { %>
+          <form method="post" action="/admin/operaciones/sync-contratados">
+            <button type="submit" class="btn btn-primary">Sincronizar contratados</button>
+          </form>
+        <% } %>
+      </div>
+    </section>
+
+    <% if (message) { %><div class="alert"><%= message %></div><% } %>
+
+    <section class="filters-card">
+      <div class="filters-head">
+        <h2>Filtros de personal</h2>
+        <p>Consulta disponibilidad por ciudad operativa, vacante o estado.</p>
+      </div>
+      <form method="get" action="/admin/operaciones/personal" class="filters-grid">
+        <div class="field">
+          <label for="operationalCityId">Ciudad operativa</label>
+          <select id="operationalCityId" name="operationalCityId">
+            <option value="">Todas las ciudades operativas</option>
+            <% cities.forEach((city) => { %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %>
+          </select>
+        </div>
+        <div class="field">
+          <label for="vacancyId">Vacante / perfil</label>
+          <select id="vacancyId" name="vacancyId">
+            <option value="">Todas las vacantes</option>
+            <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %></option><% }) %>
+          </select>
+        </div>
+        <div class="field">
+          <label for="status">Estado</label>
+          <select id="status" name="status">
+            <option value="">Todos los estados</option>
+            <option value="ACTIVE" <%= filters.status==='ACTIVE'?'selected':'' %>>Activo</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Filtrar</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Listado de personal operativo</h2>
+          <p>Personas disponibles para asignación a operaciones.</p>
+        </div>
+      </div>
+      <% if (!workers.length) { %>
+        <div class="empty">
+          <strong>No hay personal operativo registrado.</strong>
+          Cambia candidatos a contratado o sincroniza contratados existentes para alimentar este listado.
+        </div>
+      <% } else { %>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Documento</th>
+                <th>Ciudad residencia</th>
+                <th>Ciudades operativas</th>
+                <th>Vacantes / perfiles</th>
+                <th>Origen</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% workers.forEach((w) => { %>
+                <tr>
+                  <td><span class="worker-name"><%= w.fullName %></span></td>
+                  <td><%= w.phone || '-' %></td>
+                  <td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
+                  <td><%= w.residenceCity || '-' %></td>
+                  <td>
+                    <% if (w.cities.length) { %>
+                      <% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %>
+                    <% } else { %><span class="muted">Sin ciudades habilitadas</span><% } %>
+                  </td>
+                  <td>
+                    <% if (w.vacancies.length) { %>
+                      <% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %></span><% }) %>
+                    <% } else { %><span class="muted">Sin perfiles habilitados</span><% } %>
+                  </td>
+                  <td><span class="pill pill-blue"><%= w.source %></span></td>
+                  <td><span class="pill pill-green"><%= w.operationalStatus %></span></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </section>
+  </main>
+</body>
+</html>
