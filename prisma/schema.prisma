@@ -278,6 +278,7 @@ model DispatchClient {
   contactName       String?
   contactPhone      String?
   contactEmail      String?
+  publicToken       String                   @unique
   notes             String?
   isActive          Boolean                  @default(true)
   createdByUsername String?

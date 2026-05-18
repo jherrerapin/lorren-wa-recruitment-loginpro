@@ -23,7 +23,7 @@
       <div>
         <div class="eyebrow">Operaciones por cliente</div>
         <h1><%= client.name %></h1>
-        <p>Crea puntos de servicio y comparte el link público para que el cliente registre solicitudes operativas.</p>
+        <p>Crea puntos de servicio. Comparte el link público del cliente para que seleccione la operación al registrar solicitudes.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/clientes">Volver a clientes</a>
@@ -33,7 +33,7 @@
 
     <section class="grid-2">
       <article class="card">
-        <div class="card-head"><h2>Crear operación / punto</h2><p>Cada operación genera un link único para crear solicitudes de servicio.</p></div>
+        <div class="card-head"><h2>Crear operación / punto</h2><p>Las operaciones se gestionan aquí, pero el link público que se comparte es único por cliente.</p></div>
         <div class="card-body">
           <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones">
             <div class="form-grid">
@@ -50,11 +50,17 @@
       </article>
 
       <article class="card">
-        <div class="card-head"><h2>Operaciones registradas</h2><p>Copia el link y envíalo al cliente para que cree solicitudes directamente.</p></div>
+        <div class="card-head"><h2>Operaciones registradas</h2><p>Comparte el link público del cliente; los links antiguos por operación se mantienen temporalmente y redirigen al formulario del cliente.</p></div>
         <div class="card-body">
+          <% const clientLink = baseUrl + '/operaciones/cliente/' + client.publicToken; %>
+          <div class="copy-row" style="margin-bottom:16px;">
+            <input class="copy-input" readonly value="<%= clientLink %>" />
+            <a class="btn" href="/operaciones/cliente/<%= client.publicToken %>" target="_blank" rel="noopener">Abrir link del cliente</a>
+            <button class="btn btn-primary" type="button" onclick="navigator.clipboard.writeText('<%= clientLink %>')">Copiar link del cliente</button>
+          </div>
           <% if (!client.operationPoints.length) { %><div class="empty"><strong>No hay operaciones registradas.</strong>Crea el primer punto de servicio para este cliente.</div><% } else { %>
             <div class="list">
-              <% client.operationPoints.forEach((op)=>{ const link = baseUrl + '/operaciones/solicitud/' + op.publicToken; %>
+              <% client.operationPoints.forEach((op)=>{ const legacyLink = baseUrl + '/operaciones/solicitud/' + op.publicToken; %>
                 <article class="item-card">
                   <h3><%= op.name %></h3>
                   <div class="item-meta">
@@ -63,11 +69,7 @@
                     <span><strong>Contacto:</strong> <%= op.contactName || '—' %> · <%= op.contactPhone || 'Sin teléfono' %></span>
                     <span><strong>Estado:</strong> <span class="pill <%= op.isActive ? 'pill-green' : 'pill-amber' %>"><%= op.isActive ? 'Activo' : 'Inactivo' %></span></span>
                   </div>
-                  <div class="copy-row" style="margin-top:12px;">
-                    <input class="copy-input" readonly value="<%= link %>" />
-                    <a class="btn" href="/operaciones/solicitud/<%= op.publicToken %>" target="_blank" rel="noopener">Abrir</a>
-                    <button class="btn btn-primary" type="button" onclick="navigator.clipboard.writeText('<%= link %>')">Copiar link</button>
-                  </div>
+                  <div class="muted" style="margin-top:12px;">Link antiguo por operación compatible temporalmente: <%= legacyLink %></div>
                 </article>
               <% }) %>
             </div>

@@ -7,8 +7,20 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
-async function findClientByPublicAccessToken(publicToken) {
-  const operationPoint = await prisma.dispatchOperationPoint.findFirst({
+async function findClientByPublicToken(publicToken) {
+  const client = await prisma.dispatchClient.findFirst({
+    where: { publicToken, isActive: true },
+    include: {
+      operationPoints: {
+        where: { isActive: true },
+        orderBy: { name: 'asc' }
+      }
+    }
+  });
+
+  if (client) return client;
+
+  const legacyOperationPoint = await prisma.dispatchOperationPoint.findFirst({
     where: { publicToken, isActive: true },
     include: {
       client: {
@@ -22,15 +34,24 @@ async function findClientByPublicAccessToken(publicToken) {
     }
   });
 
-  return operationPoint?.client || null;
+  return legacyOperationPoint?.client?.isActive ? legacyOperationPoint.client : null;
+}
+
+async function findClientByLegacyOperationToken(publicToken) {
+  const operationPoint = await prisma.dispatchOperationPoint.findFirst({
+    where: { publicToken, isActive: true },
+    include: { client: true }
+  });
+
+  return operationPoint?.client?.isActive ? operationPoint.client : null;
 }
 
 export function publicDispatchClientRouter() {
   const router = express.Router();
 
   router.get('/cliente/:publicToken', async (req, res) => {
-    const client = await findClientByPublicAccessToken(req.params.publicToken);
-    if (!client || !client.isActive) return res.status(404).send('Link no disponible');
+    const client = await findClientByPublicToken(req.params.publicToken);
+    if (!client) return res.status(404).send('Link no disponible');
 
     return res.render('publicDispatchRequest', {
       client,
@@ -41,8 +62,8 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/cliente/:publicToken', async (req, res) => {
-    const client = await findClientByPublicAccessToken(req.params.publicToken);
-    if (!client || !client.isActive) return res.status(404).send('Link no disponible');
+    const client = await findClientByPublicToken(req.params.publicToken);
+    if (!client) return res.status(404).send('Link no disponible');
 
     const operationPointId = normalizeString(req.body.operationPointId);
     const operationPoint = client.operationPoints.find((item) => item.id === operationPointId);
@@ -83,7 +104,9 @@ export function publicDispatchClientRouter() {
   });
 
   router.get('/solicitud/:publicToken', async (req, res) => {
-    return res.redirect(`/operaciones/cliente/${req.params.publicToken}`);
+    const client = await findClientByLegacyOperationToken(req.params.publicToken);
+    if (!client) return res.redirect(`/operaciones/cliente/${req.params.publicToken}`);
+    return res.redirect(`/operaciones/cliente/${client.publicToken}`);
   });
 
   return router;

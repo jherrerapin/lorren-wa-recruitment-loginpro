@@ -23,7 +23,7 @@
       <div>
         <div class="eyebrow">Gestión comercial operativa</div>
         <h1>Clientes</h1>
-        <p>Gestiona clientes y crea sus operaciones o puntos de servicio para generar links públicos de solicitud.</p>
+        <p>Gestiona clientes, crea sus operaciones y comparte el link público único del cliente para solicitar servicios.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
@@ -50,11 +50,22 @@
       </article>
 
       <article class="card">
-        <div class="card-head"><h2>Clientes registrados</h2><p>Desde cada cliente puedes crear operaciones y copiar el link público.</p></div>
+        <div class="card-head"><h2>Clientes registrados</h2><p>El link público pertenece al cliente; en el formulario público el cliente selecciona la operación correspondiente.</p></div>
         <div class="table-wrap">
           <% if (!clients.length) { %><div class="empty"><strong>No hay clientes registrados.</strong>Crea el primer cliente para iniciar el flujo.</div><% } else { %>
-            <table class="table"><thead><tr><th>Cliente</th><th>Contacto</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
-              <% clients.forEach((c)=>{ %><tr><td><strong><%= c.name %></strong><div class="muted">NIT: <%= c.nit || '—' %></div></td><td><%= c.contactName || '—' %><div class="muted"><%= c.contactPhone || 'Sin teléfono' %> · <%= c.contactEmail || 'Sin correo' %></div></td><td><span class="pill <%= c.isActive ? 'pill-green' : 'pill-amber' %>"><%= c.isActive ? 'Activo' : 'Inactivo' %></span></td><td><a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Ver operaciones</a></td></tr><% }) %>
+            <table class="table"><thead><tr><th>Cliente</th><th>Contacto</th><th>Link público del cliente</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
+              <% clients.forEach((c)=>{ const clientLink = baseUrl + '/operaciones/cliente/' + c.publicToken; %><tr>
+                <td><strong><%= c.name %></strong><div class="muted">NIT: <%= c.nit || '—' %></div></td>
+                <td><%= c.contactName || '—' %><div class="muted"><%= c.contactPhone || 'Sin teléfono' %> · <%= c.contactEmail || 'Sin correo' %></div></td>
+                <td>
+                  <div class="copy-row">
+                    <input class="copy-input" readonly value="<%= clientLink %>" />
+                    <a class="btn" href="/operaciones/cliente/<%= c.publicToken %>" target="_blank" rel="noopener">Abrir</a>
+                  </div>
+                </td>
+                <td><span class="pill <%= c.isActive ? 'pill-green' : 'pill-amber' %>"><%= c.isActive ? 'Activo' : 'Inactivo' %></span></td>
+                <td><a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Ver operaciones</a></td>
+              </tr><% }) %>
             </tbody></table>
           <% } %>
         </div>
