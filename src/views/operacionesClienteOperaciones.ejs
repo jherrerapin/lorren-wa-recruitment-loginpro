@@ -1,12 +1,80 @@
-<!doctype html><html><head><meta charset='utf-8'><title>Operaciones cliente</title></head><body>
-<nav><a href='/admin'><img src='/public/logo-loginpro.svg' alt='LoginPro'></a></nav>
-<h1><%= client.name %></h1>
-<form method='post' action='/admin/operaciones/clientes/<%= client.id %>/operaciones'>
-<input name='name' required placeholder='Nombre operación'><input name='cityName'><input name='address'><input name='contactName'><input name='contactPhone'><textarea name='notes'></textarea><button>Crear operación</button></form>
-<% client.operationPoints.forEach((op)=>{ const link = baseUrl + '/operaciones/solicitud/' + op.publicToken; %>
-<div><strong><%= op.name %></strong> <span><%= op.cityName||'-' %></span> <span><%= op.address||'-' %></span> <span><%= op.contactName||'-' %></span> <span><%= op.contactPhone||'-' %></span>
-<a href='/operaciones/solicitud/<%= op.publicToken %>'>/operaciones/solicitud/<%= op.publicToken %></a>
-<button type='button' onclick="navigator.clipboard.writeText('<%= link %>')">Copiar link</button>
-<span><%= op.isActive?'Activo':'Inactivo' %></span></div>
-<% }) %>
-</body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Operaciones de cliente — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Operaciones por cliente</div>
+        <h1><%= client.name %></h1>
+        <p>Crea puntos de servicio y comparte el link público para que el cliente registre solicitudes operativas.</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones/clientes">Volver a clientes</a>
+        <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Solicitudes de servicio</a>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <div class="card-head"><h2>Crear operación / punto</h2><p>Cada operación genera un link único para crear solicitudes de servicio.</p></div>
+        <div class="card-body">
+          <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones">
+            <div class="form-grid">
+              <div class="field full"><label for="name">Nombre de la operación</label><input id="name" name="name" required placeholder="Ej: Bodega Siberia" /></div>
+              <div class="field"><label for="cityName">Ciudad</label><input id="cityName" name="cityName" placeholder="Bogotá, Siberia, Neiva..." /></div>
+              <div class="field"><label for="address">Dirección</label><input id="address" name="address" placeholder="Dirección del punto" /></div>
+              <div class="field"><label for="contactName">Contacto operativo</label><input id="contactName" name="contactName" placeholder="Nombre del encargado" /></div>
+              <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" placeholder="Número de contacto" /></div>
+              <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Condiciones de ingreso, horarios, requisitos o indicaciones"></textarea></div>
+            </div>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">Crear operación</button></div>
+          </form>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>Operaciones registradas</h2><p>Copia el link y envíalo al cliente para que cree solicitudes directamente.</p></div>
+        <div class="card-body">
+          <% if (!client.operationPoints.length) { %><div class="empty"><strong>No hay operaciones registradas.</strong>Crea el primer punto de servicio para este cliente.</div><% } else { %>
+            <div class="list">
+              <% client.operationPoints.forEach((op)=>{ const link = baseUrl + '/operaciones/solicitud/' + op.publicToken; %>
+                <article class="item-card">
+                  <h3><%= op.name %></h3>
+                  <div class="item-meta">
+                    <span><strong>Ciudad:</strong> <%= op.cityName || '—' %></span>
+                    <span><strong>Dirección:</strong> <%= op.address || '—' %></span>
+                    <span><strong>Contacto:</strong> <%= op.contactName || '—' %> · <%= op.contactPhone || 'Sin teléfono' %></span>
+                    <span><strong>Estado:</strong> <span class="pill <%= op.isActive ? 'pill-green' : 'pill-amber' %>"><%= op.isActive ? 'Activo' : 'Inactivo' %></span></span>
+                  </div>
+                  <div class="copy-row" style="margin-top:12px;">
+                    <input class="copy-input" readonly value="<%= link %>" />
+                    <a class="btn" href="/operaciones/solicitud/<%= op.publicToken %>" target="_blank" rel="noopener">Abrir</a>
+                    <button class="btn btn-primary" type="button" onclick="navigator.clipboard.writeText('<%= link %>')">Copiar link</button>
+                  </div>
+                </article>
+              <% }) %>
+            </div>
+          <% } %>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
