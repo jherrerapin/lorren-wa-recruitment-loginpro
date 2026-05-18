@@ -6,41 +6,54 @@ function readSource(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
-test('admin operations route remains protected by dev role', () => {
-  const adminRouterSource = readSource('src/routes/admin.js');
+test('operations entry is protected by the bridge router', () => {
+  const serverSource = readSource('src/server.js');
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
 
   assert.match(
-    adminRouterSource,
-    /function\s+ensureDevRole\s*\([^)]*\)\s*{[\s\S]*?req\.userRole\s*!==\s*['"]dev['"][\s\S]*?403/,
-    'ensureDevRole debe rechazar usuarios que no tengan rol dev con respuesta 403.'
+    serverSource,
+    /app\.use\(\s*['"]\/admin\/operaciones['"]\s*,\s*dispatchBridgeRouter\(\)\s*\)/,
+    'El router de Operaciones debe montarse antes del adminRouter general.'
   );
 
   assert.match(
-    adminRouterSource,
-    /router\.get\(\s*['"]\/operaciones['"]\s*,\s*ensureDevRole\s*,/,
-    'GET /admin/operaciones debe mantenerse protegido por ensureDevRole.'
+    bridgeSource,
+    /function\s+requireOps\s*\([^)]*\)\s*{[\s\S]*?!role[\s\S]*?redirect\(['"]\/login['"]\)[\s\S]*?!canUseOps\(req\)[\s\S]*?403/,
+    'La ruta de Operaciones debe exigir sesión y permiso operativo.'
+  );
+
+  assert.match(
+    bridgeSource,
+    /role\s*===\s*['"]dev['"]\s*\|\|\s*isOpsUser\(req\)/,
+    'Operaciones debe permitir DEV o usuario operativo limitado.'
   );
 });
 
-test('dispatch module url is sanitized before rendering operations view', () => {
-  const adminRouterSource = readSource('src/routes/admin.js');
+test('dispatch module url is sanitized before redirecting', () => {
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
 
   assert.match(
-    adminRouterSource,
+    bridgeSource,
     /function\s+normalizeHttpUrl\s*\(/,
     'Debe existir normalizeHttpUrl para validar DISPATCH_MODULE_URL.'
   );
 
   assert.match(
-    adminRouterSource,
+    bridgeSource,
     /\['http:',\s*'https:'\]\.includes\(url\.protocol\)/,
     'DISPATCH_MODULE_URL solo debe aceptar protocolos http y https.'
   );
 
   assert.match(
-    adminRouterSource,
+    bridgeSource,
     /normalizeHttpUrl\(process\.env\.DISPATCH_MODULE_URL\)/,
-    'La ruta de operaciones debe pasar DISPATCH_MODULE_URL por normalizeHttpUrl antes de renderizar.'
+    'La ruta puente debe pasar DISPATCH_MODULE_URL por normalizeHttpUrl antes de redirigir.'
+  );
+
+  assert.match(
+    bridgeSource,
+    /res\.redirect\(dispatchModuleUrl\)/,
+    'La ruta puente debe redirigir a la URL validada del módulo.'
   );
 });
 
@@ -62,7 +75,7 @@ test('operations view keeps pending-state fallback and opens dispatch through br
   assert.match(
     operationsView,
     /href=['"]\/admin\/operaciones\/abrir['"]/, 
-    'La vista debe abrir Dispatch por la ruta puente DEV-only.'
+    'La vista debe abrir Dispatch por la ruta puente del panel.'
   );
 
   assert.doesNotMatch(
@@ -72,38 +85,53 @@ test('operations view keeps pending-state fallback and opens dispatch through br
   );
 });
 
-test('dispatch bridge route remains dev-only and sanitizes destination url', () => {
+test('operations-only users are redirected to operations and blocked from recruitment admin', () => {
   const serverSource = readSource('src/server.js');
-  const bridgeSource = readSource('src/routes/dispatchBridge.js');
 
   assert.match(
     serverSource,
-    /app\.use\(\s*['"]\/admin\/operaciones['"]\s*,\s*dispatchBridgeRouter\(\)\s*\)/,
-    'El router puente debe montarse bajo /admin/operaciones antes del adminRouter general.'
+    /function\s+isOperationsOnlyUsername\s*\(/,
+    'Debe existir una función para identificar usuarios limitados a Operaciones.'
   );
 
   assert.match(
-    bridgeSource,
-    /function\s+requireDevSession\s*\([^)]*\)\s*{[\s\S]*?role\s*!==\s*['"]dev['"][\s\S]*?403/,
-    'La ruta puente debe rechazar usuarios no DEV con 403.'
+    serverSource,
+    /startsWith\(['"]operaciones-despacho['"]\)/,
+    'Los usuarios operativos deben identificarse con prefijo operaciones-despacho.'
   );
 
   assert.match(
-    bridgeSource,
-    /router\.get\(\s*['"]\/abrir['"]\s*,\s*requireDevSession\s*,/,
-    'GET /admin/operaciones/abrir debe usar requireDevSession.'
+    serverSource,
+    /res\.redirect\(isOperationsOnlyUsername\(sessionPayload\.username\)\s*\?\s*['"]\/admin\/operaciones['"]\s*:\s*['"]\/admin['"]\)/,
+    'El login debe redirigir usuarios operativos directamente a Operaciones.'
   );
 
   assert.match(
-    bridgeSource,
-    /normalizeHttpUrl\(process\.env\.DISPATCH_MODULE_URL\)/,
-    'La ruta puente debe validar DISPATCH_MODULE_URL antes de redirigir.'
+    serverSource,
+    /Usuario limitado a Operaciones \/ Despacho/,
+    'Los usuarios operativos no deben navegar el dashboard de reclutamiento.'
+  );
+});
+
+test('dev can create operations-only users without changing the database schema', () => {
+  const serverSource = readSource('src/server.js');
+
+  assert.match(
+    serverSource,
+    /app\.post\(\s*['"]\/admin\/users\/create-operations['"]/, 
+    'Debe existir un endpoint para crear usuarios de Operaciones desde el panel.'
   );
 
   assert.match(
-    bridgeSource,
-    /res\.redirect\(dispatchModuleUrl\)/,
-    'La ruta puente debe redirigir a la URL validada del módulo.'
+    serverSource,
+    /req\.session\?\.userRole\s*!==\s*['"]dev['"]/, 
+    'La creación de usuarios operativos debe estar restringida a DEV.'
+  );
+
+  assert.match(
+    serverSource,
+    /role:\s*['"]ADMIN['"][\s\S]*?accessScope:\s*['"]ALL['"]/, 
+    'El usuario operativo se crea como AppUser existente, sin migración nueva.'
   );
 });
 

@@ -2,6 +2,7 @@ import express from 'express';
 import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomInt } from 'node:crypto';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import bcrypt from 'bcryptjs';
@@ -34,6 +35,27 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function isOperationsOnlyUsername(username) {
+  return Boolean(normalizeString(username)?.startsWith('operaciones-despacho'));
+}
+
+function generateRecoveryCode() {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+async function buildUniqueOperationsUsername() {
+  const base = 'operaciones-despacho';
+  const existingUsers = await prisma.appUser.findMany({
+    where: { username: { startsWith: base } },
+    select: { username: true }
+  });
+  const used = new Set(existingUsers.map((user) => user.username));
+  if (!used.has(base)) return base;
+  let index = 2;
+  while (used.has(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
 }
 
 function buildLoginViewModel(overrides = {}) {
@@ -199,7 +221,7 @@ app.post('/login', async (req, res) => {
           username
         }));
       }
-      return res.redirect('/admin');
+      return res.redirect(isOperationsOnlyUsername(sessionPayload.username) ? '/admin/operaciones' : '/admin');
     });
   });
 });
@@ -273,9 +295,47 @@ const destroySession = (req, res) => {
 app.post('/logout', destroySession);
 app.get('/logout', destroySession);
 
+app.post('/admin/users/create-operations', express.urlencoded({ extended: true }), async (req, res) => {
+  if (req.session?.userRole !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  if (password.length < 6) {
+    return res.redirect('/admin/users?error=' + encodeURIComponent('La contraseña inicial debe tener al menos 6 caracteres.'));
+  }
+  const username = await buildUniqueOperationsUsername();
+  const passwordHash = await bcrypt.hash(password, 10);
+  const recoveryCode = generateRecoveryCode();
+  const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
+  await prisma.appUser.create({
+    data: {
+      username,
+      passwordHash,
+      recoveryCodeHash,
+      role: 'ADMIN',
+      accessScope: 'ALL',
+      recoveryPhone: normalizeString(req.body.recoveryPhone),
+      recoveryEmail: normalizeString(req.body.recoveryEmail),
+      createdByUsername: req.session?.username || 'dev',
+      lastPasswordResetAt: new Date(),
+      isActive: true
+    }
+  });
+  const params = new URLSearchParams();
+  params.set('success', `Usuario ${username} creado con acceso a Operaciones / Despacho.`);
+  params.set('username', username);
+  params.set('recoveryCode', recoveryCode);
+  return res.redirect(`/admin/users?${params.toString()}`);
+});
+
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/admin/operaciones', dispatchBridgeRouter());
+app.use('/admin', (req, res, next) => {
+  if (isOperationsOnlyUsername(req.session?.username || req.username)) {
+    if (req.method === 'GET' && (req.path === '/' || req.path === '')) return res.redirect('/admin/operaciones');
+    return res.status(403).send('Usuario limitado a Operaciones / Despacho');
+  }
+  return next();
+});
 app.use('/admin', adminRouter(prisma));
 app.use('/admin/locations', locationsRouter(prisma));
 
