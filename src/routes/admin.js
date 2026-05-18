@@ -2168,6 +2168,7 @@ export function adminRouter(prisma) {
     if (!ensureCandidateAccess(req, existingCandidate, res, returnTo)) return;
 
     await prisma.candidate.update({ where: { id }, data: { status } });
+    if (status === 'CONTRATADO') await upsertDispatchWorkerFromCandidate(prisma, id);
     if (existingCandidate.status !== status) {
       await logCandidateAdminEvent(prisma, {
         candidateId: id,

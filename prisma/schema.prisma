@@ -105,6 +105,7 @@ model City {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
   operations Operation[]
+  dispatchWorkers DispatchWorkerCity[]
 }
 
 model Operation {
@@ -152,6 +153,7 @@ model Vacancy {
   interviewSlots        InterviewSlot[]
   interviewBookings     InterviewBooking[]
   accessUsers           AppUser[]
+  dispatchWorkers       DispatchWorkerVacancy[]
 }
 
 model InterviewSlot {
@@ -236,6 +238,7 @@ model Candidate {
   interviewBookings      InterviewBooking[]
   adminEvents            CandidateAdminEvent[]
   attachmentAnalyses     AttachmentAnalysis[]
+  dispatchWorker         DispatchWorker?
 }
 
 model Message {
@@ -265,6 +268,64 @@ model CandidateAdminEvent {
   @@index([candidateId, createdAt])
 }
 
+
+
+model DispatchWorker {
+  id                String                 @id @default(cuid())
+  candidateId       String?                @unique
+  candidate         Candidate?             @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+
+  fullName          String
+  phone             String?
+  documentType      String?
+  documentNumber    String?
+  residenceCity     String?
+  residenceLocality String?
+  transportMode     String?
+
+  source            String                 @default("CANDIDATE")
+  operationalStatus String                 @default("ACTIVE")
+  notes             String?
+
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  cities            DispatchWorkerCity[]
+  vacancies         DispatchWorkerVacancy[]
+
+  @@index([candidateId])
+  @@index([documentNumber])
+  @@index([phone])
+  @@index([operationalStatus])
+}
+
+model DispatchWorkerCity {
+  id        String         @id @default(cuid())
+  workerId  String
+  worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  cityId    String
+  city      City           @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime       @default(now())
+
+  @@unique([workerId, cityId])
+  @@index([cityId])
+}
+
+model DispatchWorkerVacancy {
+  id        String         @id @default(cuid())
+  workerId  String
+  worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  vacancyId String
+  vacancy   Vacancy        @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime       @default(now())
+
+  @@unique([workerId, vacancyId])
+  @@index([vacancyId])
+}
 model AppUser {
   id                  String          @id @default(cuid())
   username            String          @unique
