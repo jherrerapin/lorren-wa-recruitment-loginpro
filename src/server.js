@@ -221,7 +221,7 @@ app.post('/login', async (req, res) => {
           username
         }));
       }
-      return res.redirect(isOperationsOnlyUsername(sessionPayload.username) ? '/admin/operaciones/abrir' : '/admin');
+      return res.redirect(isOperationsOnlyUsername(sessionPayload.username) ? '/admin/operaciones' : '/admin');
     });
   });
 });
@@ -367,7 +367,7 @@ app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/admin/operaciones', dispatchBridgeRouter());
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
-    if (req.method === 'GET' && (req.path === '/' || req.path === '')) return res.redirect('/admin/operaciones/abrir');
+    if (req.method === 'GET' && (req.path === '/' || req.path === '')) return res.redirect('/admin/operaciones');
     return res.status(403).send('Usuario limitado a Operaciones / Despacho');
   }
   return next();
