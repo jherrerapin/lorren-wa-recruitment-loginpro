@@ -280,10 +280,12 @@ model AppUser {
   createdByUsername   String?
   lastPasswordResetAt DateTime?
   isActive            Boolean         @default(true)
+  canAccessDispatch   Boolean         @default(false)
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   @@index([accessScope, scopeCity])
   @@index([scopeVacancyId])
+  @@index([canAccessDispatch])
 }
 
 

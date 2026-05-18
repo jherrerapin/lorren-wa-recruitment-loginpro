@@ -197,8 +197,10 @@
   <% if (role === 'dev' || role === 'admin') { %>
     <a href="/admin/locations">Ciudades</a>
   <% } %>
-  <% if (role === 'dev') { %>
+  <% if (role === 'dev' || canAccessDispatch) { %>
     <a href="/admin/operaciones">Operaciones / Despacho</a>
+  <% } %>
+  <% if (role === 'dev') { %>
     <a href="/admin/monitor">Monitor</a>
     <a href="/admin/bot-knowledge">Aprendizajes Lórren</a>
   <% } %>

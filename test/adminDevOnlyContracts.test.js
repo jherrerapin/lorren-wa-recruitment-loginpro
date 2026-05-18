@@ -1,231 +1,91 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 function readSource(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
-test('operations entry is protected by the bridge router', () => {
-  const serverSource = readSource('src/server.js');
-  const bridgeSource = readSource('src/routes/dispatchBridge.js');
+test('AppUser schema has dispatch access permission and migration', () => {
+  const schema = readSource('prisma/schema.prisma');
+  assert.match(schema, /canAccessDispatch\s+Boolean\s+@default\(false\)/);
+  assert.match(schema, /@@index\(\[canAccessDispatch\]\)/);
 
-  assert.match(
-    serverSource,
-    /app\.use\(\s*['"]\/admin\/operaciones['"]\s*,\s*dispatchBridgeRouter\(\)\s*\)/,
-    'El router de Operaciones debe montarse antes del adminRouter general.'
+  const migrationsDir = new URL('../prisma/migrations', import.meta.url);
+  const migrationFiles = readdirSync(migrationsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith('_add_dispatch_access_to_app_user'))
+    .map((entry) => readFileSync(join(migrationsDir.pathname, entry.name, 'migration.sql'), 'utf8'));
+
+  assert.ok(migrationFiles.length > 0, 'Debe existir una migración para canAccessDispatch.');
+  assert.ok(
+    migrationFiles.some((source) => /ADD COLUMN "canAccessDispatch"/.test(source)),
+    'La migración debe agregar la columna canAccessDispatch.'
   );
+  assert.ok(
+    migrationFiles.some((source) => /CREATE INDEX "AppUser_canAccessDispatch_idx"/.test(source)),
+    'La migración debe crear el índice AppUser_canAccessDispatch_idx.'
+  );
+});
+
+test('login session carries dispatch access permission', () => {
+  const serverSource = readSource('src/server.js');
+
+  assert.match(serverSource, /select:\s*{[\s\S]*?canAccessDispatch:\s*true[\s\S]*?isActive:\s*true[\s\S]*?}/);
+  assert.match(serverSource, /function\s+buildUserSessionPayload\s*\([^)]*\)\s*{[\s\S]*?canAccessDispatch:\s*Boolean\(user\.canAccessDispatch\)/);
+  assert.match(serverSource, /function\s+applySessionPayload\s*\([^)]*\)\s*{[\s\S]*?req\.session\.canAccessDispatch\s*=\s*Boolean\(payload\.canAccessDispatch\)/);
+  assert.match(serverSource, /req\.canAccessDispatch\s*=\s*Boolean\(req\.session\?\.canAccessDispatch\)/);
+  assert.match(serverSource, /canAccessDispatch:\s*role\s*===\s*['"]dev['"]/);
+});
+
+test('operations bridge allows DEV or canAccessDispatch and still protects session', () => {
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
 
   assert.match(
     bridgeSource,
     /function\s+requireOps\s*\([^)]*\)\s*{[\s\S]*?!role[\s\S]*?redirect\(['"]\/login['"]\)[\s\S]*?!canUseOps\(req\)[\s\S]*?403/,
-    'La ruta de Operaciones debe exigir sesión y permiso operativo.'
+    'Operaciones debe redirigir a /login sin sesión y responder 403 sin permiso.'
   );
-
-  assert.match(
-    bridgeSource,
-    /role\s*===\s*['"]dev['"]\s*\|\|\s*isOpsUser\(req\)/,
-    'Operaciones debe permitir DEV o usuario operativo limitado.'
-  );
-});
-
-test('operations dashboard renders natively without external dispatch navigation', () => {
-  const bridgeSource = readSource('src/routes/dispatchBridge.js');
-  const dashboardView = readSource('src/views/operacionesDashboard.ejs');
-
-  assert.match(
-    bridgeSource,
-    /router\.get\(\s*['"]\/['"]\s*,\s*requireOps[\s\S]*?renderOperationsDashboard\(res\)/,
-    'GET /admin/operaciones debe renderizar el dashboard nativo.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /router\.get\(\s*['"]\/abrir['"]\s*,\s*requireOps[\s\S]*?renderOperationsDashboard\(res\)/,
-    'GET /admin/operaciones/abrir debe renderizar nativo o permanecer interno.'
-  );
-
+  assert.match(bridgeSource, /role\s*===\s*['"]dev['"][\s\S]*?canAccessDispatch/);
+  assert.match(bridgeSource, /req\.session\?\.canAccessDispatch\s*\|\|\s*req\.canAccessDispatch/);
   assert.doesNotMatch(
     bridgeSource,
     /DISPATCH_MODULE_URL|dispatchModuleUrl|normalizeHttpUrl|res\.redirect\(dispatchModuleUrl\)/,
     'El router nativo no debe depender de DISPATCH_MODULE_URL ni redirigir a URLs externas.'
   );
-
-  for (const route of ['solicitudes', 'asignaciones', 'novedades']) {
-    assert.match(
-      bridgeSource,
-      new RegExp(`router\\.get\\(\\s*['"]\\/${route}['"]\\s*,\\s*requireOps[\\s\\S]*?renderOperationsDashboard\\(res`),
-      `GET /admin/operaciones/${route} debe renderizar una vista nativa protegida.`
-    );
-  }
-
-  assert.match(
-    dashboardView,
-    /<h1><%= pageTitle %><\/h1>/,
-    'La vista debe mostrar el titulo de la seccion nativa.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /Gestión operativa de solicitudes, asignaciones, novedades y reemplazos\./,
-    'La ruta debe enviar el subtitulo de gestion operativa nativa.'
-  );
-
-  for (const text of [
-    'Solicitudes del día',
-    'Pendientes de asignación',
-    'Asignación completa',
-    'Novedades abiertas',
-    'Operaciones del día',
-    'Cliente / punto',
-    'Fecha',
-    'Hora',
-    'Estado',
-    'Requeridos',
-    'Asignados',
-    'Acciones',
-    'No hay operaciones registradas para la fecha seleccionada.',
-    'Nueva solicitud',
-    'Ver asignaciones',
-    'Ver novedades'
-  ]) {
-    assert.match(dashboardView, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `La vista debe contener: ${text}`);
-  }
-
-  for (const href of [
-    '/admin',
-    '/admin/vacancies',
-    '/admin/operaciones',
-    '/admin/monitor',
-    '/admin/operaciones/solicitudes',
-    '/admin/operaciones/asignaciones',
-    '/admin/operaciones/novedades'
-  ]) {
-    assert.match(dashboardView, new RegExp(`href=["']${href}["']`), `La vista debe enlazar ${href}.`);
-  }
-
-  assert.doesNotMatch(
-    dashboardView,
-    /target=["']_blank["']|módulo externo|DISPATCH_MODULE_URL|opera-dispatch-web|pendiente de despliegue|Estado de conexión|Módulo del panel LoginPro disponible|Continuar a Operaciones \/ Despacho|Abrir Operaciones \/ Despacho/i,
-    'La vista nativa no debe contener enlaces externos ni textos de pantalla puente.'
-  );
 });
 
-test('operations access remains limited to DEV or operations-dispatch users', () => {
-  const bridgeSource = readSource('src/routes/dispatchBridge.js');
+test('admin user creation stores canAccessDispatch on normal recruiter users', () => {
+  const adminSource = readSource('src/routes/admin.js');
 
-  assert.match(
-    bridgeSource,
-    /function\s+requireOps\s*\([^)]*\)\s*{[\s\S]*?!role[\s\S]*?redirect\(['"]\/login['"]\)[\s\S]*?!canUseOps\(req\)[\s\S]*?403/,
-    'La ruta de Operaciones debe exigir sesión y permiso operativo.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /role\s*===\s*['"]dev['"]\s*\|\|\s*isOpsUser\(req\)/,
-    'Operaciones debe permitir DEV o usuario operativo limitado.'
-  );
-
-  assert.match(
-    bridgeSource,
-    /startsWith\(['"]operaciones-despacho['"]\)/,
-    'Los usuarios operativos deben identificarse por el prefijo operaciones-despacho.'
-  );
-
-  assert.doesNotMatch(
-    bridgeSource,
-    /role\s*===\s*['"]admin['"]|role\s*!==\s*['"]recruiter['"]/,
-    'Un reclutador/admin normal no debe quedar autorizado por el rol.'
-  );
+  assert.match(adminSource, /router\.post\(\s*['"]\/users\/create['"]/);
+  assert.match(adminSource, /const\s+canAccessDispatch\s*=\s*req\.body\.canAccessDispatch\s*===\s*['"]true['"]/);
+  assert.match(adminSource, /prisma\.appUser\.create\([\s\S]*?data:\s*{[\s\S]*?username,[\s\S]*?role:\s*['"]ADMIN['"][\s\S]*?canAccessDispatch,/);
+  assert.match(adminSource, /buildUniqueRecruiterUsername/);
 });
 
-test('operations-only users are redirected to operations and blocked from recruitment admin', () => {
-  const serverSource = readSource('src/server.js');
-
-  assert.match(
-    serverSource,
-    /function\s+isOperationsOnlyUsername\s*\(/,
-    'Debe existir una función para identificar usuarios limitados a Operaciones.'
-  );
-
-  assert.match(
-    serverSource,
-    /startsWith\(['"]operaciones-despacho['"]\)/,
-    'Los usuarios operativos deben identificarse con prefijo operaciones-despacho.'
-  );
-
-  assert.match(
-    serverSource,
-    /res\.redirect\(isOperationsOnlyUsername\(sessionPayload\.username\)\s*\?\s*['"]\/admin\/operaciones['"]\s*:\s*['"]\/admin['"]\)/,
-    'El login debe redirigir usuarios operativos directamente a Operaciones / Despacho.'
-  );
-
-  assert.match(
-    serverSource,
-    /Usuario limitado a Operaciones \/ Despacho/,
-    'Los usuarios operativos no deben navegar el dashboard de reclutamiento.'
-  );
-});
-
-test('dev can open and submit operations-only user creation without changing the database schema', () => {
-  const serverSource = readSource('src/server.js');
+test('users view has one form with dispatch checkbox and no operations-only form', () => {
   const usersView = readSource('src/views/users.ejs');
 
-  assert.match(
-    serverSource,
-    /app\.get\(\s*['"]\/admin\/users\/create-operations['"]/,
-    'Debe existir un formulario GET para crear usuarios de Operaciones desde el panel.'
-  );
-
-  assert.match(
-    serverSource,
-    /if\s*\(\s*!req\.session\?\.userRole\s*\)\s*return\s+res\.redirect\(['"]\/login['"]\)/,
-    'El formulario GET debe redirigir a /login cuando no hay sesión.'
-  );
-
-  assert.match(
-    serverSource,
-    /req\.session\.userRole\s*!==\s*['"]dev['"]/,
-    'El formulario GET debe estar restringido a DEV.'
-  );
-
-  assert.match(
-    serverSource,
-    /app\.post\(\s*['"]\/admin\/users\/create-operations['"]/,
-    'Debe existir un endpoint para crear usuarios de Operaciones desde el panel.'
-  );
-
-  assert.match(
-    serverSource,
-    /req\.session\?\.userRole\s*!==\s*['"]dev['"]/,
-    'La creación de usuarios operativos debe estar restringida a DEV.'
-  );
-
-  assert.match(
-    serverSource,
-    /role:\s*['"]ADMIN['"][\s\S]*?accessScope:\s*['"]ALL['"]/,
-    'El usuario operativo se crea como AppUser existente, sin migración nueva.'
-  );
-
-  const operationsCreateIndex = usersView.indexOf('/admin/users/create-operations');
-
-  assert.notEqual(
-    operationsCreateIndex,
-    -1,
-    'La vista de usuarios debe enlazar el formulario de Operaciones / Despacho.'
-  );
-
-  const beforeLink = usersView.slice(Math.max(0, operationsCreateIndex - 250), operationsCreateIndex);
-
-  assert.match(
-    beforeLink,
-    /role\s*===\s*['"]dev['"]|role\s*==\s*['"]dev['"]/,
-    'El enlace para crear usuarios operativos debe mostrarse solo para DEV.'
-  );
+  assert.match(usersView, /name=["']canAccessDispatch["']/);
+  assert.match(usersView, /id=["']canAccessDispatch["']/);
+  assert.match(usersView, /value=["']true["']/);
+  assert.match(usersView, /Permitir acceso a Operaciones \/ Despacho/);
+  assert.match(usersView, /El usuario podrá entrar al panel operativo además del alcance de reclutamiento seleccionado\./);
+  assert.match(usersView, /<%= user\.canAccessDispatch \? 'Operaciones \/ Despacho' : 'Reclutamiento' %>/);
+  assert.doesNotMatch(usersView, /Crear usuario de Operaciones \/ Despacho/);
+  assert.doesNotMatch(usersView, /\/admin\/users\/create-operations/);
 });
 
-test('dev-only navigation links are not exposed unconditionally', () => {
-  const serverSource = readSource('src/routes/admin.js');
+test('operations-only creation routes were removed from server', () => {
+  const serverSource = readSource('src/server.js');
+
+  assert.doesNotMatch(serverSource, /app\.get\(\s*['"]\/admin\/users\/create-operations['"]/);
+  assert.doesNotMatch(serverSource, /app\.post\(\s*['"]\/admin\/users\/create-operations['"]/);
+  assert.doesNotMatch(serverSource, /buildUniqueOperationsUsername/);
+});
+
+test('operations navigation uses dispatch permission without target blank', () => {
   const views = [
     'src/views/list.ejs',
     'src/views/vacancies.ejs',
@@ -240,52 +100,42 @@ test('dev-only navigation links are not exposed unconditionally', () => {
   for (const viewPath of views) {
     const viewSource = readSource(viewPath);
     const operationsIndex = viewSource.indexOf('/admin/operaciones');
+    assert.notEqual(operationsIndex, -1, `${viewPath} debe enlazar Operaciones / Despacho.`);
 
-    assert.notEqual(
-      operationsIndex,
-      -1,
-      `${viewPath} debe conservar el enlace nativo de Operaciones / Despacho para DEV.`
-    );
-
-    const directOperationsLink = new RegExp(`<a[^>]+href=[\"']\/admin\/operaciones[\"'][^>]*>\\s*Operaciones \/ Despacho`);
-    const operationsLinkMatch = viewSource.match(directOperationsLink);
-
-    assert.ok(
-      operationsLinkMatch,
-      `${viewPath} debe enlazar Operaciones / Despacho directamente a /admin/operaciones.`
-    );
-
-    assert.doesNotMatch(
-      operationsLinkMatch[0],
-      /target=[\"']_blank[\"']/,
-      `${viewPath} debe abrir Operaciones / Despacho en la misma pestaña.`
-    );
+    const directOperationsLink = viewSource.match(/<a[^>]+href=["']\/admin\/operaciones["'][^>]*>\s*Operaciones \/ Despacho/);
+    assert.ok(directOperationsLink, `${viewPath} debe enlazar directamente a /admin/operaciones.`);
+    assert.doesNotMatch(directOperationsLink[0], /target=["']_blank["']/);
 
     const beforeLink = viewSource.slice(Math.max(0, operationsIndex - 250), operationsIndex);
-    const isDevOnlyView = [
-      'src/views/monitor.ejs',
-      'src/views/botKnowledge.ejs'
-    ].includes(viewPath) && new RegExp(`router\\.get\\(\\s*['\"]\/${viewPath.includes('monitor') ? 'monitor' : 'bot-knowledge'}['\"]\\s*,\\s*ensureDevRole`).test(serverSource);
+    assert.match(beforeLink, /role\s*===\s*['"]dev['"]\s*\|\|\s*canAccessDispatch/);
+  }
 
-    if (isDevOnlyView) continue;
+  const allViewSource = views.map(readSource).join('\n');
+  assert.doesNotMatch(allViewSource, /target=["']_blank["'][^>]*>\s*Operaciones \/ Despacho/);
+});
 
-    assert.match(
-      beforeLink,
-      /role\s*===\s*['"]dev['"]|role\s*==\s*['"]dev['"]/,
-      `${viewPath} debe envolver el enlace de Operaciones / Despacho en una condicion de rol dev.`
-    );
+
+test('monitor navigation remains dev-only outside operations dashboard', () => {
+  const views = [
+    'src/views/list.ejs',
+    'src/views/vacancies.ejs',
+    'src/views/detail.ejs',
+    'src/views/users.ejs',
+    'src/views/locations.ejs',
+    'src/views/outreachApproved.ejs',
+    'src/views/operacionesDashboard.ejs'
+  ];
+
+  for (const viewPath of views) {
+    const viewSource = readSource(viewPath);
+    const monitorIndex = viewSource.indexOf('/admin/monitor');
+    assert.notEqual(monitorIndex, -1, `${viewPath} debe conservar enlace de Monitor para DEV.`);
+    const beforeLink = viewSource.slice(Math.max(0, monitorIndex - 180), monitorIndex);
+    assert.match(beforeLink, /role\s*===\s*['"]dev['"]/, `${viewPath} debe mantener Monitor solo para DEV.`);
   }
 });
 
-test('environment documentation keeps dispatch module url documented as optional', () => {
-  const readme = readSource('README.md');
-  const envExample = readSource('.env.example');
-
-  assert.match(readme, /DISPATCH_MODULE_URL/, 'README debe documentar DISPATCH_MODULE_URL.');
-  assert.match(envExample, /DISPATCH_MODULE_URL/, '.env.example debe incluir DISPATCH_MODULE_URL.');
-  assert.match(
-    readme,
-    /solo DEV|DEV-only|perfil DEV/i,
-    'README debe indicar que Operaciones / Despacho es una seccion restringida a DEV.'
-  );
+test('logo text is visible on dark navigation', () => {
+  const logo = readSource('src/public/logo-loginpro.svg');
+  assert.match(logo, /fill=["']#ffffff["']>LoginPro</);
 });

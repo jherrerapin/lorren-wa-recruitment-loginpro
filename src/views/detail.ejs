@@ -152,8 +152,10 @@
     <a href="/admin">Candidatos</a>
     <a href="/admin/vacancies">Vacantes</a>
     <% if (canManageUsers) { %><a href="/admin/users">Usuarios</a><% } %>
-    <% if (role === 'dev') { %>
+    <% if (role === 'dev' || canAccessDispatch) { %>
       <a href="/admin/operaciones">Operaciones / Despacho</a>
+    <% } %>
+    <% if (role === 'dev') { %>
       <a href="/admin/monitor">Monitor</a>
       <a href="/admin/bot-knowledge">Aprendizajes Lórren</a>
     <% } %>

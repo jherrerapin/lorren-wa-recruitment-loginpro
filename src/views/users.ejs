@@ -42,6 +42,8 @@
       background: var(--surface-2); outline: none;
     }
     .field input:focus, .field select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
+    .field .checkbox-label { flex-direction: row; align-items: center; gap: 8px; color: var(--text); text-transform: none; letter-spacing: 0; font-size: 14px; }
+    .field .checkbox-label input { width: auto; }
     .hint { font-size: 12px; color: var(--text-muted); }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
     .btn { border: none; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 700; }
@@ -112,8 +114,10 @@
     <a href="/admin">Candidatos</a>
     <a href="/admin/vacancies">Vacantes</a>
     <a href="/admin/users" class="nav-active">Usuarios</a>
-    <% if (role === 'dev') { %>
+    <% if (role === 'dev' || canAccessDispatch) { %>
       <a href="/admin/operaciones">Operaciones / Despacho</a>
+    <% } %>
+    <% if (role === 'dev') { %>
       <a href="/admin/monitor">Monitor</a>
     <% } %>
     <span class="spacer"></span>
@@ -133,11 +137,6 @@
         <h1>Usuarios de reclutamiento</h1>
         <p>Desde aquí puedes crear reclutadores con alcance total, por ciudad o por vacante, asignar contraseña inicial y regenerar su código de recuperación.</p>
       </div>
-      <% if (role === 'dev') { %>
-        <div class="actions">
-          <a class="btn btn-secondary" href="/admin/users/create-operations">Crear usuario de Operaciones / Despacho</a>
-        </div>
-      <% } %>
     </div>
 
     <% if (successMsg) { %>
@@ -208,6 +207,15 @@
             <input id="recoveryEmail" name="recoveryEmail" type="email" />
           </div>
 
+          <div class="field full">
+            <label>Permisos del panel</label>
+            <label class="checkbox-label" for="canAccessDispatch">
+              <input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" />
+              Permitir acceso a Operaciones / Despacho
+            </label>
+            <span class="hint">El usuario podrá entrar al panel operativo además del alcance de reclutamiento seleccionado.</span>
+          </div>
+
           <div class="full actions">
             <button class="btn btn-primary" type="submit">Crear usuario</button>
           </div>
@@ -226,6 +234,7 @@
             <tr>
               <th>Usuario</th>
               <th>Alcance</th>
+              <th>Permisos</th>
               <th>Estado</th>
               <th>Recuperación</th>
               <th>Acciones</th>
@@ -242,6 +251,9 @@
                 <td>
                   <%= describeUserScope(user) %>
                   <% if (user.scopeVacancy?.city) { %><small>Ciudad operativa: <%= user.scopeVacancy.city %></small><% } %>
+                </td>
+                <td>
+                  <%= user.canAccessDispatch ? 'Operaciones / Despacho' : 'Reclutamiento' %>
                 </td>
                 <td>
                   <span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>">

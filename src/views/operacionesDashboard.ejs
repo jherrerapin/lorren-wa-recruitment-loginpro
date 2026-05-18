@@ -67,7 +67,7 @@
     <a href="/admin">Panel</a>
     <a href="/admin/vacancies">Vacantes</a>
     <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
-    <a href="/admin/monitor">Monitor</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
     <span class="spacer"></span>
     <a href="/logout" class="btn-logout">Cerrar sesión</a>
   </nav>

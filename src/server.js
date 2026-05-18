@@ -2,7 +2,6 @@ import express from 'express';
 import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { randomInt } from 'node:crypto';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import bcrypt from 'bcryptjs';
@@ -41,23 +40,6 @@ function isOperationsOnlyUsername(username) {
   return Boolean(normalizeString(username)?.startsWith('operaciones-despacho'));
 }
 
-function generateRecoveryCode() {
-  return String(randomInt(0, 1_000_000)).padStart(6, '0');
-}
-
-async function buildUniqueOperationsUsername() {
-  const base = 'operaciones-despacho';
-  const existingUsers = await prisma.appUser.findMany({
-    where: { username: { startsWith: base } },
-    select: { username: true }
-  });
-  const used = new Set(existingUsers.map((user) => user.username));
-  if (!used.has(base)) return base;
-  let index = 2;
-  while (used.has(`${base}-${index}`)) index += 1;
-  return `${base}-${index}`;
-}
-
 function buildLoginViewModel(overrides = {}) {
   return {
     error: null,
@@ -79,7 +61,8 @@ function buildUserSessionPayload(user) {
     userAccessScope: user.accessScope || 'ALL',
     userAccessCity: user.scopeCity || null,
     userAccessVacancyId: user.scopeVacancyId || null,
-    userSource: 'db'
+    userSource: 'db',
+    canAccessDispatch: Boolean(user.canAccessDispatch)
   };
 }
 
@@ -91,6 +74,7 @@ function applySessionPayload(req, payload) {
   req.session.userAccessCity = payload.userAccessCity || null;
   req.session.userAccessVacancyId = payload.userAccessVacancyId || null;
   req.session.userSource = payload.userSource || 'env';
+  req.session.canAccessDispatch = Boolean(payload.canAccessDispatch);
 }
 
 app.set('view engine', 'ejs');
@@ -123,7 +107,7 @@ app.use(session({
   }
 }));
 
-app.use((req, _res, next) => {
+app.use((req, res, next) => {
   req.userRole = req.session?.userRole || null;
   req.userId = req.session?.userId || null;
   req.username = req.session?.username || null;
@@ -131,6 +115,9 @@ app.use((req, _res, next) => {
   req.userAccessCity = req.session?.userAccessCity || null;
   req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
   req.userSource = req.session?.userSource || null;
+  req.canAccessDispatch = Boolean(req.session?.canAccessDispatch);
+  res.locals.role = req.userRole;
+  res.locals.canAccessDispatch = req.userRole === 'dev' || req.canAccessDispatch;
   next();
 });
 
@@ -167,6 +154,7 @@ async function authenticateDatabaseUser(username, password) {
       accessScope: true,
       scopeCity: true,
       scopeVacancyId: true,
+      canAccessDispatch: true,
       isActive: true
     }
   });
@@ -194,7 +182,8 @@ app.post('/login', async (req, res) => {
         userAccessScope: 'ALL',
         userAccessCity: null,
         userAccessVacancyId: null,
-        userSource: 'env'
+        userSource: 'env',
+        canAccessDispatch: role === 'dev'
       };
     }
   }
@@ -294,73 +283,6 @@ const destroySession = (req, res) => {
 
 app.post('/logout', destroySession);
 app.get('/logout', destroySession);
-
-app.get('/admin/users/create-operations', (req, res) => {
-  if (!req.session?.userRole) return res.redirect('/login');
-  if (req.session.userRole !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
-
-  return res.send(`<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crear usuario de Operaciones / Despacho | LoginPro</title>
-</head>
-<body>
-  <main>
-    <h1>Crear usuario de Operaciones / Despacho</h1>
-    <p>Este formulario crea un usuario limitado al módulo Operaciones / Despacho.</p>
-    <form method="post" action="/admin/users/create-operations">
-      <div>
-        <label for="password">Contraseña inicial</label>
-        <input id="password" name="password" type="password" required minlength="6" autocomplete="new-password" />
-      </div>
-      <div>
-        <label for="recoveryPhone">Teléfono de recuperación</label>
-        <input id="recoveryPhone" name="recoveryPhone" type="tel" autocomplete="tel" />
-      </div>
-      <div>
-        <label for="recoveryEmail">Email de recuperación</label>
-        <input id="recoveryEmail" name="recoveryEmail" type="email" autocomplete="email" />
-      </div>
-      <button type="submit">Crear usuario de Operaciones / Despacho</button>
-    </form>
-    <p><a href="/admin/users">Volver a Usuarios</a></p>
-  </main>
-</body>
-</html>`);
-});
-
-app.post('/admin/users/create-operations', express.urlencoded({ extended: true }), async (req, res) => {
-  if (req.session?.userRole !== 'dev') return res.status(403).send('Acceso restringido a desarrolladores');
-  const password = typeof req.body.password === 'string' ? req.body.password : '';
-  if (password.length < 6) {
-    return res.redirect('/admin/users?error=' + encodeURIComponent('La contraseña inicial debe tener al menos 6 caracteres.'));
-  }
-  const username = await buildUniqueOperationsUsername();
-  const passwordHash = await bcrypt.hash(password, 10);
-  const recoveryCode = generateRecoveryCode();
-  const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
-  await prisma.appUser.create({
-    data: {
-      username,
-      passwordHash,
-      recoveryCodeHash,
-      role: 'ADMIN',
-      accessScope: 'ALL',
-      recoveryPhone: normalizeString(req.body.recoveryPhone),
-      recoveryEmail: normalizeString(req.body.recoveryEmail),
-      createdByUsername: req.session?.username || 'dev',
-      lastPasswordResetAt: new Date(),
-      isActive: true
-    }
-  });
-  const params = new URLSearchParams();
-  params.set('success', `Usuario ${username} creado con acceso a Operaciones / Despacho.`);
-  params.set('username', username);
-  params.set('recoveryCode', recoveryCode);
-  return res.redirect(`/admin/users?${params.toString()}`);
-});
 
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
