@@ -35,7 +35,12 @@ function redirectToAssignment(serviceRequestId, message) {
 }
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
 }
 
 function normalizeDateParam(value) {
@@ -52,6 +57,22 @@ function buildUtcDayRange(dateText) {
   return { start, end };
 }
 
+function serviceRequestServiceData(service) {
+  return {
+    serviceId: service?.id || null,
+    serviceName: service?.name || null
+  };
+}
+
+async function resolveDispatchService(prisma, serviceId) {
+  const normalizedServiceId = normalizeString(serviceId);
+  if (!normalizedServiceId) return null;
+  return prisma.dispatchClientService.findFirst({
+    where: { id: normalizedServiceId, isActive: true },
+    include: { client: true }
+  });
+}
+
 async function getTemplate(prisma) {
   const template = await prisma.dispatchMessageTemplate.findUnique({ where: { key: TEMPLATE_KEY } });
   return template?.content || DEFAULT_ASSIGNMENT_TEMPLATE;
@@ -59,6 +80,56 @@ async function getTemplate(prisma) {
 
 export function dispatchOpsExtrasRouter(prisma) {
   const router = express.Router();
+
+  router.get('/solicitudes', requireOps, async (req, res) => {
+    const [serviceRequests, clients] = await Promise.all([
+      prisma.dispatchServiceRequest.findMany({
+        include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } },
+        orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }]
+      }),
+      prisma.dispatchClient.findMany({
+        where: { isActive: true },
+        include: { services: { where: { isActive: true }, orderBy: { name: 'asc' } } },
+        orderBy: { name: 'asc' }
+      })
+    ]);
+    return res.render('operacionesSolicitudes', { serviceRequests, clients, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message), today: todayIsoDate() });
+  });
+
+  router.post('/solicitudes', requireOps, async (req, res) => {
+    const selectedService = await resolveDispatchService(prisma, req.body.serviceId);
+    const clientName = selectedService?.client?.name || normalizeString(req.body.clientName);
+    const serviceDateRaw = normalizeString(req.body.serviceDate);
+    const requiredWorkersRaw = Number(req.body.requiredWorkers);
+    if (!clientName || !serviceDateRaw || !Number.isFinite(requiredWorkersRaw) || requiredWorkersRaw < 1) {
+      return res.status(400).send('Datos invalidos para crear solicitud de servicio');
+    }
+    const created = await prisma.dispatchServiceRequest.create({
+      data: {
+        clientName,
+        operationPointName: normalizeString(req.body.operationPointName),
+        cityName: normalizeString(req.body.cityName),
+        address: normalizeString(req.body.address),
+        ...serviceRequestServiceData(selectedService),
+        serviceDate: new Date(serviceDateRaw),
+        startTime: normalizeString(req.body.startTime),
+        endTime: normalizeString(req.body.endTime),
+        requiredWorkers: Math.max(1, Math.trunc(requiredWorkersRaw)),
+        notes: normalizeString(req.body.notes),
+        status: 'PENDING_ASSIGNMENT',
+        source: 'INTERNAL',
+        createdByUsername: req.session?.username || req.username || null
+      }
+    });
+    return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud creada.')}&created=${created.id}`);
+  });
+
+  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => {
+    const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } });
+    if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
+    await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } });
+    return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`);
+  });
 
   router.get('/novedades', requireOps, async (req, res) => {
     const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
