@@ -57,7 +57,7 @@
         <div class="card-head"><h2>Clientes registrados</h2><p>El link público pertenece al cliente; en el formulario público el cliente selecciona la operación correspondiente.</p></div>
         <div class="table-wrap">
           <% if (!clients.length) { %><div class="empty"><strong>No hay clientes registrados.</strong>Crea el primer cliente para iniciar el flujo.</div><% } else { %>
-            <table class="table"><thead><tr><th>Cliente</th><th>Contacto</th><th>Link público del cliente</th><th>Estado</th><th>Acciones CRUD</th></tr></thead><tbody>
+            <table class="table"><thead><tr><th>Cliente</th><th>Contacto</th><th>Link público del cliente</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
               <% clients.forEach((c)=>{ const clientLink = baseUrl + '/operaciones/cliente/' + c.publicToken; %><tr>
                 <td><strong><%= c.name %></strong><div class="muted">NIT: <%= c.nit || '—' %></div></td>
                 <td><%= c.contactName || '—' %><div class="muted"><%= c.contactPhone || 'Sin teléfono' %> · <%= c.contactEmail || 'Sin correo' %></div></td>
@@ -73,7 +73,7 @@
                     <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Operaciones y servicios</a>
                     <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/editar">Editar</a>
                     <form method="post" action="/admin/operaciones/clientes/<%= c.id %>/toggle"><button class="btn" type="submit"><%= c.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
-                    <form method="post" action="/admin/operaciones/clientes/<%= c.id %>/eliminar"><button class="btn" type="submit">Eliminar</button></form>
+                    <form method="post" action="/operaciones/admin-delete/clientes/<%= c.id %>"><button class="btn" type="submit">Eliminar</button></form>
                   </div>
                   <div class="muted"><%= c._count?.operationPoints || 0 %> operaciones · <%= c._count?.services || 0 %> servicios</div>
                 </td>
