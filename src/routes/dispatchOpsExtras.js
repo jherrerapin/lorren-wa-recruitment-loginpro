@@ -34,6 +34,24 @@ function redirectToAssignment(serviceRequestId, message) {
   return `/admin/operaciones/asignaciones?${params.toString()}`;
 }
 
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeDateParam(value) {
+  const rawValue = normalizeString(value);
+  if (!rawValue) return todayIsoDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) return todayIsoDate();
+  return rawValue;
+}
+
+function buildUtcDayRange(dateText) {
+  const start = new Date(`${dateText}T00:00:00.000Z`);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start, end };
+}
+
 async function getTemplate(prisma) {
   const template = await prisma.dispatchMessageTemplate.findUnique({ where: { key: TEMPLATE_KEY } });
   return template?.content || DEFAULT_ASSIGNMENT_TEMPLATE;
@@ -41,6 +59,33 @@ async function getTemplate(prisma) {
 
 export function dispatchOpsExtrasRouter(prisma) {
   const router = express.Router();
+
+  router.get('/novedades', requireOps, async (req, res) => {
+    const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
+    const status = normalizeString(req.query.status) || 'OPEN';
+    const { start, end } = buildUtcDayRange(selectedDate);
+    const incidents = await prisma.dispatchIncident.findMany({
+      where: {
+        ...(status === 'ALL' ? {} : { status }),
+        serviceRequest: { serviceDate: { gte: start, lt: end } }
+      },
+      include: {
+        serviceRequest: true,
+        worker: true,
+        assignment: { include: { worker: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return res.render('operacionesNovedades', {
+      pageTitle: 'Novedades operativas',
+      selectedDate,
+      status,
+      incidents,
+      role: req.session?.userRole || req.userRole,
+      canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
+    });
+  });
 
   router.get('/api/asignacion-template', requireOps, async (_req, res) => {
     const content = await getTemplate(prisma);
@@ -108,6 +153,21 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(redirectToAssignment(incident.serviceRequestId, 'Novedad resuelta.'));
   });
 
+  router.post('/novedades/:incidentId/resolver', requireOps, async (req, res) => {
+    const incident = await prisma.dispatchIncident.findUnique({ where: { id: req.params.incidentId }, select: { id: true } });
+    if (!incident) return res.status(404).send('Novedad no encontrada');
+    await prisma.dispatchIncident.update({
+      where: { id: incident.id },
+      data: {
+        status: 'RESOLVED',
+        resolutionNote: normalizeString(req.body.resolutionNote),
+        resolvedByUsername: req.session?.username || req.username || null,
+        resolvedAt: new Date()
+      }
+    });
+    return res.redirect(`/admin/operaciones/novedades?fecha=${encodeURIComponent(normalizeDateParam(req.body.fecha))}&status=${encodeURIComponent(normalizeString(req.body.status) || 'OPEN')}`);
+  });
+
   router.post('/asignaciones/novedades/:incidentId/reabrir', requireOps, async (req, res) => {
     const incident = await prisma.dispatchIncident.findUnique({ where: { id: req.params.incidentId }, select: { id: true, serviceRequestId: true } });
     if (!incident) return res.status(404).send('Novedad no encontrada');
@@ -118,6 +178,13 @@ export function dispatchOpsExtrasRouter(prisma) {
     });
 
     return res.redirect(redirectToAssignment(incident.serviceRequestId, 'Novedad reabierta.'));
+  });
+
+  router.post('/novedades/:incidentId/reabrir', requireOps, async (req, res) => {
+    const incident = await prisma.dispatchIncident.findUnique({ where: { id: req.params.incidentId }, select: { id: true } });
+    if (!incident) return res.status(404).send('Novedad no encontrada');
+    await prisma.dispatchIncident.update({ where: { id: incident.id }, data: { status: 'OPEN', resolvedAt: null, resolvedByUsername: null, resolutionNote: null } });
+    return res.redirect(`/admin/operaciones/novedades?fecha=${encodeURIComponent(normalizeDateParam(req.body.fecha))}&status=${encodeURIComponent(normalizeString(req.body.status) || 'ALL')}`);
   });
 
   return router;
