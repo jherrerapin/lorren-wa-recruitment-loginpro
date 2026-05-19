@@ -356,6 +356,7 @@ model DispatchWorker {
   cities            DispatchWorkerCity[]
   vacancies         DispatchWorkerVacancy[]
   assignments       DispatchAssignment[]
+  incidents         DispatchIncident[]
 
   @@index([candidateId])
   @@index([documentNumber])
@@ -389,6 +390,7 @@ model DispatchServiceRequest {
   updatedAt          DateTime             @updatedAt
 
   assignments        DispatchAssignment[]
+  incidents          DispatchIncident[]
 
   @@index([serviceDate])
   @@index([status])
@@ -412,10 +414,50 @@ model DispatchAssignment {
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 
+  incidents         DispatchIncident[]
+
   @@unique([serviceRequestId, workerId])
   @@index([serviceRequestId])
   @@index([workerId])
   @@index([status])
+}
+
+model DispatchIncident {
+  id                String                  @id @default(cuid())
+  serviceRequestId  String
+  serviceRequest    DispatchServiceRequest  @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  assignmentId      String?
+  assignment        DispatchAssignment?      @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  workerId          String?
+  worker            DispatchWorker?          @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  type              String
+  status            String                  @default("OPEN")
+  description       String
+  reportedBy        String?
+  resolutionNote    String?
+  createdByUsername String?
+  resolvedByUsername String?
+  resolvedAt        DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  @@index([serviceRequestId])
+  @@index([assignmentId])
+  @@index([workerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DispatchMessageTemplate {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  content           String
+  createdByUsername String?
+  updatedByUsername String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([key])
 }
 
 model DispatchWorkerCity {
