@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= pageTitle %> — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .toolbar { display:flex; justify-content:space-between; align-items:end; gap:14px; flex-wrap:wrap; background:#fff; border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:var(--shadow-sm); }
+    .toolbar-form { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+    .incident-grid { display:grid; gap:12px; }
+    .incident-card { background:#fff; border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:var(--shadow-sm); border-left:4px solid var(--blue); }
+    .incident-card.open { border-left-color:var(--amber); }
+    .incident-card.resolved { border-left-color:var(--green); }
+    .incident-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+    .incident-head strong { color:var(--navy); font-size:16px; }
+    .incident-meta { color:var(--muted); font-size:13px; display:grid; gap:3px; }
+    .incident-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .incident-actions form { margin:0; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .resolution-input { min-width:260px; border:1px solid var(--border); border-radius:10px; padding:9px 10px; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Seguimiento operativo</div>
+        <h1>Novedades operativas</h1>
+        <p>Consulta y cierra novedades relacionadas con solicitudes, asignaciones o auxiliares.</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
+        <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Asignaciones</a>
+      </div>
+    </section>
+
+    <section class="toolbar">
+      <div>
+        <h2>Filtro de novedades</h2>
+        <p class="muted">El indicador del dashboard cuenta novedades OPEN e IN_PROGRESS de la fecha seleccionada.</p>
+      </div>
+      <form class="toolbar-form" method="get" action="/admin/operaciones/novedades">
+        <div class="field"><label for="fecha">Fecha servicio</label><input id="fecha" name="fecha" type="date" value="<%= selectedDate %>" /></div>
+        <div class="field"><label for="status">Estado</label><select id="status" name="status"><option value="OPEN" <%= status==='OPEN'?'selected':'' %>>Abiertas</option><option value="IN_PROGRESS" <%= status==='IN_PROGRESS'?'selected':'' %>>En seguimiento</option><option value="RESOLVED" <%= status==='RESOLVED'?'selected':'' %>>Resueltas</option><option value="ALL" <%= status==='ALL'?'selected':'' %>>Todas</option></select></div>
+        <button class="btn btn-primary" type="submit">Aplicar</button>
+      </form>
+    </section>
+
+    <section class="incident-grid">
+      <% if (!incidents.length) { %>
+        <div class="empty"><strong>No hay novedades para este filtro.</strong>Las novedades se crean desde el tablero de asignaciones, dentro de cada auxiliar asignado.</div>
+      <% } %>
+      <% incidents.forEach((incident)=>{ const request = incident.serviceRequest; const worker = incident.worker || incident.assignment?.worker; %>
+        <article class="incident-card <%= incident.status === 'RESOLVED' ? 'resolved' : 'open' %>">
+          <div class="incident-head">
+            <div>
+              <strong><%= incident.type %></strong>
+              <div class="incident-meta">
+                <span>Estado: <%= incident.status %></span>
+                <span>Solicitud: <%= request.clientName %> · <%= request.operationPointName || 'Sin operación' %> · <%= request.cityName || 'Sin ciudad' %></span>
+                <span>Fecha servicio: <%= new Date(request.serviceDate).toISOString().slice(0,10) %> · <%= request.startTime || '-' %> - <%= request.endTime || '-' %></span>
+                <span>Auxiliar: <%= worker?.fullName || 'Sin auxiliar asociado' %></span>
+                <span>Reportado por: <%= incident.reportedBy || incident.createdByUsername || 'No registrado' %></span>
+              </div>
+            </div>
+            <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Ver asignación</a>
+          </div>
+          <p><%= incident.description %></p>
+          <% if (incident.resolutionNote) { %><p class="muted"><strong>Cierre:</strong> <%= incident.resolutionNote %></p><% } %>
+          <div class="incident-actions">
+            <% if (incident.status === 'RESOLVED') { %>
+              <form method="post" action="/admin/operaciones/novedades/<%= incident.id %>/reabrir"><input type="hidden" name="fecha" value="<%= selectedDate %>" /><input type="hidden" name="status" value="<%= status %>" /><button class="btn" type="submit">Reabrir</button></form>
+            <% } else { %>
+              <form method="post" action="/admin/operaciones/novedades/<%= incident.id %>/resolver"><input type="hidden" name="fecha" value="<%= selectedDate %>" /><input type="hidden" name="status" value="<%= status %>" /><input class="resolution-input" name="resolutionNote" placeholder="Nota de cierre" /><button class="btn btn-primary" type="submit">Resolver</button></form>
+            <% } %>
+          </div>
+        </article>
+      <% }) %>
+    </section>
+  </main>
+</body>
+</html>
