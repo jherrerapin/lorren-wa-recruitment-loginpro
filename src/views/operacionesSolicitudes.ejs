@@ -18,12 +18,15 @@
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
+  <% const statusLabel = (value) => ({ PENDING_ASSIGNMENT: 'Pendiente de asignación', ASSIGNMENT_PARTIAL: 'Asignación parcial', ASSIGNMENT_COMPLETE: 'Asignación completa', CANCELLED: 'Cancelada' }[value] || value || 'Pendiente de asignación'); %>
+  <% const sourceLabel = (value) => ({ INTERNAL: 'Interna', PUBLIC_LINK: 'Cliente', MANUAL: 'Manual' }[value] || value || 'Interna'); %>
+
   <main class="page">
     <section class="hero">
       <div>
         <div class="eyebrow">Solicitudes operativas</div>
         <h1>Solicitudes de servicio</h1>
-        <p>Consulta solicitudes creadas desde links públicos de clientes o solicitudes internas de prueba.</p>
+        <p>Consulta, crea, edita y elimina solicitudes creadas desde links públicos de clientes o solicitudes internas.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
@@ -32,10 +35,33 @@
       </div>
     </section>
 
+    <% if (message) { %><div class="section-note"><%= message %></div><% } %>
+
+    <details class="card" open>
+      <summary style="cursor:pointer;font-weight:900;color:var(--navy);padding:18px;">Crear solicitud de servicio</summary>
+      <div class="card-body">
+        <form method="post" action="/admin/operaciones/solicitudes">
+          <div class="form-grid">
+            <div class="field"><label>Cliente</label><input name="clientName" required placeholder="Nombre del cliente" /></div>
+            <div class="field"><label>Operación / punto</label><input name="operationPointName" placeholder="Punto operativo" /></div>
+            <div class="field"><label>Servicio del cliente</label><select name="serviceId"><option value="">Sin servicio configurado</option><% clients.forEach((client)=>{ if (client.services.length) { %><optgroup label="<%= client.name %>"><% client.services.forEach((service)=>{ %><option value="<%= service.id %>"><%= service.name %></option><% }) %></optgroup><% } }) %></select></div>
+            <div class="field"><label>Ciudad</label><input name="cityName" placeholder="Ciudad de la solicitud" /></div>
+            <div class="field"><label>Dirección</label><input name="address" placeholder="Dirección de la operación" /></div>
+            <div class="field"><label>Fecha servicio</label><input type="date" name="serviceDate" value="<%= today %>" required /></div>
+            <div class="field"><label>Hora inicio</label><input type="time" name="startTime" /></div>
+            <div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div>
+            <div class="field"><label>Auxiliares requeridos</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div>
+            <div class="field full"><label>Notas</label><textarea name="notes" placeholder="Observaciones de la solicitud"></textarea></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-primary" type="submit">Crear solicitud</button></div>
+        </form>
+      </div>
+    </details>
+
     <section class="card">
       <div class="card-head">
         <h2>Listado de solicitudes</h2>
-        <p>Selecciona una solicitud para asignar auxiliares o editar sus datos.</p>
+        <p>Selecciona una solicitud para asignar auxiliares, editar sus datos o eliminarla.</p>
       </div>
       <div class="table-wrap">
         <% if (!serviceRequests.length) { %>
@@ -51,12 +77,13 @@
                   <td><%= request.startTime || '-' %> - <%= request.endTime || '-' %></td>
                   <td><%= request.requiredWorkers %></td>
                   <td><%= request.assignments.length %></td>
-                  <td><span class="pill pill-amber"><%= request.source || 'INTERNAL' %></span></td>
-                  <td><span class="pill <%= request.status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : 'pill-amber' %>"><%= request.status %></span></td>
+                  <td><span class="pill pill-amber"><%= sourceLabel(request.source || 'INTERNAL') %></span></td>
+                  <td><span class="pill <%= request.status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : 'pill-amber' %>"><%= statusLabel(request.status) %></span></td>
                   <td>
-                    <div class="actions">
+                    <div class="actions stack-actions">
                       <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar</a>
                       <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
+                      <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
                     </div>
                   </td>
                 </tr>
