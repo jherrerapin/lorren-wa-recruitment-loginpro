@@ -25,7 +25,7 @@ function requireOps(req, res, next) {
 }
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota' })).toISOString().slice(0, 10);
 }
 
 function normalizeDateParam(value) {
@@ -46,63 +46,25 @@ function buildUtcDayRange(dateText) {
 
 async function buildOperationsDashboardMetrics(prisma, selectedDate) {
   const { start, end } = buildUtcDayRange(selectedDate);
-  const whereForDate = {
-    serviceDate: {
-      gte: start,
-      lt: end
-    }
-  };
-
+  const whereForDate = { serviceDate: { gte: start, lt: end } };
   const [totalRequests, pendingRequests, completedRequests, openIncidents] = await Promise.all([
     prisma.dispatchServiceRequest.count({ where: whereForDate }),
-    prisma.dispatchServiceRequest.count({
-      where: {
-        ...whereForDate,
-        status: { in: ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL'] }
-      }
-    }),
-    prisma.dispatchServiceRequest.count({
-      where: {
-        ...whereForDate,
-        status: 'ASSIGNMENT_COMPLETE'
-      }
-    }),
-    prisma.dispatchIncident.count({
-      where: {
-        status: { in: ['OPEN', 'IN_PROGRESS'] },
-        serviceRequest: whereForDate
-      }
-    })
+    prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: { in: ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL'] } } }),
+    prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: 'ASSIGNMENT_COMPLETE' } }),
+    prisma.dispatchIncident.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] }, serviceRequest: whereForDate } })
   ]);
-
-  return {
-    totalRequests,
-    pendingRequests,
-    completedRequests,
-    openIncidents
-  };
+  return { totalRequests, pendingRequests, completedRequests, openIncidents };
 }
 
 async function renderOperationsDashboard(req, res, prisma) {
   const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
   const metrics = await buildOperationsDashboardMetrics(prisma, selectedDate);
-
-  return res.render('operacionesDashboard', {
-    pageTitle: 'Operaciones / Despacho',
-    subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.',
-    activeSection: 'dashboard',
-    selectedDate,
-    metrics,
-    role: req.session?.userRole || req.userRole,
-    canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
-  });
+  return res.render('operacionesDashboard', { pageTitle: 'Operaciones / Despacho', subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.', activeSection: 'dashboard', selectedDate, metrics, role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
 }
 
 export function dispatchDashboardMetricsRouter(prisma) {
   const router = express.Router();
-
   router.get('/', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
   router.get('/abrir', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
-
   return router;
 }
