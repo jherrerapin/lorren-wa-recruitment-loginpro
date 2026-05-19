@@ -191,7 +191,7 @@
                       <div class="hero-actions">
                         <a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/editar">Editar</a>
                         <form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle"><button class="btn btn-secondary" type="submit"><%= w.operationalStatus === 'ACTIVE' ? 'Desactivar' : 'Reactivar' %></button></form>
-                        <form method="post" action="/admin/operaciones/personal/<%= w.id %>/eliminar"><button class="btn btn-secondary" type="submit">Eliminar</button></form>
+                        <form method="post" action="/operaciones/admin-delete/personal/<%= w.id %>"><button class="btn btn-secondary" type="submit">Eliminar</button></form>
                       </div>
                     <% } else { %><span class="muted">Sin edición manual</span><% } %>
                   </td>
