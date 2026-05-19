@@ -12,6 +12,7 @@ import { adminRouter } from './routes/admin.js';
 import { botKnowledgeCrudRouter } from './routes/botKnowledgeCrud.js';
 import { locationsRouter } from './routes/locations.js';
 import { dispatchDashboardMetricsRouter } from './routes/dispatchDashboardMetrics.js';
+import { dispatchOpsExtrasRouter } from './routes/dispatchOpsExtras.js';
 import { dispatchBridgeRouter } from './routes/dispatchBridge.js';
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 
@@ -290,6 +291,7 @@ app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/operaciones', publicDispatchClientRouter());
 app.use('/admin/operaciones', dispatchDashboardMetricsRouter(prisma));
+app.use('/admin/operaciones', dispatchOpsExtrasRouter(prisma));
 app.use('/admin/operaciones', dispatchBridgeRouter());
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
