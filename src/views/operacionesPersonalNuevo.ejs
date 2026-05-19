@@ -23,16 +23,18 @@
       <div>
         <div class="eyebrow">Personal operativo</div>
         <h1><%= mode === 'edit' ? 'Editar auxiliar manual' : 'Crear auxiliar manual' %></h1>
-        <p><%= mode === 'edit' ? 'Actualiza datos, ciudades operativas, perfiles y estado del auxiliar manual.' : 'Registra personal operativo que no viene del flujo de candidatos del bot.' %></p>
+        <p><%= mode === 'edit' ? 'Actualiza datos, hoja de vida, ciudades operativas, perfiles y estado del auxiliar manual.' : 'Registra personal operativo que no viene del flujo de candidatos del bot.' %></p>
       </div>
       <div class="actions"><a class="btn" href="/admin/operaciones/personal">Volver a personal</a></div>
     </section>
 
+    <% if (typeof error !== 'undefined' && error) { %><div class="alert"><%= error %></div><% } %>
+
     <section class="card">
-      <div class="card-head"><h2>Datos del auxiliar</h2><p>Define información básica, ciudades operativas y perfiles habilitados.</p></div>
+      <div class="card-head"><h2>Datos del auxiliar</h2><p>Define información básica, hoja de vida, ciudades operativas y perfiles habilitados.</p></div>
       <div class="card-body">
         <% const w = worker || {}; const selectedCityIds = new Set((w.cities || []).map((entry)=>entry.cityId)); const selectedVacancyIds = new Set((w.vacancies || []).map((entry)=>entry.vacancyId)); %>
-        <form method="post" action="<%= formAction %>">
+        <form method="post" action="<%= formAction %>" enctype="multipart/form-data">
           <div class="form-grid">
             <div class="field full"><label for="fullName">Nombre completo</label><input id="fullName" name="fullName" required value="<%= w.fullName || '' %>" placeholder="Nombre y apellido" /></div>
             <div class="field"><label for="phone">Teléfono</label><input id="phone" name="phone" value="<%= w.phone || '' %>" placeholder="Celular" /></div>
@@ -42,15 +44,72 @@
             <div class="field"><label for="residenceLocality">Localidad / barrio</label><input id="residenceLocality" name="residenceLocality" value="<%= w.residenceLocality || '' %>" /></div>
             <div class="field"><label for="transportMode">Medio de transporte</label><input id="transportMode" name="transportMode" value="<%= w.transportMode || '' %>" placeholder="Moto, transporte público..." /></div>
             <div class="field"><label for="operationalStatus">Estado operativo</label><select id="operationalStatus" name="operationalStatus"><option value="ACTIVE" <%= w.operationalStatus !== 'INACTIVE' ? 'selected' : '' %>>Activo</option><option value="INACTIVE" <%= w.operationalStatus === 'INACTIVE' ? 'selected' : '' %>>Inactivo</option></select></div>
+            <div class="field full">
+              <label for="cvFile">Hoja de vida</label>
+              <input id="cvFile" name="cvFile" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+              <small class="muted">Formatos permitidos: PDF, DOC o DOCX. Tamaño máximo: 5 MB.</small>
+              <% if (w.cvOriginalName) { %><small class="muted">Hoja de vida actual: <strong><%= w.cvOriginalName %></strong>. Si adjuntas otra, se reemplaza.</small><% } %>
+            </div>
             <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Disponibilidad, restricciones o comentarios"><%= w.notes || '' %></textarea></div>
-            <div class="field"><label for="cityIds">Ciudades operativas</label><select id="cityIds" name="cityIds" multiple size="7"><% cities.forEach((c)=>{ %><option value="<%= c.id %>" <%= selectedCityIds.has(c.id) ? 'selected' : '' %>><%= c.name %></option><% }) %></select></div>
-            <div class="field"><label for="vacancyIds">Vacantes / perfiles</label><select id="vacancyIds" name="vacancyIds" multiple size="7"><% vacancies.forEach((v)=>{ %><option value="<%= v.id %>" <%= selectedVacancyIds.has(v.id) ? 'selected' : '' %>><%= v.title %></option><% }) %></select></div>
+            <div class="field"><label for="cityIds">Ciudades operativas</label><select id="cityIds" name="cityIds" multiple size="7"><% cities.forEach((c)=>{ %><option value="<%= c.id %>" data-city-name="<%= c.name %>" <%= selectedCityIds.has(c.id) ? 'selected' : '' %>><%= c.name %></option><% }) %></select></div>
+            <div class="field">
+              <label for="vacancyIds">Vacantes / perfiles</label>
+              <select id="vacancyIds" name="vacancyIds" multiple size="7">
+                <% vacancies.forEach((v)=>{ %><option value="<%= v.id %>" data-city-name="<%= v.city %>" <%= selectedVacancyIds.has(v.id) ? 'selected' : '' %>><%= v.title %> — <%= v.city %></option><% }) %>
+              </select>
+              <small id="vacancyHelp" class="muted">Selecciona una ciudad para ver perfiles disponibles.</small>
+            </div>
           </div>
-          <div class="section-note" style="margin-top:14px;">Puedes seleccionar varias ciudades y varios perfiles manteniendo presionada la tecla Ctrl o Cmd.</div>
+          <div class="section-note" style="margin-top:14px;">Puedes seleccionar varias ciudades y varios perfiles manteniendo presionada la tecla Ctrl o Cmd. El listado de perfiles se ajusta automáticamente según las ciudades seleccionadas.</div>
           <div class="form-actions"><button class="btn btn-primary" type="submit"><%= mode === 'edit' ? 'Guardar auxiliar' : 'Crear auxiliar' %></button><a class="btn" href="/admin/operaciones/personal">Cancelar</a></div>
         </form>
       </div>
     </section>
   </main>
+
+  <script>
+    const citySelect = document.getElementById('cityIds');
+    const vacancySelect = document.getElementById('vacancyIds');
+    const vacancyHelp = document.getElementById('vacancyHelp');
+    const normalize = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+    const allVacancyOptions = Array.from(vacancySelect.options).map((option) => ({
+      value: option.value,
+      text: option.textContent,
+      cityName: option.dataset.cityName,
+      selected: option.selected
+    }));
+
+    function selectedCityNames() {
+      return Array.from(citySelect.selectedOptions).map((option) => normalize(option.dataset.cityName || option.textContent));
+    }
+
+    function refreshVacancyOptions() {
+      const selectedCities = selectedCityNames();
+      const previousSelection = new Set(Array.from(vacancySelect.selectedOptions).map((option) => option.value));
+      vacancySelect.innerHTML = '';
+
+      if (!selectedCities.length) {
+        vacancyHelp.textContent = 'Selecciona una ciudad para ver perfiles disponibles.';
+        return;
+      }
+
+      const filtered = allVacancyOptions.filter((option) => selectedCities.includes(normalize(option.cityName)));
+      filtered.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = item.text;
+        option.dataset.cityName = item.cityName;
+        option.selected = previousSelection.has(item.value) || item.selected;
+        vacancySelect.appendChild(option);
+      });
+
+      vacancyHelp.textContent = filtered.length
+        ? 'Perfiles activos disponibles para las ciudades seleccionadas.'
+        : 'No hay perfiles activos para las ciudades seleccionadas.';
+    }
+
+    citySelect.addEventListener('change', refreshVacancyOptions);
+    refreshVacancyOptions();
+  </script>
 </body>
 </html>
