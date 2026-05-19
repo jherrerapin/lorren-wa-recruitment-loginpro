@@ -95,7 +95,7 @@
         <p class="subtitle"><%= subtitle %></p>
       </div>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">Crear auxiliar manual</a>
+        <a class="btn btn-primary" href="/operaciones/admin-worker/nuevo">Crear auxiliar manual</a>
         <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
         <% if (role === 'dev') { %>
           <form method="post" action="/admin/operaciones/sync-contratados">
@@ -124,7 +124,7 @@
           <label for="vacancyId">Vacante / perfil</label>
           <select id="vacancyId" name="vacancyId">
             <option value="">Todas las vacantes</option>
-            <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %></option><% }) %>
+            <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %> — <%= vacancy.city || 'Sin ciudad' %></option><% }) %>
           </select>
         </div>
         <div class="field">
@@ -181,7 +181,7 @@
                   </td>
                   <td>
                     <% if (w.vacancies.length) { %>
-                      <% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %></span><% }) %>
+                      <% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %> — <%= entry.vacancy.city || 'Sin ciudad' %></span><% }) %>
                     <% } else { %><span class="muted">Sin perfiles habilitados</span><% } %>
                   </td>
                   <td><span class="pill pill-blue"><%= w.source %></span></td>
@@ -189,7 +189,7 @@
                   <td>
                     <% if (w.source === 'MANUAL') { %>
                       <div class="hero-actions">
-                        <a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/editar">Editar</a>
+                        <a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a>
                         <form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle"><button class="btn btn-secondary" type="submit"><%= w.operationalStatus === 'ACTIVE' ? 'Desactivar' : 'Reactivar' %></button></form>
                         <form method="post" action="/operaciones/admin-delete/personal/<%= w.id %>"><button class="btn btn-secondary" type="submit">Eliminar</button></form>
                       </div>

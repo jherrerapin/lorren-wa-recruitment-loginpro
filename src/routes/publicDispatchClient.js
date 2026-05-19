@@ -1,10 +1,28 @@
 import express from 'express';
+import multer from 'multer';
 import { prisma } from '../lib/prisma.js';
+
+const workerCvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
+
+const ALLOWED_WORKER_CV_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+]);
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) return value.map((item) => normalizeString(item)).filter(Boolean);
+  const single = normalizeString(value);
+  return single ? [single] : [];
 }
 
 function isOpsUser(req) {
@@ -45,6 +63,102 @@ async function runDelete(res, successPath, failurePath, action, successMessage, 
     if (!isKnownDeleteConstraintError(error)) console.error(error);
     return res.redirect(redirectWithMessage(failurePath, failureMessage));
   }
+}
+
+function buildWorkerData(body) {
+  return {
+    fullName: normalizeString(body.fullName),
+    phone: normalizeString(body.phone),
+    documentType: normalizeString(body.documentType),
+    documentNumber: normalizeString(body.documentNumber),
+    residenceCity: normalizeString(body.residenceCity),
+    residenceLocality: normalizeString(body.residenceLocality),
+    transportMode: normalizeString(body.transportMode),
+    operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
+    notes: normalizeString(body.notes)
+  };
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+async function loadWorkerFormOptions() {
+  const [cities, vacancies] = await Promise.all([
+    prisma.city.findMany({ orderBy: { name: 'asc' } }),
+    prisma.vacancy.findMany({
+      where: { isActive: true },
+      select: { id: true, title: true, city: true },
+      orderBy: [{ city: 'asc' }, { title: 'asc' }]
+    })
+  ]);
+
+  return { cities, vacancies };
+}
+
+async function validateVacanciesForSelectedCities(cityIds, vacancyIds) {
+  if (!vacancyIds.length) return [];
+  if (!cityIds.length) throw new Error('Selecciona al menos una ciudad operativa antes de elegir perfiles.');
+
+  const selectedCities = await prisma.city.findMany({
+    where: { id: { in: cityIds } },
+    select: { name: true }
+  });
+  const selectedCityNames = new Set(selectedCities.map((city) => normalizeText(city.name)));
+
+  const validVacancies = await prisma.vacancy.findMany({
+    where: { id: { in: vacancyIds }, isActive: true },
+    select: { id: true, city: true }
+  });
+
+  const validVacancyIds = validVacancies
+    .filter((vacancy) => selectedCityNames.has(normalizeText(vacancy.city)))
+    .map((vacancy) => vacancy.id);
+
+  if (validVacancyIds.length !== vacancyIds.length) {
+    throw new Error('Uno o más perfiles no pertenecen a las ciudades seleccionadas o no están activos.');
+  }
+
+  return validVacancyIds;
+}
+
+async function replaceWorkerRelations(workerId, body) {
+  const cityIds = normalizeStringList(body.cityIds);
+  const vacancyIds = normalizeStringList(body.vacancyIds);
+  const validVacancyIds = await validateVacanciesForSelectedCities(cityIds, vacancyIds);
+
+  await prisma.$transaction([
+    prisma.dispatchWorkerCity.deleteMany({ where: { workerId } }),
+    prisma.dispatchWorkerVacancy.deleteMany({ where: { workerId } }),
+    ...(cityIds.length ? [prisma.dispatchWorkerCity.createMany({ data: cityIds.map((cityId) => ({ workerId, cityId })), skipDuplicates: true })] : []),
+    ...(validVacancyIds.length ? [prisma.dispatchWorkerVacancy.createMany({ data: validVacancyIds.map((vacancyId) => ({ workerId, vacancyId })), skipDuplicates: true })] : [])
+  ]);
+}
+
+async function saveWorkerCv(workerId, file) {
+  if (!file) return;
+  if (!ALLOWED_WORKER_CV_MIME_TYPES.has(file.mimetype)) {
+    throw new Error('La hoja de vida debe ser PDF, DOC o DOCX.');
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "DispatchWorker"
+    SET "cvOriginalName" = ${file.originalname},
+        "cvMimeType" = ${file.mimetype},
+        "cvData" = ${file.buffer}
+    WHERE "id" = ${workerId}
+  `;
+}
+
+async function findManualWorkerOr404(workerId) {
+  return prisma.dispatchWorker.findFirst({
+    where: { id: workerId, source: 'MANUAL' },
+    include: { cities: true, vacancies: true }
+  });
 }
 
 async function findClientByPublicToken(publicToken) {
@@ -151,6 +265,63 @@ export function publicDispatchClientRouter() {
       'Auxiliar manual eliminado correctamente.',
       'No fue posible eliminar el auxiliar porque tiene dependencias operativas.'
     );
+  });
+
+  router.get('/admin-worker/nuevo', requireOps, async (req, res) => {
+    const { cities, vacancies } = await loadWorkerFormOptions();
+    return res.render('operacionesPersonalNuevo', {
+      cities,
+      vacancies,
+      worker: null,
+      mode: 'create',
+      formAction: '/operaciones/admin-worker/nuevo',
+      role: req.session?.userRole || req.userRole,
+      error: normalizeString(req.query.error)
+    });
+  });
+
+  router.post('/admin-worker/nuevo', requireOps, workerCvUpload.single('cvFile'), async (req, res) => {
+    try {
+      const workerData = buildWorkerData(req.body);
+      if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
+      const worker = await prisma.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
+      await replaceWorkerRelations(worker.id, req.body);
+      await saveWorkerCv(worker.id, req.file);
+      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual creado.'));
+    } catch (error) {
+      console.error(error);
+      return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent(error.message || 'No fue posible crear el auxiliar.'));
+    }
+  });
+
+  router.get('/admin-worker/:workerId/editar', requireOps, async (req, res) => {
+    const [worker, options] = await Promise.all([findManualWorkerOr404(req.params.workerId), loadWorkerFormOptions()]);
+    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    return res.render('operacionesPersonalNuevo', {
+      cities: options.cities,
+      vacancies: options.vacancies,
+      worker,
+      mode: 'edit',
+      formAction: `/operaciones/admin-worker/${worker.id}/editar`,
+      role: req.session?.userRole || req.userRole,
+      error: normalizeString(req.query.error)
+    });
+  });
+
+  router.post('/admin-worker/:workerId/editar', requireOps, workerCvUpload.single('cvFile'), async (req, res) => {
+    try {
+      const existing = await findManualWorkerOr404(req.params.workerId);
+      if (!existing) return res.status(404).send('Auxiliar manual no encontrado');
+      const workerData = buildWorkerData(req.body);
+      if (!workerData.fullName) return res.redirect(`/operaciones/admin-worker/${existing.id}/editar?error=` + encodeURIComponent('Nombre requerido.'));
+      await prisma.dispatchWorker.update({ where: { id: existing.id }, data: workerData });
+      await replaceWorkerRelations(existing.id, req.body);
+      await saveWorkerCv(existing.id, req.file);
+      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual actualizado.'));
+    } catch (error) {
+      console.error(error);
+      return res.redirect(`/operaciones/admin-worker/${req.params.workerId}/editar?error=` + encodeURIComponent(error.message || 'No fue posible actualizar el auxiliar.'));
+    }
   });
 
   router.get('/cliente/:publicToken', async (req, res) => {
