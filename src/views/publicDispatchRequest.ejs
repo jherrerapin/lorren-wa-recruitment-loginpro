@@ -33,23 +33,27 @@
             </div>
           </div>
 
+          <% if (!operationPoints.length || !services.length) { %>
+            <div class="section-note">Este cliente debe tener operaciones y servicios activos configurados antes de crear solicitudes.</div>
+          <% } %>
+
           <form method="post">
             <div class="form-grid">
               <div class="field full">
                 <label for="operationPointId">Operación / punto de servicio</label>
-                <select id="operationPointId" name="operationPointId" required>
+                <select id="operationPointId" name="operationPointId" required <%= operationPoints.length ? '' : 'disabled' %>>
                   <option value="">Selecciona una operación</option>
                   <% operationPoints.forEach((op)=>{ %>
-                    <option value="<%= op.id %>"><%= op.name %><% if (op.cityName) { %> — <%= op.cityName %><% } %><% if (op.address) { %> · <%= op.address %><% } %></option>
+                    <option value="<%= op.id %>" <%= operationPoints.length === 1 ? 'selected' : '' %>><%= op.name %><% if (op.cityName) { %> — <%= op.cityName %><% } %><% if (op.address) { %> · <%= op.address %><% } %></option>
                   <% }) %>
                 </select>
               </div>
               <div class="field full">
                 <label for="serviceId">Servicio solicitado</label>
-                <select id="serviceId" name="serviceId" <%= services.length ? 'required' : '' %>>
+                <select id="serviceId" name="serviceId" required <%= services.length ? '' : 'disabled' %>>
                   <option value=""><%= services.length ? 'Selecciona un servicio' : 'Sin servicios configurados para este cliente' %></option>
                   <% services.forEach((item)=>{ %>
-                    <option value="<%= item.id %>"><%= item.name %><% if (item.description) { %> — <%= item.description %><% } %></option>
+                    <option value="<%= item.id %>" <%= services.length === 1 ? 'selected' : '' %>><%= item.name %><% if (item.description) { %> — <%= item.description %><% } %></option>
                   <% }) %>
                 </select>
               </div>
@@ -58,11 +62,11 @@
               <div class="field"><label for="requestedByEmail">Correo</label><input id="requestedByEmail" name="requestedByEmail" type="email" placeholder="correo@empresa.com" /></div>
               <div class="field"><label for="serviceDate">Fecha del servicio</label><input id="serviceDate" type="date" name="serviceDate" required /></div>
               <div class="field"><label for="requiredWorkers">Cantidad de auxiliares</label><input id="requiredWorkers" type="number" min="1" name="requiredWorkers" required value="1" /></div>
-              <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" name="startTime" placeholder="Ej: 08:00" /></div>
-              <div class="field"><label for="endTime">Hora fin</label><input id="endTime" name="endTime" placeholder="Ej: 17:00" /></div>
+              <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" type="time" name="startTime" /></div>
+              <div class="field"><label for="endTime">Hora fin</label><input id="endTime" type="time" name="endTime" /></div>
               <div class="field full"><label for="notes">Observaciones</label><textarea id="notes" name="notes" placeholder="Describe condiciones, requisitos de ingreso o detalles del servicio"></textarea></div>
             </div>
-            <div class="form-actions"><button class="btn btn-primary" type="submit">Enviar solicitud</button></div>
+            <div class="form-actions"><button class="btn btn-primary" type="submit" <%= operationPoints.length && services.length ? '' : 'disabled' %>>Enviar solicitud</button></div>
           </form>
         <% } %>
       </div>
