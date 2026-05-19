@@ -86,7 +86,7 @@
                   </details>
                   <div class="actions stack-actions">
                     <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/toggle"><button class="btn" type="submit"><%= op.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
-                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/eliminar"><button class="btn" type="submit">Eliminar</button></form>
+                    <form method="post" action="/operaciones/admin-delete/clientes/<%= client.id %>/operaciones/<%= op.id %>"><button class="btn" type="submit">Eliminar</button></form>
                   </div>
                   <div class="muted" style="margin-top:12px;">Link antiguo por operación compatible temporalmente: <%= legacyLink %></div>
                 </article>
@@ -134,7 +134,7 @@
                   </details>
                   <div class="actions stack-actions">
                     <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/servicios/<%= service.id %>/toggle"><button class="btn" type="submit"><%= service.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
-                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/servicios/<%= service.id %>/eliminar"><button class="btn" type="submit">Eliminar</button></form>
+                    <form method="post" action="/operaciones/admin-delete/clientes/<%= client.id %>/servicios/<%= service.id %>"><button class="btn" type="submit">Eliminar</button></form>
                   </div>
                 </article>
               <% }) %>
