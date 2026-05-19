@@ -71,6 +71,7 @@
     </section>
 
     <% if (message) { %><div class="section-note"><%= message %></div><% } %>
+    <% const assignedWorkerIds = new Set(selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []); const availableWorkers = workers.filter((worker) => !assignedWorkerIds.has(worker.id)); %>
 
     <section class="board-layout">
       <aside class="board-panel workers-panel">
@@ -94,11 +95,11 @@
         </form>
 
         <div class="worker-list" id="workerList">
-          <% if (!workers.length) { %>
-            <div class="empty"><strong>No hay auxiliares con esos filtros.</strong>Ajusta los filtros o registra personal operativo.</div>
+          <% if (!availableWorkers.length) { %>
+            <div class="empty"><strong>No hay auxiliares disponibles con esos filtros.</strong>Si ya fueron asignados a esta solicitud, aparecerán en la columna de asignación. Si los quitas, vuelven a este listado.</div>
           <% } %>
           <div id="autoFilterEmpty" class="empty" hidden><strong>No hay auxiliares para la ciudad de esta solicitud.</strong>Revisa ciudades operativas, vacantes asignadas o ajusta filtros manuales.</div>
-          <% workers.forEach((worker)=>{ const workerCityNames = worker.cities.map((entry)=>entry.city.name).join('|'); const vacancyCityNames = worker.vacancies.map((entry)=>entry.vacancy.city || '').join('|'); %>
+          <% availableWorkers.forEach((worker)=>{ const workerCityNames = worker.cities.map((entry)=>entry.city.name).join('|'); const vacancyCityNames = worker.vacancies.map((entry)=>entry.vacancy.city || '').join('|'); %>
             <article class="worker-card" draggable="true" data-worker-id="<%= worker.id %>" data-worker-cities="<%= workerCityNames %>" data-vacancy-cities="<%= vacancyCityNames %>">
               <strong><%= worker.fullName %></strong>
               <div class="meta">
