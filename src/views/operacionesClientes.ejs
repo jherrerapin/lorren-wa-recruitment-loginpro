@@ -53,7 +53,7 @@
           <form method="post" action="<%= isEditingClient ? '/operaciones/admin-clientes/' + safeEditClient.id + '/editar' : '/operaciones/admin-clientes' %>">
             <div class="form-grid">
               <div class="field full"><label for="name">Nombre del cliente</label><input id="name" name="name" required value="<%= formClient.name || '' %>" placeholder="Ej: Opera Logística" /></div>
-              <div class="field"><label for="cityName">Ciudad principal</label><select id="cityName" name="cityName" required><option value="">Selecciona una ciudad</option><% cityOptions.forEach((city)=>{ %><option value="<%= city.name %>" <%= formClient.cityName===city.name?'selected':'' %>><%= city.name %></option><% }) %></select></div>
+              <div class="field"><label for="cityName">Ciudad principal</label><select id="cityName" name="cityName" required data-selected-city="<%= formClient.cityName || '' %>"><option value="">Selecciona una ciudad</option><% cityOptions.forEach((city)=>{ %><option value="<%= city.name %>" <%= formClient.cityName===city.name?'selected':'' %>><%= city.name %></option><% }) %></select><small class="muted">Crea la ciudad si no aparece en el listado.</small></div>
               <div class="field"><label for="nit">NIT</label><input id="nit" name="nit" value="<%= formClient.nit || '' %>" placeholder="Opcional" /></div>
               <div class="field"><label for="contactName">Contacto</label><input id="contactName" name="contactName" value="<%= formClient.contactName || '' %>" placeholder="Nombre del contacto" /></div>
               <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" value="<%= formClient.contactPhone || '' %>" placeholder="Celular o fijo" /></div>
@@ -98,5 +98,31 @@
       </div>
     </section>
   </main>
+
+  <script>
+    async function loadCityOptions() {
+      const citySelect = document.getElementById('cityName');
+      if (!citySelect) return;
+      const selectedCity = citySelect.dataset.selectedCity || citySelect.value || '';
+      try {
+        const response = await fetch('/operaciones/api/ciudades');
+        if (!response.ok) return;
+        const data = await response.json();
+        const currentValues = new Set(Array.from(citySelect.options).map((option) => option.value));
+        data.cities.forEach((city) => {
+          if (currentValues.has(city.name)) return;
+          const option = document.createElement('option');
+          option.value = city.name;
+          option.textContent = city.name;
+          option.selected = city.name === selectedCity;
+          citySelect.appendChild(option);
+        });
+        if (selectedCity) citySelect.value = selectedCity;
+      } catch (error) {
+        console.error('No fue posible cargar ciudades operativas', error);
+      }
+    }
+    loadCityOptions();
+  </script>
 </body>
 </html>
