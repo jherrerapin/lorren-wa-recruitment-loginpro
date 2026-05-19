@@ -275,6 +275,7 @@ model DispatchClient {
   id                String                   @id @default(cuid())
   name              String
   nit               String?
+  cityName          String?
   contactName       String?
   contactPhone      String?
   contactEmail      String?
@@ -287,6 +288,7 @@ model DispatchClient {
   operationPoints   DispatchOperationPoint[]
   services          DispatchClientService[]
   @@index([name])
+  @@index([cityName])
   @@index([isActive])
 }
 
@@ -340,6 +342,9 @@ model DispatchWorker {
   residenceCity     String?
   residenceLocality String?
   transportMode     String?
+  cvOriginalName    String?
+  cvMimeType        String?
+  cvData            Bytes?
 
   source            String                 @default("CANDIDATE")
   operationalStatus String                 @default("ACTIVE")

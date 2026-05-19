@@ -23,7 +23,7 @@
       <div>
         <div class="eyebrow">Gestión comercial operativa</div>
         <h1>Clientes</h1>
-        <p>Gestiona clientes, crea sus operaciones y comparte el link público único del cliente para solicitar servicios.</p>
+        <p>Gestiona clientes, ciudades operativas, operaciones y links públicos de solicitud.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
@@ -32,15 +32,28 @@
     </section>
 
     <% if (message) { %><div class="alert"><%= message %></div><% } %>
-    <% const safeEditClient = typeof editClient !== 'undefined' ? editClient : null; const formClient = safeEditClient || {}; const isEditingClient = Boolean(safeEditClient); %>
+    <% const safeEditClient = typeof editClient !== 'undefined' ? editClient : null; const formClient = safeEditClient || {}; const isEditingClient = Boolean(safeEditClient); const cityOptions = typeof cities !== 'undefined' ? cities : []; %>
 
     <section class="grid-2">
       <article class="card">
-        <div class="card-head"><h2><%= isEditingClient ? 'Editar cliente' : 'Crear cliente' %></h2><p><%= isEditingClient ? 'Actualiza los datos comerciales, contacto y estado del cliente.' : 'Registra la empresa que solicitará servicios operativos.' %></p></div>
+        <div class="card-head"><h2>Crear ciudad operativa</h2><p>Las ciudades creadas alimentan los desplegables de clientes, auxiliares y filtros de asignación.</p></div>
         <div class="card-body">
-          <form method="post" action="<%= isEditingClient ? '/admin/operaciones/clientes/' + safeEditClient.id + '/editar' : '/admin/operaciones/clientes' %>">
+          <form method="post" action="/operaciones/admin-ciudades">
+            <div class="form-grid">
+              <div class="field full"><label for="cityNameCreate">Nombre de ciudad</label><input id="cityNameCreate" name="name" required placeholder="Ej: Bogotá, Siberia, Madrid, Funza, Mosquera" /></div>
+            </div>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">Crear ciudad</button></div>
+          </form>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2><%= isEditingClient ? 'Editar cliente' : 'Crear cliente' %></h2><p><%= isEditingClient ? 'Actualiza ciudad, datos comerciales, contacto y estado del cliente.' : 'Registra la empresa que solicitará servicios operativos.' %></p></div>
+        <div class="card-body">
+          <form method="post" action="<%= isEditingClient ? '/operaciones/admin-clientes/' + safeEditClient.id + '/editar' : '/operaciones/admin-clientes' %>">
             <div class="form-grid">
               <div class="field full"><label for="name">Nombre del cliente</label><input id="name" name="name" required value="<%= formClient.name || '' %>" placeholder="Ej: Opera Logística" /></div>
+              <div class="field"><label for="cityName">Ciudad principal</label><select id="cityName" name="cityName" required data-selected-city="<%= formClient.cityName || '' %>"><option value="">Selecciona una ciudad</option><% cityOptions.forEach((city)=>{ %><option value="<%= city.name %>" <%= formClient.cityName===city.name?'selected':'' %>><%= city.name %></option><% }) %></select><small class="muted">Crea la ciudad si no aparece en el listado.</small></div>
               <div class="field"><label for="nit">NIT</label><input id="nit" name="nit" value="<%= formClient.nit || '' %>" placeholder="Opcional" /></div>
               <div class="field"><label for="contactName">Contacto</label><input id="contactName" name="contactName" value="<%= formClient.contactName || '' %>" placeholder="Nombre del contacto" /></div>
               <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" value="<%= formClient.contactPhone || '' %>" placeholder="Celular o fijo" /></div>
@@ -52,37 +65,64 @@
           </form>
         </div>
       </article>
+    </section>
 
-      <article class="card">
-        <div class="card-head"><h2>Clientes registrados</h2><p>El link público pertenece al cliente; en el formulario público el cliente selecciona la operación correspondiente.</p></div>
-        <div class="table-wrap">
-          <% if (!clients.length) { %><div class="empty"><strong>No hay clientes registrados.</strong>Crea el primer cliente para iniciar el flujo.</div><% } else { %>
-            <table class="table"><thead><tr><th>Cliente</th><th>Contacto</th><th>Link público del cliente</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
-              <% clients.forEach((c)=>{ const clientLink = baseUrl + '/operaciones/cliente/' + c.publicToken; %><tr>
-                <td><strong><%= c.name %></strong><div class="muted">NIT: <%= c.nit || '—' %></div></td>
-                <td><%= c.contactName || '—' %><div class="muted"><%= c.contactPhone || 'Sin teléfono' %> · <%= c.contactEmail || 'Sin correo' %></div></td>
-                <td>
-                  <div class="copy-row">
-                    <input class="copy-input" readonly value="<%= clientLink %>" />
-                    <a class="btn" href="/operaciones/cliente/<%= c.publicToken %>" target="_blank" rel="noopener">Abrir</a>
-                  </div>
-                </td>
-                <td><span class="pill <%= c.isActive ? 'pill-green' : 'pill-amber' %>"><%= c.isActive ? 'Activo' : 'Inactivo' %></span></td>
-                <td>
-                  <div class="actions stack-actions">
-                    <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Operaciones y servicios</a>
-                    <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/editar">Editar</a>
-                    <form method="post" action="/admin/operaciones/clientes/<%= c.id %>/toggle"><button class="btn" type="submit"><%= c.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
-                    <form method="post" action="/operaciones/admin-delete/clientes/<%= c.id %>"><button class="btn" type="submit">Eliminar</button></form>
-                  </div>
-                  <div class="muted"><%= c._count?.operationPoints || 0 %> operaciones · <%= c._count?.services || 0 %> servicios</div>
-                </td>
-              </tr><% }) %>
-            </tbody></table>
-          <% } %>
-        </div>
-      </article>
+    <section class="card">
+      <div class="card-head"><h2>Clientes registrados</h2><p>El link público pertenece al cliente; en el formulario público el cliente selecciona operación y servicio.</p></div>
+      <div class="table-wrap">
+        <% if (!clients.length) { %><div class="empty"><strong>No hay clientes registrados.</strong>Crea el primer cliente para iniciar el flujo.</div><% } else { %>
+          <table class="table"><thead><tr><th>Cliente</th><th>Ciudad</th><th>Contacto</th><th>Link público del cliente</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
+            <% clients.forEach((c)=>{ const clientLink = baseUrl + '/operaciones/cliente/' + c.publicToken; %><tr>
+              <td><strong><%= c.name %></strong><div class="muted">NIT: <%= c.nit || '—' %></div></td>
+              <td><span class="pill pill-blue"><%= c.cityName || 'Sin ciudad' %></span></td>
+              <td><%= c.contactName || '—' %><div class="muted"><%= c.contactPhone || 'Sin teléfono' %> · <%= c.contactEmail || 'Sin correo' %></div></td>
+              <td>
+                <div class="copy-row">
+                  <input class="copy-input" readonly value="<%= clientLink %>" />
+                  <a class="btn" href="/operaciones/cliente/<%= c.publicToken %>" target="_blank" rel="noopener">Abrir</a>
+                </div>
+              </td>
+              <td><span class="pill <%= c.isActive ? 'pill-green' : 'pill-amber' %>"><%= c.isActive ? 'Activo' : 'Inactivo' %></span></td>
+              <td>
+                <div class="actions stack-actions">
+                  <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Operaciones y servicios</a>
+                  <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/editar">Editar</a>
+                  <form method="post" action="/admin/operaciones/clientes/<%= c.id %>/toggle"><button class="btn" type="submit"><%= c.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
+                  <form method="post" action="/operaciones/admin-delete/clientes/<%= c.id %>"><button class="btn" type="submit">Eliminar</button></form>
+                </div>
+                <div class="muted"><%= c._count?.operationPoints || 0 %> operaciones · <%= c._count?.services || 0 %> servicios</div>
+              </td>
+            </tr><% }) %>
+          </tbody></table>
+        <% } %>
+      </div>
     </section>
   </main>
+
+  <script>
+    async function loadCityOptions() {
+      const citySelect = document.getElementById('cityName');
+      if (!citySelect) return;
+      const selectedCity = citySelect.dataset.selectedCity || citySelect.value || '';
+      try {
+        const response = await fetch('/operaciones/api/ciudades');
+        if (!response.ok) return;
+        const data = await response.json();
+        const currentValues = new Set(Array.from(citySelect.options).map((option) => option.value));
+        data.cities.forEach((city) => {
+          if (currentValues.has(city.name)) return;
+          const option = document.createElement('option');
+          option.value = city.name;
+          option.textContent = city.name;
+          option.selected = city.name === selectedCity;
+          citySelect.appendChild(option);
+        });
+        if (selectedCity) citySelect.value = selectedCity;
+      } catch (error) {
+        console.error('No fue posible cargar ciudades operativas', error);
+      }
+    }
+    loadCityOptions();
+  </script>
 </body>
 </html>

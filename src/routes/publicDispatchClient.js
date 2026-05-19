@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 
 const workerCvUpload = multer({
@@ -76,6 +77,19 @@ function buildWorkerData(body) {
     transportMode: normalizeString(body.transportMode),
     operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
     notes: normalizeString(body.notes)
+  };
+}
+
+function buildClientData(body) {
+  return {
+    name: normalizeString(body.name),
+    nit: normalizeString(body.nit),
+    cityName: normalizeString(body.cityName),
+    contactName: normalizeString(body.contactName),
+    contactPhone: normalizeString(body.contactPhone),
+    contactEmail: normalizeString(body.contactEmail),
+    notes: normalizeString(body.notes),
+    isActive: normalizeString(body.isActive) !== 'false'
   };
 }
 
@@ -210,6 +224,38 @@ async function findClientByLegacyOperationToken(publicToken) {
 
 export function publicDispatchClientRouter() {
   const router = express.Router();
+
+  router.get('/api/ciudades', requireOps, async (_req, res) => {
+    const cities = await prisma.city.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } });
+    return res.json({ cities });
+  });
+
+  router.post('/admin-ciudades', requireOps, async (req, res) => {
+    const name = normalizeString(req.body.name);
+    if (!name) return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Nombre de ciudad requerido.'));
+    await prisma.city.upsert({ where: { name }, update: {}, create: { name } });
+    return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Ciudad creada correctamente.'));
+  });
+
+  router.post('/admin-clientes', requireOps, async (req, res) => {
+    const data = buildClientData(req.body);
+    if (!data.name) return res.status(400).send('Nombre requerido');
+    await prisma.dispatchClient.create({
+      data: {
+        ...data,
+        publicToken: randomBytes(24).toString('hex'),
+        createdByUsername: req.session?.username || req.username || null
+      }
+    });
+    return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente creado.'));
+  });
+
+  router.post('/admin-clientes/:clientId/editar', requireOps, async (req, res) => {
+    const data = buildClientData(req.body);
+    if (!data.name) return res.status(400).send('Nombre requerido');
+    await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data });
+    return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente actualizado.'));
+  });
 
   router.post('/admin-delete/clientes/:clientId', requireOps, async (req, res) => {
     const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId }, select: { id: true } });
@@ -375,7 +421,7 @@ export function publicDispatchClientRouter() {
         operationPointId: operationPoint.id,
         clientName: client.name,
         operationPointName: operationPoint.name,
-        cityName: operationPoint.cityName,
+        cityName: operationPoint.cityName || client.cityName,
         address: operationPoint.address,
         serviceId: selectedService?.id || null,
         serviceName: selectedService?.name || null,
