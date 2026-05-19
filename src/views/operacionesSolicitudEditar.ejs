@@ -40,9 +40,9 @@
             <div class="field"><label for="address">Dirección</label><input id="address" name="address" value="<%= serviceRequest.address || '' %>" /></div>
             <div class="field"><label for="serviceDate">Fecha servicio</label><input id="serviceDate" type="date" name="serviceDate" value="<%= new Date(serviceRequest.serviceDate).toISOString().slice(0,10) %>" required /></div>
             <div class="field"><label for="requiredWorkers">Auxiliares requeridos</label><input id="requiredWorkers" type="number" name="requiredWorkers" min="1" value="<%= serviceRequest.requiredWorkers %>" required /></div>
-            <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" name="startTime" value="<%= serviceRequest.startTime || '' %>" placeholder="Ej: 08:00" /></div>
-            <div class="field"><label for="endTime">Hora fin</label><input id="endTime" name="endTime" value="<%= serviceRequest.endTime || '' %>" placeholder="Ej: 17:00" /></div>
-            <div class="field"><label for="status">Estado</label><input id="status" name="status" value="<%= serviceRequest.status %>" /></div>
+            <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" type="time" name="startTime" value="<%= serviceRequest.startTime || '' %>" /></div>
+            <div class="field"><label for="endTime">Hora fin</label><input id="endTime" type="time" name="endTime" value="<%= serviceRequest.endTime || '' %>" /></div>
+            <div class="field"><label for="status">Estado</label><select id="status" name="status"><option value="PENDING_ASSIGNMENT" <%= serviceRequest.status==='PENDING_ASSIGNMENT'?'selected':'' %>>Pendiente de asignación</option><option value="ASSIGNMENT_PARTIAL" <%= serviceRequest.status==='ASSIGNMENT_PARTIAL'?'selected':'' %>>Asignación parcial</option><option value="ASSIGNMENT_COMPLETE" <%= serviceRequest.status==='ASSIGNMENT_COMPLETE'?'selected':'' %>>Asignación completa</option><option value="CANCELLED" <%= serviceRequest.status==='CANCELLED'?'selected':'' %>>Cancelada</option></select></div>
             <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes"><%= serviceRequest.notes || '' %></textarea></div>
           </div>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar cambios</button><a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= serviceRequest.id %>">Cancelar</a></div>
