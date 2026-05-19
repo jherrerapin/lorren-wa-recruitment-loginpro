@@ -32,6 +32,9 @@
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
+  <% const statusLabel = (value) => ({ OPEN: 'Abierta', IN_PROGRESS: 'En seguimiento', RESOLVED: 'Resuelta', CANCELLED: 'Cancelada', ALL: 'Todas' }[value] || value || 'Abierta'); %>
+  <% const typeLabel = (value) => ({ NO_SHOW: 'No llegó', CANCELACION: 'Cancelación', REEMPLAZO: 'Requiere reemplazo', CLIENTE_REPORTA: 'Reporte del cliente', OTRA: 'Otra' }[value] || value || 'Otra'); %>
+
   <main class="page">
     <section class="hero">
       <div>
@@ -48,7 +51,7 @@
     <section class="toolbar">
       <div>
         <h2>Filtro de novedades</h2>
-        <p class="muted">El indicador del dashboard cuenta novedades OPEN e IN_PROGRESS de la fecha seleccionada.</p>
+        <p class="muted">El indicador del dashboard cuenta novedades abiertas y en seguimiento de la fecha seleccionada.</p>
       </div>
       <form class="toolbar-form" method="get" action="/admin/operaciones/novedades">
         <div class="field"><label for="fecha">Fecha servicio</label><input id="fecha" name="fecha" type="date" value="<%= selectedDate %>" /></div>
@@ -65,9 +68,9 @@
         <article class="incident-card <%= incident.status === 'RESOLVED' ? 'resolved' : 'open' %>">
           <div class="incident-head">
             <div>
-              <strong><%= incident.type %></strong>
+              <strong><%= typeLabel(incident.type) %></strong>
               <div class="incident-meta">
-                <span>Estado: <%= incident.status %></span>
+                <span>Estado: <%= statusLabel(incident.status) %></span>
                 <span>Solicitud: <%= request.clientName %> · <%= request.operationPointName || 'Sin operación' %> · <%= request.cityName || 'Sin ciudad' %></span>
                 <span>Fecha servicio: <%= new Date(request.serviceDate).toISOString().slice(0,10) %> · <%= request.startTime || '-' %> - <%= request.endTime || '-' %></span>
                 <span>Auxiliar: <%= worker?.fullName || 'Sin auxiliar asociado' %></span>
