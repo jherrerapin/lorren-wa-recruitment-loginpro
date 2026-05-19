@@ -7,6 +7,11 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
+    .dashboard-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; box-shadow: var(--shadow-sm); }
+    .dashboard-toolbar h2 { color: var(--navy); font-size: 16px; margin-bottom: 4px; }
+    .dashboard-toolbar p { color: var(--muted); font-size: 13px; }
+    .date-filter { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+    .date-filter .field { min-width: 190px; }
     .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
     .summary-card { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow-sm); border-top: 4px solid var(--teal); }
     .summary-card.amber { border-top-color: var(--amber); }
@@ -21,7 +26,7 @@
     .shortcut strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 5px; }
     .shortcut span { color: var(--muted); font-size: 13px; }
     @media (max-width: 900px) { .summary-grid, .ops-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 640px) { .summary-grid, .ops-shortcuts { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { .summary-grid, .ops-shortcuts { grid-template-columns: 1fr; } .date-filter, .date-filter .field, .date-filter .btn { width: 100%; } }
   </style>
 </head>
 <body>
@@ -50,11 +55,26 @@
       </div>
     </section>
 
+    <section class="dashboard-toolbar" aria-label="Filtro de fecha del panel operativo">
+      <div>
+        <h2>Indicadores por fecha de servicio</h2>
+        <p>Selecciona el día operativo que quieres revisar. Si no eliges fecha, se usa la fecha actual.</p>
+      </div>
+      <form class="date-filter" method="get" action="/admin/operaciones">
+        <div class="field">
+          <label for="fecha">Fecha operativa</label>
+          <input id="fecha" name="fecha" type="date" value="<%= selectedDate %>" />
+        </div>
+        <button class="btn btn-primary" type="submit">Aplicar fecha</button>
+        <a class="btn" href="/admin/operaciones">Hoy</a>
+      </form>
+    </section>
+
     <section class="summary-grid" aria-label="Resumen operativo">
-      <article class="summary-card"><div class="label">Solicitudes del día</div><div class="value">0</div><div class="hint">Registradas para la fecha seleccionada</div></article>
-      <article class="summary-card amber"><div class="label">Pendientes</div><div class="value">0</div><div class="hint">Solicitudes que requieren gestión</div></article>
-      <article class="summary-card green"><div class="label">Asignación completa</div><div class="value">0</div><div class="hint">Servicios con cobertura confirmada</div></article>
-      <article class="summary-card blue"><div class="label">Novedades abiertas</div><div class="value">0</div><div class="hint">Casos operativos en seguimiento</div></article>
+      <article class="summary-card"><div class="label">Solicitudes del día</div><div class="value"><%= metrics?.totalRequests ?? 0 %></div><div class="hint">Servicios programados para la fecha seleccionada</div></article>
+      <article class="summary-card amber"><div class="label">Pendientes</div><div class="value"><%= metrics?.pendingRequests ?? 0 %></div><div class="hint">Solicitudes de esa fecha que requieren asignación</div></article>
+      <article class="summary-card green"><div class="label">Asignación completa</div><div class="value"><%= metrics?.completedRequests ?? 0 %></div><div class="hint">Servicios de esa fecha con cobertura confirmada</div></article>
+      <article class="summary-card blue"><div class="label">Novedades abiertas</div><div class="value"><%= metrics?.openIncidents ?? 0 %></div><div class="hint">Casos operativos abiertos para esa fecha</div></article>
     </section>
 
     <section class="ops-shortcuts" aria-label="Módulos de Operaciones">
