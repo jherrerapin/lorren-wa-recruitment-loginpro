@@ -253,6 +253,20 @@ export function publicDispatchClientRouter() {
     );
   });
 
+  router.post('/admin-delete/solicitudes/:serviceRequestId', requireOps, async (req, res) => {
+    const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } });
+    if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
+
+    return runDelete(
+      res,
+      '/admin/operaciones/asignaciones',
+      `/admin/operaciones/asignaciones?serviceRequestId=${serviceRequest.id}`,
+      () => prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }),
+      'Solicitud eliminada correctamente.',
+      'No fue posible eliminar la solicitud porque tiene asignaciones o dependencias operativas.'
+    );
+  });
+
   router.post('/admin-delete/personal/:workerId', requireOps, async (req, res) => {
     const worker = await prisma.dispatchWorker.findFirst({ where: { id: req.params.workerId, source: 'MANUAL' }, select: { id: true } });
     if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
