@@ -53,7 +53,7 @@ async function buildOperationsDashboardMetrics(prisma, selectedDate) {
     }
   };
 
-  const [totalRequests, pendingRequests, completedRequests] = await Promise.all([
+  const [totalRequests, pendingRequests, completedRequests, openIncidents] = await Promise.all([
     prisma.dispatchServiceRequest.count({ where: whereForDate }),
     prisma.dispatchServiceRequest.count({
       where: {
@@ -66,6 +66,12 @@ async function buildOperationsDashboardMetrics(prisma, selectedDate) {
         ...whereForDate,
         status: 'ASSIGNMENT_COMPLETE'
       }
+    }),
+    prisma.dispatchIncident.count({
+      where: {
+        status: { in: ['OPEN', 'IN_PROGRESS'] },
+        serviceRequest: whereForDate
+      }
     })
   ]);
 
@@ -73,7 +79,7 @@ async function buildOperationsDashboardMetrics(prisma, selectedDate) {
     totalRequests,
     pendingRequests,
     completedRequests,
-    openIncidents: 0
+    openIncidents
   };
 }
 
