@@ -103,7 +103,6 @@ enum AttachmentClassification {
 enum CitySourceModule {
   RECRUITMENT
   DISPATCH
-  ADMIN
 }
 model City {
   id              String           @id @default(cuid())
