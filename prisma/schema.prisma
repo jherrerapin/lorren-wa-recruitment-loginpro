@@ -105,15 +105,19 @@ enum CitySourceModule {
   DISPATCH
 }
 model City {
-  id              String           @id @default(cuid())
-  name            String           @unique
-  sourceModule    CitySourceModule @default(RECRUITMENT)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  operations      Operation[]
-  dispatchWorkers DispatchWorkerCity[]
+  id                 String           @id @default(cuid())
+  name               String           @unique
+  sourceModule       CitySourceModule @default(RECRUITMENT)
+  usedForRecruitment Boolean          @default(false)
+  usedForDispatch    Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  operations         Operation[]
+  dispatchWorkers    DispatchWorkerCity[]
 
   @@index([sourceModule])
+  @@index([usedForRecruitment])
+  @@index([usedForDispatch])
 }
 
 model Operation {
