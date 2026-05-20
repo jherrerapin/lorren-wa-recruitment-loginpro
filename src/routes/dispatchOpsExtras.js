@@ -2,6 +2,8 @@ import express from 'express';
 
 const TEMPLATE_KEY = 'DISPATCH_ASSIGNMENT_WHATSAPP';
 const DEFAULT_ASSIGNMENT_TEMPLATE = 'Hola {{nombre}}, te confirmamos asignacion para {{fecha}} en {{operacion}}. Direccion: {{direccion}}. Horario: {{horaInicio}} - {{horaFin}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
+const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
+const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 
 function normalizeString(value) { if (typeof value !== 'string') return null; const trimmed = value.trim(); return trimmed.length ? trimmed : null; }
 function isOpsUser(req) { const username = normalizeString(req.session?.username || req.username); return Boolean(username?.startsWith('operaciones-despacho')); }
@@ -14,6 +16,20 @@ function buildUtcDayRange(dateText) { const start = new Date(`${dateText}T00:00:
 function serviceRequestServiceData(service) { return { serviceId: service?.id || null, serviceName: service?.name || null }; }
 async function resolveDispatchService(prisma, serviceId) { const normalizedServiceId = normalizeString(serviceId); if (!normalizedServiceId) return null; return prisma.dispatchClientService.findFirst({ where: { id: normalizedServiceId, isActive: true }, include: { client: true } }); }
 async function getTemplate(prisma) { const template = await prisma.dispatchMessageTemplate.findUnique({ where: { key: TEMPLATE_KEY } }); return template?.content || DEFAULT_ASSIGNMENT_TEMPLATE; }
+
+async function recalculateServiceRequestStatus(prisma, serviceRequestId) {
+  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } });
+  if (!serviceRequest) return;
+  const [activeCount, confirmedCount] = await Promise.all([
+    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }),
+    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: CONFIRMED_ASSIGNMENT_STATUS } })
+  ]);
+  let status = 'PENDING_ASSIGNMENT';
+  if (confirmedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
+  else if (activeCount >= serviceRequest.requiredWorkers) status = 'PENDING_CONFIRMATION';
+  else if (activeCount > 0) status = 'ASSIGNMENT_PARTIAL';
+  await prisma.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
+}
 
 export function dispatchOpsExtrasRouter(prisma) {
   const router = express.Router();
@@ -41,6 +57,58 @@ export function dispatchOpsExtrasRouter(prisma) {
     if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
     await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } });
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`);
+  });
+
+  router.post('/asignaciones/assign', requireOps, async (req, res) => {
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    const workerId = normalizeString(req.body.workerId);
+    if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos');
+    const [serviceRequest, worker] = await Promise.all([
+      prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }),
+      prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })
+    ]);
+    if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado');
+    const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } });
+    if (activeCount >= serviceRequest.requiredWorkers) {
+      await recalculateServiceRequestStatus(prisma, serviceRequestId);
+      return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmación de los auxiliares.'));
+    }
+    const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } });
+    if (existing) {
+      if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya está asignado a esta solicitud.'));
+      await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } });
+    } else {
+      await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } });
+    }
+    await recalculateServiceRequestStatus(prisma, serviceRequestId);
+    return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmación.'));
+  });
+
+  router.post('/asignaciones/confirmar', requireOps, async (req, res) => {
+    const assignmentId = normalizeString(req.body.assignmentId);
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos');
+    await prisma.dispatchAssignment.update({ where: { id: assignmentId }, data: { status: 'CONFIRMED', notes: normalizeString(req.body.notes) } });
+    await recalculateServiceRequestStatus(prisma, serviceRequestId);
+    return res.redirect(redirectToAssignment(serviceRequestId, 'Confirmación registrada.'));
+  });
+
+  router.post('/asignaciones/no-confirmado', requireOps, async (req, res) => {
+    const assignmentId = normalizeString(req.body.assignmentId);
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos');
+    await prisma.dispatchAssignment.update({ where: { id: assignmentId }, data: { status: 'NO_CONFIRMO', notes: normalizeString(req.body.notes) || 'El auxiliar no confirmó la asignación.' } });
+    await recalculateServiceRequestStatus(prisma, serviceRequestId);
+    return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar marcado como no confirmado. Debes asignar reemplazo.'));
+  });
+
+  router.post('/asignaciones/unassign', requireOps, async (req, res) => {
+    const assignmentId = normalizeString(req.body.assignmentId);
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos');
+    await prisma.dispatchAssignment.delete({ where: { id: assignmentId } });
+    await recalculateServiceRequestStatus(prisma, serviceRequestId);
+    return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar retirado de la solicitud.'));
   });
 
   router.get('/novedades', requireOps, async (req, res) => {
