@@ -29,6 +29,16 @@ async function resolveCompatibleOperationalCityIds(prisma, operationalCityId) {
   const compatibleIds = cities.filter((city) => isBogotaSiberiaName(city.name)).map((city) => city.id);
   return compatibleIds.length ? compatibleIds : [selectedCity.id];
 }
+async function loadActiveClientsForServiceRequestForm(prisma) {
+  return prisma.dispatchClient.findMany({
+    where: { isActive: true },
+    include: {
+      operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } },
+      services: { where: { isActive: true }, orderBy: { name: 'asc' } }
+    },
+    orderBy: { name: 'asc' }
+  });
+}
 
 async function recalculateServiceRequestStatus(prisma, serviceRequestId) {
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } });
@@ -59,7 +69,7 @@ export function dispatchOpsExtrasRouter(prisma) {
       prisma.dispatchWorker.findMany({ select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }),
       prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }),
       prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }),
-      prisma.dispatchClient.findMany({ where: { isActive: true }, include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } }, services: { where: { isActive: true }, orderBy: { name: 'asc' } } }, orderBy: { name: 'asc' } })
+      loadActiveClientsForServiceRequestForm(prisma)
     ]);
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
     const blockedWorkerIds = new Set(selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []);
@@ -70,18 +80,35 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.get('/solicitudes', requireOps, async (req, res) => {
     const [serviceRequests, clients] = await Promise.all([
       prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }),
-      prisma.dispatchClient.findMany({ where: { isActive: true }, include: { services: { where: { isActive: true }, orderBy: { name: 'asc' } } }, orderBy: { name: 'asc' } })
+      loadActiveClientsForServiceRequestForm(prisma)
     ]);
     return res.render('operacionesSolicitudes', { serviceRequests, clients, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message), today: todayIsoDate() });
   });
 
   router.post('/solicitudes', requireOps, async (req, res) => {
-    const selectedService = await resolveDispatchService(prisma, req.body.serviceId);
-    const clientName = selectedService?.client?.name || normalizeString(req.body.clientName);
+    const clientId = normalizeString(req.body.clientId);
+    const operationPointId = normalizeString(req.body.operationPointId);
+    const serviceId = normalizeString(req.body.serviceId);
     const serviceDateRaw = normalizeString(req.body.serviceDate);
     const requiredWorkersRaw = Number(req.body.requiredWorkers);
-    if (!clientName || !serviceDateRaw || !Number.isFinite(requiredWorkersRaw) || requiredWorkersRaw < 1) return res.status(400).send('Datos invalidos para crear solicitud de servicio');
-    const created = await prisma.dispatchServiceRequest.create({ data: { clientName, operationPointName: normalizeString(req.body.operationPointName), cityName: normalizeString(req.body.cityName), address: normalizeString(req.body.address), ...serviceRequestServiceData(selectedService), serviceDate: new Date(serviceDateRaw), startTime: normalizeString(req.body.startTime), endTime: normalizeString(req.body.endTime), requiredWorkers: Math.max(1, Math.trunc(requiredWorkersRaw)), notes: normalizeString(req.body.notes), status: 'PENDING_ASSIGNMENT', source: 'INTERNAL', createdByUsername: req.session?.username || req.username || null } });
+    if (!clientId || !operationPointId || !serviceDateRaw || !Number.isFinite(requiredWorkersRaw) || requiredWorkersRaw < 1) return res.status(400).send('Selecciona cliente, punto de operación, fecha y cantidad válida de auxiliares.');
+
+    const client = await prisma.dispatchClient.findFirst({
+      where: { id: clientId, isActive: true },
+      include: {
+        operationPoints: { where: { isActive: true } },
+        services: { where: { isActive: true } }
+      }
+    });
+    if (!client) return res.status(404).send('Cliente no encontrado o inactivo.');
+
+    const operationPoint = client.operationPoints.find((item) => item.id === operationPointId);
+    if (!operationPoint) return res.status(400).send('Debes seleccionar una operación válida para el cliente.');
+
+    const selectedService = serviceId ? client.services.find((item) => item.id === serviceId) || null : null;
+    if (client.services.length && !selectedService) return res.status(400).send('Debes seleccionar un servicio válido para el cliente.');
+
+    const created = await prisma.dispatchServiceRequest.create({ data: { operationPointId: operationPoint.id, clientName: client.name, operationPointName: operationPoint.name, cityName: operationPoint.cityName || client.cityName, address: operationPoint.address || normalizeString(req.body.address), ...serviceRequestServiceData(selectedService), serviceDate: new Date(serviceDateRaw), startTime: normalizeString(req.body.startTime), endTime: normalizeString(req.body.endTime), requiredWorkers: Math.max(1, Math.trunc(requiredWorkersRaw)), notes: normalizeString(req.body.notes), status: 'PENDING_ASSIGNMENT', source: 'INTERNAL', createdByUsername: req.session?.username || req.username || null } });
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud creada.')}&created=${created.id}`);
   });
 
