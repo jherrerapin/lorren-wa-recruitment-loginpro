@@ -15,7 +15,6 @@
       --red: #dc2626; --red-light: #fee2e2;
       --green: #16a34a; --green-light: #dcfce7;
       --amber: #b45309; --amber-light: #fef3c7;
-      --blue: #1d4ed8; --blue-light: #dbeafe;
       --gray-light: #f3f4f6;
       --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
       --radius: 8px; --radius-lg: 12px;
@@ -58,49 +57,26 @@
     .city-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
     .city-card[data-source="DISPATCH"] { border-left: 5px solid var(--amber); }
     .city-card[data-source="RECRUITMENT"] { border-left: 5px solid var(--teal); }
-    .city-card[data-source="ADMIN"] { border-left: 5px solid var(--blue); }
-    .city-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 18px; background: var(--surface-2);
-      border-bottom: 1px solid var(--border-soft);
-    }
+    .city-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: var(--surface-2); border-bottom: 1px solid var(--border-soft); }
     .city-name { font-size: 15px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .city-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .source-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 800; }
     .source-badge.RECRUITMENT { background: var(--teal-light); color: var(--teal); }
     .source-badge.DISPATCH { background: var(--amber-light); color: var(--amber); }
-    .source-badge.ADMIN { background: var(--blue-light); color: var(--blue); }
     .ops-list { padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
-    .op-row {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 9px 12px; border-radius: var(--radius);
-      background: var(--surface-2); border: 1px solid var(--border-soft);
-    }
+    .op-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--border-soft); }
     .op-name { font-size: 13px; font-weight: 600; color: var(--text); }
     .op-sub  { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
     .op-actions { display: flex; gap: 5px; }
     .add-op-row { padding: 8px 18px 14px; }
     .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .inline-form input, .inline-form select {
-      border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
-      font-size: 13px; font-family: var(--font); color: var(--text);
-      background: var(--surface); outline: none; flex: 1; min-width: 160px;
-      transition: border-color .15s, box-shadow .15s;
-    }
+    .inline-form input, .inline-form select { border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: var(--font); color: var(--text); background: var(--surface); outline: none; flex: 1; min-width: 160px; transition: border-color .15s, box-shadow .15s; }
     .inline-form input:focus, .inline-form select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
-    .add-city-card {
-      background: var(--surface); border: 2px dashed var(--border);
-      border-radius: var(--radius-lg); padding: 16px 18px;
-    }
+    .add-city-card { background: var(--surface); border: 2px dashed var(--border); border-radius: var(--radius-lg); padding: 16px 18px; }
     .add-city-title { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; }
     .empty-ops { font-size: 12px; color: var(--text-faint); padding: 8px 0 0 2px; font-style: italic; }
     .empty-section { background: var(--surface); border: 1px dashed var(--border); color: var(--text-muted); border-radius: var(--radius-lg); padding: 18px; font-size: 13px; }
-    .badge-count {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 20px; height: 20px; border-radius: 50%;
-      background: var(--teal-light); color: var(--teal);
-      font-size: 11px; font-weight: 700;
-    }
+    .badge-count { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--teal-light); color: var(--teal); font-size: 11px; font-weight: 700; }
     @media (max-width: 600px) {
       .city-header, .source-header { flex-direction: column; align-items: flex-start; gap: 8px; }
       .inline-form { flex-direction: column; align-items: stretch; }
@@ -111,39 +87,26 @@
 <body>
 
 <nav class="navbar">
-  <a class="brand" href="/admin" aria-label="LoginPro">
-    <img src="/public/logo-loginpro.svg" alt="LoginPro" />
-  </a>
+  <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
   <a href="/admin">Panel</a>
   <a href="/admin/vacancies">Vacantes</a>
   <a href="/admin/locations" class="nav-active">Ciudades</a>
-  <% if (role === 'dev' || canAccessDispatch) { %>
-    <a href="/admin/operaciones">Operaciones / Despacho</a>
-  <% } %>
-  <% if (role === 'dev') { %>
-    <a href="/admin/monitor">Monitor</a>
-  <% } %>
+  <% if (role === 'dev' || canAccessDispatch) { %><a href="/admin/operaciones">Operaciones / Despacho</a><% } %>
+  <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
   <span class="spacer"></span>
-  <form method="post" action="/logout">
-    <button type="submit" class="btn-logout">Cerrar sesión</button>
-  </form>
+  <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
 </nav>
 
 <div class="page">
-
   <div class="page-header">
     <div>
       <h1>🏙️ Ciudades y Operaciones</h1>
-      <p class="sub">Gestiona la jerarquía Ciudad → Operación/Zona. Las ciudades ahora se separan por origen para no mezclar bot, despacho y administración.</p>
+      <p class="sub">Gestiona la jerarquía Ciudad → Operación/Zona. Las ciudades se separan por origen: bot/reclutamiento o despacho.</p>
     </div>
   </div>
 
-  <% if (successMsg) { %>
-    <div class="alert alert-success">✅ <%= successMsg %></div>
-  <% } %>
-  <% if (errorMsg) { %>
-    <div class="alert alert-error">⚠️ <%= errorMsg %></div>
-  <% } %>
+  <% if (successMsg) { %><div class="alert alert-success">✅ <%= successMsg %></div><% } %>
+  <% if (errorMsg) { %><div class="alert alert-error">⚠️ <%= errorMsg %></div><% } %>
 
   <div class="source-tabs">
     <% for (const section of citySections) { %>
@@ -155,20 +118,14 @@
     <section class="source-section" id="section-<%= section.sourceModule %>">
       <div class="source-header">
         <div>
-          <div class="source-title">
-            <% if (section.sourceModule === 'DISPATCH') { %>🚚<% } else if (section.sourceModule === 'ADMIN') { %>⚙️<% } else { %>🤖<% } %>
-            <%= section.label %>
-          </div>
+          <div class="source-title"><%= section.sourceModule === 'DISPATCH' ? '🚚' : '🤖' %> <%= section.label %></div>
           <p class="source-description"><%= section.description %></p>
         </div>
         <span class="source-count"><%= section.cities.length %> ciudad<%= section.cities.length !== 1 ? 'es' : '' %></span>
       </div>
 
       <div class="city-list">
-        <% if (section.cities.length === 0) { %>
-          <div class="empty-section">No hay ciudades clasificadas en este origen.</div>
-        <% } %>
-
+        <% if (section.cities.length === 0) { %><div class="empty-section">No hay ciudades clasificadas en este origen.</div><% } %>
         <% for (const city of section.cities) { %>
         <div class="city-card" data-source="<%= city.sourceModule %>">
           <div class="city-header">
@@ -178,12 +135,9 @@
               <span class="badge-count" title="Operaciones"><%= city.operations.length %></span>
             </div>
             <div class="city-actions">
-              <button class="btn btn-secondary btn-sm" onclick="toggleEditCity('<%= city.id %>')">
-                ✏️ Editar
-              </button>
+              <button class="btn btn-secondary btn-sm" onclick="toggleEditCity('<%= city.id %>')">✏️ Editar</button>
               <% if (city.operations.length === 0) { %>
-              <form method="post" action="/admin/locations/cities/<%= city.id %>/delete"
-                    onsubmit="return confirm('¿Eliminar ciudad <%= city.name %>? Esta acción no se puede deshacer.')">
+              <form method="post" action="/admin/locations/cities/<%= city.id %>/delete" onsubmit="return confirm('¿Eliminar ciudad <%= city.name %>? Esta acción no se puede deshacer.')">
                 <button type="submit" class="btn btn-danger btn-sm">🗑️ Eliminar</button>
               </form>
               <% } %>
@@ -194,9 +148,7 @@
             <form method="post" action="/admin/locations/cities/<%= city.id %>/edit" class="inline-form">
               <input type="text" name="name" value="<%= city.name %>" required placeholder="Nombre ciudad" />
               <select name="sourceModule" required aria-label="Origen de la ciudad">
-                <% for (const source of citySourceOrder) { %>
-                  <option value="<%= source %>" <%= city.sourceModule === source ? 'selected' : '' %>><%= citySourceLabels[source] %></option>
-                <% } %>
+                <% for (const source of citySourceOrder) { %><option value="<%= source %>" <%= city.sourceModule === source ? 'selected' : '' %>><%= citySourceLabels[source] %></option><% } %>
               </select>
               <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
               <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditCity('<%= city.id %>')">Cancelar</button>
@@ -204,9 +156,7 @@
           </div>
 
           <div class="ops-list">
-            <% if (city.operations.length === 0) { %>
-              <p class="empty-ops">Sin operaciones. Agrega la primera abajo.</p>
-            <% } %>
+            <% if (city.operations.length === 0) { %><p class="empty-ops">Sin operaciones. Agrega la primera abajo.</p><% } %>
             <% for (const op of city.operations) { %>
             <div class="op-row">
               <div>
@@ -216,8 +166,7 @@
               <div class="op-actions">
                 <button class="btn btn-secondary btn-xs" onclick="toggleEditOp('<%= op.id %>')">✏️</button>
                 <% if ((op._count?.vacancies || 0) === 0) { %>
-                <form method="post" action="/admin/locations/operations/<%= op.id %>/delete" style="display:inline;"
-                      onsubmit="return confirm('¿Eliminar operación <%= op.name %>?')">
+                <form method="post" action="/admin/locations/operations/<%= op.id %>/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar operación <%= op.name %>?')">
                   <button type="submit" class="btn btn-danger btn-xs">🗑️</button>
                 </form>
                 <% } %>
@@ -252,12 +201,10 @@
       <select name="sourceModule" required aria-label="Origen de la ciudad">
         <option value="RECRUITMENT">Bot / Reclutamiento</option>
         <option value="DISPATCH">Despacho</option>
-        <option value="ADMIN">Administración</option>
       </select>
       <button type="submit" class="btn btn-primary">Crear ciudad</button>
     </form>
   </div>
-
 </div>
 
 <script>
