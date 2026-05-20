@@ -227,9 +227,14 @@ export function publicDispatchClientRouter() {
 
   router.get('/api/ciudades', requireOps, async (_req, res) => {
     const cities = await prisma.city.findMany({
-      where: { usedForRecruitment: true },
+      where: {
+        OR: [
+          { usedForRecruitment: true },
+          { usedForDispatch: true }
+        ]
+      },
       orderBy: { name: 'asc' },
-      select: { id: true, name: true }
+      select: { id: true, name: true, usedForRecruitment: true, usedForDispatch: true }
     });
     return res.json({ cities });
   });
