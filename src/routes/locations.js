@@ -1,6 +1,20 @@
 // routes/locations.js — CRUD de Ciudad y Operación
 import express from 'express';
 
+const CITY_SOURCE_ORDER = ['RECRUITMENT', 'DISPATCH', 'ADMIN'];
+
+const CITY_SOURCE_LABELS = {
+  RECRUITMENT: 'Bot / Reclutamiento',
+  DISPATCH: 'Despacho',
+  ADMIN: 'Administración'
+};
+
+const CITY_SOURCE_DESCRIPTIONS = {
+  RECRUITMENT: 'Ciudades usadas por el bot, vacantes y flujo de reclutamiento.',
+  DISPATCH: 'Ciudades creadas para operación, despacho, asignaciones o personal operativo.',
+  ADMIN: 'Ciudades creadas manualmente para parametrización general del board.'
+};
+
 function sessionAuth(req, res, next) {
   const role = req.session?.userRole;
   if (!role) return res.redirect('/login');
@@ -27,6 +41,24 @@ function normalize(v) {
   return s.length ? s : null;
 }
 
+function normalizeCitySourceModule(value, fallback = 'RECRUITMENT') {
+  const normalized = normalize(value)?.toUpperCase();
+  return CITY_SOURCE_ORDER.includes(normalized) ? normalized : fallback;
+}
+
+function citySourceLabel(sourceModule) {
+  return CITY_SOURCE_LABELS[sourceModule] || CITY_SOURCE_LABELS.RECRUITMENT;
+}
+
+function groupCitiesBySource(cities = []) {
+  return CITY_SOURCE_ORDER.map((sourceModule) => ({
+    sourceModule,
+    label: citySourceLabel(sourceModule),
+    description: CITY_SOURCE_DESCRIPTIONS[sourceModule],
+    cities: cities.filter((city) => normalizeCitySourceModule(city.sourceModule) === sourceModule)
+  }));
+}
+
 export function locationsRouter(prisma) {
   const router = express.Router();
   router.use(sessionAuth);
@@ -34,7 +66,7 @@ export function locationsRouter(prisma) {
   // ── GET /admin/locations ────────────────────────────────────
   router.get('/', async (req, res) => {
     const cities = await prisma.city.findMany({
-      orderBy: { name: 'asc' },
+      orderBy: [{ sourceModule: 'asc' }, { name: 'asc' }],
       include: {
         operations: {
           orderBy: { name: 'asc' },
@@ -43,14 +75,22 @@ export function locationsRouter(prisma) {
       }
     });
     const { successMsg, errorMsg } = readFlash(req, res);
-    res.render('locations', { cities, successMsg, errorMsg, role: req.userRole });
+    res.render('locations', {
+      cities,
+      citySections: groupCitiesBySource(cities),
+      citySourceOrder: CITY_SOURCE_ORDER,
+      citySourceLabels: CITY_SOURCE_LABELS,
+      successMsg,
+      errorMsg,
+      role: req.userRole
+    });
   });
 
   // ── API: listar operaciones por ciudad (para selects dinámicos) ─
   router.get('/api/operations', async (req, res) => {
     const operations = await prisma.operation.findMany({
       orderBy: [{ city: { name: 'asc' } }, { name: 'asc' }],
-      include: { city: { select: { name: true } } }
+      include: { city: { select: { name: true, sourceModule: true } } }
     });
     res.json(operations);
   });
@@ -58,13 +98,14 @@ export function locationsRouter(prisma) {
   // ── POST /admin/locations/cities ─── Crear ciudad ──────────
   router.post('/cities', async (req, res) => {
     const name = normalize(req.body.name);
+    const sourceModule = normalizeCitySourceModule(req.body.sourceModule);
     if (!name) {
       flash(res, 'error', 'El nombre de la ciudad no puede estar vacío.');
       return res.redirect('/admin/locations');
     }
     try {
-      await prisma.city.create({ data: { name } });
-      flash(res, 'success', `Ciudad "${name}" creada exitosamente.`);
+      await prisma.city.create({ data: { name, sourceModule } });
+      flash(res, 'success', `Ciudad "${name}" creada exitosamente en ${citySourceLabel(sourceModule)}.`);
     } catch (err) {
       if (err.code === 'P2002') {
         flash(res, 'error', `Ya existe una ciudad con el nombre "${name}".`);
@@ -78,13 +119,14 @@ export function locationsRouter(prisma) {
   // ── POST /admin/locations/cities/:id/edit ─── Renombrar ────
   router.post('/cities/:id/edit', async (req, res) => {
     const name = normalize(req.body.name);
+    const sourceModule = normalizeCitySourceModule(req.body.sourceModule);
     if (!name) {
       flash(res, 'error', 'El nombre no puede estar vacío.');
       return res.redirect('/admin/locations');
     }
     try {
-      await prisma.city.update({ where: { id: req.params.id }, data: { name } });
-      flash(res, 'success', `Ciudad renombrada a "${name}".`);
+      await prisma.city.update({ where: { id: req.params.id }, data: { name, sourceModule } });
+      flash(res, 'success', `Ciudad renombrada a "${name}" y clasificada como ${citySourceLabel(sourceModule)}.`);
     } catch (err) {
       if (err.code === 'P2002') {
         flash(res, 'error', `Ya existe una ciudad con el nombre "${name}".`);

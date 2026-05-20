@@ -99,13 +99,22 @@ enum AttachmentClassification {
   OTHER
   UNREADABLE
 }
+
+enum CitySourceModule {
+  RECRUITMENT
+  DISPATCH
+  ADMIN
+}
 model City {
-  id         String      @id @default(cuid())
-  name       String      @unique
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  operations Operation[]
+  id              String           @id @default(cuid())
+  name            String           @unique
+  sourceModule    CitySourceModule @default(RECRUITMENT)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  operations      Operation[]
   dispatchWorkers DispatchWorkerCity[]
+
+  @@index([sourceModule])
 }
 
 model Operation {
