@@ -1,18 +1,16 @@
 // routes/locations.js — CRUD de Ciudad y Operación
 import express from 'express';
 
-const CITY_SOURCE_ORDER = ['RECRUITMENT', 'DISPATCH', 'ADMIN'];
+const CITY_SOURCE_ORDER = ['RECRUITMENT', 'DISPATCH'];
 
 const CITY_SOURCE_LABELS = {
   RECRUITMENT: 'Bot / Reclutamiento',
-  DISPATCH: 'Despacho',
-  ADMIN: 'Administración'
+  DISPATCH: 'Despacho'
 };
 
 const CITY_SOURCE_DESCRIPTIONS = {
   RECRUITMENT: 'Ciudades usadas por el bot, vacantes y flujo de reclutamiento.',
-  DISPATCH: 'Ciudades creadas para operación, despacho, asignaciones o personal operativo.',
-  ADMIN: 'Ciudades creadas manualmente para parametrización general del board.'
+  DISPATCH: 'Ciudades creadas para operación, despacho, asignaciones o personal operativo.'
 };
 
 function sessionAuth(req, res, next) {
