@@ -47,9 +47,11 @@ function buildUtcDayRange(dateText) {
 async function buildOperationsDashboardMetrics(prisma, selectedDate) {
   const { start, end } = buildUtcDayRange(selectedDate);
   const whereForDate = { serviceDate: { gte: start, lt: end } };
+  const pendingStatuses = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
+
   const [totalRequests, pendingRequests, completedRequests, openIncidents] = await Promise.all([
     prisma.dispatchServiceRequest.count({ where: whereForDate }),
-    prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: { in: ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL'] } } }),
+    prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: { in: pendingStatuses } } }),
     prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: 'ASSIGNMENT_COMPLETE' } }),
     prisma.dispatchIncident.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] }, serviceRequest: whereForDate } })
   ]);
