@@ -6,6 +6,9 @@
   <title>Operaciones de cliente — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
+  </style>
 </head>
 <body>
   <nav class="navbar">
@@ -23,7 +26,7 @@
       <div>
         <div class="eyebrow">Operaciones por cliente</div>
         <h1><%= client.name %></h1>
-        <p>Crea, edita, desactiva o reactiva operaciones y servicios. Comparte el link público del cliente para que seleccione operación y servicio al registrar solicitudes.</p>
+        <p>Un cliente puede tener operaciones en varias ciudades. Cada operación guarda su propia ciudad, dirección y contacto operativo.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/clientes">Volver a clientes</a>
@@ -35,12 +38,12 @@
 
     <section class="grid-2">
       <article class="card">
-        <div class="card-head"><h2>Crear operación / punto</h2><p>Las operaciones se gestionan aquí, pero el link público que se comparte es único por cliente.</p></div>
+        <div class="card-head"><h2>Crear operación / punto</h2><p>Selecciona la ciudad operativa del punto. Luego las solicitudes usarán esa ciudad y dirección automáticamente.</p></div>
         <div class="card-body">
           <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones">
             <div class="form-grid">
               <div class="field full"><label for="name">Nombre de la operación</label><input id="name" name="name" required placeholder="Ej: Bodega Siberia" /></div>
-              <div class="field"><label for="cityName">Ciudad</label><input id="cityName" name="cityName" placeholder="Bogotá, Siberia, Neiva..." /></div>
+              <div class="field"><label for="cityName">Ciudad</label><select id="cityName" name="cityName" class="city-select" required><option value="">Cargando ciudades...</option></select></div>
               <div class="field"><label for="address">Dirección</label><input id="address" name="address" placeholder="Dirección del punto" /></div>
               <div class="field"><label for="contactName">Contacto operativo</label><input id="contactName" name="contactName" placeholder="Nombre del encargado" /></div>
               <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" placeholder="Número de contacto" /></div>
@@ -53,7 +56,7 @@
       </article>
 
       <article class="card">
-        <div class="card-head"><h2>Operaciones registradas</h2><p>Los links antiguos por operación se mantienen temporalmente y redirigen al formulario del cliente.</p></div>
+        <div class="card-head"><h2>Operaciones registradas</h2><p>El link público es único por cliente. En ese formulario se elige la operación y el servicio.</p></div>
         <div class="card-body">
           <% const clientLink = baseUrl + '/operaciones/cliente/' + client.publicToken; %>
           <div class="copy-row" style="margin-bottom:16px;">
@@ -75,7 +78,7 @@
                   <details class="crud-details"><summary>Editar operación</summary>
                     <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/editar" class="form-grid compact-form">
                       <div class="field full"><label>Nombre</label><input name="name" required value="<%= op.name %>" /></div>
-                      <div class="field"><label>Ciudad</label><input name="cityName" value="<%= op.cityName || '' %>" /></div>
+                      <div class="field"><label>Ciudad</label><select name="cityName" class="city-select" data-selected-city="<%= op.cityName || '' %>"><option value="">Cargando ciudades...</option></select></div>
                       <div class="field"><label>Dirección</label><input name="address" value="<%= op.address || '' %>" /></div>
                       <div class="field"><label>Contacto</label><input name="contactName" value="<%= op.contactName || '' %>" /></div>
                       <div class="field"><label>Teléfono</label><input name="contactPhone" value="<%= op.contactPhone || '' %>" /></div>
@@ -144,5 +147,43 @@
       </article>
     </section>
   </main>
+
+  <script>
+    function refreshSelectState(select) { select.classList.toggle('has-selection', Boolean(select.value)); }
+    async function loadCityOptions() {
+      const selects = Array.from(document.querySelectorAll('.city-select'));
+      if (!selects.length) return;
+      try {
+        const response = await fetch('/operaciones/api/ciudades');
+        if (!response.ok) return;
+        const data = await response.json();
+        selects.forEach((select) => {
+          const selectedCity = select.dataset.selectedCity || select.value || '';
+          select.innerHTML = '<option value="">Selecciona una ciudad</option>';
+          data.cities.forEach((city) => {
+            const option = document.createElement('option');
+            option.value = city.name;
+            option.textContent = `${city.name}${city.usedForRecruitment && city.usedForDispatch ? ' — Bot y Despacho' : city.usedForDispatch ? ' — Despacho' : ' — Bot'}`;
+            select.appendChild(option);
+          });
+          if (selectedCity) {
+            const exists = Array.from(select.options).some((option) => option.value === selectedCity);
+            if (!exists) {
+              const option = document.createElement('option');
+              option.value = selectedCity;
+              option.textContent = `${selectedCity} — no configurada`;
+              select.appendChild(option);
+            }
+            select.value = selectedCity;
+          }
+          refreshSelectState(select);
+          select.addEventListener('change', () => refreshSelectState(select));
+        });
+      } catch (error) {
+        console.error('No fue posible cargar ciudades', error);
+      }
+    }
+    loadCityOptions();
+  </script>
 </body>
 </html>
