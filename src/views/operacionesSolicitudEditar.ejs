@@ -6,6 +6,11 @@
   <title>Editar solicitud — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .readonly-field { background: #f8fafc; color: var(--muted); cursor: not-allowed; }
+    .select-hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
+  </style>
 </head>
 <body>
   <nav class="navbar">
@@ -23,7 +28,7 @@
       <div>
         <div class="eyebrow">Solicitudes de servicio</div>
         <h1>Editar solicitud</h1>
-        <p>Actualiza los datos operativos de la solicitud antes o durante el proceso de asignación.</p>
+        <p>Actualiza la solicitud seleccionando cliente, operación y servicio desde datos ya registrados. Ciudad y dirección se heredan de la operación.</p>
       </div>
       <div class="actions"><a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= serviceRequest.id %>">Volver a asignación</a></div>
     </section>
@@ -33,16 +38,38 @@
       <div class="card-body">
         <form method="post" action="/admin/operaciones/asignaciones/solicitudes/<%= serviceRequest.id %>/editar">
           <div class="form-grid">
-            <div class="field"><label for="clientName">Cliente</label><input id="clientName" name="clientName" value="<%= serviceRequest.clientName %>" required /></div>
-            <div class="field"><label for="operationPointName">Operación / punto</label><input id="operationPointName" name="operationPointName" value="<%= serviceRequest.operationPointName || '' %>" /></div>
-            <div class="field"><label for="serviceId">Servicio del cliente</label><select id="serviceId" name="serviceId"><option value="">Sin servicio</option><% clients.forEach((client)=>{ if (client.services.length) { %><optgroup label="<%= client.name %>"><% client.services.forEach((service)=>{ %><option value="<%= service.id %>" <%= serviceRequest.serviceId===service.id?'selected':'' %>><%= service.name %></option><% }) %></optgroup><% } }) %></select><% if (serviceRequest.serviceName && !serviceRequest.serviceId) { %><div class="muted">Servicio actual: <%= serviceRequest.serviceName %></div><% } %></div>
-            <div class="field"><label for="cityName">Ciudad</label><input id="cityName" name="cityName" value="<%= serviceRequest.cityName || '' %>" /></div>
-            <div class="field"><label for="address">Dirección</label><input id="address" name="address" value="<%= serviceRequest.address || '' %>" /></div>
+            <div class="field">
+              <label for="clientId">Cliente</label>
+              <select id="clientId" name="clientId" required data-current-client-name="<%= serviceRequest.clientName || '' %>">
+                <option value="">Selecciona un cliente</option>
+                <% clients.forEach((client)=>{ const selectedByOperation = client.operationPoints.some((operation)=>operation.id === serviceRequest.operationPointId); const selectedByName = !serviceRequest.operationPointId && client.name === serviceRequest.clientName; %>
+                  <option value="<%= client.id %>" <%= selectedByOperation || selectedByName ? 'selected' : '' %>><%= client.name %></option>
+                <% }) %>
+              </select>
+              <p class="select-hint">El cliente define las operaciones y servicios disponibles.</p>
+            </div>
+            <div class="field">
+              <label for="operationPointId">Operación / punto</label>
+              <select id="operationPointId" name="operationPointId" required data-selected-operation="<%= serviceRequest.operationPointId || '' %>">
+                <option value="">Selecciona primero un cliente</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="serviceId">Servicio del cliente</label>
+              <select id="serviceId" name="serviceId" data-selected-service="<%= serviceRequest.serviceId || '' %>">
+                <option value="">Selecciona primero un cliente</option>
+              </select>
+              <% if (serviceRequest.serviceName && !serviceRequest.serviceId) { %><div class="muted">Servicio anterior: <%= serviceRequest.serviceName %></div><% } %>
+            </div>
+            <div class="field"><label for="cityNameDisplay">Ciudad</label><input id="cityNameDisplay" class="readonly-field" readonly value="<%= serviceRequest.cityName || '' %>" placeholder="Se carga desde la operación" /></div>
+            <div class="field"><label for="addressDisplay">Dirección</label><input id="addressDisplay" class="readonly-field" readonly value="<%= serviceRequest.address || '' %>" placeholder="Se carga desde la operación" /></div>
+            <input type="hidden" id="cityName" name="cityName" value="<%= serviceRequest.cityName || '' %>" />
+            <input type="hidden" id="address" name="address" value="<%= serviceRequest.address || '' %>" />
             <div class="field"><label for="serviceDate">Fecha servicio</label><input id="serviceDate" type="date" name="serviceDate" value="<%= new Date(serviceRequest.serviceDate).toISOString().slice(0,10) %>" required /></div>
             <div class="field"><label for="requiredWorkers">Auxiliares requeridos</label><input id="requiredWorkers" type="number" name="requiredWorkers" min="1" value="<%= serviceRequest.requiredWorkers %>" required /></div>
-            <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" name="startTime" value="<%= serviceRequest.startTime || '' %>" placeholder="Ej: 08:00" /></div>
-            <div class="field"><label for="endTime">Hora fin</label><input id="endTime" name="endTime" value="<%= serviceRequest.endTime || '' %>" placeholder="Ej: 17:00" /></div>
-            <div class="field"><label for="status">Estado</label><input id="status" name="status" value="<%= serviceRequest.status %>" /></div>
+            <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" type="time" name="startTime" value="<%= serviceRequest.startTime || '' %>" /></div>
+            <div class="field"><label for="endTime">Hora fin</label><input id="endTime" type="time" name="endTime" value="<%= serviceRequest.endTime || '' %>" /></div>
+            <div class="field"><label for="status">Estado</label><select id="status" name="status"><option value="PENDING_ASSIGNMENT" <%= serviceRequest.status === 'PENDING_ASSIGNMENT' ? 'selected' : '' %>>Pendiente de asignación</option><option value="ASSIGNMENT_PARTIAL" <%= serviceRequest.status === 'ASSIGNMENT_PARTIAL' ? 'selected' : '' %>>Asignación parcial</option><option value="PENDING_CONFIRMATION" <%= serviceRequest.status === 'PENDING_CONFIRMATION' ? 'selected' : '' %>>Pendiente de confirmación</option><option value="ASSIGNMENT_COMPLETE" <%= serviceRequest.status === 'ASSIGNMENT_COMPLETE' ? 'selected' : '' %>>Asignación completa</option><option value="CANCELLED" <%= serviceRequest.status === 'CANCELLED' ? 'selected' : '' %>>Cancelada</option></select></div>
             <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes"><%= serviceRequest.notes || '' %></textarea></div>
           </div>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar cambios</button><a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= serviceRequest.id %>">Cancelar</a></div>
@@ -50,5 +77,85 @@
       </div>
     </section>
   </main>
+
+  <script type="application/json" id="clients-data"><%- JSON.stringify(clients.map((client) => ({ id: client.id, name: client.name, cityName: client.cityName, operationPoints: client.operationPoints || [], services: client.services || [] }))) %></script>
+  <script>
+    const clientsData = JSON.parse(document.getElementById('clients-data').textContent || '[]');
+    const clientSelect = document.getElementById('clientId');
+    const operationSelect = document.getElementById('operationPointId');
+    const serviceSelect = document.getElementById('serviceId');
+    const cityDisplay = document.getElementById('cityNameDisplay');
+    const addressDisplay = document.getElementById('addressDisplay');
+    const cityInput = document.getElementById('cityName');
+    const addressInput = document.getElementById('address');
+    const selectedOperationId = operationSelect.dataset.selectedOperation || '';
+    const selectedServiceId = serviceSelect.dataset.selectedService || '';
+
+    function setSelectState(select) { select.classList.toggle('has-selection', Boolean(select.value)); }
+    function currentClient() { return clientsData.find((item) => item.id === clientSelect.value) || null; }
+    function fillOperationOptions(client, preferredOperationId = '') {
+      operationSelect.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = client ? 'Selecciona un punto de operación' : 'Selecciona primero un cliente';
+      operationSelect.appendChild(placeholder);
+      (client?.operationPoints || []).forEach((operation) => {
+        const option = document.createElement('option');
+        option.value = operation.id;
+        option.textContent = `${operation.name}${operation.cityName ? ' — ' + operation.cityName : ''}`;
+        option.dataset.city = operation.cityName || client.cityName || '';
+        option.dataset.address = operation.address || '';
+        operationSelect.appendChild(option);
+      });
+      operationSelect.disabled = !client || !(client.operationPoints || []).length;
+      if (preferredOperationId) operationSelect.value = preferredOperationId;
+      setSelectState(operationSelect);
+    }
+    function fillServiceOptions(client, preferredServiceId = '') {
+      serviceSelect.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = client ? ((client.services || []).length ? 'Selecciona un servicio' : 'Cliente sin servicios configurados') : 'Selecciona primero un cliente';
+      serviceSelect.appendChild(placeholder);
+      (client?.services || []).forEach((service) => {
+        const option = document.createElement('option');
+        option.value = service.id;
+        option.textContent = service.name;
+        serviceSelect.appendChild(option);
+      });
+      serviceSelect.disabled = !client || !(client.services || []).length;
+      serviceSelect.required = Boolean(client && (client.services || []).length);
+      if (preferredServiceId) serviceSelect.value = preferredServiceId;
+      setSelectState(serviceSelect);
+    }
+    function syncOperationData() {
+      const option = operationSelect.selectedOptions[0];
+      const city = option?.dataset.city || '';
+      const address = option?.dataset.address || '';
+      cityDisplay.value = city;
+      addressDisplay.value = address;
+      cityInput.value = city;
+      addressInput.value = address;
+      setSelectState(operationSelect);
+    }
+    clientSelect?.addEventListener('change', () => {
+      const client = currentClient();
+      fillOperationOptions(client);
+      fillServiceOptions(client);
+      cityDisplay.value = '';
+      addressDisplay.value = '';
+      cityInput.value = '';
+      addressInput.value = '';
+      [clientSelect, operationSelect, serviceSelect].forEach(setSelectState);
+    });
+    operationSelect?.addEventListener('change', syncOperationData);
+    serviceSelect?.addEventListener('change', () => setSelectState(serviceSelect));
+
+    const initialClient = currentClient();
+    fillOperationOptions(initialClient, selectedOperationId);
+    fillServiceOptions(initialClient, selectedServiceId);
+    if (selectedOperationId && operationSelect.value === selectedOperationId) syncOperationData();
+    [clientSelect, operationSelect, serviceSelect, document.getElementById('status')].forEach((select) => select && setSelectState(select));
+  </script>
 </body>
 </html>
