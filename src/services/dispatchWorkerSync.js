@@ -1,3 +1,5 @@
+import { normalizeTransportMode } from './transportMode.js';
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -24,6 +26,8 @@ export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
 
   if (!candidate) return null;
 
+  const normalizedTransportMode = normalizeTransportMode(candidate.transportMode);
+
   const worker = await prisma.dispatchWorker.upsert({
     where: { candidateId: candidate.id },
     create: {
@@ -34,7 +38,7 @@ export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
       documentNumber: normalizeString(candidate.documentNumber),
       residenceCity: normalizeString(candidate.zone) || normalizeString(candidate.vacancy?.city),
       residenceLocality: normalizeString(candidate.locality) || normalizeString(candidate.neighborhood),
-      transportMode: normalizeString(candidate.transportMode),
+      transportMode: normalizedTransportMode,
       source: 'CANDIDATE',
       operationalStatus: 'ACTIVE'
     },
@@ -45,7 +49,7 @@ export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
       documentNumber: normalizeString(candidate.documentNumber),
       residenceCity: normalizeString(candidate.zone) || normalizeString(candidate.vacancy?.city),
       residenceLocality: normalizeString(candidate.locality) || normalizeString(candidate.neighborhood),
-      transportMode: normalizeString(candidate.transportMode),
+      transportMode: normalizedTransportMode,
       source: 'CANDIDATE',
       operationalStatus: 'ACTIVE'
     }
