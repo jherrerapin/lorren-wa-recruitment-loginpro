@@ -377,32 +377,36 @@ model DispatchWorker {
 }
 
 model DispatchServiceRequest {
-  id                 String               @id @default(cuid())
-  clientName         String
-  operationPointName String?
-  cityName           String?
-  address            String?
-  serviceDate        DateTime
-  startTime          String?
-  endTime            String?
-  requiredWorkers    Int                  @default(1)
-  status             String               @default("PENDING_ASSIGNMENT")
-  notes              String?
-  createdByUsername  String?
-  operationPointId   String?
-  operationPoint     DispatchOperationPoint? @relation(fields: [operationPointId], references: [id], onDelete: SetNull)
-  serviceId          String?
-  service            DispatchClientService?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  serviceName        String?
-  requestedByName    String?
-  requestedByPhone   String?
-  requestedByEmail   String?
-  source             String               @default("INTERNAL")
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  id                       String               @id @default(cuid())
+  clientName               String
+  operationPointName       String?
+  cityName                 String?
+  address                  String?
+  serviceDate              DateTime
+  startTime                String?
+  endTime                  String?
+  requiredWorkers          Int                  @default(1)
+  status                   String               @default("PENDING_ASSIGNMENT")
+  notes                    String?
+  createdByUsername        String?
+  operationPointId         String?
+  operationPoint           DispatchOperationPoint? @relation(fields: [operationPointId], references: [id], onDelete: SetNull)
+  serviceId                String?
+  service                  DispatchClientService?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  serviceName              String?
+  requestedByName          String?
+  requestedByPhone         String?
+  requestedByEmail         String?
+  completionEmailSentAt    DateTime?
+  completionEmailTo        String?
+  completionEmailProviderId String?
+  completionEmailLastError String?
+  source                   String               @default("INTERNAL")
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
 
-  assignments        DispatchAssignment[]
-  incidents          DispatchIncident[]
+  assignments              DispatchAssignment[]
+  incidents                DispatchIncident[]
 
   @@index([serviceDate])
   @@index([status])
@@ -410,6 +414,7 @@ model DispatchServiceRequest {
   @@index([operationPointId])
   @@index([serviceId])
   @@index([source])
+  @@index([completionEmailSentAt])
 }
 
 model DispatchAssignment {
