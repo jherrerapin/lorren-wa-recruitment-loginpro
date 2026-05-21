@@ -26,7 +26,7 @@
       <div>
         <div class="eyebrow">Gestión comercial operativa</div>
         <h1>Clientes</h1>
-        <p>Gestiona clientes, operaciones y links públicos de solicitud. La ciudad principal del cliente se toma del listado central de ciudades del bot.</p>
+        <p>Gestiona clientes, operaciones, estadísticas y links públicos de solicitud. La ciudad principal del cliente se toma del catálogo central.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
@@ -41,11 +41,11 @@
     <section class="card">
       <div class="card-head"><h2><%= isEditingClient ? 'Editar cliente' : 'Crear cliente' %></h2><p><%= isEditingClient ? 'Actualiza ciudad, datos comerciales, contacto y estado del cliente.' : 'Registra la empresa que solicitará servicios operativos.' %></p></div>
       <div class="card-body">
-        <div class="section-note" style="margin-bottom:14px;">Si falta una ciudad, créala o habilítala para <strong>Bot / Reclutamiento</strong> desde <a href="/admin/locations">Ciudades</a>. Una ciudad también puede quedar marcada para Despacho si se usará en asignaciones.</div>
+        <div class="section-note" style="margin-bottom:14px;">Si falta una ciudad, créala o habilítala desde <a href="/admin/locations">Ciudades</a>. Una misma ciudad puede servir para Bot / Reclutamiento, Despacho o ambos usos.</div>
         <form method="post" action="<%= isEditingClient ? '/operaciones/admin-clientes/' + safeEditClient.id + '/editar' : '/operaciones/admin-clientes' %>">
           <div class="form-grid">
             <div class="field full"><label for="name">Nombre del cliente</label><input id="name" name="name" required value="<%= formClient.name || '' %>" placeholder="Ej: Opera Logística" /></div>
-            <div class="field"><label for="cityName">Ciudad principal</label><select id="cityName" name="cityName" required data-selected-city="<%= formClient.cityName || '' %>"><option value="">Cargando ciudades...</option></select><small class="muted">Solo aparecen ciudades habilitadas para Bot / Reclutamiento desde el CRUD central.</small></div>
+            <div class="field"><label for="cityName">Ciudad principal</label><select id="cityName" name="cityName" required data-selected-city="<%= formClient.cityName || '' %>"><option value="">Cargando ciudades...</option></select><small class="muted">Ciudad administrativa del cliente. Las operaciones pueden tener ciudades diferentes.</small></div>
             <div class="field"><label for="nit">NIT</label><input id="nit" name="nit" value="<%= formClient.nit || '' %>" placeholder="Opcional" /></div>
             <div class="field"><label for="contactName">Contacto</label><input id="contactName" name="contactName" value="<%= formClient.contactName || '' %>" placeholder="Nombre del contacto" /></div>
             <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" value="<%= formClient.contactPhone || '' %>" placeholder="Celular o fijo" /></div>
@@ -72,6 +72,8 @@
               <td>
                 <div class="actions stack-actions">
                   <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/operaciones">Operaciones y servicios</a>
+                  <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/estadisticas">Estadísticas</a>
+                  <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/estadisticas/exportar">Descargar Excel</a>
                   <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/editar">Editar</a>
                   <form method="post" action="/admin/operaciones/clientes/<%= c.id %>/toggle"><button class="btn" type="submit"><%= c.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
                   <form method="post" action="/operaciones/admin-delete/clientes/<%= c.id %>"><button class="btn" type="submit">Eliminar</button></form>
@@ -99,7 +101,7 @@
         data.cities.forEach((city) => {
           const option = document.createElement('option');
           option.value = city.name;
-          option.textContent = city.name;
+          option.textContent = `${city.name}${city.usedForRecruitment && city.usedForDispatch ? ' — Bot y Despacho' : city.usedForDispatch ? ' — Despacho' : ' — Bot'}`;
           citySelect.appendChild(option);
         });
         if (selectedCity) {
@@ -107,14 +109,14 @@
           if (!exists) {
             const option = document.createElement('option');
             option.value = selectedCity;
-            option.textContent = `${selectedCity} — no habilitada para Bot / Reclutamiento`;
+            option.textContent = `${selectedCity} — no configurada`;
             citySelect.appendChild(option);
           }
           citySelect.value = selectedCity;
         }
         refreshSelectState(citySelect);
       } catch (error) {
-        console.error('No fue posible cargar ciudades del bot', error);
+        console.error('No fue posible cargar ciudades', error);
       }
     }
     document.getElementById('cityName')?.addEventListener('change', (event) => refreshSelectState(event.target));
