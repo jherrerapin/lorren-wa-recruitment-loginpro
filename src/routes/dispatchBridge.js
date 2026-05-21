@@ -2,6 +2,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import { upsertDispatchWorkerFromCandidate } from '../services/dispatchWorkerSync.js';
+import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/cityOptions.js';
 import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../services/transportMode.js';
 
 function normalizeString(value) {
@@ -14,16 +15,8 @@ function normalizeStringList(value) {
   const single = normalizeString(value);
   return single ? [single] : [];
 }
-function normalizeText(value) { return normalizeString(value)?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() || ''; }
-function isBogotaSiberiaName(cityName) { const normalized = normalizeText(cityName); return normalized === 'bogota' || normalized === 'bogota d.c.' || normalized === 'bogota dc' || normalized === 'siberia'; }
 async function resolveCompatibleOperationalCityIds(operationalCityId) {
-  if (!operationalCityId) return [];
-  const selectedCity = await prisma.city.findFirst({ where: { id: operationalCityId, usedForDispatch: true }, select: { id: true, name: true } });
-  if (!selectedCity) return [operationalCityId];
-  if (!isBogotaSiberiaName(selectedCity.name)) return [selectedCity.id];
-  const cities = await prisma.city.findMany({ where: { usedForDispatch: true }, select: { id: true, name: true } });
-  const compatibleIds = cities.filter((city) => isBogotaSiberiaName(city.name)).map((city) => city.id);
-  return compatibleIds.length ? compatibleIds : [selectedCity.id];
+  return resolveEquivalentCityIds(prisma, operationalCityId);
 }
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function isOpsUser(req) { const username = normalizeString(req.session?.username || req.username); return Boolean(username?.startsWith('operaciones-despacho')); }
@@ -70,7 +63,7 @@ async function replaceWorkerRelations(workerId, body) {
   ]);
 }
 async function findManualWorkerOr404(workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId, source: 'MANUAL' }, include: { cities: true, vacancies: true } }); }
-async function loadDispatchCities() { return prisma.city.findMany({ where: { usedForDispatch: true }, orderBy: { name: 'asc' } }); }
+async function loadDispatchCities() { return loadUnifiedCityOptions(prisma); }
 async function loadRequestFormClients() {
   return prisma.dispatchClient.findMany({ where: { isActive: true }, include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } }, services: { where: { isActive: true }, orderBy: { name: 'asc' } } }, orderBy: { name: 'asc' } });
 }

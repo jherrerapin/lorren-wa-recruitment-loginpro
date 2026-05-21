@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
+import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 
 const workerCvUpload = multer({
@@ -111,7 +112,7 @@ function normalizeText(value) {
 
 async function loadWorkerFormOptions() {
   const [cities, vacancies] = await Promise.all([
-    prisma.city.findMany({ where: { usedForDispatch: true }, orderBy: { name: 'asc' } }),
+    loadUnifiedCityOptions(prisma),
     prisma.vacancy.findMany({
       where: { isActive: true },
       select: { id: true, title: true, city: true },
@@ -126,8 +127,10 @@ async function validateVacanciesForSelectedCities(cityIds, vacancyIds) {
   if (!vacancyIds.length) return [];
   if (!cityIds.length) throw new Error('Selecciona al menos una ciudad operativa antes de elegir perfiles.');
 
+  const selectedCityIdGroups = await Promise.all(cityIds.map((cityId) => resolveEquivalentCityIds(prisma, cityId)));
+  const equivalentCityIds = selectedCityIdGroups.flat();
   const selectedCities = await prisma.city.findMany({
-    where: { id: { in: cityIds }, usedForDispatch: true },
+    where: { id: { in: equivalentCityIds } },
     select: { name: true }
   });
   const selectedCityNames = new Set(selectedCities.map((city) => normalizeText(city.name)));
@@ -234,7 +237,7 @@ export function publicDispatchClientRouter() {
   const router = express.Router();
 
   router.get('/api/ciudades', requireOps, async (_req, res) => {
-    const cities = await prisma.city.findMany({ where: { usedForDispatch: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } });
+    const cities = await loadUnifiedCityOptions(prisma);
     return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 
