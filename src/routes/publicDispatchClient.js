@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
+import { normalizeTransportMode } from '../services/transportMode.js';
 
 const workerCvUpload = multer({
   storage: multer.memoryStorage(),
@@ -81,7 +82,7 @@ function buildWorkerData(body) {
     documentNumber: normalizeString(body.documentNumber),
     residenceCity: normalizeString(body.residenceCity),
     residenceLocality: normalizeString(body.residenceLocality),
-    transportMode: normalizeString(body.transportMode),
+    transportMode: normalizeTransportMode(body.transportMode),
     operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
     notes: normalizeString(body.notes)
   };
@@ -233,17 +234,7 @@ export function publicDispatchClientRouter() {
   const router = express.Router();
 
   router.get('/api/ciudades', requireOps, async (_req, res) => {
-    setNoStore(res);
-    const cities = await prisma.city.findMany({
-      where: {
-        OR: [
-          { usedForRecruitment: true },
-          { usedForDispatch: true }
-        ]
-      },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true, usedForRecruitment: true, usedForDispatch: true }
-    });
+    const cities = await prisma.city.findMany({ where: { usedForDispatch: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } });
     return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 

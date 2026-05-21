@@ -1,0 +1,68 @@
+function normalizeString(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeComparableText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function titleCase(value) {
+  return String(value || '')
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+export function normalizeTransportMode(value) {
+  const raw = normalizeString(value);
+  if (!raw) return null;
+
+  const normalized = normalizeComparableText(raw);
+  if (!normalized) return null;
+
+  if (
+    normalized === 'sin medio de transporte' ||
+    normalized === 'sin transporte' ||
+    normalized === 'sin vehiculo' ||
+    normalized === 'ninguno' ||
+    normalized === 'ninguna' ||
+    normalized === 'no tiene' ||
+    normalized === 'no tengo' ||
+    normalized.startsWith('sin ') ||
+    normalized.startsWith('no tengo') ||
+    normalized.startsWith('no tiene') ||
+    normalized.startsWith('no cuento con')
+  ) {
+    return 'Sin medio de transporte';
+  }
+
+  if (/(^| )(moto|motocicleta)( |$)/.test(normalized)) return 'Moto';
+  if (/(^| )(bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta)( |$)/.test(normalized)) return 'Bicicleta';
+  if (/(^| )(carro|auto|automovil|coche|vehiculo propio|carro propio)( |$)/.test(normalized)) return 'Carro';
+  if (/(^| )(a pie|caminando|caminar)( |$)/.test(normalized)) return 'A pie';
+  if (/(^| )(bus|buseta|colectivo|transmilenio|transmi|sitp|alimentador|metro|transporte publico|publico|servicio publico)( |$)/.test(normalized)) return 'Público';
+
+  return titleCase(normalized);
+}
+
+export function uniqueNormalizedTransportModes(values = []) {
+  const seen = new Set();
+  const result = [];
+
+  for (const value of values) {
+    const normalized = normalizeTransportMode(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result.sort((a, b) => a.localeCompare(b, 'es'));
+}

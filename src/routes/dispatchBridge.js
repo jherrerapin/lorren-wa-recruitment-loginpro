@@ -2,6 +2,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import { upsertDispatchWorkerFromCandidate } from '../services/dispatchWorkerSync.js';
+import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../services/transportMode.js';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -53,7 +54,7 @@ function buildWorkerData(body) {
     documentNumber: normalizeString(body.documentNumber),
     residenceCity: normalizeString(body.residenceCity),
     residenceLocality: normalizeString(body.residenceLocality),
-    transportMode: normalizeString(body.transportMode),
+    transportMode: normalizeTransportMode(body.transportMode),
     operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
     notes: normalizeString(body.notes)
   };
@@ -129,16 +130,17 @@ export function dispatchBridgeRouter() {
   router.post('/clientes/:clientId/servicios/:serviceId/eliminar', requireOps, async (req, res) => { const service = await prisma.dispatchClientService.findFirst({ where: { id: req.params.serviceId, clientId: req.params.clientId }, select: { id: true } }); if (!service) return res.status(404).send('Servicio no encontrado'); await prisma.dispatchClientService.update({ where: { id: service.id }, data: { isActive: false } }); return res.redirect(redirectClientOperations(req.params.clientId, 'Servicio eliminado del flujo activo.')); });
 
   router.get('/asignaciones', requireOps, async (req, res) => {
-    const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const vacancyId = normalizeString(req.query.vacancyId); const transportMode = normalizeString(req.query.transportMode); const locality = normalizeString(req.query.locality); const status = normalizeString(req.query.status);
+    const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const vacancyId = normalizeString(req.query.vacancyId); const transportMode = normalizeTransportMode(req.query.transportMode); const locality = normalizeString(req.query.locality); const status = normalizeString(req.query.status);
     const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds(operationalCityId); const operationalCityFilter = buildOperationalCityFilter(compatibleOperationalCityIds);
     const workers = await prisma.dispatchWorker.findMany({ where: { ...(status ? { operationalStatus: status } : {}), ...(q ? { OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] } : {}), ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(transportMode ? { transportMode } : {}), ...(locality ? { residenceLocality: locality } : {}) }, include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } });
     const localityWhere = { ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(transportMode ? { transportMode } : {}), ...(status ? { operationalStatus: status } : {}) };
+    const transportWhere = { ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(locality ? { residenceLocality: locality } : {}), ...(status ? { operationalStatus: status } : {}) };
     const serviceRequestId = normalizeString(req.query.serviceRequestId);
     const [cities, vacancies, transportModeRows, localityRows, serviceRequests, clients] = await Promise.all([
-      loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }), prisma.dispatchWorker.findMany({ select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }), prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }), prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }), loadRequestFormClients()
+      loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }), prisma.dispatchWorker.findMany({ where: transportWhere, select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }), prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }), prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }), loadRequestFormClients()
     ]);
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
-    return res.render('operacionesAsignaciones', { workers, cities, vacancies, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', transportMode: transportMode || '', locality: locality || '', status: status || '' }, transportModes: transportModeRows.map((row) => row.transportMode).filter(Boolean), localities: localityRows.map((row) => row.residenceLocality).filter(Boolean), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
+    return res.render('operacionesAsignaciones', { workers, cities, vacancies, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', transportMode: transportMode || '', locality: locality || '', status: status || '' }, transportModes: uniqueNormalizedTransportModes(transportModeRows.map((row) => row.transportMode)), localities: localityRows.map((row) => row.residenceLocality).filter(Boolean), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
   });
 
   router.get('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res) => { const [serviceRequest, clients] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.id }, include: { service: true } }), loadRequestFormClients()]); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); return res.render('operacionesSolicitudEditar', { serviceRequest, clients, role: req.session?.userRole || req.userRole }); });
