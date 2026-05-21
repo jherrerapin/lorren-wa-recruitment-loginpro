@@ -40,7 +40,7 @@
       <article class="card">
         <div class="card-head"><h2>Crear operación / punto</h2><p>Selecciona la ciudad operativa del punto. Luego las solicitudes usarán esa ciudad y dirección automáticamente.</p></div>
         <div class="card-body">
-          <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones">
+          <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones" autocomplete="off">
             <div class="form-grid">
               <div class="field full"><label for="name">Nombre de la operación</label><input id="name" name="name" required placeholder="Ej: Bodega Siberia" /></div>
               <div class="field"><label for="cityName">Ciudad</label><select id="cityName" name="cityName" class="city-select" required><option value="">Cargando ciudades...</option></select></div>
@@ -76,7 +76,7 @@
                     <span><strong>Estado:</strong> <span class="pill <%= op.isActive ? 'pill-green' : 'pill-amber' %>"><%= op.isActive ? 'Activo' : 'Inactivo' %></span></span>
                   </div>
                   <details class="crud-details"><summary>Editar operación</summary>
-                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/editar" class="form-grid compact-form">
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/editar" class="form-grid compact-form" autocomplete="off">
                       <div class="field full"><label>Nombre</label><input name="name" required value="<%= op.name %>" /></div>
                       <div class="field"><label>Ciudad</label><select name="cityName" class="city-select" data-selected-city="<%= op.cityName || '' %>"><option value="">Cargando ciudades...</option></select></div>
                       <div class="field"><label>Dirección</label><input name="address" value="<%= op.address || '' %>" /></div>
@@ -154,7 +154,7 @@
       const selects = Array.from(document.querySelectorAll('.city-select'));
       if (!selects.length) return;
       try {
-        const response = await fetch('/operaciones/api/ciudades');
+        const response = await fetch(`/operaciones/api/ciudades?t=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) return;
         const data = await response.json();
         selects.forEach((select) => {
@@ -183,6 +183,7 @@
         console.error('No fue posible cargar ciudades', error);
       }
     }
+    window.addEventListener('pageshow', (event) => { if (event.persisted) window.location.reload(); });
     loadCityOptions();
   </script>
 </body>
