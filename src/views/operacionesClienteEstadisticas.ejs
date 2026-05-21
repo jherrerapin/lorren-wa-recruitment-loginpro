@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Estadísticas de cliente — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .stat-card { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-sm); }
+    .stat-card span { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+    .stat-card strong { display: block; color: var(--navy); font-size: 28px; margin-top: 6px; }
+    .insights-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+    .mini-bars { display: grid; gap: 10px; }
+    .bar-row { display: grid; gap: 4px; }
+    .bar-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .bar-track { width: 100%; height: 9px; border-radius: 999px; background: #eef2f7; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; background: var(--teal); min-width: 4px; }
+    .request-table { font-size: 13px; }
+    @media (max-width: 980px) { .stats-grid, .insights-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <% const maxStatus = Math.max(...stats.statusRows.map((row)=>row.total), 1); %>
+  <% const maxService = Math.max(...stats.serviceRows.map((row)=>row.total), 1); %>
+  <% const maxOperation = Math.max(...stats.operationRows.map((row)=>row.total), 1); %>
+  <% const maxDate = Math.max(...stats.dateRows.map((row)=>row.total), 1); %>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Estadísticas por cliente</div>
+        <h1><%= client.name %></h1>
+        <p>Visualiza solicitudes, cobertura, servicios y operaciones del cliente. La descarga se abre en Excel como archivo CSV compatible.</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones/clientes">Volver a clientes</a>
+        <a class="btn" href="/admin/operaciones/clientes/<%= client.id %>/operaciones">Operaciones y servicios</a>
+        <a class="btn btn-primary" href="/admin/operaciones/clientes/<%= client.id %>/estadisticas/exportar">Descargar Excel</a>
+      </div>
+    </section>
+
+    <section class="stats-grid">
+      <article class="stat-card"><span>Total solicitudes</span><strong><%= stats.total %></strong></article>
+      <article class="stat-card"><span>Pendientes</span><strong><%= stats.pending %></strong></article>
+      <article class="stat-card"><span>Completadas</span><strong><%= stats.complete %></strong></article>
+      <article class="stat-card"><span>Cumplimiento</span><strong><%= stats.completionRate %>%</strong></article>
+    </section>
+
+    <section class="stats-grid">
+      <article class="stat-card"><span>Auxiliares solicitados</span><strong><%= stats.totalRequiredWorkers %></strong></article>
+      <article class="stat-card"><span>Auxiliares asignados</span><strong><%= stats.totalAssignedWorkers %></strong></article>
+      <article class="stat-card"><span>Operaciones creadas</span><strong><%= client.operationPoints.length %></strong></article>
+      <article class="stat-card"><span>Servicios creados</span><strong><%= client.services.length %></strong></article>
+    </section>
+
+    <section class="insights-grid">
+      <article class="card">
+        <div class="card-head"><h2>Solicitudes por estado</h2><p>Distribución operativa del cliente.</p></div>
+        <div class="card-body mini-bars">
+          <% if (!stats.statusRows.length) { %><div class="empty">Sin solicitudes registradas.</div><% } %>
+          <% stats.statusRows.forEach((row)=>{ %><div class="bar-row"><div class="bar-meta"><span><%= row.label %></span><span><%= row.total %></span></div><div class="bar-track"><div class="bar-fill" style="width:<%= Math.max(5, Math.round((row.total / maxStatus) * 100)) %>%"></div></div></div><% }) %>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>Servicios más solicitados</h2><p>Ayuda a identificar qué tipo de servicio pide más el cliente.</p></div>
+        <div class="card-body mini-bars">
+          <% if (!stats.serviceRows.length) { %><div class="empty">Sin servicios registrados en solicitudes.</div><% } %>
+          <% stats.serviceRows.slice(0,8).forEach((row)=>{ %><div class="bar-row"><div class="bar-meta"><span><%= row.label %></span><span><%= row.total %></span></div><div class="bar-track"><div class="bar-fill" style="width:<%= Math.max(5, Math.round((row.total / maxService) * 100)) %>%"></div></div></div><% }) %>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>Operaciones con más solicitudes</h2><p>Ranking de puntos de operación del cliente.</p></div>
+        <div class="card-body mini-bars">
+          <% if (!stats.operationRows.length) { %><div class="empty">Sin operaciones registradas en solicitudes.</div><% } %>
+          <% stats.operationRows.slice(0,8).forEach((row)=>{ %><div class="bar-row"><div class="bar-meta"><span><%= row.label %></span><span><%= row.total %></span></div><div class="bar-track"><div class="bar-fill" style="width:<%= Math.max(5, Math.round((row.total / maxOperation) * 100)) %>%"></div></div></div><% }) %>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>Solicitudes por fecha</h2><p>Histórico diario para seguimiento operativo.</p></div>
+        <div class="card-body mini-bars">
+          <% if (!stats.dateRows.length) { %><div class="empty">Sin solicitudes registradas.</div><% } %>
+          <% stats.dateRows.slice(-10).forEach((row)=>{ %><div class="bar-row"><div class="bar-meta"><span><%= row.label %></span><span><%= row.total %></span></div><div class="bar-track"><div class="bar-fill" style="width:<%= Math.max(5, Math.round((row.total / maxDate) * 100)) %>%"></div></div></div><% }) %>
+        </div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Detalle de solicitudes</h2><p>Información lista para revisión operativa o exportación.</p></div>
+      <div class="table-wrap">
+        <% if (!serviceRequests.length) { %><div class="empty"><strong>No hay solicitudes para este cliente.</strong></div><% } else { %>
+          <table class="table request-table">
+            <thead><tr><th>Fecha</th><th>Operación</th><th>Servicio</th><th>Horario</th><th>Auxiliares</th><th>Estado</th><th>Origen</th><th>Solicitante</th></tr></thead>
+            <tbody>
+              <% serviceRequests.forEach((request)=>{ %>
+                <tr>
+                  <td><%= formatDate(request.serviceDate) %></td>
+                  <td><strong><%= request.operationPointName || request.operationPoint?.name || 'Sin operación' %></strong><div class="muted"><%= request.cityName || 'Sin ciudad' %> · <%= request.address || 'Sin dirección' %></div></td>
+                  <td><%= request.serviceName || request.service?.name || 'Sin servicio' %></td>
+                  <td><%= request.startTime || '-' %> - <%= request.endTime || '-' %></td>
+                  <td><%= request.assignments.length %> / <%= request.requiredWorkers %></td>
+                  <td><span class="pill <%= request.status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : request.status === 'CANCELLED' ? 'pill-amber' : 'pill-blue' %>"><%= statusLabel(request.status) %></span></td>
+                  <td><%= sourceLabel(request.source) %></td>
+                  <td><%= request.requestedByName || '—' %><div class="muted"><%= request.requestedByEmail || 'Sin correo' %></div></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        <% } %>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
