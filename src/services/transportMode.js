@@ -48,7 +48,7 @@ export function normalizeTransportMode(value) {
   if (/(^| )(bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta)( |$)/.test(normalized)) return 'Bicicleta';
   if (/(^| )(carro|auto|automovil|coche|vehiculo propio|carro propio)( |$)/.test(normalized)) return 'Carro';
   if (/(^| )(a pie|caminando|caminar)( |$)/.test(normalized)) return 'A pie';
-  if (/(^| )(bus|buseta|colectivo|transmilenio|transmi|sitp|alimentador|metro|transporte publico|publico|servicio publico)( |$)/.test(normalized)) return 'Público';
+  if (/(^| )(bus|buseta|colectivo|transmilenio|transmi|sitp|alimentador|metro|transporte publico|publico|servicio publico|didi|uber|taxi|transporte urbano)( |$)/.test(normalized)) return 'Público';
 
   return titleCase(normalized);
 }
