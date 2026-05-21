@@ -26,6 +26,12 @@ function normalizeStringList(value) {
   return single ? [single] : [];
 }
 
+function setNoStore(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+}
+
 function isOpsUser(req) {
   const username = normalizeString(req.session?.username || req.username);
   return Boolean(username?.startsWith('operaciones-despacho'));
@@ -38,6 +44,7 @@ function canUseOps(req) {
 }
 
 function requireOps(req, res, next) {
+  setNoStore(res);
   const role = req.session?.userRole || req.userRole;
   if (!role) return res.redirect('/login');
   if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
@@ -226,6 +233,7 @@ export function publicDispatchClientRouter() {
   const router = express.Router();
 
   router.get('/api/ciudades', requireOps, async (_req, res) => {
+    setNoStore(res);
     const cities = await prisma.city.findMany({
       where: {
         OR: [
@@ -236,7 +244,7 @@ export function publicDispatchClientRouter() {
       orderBy: { name: 'asc' },
       select: { id: true, name: true, usedForRecruitment: true, usedForDispatch: true }
     });
-    return res.json({ cities });
+    return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 
   router.post('/admin-clientes', requireOps, async (req, res) => {
