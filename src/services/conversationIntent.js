@@ -140,7 +140,7 @@ function normalizeStep(options = {}) {
 
 function isInitialConversation(options = {}) {
   const step = normalizeStep(options);
-  if (!step) return true;
+  if (!step) return Boolean(options.isInitialContact);
   return INITIAL_STEPS.has(step);
 }
 
