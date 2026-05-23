@@ -208,14 +208,13 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
       resolved.conditions ? `Condiciones principales: ${resolved.conditions.split('\n').slice(0, 3).join(', ')}` : 'No menciones condiciones si no están registradas.'
     ].join(' ');
   } else {
-    const vacancyList = vacancies.map((v) => `${v.role} en ${v.city}`).join(', ');
     systemPrompt = [
       'Sos un reclutador humano de LoginPro en WhatsApp.',
       'El candidato te escribe. Saludá de forma cálida y preguntá de forma natural',
-      'por cuál vacante y ciudad se comunica. NO los ofrezcas como catálogo.',
+      'desde qué ciudad escribe y por cuál vacante, cargo, publicidad o referencia se comunica.',
+      'NO ofrezcas vacantes como catálogo ni menciones una lista de cargos activos.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real.',
-      'No inventés cargos, sectores ni documentación; si no hay ciudad o cargo claro, pedilo antes de afirmar opciones.',
-      `Vacantes activas disponibles: ${vacancyList || 'ninguna por el momento'}`
+      'No inventés cargos, sectores ni documentación; si no hay ciudad o cargo claro, pedilo antes de afirmar opciones.'
     ].join(' ');
   }
 
@@ -248,7 +247,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
 
   return resolved
     ? `¡Hola! Gracias por comunicarte con LoginPro. Tengo ubicada la vacante de ${resolved.role} en ${resolved.city}. Te comparto la información principal y, si te interesa, avanzamos con los datos necesarios.`
-    : '¡Hola! Gracias por comunicarte con LoginPro. ¿Para cuál vacante y ciudad te estás comunicando?';
+    : '¡Hola! Gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y por cuál vacante, cargo o publicidad te estás comunicando?';
 }
 
 /**
@@ -399,42 +398,20 @@ function vacancyMatchesCity(vacancy = {}, city = null) {
   return Boolean(requested && actual && requested === actual);
 }
 
-function vacancyLabel(vacancy = {}) {
-  return vacancy.title || vacancy.role || null;
-}
-
-function joinNatural(items = []) {
-  const clean = items.filter(Boolean);
-  if (clean.length <= 1) return clean[0] || '';
-  if (clean.length === 2) return `${clean[0]} y ${clean[1]}`;
-  return `${clean.slice(0, -1).join(', ')} y ${clean[clean.length - 1]}`;
-}
-
-export function buildVacancyOptionsReply({ city = null, vacancyOptions = [], hasAskedAvailableVacancies = true } = {}) {
+export function buildVacancyOptionsReply({ city = null, vacancyOptions = [] } = {}) {
   const activeOptions = (vacancyOptions || [])
     .filter((vacancy) => vacancy?.isActive === true && vacancy?.acceptingApplications === true)
-    .filter((vacancy) => vacancyMatchesCity(vacancy, city))
-    .map(vacancyLabel)
-    .filter(Boolean);
+    .filter((vacancy) => vacancyMatchesCity(vacancy, city));
 
   if (!city) {
-    return 'Claro, para revisar opciones reales primero cuéntame desde qué ciudad nos escribes y qué cargo tienes en mente.';
+    return 'Claro, para revisar opciones reales primero cuéntame desde qué ciudad nos escribes y qué cargo o publicidad viste.';
   }
 
   if (!activeOptions.length) {
     return `En este momento no tengo vacantes activas registradas para ${city}. Si viste una publicidad, dime el cargo exacto o envíame más contexto y reviso sin asumir una vacante.`;
   }
 
-  if (activeOptions.length === 1) {
-    return `Claro, para ${city} tengo disponible ${activeOptions[0]}. ¿Quieres que te comparta la información de esa vacante?`;
-  }
-
-  if (activeOptions.length > 3) {
-    return `Claro, en ${city} hay varias opciones activas. Para ubicarte bien sin confundirte, dime el cargo puntual que tienes en mente.`;
-  }
-
-  const lead = hasAskedAvailableVacancies ? 'Claro' : 'Te cuento';
-  return `${lead}, en ${city} tengo ${joinNatural(activeOptions)}. ¿Cuál de esas te interesa?`;
+  return `Gracias. Para ubicarte bien en ${city} y no confundirte con otra convocatoria, dime qué cargo, publicidad o referencia viste.`;
 }
 
 export function buildUnavailableVacancyInfoReply(vacancy = {}) {

@@ -6,6 +6,7 @@ import { buildVacancyOptionsReply, buildUnavailableVacancyInfoReply } from '../s
 import { sanitizeOutboundReply } from '../src/services/replySafety.js';
 import { getCandidateReadiness, hasValidCv } from '../src/services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../src/services/schedulingGuard.js';
+import { resolveVacancyFromText } from '../src/services/vacancyResolver.js';
 
 const ConversationStep = {
   ASK_CV: 'ASK_CV',
@@ -50,7 +51,7 @@ function candidate(overrides = {}) {
 
 const nextSlot = { slot: { id: 'slot-1' }, date: new Date('2026-06-01T15:00:00.000Z'), windowOk: true };
 
-test('A: pregunta por vacantes en ciudad lista solo opciones reales y no pide HV', () => {
+test('A: pregunta por vacantes en ciudad no lista catalogo ni pide HV', () => {
   const reply = buildVacancyOptionsReply({
     city: 'Bogota',
     vacancyOptions: [
@@ -60,11 +61,64 @@ test('A: pregunta por vacantes en ciudad lista solo opciones reales y no pide HV
     ]
   });
 
-  assert.match(reply, /Auxiliar de Cargue Bogota/);
-  assert.match(reply, /Auxiliar de Bodega Bogota/);
+  assert.match(reply, /cargo|publicidad|referencia/i);
+  assert.doesNotMatch(reply, /Auxiliar de Cargue Bogota/);
+  assert.doesNotMatch(reply, /Auxiliar de Bodega Bogota/);
   assert.doesNotMatch(reply, /Mensajero Ibague/);
+  assert.doesNotMatch(reply, /cu[aá]l de esas|opciones activas|tengo disponible/i);
   assert.doesNotMatch(reply, /hoja de vida|HV|PDF|DOCX/i);
-  assert.doesNotMatch(reply, /no tengo visible/i);
+});
+
+test('A2: resolver usa funciones de la vacante como evidencia sin inventar cargo literal', async () => {
+  const maquilaVacancy = activeBogota({
+    id: 'vac-maquila',
+    title: 'Auxiliar Operativo Ibague',
+    role: 'Auxiliar operativo',
+    city: 'Ibague',
+    operation: { city: { name: 'Ibague' }, name: 'Operacion Ibague' },
+    roleDescription: 'Apoyo en maquila, empaque y alistamiento de producto terminado.'
+  });
+  const coordinatorVacancy = activeBogota({
+    id: 'vac-coord',
+    title: 'Coordinador Logistico Ibague',
+    role: 'Coordinador logistico',
+    city: 'Ibague',
+    operation: { city: { name: 'Ibague' }, name: 'Operacion Ibague' },
+    roleDescription: 'Coordinacion de rutas y supervision de personal operativo.'
+  });
+
+  const resolution = await resolveVacancyFromText(null, 'Es para maquila en Ibague', {
+    allVacancies: [maquilaVacancy, coordinatorVacancy],
+    activeVacancies: [maquilaVacancy, coordinatorVacancy]
+  });
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, 'vac-maquila');
+  assert.equal(resolution.roleHint, 'maquila');
+});
+
+test('A3: cargo inexistente no se toma como vacante real', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Estoy interesado en vigilante en Ibague', {
+    allVacancies: [activeBogota({
+      id: 'vac-aux',
+      title: 'Auxiliar Operativo Ibague',
+      role: 'Auxiliar operativo',
+      city: 'Ibague',
+      operation: { city: { name: 'Ibague' }, name: 'Operacion Ibague' },
+      roleDescription: 'Apoyo en cargue, descargue y empaque.'
+    })],
+    activeVacancies: [activeBogota({
+      id: 'vac-aux',
+      title: 'Auxiliar Operativo Ibague',
+      role: 'Auxiliar operativo',
+      city: 'Ibague',
+      operation: { city: { name: 'Ibague' }, name: 'Operacion Ibague' },
+      roleDescription: 'Apoyo en cargue, descargue y empaque.'
+    })]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.notEqual(resolution.reason, 'matched_active_vacancy');
 });
 
 test('B y F: información de vacante no inventa condiciones ni prestaciones sin dato registrado', () => {

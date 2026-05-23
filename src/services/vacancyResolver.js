@@ -14,7 +14,7 @@ const ROLE_STOPWORDS = new Set([
   'publicada', 'publicado', 'empleo', 'oferta', 'averiguar', 'informarme', 'quisiera',
   'vivo', 'vive', 'vives', 'vivir', 'ciudad', 'numero', 'dieron', 'este', 'esta'
 ]);
-const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|descargue|descarge|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol)\b/i;
+const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|descargue|descarge|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento)\b/i;
 const LOCATION_ALIASES = [
   { value: 'Bogota', patterns: [/\bbogota\b/i, /\bfunza\b/i, /\bmosquera\b/i, /\bmadrid\b/i, /\bsiberia\b/i, /\bsuba\b/i, /\bengativa\b/i, /\bcalle 80\b/i, /\bvillas? de granada\b/i, /\bel rosal\b/i] },
   { value: 'Ibague', patterns: [/\bibague\b/i] }
@@ -49,6 +49,9 @@ function normalizeRoleToken(token = '') {
   if (/^operativ[ao]s?$/.test(normalized)) return 'operativo';
   if (/^coordinadoras?$/.test(normalized)) return 'coordinador';
   if (/^mensajer[oa]s?$/.test(normalized)) return 'mensajero';
+  if (/^maquil/.test(normalized)) return 'maquila';
+  if (/^empac/.test(normalized)) return 'empaque';
+  if (/^producc/.test(normalized)) return 'produccion';
   return normalized;
 }
 
@@ -65,6 +68,23 @@ function buildVacancyLocationText(vacancy) {
     vacancy?.operation?.name,
     vacancy?.operationAddress
   ].filter(Boolean).join(' '));
+}
+
+function buildVacancyRoleText(vacancy) {
+  return [vacancy?.title, vacancy?.role, vacancy?.operation?.name, vacancy?.operationAddress]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function buildVacancyFunctionalText(vacancy) {
+  return [
+    vacancy?.roleDescription,
+    vacancy?.requirements,
+    vacancy?.conditions,
+    vacancy?.requiredDocuments,
+    vacancy?.operationAddress,
+    vacancy?.operation?.name
+  ].filter(Boolean).join(' ');
 }
 
 function findLocationGroup(text = '') {
@@ -138,7 +158,7 @@ const GENERIC_ROLE_HINT_TOKENS = new Set([
   'rol'
 ]);
 
-const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|descargue|bodega|operari|operativo|operativa|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ)/i;
+const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|descargue|bodega|operari|operativo|operativa|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ|maquila|empaque|planta|picking|packing|alistamiento)/i;
 
 function normalizeRoleHint(value = '', city = '') {
   const cityTokens = new Set(tokenize(city));
@@ -224,7 +244,8 @@ function hasInterestSignal(text = '') {
 }
 
 function scoreVacancyRole(vacancy, { text, roleHint }) {
-  const vacancyText = [vacancy?.title, vacancy?.role, vacancy?.operation?.name, vacancy?.operationAddress].filter(Boolean).join(' ');
+  const vacancyText = buildVacancyRoleText(vacancy);
+  const functionalText = buildVacancyFunctionalText(vacancy);
   const normalizedText = normalizeResolverText(text);
   const normalizedTitle = normalizeResolverText(vacancy?.title || '');
   const normalizedRole = normalizeResolverText(vacancy?.role || '');
@@ -232,8 +253,10 @@ function scoreVacancyRole(vacancy, { text, roleHint }) {
 
   if (roleHint) {
     score += similarityScore(roleHint, vacancyText) * 6;
+    score += similarityScore(roleHint, functionalText) * 4;
   } else {
     score += similarityScore(text, vacancyText) * 3;
+    score += similarityScore(text, functionalText) * 2;
   }
 
   if (normalizedTitle && normalizedText.includes(normalizedTitle)) score += 2;
@@ -311,16 +334,10 @@ function pickBestVacancyMatch(vacancies = [], context = {}) {
   };
 }
 
-function isStrongUniqueRoleMatch(match, threshold = 4.5) {
-  if (!match?.best) return false;
-  if (match.best.score < threshold) return false;
-  return !match.runnerUp || match.margin >= 0.75;
-}
-
 function roleEvidenceThreshold(roleHint = '') {
   const tokenCount = roleHint ? cleanRoleTokens(tokenize(roleHint)).length : 0;
   if (!tokenCount) return 0;
-  return tokenCount >= 2 ? 3 : 2.5;
+  return tokenCount >= 2 ? 2.8 : 2.2;
 }
 
 function hasEnoughRoleEvidence(match, roleHint = '') {
@@ -357,7 +374,7 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
     : inactiveVacancies;
 
   const roleTokenCount = roleHint ? cleanRoleTokens(tokenize(roleHint)).length : 0;
-  const threshold = roleHint ? (roleTokenCount >= 2 ? 4 : 4.5) : 6;
+  const threshold = roleHint ? (roleTokenCount >= 2 ? 4 : 4.2) : 6;
   const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
   const inactiveHasRoleEvidence = hasEnoughRoleEvidence(inactiveMatch, roleHint);
 
