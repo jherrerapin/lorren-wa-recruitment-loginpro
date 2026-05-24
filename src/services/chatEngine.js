@@ -6,6 +6,7 @@ import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.
 import { detectConversationIntent } from './conversationIntent.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
 
+// Paused-vacancy profile consent work branch.
 function latestOutboundWasManualHumanWithoutLaterInbound(recentMessages = []) {
   const messages = recentMessages || [];
   const lastOutboundIndex = [...messages]
