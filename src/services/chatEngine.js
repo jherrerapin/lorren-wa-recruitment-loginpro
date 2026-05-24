@@ -279,6 +279,8 @@ export async function runChatEngine({
   const shouldEvaluateGate = Boolean(
     currentStep === ConversationStep.SCHEDULED
     || currentStep === ConversationStep.DONE
+    || readiness.readyForDone
+    || Boolean(activeInterviewBooking)
     || (vacancy && !vacancy.schedulingEnabled && readiness.readyForDone)
   );
 
