@@ -6,6 +6,104 @@ import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.
 import { detectConversationIntent } from './conversationIntent.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
 
+const PAUSED_VACANCY_FLAG = 'paused_vacancy';
+const PAUSED_VACANCY_CAPTURE = 'paused_vacancy_capture';
+
+function isOpenVacancy(vacancy = null) {
+  return Boolean(vacancy?.isActive && vacancy?.acceptingApplications);
+}
+
+function pausedVacancyMessage(vacancy = null) {
+  const role = vacancy?.title || vacancy?.role || 'esa vacante';
+  const city = vacancy?.operation?.city?.name || vacancy?.city || '';
+  const place = city ? ` en ${city}` : '';
+  return `La convocatoria de ${role}${place} está identificada, pero por ahora no está activa. Si deseas, puedo tomar tu registro para futuras aperturas.`;
+}
+
+function pausedRegistrationMessage(candidate = {}, vacancy = null) {
+  const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
+  const labels = readiness.missingFieldLabels || readiness.missingFields || [];
+  if (labels.length) return `Listo, lo tomo como registro para futuras aperturas. Compárteme: ${labels.join(', ')}.`;
+  return 'Listo, lo tomo como registro para futuras aperturas. Si no la has enviado, adjunta tu hoja de vida en PDF o Word/DOCX.';
+}
+
+function buildBypassResult({ reply, nextStep, reason }) {
+  return {
+    reply,
+    actions: [],
+    nextStep,
+    extractedFields: {},
+    candidateFields: {},
+    fallback: false,
+    fallbackReason: null,
+    loopGuardApplied: false,
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    suppressed: false,
+    suppressedReason: null,
+    pausedVacancyGuard: reason
+  };
+}
+
+async function guardPausedVacancy({ prisma, candidate, vacancy, inboundText, currentStep }) {
+  if (!vacancy || isOpenVacancy(vacancy)) return null;
+  if (candidate?.botResumeMode === PAUSED_VACANCY_CAPTURE) return null;
+
+  const intent = detectConversationIntent(inboundText, { currentStep });
+  const waiting = candidate?.botResumeMode === PAUSED_VACANCY_FLAG;
+
+  if (waiting && (intent === 'confirmation_yes' || intent === 'apply_intent' || intent === 'cv_intent')) {
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        currentStep: ConversationStep.COLLECTING_DATA,
+        botResumeMode: PAUSED_VACANCY_CAPTURE,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      }
+    });
+
+    return buildBypassResult({
+      reply: pausedRegistrationMessage(candidate, vacancy),
+      nextStep: ConversationStep.COLLECTING_DATA,
+      reason: 'accepted'
+    });
+  }
+
+  if (waiting && (intent === 'no_interest' || intent === 'farewell')) {
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        currentStep: ConversationStep.DONE,
+        botResumeMode: null,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      }
+    });
+
+    return buildBypassResult({
+      reply: 'Entendido, gracias por escribirnos. Puedes volver a escribirnos más adelante para revisar nuevas aperturas.',
+      nextStep: ConversationStep.DONE,
+      reason: 'declined'
+    });
+  }
+
+  await prisma.candidate.update({
+    where: { id: candidate.id },
+    data: {
+      currentStep: ConversationStep.GREETING_SENT,
+      botResumeMode: PAUSED_VACANCY_FLAG,
+      reminderScheduledFor: null,
+      reminderState: 'SKIPPED'
+    }
+  });
+
+  return buildBypassResult({
+    reply: pausedVacancyMessage(vacancy),
+    nextStep: ConversationStep.GREETING_SENT,
+    reason: waiting ? 'waiting' : 'requested'
+  });
+}
+
 function latestOutboundWasManualHumanWithoutLaterInbound(recentMessages = []) {
   const messages = recentMessages || [];
   const lastOutboundIndex = [...messages]
@@ -41,6 +139,9 @@ export async function runChatEngine({
   const activeInterviewBooking = nextSlot?.isConfirmedBooking
     ? { status: 'SCHEDULED', scheduledAt: nextSlot.date }
     : null;
+  const pausedGuard = await guardPausedVacancy({ prisma, candidate, vacancy, inboundText, currentStep });
+  if (pausedGuard) return pausedGuard;
+
   const readiness = getCandidateReadiness(candidate, vacancy);
   const shouldEvaluateGate = Boolean(
     currentStep === ConversationStep.SCHEDULED
