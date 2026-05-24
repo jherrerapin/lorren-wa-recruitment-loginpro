@@ -120,17 +120,6 @@ function isCvOnlyComplete(candidate = {}, vacancy = null, readiness = null) {
   return isMainFlowComplete(candidate, vacancy, readiness);
 }
 
-function lastOutboundAlreadyClosedCompletedFlow(lastOutbound = {}) {
-  const text = normalize(lastOutbound?.message?.body || '');
-  if (!text) return false;
-  return text.includes('datos pendientes')
-    || text.includes('informacion queda registrada')
-    || text.includes('ya tengo tus datos')
-    || text.includes('no necesitas enviar nada mas')
-    || text.includes('nuevas aperturas')
-    || text.includes('te contactamos');
-}
-
 function getConfiguredContactPerson({ vacancy = null, activeInterviewBooking = null } = {}) {
   return activeInterviewBooking?.contactPerson
     || activeInterviewBooking?.contactName
@@ -356,29 +345,13 @@ export function evaluateContextualResponseGate({
         responsePurpose: ContextualResponsePurpose.NONE
       });
     }
-    if (semanticIntent === 'ASK_APPLICATION_STATUS') {
-      if (lastOutboundAlreadyClosedCompletedFlow(lastOutbound)) {
-        return decision({
-          shouldReply: false,
-          allowedAction: ContextualAllowedAction.NO_REPLY,
-          reason: 'Candidate asked again after the completed-flow close was already sent; suppressing duplicate bot reply.',
-          responsePurpose: ContextualResponsePurpose.NONE
-        });
-      }
+    if (['ASK_APPLICATION_STATUS', 'PROVIDE_EXTRA_DATA', 'UNCLEAR'].includes(semanticIntent)) {
       return decision({
         shouldReply: true,
-        allowedAction: ContextualAllowedAction.SHORT_CONTEXTUAL_CLOSE,
-        reason: 'Candidate main flow is complete and asked whether anything else is pending.',
-        responsePurpose: ContextualResponsePurpose.CLOSE_THREAD,
-        reply: 'Ya tengo tus datos y hoja de vida registrados. Por ahora no necesitas enviar nada más; si hay una novedad o nueva apertura, te contactamos por este medio.'
-      });
-    }
-    if (semanticIntent === 'PROVIDE_EXTRA_DATA') {
-      return decision({
-        shouldReply: false,
-        allowedAction: ContextualAllowedAction.NO_REPLY,
-        reason: 'Candidate sent extra data after the main flow was complete; no deterministic evidence requires changing validated data.',
-        responsePurpose: ContextualResponsePurpose.NONE
+        allowedAction: ContextualAllowedAction.CONTINUE_FLOW,
+        reason: 'Candidate main flow is complete, but the new message may need a contextual answer or correction; continue to the engine instead of returning a fixed close.',
+        responsePurpose: ContextualResponsePurpose.FLOW,
+        metadata: { postCompletionContext: true }
       });
     }
     return decision({
