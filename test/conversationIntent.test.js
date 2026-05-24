@@ -7,9 +7,22 @@ test('detecta intención apply y faq', () => {
   assert.equal(detectConversationIntent('cuando es la entrevista?'), 'faq');
 });
 
-test('detecta confirmaciones y correcciones', () => {
-  assert.equal(detectConversationIntent('si, todo está correcto'), 'confirmation_yes');
-  assert.equal(detectConversationIntent('no, corrijo el barrio'), 'confirmation_no_or_correction');
+test('detecta confirmaciones y correcciones en contexto', () => {
+  assert.equal(detectConversationIntent('si, todo está correcto', { currentStep: 'CONFIRMING_DATA' }), 'confirmation_yes');
+  assert.equal(detectConversationIntent('no, corrijo el barrio', { currentStep: 'CONFIRMING_DATA' }), 'confirmation_no_or_correction');
+});
+
+test('saludo puro solo inicia saludo con contexto inicial explícito', () => {
+  assert.equal(detectConversationIntent('hola', { currentStep: 'MENU' }), 'greeting');
+  assert.equal(detectConversationIntent('hola', { isInitialContact: true }), 'greeting');
+  assert.equal(detectConversationIntent('hola'), 'provide_data');
+  assert.equal(detectConversationIntent('hola', { currentStep: 'COLLECTING_DATA' }), 'provide_data');
+  assert.equal(detectConversationIntent('hola', { currentStep: 'DONE', isDoneStep: true }), 'post_completion_ack');
+});
+
+test('saludo con contenido no tapa datos ni preguntas posteriores', () => {
+  assert.equal(detectConversationIntent('hola mi cedula es 1234567890', { currentStep: 'COLLECTING_DATA' }), 'provide_data');
+  assert.equal(detectConversationIntent('hola cuanto pagan?', { currentStep: 'COLLECTING_DATA' }), 'faq');
 });
 
 test('detecta agradecimiento post cierre', () => {
