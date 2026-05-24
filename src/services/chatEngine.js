@@ -49,7 +49,10 @@ export async function runChatEngine({
   );
 
   if (shouldEvaluateGate) {
-    const resolvedIntent = detectConversationIntent(inboundText, { isDoneStep: currentStep === ConversationStep.DONE });
+    const resolvedIntent = detectConversationIntent(inboundText, {
+      currentStep,
+      isDoneStep: currentStep === ConversationStep.DONE
+    });
     const semanticIntent = inferContextualSemanticIntent({
       text: inboundText,
       resolvedIntent,
