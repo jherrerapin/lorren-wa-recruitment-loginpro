@@ -12,8 +12,10 @@ test('detecta confirmaciones y correcciones en contexto', () => {
   assert.equal(detectConversationIntent('no, corrijo el barrio', { currentStep: 'CONFIRMING_DATA' }), 'confirmation_no_or_correction');
 });
 
-test('saludo puro solo inicia saludo al comienzo, no reinicia en medio del flujo', () => {
+test('saludo puro solo inicia saludo con contexto inicial explícito', () => {
   assert.equal(detectConversationIntent('hola', { currentStep: 'MENU' }), 'greeting');
+  assert.equal(detectConversationIntent('hola', { isInitialContact: true }), 'greeting');
+  assert.equal(detectConversationIntent('hola'), 'provide_data');
   assert.equal(detectConversationIntent('hola', { currentStep: 'COLLECTING_DATA' }), 'provide_data');
   assert.equal(detectConversationIntent('hola', { currentStep: 'DONE', isDoneStep: true }), 'post_completion_ack');
 });
