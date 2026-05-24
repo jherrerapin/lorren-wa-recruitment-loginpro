@@ -247,6 +247,15 @@ export function evaluateContextualResponseGate({
     });
   }
 
+  if (lastOutbound.isManual && !realPendingAction && ['ASK_APPLICATION_STATUS', 'PROVIDE_EXTRA_DATA', 'UNCLEAR', 'SOFT_CONFIRMATION'].includes(semanticIntent)) {
+    return decision({
+      shouldReply: false,
+      allowedAction: ContextualAllowedAction.NO_REPLY,
+      reason: 'Last outbound message was manually authorized and no deterministic pending action exists; suppressing bot reply to avoid overriding recruiter context.',
+      responsePurpose: ContextualResponsePurpose.NONE
+    });
+  }
+
   if (lastOutbound.isManual && CLOSING_INTENTS.has(semanticIntent) && !realPendingAction) {
     return decision({
       shouldReply: false,
@@ -336,21 +345,13 @@ export function evaluateContextualResponseGate({
         responsePurpose: ContextualResponsePurpose.NONE
       });
     }
-    if (semanticIntent === 'ASK_APPLICATION_STATUS') {
+    if (['ASK_APPLICATION_STATUS', 'PROVIDE_EXTRA_DATA', 'UNCLEAR'].includes(semanticIntent)) {
       return decision({
         shouldReply: true,
-        allowedAction: ContextualAllowedAction.SHORT_CONTEXTUAL_CLOSE,
-        reason: 'Candidate main flow is complete and asked whether anything else is pending.',
-        responsePurpose: ContextualResponsePurpose.CLOSE_THREAD,
-        reply: 'Por ahora no veo datos pendientes en tu registro. La información queda registrada para continuar el proceso interno según la vacante.'
-      });
-    }
-    if (semanticIntent === 'PROVIDE_EXTRA_DATA') {
-      return decision({
-        shouldReply: false,
-        allowedAction: ContextualAllowedAction.NO_REPLY,
-        reason: 'Candidate sent extra data after the main flow was complete; no deterministic evidence requires changing validated data.',
-        responsePurpose: ContextualResponsePurpose.NONE
+        allowedAction: ContextualAllowedAction.CONTINUE_FLOW,
+        reason: 'Candidate main flow is complete, but the new message may need a contextual answer or correction; continue to the engine instead of returning a fixed close.',
+        responsePurpose: ContextualResponsePurpose.FLOW,
+        metadata: { postCompletionContext: true }
       });
     }
     return decision({
