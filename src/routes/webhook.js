@@ -373,6 +373,10 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
 }
 function buildVacancyContinuePrompt(candidate, vacancy = null) {
   if (vacancy && !isVacancyOpen(vacancy)) {
+    if (candidate?.botResumeMode !== 'paused_vacancy_capture') {
+      return '';
+    }
+
     if (candidate.currentStep === ConversationStep.ASK_CV) {
       return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF o Word/DOCX.';
     }

@@ -262,7 +262,7 @@ function buildSchedulingStepInstructions(currentStep, candidate, vacancy, nextSl
 INSTRUCCION CRITICA DE DISPONIBILIDAD:
 - Esta vacante no esta abierta para recibir personal en este momento.
 - No ofrezcas entrevistas ni agendamiento.
-- Puedes pedir datos y hoja de vida para dejar el perfil registrado por si se reactiva.`;
+- No avances a captura automaticamente. Solo continua si backend ya marco consentimiento contextual para registro de perfil; nunca ofrezcas entrevista ni agenda.`;
   }
 
   if (candidate.gender === 'FEMALE') {
@@ -349,7 +349,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - Si la vacante aun no esta identificada, no inventes cargos, sectores ni categorias de vacantes; pide ciudad y cargo de interes para consultar una opcion concreta.
 - No inventes catalogos de vacantes. Si el backend te entrega vacancyOptionsByCity filtradas por ciudad y estado activo, puedes mencionarlas de forma natural. Si no se te entregan opciones, pide ciudad o cargo sin afirmar que no existen.
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
-- Si la vacante existe pero esta inactiva o pausada, explica que hoy no se esta recibiendo personal, pero aun puedes pedir datos y hoja de vida para dejar el perfil registrado.
+- Si la vacante existe pero esta inactiva o pausada, no avances a captura automaticamente sin consentimiento contextual del candidato para registro de perfil. Si ese consentimiento ya fue marcado por backend, continua solo como registro para futuras aperturas, nunca como entrevista activa.
 - Si despues de datos + hoja de vida o despues de una entrevista agendada aparece una pregunta que no puedes responder con la vacante asignada, revisa con calma ESTADO CURADO DE LA VACANTE y APRENDIZAJES MANUALES DEV; si aun asi no hay informacion segura, usa "pause_bot" con una razon concreta y deja reply vacío. No anuncies validaciones internas ni seguimiento humano al candidato.
 - La documentacion para entrevista solo puede salir de requiredDocuments/interviewDocumentation de la vacante asignada. Respeta exactamente lo configurado en la vacante para documentos de entrevista; no conviertas ni infieras formatos como PDF/DOCX si no estan registrados alli.
 - No te quedes en bucle cuando el usuario corrige.
