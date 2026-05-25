@@ -77,6 +77,30 @@ export function hasValidCv(candidate = {}) {
   return isCvMimeTypeAllowed(mime, filename);
 }
 
+function hasBaseRegistrationFields(candidate = {}, vacancyContext = null) {
+  return Boolean(
+    hasValue(candidate.fullName)
+    && hasValue(candidate.documentType)
+    && hasValue(candidate.documentNumber)
+    && hasValue(candidate.age)
+    && hasValue(getCandidateResidenceValue(candidate, vacancyContext))
+    && hasValue(candidate.medicalRestrictions)
+    && hasValue(candidate.transportMode)
+  );
+}
+
+function isClosedOrRegistered(candidate = {}) {
+  return candidate.currentStep === 'DONE'
+    || ['REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO'].includes(String(candidate.status || ''));
+}
+
+function removePostRegistrationDynamicFields(missingFields = []) {
+  for (const field of ['experienceInfo', 'experienceTime']) {
+    const index = missingFields.indexOf(field);
+    if (index >= 0) missingFields.splice(index, 1);
+  }
+}
+
 export function getCandidateReadiness(candidate = {}, vacancy = null, options = {}) {
   const missingFields = [];
   const vacancyContext = vacancy || candidate?.vacancy || candidate;
@@ -92,6 +116,11 @@ export function getCandidateReadiness(candidate = {}, vacancy = null, options = 
 
   const requireCv = options.requireCv !== false;
   const validCv = hasValidCv(candidate);
+
+  if (validCv && isClosedOrRegistered(candidate) && hasBaseRegistrationFields(candidate, vacancyContext)) {
+    removePostRegistrationDynamicFields(missingFields);
+  }
+
   const missingForDone = [...missingFields];
   if (requireCv && !validCv) missingForDone.push('cv');
 
