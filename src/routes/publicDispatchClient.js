@@ -237,7 +237,10 @@ export function publicDispatchClientRouter() {
   const router = express.Router();
 
   router.get('/api/ciudades', requireOps, async (_req, res) => {
-    const cities = await loadUnifiedCityOptions(prisma);
+    const cities = await prisma.city.findMany({
+      where: { usedForDispatch: true },
+      orderBy: { name: 'asc' }
+    });
     return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 

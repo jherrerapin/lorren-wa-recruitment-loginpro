@@ -41,7 +41,7 @@
     <section class="card">
       <div class="card-head"><h2><%= isEditingClient ? 'Editar cliente' : 'Crear cliente' %></h2><p><%= isEditingClient ? 'Actualiza ciudad, datos comerciales, contacto y estado del cliente.' : 'Registra la empresa que solicitará servicios operativos.' %></p></div>
       <div class="card-body">
-        <div class="section-note" style="margin-bottom:14px;">Si falta una ciudad, créala o habilítala desde <a href="/admin/locations">Ciudades</a>. Una misma ciudad puede servir para Bot / Reclutamiento, Despacho o ambos usos.</div>
+        <div class="section-note" style="margin-bottom:14px;">Este módulo no crea ciudades. Si falta una ciudad, créala o habilítala desde <a href="/admin/locations">Ciudades</a>. Una misma ciudad puede servir para Bot / Reclutamiento, Despacho o ambos usos.</div>
         <form method="post" action="<%= isEditingClient ? '/operaciones/admin-clientes/' + safeEditClient.id + '/editar' : '/operaciones/admin-clientes' %>" autocomplete="off">
           <div class="form-grid">
             <div class="field full"><label for="name">Nombre del cliente</label><input id="name" name="name" required value="<%= formClient.name || '' %>" placeholder="Ej: Opera Logística" /></div>
