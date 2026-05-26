@@ -91,6 +91,7 @@
                   <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/estadisticas/exportar">Descargar Excel</a>
                   <a class="btn" href="/admin/operaciones/clientes/<%= c.id %>/editar">Editar</a>
                   <form method="post" action="/admin/operaciones/clientes/<%= c.id %>/toggle"><button class="btn" type="submit"><%= c.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
+                  <form method="post" action="/admin/operaciones/clientes/<%= c.id %>/regenerar-link" onsubmit="return confirm('Esto invalida el link público anterior de este cliente. ¿Deseas continuar?')"><button class="btn" type="submit">Regenerar link</button></form>
                   <form method="post" action="/operaciones/admin-delete/clientes/<%= c.id %>"><button class="btn" type="submit">Eliminar</button></form>
                 </div>
                 <div class="muted"><%= c._count?.operationPoints || 0 %> operaciones · <%= c._count?.services || 0 %> servicios</div>
