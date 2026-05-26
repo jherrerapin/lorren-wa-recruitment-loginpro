@@ -13,6 +13,7 @@ test('dispatch CRUD contracts for clients operations services and manual workers
     "get('/clientes/:clientId/editar'",
     "post('/clientes/:clientId/editar'",
     "post('/clientes/:clientId/toggle'",
+    "post('/clientes/:clientId/regenerar-link'",
     "post('/clientes/:clientId/eliminar'",
     "post('/clientes/:clientId/operaciones/:operationId/editar'",
     "post('/clientes/:clientId/operaciones/:operationId/toggle'",
@@ -30,8 +31,9 @@ test('dispatch CRUD contracts for clients operations services and manual workers
   assert.match(route, /findManualWorkerOr404/);
   assert.match(route, /dispatchOperationPoint\.update/);
   assert.match(route, /dispatchClientService\.update/);
+  assert.match(route, /regenerar-link/);
 
-  ['Editar', 'Desactivar', 'Reactivar', 'Eliminar', 'Acciones CRUD'].forEach((label) => assert.match(clientsView, new RegExp(label)));
+  ['Editar', 'Desactivar', 'Reactivar', 'Regenerar link', 'Eliminar', 'Acciones CRUD'].forEach((label) => assert.match(clientsView, new RegExp(label)));
   ['Editar operación', 'Editar servicio', 'Guardar operación', 'Guardar servicio', 'Eliminar'].forEach((label) => assert.match(clientOpsView, new RegExp(label)));
   ['Editar', 'Desactivar', 'Reactivar', 'Eliminar', 'MANUAL'].forEach((label) => assert.match(personalView, new RegExp(label)));
   ['mode ===', 'formAction', 'selectedCityIds', 'selectedVacancyIds', 'operationalStatus'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
