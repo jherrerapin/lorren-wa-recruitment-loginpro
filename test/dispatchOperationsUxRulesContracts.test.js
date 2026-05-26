@@ -27,6 +27,15 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(assignmentsView, /type="time" name="endTime"/);
   assert.match(editRequestView, /id="startTime" type="time" name="startTime"/);
   assert.match(editRequestView, /id="endTime" type="time" name="endTime"/);
+  assert.match(publicRoute, /TIME_HH_MM_PATTERN/);
+  assert.match(publicRoute, /normalizeOptionalTime/);
+  assert.match(publicRoute, /Horario invalido\. Usa formato HH:mm/);
+  assert.match(publicRoute, /startTime,\n\s*endTime/);
+  assert.match(dispatchRoute, /TIME_HH_MM_PATTERN/);
+  assert.match(dispatchRoute, /normalizeOptionalTime/);
+  assert.match(dispatchRoute, /resolveRequestTimes/);
+  assert.match(dispatchRoute, /Horario invalido\. Usa formato HH:mm/);
+  assert.match(dispatchRoute, /\.\.\.requestTimes/);
 
   assert.match(workerFormView, /enctype="multipart\/form-data"/);
   assert.match(workerFormView, /name="cvFile"/);
