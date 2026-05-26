@@ -110,6 +110,17 @@ function normalizeText(value) {
     .toLowerCase();
 }
 
+function buildInitialClientServiceNames(body = {}) {
+  const serviceNames = normalizeStringList(body.services);
+  const seen = new Set();
+  return serviceNames.filter((name) => {
+    const key = normalizeText(name);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function loadWorkerFormOptions() {
   const [cities, vacancies] = await Promise.all([
     loadUnifiedCityOptions(prisma),
@@ -237,21 +248,26 @@ export function publicDispatchClientRouter() {
   const router = express.Router();
 
   router.get('/api/ciudades', requireOps, async (_req, res) => {
-    const cities = await prisma.city.findMany({
-      where: { usedForDispatch: true },
-      orderBy: { name: 'asc' }
-    });
+    const allCities = await loadUnifiedCityOptions(prisma);
+    const cities = allCities.filter((city) => city.usedForDispatch);
     return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 
   router.post('/admin-clientes', requireOps, async (req, res) => {
     const data = buildClientData(req.body);
     if (!data.name) return res.status(400).send('Nombre requerido');
+    const serviceNames = buildInitialClientServiceNames(req.body);
+    const createdByUsername = req.session?.username || req.username || null;
     await prisma.dispatchClient.create({
       data: {
         ...data,
         publicToken: randomBytes(24).toString('hex'),
-        createdByUsername: req.session?.username || req.username || null
+        createdByUsername,
+        ...(serviceNames.length ? {
+          services: {
+            create: serviceNames.map((name) => ({ name, createdByUsername }))
+          }
+        } : {})
       }
     });
     return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente creado.'));
