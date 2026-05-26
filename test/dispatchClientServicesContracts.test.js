@@ -7,6 +7,7 @@ test('dispatch client services can be managed and selected in operational reques
   const route = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const publicView = fs.readFileSync('src/views/publicDispatchRequest.ejs', 'utf8');
+  const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
   const clientOpsView = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
   const assignmentView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
   const editView = fs.readFileSync('src/views/operacionesSolicitudEditar.ejs', 'utf8');
@@ -21,9 +22,18 @@ test('dispatch client services can be managed and selected in operational reques
   assert.match(route, /dispatchClientService\.create/);
   assert.match(route, /resolveDispatchService/);
   assert.match(route, /serviceRequestServiceData/);
+
+  assert.match(publicRoute, /buildInitialClientServiceNames/);
+  assert.match(publicRoute, /body\.services/);
   assert.match(publicRoute, /services:\s*\{/);
+  assert.match(publicRoute, /create:\s*serviceNames\.map/);
+  assert.match(publicRoute, /loadUnifiedCityOptions\(prisma\)/);
+  assert.match(publicRoute, /filter\(\(city\) => city\.usedForDispatch\)/);
   assert.match(publicRoute, /serviceId: selectedService\?\.id/);
 
+  assert.match(clientsView, /Servicios del cliente/);
+  assert.match(clientsView, /name="services\[\]"/);
+  assert.match(clientsView, /\+ Agregar servicio/);
   assert.match(clientOpsView, /Crear servicio/);
   assert.match(clientOpsView, /Servicios registrados/);
   assert.match(publicView, /name="serviceId"/);
