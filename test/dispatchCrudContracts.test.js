@@ -33,7 +33,8 @@ test('dispatch CRUD contracts for clients operations services and manual workers
   assert.match(route, /dispatchClientService\.update/);
   assert.match(route, /regenerar-link/);
 
-  ['Editar', 'Desactivar', 'Reactivar', 'Regenerar link', 'Eliminar', 'Acciones CRUD'].forEach((label) => assert.match(clientsView, new RegExp(label)));
+  ['Editar', 'Desactivar', 'Reactivar', 'Regenerar link', 'Eliminar'].forEach((label) => assert.match(clientsView, new RegExp(label)));
+  assert.doesNotMatch(clientsView, /Acciones CRUD/);
   ['Editar operación', 'Editar servicio', 'Guardar operación', 'Guardar servicio', 'Eliminar'].forEach((label) => assert.match(clientOpsView, new RegExp(label)));
   ['Editar', 'Desactivar', 'Reactivar', 'Eliminar', 'MANUAL'].forEach((label) => assert.match(personalView, new RegExp(label)));
   ['mode ===', 'formAction', 'selectedCityIds', 'selectedVacancyIds', 'operationalStatus'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
