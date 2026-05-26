@@ -16,6 +16,8 @@ const ALLOWED_WORKER_CV_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ]);
 
+const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -26,6 +28,15 @@ function normalizeStringList(value) {
   if (Array.isArray(value)) return value.map((item) => normalizeString(item)).filter(Boolean);
   const single = normalizeString(value);
   return single ? [single] : [];
+}
+
+function normalizeOptionalTime(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+  if (!TIME_HH_MM_PATTERN.test(normalized)) {
+    throw new Error('Horario invalido. Usa formato HH:mm.');
+  }
+  return normalized;
 }
 
 function setNoStore(res) {
@@ -439,6 +450,15 @@ export function publicDispatchClientRouter() {
       return res.status(400).send('Debes ingresar fecha y cantidad válida de auxiliares.');
     }
 
+    let startTime = null;
+    let endTime = null;
+    try {
+      startTime = normalizeOptionalTime(req.body.startTime);
+      endTime = normalizeOptionalTime(req.body.endTime);
+    } catch (error) {
+      return res.status(400).send(error.message || 'Horario invalido. Usa formato HH:mm.');
+    }
+
     await prisma.dispatchServiceRequest.create({
       data: {
         operationPointId: operationPoint.id,
@@ -449,8 +469,8 @@ export function publicDispatchClientRouter() {
         serviceId: selectedService?.id || null,
         serviceName: selectedService?.name || null,
         serviceDate: new Date(serviceDate),
-        startTime: normalizeString(req.body.startTime),
-        endTime: normalizeString(req.body.endTime),
+        startTime,
+        endTime,
         requiredWorkers: Math.max(1, Math.trunc(requiredWorkersRaw)),
         notes: normalizeString(req.body.notes),
         requestedByName: normalizeString(req.body.requestedByName),
