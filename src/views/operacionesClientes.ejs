@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
     select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
+    .inline-list { display:flex; flex-direction:column; gap:10px; }
+    .inline-list-row { display:flex; gap:10px; align-items:center; }
+    .inline-list-row input { flex:1; }
   </style>
 </head>
 <body>
@@ -41,7 +44,7 @@
     <section class="card">
       <div class="card-head"><h2><%= isEditingClient ? 'Editar cliente' : 'Crear cliente' %></h2><p><%= isEditingClient ? 'Actualiza ciudad, datos comerciales, contacto y estado del cliente.' : 'Registra la empresa que solicitará servicios operativos.' %></p></div>
       <div class="card-body">
-        <div class="section-note" style="margin-bottom:14px;">Si falta una ciudad, créala o habilítala desde <a href="/admin/locations">Ciudades</a>. Una misma ciudad puede servir para Bot / Reclutamiento, Despacho o ambos usos.</div>
+        <div class="section-note" style="margin-bottom:14px;">Este módulo no crea ciudades. Si falta una ciudad, créala o habilítala desde <a href="/admin/locations">Ciudades</a>. Una misma ciudad puede servir para Bot / Reclutamiento, Despacho o ambos usos.</div>
         <form method="post" action="<%= isEditingClient ? '/operaciones/admin-clientes/' + safeEditClient.id + '/editar' : '/operaciones/admin-clientes' %>" autocomplete="off">
           <div class="form-grid">
             <div class="field full"><label for="name">Nombre del cliente</label><input id="name" name="name" required value="<%= formClient.name || '' %>" placeholder="Ej: Opera Logística" /></div>
@@ -52,6 +55,18 @@
             <div class="field"><label for="contactEmail">Correo</label><input id="contactEmail" name="contactEmail" type="email" value="<%= formClient.contactEmail || '' %>" placeholder="correo@cliente.com" /></div>
             <div class="field"><label for="isActive">Estado</label><select id="isActive" name="isActive"><option value="true" <%= formClient.isActive !== false ? 'selected' : '' %>>Activo</option><option value="false" <%= formClient.isActive === false ? 'selected' : '' %>>Inactivo</option></select></div>
             <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Condiciones, observaciones o información relevante"><%= formClient.notes || '' %></textarea></div>
+            <% if (!isEditingClient) { %>
+              <div class="field full">
+                <label>Servicios del cliente</label>
+                <div id="servicesList" class="inline-list">
+                  <div class="inline-list-row">
+                    <input name="services[]" placeholder="Ej: Cargue y descargue" />
+                  </div>
+                </div>
+                <button class="btn" type="button" id="addServiceBtn" style="margin-top:10px;">+ Agregar servicio</button>
+                <small class="muted">Estos servicios quedarán asociados al cliente y luego se podrán administrar en Operaciones y servicios.</small>
+              </div>
+            <% } %>
           </div>
           <div class="form-actions"><button class="btn btn-primary" type="submit"><%= isEditingClient ? 'Guardar cliente' : 'Crear cliente' %></button><% if (isEditingClient) { %><a class="btn" href="/admin/operaciones/clientes">Cancelar</a><% } %></div>
         </form>
@@ -119,6 +134,24 @@
         console.error('No fue posible cargar ciudades', error);
       }
     }
+    document.getElementById('addServiceBtn')?.addEventListener('click', () => {
+      const servicesList = document.getElementById('servicesList');
+      if (!servicesList) return;
+      const row = document.createElement('div');
+      row.className = 'inline-list-row';
+      const input = document.createElement('input');
+      input.name = 'services[]';
+      input.placeholder = 'Ej: Inventario o Picking / packing';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn';
+      remove.textContent = 'Quitar';
+      remove.addEventListener('click', () => row.remove());
+      row.appendChild(input);
+      row.appendChild(remove);
+      servicesList.appendChild(row);
+      input.focus();
+    });
     window.addEventListener('pageshow', (event) => { if (event.persisted) window.location.reload(); });
     document.getElementById('cityName')?.addEventListener('change', (event) => refreshSelectState(event.target));
     loadCityOptions();
