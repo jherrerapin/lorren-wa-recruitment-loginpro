@@ -132,7 +132,7 @@ export function detectCityFromText(text = '', cityNames = []) {
 
   if (bestMatch?.value) return bestMatch.value;
 
-  const alias = LOCATION_ALIASES.find((entry) => entry.patterns.some((pattern) => pattern.test(text)));
+  const alias = LOCATION_ALIASES.find((entry) => entry.patterns.some((pattern) => pattern.test(text) || pattern.test(normalized)));
   return alias?.value || null;
 }
 
