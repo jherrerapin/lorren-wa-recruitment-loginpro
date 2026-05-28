@@ -840,6 +840,12 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
   }
 
   if (engineResult.suppressed) {
+    await recordIntentionalSilence(prisma, candidate, inboundText, {
+      reason: engineResult.suppressedReason || 'engine_suppressed_without_reason',
+      gate: 'chat_engine',
+      action: 'SUPPRESSED',
+      vacancyId: vacancy?.id || candidate?.vacancyId || null
+    });
     console.warn('[BOT_SUPPRESSED]', JSON.stringify({
       phone: candidate.phone,
       candidateId: candidate.id,
@@ -1063,6 +1069,39 @@ async function hasRecentResumePhotoReply(prisma, candidateId, minutes = 15) {
   });
   return recent.some((message) => message?.rawPayload?.situation === 'attachment_resume_photo'
     || (message?.rawPayload?.replyIntent === 'request_cv_pdf_word' && /registrar tu hoja de vida|pdf o word\/docx/i.test(message?.body || '')));
+}
+
+
+async function recordIntentionalSilence(prisma, candidate = {}, inboundText = '', details = {}) {
+  const payload = {
+    source: 'bot_silence_trace',
+    visibility: 'internal',
+    neverSendToCandidate: true,
+    candidateId: candidate?.id || null,
+    inboundPreview: String(inboundText || '').slice(0, 180),
+    currentStep: candidate?.currentStep || null,
+    vacancyId: candidate?.vacancyId || details.vacancyId || null,
+    reason: details.reason || 'intentional_silence',
+    gate: details.gate || details.action || null,
+    action: details.action || null,
+    replyKind: details.replyKind || null,
+    recentReplyKind: details.recentReplyKind || null,
+    createdAt: new Date().toISOString()
+  };
+  try {
+    await prisma.message.create({
+      data: {
+        candidateId: candidate.id,
+        direction: MessageDirection.OUTBOUND,
+        messageType: MessageType.TEXT,
+        body: `[silencio intencional] ${payload.reason}`,
+        rawPayload: payload
+      }
+    });
+  } catch (error) {
+    console.warn('[BOT_SILENCE_TRACE_ERROR]', JSON.stringify({ candidateId: candidate?.id || null, reason: payload.reason, error: error?.message?.slice(0, 160) }));
+  }
+  console.info('[BOT_SILENCE_TRACE]', JSON.stringify(payload));
 }
 
 async function pauseSilentlyForManualReview(prisma, candidate, reason, inboundText = '', options = {}) {
@@ -1550,37 +1589,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   } else if (aiResult.status === 'disabled') {
     console.log('[AI_FALLBACK]', JSON.stringify({ phone: candidate.phone, reason: 'openai_disabled' }));
   }
-  if (!currentVacancy) {
-    const shouldRetryVacancyResolution = hasDataIntent
-      || Boolean(vacancyHints.city || vacancyHints.roleHint)
-      || isAffirmativeInterest(cleanText)
-      || isQuestionLike(cleanText);
-
-    if (shouldRetryVacancyResolution) {
-      const resolution = await resolveVacancyForCandidate();
-      if (resolution.resolved && resolution.vacancy) {
-        await prisma.candidate.update({
-          where: { id: candidate.id },
-          data: { vacancyId: resolution.vacancy.id }
-        });
-        candidate = { ...candidate, vacancyId: resolution.vacancy.id };
-        currentVacancy = resolution.vacancy;
-        normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
-        debugTrace.normalized_fields = normalizedData;
-      } else if (
-        ![
-          ConversationStep.MENU,
-          ConversationStep.GREETING_SENT,
-          ConversationStep.COLLECTING_DATA,
-          ConversationStep.CONFIRMING_DATA,
-          ConversationStep.ASK_CV
-        ].includes(candidate.currentStep)
-        && await replyFromVacancyResolutionFailure(resolution)
-      ) {
-        return;
-      }
-    }
-  }
+  debugTrace.vacancy_assignment_pre_gate_blocked = !currentVacancy;
 
   if (candidate.status === CandidateStatus.RECHAZADO) return reply(prisma, candidate.id, from, DESCARTE_MSG);
 
@@ -1653,7 +1662,15 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           extra: { allowedAction: gateDecision.allowedAction, semanticIntent: semanticIntentForGate }
         });
       }
-      if (!gateDecision.shouldReply) return;
+      if (!gateDecision.shouldReply) {
+        await recordIntentionalSilence(prisma, candidate, cleanText, {
+          reason: gateDecision.reason || 'contextual_gate_should_not_reply',
+          gate: 'contextual_response_gate',
+          action: gateDecision.allowedAction,
+          vacancyId: currentVacancy?.id || candidate?.vacancyId || null
+        });
+        return;
+      }
       if (gateDecision.reply) {
         return reply(prisma, candidate.id, from, gateDecision.reply, cleanText, {
           body: gateDecision.reply,
@@ -1695,6 +1712,14 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   };
 
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.SUPPRESS_REPLY) {
+    await recordIntentionalSilence(prisma, candidate, cleanText, {
+      reason: vacancyFirstGateDecision.reason,
+      gate: 'vacancy_first_gate',
+      action: vacancyFirstGateDecision.action,
+      replyKind: vacancyFirstGateDecision.replyKind || null,
+      recentReplyKind: vacancyFirstGateDecision.suppressedDecision?.replyKind || null,
+      vacancyId: currentVacancy?.id || candidate?.vacancyId || vacancyFirstGateDecision.vacancyId || null
+    });
     return;
   }
 
@@ -1776,12 +1801,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           Object.assign(updateData, initialDecisions.persistedData);
         }
       }
-      updateData.vacancyId = resolution.vacancy.id;
+      debugTrace.vacancy_resolution_after_gate_not_persisted = resolution.vacancy.id;
     }
     await prisma.candidate.update({ where: { id: candidate.id }, data: updateData });
 
     if (resolution.resolved && resolution.vacancy) {
-      const candidateState = { ...candidate, ...updateData, vacancyId: resolution.vacancy.id };
+      const candidateState = { ...candidate, ...updateData };
       return replyWithVacancyContext(candidateState, resolution.vacancy);
     }
 
@@ -1802,8 +1827,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     const resolution = await resolveVacancyForCandidate();
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
     if (resolution.resolved && resolution.vacancy) {
-      await prisma.candidate.update({ where: { id: candidate.id }, data: { vacancyId: resolution.vacancy.id } });
-      const candidateState = { ...candidate, vacancyId: resolution.vacancy.id, currentStep: ConversationStep.GREETING_SENT };
+      debugTrace.vacancy_resolution_after_gate_not_persisted = resolution.vacancy.id;
+      const candidateState = { ...candidate, currentStep: ConversationStep.GREETING_SENT };
       return replyWithVacancyContext(candidateState, resolution.vacancy);
     }
     if (await replyFromVacancyResolutionFailure(resolution)) return;
@@ -1862,12 +1887,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
     const resolution = await resolveVacancyForCandidate();
     if (resolution.resolved && resolution.vacancy) {
-      await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: { vacancyId: resolution.vacancy.id }
-      });
-      const candidateState = { ...candidate, vacancyId: resolution.vacancy.id };
-      return replyWithVacancyContext(candidateState, resolution.vacancy);
+      debugTrace.vacancy_resolution_after_gate_not_persisted = resolution.vacancy.id;
+      return replyWithVacancyContext(candidate, resolution.vacancy);
     }
 
     if (await replyFromVacancyResolutionFailure(resolution)) {

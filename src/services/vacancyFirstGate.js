@@ -1,5 +1,5 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
-import { normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
+import { detectOperationZoneEvidence, detectRoleHintFromText, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -114,14 +114,109 @@ function isFutureProfileOfferMode(mode = '') {
   return [FUTURE_PROFILE_OFFER_MODE, PAUSED_VACANCY_OFFER_MODE].includes(String(mode || ''));
 }
 
-function hasFutureProfileAcceptanceEvidence(text = '') {
+
+const FUTURE_PROFILE_OFFER_REPLY_KINDS = new Set([
+  'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
+  'NO_ACTIVE_VACANCIES_FOR_CITY'
+]);
+
+function getLastOutboundBotDecision(recentMessages = []) {
+  return [...(recentMessages || [])]
+    .reverse()
+    .filter((message) => !message?.direction || message.direction === 'OUTBOUND')
+    .find((message) => {
+      const payload = message?.rawPayload || {};
+      const source = String(payload.source || '');
+      const actor = String(payload.actor || 'BOT');
+      return actor !== 'RECRUITER'
+        && actor !== 'ADMIN'
+        && (source === 'vacancy_first_gate' || source.startsWith('bot_') || source === 'bot_flow');
+    }) || null;
+}
+
+function detectAffirmationIntent(text = '') {
   const normalized = normalizeResolverText(text);
-  if (!normalized) return false;
+  if (!normalized) return { affirmative: false, passiveAck: false };
   const tokens = new Set(normalized.split(' ').filter(Boolean));
-  const affirmative = ['si', 'sii', 'sip', 'sipi', 'claro', 'listo', 'acepto', 'confirmo', 'dale'].some((token) => tokens.has(token));
-  const profileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
+  const hasActiveConfirmation = tokens.has('confirmo')
+    || tokens.has('acepto')
+    || /\b(de acuerdo|claro que si|si confirmo|dale|hagale|listo)\b/.test(normalized)
+    || (/\bsi\b/.test(normalized) && !/\bpero\b/.test(normalized));
+  const passiveAck = /^(a\s*)?(bueno|ok|okay|entiendo|vale|gracias|listo gracias|perfecto gracias)$/.test(normalized)
+    || (/\b(entendido|comprendo)\b/.test(normalized) && !hasActiveConfirmation);
+  return { affirmative: hasActiveConfirmation, passiveAck };
+}
+
+function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMessages = [] } = {}) {
+  const lastOutbound = getLastOutboundBotDecision(recentMessages);
+  const lastReplyKind = lastOutbound?.rawPayload?.replyKind || null;
+  const lastWasFutureOffer = FUTURE_PROFILE_OFFER_REPLY_KINDS.has(lastReplyKind);
+  const inOfferMode = isFutureProfileOfferMode(botResumeMode);
+  const intent = detectAffirmationIntent(text);
+  const normalized = normalizeResolverText(text);
+  const explicitProfileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
     && /\b(perfil|hoja de vida|hv|datos|registro|registrada|registrado)\b/.test(normalized);
-  return affirmative && profileIntent;
+
+  if (inOfferMode && lastWasFutureOffer && intent.affirmative) {
+    return { accepted: true, passiveAck: false, reason: 'contextual_affirmation_after_future_profile_offer', lastReplyKind };
+  }
+  if (inOfferMode && lastWasFutureOffer && intent.passiveAck) {
+    return { accepted: false, passiveAck: true, reason: 'passive_ack_after_future_profile_offer', lastReplyKind };
+  }
+  if (intent.affirmative && explicitProfileIntent) {
+    return { accepted: true, passiveAck: false, reason: 'explicit_future_profile_acceptance', lastReplyKind };
+  }
+  return { accepted: false, passiveAck: intent.passiveAck, reason: intent.passiveAck ? 'passive_ack' : 'no_acceptance_evidence', lastReplyKind };
+}
+
+function hasFutureProfileAcceptanceEvidence(text = '', context = {}) {
+  return evaluateFutureProfileConsent({ text, ...context }).accepted;
+}
+
+function messageCreatedAtMs(message = {}) {
+  const raw = message.createdAt || message.timestamp || message.rawPayload?.createdAt;
+  const date = raw ? new Date(raw) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : Date.now();
+}
+
+export function hasRecentSameBotDecision({ recentMessages = [], replyKind = '', reason = '', windowMinutes = 10 } = {}) {
+  if (!replyKind || !reason) return false;
+  const since = Date.now() - (Number(windowMinutes) || 10) * 60 * 1000;
+  return (recentMessages || []).some((message) => {
+    if (message?.direction && message.direction !== 'OUTBOUND') return false;
+    const payload = message?.rawPayload || {};
+    const actor = String(payload.actor || 'BOT');
+    if (actor === 'RECRUITER' || actor === 'ADMIN') return false;
+    const source = String(payload.source || '');
+    if (source && source !== 'vacancy_first_gate' && !source.startsWith('bot_')) return false;
+    return payload.replyKind === replyKind
+      && payload.reason === reason
+      && messageCreatedAtMs(message) >= since;
+  });
+}
+
+function hasMaterialVacancyEvidence(text = '', city = null) {
+  return Boolean(
+    detectRoleHintFromText(text, { city })
+    || detectOperationZoneEvidence(text).length
+  );
+}
+
+function preventRepeatDecision(decision, { recentMessages = [], inboundText = '', city = null } = {}) {
+  if (!decision?.replyKind || !decision?.reason) return decision;
+  const repeated = hasRecentSameBotDecision({
+    recentMessages,
+    replyKind: decision.replyKind,
+    reason: decision.reason,
+    windowMinutes: 10
+  });
+  if (!repeated || hasMaterialVacancyEvidence(inboundText, city)) return decision;
+  return {
+    action: VacancyFirstGateAction.SUPPRESS_REPLY,
+    reason: 'REPEAT_PREVENTED',
+    replyKind: decision.replyKind,
+    suppressedDecision: { reason: decision.reason, replyKind: decision.replyKind }
+  };
 }
 
 function isRegisteredCompleteWithoutVacancy(candidate = {}, readiness = {}) {
@@ -163,6 +258,15 @@ export async function resolveVacancyFirstGate({
     };
   }
 
+  const futureProfileConsent = evaluateFutureProfileConsent({ text: inboundText, botResumeMode, recentMessages });
+  if (isFutureProfileOfferMode(botResumeMode) && futureProfileConsent.passiveAck) {
+    return {
+      action: VacancyFirstGateAction.SUPPRESS_REPLY,
+      reason: 'PASSIVE_ACK_AFTER_FUTURE_PROFILE_OFFER',
+      replyKind: futureProfileConsent.lastReplyKind || null
+    };
+  }
+
   if (isRegisteredCompleteWithoutVacancy(candidate, effectiveReadiness)) {
     return {
       action: VacancyFirstGateAction.REPLY,
@@ -174,7 +278,7 @@ export async function resolveVacancyFirstGate({
 
   if (currentVacancy || candidate?.vacancyId) {
     if (currentVacancy && !isOpenVacancy(currentVacancy)) {
-      if (isFutureProfileOfferMode(botResumeMode) && hasFutureProfileAcceptanceEvidence(inboundText)) {
+      if (hasFutureProfileAcceptanceEvidence(inboundText, { botResumeMode, recentMessages })) {
         return {
           action: VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT,
           reason: 'PAUSED_VACANCY_FUTURE_PROFILE_ACCEPTED',
@@ -188,7 +292,7 @@ export async function resolveVacancyFirstGate({
           reply: missingDataPrompt(candidate, currentVacancy)
         };
       }
-      return {
+      return preventRepeatDecision({
         action: VacancyFirstGateAction.REPLY,
         reason: 'VACANCY_NOT_ACTIVE',
         replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
@@ -199,7 +303,7 @@ export async function resolveVacancyFirstGate({
           reminderState: 'SKIPPED'
         },
         reply: buildInactiveVacancyReply(currentVacancy)
-      };
+      }, { recentMessages, inboundText, city: vacancyCity(currentVacancy) });
     }
 
     return {
@@ -215,7 +319,7 @@ export async function resolveVacancyFirstGate({
     };
   }
 
-  if (isFutureProfileOfferMode(botResumeMode) && hasFutureProfileAcceptanceEvidence(inboundText)) {
+  if (hasFutureProfileAcceptanceEvidence(inboundText, { botResumeMode, recentMessages })) {
     return {
       action: VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT,
       reason: 'NO_ACTIVE_VACANCY_FUTURE_PROFILE_ACCEPTED',
@@ -249,7 +353,7 @@ export async function resolveVacancyFirstGate({
   }
 
   if (resolution.resolved && resolution.vacancy && !isOpenVacancy(resolution.vacancy)) {
-    return {
+    return preventRepeatDecision({
       action: VacancyFirstGateAction.INACTIVE_VACANCY_REPLY,
       reason: 'INACTIVE_VACANCY_RESOLVED',
       replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
@@ -262,11 +366,11 @@ export async function resolveVacancyFirstGate({
       },
       reply: buildInactiveVacancyReply(resolution.vacancy, resolution.city),
       resolution
-    };
+    }, { recentMessages, inboundText, city: resolution.city });
   }
 
   if (['city_without_active_vacancies', 'no_active_vacancies'].includes(resolution.reason)) {
-    return {
+    return preventRepeatDecision({
       action: VacancyFirstGateAction.REPLY,
       reason: 'CITY_WITHOUT_ACTIVE_VACANCIES',
       replyKind: 'NO_ACTIVE_VACANCIES_FOR_CITY',
@@ -278,26 +382,26 @@ export async function resolveVacancyFirstGate({
       },
       reply: buildNoActiveVacanciesReply(resolution.city),
       resolution
-    };
+    }, { recentMessages, inboundText, city: resolution.city });
   }
 
   if (['city_with_active_vacancies', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
-    return {
+    return preventRepeatDecision({
       action: VacancyFirstGateAction.REPLY,
       reason: 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS',
       replyKind: 'ASK_CITY_LOCALITY_AND_ROLE',
       candidateUpdates: { currentStep: GREETING_SENT },
       reply: buildNeedRoleForCityReply(resolution.city),
       resolution
-    };
+    }, { recentMessages, inboundText, city: resolution.city });
   }
 
-  return {
+  return preventRepeatDecision({
     action: VacancyFirstGateAction.REPLY,
     reason: 'VACANCY_NOT_RESOLVED',
     replyKind: 'ASK_CITY_AND_ROLE',
     candidateUpdates: { currentStep: GREETING_SENT },
     reply: 'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.',
     resolution
-  };
+  }, { recentMessages, inboundText, city: resolution?.city });
 }

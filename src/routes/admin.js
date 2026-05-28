@@ -875,9 +875,10 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
   await sendTextMessage(candidate.phone, finalBody);
   await prisma.candidate.update({ where: { id: candidate.id }, data: update });
   const authorizedPayload = {
-    actor: 'RECRUITER',
+    ...rawPayload,
+    actor: rawPayload?.actor === 'ADMIN' ? 'ADMIN' : 'RECRUITER',
     sourceCategory: 'MANUAL_AUTHORIZED',
-    ...rawPayload
+    manualIntervention: true
   };
   await prisma.message.create({
     data: {
@@ -2251,7 +2252,8 @@ export function adminRouter(prisma) {
             conditions: true,
             operationAddress: true,
             interviewAddress: true,
-            acceptingApplications: true
+            acceptingApplications: true,
+            isActive: true
           }
         }
       }
@@ -2271,6 +2273,10 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'La ventana de 24h de WhatsApp está vencida. No se puede enviar la información de la vacante.'));
     }
 
+    if (!candidate.vacancy.isActive || !candidate.vacancy.acceptingApplications) {
+      return res.redirect(withFlashMessage(returnTo, 'error', 'La vacante no está activa para recibir postulaciones. No se envió información automática de vacante.'));
+    }
+
     const body = buildManualVacancyInfoMessage(candidate.vacancy);
     if (!body) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'La vacante no tiene información suficiente para enviarla.'));
@@ -2279,6 +2285,7 @@ export function adminRouter(prisma) {
     try {
       await sendAdminOutboundMessage(prisma, candidate, body, {
         source: 'admin_manual_vacancy_info',
+        actor: 'RECRUITER',
         action: 'send_vacancy_info',
         vacancyId: candidate.vacancy.id
       });
