@@ -15,13 +15,23 @@ const ROLE_STOPWORDS = new Set([
   'vivo', 'vive', 'vives', 'vivir', 'ciudad', 'numero', 'dieron', 'este', 'esta'
 ]);
 const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|descargue|descarge|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento)\b/i;
-const LOCATION_ALIASES = [
-  { value: 'Bogota', patterns: [/\bbogota\b/i, /\bfunza\b/i, /\bmosquera\b/i, /\bmadrid\b/i, /\bsiberia\b/i, /\bsuba\b/i, /\bengativa\b/i, /\bcalle 80\b/i, /\bvillas? de granada\b/i, /\bel rosal\b/i] },
-  { value: 'Ibague', patterns: [/\bibague\b/i] }
+const CITY_ALIASES = [
+  { value: 'Bogota', aliases: ['bogota'] },
+  { value: 'Ibague', aliases: ['ibague'] }
 ];
-const LOCATION_GROUPS = [
-  { key: 'bogota-siberia', aliases: ['bogota', 'siberia', 'funza', 'mosquera', 'madrid', 'suba', 'engativa', 'calle 80', 'villas de granada', 'el rosal'] },
-  { key: 'ibague', aliases: ['ibague'] }
+
+const OPERATION_ZONE_ALIASES = [
+  { key: 'siberia', aliases: ['siberia'] },
+  { key: 'funza', aliases: ['funza'] },
+  { key: 'mosquera', aliases: ['mosquera'] },
+  { key: 'madrid', aliases: ['madrid'] },
+  { key: 'calle 80', aliases: ['calle 80'] },
+  { key: 'tenjo', aliases: ['tenjo'] },
+  { key: 'la punta', aliases: ['la punta'] },
+  { key: 'el rosal', aliases: ['el rosal'] },
+  { key: 'villas de granada', aliases: ['villas de granada', 'villa de granada'] },
+  { key: 'suba', aliases: ['suba'] },
+  { key: 'engativa', aliases: ['engativa'] }
 ];
 
 export function normalizeResolverText(text = '') {
@@ -87,23 +97,26 @@ function buildVacancyFunctionalText(vacancy) {
   ].filter(Boolean).join(' ');
 }
 
-function findLocationGroup(text = '') {
+export function detectOperationZoneEvidence(text = '') {
   const normalized = normalizeResolverText(text);
-  if (!normalized) return null;
-  return LOCATION_GROUPS.find((group) => group.aliases.some((alias) => normalized.includes(alias))) || null;
+  if (!normalized) return [];
+  const padded = ` ${normalized} `;
+  return OPERATION_ZONE_ALIASES
+    .filter((entry) => entry.aliases.some((alias) => padded.includes(` ${normalizeResolverText(alias)} `)))
+    .map((entry) => entry.key);
 }
 
 function cityMatchesVacancy(vacancy, requestedCity = '') {
   const normalizedRequestedCity = normalizeResolverText(requestedCity);
   const normalizedVacancyCity = normalizeResolverText(canonicalVacancyCity(vacancy));
   if (!normalizedRequestedCity) return true;
-  if (normalizedVacancyCity === normalizedRequestedCity) return true;
+  return normalizedVacancyCity === normalizedRequestedCity;
+}
 
-  const requestedGroup = findLocationGroup(normalizedRequestedCity);
-  if (!requestedGroup) return false;
-
+function zoneMatchesVacancy(vacancy, zones = []) {
+  if (!zones.length) return false;
   const vacancyLocationText = buildVacancyLocationText(vacancy);
-  return requestedGroup.aliases.some((alias) => vacancyLocationText.includes(alias));
+  return zones.some((zone) => vacancyLocationText.includes(normalizeResolverText(zone)));
 }
 
 function isVacancyOpen(vacancy) {
@@ -132,8 +145,11 @@ export function detectCityFromText(text = '', cityNames = []) {
 
   if (bestMatch?.value) return bestMatch.value;
 
-  const alias = LOCATION_ALIASES.find((entry) => entry.patterns.some((pattern) => pattern.test(text) || pattern.test(normalized)));
-  return alias?.value || null;
+  for (const entry of CITY_ALIASES) {
+    if (entry.aliases.some((alias) => padded.includes(` ${normalizeResolverText(alias)} `))) return entry.value;
+  }
+
+  return null;
 }
 
 function cleanRoleTokens(tokens = [], cityTokens = new Set()) {
@@ -265,12 +281,16 @@ function scoreVacancyRole(vacancy, { text, roleHint }) {
   return score;
 }
 
-function scoreVacancy(vacancy, { text, city, roleHint }) {
+function scoreVacancy(vacancy, { text, city, roleHint, operationZones = [] }) {
   let score = 0;
 
   if (city) {
     if (!cityMatchesVacancy(vacancy, city)) return -1;
     score += 4;
+  }
+
+  if (operationZones.length) {
+    if (zoneMatchesVacancy(vacancy, operationZones)) score += 3;
   }
 
   score += scoreVacancyRole(vacancy, { text, roleHint });
@@ -345,6 +365,70 @@ function hasEnoughRoleEvidence(match, roleHint = '') {
   return Boolean(match?.best && match.best.roleScore >= roleEvidenceThreshold(roleHint));
 }
 
+
+function roleHintTokens(roleHint = '') {
+  return cleanRoleTokens(tokenize(roleHint));
+}
+
+function isGenericInactiveRoleHint(roleHint = '') {
+  const tokens = roleHintTokens(roleHint);
+  if (!tokens.length) return true;
+  const tokenSet = new Set(tokens);
+  const genericGroups = [
+    ['auxiliar'],
+    ['bodega'],
+    ['auxiliar', 'bodega'],
+    ['cargue'],
+    ['descargue'],
+    ['cargue', 'descargue'],
+    ['auxiliar', 'cargue'],
+    ['auxiliar', 'descargue'],
+    ['auxiliar', 'cargue', 'descargue'],
+    ['operativo'],
+    ['operario']
+  ];
+  return genericGroups.some((group) => group.length === tokens.length && group.every((token) => tokenSet.has(token)));
+}
+
+function hasExactNormalizedPhrase(text = '', phrase = '') {
+  const normalizedText = ` ${normalizeResolverText(text)} `;
+  const normalizedPhrase = normalizeResolverText(phrase);
+  return Boolean(normalizedPhrase && normalizedText.includes(` ${normalizedPhrase} `));
+}
+
+function hasSpecificInactiveVacancyEvidence({ text = '', vacancy = null, city = null, roleHint = '', operationZones = [], roleScore = 0 } = {}) {
+  if (!vacancy) return false;
+  if (zoneMatchesVacancy(vacancy, operationZones)) return true;
+
+  const operationName = vacancy?.operation?.name;
+  if (operationName && hasExactNormalizedPhrase(text, operationName)) return true;
+
+  const title = vacancy?.title || '';
+  if (title && hasExactNormalizedPhrase(text, title)) return true;
+
+  const vacancyCityText = normalizeResolverText(canonicalVacancyCity(vacancy));
+  const requestedCityText = normalizeResolverText(city);
+  if (requestedCityText && vacancyCityText && requestedCityText !== vacancyCityText) return false;
+
+  return Boolean(roleHint && !isGenericInactiveRoleHint(roleHint) && roleScore >= roleEvidenceThreshold(roleHint));
+}
+
+function canUseInactiveMatch(inactiveMatch, context = {}) {
+  return Boolean(
+    inactiveMatch?.best?.vacancy
+    && inactiveMatch.best.score >= context.threshold
+    && context.inactiveHasRoleEvidence
+    && hasSpecificInactiveVacancyEvidence({
+      text: context.text,
+      vacancy: inactiveMatch.best.vacancy,
+      city: context.city,
+      roleHint: context.roleHint,
+      operationZones: context.operationZones,
+      roleScore: inactiveMatch.best.roleScore
+    })
+  );
+}
+
 export async function resolveVacancyFromText(prisma, text, options = {}) {
   const normalizedText = normalizeResolverText(text);
   if (!normalizedText) {
@@ -359,6 +443,7 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   }
 
   const city = options.cityHint || detectCityFromText(text, buildCityNames(allVacancies));
+  const operationZones = detectOperationZoneEvidence(text);
   const roleHint = normalizeRoleHint(options.roleHint || detectRoleHintFromText(text, { city }), city);
   if (!city && !roleHint) {
     return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'missing_city_and_role' };
@@ -374,12 +459,14 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
     : inactiveVacancies;
 
   const roleTokenCount = roleHint ? cleanRoleTokens(tokenize(roleHint)).length : 0;
-  const threshold = roleHint ? (roleTokenCount >= 2 ? 4 : 4.2) : 6;
-  const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint });
-  const inactiveHasRoleEvidence = hasEnoughRoleEvidence(inactiveMatch, roleHint);
+  const hasExplicitOperationZone = operationZones.length > 0;
+  const threshold = hasExplicitOperationZone ? 3 : (roleHint ? (roleTokenCount >= 2 ? 4 : 4.2) : 6);
+  const inactiveMatch = pickBestVacancyMatch(inactiveCityVacancies, { text, city, roleHint, operationZones });
+  const inactiveHasRoleEvidence = operationZones.length ? true : hasEnoughRoleEvidence(inactiveMatch, roleHint);
+  const inactiveContext = { text, city, roleHint, operationZones, threshold, inactiveHasRoleEvidence };
 
   if (city && !matchingCityVacancies.length) {
-    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold && inactiveHasRoleEvidence) {
+    if (canUseInactiveMatch(inactiveMatch, inactiveContext)) {
       return {
         resolved: true,
         vacancy: inactiveMatch.best.vacancy,
@@ -392,7 +479,7 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   }
 
   if (!activeVacancies.length) {
-    if (inactiveMatch?.best && inactiveMatch.best.score >= threshold && inactiveHasRoleEvidence) {
+    if (canUseInactiveMatch(inactiveMatch, inactiveContext)) {
       return {
         resolved: true,
         vacancy: inactiveMatch.best.vacancy,
@@ -408,15 +495,13 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
     return { resolved: false, vacancy: null, city, roleHint, reason: 'city_with_active_vacancies' };
   }
 
-  const { best, runnerUp, margin } = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint });
+  const { best, runnerUp, margin } = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint, operationZones });
   const effectiveThreshold = roleHint ? threshold : 6;
   const activeHasRoleEvidence = hasEnoughRoleEvidence({ best }, roleHint);
 
   if (!best || best.score < effectiveThreshold || !activeHasRoleEvidence) {
     if (
-      inactiveMatch?.best
-      && inactiveMatch.best.score >= threshold
-      && inactiveHasRoleEvidence
+      canUseInactiveMatch(inactiveMatch, inactiveContext)
       && (!best || !activeHasRoleEvidence)
     ) {
       return {

@@ -143,7 +143,7 @@ test('D: ciudad + cargo resuelven vacante activa en Neiva', async () => {
   assert.equal(decision.resolution.reason, 'matched_active_vacancy');
 });
 
-test('F: vacante compatible pausada informa que no está activa y no autoriza datos ni agenda', async () => {
+test('F: vacante compatible pausada sin evidencia específica no se asigna y ofrece registro futuro', async () => {
   const paused = vacancy({
     id: 'vac-bog-paused',
     title: 'Auxiliar de Bodega Bogota',
@@ -154,12 +154,12 @@ test('F: vacante compatible pausada informa que no está activa y no autoriza da
   });
   const decision = await decide({ text: 'Estoy en Bogotá para auxiliar de bodega', vacancies: [paused], activeVacancies: [] });
 
-  assert.equal(decision.action, VacancyFirstGateAction.INACTIVE_VACANCY_REPLY);
-  assert.equal(decision.vacancy?.id, 'vac-bog-paused');
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'CITY_WITHOUT_ACTIVE_VACANCIES');
   assert.equal(decision.vacancyId, undefined);
   assert.equal(decision.candidateUpdates.vacancyId, undefined);
-  assert.equal(decision.candidateUpdates.botResumeMode, PAUSED_VACANCY_OFFER_MODE);
-  assert.match(decision.reply, /no está activa|no esta activa/i);
+  assert.equal(decision.candidateUpdates.botResumeMode, FUTURE_PROFILE_OFFER_MODE);
+  assert.match(decision.reply, /no tengo vacantes activas|no veo operaciones activas/i);
   assert.match(decision.reply, /futuras aperturas/i);
   assertNoPersonalDataRequest(decision.reply);
   assertNoPublicityOrPhoto(decision.reply);
@@ -242,4 +242,123 @@ test('registro futuro por ciudad sin vacantes requiere aceptación contextual an
   assert.equal(decision.candidateUpdates.botResumeMode, FUTURE_PROFILE_CAPTURE_MODE);
   assert.equal(decision.candidateUpdates.currentStep, ConversationStep.COLLECTING_DATA);
   assert.doesNotMatch(decision.reply, /entrevista|agend/i);
+});
+
+test('Bogotá + auxiliar de bodega no resuelve Siberia inactiva ni persiste vacancyId', async () => {
+  const inactiveSiberia = vacancy({
+    id: 'vac-siberia-inactive',
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    role: 'Auxiliar de cargue y descargue',
+    city: 'Bogota',
+    operation: bogotaOperation,
+    operationAddress: 'Siberia',
+    isActive: false,
+    acceptingApplications: false
+  });
+  const decision = await decide({
+    text: 'De Bogotá\nOuxiliar de bodega',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: [inactiveSiberia],
+    activeVacancies: []
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'CITY_WITHOUT_ACTIVE_VACANCIES');
+  assert.equal(decision.vacancyId, undefined);
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+});
+
+test('acuse pasivo después de oferta de registro futuro no captura datos ni repite oferta', async () => {
+  const decision = await decide({
+    text: 'A bueno',
+    candidatePatch: {
+      currentStep: ConversationStep.GREETING_SENT,
+      botResumeMode: FUTURE_PROFILE_OFFER_MODE
+    },
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      body: 'No hay vacantes activas. Puedo dejar tu perfil registrado si confirmas.',
+      createdAt: new Date(),
+      rawPayload: {
+        source: 'vacancy_first_gate',
+        replyKind: 'NO_ACTIVE_VACANCIES_FOR_CITY',
+        reason: 'CITY_WITHOUT_ACTIVE_VACANCIES'
+      }
+    }],
+    vacancies: []
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.SUPPRESS_REPLY);
+  assert.equal(decision.reason, 'PASSIVE_ACK_AFTER_FUTURE_PROFILE_OFFER');
+});
+
+test('sí confirmo después de oferta de registro futuro entra a captura contextual', async () => {
+  const decision = await decide({
+    text: 'Si confirmó',
+    candidatePatch: {
+      currentStep: ConversationStep.GREETING_SENT,
+      botResumeMode: FUTURE_PROFILE_OFFER_MODE
+    },
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      body: 'No hay vacantes activas. Puedo dejar tu perfil registrado si confirmas.',
+      createdAt: new Date(),
+      rawPayload: {
+        source: 'vacancy_first_gate',
+        replyKind: 'NO_ACTIVE_VACANCIES_FOR_CITY',
+        reason: 'CITY_WITHOUT_ACTIVE_VACANCIES'
+      }
+    }],
+    vacancies: []
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT);
+  assert.equal(decision.candidateUpdates.botResumeMode, FUTURE_PROFILE_CAPTURE_MODE);
+  assert.equal(decision.candidateUpdates.currentStep, ConversationStep.COLLECTING_DATA);
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+});
+
+test('prevención de repetición bloquea mismo replyKind y reason sin información nueva', async () => {
+  const decision = await decide({
+    text: 'ok',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      body: 'Con gusto te ayudo con ciudad y cargo.',
+      createdAt: new Date(),
+      rawPayload: {
+        source: 'vacancy_first_gate',
+        replyKind: 'ASK_CITY_AND_ROLE',
+        reason: 'VACANCY_NOT_RESOLVED'
+      }
+    }],
+    vacancies: []
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.SUPPRESS_REPLY);
+  assert.equal(decision.reason, 'REPEAT_PREVENTED');
+});
+
+test('vacante inactiva explícita en Siberia responde oferta futura sin candidateUpdates.vacancyId', async () => {
+  const inactiveSiberia = vacancy({
+    id: 'vac-siberia-inactive-explicit',
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    role: 'Auxiliar de cargue y descargue',
+    city: 'Bogota',
+    operation: bogotaOperation,
+    operationAddress: 'Siberia',
+    isActive: false,
+    acceptingApplications: false
+  });
+  const decision = await decide({
+    text: 'Estoy para auxiliar de bodega en Siberia',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: [inactiveSiberia],
+    activeVacancies: []
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.INACTIVE_VACANCY_REPLY);
+  assert.equal(decision.replyKind, 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER');
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+  assert.equal(decision.vacancyId, undefined);
 });

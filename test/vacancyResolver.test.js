@@ -123,3 +123,36 @@ test('resolveVacancyFromText no asigna vacante por cargo incoherente aunque haya
   assert.equal(resolution.city, 'Ibague');
   assert.equal(resolution.reason, 'city_with_active_vacancies');
 });
+
+const inactiveSiberiaCargueVacancy = {
+  id: 'vac-sib-cargue-inactive',
+  title: 'Auxiliar Cargue y Descargue Siberia',
+  role: 'Auxiliar de cargue y descargue',
+  city: 'Bogota',
+  operation: bogotaOperation,
+  operationAddress: 'Siberia',
+  isActive: false,
+  acceptingApplications: false
+};
+
+test('Bogotá + cargo genérico no resuelve vacante inactiva de Siberia sin evidencia de zona', async () => {
+  const resolution = await resolveVacancyFromText(null, 'De Bogotá\nOuxiliar de bodega', {
+    activeVacancies: [],
+    allVacancies: [inactiveSiberiaCargueVacancy]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.city, 'Bogota');
+  assert.equal(resolution.reason, 'city_without_active_vacancies');
+});
+
+test('Siberia explícito puede usar vacante inactiva solo como contexto, no como asignación activa', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Estoy para auxiliar de bodega en Siberia', {
+    activeVacancies: [],
+    allVacancies: [inactiveSiberiaCargueVacancy]
+  });
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, 'vac-sib-cargue-inactive');
+  assert.equal(resolution.reason, 'matched_inactive_vacancy');
+});
