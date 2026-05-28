@@ -211,7 +211,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
     systemPrompt = [
       'Sos un reclutador humano de LoginPro en WhatsApp.',
       'El candidato te escribe. Saludá de forma cálida y preguntá de forma natural',
-      'desde qué ciudad escribe y por cuál vacante, cargo, publicidad o referencia se comunica.',
+      'desde qué ciudad escribe y por cuál vacante, cargo o referencia verbal se comunica, si la tiene.',
       'NO ofrezcas vacantes como catálogo ni menciones una lista de cargos activos.',
       'NO usés viñetas ni Markdown. Máx 2 oraciones. Soná como una persona real.',
       'No inventés cargos, sectores ni documentación; si no hay ciudad o cargo claro, pedilo antes de afirmar opciones.'
@@ -247,7 +247,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
 
   return resolved
     ? `¡Hola! Gracias por comunicarte con LoginPro. Tengo ubicada la vacante de ${resolved.role} en ${resolved.city}. Te comparto la información principal y, si te interesa, avanzamos con los datos necesarios.`
-    : '¡Hola! Gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y por cuál vacante, cargo o publicidad te estás comunicando?';
+    : '¡Hola! Gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y por cuál vacante o cargo te estás comunicando?';
 }
 
 /**
@@ -404,14 +404,14 @@ export function buildVacancyOptionsReply({ city = null, vacancyOptions = [] } = 
     .filter((vacancy) => vacancyMatchesCity(vacancy, city));
 
   if (!city) {
-    return 'Claro, para revisar opciones reales primero cuéntame desde qué ciudad nos escribes y qué cargo o publicidad viste.';
+    return 'Claro, para revisar opciones reales primero cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.';
   }
 
   if (!activeOptions.length) {
-    return `En este momento no tengo vacantes activas registradas para ${city}. Si viste una publicidad, dime el cargo exacto o envíame más contexto y reviso sin asumir una vacante.`;
+    return `En este momento no tengo vacantes activas registradas para ${city}. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo si me confirmas que deseas ese registro.`;
   }
 
-  return `Gracias. Para ubicarte bien en ${city} y no confundirte con otra convocatoria, dime qué cargo, publicidad o referencia viste.`;
+  return `Gracias. Para ubicarte bien en ${city} y no confundirte con otra convocatoria, dime qué cargo o vacante buscas y, si aplica, una referencia verbal de la convocatoria.`;
 }
 
 export function buildUnavailableVacancyInfoReply(vacancy = {}) {

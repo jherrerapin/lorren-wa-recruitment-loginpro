@@ -61,7 +61,8 @@ test('A: pregunta por vacantes en ciudad no lista catalogo ni pide HV', () => {
     ]
   });
 
-  assert.match(reply, /cargo|publicidad|referencia/i);
+  assert.match(reply, /cargo|vacante|referencia/i);
+  assert.doesNotMatch(reply, /publicidad|foto|imagen/i);
   assert.doesNotMatch(reply, /Auxiliar de Cargue Bogota/);
   assert.doesNotMatch(reply, /Auxiliar de Bodega Bogota/);
   assert.doesNotMatch(reply, /Mensajero Ibague/);

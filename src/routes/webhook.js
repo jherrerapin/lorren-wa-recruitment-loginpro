@@ -38,6 +38,7 @@ import { getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMiss
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
 import { ContextualAllowedAction, evaluateContextualResponseGate, inferContextualSemanticIntent } from '../services/contextualResponseGate.js';
+import { FUTURE_PROFILE_CAPTURE_MODE, PAUSED_VACANCY_CAPTURE_MODE, resolveVacancyFirstGate, VacancyFirstGateAction } from '../services/vacancyFirstGate.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -326,7 +327,7 @@ function buildVacancyCompactSummary(vacancy) {
 }
 function buildNoOperationsAvailableReply(city = null) {
   const location = city ? ` en ${city}` : '';
-  return `En este momento no veo operaciones activas${location}. Para orientarte bien, dime qué cargo o publicidad viste y reviso opciones reales sin asumir una vacante.`;
+  return `En este momento no veo operaciones activas${location}. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo si me confirmas que deseas ese registro.`;
 }
 
 function formatVacancyOptions(vacancies = [], city = null) {
@@ -371,6 +372,10 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
     ? `Con ese contexto, te doy la informacion vigente de ${vacancy?.title || vacancy?.role || 'la vacante'}.`
     : `Con ese contexto, te comparto la informacion vigente y si quieres dejo tu perfil registrado para cuando reabran ${vacancy?.title || vacancy?.role || 'esa vacante'}.`;
 }
+function isFutureProfileCaptureCandidate(candidate = {}) {
+  return [FUTURE_PROFILE_CAPTURE_MODE, PAUSED_VACANCY_CAPTURE_MODE].includes(String(candidate?.botResumeMode || ''));
+}
+
 function buildVacancyContinuePrompt(candidate, vacancy = null) {
   if (vacancy && !isVacancyOpen(vacancy)) {
     if (candidate?.botResumeMode !== 'paused_vacancy_capture') {
@@ -1124,6 +1129,20 @@ async function finalizeCandidateAfterCv(prisma, candidate, from) {
 
   const readiness = getCandidateReadiness(candidate, vacancy);
 
+  if (!vacancy && isFutureProfileCaptureCandidate(candidate) && readiness.readyForDone) {
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        currentStep: ConversationStep.DONE,
+        status: CandidateStatus.REGISTRADO,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      }
+    });
+    const body = 'Ya recibí tu información y tu hoja de vida para dejar tu perfil registrado. En este momento no hay una vacante activa asociada ni entrevista por agendar; si se abre una oportunidad compatible, el equipo te contactará por este medio.';
+    return reply(prisma, candidate.id, from, body, '', { body, source: 'future_profile_capture' });
+  }
+
   if (vacancy && !isVacancyOpen(vacancy) && readiness.readyForDone) {
     await prisma.candidate.update({
       where: { id: candidate.id },
@@ -1511,7 +1530,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   const tryPrimaryEngineReply = async (candidateState = candidate, vacancyState = currentVacancy) => {
     if (!shouldUsePrimaryConversationEngine(candidateState, cleanText)) return false;
 
-    if (hasDataIntent) {
+    if (hasDataIntent && vacancyState && isVacancyOpen(vacancyState) && !isFutureProfileCaptureCandidate(candidateState)) {
       const rejection = shouldRejectByRequirements(cleanText, normalizedData, evidenceByField);
       if (rejection.reject) {
         await rejectCandidate(prisma, candidate.id, from, rejection);
@@ -1647,6 +1666,89 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         });
       }
     }
+  }
+
+
+  const vacancyFirstGateDecision = await resolveVacancyFirstGate({
+    prisma,
+    candidate,
+    currentVacancy,
+    inboundText: cleanText,
+    currentStep: candidate.currentStep,
+    readiness: contextualReadiness,
+    recentMessages: await getRecentConversationMessages(prisma, candidate.id, 10),
+    vacancyHints
+  });
+  debugTrace.vacancy_first_gate = {
+    action: vacancyFirstGateDecision.action,
+    reason: vacancyFirstGateDecision.reason,
+    replyKind: vacancyFirstGateDecision.replyKind || null,
+    vacancyId: vacancyFirstGateDecision.vacancyId || null,
+    resolutionReason: vacancyFirstGateDecision.resolution?.reason || null
+  };
+
+  const applyVacancyFirstGateUpdates = async (updates = {}) => {
+    if (!updates || !Object.keys(updates).length) return candidate;
+    candidate = await prisma.candidate.update({ where: { id: candidate.id }, data: updates });
+    if (updates.vacancyId) currentVacancy = await loadVacancyContext(prisma, updates.vacancyId);
+    return candidate;
+  };
+
+  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.SUPPRESS_REPLY) {
+    return;
+  }
+
+  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY) {
+    await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
+    return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
+      body: vacancyFirstGateDecision.reply,
+      source: 'vacancy_first_gate',
+      reason: vacancyFirstGateDecision.reason,
+      replyKind: vacancyFirstGateDecision.replyKind
+    });
+  }
+
+  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT) {
+    await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
+    return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
+      body: vacancyFirstGateDecision.reply,
+      source: 'vacancy_first_gate',
+      reason: vacancyFirstGateDecision.reason,
+      replyKind: vacancyFirstGateDecision.replyKind
+    });
+  }
+
+  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.INACTIVE_VACANCY_REPLY) {
+    await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates || {
+      currentStep: ConversationStep.GREETING_SENT
+    });
+    return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
+      body: vacancyFirstGateDecision.reply,
+      source: 'vacancy_first_gate',
+      reason: vacancyFirstGateDecision.reason,
+      replyKind: vacancyFirstGateDecision.replyKind,
+      safetyVacancy: currentVacancy || vacancyFirstGateDecision.vacancy
+    });
+  }
+
+  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE) {
+    const nextStep = candidate.currentStep === ConversationStep.MENU
+      ? ConversationStep.GREETING_SENT
+      : candidate.currentStep;
+    candidate = await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: { vacancyId: vacancyFirstGateDecision.vacancyId, currentStep: nextStep }
+    });
+    currentVacancy = vacancyFirstGateDecision.vacancy || await loadVacancyContext(prisma, vacancyFirstGateDecision.vacancyId);
+    normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
+    debugTrace.normalized_fields = normalizedData;
+    const body = buildVacancyReplyNatural(currentVacancy, candidate, cleanText);
+    return reply(prisma, candidate.id, from, body, cleanText, {
+      body,
+      source: 'vacancy_first_gate',
+      reason: vacancyFirstGateDecision.reason,
+      safetyVacancy: currentVacancy
+    });
   }
 
   if (candidate.currentStep === ConversationStep.MENU) {
@@ -2008,7 +2110,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, replyText, cleanText, { body: replyText, source: 'bot_flow' });
     }
 
-    if (!updatedCandidate.vacancyId) {
+    if (!updatedCandidate.vacancyId && !isFutureProfileCaptureCandidate(updatedCandidate)) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
         const activeVacancies = await findActiveVacancies(prisma);
         const cityVacancies = vacancyHints.city
@@ -2102,7 +2204,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (isAffirmativeInterest(cleanText) || hasDataIntent) {
-      if (!currentVacancy && !candidate.vacancyId) {
+      if (!currentVacancy && !candidate.vacancyId && !isFutureProfileCaptureCandidate(candidate)) {
         const activeVacancies = await findActiveVacancies(prisma);
         const cityVacancies = vacancyHints.city
           ? activeVacancies.filter((vacancy) => (
@@ -2120,7 +2222,9 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       if (hasDataIntent) {
-        const rejection = shouldRejectByRequirements(cleanText, normalizedData);
+        const rejection = currentVacancy && isVacancyOpen(currentVacancy) && !isFutureProfileCaptureCandidate(candidate)
+          ? shouldRejectByRequirements(cleanText, normalizedData)
+          : { reject: false };
         if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
         const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
 
@@ -2146,11 +2250,13 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
 
-    const rejection = shouldRejectByRequirements(cleanText, normalizedData);
+    const rejection = currentVacancy && isVacancyOpen(currentVacancy) && !isFutureProfileCaptureCandidate(candidate)
+      ? shouldRejectByRequirements(cleanText, normalizedData)
+      : { reject: false };
     if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
 
     if (Object.keys(normalizedData).length >= 1) {
-      if (!currentVacancy && !candidate.vacancyId) {
+      if (!currentVacancy && !candidate.vacancyId && !isFutureProfileCaptureCandidate(candidate)) {
         const activeVacancies = await findActiveVacancies(prisma);
         const cityVacancies = vacancyHints.city
           ? activeVacancies.filter((vacancy) => (
@@ -2196,7 +2302,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return replyWithVacancyContext(candidate, currentVacancy);
     }
 
-    if (!currentVacancy && !candidate.vacancyId) {
+    if (!currentVacancy && !candidate.vacancyId && !isFutureProfileCaptureCandidate(candidate)) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
       const activeVacancies = await findActiveVacancies(prisma);
       const cityVacancies = vacancyHints.city
@@ -2213,12 +2319,14 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }
 
-    const rejection = shouldRejectByRequirements(cleanText, normalizedData);
+    const rejection = currentVacancy && isVacancyOpen(currentVacancy) && !isFutureProfileCaptureCandidate(candidate)
+      ? shouldRejectByRequirements(cleanText, normalizedData)
+      : { reject: false };
     if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
     const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
     const missingAfterUpdate = getMissingFields(updated, currentVacancy);
 
-    if (!updated.vacancyId) {
+    if (!updated.vacancyId && !isFutureProfileCaptureCandidate(updated)) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
       const activeVacancies = await findActiveVacancies(prisma);
       const cityVacancies = vacancyHints.city
@@ -2441,6 +2549,25 @@ export function webhookRouter(prisma) {
         const debugTrace = createDebugTrace({ phone: from, currentStepBefore: freshCandidate.currentStep });
         debugTrace.cv_detected = message.type === 'document';
         const recentOutbound = await getRecentOutboundMessages(prisma, candidate.id);
+        const shouldSuppressAttachmentReply = async (kind) => {
+          const decision = await resolveVacancyFirstGate({
+            prisma,
+            candidate: freshCandidate,
+            inboundText: '',
+            currentStep: freshCandidate.currentStep,
+            recentMessages: recentOutbound,
+            attachmentContext: { isAttachment: true, kind }
+          });
+          if (decision.action === VacancyFirstGateAction.SUPPRESS_REPLY) {
+            debugTrace.vacancy_first_gate = {
+              action: decision.action,
+              reason: decision.reason,
+              attachmentKind: kind
+            };
+            return true;
+          }
+          return false;
+        };
         const canQueueAdminForward = isFeatureEnabled('FF_ASYNC_ADMIN_MEDIA_FORWARD', false)
           && Boolean(process.env.ADMIN_MEDIA_FORWARD_NUMBERS)
           && Boolean(prisma?.jobQueue?.create);
@@ -2476,6 +2603,7 @@ export function webhookRouter(prisma) {
               caption: message.image?.caption || ''
             }).catch((error) => console.warn('[ADMIN_SUPERVISOR_IMAGE_ERROR]', error?.message || error));
             if (isFeatureEnabled('FF_ATTACHMENT_ANALYZER', false)) {
+              if (await shouldSuppressAttachmentReply('image')) continue;
               const syntheticAnalysis = {
                 classification: 'CV_IMAGE_ONLY',
                 confidence: 0.55,
@@ -2550,6 +2678,7 @@ export function webhookRouter(prisma) {
               debugTrace.cv_invalid_mime = true;
               console.warn('[CV_ERROR]', JSON.stringify({ phone: from, mimeType, filename, reason: 'invalid_mime' }));
               if (!automationBlocked) {
+                if (await shouldSuppressAttachmentReply('document')) continue;
                 await composeContextualAttachmentReply(prisma, {
                   candidate: freshCandidate,
                   from,
@@ -2603,6 +2732,7 @@ export function webhookRouter(prisma) {
                     await pauseForManualQuestionReview(prisma, freshCandidate, from, filename || '');
                   } else {
                     const attachmentDecision = deriveAttachmentDecision(analysis.classification);
+                    if (await shouldSuppressAttachmentReply('document')) continue;
                     await composeContextualAttachmentReply(prisma, {
                       candidate: freshCandidate,
                       from,
