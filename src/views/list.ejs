@@ -555,7 +555,7 @@
   function getVacancyFilterFields(vacancyOrCity) {
     return vacancyUsesLocality(vacancyOrCity)
       ? ['transportMode', 'locality']
-      : ['transportMode', 'neighborhood', 'locality'];
+      : ['transportMode', 'neighborhood'];
   }
   function getVacancyFilterLabel(field, vacancyOrCity) {
     if (field === 'locality' && vacancyUsesLocality(vacancyOrCity)) return 'Localidad';
@@ -1137,7 +1137,7 @@
           </div>
         </div>
 
-        <form method="get" action="/admin" class="filter-strip vacancy-filter-bar">
+        <form method="get" action="/admin#vacancy-<%= v.id %>" class="filter-strip vacancy-filter-bar">
           <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
           <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
           <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
@@ -1166,7 +1166,7 @@
           <% } %>
         </form>
 
-        <form method="get" action="/admin" class="filter-strip vacancy-filter-bar">
+        <form method="get" action="/admin#vacancy-<%= v.id %>" class="filter-strip vacancy-filter-bar">
           <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
           <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
           <% if (vacancyFiltersById) { for (const [vacancyId, filters] of Object.entries(vacancyFiltersById)) { if (vacancyId !== v.id) { for (const field of vacancyFilterFields) { if (filters && filters[field]) { %>
