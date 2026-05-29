@@ -12,7 +12,7 @@
 import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
 import { splitFieldDecisions } from './debugTrace.js';
-import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import { alignCandidateLocationFields, getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
 import { getCandidateReadiness } from './readinessGuard.js';
 import { evaluateSchedulingGuard } from './schedulingGuard.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js';
@@ -107,6 +107,14 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
   const residenceConfig = getResidenceFieldConfig(vacancy || candidate?.vacancy);
   const residenceValue = getCandidateResidenceValue(candidate, vacancy || candidate?.vacancy);
 
+  const residenceState = buildFieldState(residenceValue);
+  const neighborhoodState = residenceConfig.field === 'neighborhood'
+    ? residenceState
+    : buildFieldState(candidate.neighborhood || residenceValue);
+  const localityState = residenceConfig.field === 'locality'
+    ? residenceState
+    : buildFieldState(candidate.locality || residenceValue);
+
   return {
     currentStep: candidate.currentStep || 'MENU',
     status: candidate.status || null,
@@ -131,12 +139,12 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
       documentNumber: buildFieldState(candidate.documentNumber),
       age: buildFieldState(candidate.age),
       gender: buildFieldState(genderLabel),
-      neighborhood: buildFieldState(candidate.neighborhood),
-      locality: buildFieldState(candidate.locality),
+      neighborhood: neighborhoodState,
+      locality: localityState,
       residenceArea: {
         field: residenceConfig.field,
         label: residenceConfig.label,
-        state: buildFieldState(residenceValue)
+        state: residenceState
       },
       medicalRestrictions: buildFieldState(normalizeMedicalRestrictionsLabel(candidate.medicalRestrictions)),
       transportMode: buildFieldState(candidate.transportMode),
@@ -367,6 +375,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No pierdas datos enviados en varios fragmentos.
 - No ignores transportes como carro, automovil, bici, bicicleta, cicla, bus o independiente.
 - Si la vacante es en Bogota, pide y usa la localidad como zona de residencia; no sigas pidiendo barrio.
+- Para vacantes en Bogota, si el candidato menciona Soacha como residencia, el backend la normaliza internamente como localidad; no expliques esa normalizacion ni exijas una localidad bogotana adicional cuando READINESS ya no lo marca pendiente.
 - Si el candidato da una localidad o la menciona como barrio para Bogota, guardala como localidad.
 - No uses la frase "barrio o localidad": pide un solo dato segun la ciudad (Bogota = localidad; otras ciudades = barrio).
 - Si la vacante exige experiencia (experienceRequired = YES), debes pedir y capturar experiencia (si/no) y tiempo de experiencia.
@@ -377,7 +386,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - Si el candidato pregunta por ciudad y no hay vacantes activas, explicalo con claridad.
 - Si la vacante existe pero esta inactiva o pausada, no avances a captura automaticamente sin consentimiento contextual del candidato para registro de perfil. Si ese consentimiento ya fue marcado por backend, continua solo como registro para futuras aperturas, nunca como entrevista activa.
 - Si despues de datos + hoja de vida o despues de una entrevista agendada aparece una pregunta que no puedes responder con la vacante asignada, revisa con calma ESTADO CURADO DE LA VACANTE y APRENDIZAJES MANUALES DEV; si aun asi no hay informacion segura, usa "pause_bot" con una razon concreta y deja reply vacío. No anuncies validaciones internas ni seguimiento humano al candidato.
-- La documentacion para entrevista solo puede salir de requiredDocuments/interviewDocumentation de la vacante asignada. Respeta exactamente lo configurado en la vacante para documentos de entrevista; no conviertas ni infieras formatos como PDF/DOCX si no estan registrados alli.
+- La documentacion para entrevista solo puede salir de requiredDocuments/interviewDocumentation de la vacante asignada. Respeta exactamente esa informacion de la vacante para documentos de entrevista; no conviertas ni infieras formatos como PDF/DOCX si no estan registrados alli.
 - No te quedes en bucle cuando el usuario corrige.
 - No reabras confirmacion si el dato ya fue corregido.
 - No respondas como formulario disfrazado.
@@ -740,7 +749,7 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     ? candidateFields
     : extractEngineCandidateFields(normalizedActions, extractedFields);
 
-  const mergedFields = normalizeCandidateFields(mergedRawFields);
+  const mergedFields = alignCandidateLocationFields(normalizeCandidateFields(mergedRawFields), vacancy);
   const mappedGender = mapEngineGender(mergedRawFields.gender, Gender);
   const engineSourceByField = Object.fromEntries(
     Object.keys(mergedFields).map((field) => [field, 'engine'])

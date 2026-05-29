@@ -104,7 +104,7 @@ export function isSuspiciousFullName(value = '') {
     /\b(barrio|localidad|zona|sector|vereda|ciudadela)\b/,
     /\b(cundinamarca|tolima|antioquia|boyaca|boyacá|santander|meta|caldas|quindio|quindío|risaralda|huila|cauca|narino|nariño)\b/,
     /\b(pdf|doc|docx|word|archivo|adjunto|adjunta|hoja de vida|hv|cv)\b/,
-    /\b(bogota|bogotá|ibague|ibagué|funza|mosquera|madrid|siberia)\b/,
+    /\b(bogota|bogotá|ibague|ibagué|funza|mosquera|madrid|siberia|soacha|cundinamarca)\b/,
     /\b(calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv)\b/,
     /^(para\s+(el|la)\b|de\s+[a-záéíóúñ]+$)/,
     /\b(restriccion(?:es)?\s+medica(?:s)?|sin\s+restriccion(?:es)?(\s+medica(?:s)?)?)\b/

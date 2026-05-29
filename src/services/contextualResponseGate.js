@@ -1,6 +1,6 @@
 import { getCandidateReadiness } from './readinessGuard.js';
 import { formatInterviewDate } from './interviewScheduler.js';
-import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
+import { buildInterviewDocumentsSentence, sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 
 export const ContextualAllowedAction = Object.freeze({
   CONTINUE_FLOW: 'CONTINUE_FLOW',
@@ -162,7 +162,7 @@ function buildLogisticsReply({ semanticIntent, vacancy = null, activeInterviewBo
   if (semanticIntent === 'ASK_REQUIRED_DOCUMENTS') {
     const documents = sanitizeRequiredDocumentsForBot(vacancy?.requiredDocuments || '');
     if (!documents) return null;
-    return `Para la entrevista, los documentos configurados son: ${documents}.`;
+    return buildInterviewDocumentsSentence(documents);
   }
 
   return null;
