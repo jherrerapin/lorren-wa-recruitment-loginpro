@@ -25,3 +25,24 @@ test('recruitment dashboard exposes vacancy filters for dev and normalizes dupli
   assert.match(view, /const key = normalizeFilterOptionKey\(label\);/);
   assert.match(view, /normalizeFilterOptionKey\(candidateFilterValue\(candidate, field, vacancyOrCity\)\) === normalizeFilterOptionKey\(filters\[field\]\)/);
 });
+
+
+test('vacancy forms preserve selected vacancy hash and hide locality outside Bogota', () => {
+  const view = fs.readFileSync('src/views/list.ejs', 'utf8');
+
+  assert.match(view, /action="\/admin#vacancy-<%= v\.id %>" class="filter-strip vacancy-filter-bar"/);
+  assert.match(view, /\? \['transportMode', 'locality'\]\s*: \['transportMode', 'neighborhood'\]/);
+  assert.doesNotMatch(view, /: \['transportMode', 'neighborhood', 'locality'\]/);
+});
+
+
+test('admin movement labels are stored and displayed without mojibake', () => {
+  const route = fs.readFileSync('src/routes/admin.js', 'utf8');
+
+  assert.match(route, /function repairMojibakeLabel\(value\)/);
+  assert.match(route, /const fallback = repairMojibakeLabel\(event\.eventLabel\);/);
+  assert.match(route, /eventLabel: 'Edición manual de estado'/);
+  assert.match(route, /eventLabel: 'Actualizó observaciones dev'/);
+  assert.match(route, /eventLabel: 'Actualizó género del candidato'/);
+  assert.doesNotMatch(route, /EdiciÃ³n|ActualizÃ³|gÃ©nero|PausÃ³|ReanudÃ³|AsignÃ³|AbriÃ³/);
+});
