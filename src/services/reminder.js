@@ -17,10 +17,10 @@ import { enqueueJob, JOB_TYPES } from './jobQueue.js';
 
 const REMINDER_DELAY_MS = 60 * 60 * 1000;
 const INTERVIEW_REMINDER_LEAD_MS = Number.parseInt(
-  process.env.INTERVIEW_REMINDER_LEAD_MS || String(40 * 60 * 1000), 10
-) || (40 * 60 * 1000);
+  process.env.INTERVIEW_REMINDER_LEAD_MS || String(30 * 60 * 1000), 10
+) || (30 * 60 * 1000);
 const INTERVIEW_REMINDER_EARLY_TOLERANCE_MS = 5 * 60 * 1000;
-const INTERVIEW_REMINDER_LATE_TOLERANCE_MS = 20 * 60 * 1000;
+const INTERVIEW_REMINDER_LATE_TOLERANCE_MS = 10 * 60 * 1000;
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 const INTERVIEW_BOOKING_REMINDER_SOURCE = 'interview_booking_reminder';
 
