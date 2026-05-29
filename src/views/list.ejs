@@ -636,21 +636,38 @@
     return candidate[field] || '';
   }
 
+  function normalizeFilterOptionKey(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function normalizeFilterOptionLabel(value) {
+    const compact = String(value || '').replace(/\s+/g, ' ').trim();
+    return compact.replace(/\S+/g, (word) => {
+      if (word === word.toUpperCase() && word.length <= 3) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    });
+  }
+
   function candidateMatchesVacancyFilters(candidate, filters, vacancyOrCity = null) {
     if (!filters) return true;
     return vacancyFilterFields.every((field) => {
       if (!filters[field]) return true;
-      return String(candidateFilterValue(candidate, field, vacancyOrCity)).toLowerCase() === String(filters[field]).toLowerCase();
+      return normalizeFilterOptionKey(candidateFilterValue(candidate, field, vacancyOrCity)) === normalizeFilterOptionKey(filters[field]);
     });
   }
 
   function buildVacancyFilterOptions(candidates, field, vacancyOrCity = null) {
     const uniqueValues = new Map();
     for (const candidate of candidates || []) {
-      const value = String(candidateFilterValue(candidate, field, vacancyOrCity) || '').trim();
-      if (!value) continue;
-      const key = value.toLowerCase();
-      if (!uniqueValues.has(key)) uniqueValues.set(key, value);
+      const label = normalizeFilterOptionLabel(candidateFilterValue(candidate, field, vacancyOrCity));
+      if (!label) continue;
+      const key = normalizeFilterOptionKey(label);
+      if (!uniqueValues.has(key)) uniqueValues.set(key, label);
     }
     return Array.from(uniqueValues.values()).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
   }
@@ -1149,7 +1166,6 @@
           <% } %>
         </form>
 
-        <% if (role === 'admin') { %>
         <form method="get" action="/admin" class="filter-strip vacancy-filter-bar">
           <% if (activeCity) { %><input type="hidden" name="city" value="<%= activeCity %>" /><% } %>
           <% if (selectedDate) { %><input type="hidden" name="date" value="<%= selectedDate %>" /><% } %>
@@ -1181,7 +1197,6 @@
             <span class="filter-note">Filtro activo en esta vacante.</span>
           <% } %>
         </form>
-        <% } %>
 
         <div class="vacancy-body">
           <% if (isScheduling) { %>
