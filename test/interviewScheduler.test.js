@@ -52,7 +52,7 @@ test('listOfferableSlots permite horario del mismo dia cuando es asignacion manu
 });
 
 
-test('getInterviewReminderAt calcula recordatorio 15 minutos antes de la entrevista', () => {
+test('getInterviewReminderAt calcula recordatorio 1 hora antes de la entrevista', () => {
   const interviewDate = new Date('2026-04-08T22:00:00.000Z');
-  assert.equal(getInterviewReminderAt(interviewDate).toISOString(), '2026-04-08T21:45:00.000Z');
+  assert.equal(getInterviewReminderAt(interviewDate).toISOString(), '2026-04-08T21:00:00.000Z');
 });
