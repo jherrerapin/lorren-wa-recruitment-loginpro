@@ -19,6 +19,8 @@
  *  - Sin mencionar nunca que es un bot, a menos que el candidato pregunte.
  */
 
+import { FlowDeciderAction } from './flowDecider.js';
+
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
@@ -54,23 +56,8 @@ export function sanitizeRequiredDocumentsForBot(requiredDocuments) {
 }
 
 
-function stripRepeatedOpeningGreeting(reply = '') {
-  const text = String(reply || '').trim();
-  if (!text) return text;
-
-  const withoutGreeting = text.replace(
-    /^(?:[¡!\s]*)(?:hola|buen(?:os|as)\s+(?:d[ií]as|tardes|noches)|cordial\s+saludo)(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,})?\s*[,.:;-]+\s*/i,
-    ''
-  ).trim();
-
-  if (!withoutGreeting) return text;
-  return withoutGreeting.replace(/^([a-záéíóúñ])/, (match) => match.toUpperCase());
-}
-
-function polishReplyForTurn(reply = '', { allowOpeningGreeting = false } = {}) {
-  const text = String(reply || '').replace(/\s+/g, ' ').trim();
-  if (!text) return text;
-  return allowOpeningGreeting ? text : stripRepeatedOpeningGreeting(text);
+function polishReplyForTurn(reply = '') {
+  return String(reply || '').replace(/\s+/g, ' ').trim();
 }
 
 export function preserveConfiguredInterviewDocuments(reply = '', configuredDocuments = '') {
@@ -84,15 +71,97 @@ export function preserveConfiguredInterviewDocuments(reply = '', configuredDocum
   );
 }
 
-function polishInterviewReply(reply = '', configuredDocuments = '', options = {}) {
-  return preserveConfiguredInterviewDocuments(polishReplyForTurn(reply, options), configuredDocuments);
+function polishInterviewReply(reply = '', configuredDocuments = '') {
+  return preserveConfiguredInterviewDocuments(polishReplyForTurn(reply), configuredDocuments);
+}
+
+function getCandidateFirstName(candidate = {}) {
+  if (!candidate?.fullName) return null;
+  if (candidate.fullNameStatus === 'rejected' || candidate.fullNameRejected === true) return null;
+  if (Array.isArray(candidate.rejectedFields) && candidate.rejectedFields.includes('fullName')) return null;
+  if (Array.isArray(candidate.pendingFields) && candidate.pendingFields.includes('fullName')) return null;
+  if (Array.isArray(candidate.missingFields) && candidate.missingFields.includes('fullName')) return null;
+
+  const [firstName] = String(candidate.fullName).trim().split(/\s+/);
+  return firstName || null;
+}
+
+function humanizeFieldName(field = '') {
+  return String(field || '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .trim();
+}
+
+function getFlowAction(flowDecision = {}) {
+  return flowDecision?.action || flowDecision?.nextAction || null;
+}
+
+function buildContextualFallbackReply({
+  vacancy = null,
+  candidate = null,
+  flowDecision = null,
+  fallbackText = null,
+  defaultAction = null,
+  formattedDate = null,
+  address = null,
+  documents = null,
+  isReschedule = false
+} = {}) {
+  if (fallbackText) return polishReplyForTurn(fallbackText);
+
+  const action = getFlowAction(flowDecision) || defaultAction;
+  const payload = flowDecision?.payload;
+  const name = getCandidateFirstName(candidate);
+  const vacancyName = vacancy?.title || vacancy?.role || null;
+  const missingFields = Array.isArray(payload) ? payload : (Array.isArray(candidate?.missingFields) ? candidate.missingFields : []);
+  const nextField = humanizeFieldName(missingFields[0]);
+  const parts = [];
+
+  if (action === FlowDeciderAction.IDENTIFY_VACANCY) {
+    parts.push('Para ubicar tu proceso necesito confirmar la ciudad y la vacante o cargo por el que nos escribes.');
+  } else if (action === FlowDeciderAction.PRESENT_VACANCY) {
+    parts.push(vacancyName
+      ? `Tengo ubicada la vacante de ${vacancyName}${vacancyCity(vacancy) ? ` en ${vacancyCity(vacancy)}` : ''}.`
+      : 'Necesito confirmar la vacante registrada antes de avanzar.');
+    parts.push('Si te interesa, seguimos con los datos necesarios para el proceso.');
+  } else if (action === FlowDeciderAction.COLLECT_DATA) {
+    parts.push(`${name ? `${name}, ` : ''}para continuar con tu postulación${vacancyName ? ` a ${vacancyName}` : ''}, necesito confirmar ${nextField || 'el dato pendiente'}.`);
+  } else if (action === FlowDeciderAction.REQUEST_CV) {
+    parts.push(`${name ? `${name}, ` : ''}ya tengo los datos principales; ahora necesito que compartas tu hoja de vida en un archivo válido para revisarla.`);
+  } else if (action === FlowDeciderAction.SCHEDULE_INTERVIEW) {
+    if (formattedDate) {
+      parts.push(isReschedule
+        ? `Te puedo ofrecer el ${formattedDate} como alternativa para entrevista.`
+        : `Te puedo agendar entrevista para el ${formattedDate}.`);
+      parts.push('Confírmame si ese horario te queda bien.');
+    } else {
+      parts.push('El siguiente paso es coordinar entrevista con la información registrada de tu proceso.');
+    }
+  } else if (action === FlowDeciderAction.CONFIRM_RECEIPT) {
+    parts.push('Tu información quedó recibida y seguimos con la revisión del proceso.');
+  } else if (action === FlowDeciderAction.SAVE_PROFILE) {
+    parts.push('Con la información registrada puedo dejar tu perfil guardado para futuras aperturas compatibles.');
+  } else if (action === FlowDeciderAction.ANSWER_FROM_VACANCY) {
+    parts.push(vacancyName
+      ? `Te comparto solo la información registrada de ${vacancyName}.`
+      : 'Te comparto solo la información que está registrada de la vacante.');
+  } else {
+    parts.push('Necesito validar este punto con el equipo para no darte información incorrecta.');
+  }
+
+  if (address) parts.push(`La dirección registrada es ${address}.`);
+  if (documents) parts.push(`La documentación configurada es ${documents}.`);
+
+  return polishReplyForTurn(parts.filter(Boolean).join(' '));
 }
 
 /**
  * Construye el system prompt del reclutador con el contexto de la vacante.
  */
 function buildSystemPrompt(vacancy, candidate, conversationContext) {
-  const candidateName = candidate?.fullName ? candidate.fullName.split(' ')[0] : null;
+  const candidateName = getCandidateFirstName(candidate);
 
   const vacancyBlock = vacancy ? [
     vacancy.title || vacancy.role ? `Vacante: ${vacancy.title || vacancy.role}` : null,
@@ -136,10 +205,11 @@ export async function generateNaturalReply({
   inboundText,
   conversationContext,
   recentBotMessages = [],
-  fallbackText = null
+  fallbackText = null,
+  flowDecision = null
 }) {
   if (!process.env.OPENAI_API_KEY) {
-    return fallbackText || 'Te lei, dame un momento y continuo contigo.';
+    return buildContextualFallbackReply({ vacancy, candidate, flowDecision, fallbackText });
   }
 
   const systemPrompt = buildSystemPrompt(vacancy, candidate, conversationContext);
@@ -177,11 +247,11 @@ export async function generateNaturalReply({
 
     const content = response.data?.choices?.[0]?.message?.content;
     if (typeof content === 'string' && content.trim()) {
-      return polishReplyForTurn(content, { allowOpeningGreeting: !recentBotMessages.length });
+      return polishReplyForTurn(content);
     }
-    return polishReplyForTurn(fallbackText || 'Te lei, dame un momento y continuo contigo.', { allowOpeningGreeting: !recentBotMessages.length });
+    return buildContextualFallbackReply({ vacancy, candidate, flowDecision, fallbackText });
   } catch {
-    return polishReplyForTurn(fallbackText || 'Te lei, dame un momento y continuo contigo.', { allowOpeningGreeting: !recentBotMessages.length });
+    return buildContextualFallbackReply({ vacancy, candidate, flowDecision, fallbackText });
   }
 }
 
@@ -191,7 +261,7 @@ export async function generateNaturalReply({
  */
 export async function generateGreeting(vacancies, inboundText, resolvedVacancyId) {
   if (!process.env.OPENAI_API_KEY) {
-    return '¡Hola! Gracias por comunicarte con LoginPro. ¿Para cuál vacante y ciudad te interesa aplicar?';
+    return buildContextualFallbackReply({ defaultAction: FlowDeciderAction.IDENTIFY_VACANCY });
   }
 
   const resolved = vacancies.find((v) => v.id === resolvedVacancyId);
@@ -245,9 +315,10 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
     // fallback
   }
 
-  return resolved
-    ? `¡Hola! Gracias por comunicarte con LoginPro. Tengo ubicada la vacante de ${resolved.role} en ${resolved.city}. Te comparto la información principal y, si te interesa, avanzamos con los datos necesarios.`
-    : '¡Hola! Gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y por cuál vacante o cargo te estás comunicando?';
+  return buildContextualFallbackReply({
+    vacancy: resolved,
+    defaultAction: resolved ? FlowDeciderAction.PRESENT_VACANCY : FlowDeciderAction.IDENTIFY_VACANCY
+  });
 }
 
 /**
@@ -257,6 +328,7 @@ export async function generateInterviewOffer({
   formattedDate,
   vacancy,
   candidateName,
+  candidate = null,
   requiredDocuments,
   isReschedule = false
 }) {
@@ -264,12 +336,19 @@ export async function generateInterviewOffer({
   const docsLine = safeRequiredDocuments
     ? `Debe traer: ${safeRequiredDocuments}.`
     : '';
+  const fallbackCandidate = candidate || { fullName: candidateName };
+  const candidateFirstName = getCandidateFirstName(fallbackCandidate);
+  const scheduleFallback = () => buildContextualFallbackReply({
+    vacancy,
+    candidate: fallbackCandidate,
+    defaultAction: FlowDeciderAction.SCHEDULE_INTERVIEW,
+    formattedDate,
+    documents: safeRequiredDocuments,
+    isReschedule
+  });
 
   if (!process.env.OPENAI_API_KEY) {
-    const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
-    return isReschedule
-      ? `Entonces te ofrezco el ${formattedDate}. ¿Te queda bien ese horario? ${docsLine}`.trim()
-      : `Perfecto${name}. Te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim();
+    return scheduleFallback();
   }
 
   const systemPrompt = [
@@ -277,7 +356,7 @@ export async function generateInterviewOffer({
     isReschedule
       ? 'El candidato rechazó el horario anterior. Ofrecé el nuevo de forma natural y empática.'
       : 'Ofrecé el horario de entrevista de forma amable y directa.',
-    candidateName ? `Nombre del candidato: ${candidateName.split(' ')[0]}.` : '',
+    candidateFirstName ? `Nombre del candidato: ${candidateFirstName}.` : '',
     docsLine ? `Indicá también esta documentación configurada para entrevista, usando exactamente esta información y sin agregar documentos no registrados: ${docsLine}` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
     docsLine ? 'No conviertas la hoja de vida configurada a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
     'Preguntá si el horario le queda bien. Máx 2 oraciones. Sin viñetas ni Markdown. Soná humano.',
@@ -309,33 +388,38 @@ export async function generateInterviewOffer({
     // fallback
   }
 
-  const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
-  return polishInterviewReply(isReschedule
-    ? `Entonces te ofrezco el ${formattedDate}. ¿Te queda bien? ${docsLine}`.trim()
-    : `Listo${name}, te puedo agendar para el ${formattedDate}. ¿Confirmas? ${docsLine}`.trim(), safeRequiredDocuments);
+  return polishInterviewReply(scheduleFallback(), safeRequiredDocuments);
 }
 
 /**
  * Genera el mensaje de confirmación final de entrevista agendada.
  */
-export async function generateBookingConfirmation({ formattedDate, vacancy, candidateName }) {
+export async function generateBookingConfirmation({ formattedDate, vacancy, candidateName, candidate = null }) {
   const address = vacancy?.interviewAddress || vacancy?.operationAddress || '';
   const docs = sanitizeRequiredDocumentsForBot(vacancy?.requiredDocuments) || '';
-  const name = candidateName ? ` ${candidateName.split(' ')[0]}` : '';
+  const fallbackCandidate = candidate || { fullName: candidateName };
+  const candidateFirstName = getCandidateFirstName(fallbackCandidate);
+  const confirmationFallback = () => polishInterviewReply([
+    buildContextualFallbackReply({
+      vacancy,
+      candidate: fallbackCandidate,
+      defaultAction: FlowDeciderAction.CONFIRM_RECEIPT,
+      formattedDate,
+      address,
+      documents: docs
+    }),
+    `La entrevista quedó agendada para el ${formattedDate}.`,
+    'Te llegará un recordatorio 40 minutos antes.'
+  ].filter(Boolean).join(' '), docs);
 
   if (!process.env.OPENAI_API_KEY) {
-    return polishInterviewReply([
-      `Listo${name}, quedaste agendado para el ${formattedDate}.`,
-      address ? `La dirección es ${address}.` : '',
-      docs ? `Recuerda traer: ${docs}.` : '',
-      'Te enviaré un recordatorio 40 minutos antes. ¡Mucha suerte!'
-    ].filter(Boolean).join(' '), docs);
+    return confirmationFallback();
   }
 
   const systemPrompt = [
     'Sos un reclutador humano de LoginPro en WhatsApp.',
     'Confirmá la entrevista agendada de forma cálida y clara.',
-    candidateName ? `Nombre: ${candidateName.split(' ')[0]}.` : '',
+    candidateFirstName ? `Nombre: ${candidateFirstName}.` : '',
     `Fecha/hora: ${formattedDate}.`,
     address ? `Dirección: ${address}.` : '',
     docs ? `Documentación configurada para entrevista: ${docs}.` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
@@ -369,12 +453,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     // fallback
   }
 
-  return polishInterviewReply([
-    `Perfecto${name}, quedaste agendado para el ${formattedDate}.`,
-    address ? `Nos vemos en ${address}.` : '',
-    docs ? `Recuerda traer: ${docs}.` : '',
-    'Te envío un recordatorio 40 minutos antes. ¡Éxitos!'
-  ].filter(Boolean).join(' '), docs);
+  return confirmationFallback();
 }
 
 function normalizeCity(value = '') {

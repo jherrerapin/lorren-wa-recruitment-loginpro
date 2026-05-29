@@ -658,6 +658,7 @@ async function buildInterviewOfferReply(candidate, vacancy, nextSlot, isReschedu
     formattedDate: nextSlot.formattedDate,
     vacancy,
     candidateName: candidate.fullName,
+    candidate,
     isReschedule
   });
 }
@@ -670,7 +671,8 @@ async function buildInterviewConfirmationReply(candidate, vacancy, nextSlot) {
   return generateBookingConfirmation({
     formattedDate: nextSlot.formattedDate,
     vacancy,
-    candidateName: candidate.fullName
+    candidateName: candidate.fullName,
+    candidate
   });
 }
 
