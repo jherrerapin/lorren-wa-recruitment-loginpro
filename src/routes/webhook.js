@@ -1568,6 +1568,9 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
   const tryPrimaryEngineReply = async (candidateState = candidate, vacancyState = currentVacancy) => {
     if (!shouldUsePrimaryConversationEngine(candidateState, cleanText)) return false;
+    const isPostOnboarding = candidateState.stage
+      && !['GREETING', 'INITIAL', 'INTEREST'].includes(candidateState.stage);
+    if (isPostOnboarding && !vacancyState && !candidateState.vacancyId) return false;
 
     if (hasDataIntent && vacancyState && isVacancyOpen(vacancyState) && !isFutureProfileCaptureCandidate(candidateState)) {
       const rejection = shouldRejectByRequirements(cleanText, normalizedData, evidenceByField);
