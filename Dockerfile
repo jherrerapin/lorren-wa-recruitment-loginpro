@@ -8,4 +8,4 @@ COPY src ./src
 COPY .env.example ./.env.example
 COPY README.md ./README.md
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && node src/server.js & node src/workers/jobWorker.js & wait"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node src/server.js & sleep 3 && node src/workers/jobWorker.js & wait"]
