@@ -1,3 +1,73 @@
+import { buildMissingFieldReply } from './readinessGuard.js';
+
+function normalizeScopeText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const PROFILE_REQUEST_SCOPE_CATALOG = [
+  {
+    key: 'email',
+    fields: ['email', 'correo'],
+    requestPattern: /\b(?:correo(?:\s+electronico)?|email|e-mail|mail)\b/i
+  },
+  {
+    key: 'phone',
+    fields: ['phone', 'telefono'],
+    requestPattern: /\b(?:telefono|celular|numero\s+de\s+(?:contacto|telefono|celular)|whatsapp)\b/i
+  },
+  {
+    key: 'address',
+    fields: ['address', 'direccion'],
+    requestPattern: /\b(?:direccion|lugar\s+de\s+residencia|domicilio)\b/i
+  }
+];
+
+function replyAsksForCandidateData(reply = '') {
+  const normalized = normalizeScopeText(reply);
+  if (!normalized) return false;
+  return /\b(?:me\s+falta|faltan?|necesito|confirma(?:r|me)?|confirmame|comparteme|envia(?:me)?|indica(?:me)?|dime|pasame|regalame|cual\s+es)\b/
+    .test(normalized);
+}
+
+function readinessAllowsProfileRequest(readiness = {}, request = {}) {
+  const missingFields = (readiness.missingFields || readiness.missingForDone || [])
+    .map((field) => normalizeScopeText(field));
+  const missingLabels = (readiness.missingFieldLabels || [])
+    .map((label) => normalizeScopeText(label));
+  const allowedValues = new Set([...missingFields, ...missingLabels]);
+
+  return request.fields.some((field) => allowedValues.has(normalizeScopeText(field)))
+    || missingLabels.some((label) => request.requestPattern.test(label));
+}
+
+export function guardReplyAgainstReadinessDrift(reply = '', readiness = {}) {
+  const originalReply = String(reply || '').trim();
+  if (!originalReply || !replyAsksForCandidateData(originalReply)) {
+    return { reply: originalReply, blocked: false, reason: null, requestedFieldsOutsideReadiness: [] };
+  }
+
+  const normalizedReply = normalizeScopeText(originalReply);
+  const requestedFieldsOutsideReadiness = PROFILE_REQUEST_SCOPE_CATALOG
+    .filter((request) => request.requestPattern.test(normalizedReply))
+    .filter((request) => !readinessAllowsProfileRequest(readiness, request))
+    .map((request) => request.key);
+
+  if (!requestedFieldsOutsideReadiness.length) {
+    return { reply: originalReply, blocked: false, reason: null, requestedFieldsOutsideReadiness: [] };
+  }
+
+  return {
+    reply: buildMissingFieldReply(readiness),
+    blocked: true,
+    reason: 'profile_request_outside_readiness',
+    requestedFieldsOutsideReadiness
+  };
+}
 
 const CV_UNSAFE_FALLBACK_REPLY = 'Para continuar, envíame tu hoja de vida como archivo PDF o Word/DOCX. No puedo registrarla en foto ni impresa por este medio.';
 

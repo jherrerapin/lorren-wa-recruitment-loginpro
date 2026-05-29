@@ -296,6 +296,32 @@ ${actionInstruction}
 - Si la vacante es solo postulacion, nunca menciones entrevistas.`;
 }
 
+
+function formatOperationalList(values = []) {
+  const cleanValues = values.map((value) => String(value || '').trim()).filter(Boolean);
+  if (!cleanValues.length) return 'ninguno';
+  if (cleanValues.length === 1) return cleanValues[0];
+  if (cleanValues.length === 2) return `${cleanValues[0]} y ${cleanValues[1]}`;
+  return `${cleanValues.slice(0, -1).join(', ')} y ${cleanValues[cleanValues.length - 1]}`;
+}
+
+export function buildOperationalScopeInstruction(readiness = {}) {
+  const missingLabels = Array.isArray(readiness.missingFieldLabels) ? readiness.missingFieldLabels : [];
+  const missingFields = Array.isArray(readiness.missingFields) ? readiness.missingFields : [];
+  const canAskCv = Boolean(readiness.readyForCvRequest) || (!readiness.hasValidCv && !missingFields.length);
+  const allowedProfileRequests = missingLabels.length
+    ? formatOperationalList(missingLabels)
+    : (canAskCv ? 'hoja de vida en PDF o Word/DOCX' : 'ningun dato de perfil adicional');
+
+  return `
+ALCANCE OPERATIVO DEL TURNO:
+- Puedes redactar con libertad, pero el contenido debe estar amarrado al estado curado.
+- Si vas a pedir datos del candidato, pide exclusivamente lo que aparece pendiente en READINESS: ${allowedProfileRequests}.
+- No agregues datos por costumbre de reclutamiento, por ejemplo datos de contacto, direccion o confirmaciones que no aparezcan como pendientes en READINESS.
+- Si READINESS no muestra campos faltantes y tampoco corresponde pedir HV, no pidas mas datos de perfil; avanza, responde la duda o usa "nothing" segun el contexto.
+- Si vas a informar sobre la vacante, usa solo ESTADO CURADO DE LA VACANTE; cuando un dato no este alli, di que no lo tienes registrado o usa "pause_bot" si puede afectar el proceso.`;
+}
+
 function buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep, botKnowledge = [] }) {
   const candidateState = buildCandidateStateForModel(candidate, vacancy, recentMessages);
   const vacancyState = buildVacancyStateForModel(vacancy);
@@ -366,6 +392,8 @@ ${JSON.stringify(candidateState, null, 2)}
 READINESS DETERMINISTICO DEL BACKEND (JSON):
 ${JSON.stringify(readiness, null, 2)}
 
+${buildOperationalScopeInstruction(readiness)}
+
 ${buildNextSlotContext(nextSlot)}
 
 ${buildGenderFlowInstruction(candidate, vacancy)}
@@ -404,14 +432,14 @@ ACCIONES DISPONIBLES:
 - "nothing"               -> no se requiere accion del sistema
 
 REGLAS CRITICAS:
-- Decide que falta leyendo el estado curado del candidato; no dependas de una lista fija de faltantes.
+- Decide que falta leyendo READINESS y el estado curado del candidato; no pidas ni confirmes datos que no esten pendientes alli.
 - Si el candidato envia un mensaje largo con datos mezclados, extrae todo lo valido en extractedFields.
 - extractedFields tiene peso real: guarda correcciones y datos nuevos aunque no esten solo en save_fields.
 - Si haces una pregunta y pides algo en el mismo mensaje, responde primero la duda y luego retoma el siguiente paso.
 - Si no hubo progreso real, no repitas la misma estructura del bot anterior; reformula y aporta algo mas util.
 - Nunca pidas el genero de forma directa; detectalo solo si el candidato lo expresa con evidencia lingüistica clara y no por el nombre.
 - Si el mensaje del candidato suena a cierre humano, desistimiento o pausa, adaptate al contexto.
-- Nunca propongas DONE, ASK_CV, SCHEDULING, SCHEDULED, offer_interview, confirm_booking ni mark_female_pipeline si READINESS indica campos faltantes o HV faltante; después de confirmar interés por una vacante asignada, pide todos los campos faltantes de READINESS en un solo mensaje natural y no vuelvas a pedir campos ya capturados.
+- Nunca propongas DONE, ASK_CV, SCHEDULING, SCHEDULED, offer_interview, confirm_booking ni mark_female_pipeline si READINESS indica campos faltantes o HV faltante; después de confirmar interés por una vacante asignada, pide solo los campos faltantes de READINESS en un mensaje natural y no vuelvas a pedir campos ya capturados ni datos no requeridos por el sistema.
 
 Devuelve SOLO el JSON. Sin texto antes ni despues.`;
 }
