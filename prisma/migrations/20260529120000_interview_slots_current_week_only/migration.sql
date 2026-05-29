@@ -1,0 +1,2 @@
+ALTER TABLE "InterviewSlot"
+  ADD COLUMN IF NOT EXISTS "currentWeekOnly" BOOLEAN NOT NULL DEFAULT false;
