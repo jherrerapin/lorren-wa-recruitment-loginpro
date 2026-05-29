@@ -87,7 +87,7 @@ function buildNeedRoleForCityReply(city = null, roleHint = null) {
   }
 
   const localityPart = isBogotaCity(city) ? ' y en qué localidad estás' : '';
-  return `Gracias por contarme desde dónde escribes. Para ubicar una convocatoria real ${place} sin asumir una vacante, cuéntame qué cargo o vacante buscas${localityPart}.`;
+  return `Gracias por contarme desde dónde escribes. ¿Para qué vacante o cargo estás interesado${localityPart}?`;
 }
 
 function buildInactiveVacancyReply(vacancy = null, city = null) {
@@ -410,7 +410,7 @@ export async function resolveVacancyFirstGate({
     reason: 'VACANCY_NOT_RESOLVED',
     replyKind: 'ASK_CITY_AND_ROLE',
     candidateUpdates: { currentStep: GREETING_SENT },
-    reply: 'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.',
+    reply: 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?',
     resolution
   }, { recentMessages, inboundText, city: resolution?.city });
 }
