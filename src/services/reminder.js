@@ -1,5 +1,4 @@
 import { sendTextMessage } from './whatsapp.js';
-import { getSupervisorPhone } from './adminSupervisor.js';
 import {
   canScheduleReminderPolicy,
   canSendInterviewKeepalivePolicy,
@@ -119,16 +118,6 @@ function buildInterviewFiveMinuteText(candidate = {}) {
   return `Hola ${candidateName}, tu entrevista es en 5 minutos, ¿ya estás en camino?`;
 }
 
-function buildAdminInterviewStatusText({ candidate = {}, vacancy = {}, status, responseText = '' } = {}) {
-  return [
-    'Actualización entrevista Lórren',
-    `Candidato: ${candidate?.fullName || 'Sin nombre'}`,
-    `Vacante: ${getVacancyTitle(candidate, vacancy)}`,
-    `Estado nuevo: ${status}`,
-    responseText ? `Respuesta candidato: ${responseText}` : null
-  ].filter(Boolean).join('\n');
-}
-
 export function canScheduleReminder(candidate) {
   return canScheduleReminderPolicy(candidate);
 }
@@ -205,39 +194,6 @@ async function findBookingVacancy(prisma, booking = {}, candidate = {}) {
   const vacancyId = booking?.vacancyId || candidate?.vacancyId || candidate?.vacancy?.id;
   if (!vacancyId || typeof prisma?.vacancy?.findUnique !== 'function') return candidate?.vacancy || {};
   return prisma.vacancy.findUnique({ where: { id: vacancyId } }).catch(() => candidate?.vacancy || {});
-}
-
-async function storeAdminOutbound(prisma, body, metadata = {}) {
-  if (typeof prisma?.candidate?.upsert !== 'function' || typeof prisma?.message?.create !== 'function') return;
-  const supervisorPhone = getSupervisorPhone();
-  const supervisor = await prisma.candidate.upsert({
-    where: { phone: supervisorPhone },
-    update: {},
-    create: { phone: supervisorPhone, fullName: 'Administrador del sistema' }
-  });
-  await storeOutbound(prisma, supervisor.id, body, {
-    ...metadata,
-    target: 'admin_supervisor',
-    visibility: 'internal',
-    neverSendToCandidate: true,
-    supervisorPhone
-  });
-}
-
-async function notifyAdminInterviewStatus(prisma, { candidate = {}, booking = {}, vacancy = {}, status, responseText = '', now = new Date() } = {}) {
-  const supervisorPhone = getSupervisorPhone();
-  const body = buildAdminInterviewStatusText({ candidate, vacancy, status, responseText });
-  await sendTextMessage(supervisorPhone, body);
-  await storeAdminOutbound(prisma, body, {
-    source: 'interview_status_admin_notification',
-    candidateId: candidate?.id || booking?.candidateId || null,
-    candidatePhone: candidate?.phone || null,
-    bookingId: booking?.id || null,
-    vacancyId: booking?.vacancyId || candidate?.vacancyId || null,
-    status,
-    responseText: responseText || null,
-    notifiedAt: now.toISOString()
-  });
 }
 
 async function findActiveInterviewBooking(prisma, candidateId) {
@@ -351,8 +307,6 @@ async function runInterviewNoResponseDispatcher(prisma, now = new Date(), candid
         reminderWindowClosed: true
       }
     });
-    const vacancy = await findBookingVacancy(prisma, booking, candidate);
-    await notifyAdminInterviewStatus(prisma, { candidate, booking, vacancy, status: 'NO_SHOW', now });
     console.log('[REMINDER_TRACE]', JSON.stringify({
       event: 'interview_marked_no_show',
       bookingId: booking.id,
@@ -543,16 +497,6 @@ export async function handleInterviewReminderResponse(prisma, candidateId, respo
       reminderResponse: responseText,
       reminderWindowClosed: true
     }
-  });
-  const candidate = await prisma.candidate.findUnique({ where: { id: candidateId } });
-  const vacancy = await findBookingVacancy(prisma, booking, candidate);
-  await notifyAdminInterviewStatus(prisma, {
-    candidate,
-    booking,
-    vacancy,
-    status: nextStatus,
-    responseText,
-    now
   });
   return { status: nextStatus, intent, booking: updatedBooking };
 }
