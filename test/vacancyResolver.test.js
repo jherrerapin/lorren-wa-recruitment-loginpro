@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectRoleHintFromText, resolveVacancyFromText } from '../src/services/vacancyResolver.js';
+import { detectRoleHintFromText, resolveVacancy, resolveVacancyFromText } from '../src/services/vacancyResolver.js';
 
 const operation = {
   id: 'op-ibague',
@@ -155,4 +155,84 @@ test('Siberia explícito puede usar vacante inactiva solo como contexto, no como
   assert.equal(resolution.resolved, true);
   assert.equal(resolution.vacancy.id, 'vac-sib-cargue-inactive');
   assert.equal(resolution.reason, 'matched_inactive_vacancy');
+});
+
+
+test('resolveVacancy asigna solo vacantes de la ciudad indicada', () => {
+  const bogotaOnly = resolveVacancy('Bogota', 'Quiero auxiliar de cargue y descargue', [activeIbagueVacancy]);
+
+  assert.equal(bogotaOnly.vacancy, null);
+  assert.equal(bogotaOnly.ambiguous, false);
+  assert.deepEqual(bogotaOnly.options, []);
+});
+
+test('resolveVacancy prioriza vacantes activas sobre inactivas de la misma ciudad e intención', () => {
+  const inactiveBogotaBodegaVacancy = {
+    ...activeBogotaBodegaVacancy,
+    id: 'vac-bog-bodega-inactive',
+    isActive: false,
+    acceptingApplications: false
+  };
+
+  const resolution = resolveVacancy('Bogota', 'Estoy interesada en labores de bodega', [
+    inactiveBogotaBodegaVacancy,
+    activeBogotaBodegaVacancy
+  ]);
+
+  assert.equal(resolution.vacancy.id, 'vac-bog-bodega');
+  assert.equal(resolution.ambiguous, false);
+});
+
+test('resolveVacancy identifica vacante por intención funcional y no por nombre exacto', () => {
+  const resolution = resolveVacancy('Ibague', 'Me interesa cargar y descargar mercancía', [activeIbagueVacancy]);
+
+  assert.equal(resolution.vacancy.id, 'vac-iba-1');
+  assert.equal(resolution.ambiguous, false);
+});
+
+test('resolveVacancy retorna opciones cuando hay ambigüedad entre vacantes de la misma ciudad', () => {
+  const morningBodegaVacancy = {
+    ...activeBogotaBodegaVacancy,
+    id: 'vac-bog-bodega-am',
+    title: 'Auxiliar de Bodega Turno Mañana Bogota'
+  };
+  const afternoonBodegaVacancy = {
+    ...activeBogotaBodegaVacancy,
+    id: 'vac-bog-bodega-pm',
+    title: 'Auxiliar de Bodega Turno Tarde Bogota'
+  };
+
+  const resolution = resolveVacancy('Bogota', 'Busco auxiliar de bodega', [
+    morningBodegaVacancy,
+    afternoonBodegaVacancy
+  ]);
+
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.ambiguous, true);
+  assert.deepEqual(resolution.options.map((vacancy) => vacancy.id), ['vac-bog-bodega-am', 'vac-bog-bodega-pm']);
+});
+
+test('resolveVacancy nunca asigna vacante de otra ciudad aunque el cargo coincida', () => {
+  const resolution = resolveVacancy('Bogota', 'Estoy para auxiliar de cargue y descargue', [activeIbagueVacancy]);
+
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.ambiguous, false);
+  assert.deepEqual(resolution.options, []);
+});
+
+test('resolveVacancy marca requiresRelocation para vacantes en Siberia que implican desplazamiento', () => {
+  const activeSiberiaBodegaVacancy = {
+    ...activeBogotaBodegaVacancy,
+    id: 'vac-sib-bodega-active',
+    title: 'Auxiliar de Bodega Siberia',
+    operationAddress: 'Parque industrial Siberia',
+    isActive: true,
+    acceptingApplications: true
+  };
+
+  const resolution = resolveVacancy('Bogota', 'Quiero postularme como auxiliar de bodega en Siberia', [activeSiberiaBodegaVacancy]);
+
+  assert.equal(resolution.vacancy.id, 'vac-sib-bodega-active');
+  assert.equal(resolution.requiresRelocation, true);
+  assert.equal(resolution.ambiguous, false);
 });
