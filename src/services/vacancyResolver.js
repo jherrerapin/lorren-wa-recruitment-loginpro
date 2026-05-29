@@ -14,7 +14,7 @@ const ROLE_STOPWORDS = new Set([
   'publicada', 'publicado', 'empleo', 'oferta', 'averiguar', 'informarme', 'quisiera',
   'vivo', 'vive', 'vives', 'vivir', 'ciudad', 'numero', 'dieron', 'este', 'esta'
 ]);
-const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|descargue|descarge|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento)\b/i;
+const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|cargar|cargando|descargue|descarge|descargar|descargando|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento)\b/i;
 const CITY_ALIASES = [
   { value: 'Bogota', aliases: ['bogota'] },
   { value: 'Ibague', aliases: ['ibague'] }
@@ -51,8 +51,8 @@ function tokenize(text = '') {
 function normalizeRoleToken(token = '') {
   const normalized = normalizeResolverText(token);
   if (!normalized) return '';
-  if (/^carg(?:e|ue)$/.test(normalized)) return 'cargue';
-  if (/^descarg(?:e|ue)$/.test(normalized)) return 'descargue';
+  if (/^carg(?:e|ue|ar|ando)$/.test(normalized)) return 'cargue';
+  if (/^descarg(?:e|ue|ar|ando)$/.test(normalized)) return 'descargue';
   if (/^aux$/.test(normalized)) return 'auxiliar';
   if (/^bideg[ae]$/.test(normalized)) return 'bodega';
   if (/^bodegas?$/.test(normalized)) return 'bodega';
@@ -174,7 +174,7 @@ const GENERIC_ROLE_HINT_TOKENS = new Set([
   'rol'
 ]);
 
-const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|descargue|bodega|operari|operativo|operativa|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ|maquila|empaque|planta|picking|packing|alistamiento)/i;
+const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|cargar|descargue|descargar|bodega|operari|operativo|operativa|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ|maquila|empaque|planta|picking|packing|alistamiento)/i;
 
 function normalizeRoleHint(value = '', city = '') {
   const cityTokens = new Set(tokenize(city));
@@ -427,6 +427,76 @@ function canUseInactiveMatch(inactiveMatch, context = {}) {
       roleScore: inactiveMatch.best.roleScore
     })
   );
+}
+
+
+function baseVacancyResolution(overrides = {}) {
+  return {
+    vacancy: null,
+    requiresRelocation: false,
+    ambiguous: false,
+    options: [],
+    ...overrides
+  };
+}
+
+function vacancyImpliesSiberiaRelocation(vacancy, requestedCity = '') {
+  const locationText = buildVacancyLocationText(vacancy);
+  if (!locationText.includes('siberia')) return false;
+
+  const normalizedRequestedCity = normalizeResolverText(requestedCity);
+  const normalizedVacancyCity = normalizeResolverText(canonicalVacancyCity(vacancy));
+  return Boolean(!normalizedRequestedCity || normalizedRequestedCity !== 'siberia' || normalizedVacancyCity !== 'siberia');
+}
+
+function rankVacanciesByIntent(vacancies = [], context = {}) {
+  return vacancies
+    .map((vacancy) => ({
+      vacancy,
+      score: scoreVacancyRole(vacancy, context)
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+}
+
+function selectVacancyFromRanked(ranked = [], requestedCity = '') {
+  if (!ranked.length) return baseVacancyResolution();
+
+  const best = ranked[0];
+  const matchingBestOptions = ranked
+    .filter((entry) => Math.abs(entry.score - best.score) < 0.75)
+    .map((entry) => entry.vacancy);
+
+  if (matchingBestOptions.length > 1) {
+    return baseVacancyResolution({
+      ambiguous: true,
+      options: matchingBestOptions
+    });
+  }
+
+  return baseVacancyResolution({
+    vacancy: best.vacancy,
+    requiresRelocation: vacancyImpliesSiberiaRelocation(best.vacancy, requestedCity)
+  });
+}
+
+export function resolveVacancy(city, intentText, availableVacancies = []) {
+  const requestedCity = normalizeResolverText(city);
+  if (!requestedCity || !Array.isArray(availableVacancies) || !availableVacancies.length) {
+    return baseVacancyResolution();
+  }
+
+  const cityVacancies = availableVacancies.filter((vacancy) => cityMatchesVacancy(vacancy, city));
+  if (!cityVacancies.length) return baseVacancyResolution();
+
+  const roleHint = normalizeRoleHint(detectRoleHintFromText(intentText, { city }) || intentText, city);
+  const context = { text: intentText, city, roleHint, operationZones: detectOperationZoneEvidence(intentText) };
+  const activeMatches = rankVacanciesByIntent(cityVacancies.filter(isVacancyOpen), context);
+  const activeResolution = selectVacancyFromRanked(activeMatches, city);
+  if (activeResolution.vacancy || activeResolution.ambiguous) return activeResolution;
+
+  const inactiveMatches = rankVacanciesByIntent(cityVacancies.filter((vacancy) => !isVacancyOpen(vacancy)), context);
+  return selectVacancyFromRanked(inactiveMatches, city);
 }
 
 export async function resolveVacancyFromText(prisma, text, options = {}) {
