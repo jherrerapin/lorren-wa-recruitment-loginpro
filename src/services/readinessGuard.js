@@ -25,8 +25,21 @@ const FIELD_LABELS = {
   vacancyId: 'vacante asignada'
 };
 
+function getConfiguredCandidateFields(vacancy = null) {
+  const configured = vacancy?.requiredCandidateFields
+    || vacancy?.requiredFields
+    || vacancy?.dataFields
+    || vacancy?.fieldsToCollect
+    || null;
+  if (!Array.isArray(configured)) return null;
+  const fields = configured.map((field) => String(field || '').trim()).filter(Boolean);
+  return fields.length ? [...new Set(fields)] : null;
+}
 
 export function getRequiredCandidateFieldKeys(vacancy = null) {
+  const configuredFields = getConfiguredCandidateFields(vacancy);
+  if (configuredFields) return configuredFields;
+
   const residenceConfig = getResidenceFieldConfig(vacancy);
   const fields = [
     'fullName',
@@ -140,6 +153,21 @@ export function getCandidateReadiness(candidate = {}, vacancy = null, options = 
     missingForDone,
     blockedReasons
   };
+}
+
+function formatNaturalFieldList(labels = []) {
+  const values = labels.map((label) => String(label || '').trim()).filter(Boolean);
+  if (!values.length) return '';
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} y ${values[1]}`;
+  return `${values.slice(0, -1).join(', ')} y ${values[values.length - 1]}`;
+}
+
+export function buildCandidateDataCollectionMessage(candidate = {}, vacancy = null) {
+  const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
+  const pendingText = formatNaturalFieldList(readiness.missingFieldLabels || []);
+  if (!pendingText) return '';
+  return `Perfecto, seguimos con tu postulación. Para dejar tu registro completo, compárteme en un solo mensaje ${pendingText}.`;
 }
 
 export function getFirstMissingFieldLabel(readiness = {}) {

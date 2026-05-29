@@ -24,6 +24,18 @@ test('detectRoleHintFromText ignora expresiones genericas de vacante de trabajo'
   assert.equal(roleHint, null);
 });
 
+
+test('detectRoleHintFromText ignora prompt previo del bot y conserva cargo del candidato', () => {
+  const text = [
+    'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.',
+    'Bogotá auxiliar de bodega'
+  ].join('\n');
+
+  const roleHint = detectRoleHintFromText(text, { city: 'Bogota' });
+
+  assert.equal(roleHint, 'auxiliar bodega');
+});
+
 test('resolveVacancyFromText no autoasigna vacante cuando solo detecta ciudad', async () => {
   const resolution = await resolveVacancyFromText(null, 'Buenas noches te escribo desde Ibague para vacante de trabajo', {
     activeVacancies: [activeIbagueVacancy],

@@ -50,6 +50,7 @@ function isBogotaCity(city = '') {
 function recentConversationText(recentMessages = []) {
   return (recentMessages || [])
     .slice(-6)
+    .filter((message) => !message?.direction || message.direction === 'INBOUND')
     .map((message) => String(message?.body || ''))
     .filter(Boolean)
     .join('\n');
@@ -75,8 +76,16 @@ function buildNoActiveVacanciesReply(city = null) {
   return `En este momento no tengo vacantes activas${location}. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo lo hago si me confirmas que deseas ese registro.`;
 }
 
-function buildNeedRoleForCityReply(city = null) {
-  const place = city ? ` en ${city}` : 'en tu ciudad';
+function buildNeedRoleForCityReply(city = null, roleHint = null) {
+  const place = city ? `en ${city}` : 'en tu ciudad';
+  const hasRoleHint = Boolean(String(roleHint || '').trim());
+  if (hasRoleHint) {
+    if (isBogotaCity(city)) {
+      return `Gracias, ya tengo la ciudad y el cargo de interés. Para ubicar la convocatoria correcta ${place}, cuéntame en qué localidad estás o alguna referencia adicional de la convocatoria.`;
+    }
+    return `Gracias, ya tengo la ciudad y el cargo de interés. Para ubicar la convocatoria correcta ${place}, cuéntame alguna referencia adicional de la convocatoria.`;
+  }
+
   const localityPart = isBogotaCity(city) ? ' y en qué localidad estás' : '';
   return `Gracias por contarme desde dónde escribes. Para ubicar una convocatoria real ${place} sin asumir una vacante, cuéntame qué cargo o vacante buscas${localityPart}.`;
 }
@@ -391,7 +400,7 @@ export async function resolveVacancyFirstGate({
       reason: 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS',
       replyKind: 'ASK_CITY_LOCALITY_AND_ROLE',
       candidateUpdates: { currentStep: GREETING_SENT },
-      reply: buildNeedRoleForCityReply(resolution.city),
+      reply: buildNeedRoleForCityReply(resolution.city, resolution.roleHint),
       resolution
     }, { recentMessages, inboundText, city: resolution.city });
   }

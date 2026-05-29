@@ -125,6 +125,29 @@ function currentStepCollectsCandidateData(context = {}) {
   return /COLLECT|CONFIRM|GREETING_SENT|ASK_DATA|DATA|REGISTRO/.test(step);
 }
 
+function looksLikeNonDataText(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) return true;
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+
+  const conversationalTokens = new Set([
+    'hola', 'buenas', 'buenos', 'dias', 'tardes', 'noches', 'gracias',
+    'ok', 'okay', 'vale', 'listo', 'claro', 'si', 'sii', 'sip', 'no',
+    'bueno', 'buena', 'perfecto', 'correcto', 'correcta', 'dale'
+  ]);
+  const onlyConversational = tokens.every((token) => conversationalTokens.has(token));
+  if (onlyConversational) return true;
+
+  if (/^(?:a\s*)?(?:ok|okay|vale|listo|claro|gracias|perfecto|bueno|correcto)(?:\s+(?:gracias|claro|listo|si|no))?$/.test(normalized)) return true;
+  if (/^(?:si|sii|sip|no)(?:\s+(?:senora|senor|claro|gracias|por favor|listo))?$/.test(normalized)) return true;
+  return false;
+}
+
+function isStringCandidateValue(value) {
+  return typeof value === 'string' || value instanceof String;
+}
+
 function getEvidence(field, evidence = {}) {
   const item = evidence?.[field] || {};
   const confidence = Number(item.confidence);
@@ -227,7 +250,7 @@ function looksLikePersonalName(value = '') {
   const semanticTokenCount = normalizedTokens.filter((token) => semanticNonNameTokens.has(token)).length;
   if (semanticNonNameTokens.has(normalizedTokens[0]) || semanticTokenCount === normalizedTokens.length) return false;
 
-  return tokens.every((token) => /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/.test(token));
+  return tokens.every((token) => /^[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}$/.test(token));
 }
 
 function looksLikeResidenceValue(value = '') {
@@ -354,6 +377,7 @@ function sanitizeDocumentType(value) {
 }
 
 function sanitizeAge(value, text) {
+  if (!/^\d+$/.test(String(value || '').trim())) return { ok: false, reason: 'invalid_numeric_value' };
   const age = Number(value);
   if (!Number.isInteger(age) || age < 14 || age > 80) return { ok: false, reason: 'invalid_age_range' };
   if (/\b(calle|carrera|cra|cl|avenida|av|km|kilometro)\s+\d{1,3}\b/i.test(text)) {
@@ -366,6 +390,7 @@ function sanitizeAge(value, text) {
 
 function evaluateField(field, value, evidence, text, context, turnType) {
   if (!hasValue(value)) return { ok: false, reason: 'empty' };
+  if (isStringCandidateValue(value) && looksLikeNonDataText(value)) return { ok: false, reason: 'non_data_text' };
 
   if (field === 'fullName') return sanitizeFullName(value, evidence, text, context, turnType);
   if (RESIDENCE_FIELDS.has(field)) return sanitizeResidence(field, value, evidence, text, context, turnType);

@@ -193,20 +193,19 @@ function splitMeaningfulSegments(text = '') {
     .filter(Boolean);
 }
 
-function findSegmentWithRoleSignal(segments = []) {
-  return segments.find((segment) => ROLE_SIGNAL_REGEX.test(segment)) || null;
-}
-
 export function detectRoleHintFromText(text = '', options = {}) {
   const normalized = normalizeResolverText(text);
   if (!normalized) return null;
 
   const cityTokens = new Set(tokenize(options.city || ''));
   const segments = splitMeaningfulSegments(text);
-  const preferredSegment = findSegmentWithRoleSignal(segments);
-  if (preferredSegment) {
+  const preferredSegments = segments.filter((segment) => ROLE_SIGNAL_REGEX.test(segment));
+  for (const preferredSegment of preferredSegments) {
     const preferredTokens = cleanRoleTokens(tokenize(preferredSegment), cityTokens);
-    if (preferredTokens.length) return normalizeRoleHint(preferredTokens.join(' '), options.city || '');
+    const preferredRoleHint = preferredTokens.length
+      ? normalizeRoleHint(preferredTokens.join(' '), options.city || '')
+      : null;
+    if (preferredRoleHint) return preferredRoleHint;
   }
 
   const explicitPatterns = [

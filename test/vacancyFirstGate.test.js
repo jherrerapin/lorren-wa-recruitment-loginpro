@@ -138,6 +138,92 @@ test('C: GREETING_SENT + Bogotá con vacantes activas pero cargo ambiguo pide lo
   assertNoPublicityOrPhoto(decision.reply);
 });
 
+
+test('Bogotá auxiliar de bodega conserva cargo detectado y no vuelve a pedir cargo', async () => {
+  const morningBogota = vacancy({
+    id: 'vac-bog-bodega-am',
+    title: 'Auxiliar de Bodega Turno Mañana Bogota',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: bogotaOperation
+  });
+  const afternoonBogota = vacancy({
+    id: 'vac-bog-bodega-pm',
+    title: 'Auxiliar de Bodega Turno Tarde Bogota',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: bogotaOperation
+  });
+  const initialPrompt = 'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.';
+
+  const decision = await decide({
+    text: 'Bogotá auxiliar de bodega',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    recentMessages: [
+      { direction: 'INBOUND', body: '¡Hola! Quiero más información.' },
+      {
+        direction: 'OUTBOUND',
+        body: initialPrompt,
+        createdAt: new Date(),
+        rawPayload: {
+          source: 'vacancy_first_gate',
+          replyKind: 'ASK_CITY_AND_ROLE',
+          reason: 'VACANCY_NOT_RESOLVED'
+        }
+      }
+    ],
+    vacancies: [morningBogota, afternoonBogota]
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS');
+  assert.equal(decision.resolution.city, 'Bogota');
+  assert.equal(decision.resolution.roleHint, 'auxiliar bodega');
+  assert.match(decision.reply, /ya tengo la ciudad y el cargo/i);
+  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /qué cargo|que cargo|cargo o vacante buscas/i);
+});
+
+test('Bogotá posterior no pierde el cargo ya dado en el turno anterior', async () => {
+  const morningBogota = vacancy({
+    id: 'vac-bog-bodega-am-repeat',
+    title: 'Auxiliar de Bodega Turno Mañana Bogota',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: bogotaOperation
+  });
+  const afternoonBogota = vacancy({
+    id: 'vac-bog-bodega-pm-repeat',
+    title: 'Auxiliar de Bodega Turno Tarde Bogota',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: bogotaOperation
+  });
+
+  const decision = await decide({
+    text: 'Bogotá',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    recentMessages: [
+      { direction: 'INBOUND', body: '¡Hola! Quiero más información.' },
+      {
+        direction: 'OUTBOUND',
+        body: 'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.',
+        createdAt: new Date(Date.now() - 60_000),
+        rawPayload: { source: 'vacancy_first_gate', replyKind: 'ASK_CITY_AND_ROLE', reason: 'VACANCY_NOT_RESOLVED' }
+      },
+      { direction: 'INBOUND', body: 'Bogotá auxiliar de bodega' }
+    ],
+    vacancies: [morningBogota, afternoonBogota]
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS');
+  assert.equal(decision.resolution.city, 'Bogota');
+  assert.equal(decision.resolution.roleHint, 'auxiliar bodega');
+  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /qué cargo|que cargo|cargo o vacante buscas/i);
+});
+
 test('D: ciudad + cargo resuelven vacante activa en Neiva', async () => {
   const activeNeiva = vacancy({
     id: 'vac-neiva-cargue',

@@ -1,6 +1,64 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
+import { buildCandidateDataCollectionMessage } from '../src/services/readinessGuard.js';
+
+const bogotaVacancyWithExperience = Object.freeze({
+  id: 'vac-bog-exp',
+  title: 'Auxiliar de Bodega Bogota',
+  role: 'Auxiliar de bodega',
+  city: 'Bogota',
+  experienceRequired: 'YES',
+  experienceTimeText: 'mínimo 6 meses',
+  isActive: true,
+  acceptingApplications: true
+});
+
+test('mensaje de recolección masiva usa campos reales requeridos por la vacante', () => {
+  const message = buildCandidateDataCollectionMessage({}, bogotaVacancyWithExperience);
+
+  assert.match(message, /nombre completo/i);
+  assert.match(message, /tipo de documento/i);
+  assert.match(message, /numero de documento/i);
+  assert.match(message, /edad/i);
+  assert.match(message, /localidad/i);
+  assert.match(message, /restricciones medicas/i);
+  assert.match(message, /medio de transporte/i);
+  assert.match(message, /experiencia \(si o no\)/i);
+  assert.match(message, /tiempo de experiencia \(mínimo 6 meses\)/i);
+  assert.doesNotMatch(message, /correo|email|telefono|teléfono|direccion|dirección/i);
+});
+
+test('mensaje de recolección masiva respeta campos configurados en la vacante', () => {
+  const message = buildCandidateDataCollectionMessage({}, {
+    id: 'vac-custom-fields',
+    city: 'Ibague',
+    requiredCandidateFields: ['fullName', 'age', 'transportMode']
+  });
+
+  assert.match(message, /nombre completo/i);
+  assert.match(message, /edad/i);
+  assert.match(message, /medio de transporte/i);
+  assert.doesNotMatch(message, /tipo de documento|numero de documento|restricciones medicas|barrio|localidad/i);
+});
+
+test('mensaje de recolección masiva no repite datos ya conocidos del candidato', () => {
+  const message = buildCandidateDataCollectionMessage({
+    fullName: 'Laura Perez',
+    age: 29,
+    locality: 'Suba',
+    transportMode: 'Bus'
+  }, bogotaVacancyWithExperience);
+
+  assert.doesNotMatch(message, /nombre completo/i);
+  assert.doesNotMatch(message, /edad/i);
+  assert.doesNotMatch(message, /localidad/i);
+  assert.doesNotMatch(message, /medio de transporte/i);
+  assert.match(message, /tipo de documento/i);
+  assert.match(message, /numero de documento/i);
+  assert.match(message, /restricciones medicas/i);
+  assert.match(message, /experiencia/i);
+});
 
 function evidenceFor(fields = {}, overrides = {}) {
   return Object.fromEntries(
@@ -215,4 +273,48 @@ test('no marca mujer por gracias señorita', () => {
   });
 
   assert.equal(result.fields.gender, undefined);
+});
+
+test('rechaza saludos y cortesías como valores de cualquier campo de texto', () => {
+  const fields = {
+    fullName: 'Buenas Tardes',
+    transportMode: 'Ok',
+    medicalRestrictions: 'Gracias'
+  };
+  const result = sanitize({
+    text: 'buenas tardes ok gracias',
+    fields,
+    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['fullName', 'transportMode', 'medicalRestrictions'] },
+    turnType: 'GREETING'
+  });
+
+  assert.equal(result.fields.fullName, undefined);
+  assert.equal(result.fields.transportMode, undefined);
+  assert.equal(result.fields.medicalRestrictions, undefined);
+  assert.equal(result.rejectedFields.find((item) => item.field === 'fullName')?.reason, 'non_data_text');
+});
+
+test('acepta valores legítimos después de la validación semántica', () => {
+  const fields = {
+    fullName: 'Laura Marcela Perez',
+    age: 32,
+    transportMode: 'Bus',
+    medicalRestrictions: 'Sin restricciones medicas'
+  };
+  const result = sanitize({
+    text: 'mi nombre es Laura Marcela Perez, tengo 32 años, me movilizo en bus y no tengo restricciones medicas',
+    fields,
+    evidence: evidenceFor(fields, {
+      fullName: { snippet: 'Laura Marcela Perez', confidence: 0.96 },
+      age: { snippet: '32 años', confidence: 0.95 },
+      transportMode: { snippet: 'bus', confidence: 0.94 },
+      medicalRestrictions: { snippet: 'no tengo restricciones medicas', confidence: 0.94 }
+    }),
+    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['fullName', 'age', 'transportMode', 'medicalRestrictions'] }
+  });
+
+  assert.equal(result.fields.fullName, 'Laura Marcela Perez');
+  assert.equal(result.fields.age, 32);
+  assert.equal(result.fields.transportMode, 'Bus');
+  assert.equal(result.fields.medicalRestrictions, 'Sin restricciones medicas');
 });
