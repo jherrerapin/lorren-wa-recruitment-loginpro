@@ -394,18 +394,19 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
     const vacancy = await findBookingVacancy(prisma, booking, candidate);
     const reminderText = buildInterviewReminderText(candidate, booking, vacancy);
     try {
-      await sendTextMessage(candidate.phone, reminderText);
-      await storeOutbound(prisma, candidate.id, reminderText, {
-        source: INTERVIEW_BOOKING_REMINDER_SOURCE,
-        bookingId: booking.id,
-        scheduledAt: scheduledAt.toISOString()
-      });
+      // Mark as sent FIRST to prevent duplicate dispatch on next tick
       await prisma.interviewBooking.update({
         where: { id: booking.id },
         data: {
           reminderSentAt: now,
           reminderWindowClosed: true
         }
+      });
+      await sendTextMessage(candidate.phone, reminderText);
+      await storeOutbound(prisma, candidate.id, reminderText, {
+        source: INTERVIEW_BOOKING_REMINDER_SOURCE,
+        bookingId: booking.id,
+        scheduledAt: scheduledAt.toISOString()
       });
       await prisma.candidate.update({
         where: { id: candidate.id },
@@ -524,9 +525,7 @@ export async function runCandidateProcessReminderDispatcher(prisma, { now = new 
       continue;
     }
 
-    const reminderText = buildReminderText(candidate);
-    await sendTextMessage(candidate.phone, reminderText);
-    await storeOutbound(prisma, candidate.id, reminderText, { source: 'auto_reminder' });
+    // Mark as SENT FIRST before sending to prevent duplicate dispatch on next tick
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {
@@ -536,6 +535,10 @@ export async function runCandidateProcessReminderDispatcher(prisma, { now = new 
         lastOutboundAt: now
       }
     });
+
+    const reminderText = buildReminderText(candidate);
+    await sendTextMessage(candidate.phone, reminderText);
+    await storeOutbound(prisma, candidate.id, reminderText, { source: 'auto_reminder' });
     console.log('[REMINDER_TRACE]', JSON.stringify({ candidateId: candidate.id, event: 'reminder_sent' }));
   }
 }
