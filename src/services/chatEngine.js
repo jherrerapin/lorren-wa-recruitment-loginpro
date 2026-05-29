@@ -2,7 +2,7 @@ import axios from 'axios';
 import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
-import { sanitizeOutboundReply } from './replySafety.js';
+import { guardReplyAgainstReadinessDrift, sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
 import { detectConversationIntent } from './conversationIntent.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
@@ -399,9 +399,13 @@ export async function runChatEngine({
   const guardedReply = actResult?.blockedActions?.length
     ? buildMissingFieldReply(actResult.readiness)
     : result.reply;
+  const profileScopeGuard = guardReplyAgainstReadinessDrift(
+    guardedReply,
+    actResult?.readiness || readiness
+  );
 
   const safeReply = sanitizeOutboundReply({
-    reply: guardedReply,
+    reply: profileScopeGuard.reply,
     vacancy,
     candidate,
     currentStep,
@@ -422,7 +426,14 @@ export async function runChatEngine({
     rejectedFields: sanitized.rejectedFields,
     replySafety: safeReply,
     readiness: actResult?.readiness || null,
-    blockedActions: actResult?.blockedActions || [],
+    blockedActions: [
+      ...(actResult?.blockedActions || []),
+      ...(profileScopeGuard.blocked ? [{
+        action: 'reply_scope_guard',
+        reason: profileScopeGuard.reason,
+        requestedFieldsOutsideReadiness: profileScopeGuard.requestedFieldsOutsideReadiness
+      }] : [])
+    ],
     fallback: result.fallback,
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),
