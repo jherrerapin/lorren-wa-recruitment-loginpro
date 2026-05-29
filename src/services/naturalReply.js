@@ -483,14 +483,14 @@ export function buildVacancyOptionsReply({ city = null, vacancyOptions = [] } = 
     .filter((vacancy) => vacancyMatchesCity(vacancy, city));
 
   if (!city) {
-    return 'Claro, para revisar opciones reales primero cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.';
+    return 'Claro, ¿desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
   }
 
   if (!activeOptions.length) {
     return `En este momento no tengo vacantes activas registradas para ${city}. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo si me confirmas que deseas ese registro.`;
   }
 
-  return `Gracias. Para ubicarte bien en ${city} y no confundirte con otra convocatoria, dime qué cargo o vacante buscas y, si aplica, una referencia verbal de la convocatoria.`;
+  return `Gracias. Para orientarte bien en ${city}, dime qué cargo o vacante buscas y, si aplica, una referencia verbal de la convocatoria.`;
 }
 
 export function buildUnavailableVacancyInfoReply(vacancy = {}) {

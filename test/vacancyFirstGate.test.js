@@ -116,6 +116,21 @@ test('B/E: Bogotá ambiguo o bodega sin vacantes activas bloquea captura y ofrec
   }
 });
 
+test('saludo inicial pide ciudad y vacante con tono natural', async () => {
+  const active = vacancy({ id: 'vac-initial-natural' });
+  const decision = await decide({
+    text: 'Hola',
+    vacancies: [active]
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'VACANCY_NOT_RESOLVED');
+  assert.equal(decision.reply, 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?');
+  assert.doesNotMatch(decision.reply, /convocatoria real|no asumir/i);
+  assertNoPersonalDataRequest(decision.reply);
+  assertNoPublicityOrPhoto(decision.reply);
+});
+
 test('C: GREETING_SENT + Bogotá con vacantes activas pero cargo ambiguo pide localidad y cargo sin catálogo', async () => {
   const activeBogota = vacancy({
     id: 'vac-bog-active',
@@ -154,7 +169,7 @@ test('Bogotá auxiliar de bodega conserva cargo detectado y no vuelve a pedir ca
     city: 'Bogota',
     operation: bogotaOperation
   });
-  const initialPrompt = 'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.';
+  const initialPrompt = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?';
 
   const decision = await decide({
     text: 'Bogotá auxiliar de bodega',
@@ -207,7 +222,7 @@ test('Bogotá posterior no pierde el cargo ya dado en el turno anterior', async 
       { direction: 'INBOUND', body: '¡Hola! Quiero más información.' },
       {
         direction: 'OUTBOUND',
-        body: 'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.',
+        body: 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?',
         createdAt: new Date(Date.now() - 60_000),
         rawPayload: { source: 'vacancy_first_gate', replyKind: 'ASK_CITY_AND_ROLE', reason: 'VACANCY_NOT_RESOLVED' }
       },

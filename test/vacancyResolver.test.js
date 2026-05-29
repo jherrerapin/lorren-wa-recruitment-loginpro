@@ -27,7 +27,7 @@ test('detectRoleHintFromText ignora expresiones genericas de vacante de trabajo'
 
 test('detectRoleHintFromText ignora prompt previo del bot y conserva cargo del candidato', () => {
   const text = [
-    'Con gusto te ayudo. Para revisar una convocatoria real y no asumir una vacante, cuéntame desde qué ciudad nos escribes y qué cargo o vacante buscas.',
+    'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?',
     'Bogotá auxiliar de bodega'
   ].join('\n');
 
