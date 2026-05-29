@@ -120,6 +120,14 @@
     .empty-state { text-align: center; padding: 48px 24px; color: var(--text-faint); }
     .empty-state .empty-icon { font-size: 36px; margin-bottom: 10px; }
     .no-ops-warn { font-size: 12px; color: var(--amber); background: var(--amber-light); border: 1px solid #fcd34d; border-radius: var(--radius); padding: 8px 12px; }
+    .audit-panel { margin-top: 22px; }
+    .audit-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+    .audit-title { font-size: 16px; font-weight: 700; color: var(--navy); }
+    .audit-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .audit-table td { vertical-align: top; }
+    .audit-muted { font-size: 11px; color: var(--text-muted); margin-top: 3px; word-break: break-word; }
+    .audit-user { font-weight: 700; color: var(--navy); }
+    .audit-details { max-width: 280px; white-space: normal; }
     @media (max-width: 960px) {
       .navbar {
         flex-wrap: wrap;
@@ -316,6 +324,59 @@
       </section>
     <% } %>
   </div>
+  <% } %>
+
+  <% if (role === 'dev') { %>
+    <section class="card audit-panel">
+      <div class="audit-panel-header">
+        <div>
+          <div class="audit-title">Bitácora dev de vacantes</div>
+          <div class="audit-sub">Cambios realizados desde el panel con usuario, IP, navegador y detalle disponible.</div>
+        </div>
+        <div class="city-count"><%= (devAuditEvents || []).length %> evento<%= (devAuditEvents || []).length !== 1 ? 's' : '' %></div>
+      </div>
+      <% if (!devAuditEvents || devAuditEvents.length === 0) { %>
+        <div class="empty-state" style="padding:28px 18px;">
+          <p>Aún no hay movimientos de vacantes registrados.</p>
+        </div>
+      <% } else { %>
+        <table class="audit-table">
+          <thead><tr>
+            <th>Fecha</th>
+            <th>Acción</th>
+            <th>Vacante</th>
+            <th>Usuario</th>
+            <th>IP / navegador</th>
+            <th>Detalle</th>
+          </tr></thead>
+          <tbody>
+            <% for (const event of devAuditEvents) { %>
+              <tr>
+                <td><%= formatDateTimeCO(event.createdAt) %></td>
+                <td><%= formatDevAuditAction(event.action) %></td>
+                <td>
+                  <div><%= event.entityLabel || event.entityId || '-' %></div>
+                  <% if (event.entityId) { %><div class="audit-muted">ID: <%= event.entityId %></div><% } %>
+                </td>
+                <td>
+                  <div class="audit-user"><%= event.actorUsername || 'dashboard' %></div>
+                  <div class="audit-muted"><%= formatActorRoleLabel(event.actorRole) %><% if (event.actorSource) { %> · <%= event.actorSource %><% } %></div>
+                </td>
+                <td>
+                  <div><%= event.ipAddress || 'Sin IP' %></div>
+                  <% if (event.forwardedFor) { %><div class="audit-muted">Forwarded: <%= event.forwardedFor %></div><% } %>
+                  <% if (event.userAgent) { %><div class="audit-muted"><%= event.userAgent %></div><% } %>
+                </td>
+                <td class="audit-details">
+                  <%= formatDevAuditDetails(event) || '-' %>
+                  <% if (event.path) { %><div class="audit-muted"><%= event.method || 'POST' %> <%= event.path %></div><% } %>
+                </td>
+              </tr>
+            <% } %>
+          </tbody>
+        </table>
+      <% } %>
+    </section>
   <% } %>
 </div>
 

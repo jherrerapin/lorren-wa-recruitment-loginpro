@@ -426,7 +426,20 @@ async function loadVacancyAccessSnapshot(prisma, vacancyId) {
     select: {
       id: true,
       title: true,
+      key: true,
+      role: true,
+      roleDescription: true,
       city: true,
+      operationAddress: true,
+      interviewAddress: true,
+      requirements: true,
+      conditions: true,
+      requiredDocuments: true,
+      minAge: true,
+      maxAge: true,
+      experienceRequired: true,
+      experienceTimeText: true,
+      schedulingEnabled: true,
       isActive: true,
       acceptingApplications: true,
       dashboardReviewEnabled: true
@@ -568,6 +581,107 @@ async function logCandidateAdminEvent(prisma, {
       error: error?.message || error
     });
   }
+}
+
+function getRequestIpDetails(req) {
+  const forwardedFor = normalizeString(req.get?.('x-forwarded-for'));
+  const forwardedIp = forwardedFor ? forwardedFor.split(',').map((entry) => entry.trim()).find(Boolean) : null;
+  return {
+    ipAddress: forwardedIp || req.ip || req.socket?.remoteAddress || null,
+    forwardedFor,
+    userAgent: normalizeString(req.get?.('user-agent'))
+  };
+}
+
+function buildVacancyAuditLabel(vacancy = {}) {
+  const title = normalizeString(vacancy.title) || normalizeString(vacancy.role) || 'Vacante sin nombre';
+  const city = normalizeString(vacancy.city);
+  return city ? `${title} (${city})` : title;
+}
+
+function normalizeAuditValue(value) {
+  if (value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(normalizeAuditValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, normalizeAuditValue(entry)])
+    );
+  }
+  return value;
+}
+
+function diffAuditFields(fromValue = {}, toValue = {}) {
+  const from = normalizeAuditValue(fromValue) || {};
+  const to = normalizeAuditValue(toValue) || {};
+  return Array.from(new Set([...Object.keys(from), ...Object.keys(to)]))
+    .filter((key) => JSON.stringify(from[key] ?? null) !== JSON.stringify(to[key] ?? null));
+}
+
+async function logDevAuditEvent(prisma, req, {
+  entityType,
+  entityId = null,
+  entityLabel = null,
+  action,
+  fromValue = null,
+  toValue = null,
+  metadata = null
+} = {}) {
+  if (!entityType || !action || typeof prisma?.devAuditEvent?.create !== 'function') return;
+  const ipDetails = getRequestIpDetails(req);
+  try {
+    await prisma.devAuditEvent.create({
+      data: {
+        entityType,
+        entityId,
+        entityLabel,
+        action,
+        actorUserId: req.userId || null,
+        actorUsername: normalizeString(req.username) || normalizeString(req.userRole) || 'dashboard',
+        actorRole: normalizeString(req.userRole),
+        actorSource: normalizeString(req.userSource),
+        ipAddress: ipDetails.ipAddress,
+        forwardedFor: ipDetails.forwardedFor,
+        userAgent: ipDetails.userAgent,
+        method: req.method || null,
+        path: req.originalUrl || req.url || null,
+        fromValue: normalizeAuditValue(fromValue),
+        toValue: normalizeAuditValue(toValue),
+        metadata: normalizeAuditValue(metadata)
+      }
+    });
+  } catch (error) {
+    console.error('[dev_audit_event]', {
+      entityType,
+      entityId,
+      action,
+      error: error?.message || error
+    });
+  }
+}
+
+function formatDevAuditAction(action) {
+  const normalized = normalizeString(action);
+  const labels = {
+    VACANCY_CREATED: 'Vacante creada',
+    VACANCY_UPDATED: 'Vacante actualizada',
+    VACANCY_DELETED: 'Vacante eliminada',
+    VACANCY_FLOW_TOGGLED: 'Estado de vacante cambiado',
+    VACANCY_REVIEW_TOGGLED: 'Revisión de HV cambiada'
+  };
+  return labels[normalized] || normalized || 'Movimiento del panel';
+}
+
+function formatDevAuditDetails(event = {}) {
+  const metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+  const fields = Array.isArray(metadata.changedFields) ? metadata.changedFields.filter(Boolean) : [];
+  if (fields.length) return `Campos: ${fields.join(', ')}`;
+  const fromStatus = metadata.fromStatus;
+  const toStatus = metadata.toStatus;
+  if (fromStatus || toStatus) return `${fromStatus || 'sin estado'} → ${toStatus || 'sin estado'}`;
+  return metadata.note || '';
 }
 
 const ADMIN_STATUS_SCOPES = new Set(['inbox', 'registered', 'missing_cv_complete', 'new', 'contacted', 'contracted', 'rejected', 'all']);
@@ -2962,7 +3076,7 @@ export function adminRouter(prisma) {
 
   router.get('/vacancies', async (req, res) => {
     const accessContext = getRequestAccessContext(req);
-    const [vacancies, operations, pendingCvMigrationCount] = await Promise.all([
+    const [vacancies, operations, pendingCvMigrationCount, devAuditEvents] = await Promise.all([
       prisma.vacancy.findMany({
         where: buildVacancyAccessWhere(accessContext),
         orderBy: [{ city: 'asc' }, { title: 'asc' }],
@@ -2981,7 +3095,14 @@ export function adminRouter(prisma) {
           ? [accessContext.city]
           : []
       }),
-      req.userRole === 'dev' ? loadPendingCvMigrationCount(prisma) : 0
+      req.userRole === 'dev' ? loadPendingCvMigrationCount(prisma) : 0,
+      req.userRole === 'dev' && typeof prisma?.devAuditEvent?.findMany === 'function'
+        ? prisma.devAuditEvent.findMany({
+          where: { entityType: 'VACANCY' },
+          orderBy: { createdAt: 'desc' },
+          take: 80
+        })
+        : []
     ]);
     const successMsg = normalizeString(req.query.success);
     const errorMsg   = normalizeString(req.query.error);
@@ -2994,6 +3115,11 @@ export function adminRouter(prisma) {
       successMsg,
       errorMsg,
       pendingCvMigrationCount,
+      devAuditEvents,
+      formatDevAuditAction,
+      formatDevAuditDetails,
+      formatActorRoleLabel,
+      formatDateTimeCO,
       storageConfigured: isStorageConfigured(),
       accessScope: accessContext.scope,
       accessCity: accessContext.city,
@@ -3044,6 +3170,7 @@ export function adminRouter(prisma) {
     }
     const city = operation.city.name;
     const key = await buildUniqueVacancyKey(prisma, data.title, city);
+    let createdVacancy = null;
     await prisma.$transaction(async (tx) => {
       const vacancy = await tx.vacancy.create({
         data: {
@@ -3070,8 +3197,23 @@ export function adminRouter(prisma) {
       });
 
       await syncVacancyInterviewSlots(tx, vacancy.id, data);
+      createdVacancy = vacancy;
+      await logDevAuditEvent(tx, req, {
+        entityType: 'VACANCY',
+        entityId: vacancy.id,
+        entityLabel: buildVacancyAuditLabel(vacancy),
+        action: 'VACANCY_CREATED',
+        toValue: {
+          ...data,
+          id: vacancy.id,
+          key,
+          city,
+          operationId: operation.id
+        },
+        metadata: { note: 'Creada desde panel de vacantes' }
+      });
     });
-    res.redirect('/admin/vacancies?success=' + encodeURIComponent('Vacante "' + data.title + '" creada correctamente.'));
+    res.redirect('/admin/vacancies?success=' + encodeURIComponent('Vacante "' + (createdVacancy?.title || data.title) + '" creada correctamente.'));
   });
 
   router.post('/vacancies/:id/edit', express.urlencoded({ extended: true }), async (req, res) => {
@@ -3096,6 +3238,34 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('No tienes acceso para mover esta vacante a esa ciudad.'));
     }
     const key = await buildUniqueVacancyKey(prisma, data.title, city, id);
+    const previousAuditValue = {
+      id: currentVacancy.id,
+      title: currentVacancy.title,
+      key: currentVacancy.key,
+      role: currentVacancy.role,
+      roleDescription: currentVacancy.roleDescription,
+      city: currentVacancy.city,
+      operationAddress: currentVacancy.operationAddress,
+      interviewAddress: currentVacancy.interviewAddress,
+      requirements: currentVacancy.requirements,
+      conditions: currentVacancy.conditions,
+      requiredDocuments: currentVacancy.requiredDocuments,
+      minAge: currentVacancy.minAge,
+      maxAge: currentVacancy.maxAge,
+      experienceRequired: currentVacancy.experienceRequired,
+      experienceTimeText: currentVacancy.experienceTimeText,
+      schedulingEnabled: currentVacancy.schedulingEnabled,
+      isActive: currentVacancy.isActive,
+      acceptingApplications: currentVacancy.acceptingApplications,
+      dashboardReviewEnabled: currentVacancy.dashboardReviewEnabled
+    };
+    const nextAuditValue = {
+      ...data,
+      key,
+      city,
+      operationId: operation.id,
+      dashboardReviewEnabled: (data.isActive && !data.acceptingApplications) ? currentVacancy.dashboardReviewEnabled : false
+    };
     await prisma.$transaction(async (tx) => {
       await tx.vacancy.update({
         where: { id },
@@ -3123,6 +3293,15 @@ export function adminRouter(prisma) {
       });
 
       await syncVacancyInterviewSlots(tx, id, data);
+      await logDevAuditEvent(tx, req, {
+        entityType: 'VACANCY',
+        entityId: id,
+        entityLabel: buildVacancyAuditLabel({ title: data.title, city }),
+        action: 'VACANCY_UPDATED',
+        fromValue: previousAuditValue,
+        toValue: nextAuditValue,
+        metadata: { changedFields: diffAuditFields(previousAuditValue, nextAuditValue) }
+      });
     });
     res.redirect('/admin/vacancies?success=' + encodeURIComponent('Vacante "' + data.title + '" actualizada correctamente.'));
   });
@@ -3142,7 +3321,17 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/vacancies?error=' + encodeURIComponent('No se puede eliminar la vacante porque tiene candidatos o entrevistas relacionadas.'));
     }
 
-    await prisma.vacancy.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.vacancy.delete({ where: { id } });
+      await logDevAuditEvent(tx, req, {
+        entityType: 'VACANCY',
+        entityId: id,
+        entityLabel: buildVacancyAuditLabel(vacancy),
+        action: 'VACANCY_DELETED',
+        fromValue: vacancy,
+        metadata: { note: 'Eliminada desde panel de vacantes' }
+      });
+    });
     res.redirect('/admin/vacancies?success=' + encodeURIComponent('Vacante eliminada correctamente.'));
   });
 
@@ -3151,12 +3340,29 @@ export function adminRouter(prisma) {
     const vacancy = await ensureVacancyIdAccess(prisma, req, id, res, '/admin/vacancies');
     if (!vacancy) return res.redirect('/admin/vacancies?error=' + encodeURIComponent('Vacante no encontrada.'));
     const isCurrentlyOpen = vacancy.isActive && vacancy.acceptingApplications;
+    const nextValue = {
+      isActive: true,
+      acceptingApplications: !isCurrentlyOpen,
+      dashboardReviewEnabled: false
+    };
     await prisma.vacancy.update({
       where: { id },
-      data: {
-        isActive: true,
-        acceptingApplications: !isCurrentlyOpen,
-        dashboardReviewEnabled: false
+      data: nextValue
+    });
+    await logDevAuditEvent(prisma, req, {
+      entityType: 'VACANCY',
+      entityId: id,
+      entityLabel: buildVacancyAuditLabel(vacancy),
+      action: 'VACANCY_FLOW_TOGGLED',
+      fromValue: {
+        isActive: vacancy.isActive,
+        acceptingApplications: vacancy.acceptingApplications,
+        dashboardReviewEnabled: vacancy.dashboardReviewEnabled
+      },
+      toValue: nextValue,
+      metadata: {
+        fromStatus: isCurrentlyOpen ? 'Abierta' : 'Pausada/Inactiva',
+        toStatus: isCurrentlyOpen ? 'Pausada' : 'Abierta'
       }
     });
     const msg = isCurrentlyOpen ? 'Vacante pausada.' : 'Vacante reactivada.';
@@ -3175,6 +3381,18 @@ export function adminRouter(prisma) {
     await prisma.vacancy.update({
       where: { id },
       data: { dashboardReviewEnabled: nextReviewState }
+    });
+    await logDevAuditEvent(prisma, req, {
+      entityType: 'VACANCY',
+      entityId: id,
+      entityLabel: buildVacancyAuditLabel(vacancy),
+      action: 'VACANCY_REVIEW_TOGGLED',
+      fromValue: { dashboardReviewEnabled: vacancy.dashboardReviewEnabled },
+      toValue: { dashboardReviewEnabled: nextReviewState },
+      metadata: {
+        fromStatus: vacancy.dashboardReviewEnabled ? 'Revisión HV habilitada' : 'Revisión HV apagada',
+        toStatus: nextReviewState ? 'Revisión HV habilitada' : 'Revisión HV apagada'
+      }
     });
 
     const msg = nextReviewState
