@@ -146,6 +146,33 @@
     }
     .city-tab.active .count { background: var(--navy); }
 
+    /* ── Vacancy tabs ── */
+    .vacancy-tabs {
+      display: flex; gap: 6px; flex-wrap: wrap; margin: -4px 0 16px;
+      border-bottom: 2px solid var(--border); padding-bottom: 0;
+    }
+    .vacancy-tab {
+      display: inline-flex; align-items: center; gap: 6px; max-width: 360px;
+      padding: 9px 14px; font-size: 13px; font-weight: 700; text-decoration: none;
+      color: var(--text-muted); border-radius: 8px 8px 0 0; border: 1px solid transparent;
+      border-bottom: none; margin-bottom: -2px; transition: all .15s; background: transparent;
+      cursor: pointer; font-family: inherit;
+    }
+    .vacancy-tab:hover { color: var(--navy); background: var(--surface); border-color: var(--border); }
+    .vacancy-tab.active {
+      color: var(--navy); background: var(--surface);
+      border-color: var(--border); border-bottom-color: var(--surface);
+    }
+    .vacancy-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vacancy-tab .count {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--teal); color: #fff;
+      min-width: 18px; height: 18px; padding: 0 5px;
+      border-radius: 9px; font-size: 11px; font-weight: 800; flex-shrink: 0;
+    }
+    .vacancy-tab.active .count { background: var(--navy); }
+    .vacancy-panel[hidden] { display: none; }
+
     /* ── Vacancy grid ── */
     .vacancies-grid { display: flex; flex-direction: column; gap: 20px; }
 
@@ -390,13 +417,15 @@
         width: 100%;
         flex-wrap: wrap;
       }
-      .city-tabs {
+      .city-tabs,
+      .vacancy-tabs {
         flex-wrap: nowrap;
         overflow-x: auto;
         padding-bottom: 6px;
         scrollbar-width: thin;
       }
-      .city-tab { flex: 0 0 auto; }
+      .city-tab,
+      .vacancy-tab { flex: 0 0 auto; }
       .vacancy-header,
       .section-header,
       .legacy-header {
@@ -985,7 +1014,34 @@
     </div>
   <% } else { %>
 
-  <div class="vacancies-grid">
+  <% if (activeCityData.vacancies.length > 1) { %>
+    <div class="vacancy-tabs" role="tablist" aria-label="Vacantes de <%= activeCityData.name %>">
+      <% for (const tabVacancy of activeCityData.vacancies) { %>
+        <%
+          const tabVacancyTotal = tabVacancy.bookingsToday.length
+            + tabVacancy.registeredNoBooking.length
+            + tabVacancy.registeredComplete.length
+            + tabVacancy.completeWithoutCv.length
+            + tabVacancy.approvedCandidates.length
+            + tabVacancy.contractedCandidates.length;
+          const tabLabel = tabVacancy.title || tabVacancy.role || 'Vacante sin nombre';
+        %>
+        <button
+          type="button"
+          class="vacancy-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="vacancy-<%= tabVacancy.id %>"
+          data-vacancy-tab="<%= tabVacancy.id %>"
+        >
+          <span class="vacancy-tab-label"><%= tabLabel %></span>
+          <% if (tabVacancyTotal > 0) { %><span class="count"><%= tabVacancyTotal %></span><% } %>
+        </button>
+      <% } %>
+    </div>
+  <% } %>
+
+  <div class="vacancies-grid" data-vacancy-panels="<%= activeCityData.id || activeCityData.name %>">
     <% for (const v of activeCityData.vacancies) { %>
       <%
         const isScheduling = v.schedulingEnabled;
@@ -1050,7 +1106,7 @@
         const clearVacancySearchHref = '/admin' + (clearVacancySearchParams.toString() ? '?' + clearVacancySearchParams.toString() : '');
       %>
 
-      <div class="vacancy-card" id="vacancy-<%= v.id %>">
+      <div class="vacancy-card vacancy-panel" id="vacancy-<%= v.id %>" role="tabpanel" data-vacancy-panel="<%= v.id %>">
         <div class="vacancy-header">
           <div class="vacancy-icon <%= modeClass %>" aria-hidden="true"><%= modeIcon %></div>
           <div class="vacancy-meta">
@@ -1631,6 +1687,57 @@
     if (role === 'dev') return;
     const firstHeader = document.querySelector('#legacy-candidates-table thead th');
     if (firstHeader) firstHeader.textContent = 'Fecha de registro';
+  })();
+
+  (function () {
+    const tabs = Array.from(document.querySelectorAll('[data-vacancy-tab]'));
+    const panels = Array.from(document.querySelectorAll('[data-vacancy-panel]'));
+    if (!tabs.length || !panels.length) return;
+
+    function activateVacancy(vacancyId, options = {}) {
+      const fallbackId = tabs[0]?.dataset.vacancyTab;
+      const nextId = tabs.some((tab) => tab.dataset.vacancyTab === vacancyId) ? vacancyId : fallbackId;
+      if (!nextId) return;
+
+      tabs.forEach((tab) => {
+        const selected = tab.dataset.vacancyTab === nextId;
+        tab.classList.toggle('active', selected);
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+        tab.tabIndex = selected ? 0 : -1;
+      });
+
+      panels.forEach((panel) => {
+        panel.hidden = panel.dataset.vacancyPanel !== nextId;
+      });
+
+      if (options.updateHash) {
+        const panel = document.getElementById('vacancy-' + nextId);
+        if (panel && window.history?.replaceState) {
+          window.history.replaceState(null, '', '#vacancy-' + nextId);
+        }
+      }
+    }
+
+    const hashVacancyId = window.location.hash.startsWith('#vacancy-')
+      ? window.location.hash.replace('#vacancy-', '')
+      : null;
+    activateVacancy(hashVacancyId || tabs[0].dataset.vacancyTab);
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => activateVacancy(tab.dataset.vacancyTab, { updateHash: true }));
+      tab.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const currentIndex = tabs.indexOf(tab);
+        let nextIndex = currentIndex;
+        if (event.key === 'ArrowLeft') nextIndex = currentIndex <= 0 ? tabs.length - 1 : currentIndex - 1;
+        if (event.key === 'ArrowRight') nextIndex = currentIndex >= tabs.length - 1 ? 0 : currentIndex + 1;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = tabs.length - 1;
+        tabs[nextIndex].focus();
+        activateVacancy(tabs[nextIndex].dataset.vacancyTab, { updateHash: true });
+      });
+    });
   })();
 </script>
 
