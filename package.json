@@ -5,11 +5,11 @@
   "private": true,
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "prisma generate && prisma migrate deploy && node src/server.js",
+    "start": "prisma migrate deploy && node src/server.js & node src/workers/jobWorker.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "test": "node --test",
-    "start:worker": "prisma generate && prisma migrate deploy && node src/workers/jobWorker.js"
+    "start:worker": "node src/workers/jobWorker.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.866.0",
