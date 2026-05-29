@@ -175,8 +175,9 @@ model InterviewSlot {
   dayOfWeek     Int?
   specificDate  DateTime?
   startTime     String
-  maxCandidates Int                @default(10)
-  isActive      Boolean            @default(true)
+  maxCandidates   Int                @default(10)
+  currentWeekOnly Boolean            @default(false)
+  isActive        Boolean            @default(true)
   createdAt     DateTime           @default(now())
   bookings      InterviewBooking[]
 }

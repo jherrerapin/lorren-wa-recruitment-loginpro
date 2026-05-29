@@ -524,6 +524,18 @@
                 <% } %>
               </div>
             </div>
+            <div class="form-group full">
+              <div class="toggle-row">
+                <div class="toggle-row-body">
+                  <div class="toggle-row-title">Usar solo la semana en curso</div>
+                  <div class="toggle-row-desc">Si está activo, el bot solo agenda en los días marcados cuando todavía pertenezcan a esta semana; no los repite la próxima semana.</div>
+                </div>
+                <label class="toggle-switch" aria-label="Usar días solo en la semana en curso">
+                  <input type="checkbox" id="c-slotCurrentWeekOnly" name="slotCurrentWeekOnly" />
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
+            </div>
             <div class="form-group">
               <label for="c-slotStartTime">Hora de entrevista</label>
               <input id="c-slotStartTime" name="slotStartTime" type="time" value="08:00" />
@@ -685,6 +697,18 @@
                 <% } %>
               </div>
             </div>
+            <div class="form-group full">
+              <div class="toggle-row">
+                <div class="toggle-row-body">
+                  <div class="toggle-row-title">Usar solo la semana en curso</div>
+                  <div class="toggle-row-desc">Si está activo, el bot solo agenda en los días marcados cuando todavía pertenezcan a esta semana; no los repite la próxima semana.</div>
+                </div>
+                <label class="toggle-switch" aria-label="Usar días solo en la semana en curso">
+                  <input type="checkbox" id="e-slotCurrentWeekOnly" name="slotCurrentWeekOnly" />
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
+            </div>
             <div class="form-group">
               <label for="e-slotStartTime">Hora de entrevista</label>
               <input id="e-slotStartTime" name="slotStartTime" type="time" value="08:00" />
@@ -826,6 +850,7 @@
     document.getElementById('c-expTimeText').value = '';
     document.getElementById('c-slotStartTime').value = '08:00';
     document.getElementById('c-slotMaxCandidates').value = '10';
+    document.getElementById('c-slotCurrentWeekOnly').checked = false;
     document.querySelectorAll('#c-schedule-config input[name="slotDays"]').forEach((input) => { input.checked = false; });
     setRequiredDocumentFields('c');
     syncExperienceField('c-exp', 'c-exp-time-group');
@@ -855,6 +880,7 @@
     const primarySlot = weeklySlots[0] || null;
     document.getElementById('e-slotStartTime').value = primarySlot?.startTime || '08:00';
     document.getElementById('e-slotMaxCandidates').value = primarySlot?.maxCandidates || '10';
+    document.getElementById('e-slotCurrentWeekOnly').checked = weeklySlots.some((slot) => !!slot.currentWeekOnly);
     document.querySelectorAll('#e-schedule-config input[name="slotDays"]').forEach((input) => {
       input.checked = weeklySlots.some((slot) => String(slot.dayOfWeek) === input.value);
     });

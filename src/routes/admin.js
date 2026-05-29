@@ -1311,6 +1311,7 @@ function parseVacancyBody(body) {
       .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6))].sort((a, b) => a - b),
     slotStartTime:        time(body.slotStartTime),
     slotMaxCandidates:    positiveInt(body.slotMaxCandidates, 10),
+    slotCurrentWeekOnly:  bool(body.slotCurrentWeekOnly),
   };
 }
 
@@ -1330,6 +1331,7 @@ function buildWeeklyInterviewSlots(vacancyId, data) {
     dayOfWeek,
     startTime: data.slotStartTime,
     maxCandidates: data.slotMaxCandidates,
+    currentWeekOnly: data.slotCurrentWeekOnly,
     isActive: true
   }));
 }

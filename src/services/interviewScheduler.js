@@ -37,11 +37,36 @@ function mapStoredDayToJs(dayOfWeek) {
   return dayOfWeek === 6 ? 0 : dayOfWeek + 1;
 }
 
+function getCurrentColombiaWeekBounds(fromDate) {
+  const current = getColombiaParts(fromDate);
+  const mondayOffset = current.dayOfWeek === 0 ? -6 : 1 - current.dayOfWeek;
+  const weekStart = new Date(Date.UTC(current.year, current.month - 1, current.day + mondayOffset, 0, 0, 0, 0));
+  const weekEnd = new Date(Date.UTC(
+    weekStart.getUTCFullYear(),
+    weekStart.getUTCMonth(),
+    weekStart.getUTCDate() + 6,
+    23,
+    59,
+    59,
+    999
+  ));
+  return { weekStart, weekEnd };
+}
+
+function isInCurrentColombiaWeek(date, fromDate) {
+  const parts = getColombiaParts(date);
+  const candidateDay = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0, 0));
+  const { weekStart, weekEnd } = getCurrentColombiaWeekBounds(fromDate);
+  return candidateDay >= weekStart && candidateDay <= weekEnd;
+}
+
 function resolveSlotDates(slot, fromDate, maxOccurrences = 4) {
   const [startH, startM] = String(slot.startTime || '00:00').split(':').map(Number);
 
   if (slot.specificDate) {
-    const parts = getColombiaParts(new Date(slot.specificDate));
+    const date = new Date(slot.specificDate);
+    if (slot.currentWeekOnly && !isInCurrentColombiaWeek(date, fromDate)) return [];
+    const parts = getColombiaParts(date);
     return [createColombiaDate(parts.year, parts.month, parts.day, startH, startM)];
   }
 
@@ -51,9 +76,13 @@ function resolveSlotDates(slot, fromDate, maxOccurrences = 4) {
   const targetDay = mapStoredDayToJs(slot.dayOfWeek);
   const matches = [];
 
-  for (let offset = 0; offset < 35 && matches.length < maxOccurrences; offset += 1) {
+  const maxSearchDays = slot.currentWeekOnly ? 7 : 35;
+  const currentWeekBounds = slot.currentWeekOnly ? getCurrentColombiaWeekBounds(fromDate) : null;
+
+  for (let offset = 0; offset < maxSearchDays && matches.length < maxOccurrences; offset += 1) {
     const candidateBase = new Date(Date.UTC(current.year, current.month - 1, current.day + offset, 0, 0, 0, 0));
     if (candidateBase.getUTCDay() !== targetDay) continue;
+    if (currentWeekBounds && (candidateBase < currentWeekBounds.weekStart || candidateBase > currentWeekBounds.weekEnd)) continue;
     matches.push(createColombiaDate(
       candidateBase.getUTCFullYear(),
       candidateBase.getUTCMonth() + 1,
