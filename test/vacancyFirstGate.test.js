@@ -82,6 +82,19 @@ test('A: MENU + Ibagué + cargo claro resuelve y asigna vacante activa sin bloqu
   assert.equal(decision.resolution.reason, 'matched_active_vacancy');
 });
 
+test('ibague-greeting: etapa inicial con saludo y cargo deja resolver vacante activa', async () => {
+  const active = vacancy({ id: 'vac-ibague-greeting' });
+  const decision = await decide({
+    text: 'Buenas noches, te escribo desde Ibagué para la vacante de cargue y descargue',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT, stage: 'GREETING' },
+    vacancies: [active]
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, 'vac-ibague-greeting');
+  assert.equal(decision.resolution.reason, 'matched_active_vacancy');
+});
+
 test('B/E: Bogotá ambiguo o bodega sin vacantes activas bloquea captura y ofrece registro futuro opcional', async () => {
   for (const text of [
     'Desde Bogotá tengo experiencia en lo que me pongan a desempeñar',
