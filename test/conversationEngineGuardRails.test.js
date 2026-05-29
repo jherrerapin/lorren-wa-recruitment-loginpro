@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ConversationStep, Gender } from '@prisma/client';
-import { act } from '../src/services/conversationEngine.js';
+import { act, buildCandidateStateForModel } from '../src/services/conversationEngine.js';
 
 function completeCandidate(overrides = {}) {
   return {
@@ -71,4 +71,36 @@ test('bloquea agenda con vacante inactiva', async () => {
   const prisma = prismaMock();
   await act({ prisma, candidate: completeCandidate(), vacancy: schedulableVacancy({ isActive: false }), nextSlot: nextSlot(), actions: [{ type: 'offer_interview' }] });
   assert.equal(prisma.updates.some((u) => u.data.currentStep === ConversationStep.SCHEDULING), false);
+});
+
+test('estado del motor no trata barrio como faltante alterno en vacante Bogota', () => {
+  const state = buildCandidateStateForModel(
+    completeCandidate({ locality: 'Soacha Cundinamarca', neighborhood: null, cvStorageKey: null }),
+    schedulableVacancy({ schedulingEnabled: false }),
+    []
+  );
+
+  assert.equal(state.profile.residenceArea.field, 'locality');
+  assert.equal(state.profile.residenceArea.state.captured, true);
+  assert.equal(state.profile.locality.captured, true);
+  assert.equal(state.profile.locality.value, 'Soacha Cundinamarca');
+  assert.equal(state.profile.neighborhood.captured, true);
+  assert.equal(state.progress.missingFields.includes('locality'), false);
+});
+
+test('act alinea residencia extraida como barrio hacia localidad para Bogota', async () => {
+  const prisma = prismaMock();
+  const candidate = completeCandidate({ locality: null, neighborhood: null, cvStorageKey: null });
+
+  await act({
+    prisma,
+    candidate,
+    vacancy: schedulableVacancy({ schedulingEnabled: false }),
+    actions: [{ type: 'save_fields', data: { neighborhood: 'Soacha Compartir' } }, { type: 'request_cv' }],
+    extractedFields: { neighborhood: 'Soacha Compartir' }
+  });
+
+  assert.equal(prisma.updates[0].data.locality, 'Soacha Cundinamarca');
+  assert.equal(prisma.updates[0].data.neighborhood, undefined);
+  assert.equal(prisma.updates.at(-1).data.currentStep, ConversationStep.ASK_CV);
 });

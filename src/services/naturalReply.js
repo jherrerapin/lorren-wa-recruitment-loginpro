@@ -71,8 +71,20 @@ export function preserveConfiguredInterviewDocuments(reply = '', configuredDocum
   );
 }
 
+export function buildInterviewDocumentsSentence(documents = '') {
+  const cleanDocuments = String(documents || '').trim();
+  return cleanDocuments ? `Para la entrevista, lleva ${cleanDocuments}.` : '';
+}
+
+function naturalizeConfiguredDocumentsWording(reply = '') {
+  return String(reply || '')
+    .replace(/Para la entrevista,?\s+los documentos\s+\w+\s+son:?\s*/gi, 'Para la entrevista, lleva ')
+    .replace(/Para la entrevista\s+la documentaci[oó]n\s+\w+\s+es\s*/gi, 'Para la entrevista, lleva ')
+    .replace(/La documentaci[oó]n\s+\w+\s+es\s*/gi, 'Para la entrevista, lleva ');
+}
+
 function polishInterviewReply(reply = '', configuredDocuments = '') {
-  return preserveConfiguredInterviewDocuments(polishReplyForTurn(reply), configuredDocuments);
+  return preserveConfiguredInterviewDocuments(polishReplyForTurn(naturalizeConfiguredDocumentsWording(reply)), configuredDocuments);
 }
 
 function getCandidateFirstName(candidate = {}) {
@@ -152,7 +164,7 @@ function buildContextualFallbackReply({
   }
 
   if (address) parts.push(`La dirección registrada es ${address}.`);
-  if (documents) parts.push(`La documentación configurada es ${documents}.`);
+  if (documents) parts.push(buildInterviewDocumentsSentence(documents));
 
   return polishReplyForTurn(parts.filter(Boolean).join(' '));
 }
@@ -357,8 +369,8 @@ export async function generateInterviewOffer({
       ? 'El candidato rechazó el horario anterior. Ofrecé el nuevo de forma natural y empática.'
       : 'Ofrecé el horario de entrevista de forma amable y directa.',
     candidateFirstName ? `Nombre del candidato: ${candidateFirstName}.` : '',
-    docsLine ? `Indicá también esta documentación configurada para entrevista, usando exactamente esta información y sin agregar documentos no registrados: ${docsLine}` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
-    docsLine ? 'No conviertas la hoja de vida configurada a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
+    docsLine ? `Indicá también esta documentación de la vacante para entrevista, usando exactamente esta información y sin agregar documentos no registrados: ${docsLine}` : 'No menciones documentación para entrevista porque la vacante no trae ese dato.',
+    docsLine ? 'No conviertas la hoja de vida a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
     'Preguntá si el horario le queda bien. Máx 2 oraciones. Sin viñetas ni Markdown. Soná humano.',
     'No abras con saludo ni con "Hola": es una continuación del hilo, no un primer contacto.',
     `Horario a ofrecer: ${formattedDate}`
@@ -422,8 +434,8 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     candidateFirstName ? `Nombre: ${candidateFirstName}.` : '',
     `Fecha/hora: ${formattedDate}.`,
     address ? `Dirección: ${address}.` : '',
-    docs ? `Documentación configurada para entrevista: ${docs}.` : 'No menciones documentación para entrevista porque no hay documentación configurada.',
-    docs ? 'No conviertas la hoja de vida configurada a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
+    docs ? `Documentación de la vacante para entrevista: ${docs}.` : 'No menciones documentación para entrevista porque la vacante no trae ese dato.',
+    docs ? 'No conviertas la hoja de vida a PDF/DOCX ni cambies el formato: la documentación de entrevista debe salir tal cual de la vacante.' : '',
     'Avisá que le llegará un recordatorio 40 minutos antes.',
     'No abras con saludo ni con "Hola": el candidato acaba de confirmar el horario y esta respuesta debe continuar el hilo.',
     'Máx 3 oraciones. Sin viñetas ni Markdown. Soná genuino y cercano.'

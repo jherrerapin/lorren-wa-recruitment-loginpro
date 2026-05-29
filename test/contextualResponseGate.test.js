@@ -99,6 +99,24 @@ test('candidato citado pregunta contacto sin dato configurado: no inventa y exig
   assert.doesNotMatch(result.reply, /humano|revisar[aá] el chat/i);
 });
 
+test('pregunta por documentos de entrevista responde natural sin decir configurados', () => {
+  const result = evaluateContextualResponseGate({
+    candidate: completeCandidate({ currentStep: 'SCHEDULED' }),
+    vacancy: vacancy({
+      schedulingEnabled: true,
+      requiredDocuments: 'Hoja de vida preferiblemente Formato Minerva 1003 o impresa, como la tengas y Cedula Original'
+    }),
+    activeInterviewBooking: { id: 'booking-1', status: 'SCHEDULED', scheduledAt: new Date('2026-05-16T20:00:00.000Z') },
+    recentMessages: [],
+    semanticIntent: 'ASK_REQUIRED_DOCUMENTS'
+  });
+
+  assert.equal(result.shouldReply, true);
+  assert.equal(result.allowedAction, ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT);
+  assert.match(result.reply, /Para la entrevista, lleva Hoja de vida preferiblemente Formato Minerva 1003 o impresa, como la tengas y Cedula Original\./i);
+  assert.doesNotMatch(result.reply, /configurad/i);
+});
+
 test('candidato citado con mensaje ambiguo no recibe oferta ni avance falso', () => {
   const result = evaluateContextualResponseGate({
     candidate: completeCandidate({ currentStep: 'SCHEDULED' }),

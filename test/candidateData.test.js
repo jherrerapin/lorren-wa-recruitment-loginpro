@@ -262,6 +262,22 @@ test('prioriza moto cuando el candidato reporta bicicleta y moto', () => {
   assert.equal(normalized.transportMode, 'Moto');
 });
 
+test('normaliza menciones de Soacha como residencia canonica interna', () => {
+  const parsed = parseNaturalData('Desde Soacha');
+  const normalized = normalizeCandidateFields(parsed);
+
+  assert.equal(normalized.locality, 'Soacha Cundinamarca');
+  assert.equal(normalized.fullName, undefined);
+});
+
+test('alinea Soacha a localidad canonica para vacantes Bogota', () => {
+  const normalized = normalizeCandidateFields({ neighborhood: 'Soacha Compartir' });
+  const aligned = alignCandidateLocationFields(normalized, { city: 'Bogota' }, { clearAlternate: true });
+
+  assert.equal(aligned.locality, 'Soacha Cundinamarca');
+  assert.equal(aligned.neighborhood, null);
+});
+
 test('usa localidad como residencia principal para vacantes de Bogota', () => {
   assert.equal(getResidenceFieldConfig('Bogota').field, 'locality');
   const aligned = alignCandidateLocationFields({ neighborhood: 'Suba' }, { city: 'Bogota' }, { clearAlternate: true });

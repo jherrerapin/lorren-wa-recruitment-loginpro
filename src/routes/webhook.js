@@ -32,7 +32,7 @@ import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
 import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
-import { buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
+import { buildInterviewDocumentsSentence, buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
 import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
@@ -321,7 +321,7 @@ function buildVacancyCompactSummary(vacancy) {
   if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
   else if (vacancy.requirements) parts.push(`Los requisitos principales son ${vacancy.requirements}.`);
   const requiredDocs = sanitizeRequiredDocumentsForBot(vacancy.requiredDocuments);
-  if (requiredDocs) parts.push(`Para la entrevista la documentación configurada es ${requiredDocs}.`);
+  if (requiredDocs) parts.push(buildInterviewDocumentsSentence(requiredDocs));
   return parts.join(' ');
 }
 function buildNoOperationsAvailableReply(city = null) {

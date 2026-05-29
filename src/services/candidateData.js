@@ -62,6 +62,7 @@ const IMPLICIT_NO_MEDICAL_RESTRICTION_PATTERNS = [
 ];
 const RIDE_HAIL_VARIANTS = ['uber', 'indriver', 'in driver', 'taxi'];
 const TRANSPORT_PRIORITY = ['Moto', 'Carro', 'Bicicleta', 'Bus', 'Independiente'];
+const SOACHA_RESIDENCE_VALUE = 'Soacha Cundinamarca';
 
 function looksLikeJobRoleChunk(value = '') {
   const normalized = normalizeLooseText(value);
@@ -76,6 +77,15 @@ function normalizeLooseText(value = '') {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function mentionsSoacha(value = '') {
+  return /\bsoacha\b/.test(normalizeLooseText(value));
+}
+
+function normalizeResidenceValue(value = '') {
+  if (mentionsSoacha(value)) return SOACHA_RESIDENCE_VALUE;
+  return capitalizeWords(value);
 }
 
 export function looksLikeNoMedicalRestrictionsText(text = '', options = {}) {
@@ -678,6 +688,10 @@ export function parseNaturalData(text = '') {
     if (!result.neighborhood && inferredLocation.neighborhood) result.neighborhood = inferredLocation.neighborhood;
   }
 
+  if (!result.neighborhood && !result.locality && mentionsSoacha(text)) {
+    result.locality = SOACHA_RESIDENCE_VALUE;
+  }
+
   const medicalNegative = looksLikeNoMedicalRestrictionsText(compact);
   if (medicalNegative) result.medicalRestrictions = 'Sin restricciones médicas';
 
@@ -760,8 +774,8 @@ export function normalizeCandidateFields(fields = {}) {
     const age = Number.parseInt(String(fields.age), 10);
     if (Number.isFinite(age)) normalized.age = age;
   }
-  if (fields.neighborhood && !looksLikeGreetingLocation(fields.neighborhood)) normalized.neighborhood = capitalizeWords(fields.neighborhood);
-  if (fields.locality && !looksLikeGreetingLocation(fields.locality)) normalized.locality = capitalizeWords(fields.locality);
+  if (fields.neighborhood && !looksLikeGreetingLocation(fields.neighborhood)) normalized.neighborhood = normalizeResidenceValue(fields.neighborhood);
+  if (fields.locality && !looksLikeGreetingLocation(fields.locality)) normalized.locality = normalizeResidenceValue(fields.locality);
   if (fields.medicalRestrictions) normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
   if (fields.transportMode) normalized.transportMode = normalizeTransportMode(fields.transportMode);
   if (fields.experienceInfo) normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || capitalizeWords(fields.experienceInfo);

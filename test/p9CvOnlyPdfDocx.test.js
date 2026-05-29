@@ -46,7 +46,7 @@ test('texto con nombre de archivo no cuenta como HV adjunta', () => {
   assert.match(reply, /archivo real en PDF o Word\/DOCX/i);
 });
 
-test('documentos de entrevista salen de la configuración de la vacante sin forzar PDF/DOCX', async () => {
+test('documentos de entrevista salen de la información de la vacante sin forzar PDF/DOCX', async () => {
   const requiredDocuments = 'Traer hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original.';
   const sanitized = sanitizeRequiredDocumentsForBot(requiredDocuments);
   assert.match(sanitized, /hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
@@ -57,7 +57,8 @@ test('documentos de entrevista salen de la configuración de la vacante sin forz
     vacancy: { requiredDocuments },
     candidateName: 'Ana Perez'
   });
-  assert.match(reply, /documentación configurada es hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.match(reply, /Para la entrevista, lleva hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.doesNotMatch(reply, /configurad/i);
   assert.doesNotMatch(reply, /PDF|DOCX/i);
 
   const confirmation = await generateBookingConfirmation({
@@ -65,18 +66,20 @@ test('documentos de entrevista salen de la configuración de la vacante sin forz
     vacancy: { requiredDocuments },
     candidateName: 'Ana Perez'
   });
-  assert.match(confirmation, /documentación configurada es hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.match(confirmation, /Para la entrevista, lleva hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.doesNotMatch(confirmation, /configurad/i);
   assert.doesNotMatch(confirmation, /PDF|DOCX/i);
 });
 
-test('caso Alfonso usa documentos configurados de la vacante, no formato de carga de HV', async () => {
+test('caso Alfonso usa documentos de la vacante, no formato de carga de HV', async () => {
   const reply = await generateInterviewOffer({
     formattedDate: 'sábado 16 de mayo a las 10:00 a. m.',
     vacancy: { requiredDocuments: 'Hoja de vida\nCédula original' },
     candidateName: 'Alfonso Perez'
   });
 
-  assert.match(reply, /documentación configurada es Hoja de vida y Cédula original/i);
+  assert.match(reply, /Para la entrevista, lleva Hoja de vida y Cédula original/i);
+  assert.doesNotMatch(reply, /configurad/i);
   assert.doesNotMatch(reply, /PDF|DOCX/i);
 });
 
@@ -97,7 +100,7 @@ test('naturalReply no usa fullName pendiente o rechazado como nombre en respuest
   if (previousKey) process.env.OPENAI_API_KEY = previousKey;
 });
 
-test('si la IA intenta agregar PDF/DOCX en documentación de entrevista, se restaura lo configurado', () => {
+test('si la IA intenta agregar PDF/DOCX en documentación de entrevista, se restaura lo indicado en la vacante', () => {
   const reply = preserveConfiguredInterviewDocuments(
     'Alfonso, te compartimos entrevista para el sábado 16 de mayo a las 10:00 a.m.; debe traer hoja de vida en PDF o Word/DOCX y cédula original. ¿Te queda bien ese horario?',
     'Hoja de vida y cédula original'
