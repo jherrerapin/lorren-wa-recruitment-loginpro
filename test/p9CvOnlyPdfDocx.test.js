@@ -57,7 +57,7 @@ test('documentos de entrevista salen de la configuración de la vacante sin forz
     vacancy: { requiredDocuments },
     candidateName: 'Ana Perez'
   });
-  assert.match(reply, /Debe traer: hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.match(reply, /documentación configurada es hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
   assert.doesNotMatch(reply, /PDF|DOCX/i);
 
   const confirmation = await generateBookingConfirmation({
@@ -65,7 +65,7 @@ test('documentos de entrevista salen de la configuración de la vacante sin forz
     vacancy: { requiredDocuments },
     candidateName: 'Ana Perez'
   });
-  assert.match(confirmation, /Recuerda traer: hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
+  assert.match(confirmation, /documentación configurada es hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original/i);
   assert.doesNotMatch(confirmation, /PDF|DOCX/i);
 });
 
@@ -76,10 +76,26 @@ test('caso Alfonso usa documentos configurados de la vacante, no formato de carg
     candidateName: 'Alfonso Perez'
   });
 
-  assert.match(reply, /Debe traer: Hoja de vida y Cédula original/i);
+  assert.match(reply, /documentación configurada es Hoja de vida y Cédula original/i);
   assert.doesNotMatch(reply, /PDF|DOCX/i);
 });
 
+
+test('naturalReply no usa fullName pendiente o rechazado como nombre en respuestas contextuales', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+
+  const reply = await generateInterviewOffer({
+    formattedDate: 'jueves 14 de mayo a las 9:00 a. m.',
+    vacancy: { requiredDocuments: 'Traer hoja de vida Minerva 1003 o impresa, como la tenga, y cédula original.' },
+    candidate: { fullName: 'Buenas Tardes', missingFields: ['fullName'] }
+  });
+
+  assert.doesNotMatch(reply, /Buenas Tardes/i);
+  assert.doesNotMatch(reply, /PDF|DOCX/i);
+
+  if (previousKey) process.env.OPENAI_API_KEY = previousKey;
+});
 
 test('si la IA intenta agregar PDF/DOCX en documentación de entrevista, se restaura lo configurado', () => {
   const reply = preserveConfiguredInterviewDocuments(
