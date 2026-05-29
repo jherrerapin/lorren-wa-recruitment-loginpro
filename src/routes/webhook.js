@@ -34,7 +34,7 @@ import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAva
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
 import { buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
-import { getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
+import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
 import { ContextualAllowedAction, evaluateContextualResponseGate, inferContextualSemanticIntent } from '../services/contextualResponseGate.js';
@@ -175,9 +175,8 @@ function formatFieldListForVacancy(fields = [], vacancy = null) {
   if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
   return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
 }
-function buildDataRequestPrompt(vacancy = null) {
-  const missing = getMissingFieldLabels({}, vacancy);
-  return `Ya ubiqué la vacante. Para avanzar con cuidado, compárteme estos datos cuando puedas: ${missing.join(', ')}.`;
+function buildDataRequestPrompt(candidate = {}, vacancy = null) {
+  return buildCandidateDataCollectionMessage(candidate, vacancy);
 }
 function getMissingFields(candidate, vacancy = null) {
   return getMissingFieldsForVacancy(candidate, vacancy);
@@ -2269,7 +2268,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
-      const dataPrompt = buildDataRequestPrompt(currentVacancy);
+      const dataPrompt = buildDataRequestPrompt(candidate, currentVacancy);
       const body = askedVacancyQuestion
         ? buildQuestionFollowUpReply(currentVacancy, cleanText, dataPrompt, candidate)
         : dataPrompt;

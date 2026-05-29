@@ -411,7 +411,7 @@ REGLAS CRITICAS:
 - Si no hubo progreso real, no repitas la misma estructura del bot anterior; reformula y aporta algo mas util.
 - Nunca pidas el genero de forma directa; detectalo solo si el candidato lo expresa con evidencia lingüistica clara y no por el nombre.
 - Si el mensaje del candidato suena a cierre humano, desistimiento o pausa, adaptate al contexto.
-- Nunca propongas DONE, ASK_CV, SCHEDULING, SCHEDULED, offer_interview, confirm_booking ni mark_female_pipeline si READINESS indica campos faltantes o HV faltante; pide el faltante más importante.
+- Nunca propongas DONE, ASK_CV, SCHEDULING, SCHEDULED, offer_interview, confirm_booking ni mark_female_pipeline si READINESS indica campos faltantes o HV faltante; después de confirmar interés por una vacante asignada, pide todos los campos faltantes de READINESS en un solo mensaje natural y no vuelvas a pedir campos ya capturados.
 
 Devuelve SOLO el JSON. Sin texto antes ni despues.`;
 }
