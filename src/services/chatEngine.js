@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
+import { getNextAvailableSlotAfter, formatInterviewDate } from './interviewScheduler.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { guardReplyAgainstReadinessDrift, sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
@@ -12,7 +13,7 @@ const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PAUSED_VACANCY_FLAG = 'paused_vacancy';
 const PAUSED_VACANCY_CAPTURE = 'paused_vacancy_capture';
 const CONSENT_MODEL = process.env.OPENAI_EXTRACTION_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-const APPOINTMENT_INTENTS_HANDLED_BY_WEBHOOK = new Set([
+const APPOINTMENT_ACTION_INTENTS = new Set([
   'confirm_attendance',
   'cancel_interview',
   'reschedule_interview'
@@ -78,19 +79,21 @@ function buildBypassResult({ reply, nextStep, reason, consent = null }) {
   };
 }
 
-function buildFallbackToDeterministicFlowResult(reason, currentStep) {
+function buildEngineHandledResult({ reply, currentStep, intent, classification }) {
   return {
-    reply: '',
-    actions: [],
+    reply,
+    actions: [{ type: 'interview_reminder_response', data: { intent, source: classification?.source || null } }],
     nextStep: currentStep,
     extractedFields: {},
     candidateFields: {},
-    fallback: true,
-    fallbackReason: reason,
+    fallback: false,
+    fallbackReason: null,
     loopGuardApplied: false,
     usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
     suppressed: false,
-    suppressedReason: null
+    suppressedReason: null,
+    handledInterviewIntent: intent,
+    interviewIntentClassification: classification || null
   };
 }
 
@@ -113,6 +116,86 @@ async function loadActiveInterviewBooking(prisma, candidateId) {
       reminderWindowClosed: true
     }
   }).catch(() => null);
+}
+
+async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inboundText, booking, intent, classification, currentStep, now = new Date(), nextSlot = null }) {
+  if (!booking?.id || !APPOINTMENT_ACTION_INTENTS.has(intent)) return null;
+
+  if (intent === 'confirm_attendance') {
+    await prisma.interviewBooking.update({
+      where: { id: booking.id },
+      data: {
+        status: 'CONFIRMED',
+        reminderResponse: inboundText,
+        reminderWindowClosed: true
+      }
+    });
+    return buildEngineHandledResult({
+      currentStep,
+      intent,
+      classification,
+      reply: `Perfecto, gracias por confirmar asistencia. Te esperamos ${formatInterviewDate(new Date(booking.scheduledAt))}.`
+    });
+  }
+
+  if (intent === 'cancel_interview') {
+    await prisma.interviewBooking.update({
+      where: { id: booking.id },
+      data: {
+        status: 'CANCELLED',
+        reminderResponse: inboundText,
+        reminderWindowClosed: true
+      }
+    });
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      }
+    });
+    return buildEngineHandledResult({
+      currentStep,
+      intent,
+      classification,
+      reply: 'Listo, ya registré la cancelación de tu entrevista. Si más adelante deseas retomarla, me escribes por aquí.'
+    });
+  }
+
+  if (intent === 'reschedule_interview') {
+    await prisma.interviewBooking.update({
+      where: { id: booking.id },
+      data: {
+        status: 'RESCHEDULED',
+        reminderResponse: inboundText,
+        reminderWindowClosed: true
+      }
+    });
+
+    const lastInboundAt = candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null;
+    const alternative = nextSlot?.slot && !nextSlot?.isConfirmedBooking
+      ? nextSlot
+      : (vacancy?.id
+        ? await getNextAvailableSlotAfter(prisma, vacancy.id, lastInboundAt, booking, now).catch(() => null)
+        : null);
+
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
+        currentStep: ConversationStep.SCHEDULING,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      }
+    });
+
+    const reply = alternative?.slot
+      ? `Listo, dejé marcada la solicitud de reprogramación. Te puedo ofrecer ${alternative.formattedDate}; si te sirve, respóndeme confirmando ese horario.`
+      : 'Listo, dejé marcada la solicitud de reprogramación. En este momento no tengo otro horario válido para ofrecerte, así que el equipo te contactará para ayudarte con la reprogramación.';
+
+    return buildEngineHandledResult({ currentStep: ConversationStep.SCHEDULING, intent, classification, reply });
+  }
+
+  return null;
 }
 
 async function analyzePausedVacancyConsent({ candidate, vacancy, inboundText, currentStep, recentMessages }) {
@@ -326,9 +409,21 @@ export async function runChatEngine({
   if (
     activeInterviewBooking
     && [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(currentStep)
-    && APPOINTMENT_INTENTS_HANDLED_BY_WEBHOOK.has(interviewIntent)
+    && APPOINTMENT_ACTION_INTENTS.has(interviewIntent)
   ) {
-    return buildFallbackToDeterministicFlowResult(`delegate_interview_intent_to_webhook:${interviewIntentClassification.source}`, currentStep);
+    const directResult = await handleAppointmentIntentDirectly({
+      prisma,
+      candidate,
+      vacancy,
+      inboundText,
+      booking: activeInterviewBooking,
+      intent: interviewIntent,
+      classification: interviewIntentClassification,
+      currentStep,
+      now: new Date(),
+      nextSlot
+    });
+    if (directResult) return directResult;
   }
 
   const pausedGuard = await guardPausedVacancy({ prisma, candidate, vacancy, inboundText, recentMessages, currentStep });
