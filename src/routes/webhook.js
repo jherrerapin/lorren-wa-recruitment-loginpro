@@ -723,9 +723,9 @@ function inferNaturalOverwriteFields(text, normalizedData = {}, current = {}, cu
   }
 
   if (
-    current?.transportMode === 'Sin medio de transporte'
+    current?.transportMode === 'Publico'
     && normalizedData.transportMode
-    && normalizedData.transportMode !== 'Sin medio de transporte'
+    && normalizedData.transportMode !== 'Publico'
   ) {
     allow.add('transportMode');
   }

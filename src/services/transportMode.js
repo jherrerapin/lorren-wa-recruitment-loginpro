@@ -1,3 +1,9 @@
+export class TransportNormalizationService {
+  normalize(value) {
+    return normalizeTransportMode(value);
+  }
+}
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -41,16 +47,17 @@ export function normalizeTransportMode(value) {
     normalized.startsWith('no tiene') ||
     normalized.startsWith('no cuento con')
   ) {
-    return 'Sin medio de transporte';
+    return 'Publico';
   }
 
   if (/(^| )(moto|motocicleta)( |$)/.test(normalized)) return 'Moto';
   if (/(^| )(bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta)( |$)/.test(normalized)) return 'Bicicleta';
   if (/(^| )(carro|auto|automovil|coche|vehiculo propio|carro propio)( |$)/.test(normalized)) return 'Carro';
-  if (/(^| )(a pie|caminando|caminar)( |$)/.test(normalized)) return 'A pie';
-  if (/(^| )(bus|buseta|colectivo|transmilenio|transmi|sitp|alimentador|metro|transporte publico|publico|servicio publico|didi|uber|taxi|transporte urbano)( |$)/.test(normalized)) return 'Público';
+  if (/(^| )(patineta electrica|patineta)( |$)/.test(normalized)) return 'Patineta eléctrica';
+  if (/(^| )(a pie|caminando|caminar|voy a pie)( |$)/.test(normalized)) return 'Publico';
+  if (/(^| )(bus|buseta|colectivo|transmilenio|transmi|sitp|alimentador|metro|transporte publico|publico|servicio publico|didi|uber|indrive|in drive|taxi|transporte urbano)( |$)/.test(normalized)) return 'Publico';
 
-  return titleCase(normalized);
+  return null;
 }
 
 export function uniqueNormalizedTransportModes(values = []) {
@@ -66,3 +73,5 @@ export function uniqueNormalizedTransportModes(values = []) {
 
   return result.sort((a, b) => a.localeCompare(b, 'es'));
 }
+
+export const transportNormalizationService = new TransportNormalizationService();

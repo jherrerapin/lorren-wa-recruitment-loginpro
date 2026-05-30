@@ -24,7 +24,7 @@ test('Caso C: al reanudar conserva contexto pendiente y procesa corrección con 
 
   const first = normalizeCandidateFields(parseNaturalData(pendingQueue[0]));
   const second = normalizeCandidateFields(parseNaturalData(pendingQueue[1]));
-  const candidate = { experienceInfo: null, experienceTime: null, transportMode: 'Sin medio de transporte' };
+  const candidate = { experienceInfo: null, experienceTime: null, transportMode: 'Publico' };
 
   const firstDecision = splitFieldDecisions(first, candidate);
   Object.assign(candidate, firstDecision.persistedData);

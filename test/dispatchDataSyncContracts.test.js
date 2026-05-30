@@ -16,11 +16,11 @@ test('city options are deduplicated ignoring accents and case', () => {
   );
 });
 
-test('urban transport variants are normalized as Público', () => {
-  assert.equal(normalizeTransportMode('Didi Por El Momento'), 'Público');
-  assert.equal(normalizeTransportMode('transporte urbano'), 'Público');
-  assert.equal(normalizeTransportMode('taxi'), 'Público');
-  assert.equal(normalizeTransportMode('uber'), 'Público');
+test('urban transport variants are normalized as Publico', () => {
+  assert.equal(normalizeTransportMode('Didi Por El Momento'), 'Publico');
+  assert.equal(normalizeTransportMode('transporte urbano'), 'Publico');
+  assert.equal(normalizeTransportMode('taxi'), 'Publico');
+  assert.equal(normalizeTransportMode('uber'), 'Publico');
 });
 
 test('dispatch sync contracts keep operational data derived from candidates updated', () => {

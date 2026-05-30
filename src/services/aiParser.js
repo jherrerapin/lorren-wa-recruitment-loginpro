@@ -37,7 +37,7 @@ Campos que puedes extraer (omite los que no estén presentes o no sean claros):
   "gender": string,           // MALE | FEMALE | OTHER — solo con evidencia textual, nunca por nombre
   "neighborhood": string,     // Barrio, sector, localidad donde vive
   "medicalRestrictions": string, // Lo que diga el candidato sobre su condición física
-  "transportMode": string,    // Moto | Bicicleta | Sin medio de transporte | lo que diga
+  "transportMode": string,    // Moto | Bicicleta | Publico | lo que diga
 }
 
 INTENT — usa uno de estos valores:

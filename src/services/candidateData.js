@@ -6,6 +6,8 @@
  */
 
 import { isSuspiciousFullName } from './debugTrace.js';
+import { normalizeBogotaLocalidad } from './geographyNormalization.js';
+import { normalizeTransportMode as deterministicNormalizeTransportMode } from './transportMode.js';
 
 const NAME_TOKEN_REGEX = /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/;
 const IMPLICIT_NEIGHBORHOODS = new Set([
@@ -153,11 +155,14 @@ export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, 
   const clearAlternate = options.clearAlternate !== false;
 
   if (config.field === 'locality') {
-    if (!normalized.locality && normalized.neighborhood) {
-      normalized.locality = normalized.neighborhood;
-    }
-    if (normalized.locality && clearAlternate) {
-      normalized.neighborhood = null;
+    const extractedLocality = normalized.locality || normalized.neighborhood || null;
+    const bogotaLocalidad = normalizeBogotaLocalidad(extractedLocality);
+    if (bogotaLocalidad) {
+      normalized.locality = bogotaLocalidad;
+      if (clearAlternate) normalized.neighborhood = null;
+    } else if (extractedLocality) {
+      normalized.locality = null;
+      if (clearAlternate) normalized.neighborhood = null;
     }
     return normalized;
   }
@@ -207,7 +212,7 @@ function detectTransportKeyword(text = '') {
   if (!normalized) return null;
 
   if (/\b(?:sin|no\s+tengo|no\s+tiene|ninguno|ninguna)\s+(?:medio\s+de\s+transporte|transporte|vehiculo|moto|motocicleta|bicicleta|bici|cicla|carro|automovil|bus|buseta)\b/.test(normalized)) {
-    return 'Sin medio de transporte';
+    return 'Publico';
   }
 
   const detected = [];
@@ -400,20 +405,9 @@ function normalizeMedicalRestrictions(value = '') {
 }
 
 export function normalizeTransportMode(value = '') {
-  const normalized = normalizeLooseText(value);
-  if (!normalized) return null;
-
-  if (
-    ['sin medio de transporte', 'sin transporte', 'ninguno', 'ninguna', 'no tengo transporte', 'no tengo medio de transporte', 'no tiene', 'no tengo', 'sin vehiculo', 'sin vehículo'].includes(normalized)
-    || /^(?:no\s+(?:tengo|tiene|cuento con)|sin)\b/.test(normalized)
-  ) {
-    return 'Sin medio de transporte';
-  }
-
-  const detected = detectTransportKeyword(normalized);
-  if (detected) return detected;
-  return capitalizeWords(normalized);
+  return deterministicNormalizeTransportMode(value);
 }
+
 
 function cleanLocationValue(value = '') {
   return String(value || '')
@@ -696,7 +690,7 @@ export function parseNaturalData(text = '') {
   if (medicalNegative) result.medicalRestrictions = 'Sin restricciones médicas';
 
   const transportNegative = compact.match(/\b(?:no\s+(?:tengo|cuento\s+con)\s+(?:medio\s+de\s+transporte|transporte|moto|motocicleta|bicicleta|bici|cicla|carro|bus)|sin\s+(?:medio\s+de\s+transporte|transporte|moto|motocicleta|bicicleta|bici|cicla|carro|bus))\b/i);
-  if (transportNegative) result.transportMode = 'Sin medio de transporte';
+  if (transportNegative) result.transportMode = 'Publico';
 
   if (!result.transportMode) {
     const transportPositive = compact.match(/\b(?:mi\s+medio\s+de\s+transporte(?:\s+es)?|medio\s+de\s+transporte(?:\s+es)?|transporte\s*:|transporte\s+es|tengo|cuento con|si tengo|manejo|me movilizo en|voy en|independiente\s*-\s*bus)\b/i);
@@ -777,7 +771,10 @@ export function normalizeCandidateFields(fields = {}) {
   if (fields.neighborhood && !looksLikeGreetingLocation(fields.neighborhood)) normalized.neighborhood = normalizeResidenceValue(fields.neighborhood);
   if (fields.locality && !looksLikeGreetingLocation(fields.locality)) normalized.locality = normalizeResidenceValue(fields.locality);
   if (fields.medicalRestrictions) normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
-  if (fields.transportMode) normalized.transportMode = normalizeTransportMode(fields.transportMode);
+  if (fields.transportMode) {
+    const normalizedTransport = normalizeTransportMode(fields.transportMode);
+    if (normalizedTransport) normalized.transportMode = normalizedTransport;
+  }
   if (fields.experienceInfo) normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || capitalizeWords(fields.experienceInfo);
   if (fields.experienceTime) normalized.experienceTime = normalizeExperienceDuration(fields.experienceTime);
   if (fields.experienceSummary) normalized.experienceSummary = String(fields.experienceSummary).trim().slice(0, 280);
@@ -804,7 +801,7 @@ export function isHighConfidenceLocalField(field, value) {
     return /sin restricciones|no tengo restricciones|ninguna restriccion/i.test(raw) || raw.length >= 8;
   }
   if (field === 'transportMode') {
-    return /^(moto|motocicleta|bicicleta|bici|cicla|bicivleta|bivivleta|bisicleta|carro|automovil|automóvil|vehiculo|vehículo|bus|buseta|transporte publico|transporte público|servicio publico|servicio público|independiente|sin medio de transporte|no tiene|no tengo)$/i.test(raw);
+    return normalizeTransportMode(raw) !== null;
   }
   if (field === 'gender') return /^(male|female|other)$/i.test(raw);
   if (field === 'experienceInfo') return /^(si|sí|no)$/i.test(raw);

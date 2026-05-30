@@ -136,7 +136,7 @@ test('captura resumen de experiencia cuando describe funciones', () => {
 test('normaliza negación de transporte sin convertirla en moto', () => {
   const parsed = parseNaturalData('no tengo moto');
   const normalized = normalizeCandidateFields(parsed);
-  assert.equal(normalized.transportMode, 'Sin medio de transporte');
+  assert.equal(normalized.transportMode, 'Publico');
 });
 
 test('documento con puntos o prefijo no contamina edad', () => {
@@ -149,7 +149,7 @@ test('documento con puntos o prefijo no contamina edad', () => {
 test('negación compuesta de transporte termina en sin medio de transporte', () => {
   const parsed = parseNaturalData('no tengo moto ni bicicleta');
   const normalized = normalizeCandidateFields(parsed);
-  assert.equal(normalized.transportMode, 'Sin medio de transporte');
+  assert.equal(normalized.transportMode, 'Publico');
 });
 
 test('no toma saludo + intención como fullName aunque detecte barrio', () => {
@@ -270,11 +270,11 @@ test('normaliza menciones de Soacha como residencia canonica interna', () => {
   assert.equal(normalized.fullName, undefined);
 });
 
-test('alinea Soacha a localidad canonica para vacantes Bogota', () => {
+test('no alinea Soacha como localidad valida para vacantes Bogota', () => {
   const normalized = normalizeCandidateFields({ neighborhood: 'Soacha Compartir' });
   const aligned = alignCandidateLocationFields(normalized, { city: 'Bogota' }, { clearAlternate: true });
 
-  assert.equal(aligned.locality, 'Soacha Cundinamarca');
+  assert.equal(aligned.locality, null);
   assert.equal(aligned.neighborhood, null);
 });
 

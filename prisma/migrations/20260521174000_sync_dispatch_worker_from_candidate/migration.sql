@@ -38,7 +38,7 @@ BEGIN
     OR normalized_value LIKE 'no tiene%'
     OR normalized_value LIKE 'no cuento con%'
   THEN
-    RETURN 'Sin medio de transporte';
+    RETURN 'Publico';
   END IF;
 
   IF normalized_value ~ '(^| )(moto|motocicleta)( |$)' THEN
@@ -53,15 +53,15 @@ BEGIN
     RETURN 'Carro';
   END IF;
 
-  IF normalized_value ~ '(^| )(a pie|caminando|caminar)( |$)' THEN
-    RETURN 'A pie';
+  IF normalized_value ~ '(^| )(a pie|voy a pie|caminando|caminar)( |$)' THEN
+    RETURN 'Publico';
   END IF;
 
   IF normalized_value ~ '(^| )(bus|buseta|colectivo|transmilenio|transmi|sitp|alimentador|metro|transporte publico|publico|servicio publico|didi|uber|taxi|transporte urbano)( |$)' THEN
-    RETURN 'Público';
+    RETURN 'Publico';
   END IF;
 
-  RETURN initcap(normalized_value);
+  RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
 

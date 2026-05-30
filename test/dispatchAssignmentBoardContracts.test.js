@@ -43,7 +43,7 @@ test('dispatch assignment transport filter uses normalized current transport dat
   const sync = readSource('src/services/dispatchWorkerSync.js');
   const transport = readSource('src/services/transportMode.js');
   const manualWorkerView = readSource('src/views/operacionesPersonalNuevo.ejs');
-  const migration = readSource('prisma/migrations/20260521162000_normalize_dispatch_worker_transport/migration.sql');
+  const migration = readSource('prisma/migrations/20260521163000_normalize_dispatch_worker_transport/migration.sql');
 
   assert.match(bridge, /normalizeTransportMode/);
   assert.match(bridge, /uniqueNormalizedTransportModes/);
@@ -53,16 +53,16 @@ test('dispatch assignment transport filter uses normalized current transport dat
 
   assert.match(sync, /normalizeTransportMode\(candidate\.transportMode\)/);
   assert.match(manualWorkerView, /<select id="transportMode" name="transportMode">/);
-  assert.match(manualWorkerView, /Bus, TransMilenio, SITP y colectivo se agrupan como Público/);
+  assert.match(manualWorkerView, /Bus, TransMilenio, SITP y colectivo se agrupan como Publico/);
 
   assert.match(transport, /transmilenio/);
   assert.match(transport, /colectivo/);
   assert.match(transport, /sitp/);
-  assert.match(transport, /return 'Público'/);
+  assert.match(transport, /return 'Publico'/);
 
   assert.match(migration, /UPDATE "DispatchWorker"/);
   assert.match(migration, /UPDATE "Candidate"/);
-  assert.match(migration, /THEN 'Público'/);
+  assert.match(migration, /THEN 'Publico'/);
   assert.match(migration, /transmilenio/);
   assert.match(migration, /colectivo/);
 });
