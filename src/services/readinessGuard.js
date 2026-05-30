@@ -22,7 +22,8 @@ const FIELD_LABELS = {
   experienceInfo: 'experiencia',
   experienceTime: 'tiempo de experiencia',
   cv: 'hoja de vida en PDF o Word/DOCX',
-  vacancyId: 'vacante asignada'
+  vacancyId: 'vacante asignada',
+  eligibility: 'requisitos de la vacante'
 };
 
 function getConfiguredCandidateFields(vacancy = null) {
@@ -69,10 +70,81 @@ export function getFieldLabel(field, vacancy = null) {
   return FIELD_LABELS[field] || field;
 }
 
+function parseNullableInteger(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildAgeRangeText(minAge, maxAge) {
+  if (Number.isFinite(minAge) && Number.isFinite(maxAge)) return `entre ${minAge} y ${maxAge} años`;
+  if (Number.isFinite(minAge)) return `mínimo ${minAge} años`;
+  if (Number.isFinite(maxAge)) return `máximo ${maxAge} años`;
+  return null;
+}
+
+function buildAgeEligibilityFailure({ code, candidateAge, minAge, maxAge }) {
+  const rangeText = buildAgeRangeText(minAge, maxAge);
+  const message = rangeText
+    ? `edad fuera del rango requerido para la vacante (${rangeText})`
+    : 'edad fuera del rango requerido para la vacante';
+
+  return {
+    code,
+    field: 'age',
+    message,
+    label: message,
+    candidateAge,
+    minAge,
+    maxAge,
+    reason: code,
+    details: `Edad detectada: ${candidateAge}${rangeText ? `. Rango requerido: ${rangeText}` : ''}.`
+  };
+}
+
+export function evaluateCandidateEligibility(candidate = {}, vacancy = null) {
+  const vacancyContext = vacancy || candidate?.vacancy || null;
+  const candidateAge = parseNullableInteger(candidate?.age);
+  const minAge = parseNullableInteger(vacancyContext?.minAge);
+  const maxAge = parseNullableInteger(vacancyContext?.maxAge);
+  const failures = [];
+
+  if (Number.isFinite(candidateAge)) {
+    if (Number.isFinite(minAge) && candidateAge < minAge) {
+      failures.push(buildAgeEligibilityFailure({
+        code: 'age_below_min',
+        candidateAge,
+        minAge,
+        maxAge
+      }));
+    }
+
+    if (Number.isFinite(maxAge) && candidateAge > maxAge) {
+      failures.push(buildAgeEligibilityFailure({
+        code: 'age_above_max',
+        candidateAge,
+        minAge,
+        maxAge
+      }));
+    }
+  }
+
+  return {
+    eligible: failures.length === 0,
+    failures,
+    blockedReasons: failures.map((failure) => `eligibility_${failure.code}:age`),
+    age: candidateAge,
+    minAge,
+    maxAge
+  };
+}
+
 export function getMissingFieldLabels(candidate = {}, vacancy = null) {
-  return getCandidateReadiness(candidate, vacancy, { requireCv: false })
-    .missingFields
-    .map((field) => getFieldLabel(field, vacancy));
+  const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
+  return [
+    ...readiness.missingFields.map((field) => getFieldLabel(field, vacancy)),
+    ...(readiness.eligibilityFailures || []).map((failure) => failure.label || failure.message).filter(Boolean)
+  ];
 }
 
 function hasValue(value) {
@@ -143,26 +215,36 @@ export function getCandidateReadiness(candidate = {}, vacancy = null, options = 
 
   const requireCv = options.requireCv !== false;
   const validCv = hasValidCv(candidate);
+  const eligibility = evaluateCandidateEligibility(candidate, vacancyContext);
+  const eligibilityFailures = eligibility.failures;
+  const hasEligibilityFailures = eligibilityFailures.length > 0;
 
   if (validCv && isClosedOrRegistered(candidate) && hasBaseRegistrationFields(candidate, vacancyContext)) {
     removePostRegistrationDynamicFields(missingFields);
   }
 
   const missingForDone = [...missingFields];
+  if (hasEligibilityFailures) missingForDone.push('eligibility');
   if (requireCv && !validCv) missingForDone.push('cv');
 
   const blockedReasons = [];
   if (missingFields.length) blockedReasons.push(`missing_core_fields:${missingFields.join(',')}`);
+  if (hasEligibilityFailures) blockedReasons.push(...eligibility.blockedReasons);
   if (requireCv && !validCv) blockedReasons.push('missing_cv');
   if (!candidate.vacancyId && !vacancy?.id) blockedReasons.push('missing_vacancy');
 
   return {
-    coreDataComplete: missingFields.length === 0,
+    coreDataComplete: missingFields.length === 0 && !hasEligibilityFailures,
     hasValidCv: validCv,
     missingFields,
-    missingFieldLabels: missingFields.map((field) => getFieldLabel(field, vacancyContext)),
-    readyForCvRequest: missingFields.length === 0 && !validCv,
-    readyForScheduling: missingFields.length === 0 && validCv && Boolean(candidate.vacancyId || vacancy?.id),
+    missingFieldLabels: [
+      ...missingFields.map((field) => getFieldLabel(field, vacancyContext)),
+      ...eligibilityFailures.map((failure) => failure.label || failure.message).filter(Boolean)
+    ],
+    eligibility,
+    eligibilityFailures,
+    readyForCvRequest: missingFields.length === 0 && !validCv && !hasEligibilityFailures,
+    readyForScheduling: missingFields.length === 0 && validCv && Boolean(candidate.vacancyId || vacancy?.id) && !hasEligibilityFailures,
     readyForDone: missingForDone.length === 0,
     missingForDone,
     blockedReasons
@@ -177,19 +259,32 @@ function formatNaturalFieldList(labels = []) {
   return `${values.slice(0, -1).join(', ')} y ${values[values.length - 1]}`;
 }
 
+function buildEligibilityFailureReply(readiness = {}) {
+  const failure = readiness?.eligibilityFailures?.[0];
+  if (!failure) return '';
+  return 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque la edad registrada no cumple el rango definido para esta vacante.';
+}
+
 export function buildCandidateDataCollectionMessage(candidate = {}, vacancy = null) {
   const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
+  const eligibilityReply = buildEligibilityFailureReply(readiness);
+  if (eligibilityReply) return eligibilityReply;
   const pendingText = formatNaturalFieldList(readiness.missingFieldLabels || []);
   if (!pendingText) return '';
   return `Perfecto, seguimos con tu postulación. Para dejar tu registro completo, compárteme en un solo mensaje ${pendingText}.`;
 }
 
 export function getFirstMissingFieldLabel(readiness = {}) {
+  if (readiness?.eligibilityFailures?.length) {
+    return readiness.eligibilityFailures[0].label || readiness.eligibilityFailures[0].message || FIELD_LABELS.eligibility;
+  }
   const field = readiness.missingFields?.[0] || readiness.missingForDone?.[0] || null;
   return field ? (readiness.missingFieldLabels?.[0] || FIELD_LABELS[field] || field) : null;
 }
 
 export function buildMissingFieldReply(readiness = {}) {
+  const eligibilityReply = buildEligibilityFailureReply(readiness);
+  if (eligibilityReply) return eligibilityReply;
   if (!readiness?.missingFields?.length) {
     if (!readiness?.hasValidCv) return 'Para continuar, adjunta tu hoja de vida como archivo PDF o Word/DOCX.';
     return 'La información principal está lista; sigo con el punto concreto que falta para avanzar.';
