@@ -1,33 +1,19 @@
-const DEFAULT_MULTILINE_WINDOW_MS = 60000;
-const MIN_MULTILINE_WINDOW_MS = 12000;
-const MAX_MULTILINE_WINDOW_MS = 90000;
+const DEFAULT_REASONING_WINDOW_MS = 90000;
+const MIN_REASONING_WINDOW_MS = 12000;
+const MAX_REASONING_WINDOW_MS = 90000;
 
 function normalizeText(text = '') {
   return String(text || '').trim();
 }
 
-function isEarlyConversationContext(context = {}) {
-  return !context.vacancyResolved || ['MENU', 'GREETING_SENT'].includes(String(context.currentStep || ''));
-}
-
-function looksLikeShortFragment(text = '') {
-  const normalized = normalizeText(text);
-  if (!normalized) return false;
-  if (normalized.length > 90) return false;
-  return !/[?¿]/.test(normalized);
-}
-
-export function getMultilineWindowMs(context = {}) {
+export function getMultilineWindowMs() {
   if (process.env.NODE_ENV === 'test') return 0;
-  const raw = Number.parseInt(String(process.env.MULTILINE_SILENCE_WINDOW_MS || ''), 10);
+  const raw = Number.parseInt(String(process.env.LORREN_REASONING_WINDOW_MS || process.env.MULTILINE_SILENCE_WINDOW_MS || ''), 10);
   if (Number.isFinite(raw)) {
-    return Math.max(MIN_MULTILINE_WINDOW_MS, Math.min(MAX_MULTILINE_WINDOW_MS, raw));
+    return Math.max(MIN_REASONING_WINDOW_MS, Math.min(MAX_REASONING_WINDOW_MS, raw));
   }
 
-  const adaptiveDefault = isEarlyConversationContext(context) || looksLikeShortFragment(context.text)
-    ? DEFAULT_MULTILINE_WINDOW_MS
-    : 20000;
-  return Math.max(MIN_MULTILINE_WINDOW_MS, Math.min(MAX_MULTILINE_WINDOW_MS, adaptiveDefault));
+  return DEFAULT_REASONING_WINDOW_MS;
 }
 
 export function summarizeConsolidatedInput(text = '') {

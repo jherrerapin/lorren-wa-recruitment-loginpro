@@ -25,10 +25,15 @@ test('resumen consolidado sanitiza documento y edad', () => {
   assert.doesNotMatch(summary, /1099887766/);
 });
 
-test('la ventana multilinea es larga al inicio y mas corta en un hilo ya resuelto', () => {
+test('la ventana multilinea usa 90 segundos para consolidar antes de razonar', () => {
   const previousEnv = process.env.NODE_ENV;
+  const previousReasoning = process.env.LORREN_REASONING_WINDOW_MS;
+  const previousMultiline = process.env.MULTILINE_SILENCE_WINDOW_MS;
   process.env.NODE_ENV = 'development';
   try {
+    delete process.env.LORREN_REASONING_WINDOW_MS;
+    delete process.env.MULTILINE_SILENCE_WINDOW_MS;
+
     const earlyWindow = getMultilineWindowMs({
       currentStep: 'MENU',
       vacancyResolved: false,
@@ -40,9 +45,27 @@ test('la ventana multilinea es larga al inicio y mas corta en un hilo ya resuelt
       text: 'Si estoy interesado, que datos te doy?'
     });
 
-    assert.equal(earlyWindow, 60000);
-    assert.equal(resolvedWindow, 20000);
+    assert.equal(earlyWindow, 90000);
+    assert.equal(resolvedWindow, 90000);
   } finally {
     process.env.NODE_ENV = previousEnv;
+    if (previousReasoning === undefined) delete process.env.LORREN_REASONING_WINDOW_MS;
+    else process.env.LORREN_REASONING_WINDOW_MS = previousReasoning;
+    if (previousMultiline === undefined) delete process.env.MULTILINE_SILENCE_WINDOW_MS;
+    else process.env.MULTILINE_SILENCE_WINDOW_MS = previousMultiline;
+  }
+});
+
+test('la ventana de razonamiento se puede configurar y queda acotada a 90 segundos', () => {
+  const previousEnv = process.env.NODE_ENV;
+  const previousReasoning = process.env.LORREN_REASONING_WINDOW_MS;
+  process.env.NODE_ENV = 'development';
+  process.env.LORREN_REASONING_WINDOW_MS = '120000';
+  try {
+    assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 90000);
+  } finally {
+    process.env.NODE_ENV = previousEnv;
+    if (previousReasoning === undefined) delete process.env.LORREN_REASONING_WINDOW_MS;
+    else process.env.LORREN_REASONING_WINDOW_MS = previousReasoning;
   }
 });

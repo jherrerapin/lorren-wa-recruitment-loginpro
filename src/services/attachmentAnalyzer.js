@@ -149,10 +149,10 @@ export async function analyzeAttachment({ buffer, mimeType = '', filename = '' }
   if (mime === 'application/msword' || name.endsWith('.doc')) {
     return buildResult({
       attachmentKind: 'doc',
-      classification: 'OTHER',
-      confidence: 0.99,
-      rationale: 'unsupported_doc_format',
-      evidence: ['unsupported_doc_format']
+      classification: 'CV_VALID',
+      confidence: 0.86,
+      rationale: 'accepted_legacy_word_document',
+      evidence: ['doc_format_allowed_for_cv']
     });
   }
 
