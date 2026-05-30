@@ -5,7 +5,7 @@ import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { guardReplyAgainstReadinessDrift, sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
 import { detectConversationIntent } from './conversationIntent.js';
-import { detectInterviewIntent } from './interviewLifecycle.js';
+import { classifyInterviewIntent } from './interviewIntentClassifier.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
@@ -316,18 +316,19 @@ export async function runChatEngine({
   const activeInterviewBooking = storedActiveInterviewBooking || (nextSlot?.isConfirmedBooking
     ? { status: 'SCHEDULED', scheduledAt: nextSlot.date }
     : null);
-  const interviewIntent = detectInterviewIntent({
+  const interviewIntentClassification = await classifyInterviewIntent({
     text: inboundText,
     booking: activeInterviewBooking,
     now: new Date()
   });
+  const interviewIntent = interviewIntentClassification.intent;
 
   if (
     activeInterviewBooking
     && [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(currentStep)
     && APPOINTMENT_INTENTS_HANDLED_BY_WEBHOOK.has(interviewIntent)
   ) {
-    return buildFallbackToDeterministicFlowResult('delegate_interview_intent_to_webhook', currentStep);
+    return buildFallbackToDeterministicFlowResult(`delegate_interview_intent_to_webhook:${interviewIntentClassification.source}`, currentStep);
   }
 
   const pausedGuard = await guardPausedVacancy({ prisma, candidate, vacancy, inboundText, recentMessages, currentStep });
