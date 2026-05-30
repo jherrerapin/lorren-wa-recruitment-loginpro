@@ -17,8 +17,8 @@ import { enqueueJob, JOB_TYPES } from './jobQueue.js';
 
 const REMINDER_DELAY_MS = 60 * 60 * 1000;
 const INTERVIEW_REMINDER_LEAD_MS = Number.parseInt(
-  process.env.INTERVIEW_REMINDER_LEAD_MS || String(30 * 60 * 1000), 10
-) || (30 * 60 * 1000);
+  process.env.INTERVIEW_REMINDER_LEAD_MS || String(40 * 60 * 1000), 10
+) || (40 * 60 * 1000);
 const INTERVIEW_REMINDER_EARLY_TOLERANCE_MS = 5 * 60 * 1000;
 const INTERVIEW_REMINDER_LATE_TOLERANCE_MS = 10 * 60 * 1000;
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
@@ -305,12 +305,12 @@ async function runInterviewNoResponseDispatcher(prisma, now = new Date(), candid
     await prisma.interviewBooking.update({
       where: { id: booking.id },
       data: {
-        status: 'NO_SHOW',
+        status: 'NO_RESPONSE',
         reminderWindowClosed: true
       }
     });
     console.log('[REMINDER_TRACE]', JSON.stringify({
-      event: 'interview_marked_no_show',
+      event: 'interview_marked_no_response',
       bookingId: booking.id,
       candidateId: booking.candidateId,
       scheduledAt: new Date(booking.scheduledAt).toISOString()
