@@ -24,7 +24,11 @@ test('dispatch clients operations contracts', () => {
   assert.match(publicRoute, /post\('\/cliente\/:publicToken'/);
   assert.match(publicRoute, /operationPointId/);
   assert.match(publicRoute, /findClientByLegacyOperationToken/);
-  assert.match(server, /app\.use\('\/operaciones', publicDispatchClientRouter\(\)\)/);
+  assert.match(server, /function\s+wrapAsyncRouter/);
+  assert.match(server, /function\s+dispatchErrorHandler/);
+  assert.match(server, /app\.use\('\/operaciones', wrapAsyncRouter\(publicDispatchClientRouter\(\)\)\)/);
+  assert.match(server, /app\.use\('\/admin\/operaciones', wrapAsyncRouter\(dispatchOpsExtrasRouter\(prisma\)\)\)/);
+  assert.match(server, /app\.use\('\/admin\/operaciones', dispatchErrorHandler\('\/admin\/operaciones'\)\)/);
 
   ['worker-list', 'max-height', 'request-list', 'Clientes', 'Solicitudes de servicio', 'Crear solicitud interna'].forEach((s) => assert.match(view, new RegExp(s)));
   assert.match(view, /overflow-y:\s*auto/);
@@ -34,6 +38,8 @@ test('dispatch clients operations contracts', () => {
   const publicView = fs.readFileSync('src/views/publicDispatchRequest.ejs', 'utf8');
   assert.match(clientsView, /Link público del cliente/);
   assert.match(clientOpsView, /link público del cliente/);
+  assert.match(clientOpsView, /copy-client-link/);
+  assert.doesNotMatch(clientOpsView, /onclick="navigator\.clipboard/);
   assert.match(publicView, /name="operationPointId"/);
 
   ['src/views/operacionesClientes.ejs','src/views/operacionesClienteOperaciones.ejs','src/views/publicDispatchRequest.ejs','src/views/operacionesPersonalNuevo.ejs','src/views/operacionesSolicitudEditar.ejs'].forEach((f)=>assert.ok(fs.existsSync(f)));

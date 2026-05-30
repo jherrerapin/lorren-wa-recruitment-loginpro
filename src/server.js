@@ -53,6 +53,66 @@ function buildLoginViewModel(overrides = {}) {
   };
 }
 
+function wrapAsyncRouter(router) {
+  for (const layer of router.stack || []) {
+    if (layer.route?.stack) {
+      for (const routeLayer of layer.route.stack) {
+        const handler = routeLayer.handle;
+        if (typeof handler !== 'function' || handler.length >= 4 || handler.__asyncWrapped) continue;
+        routeLayer.handle = function asyncRouteHandler(req, res, next) {
+          try {
+            const result = handler(req, res, next);
+            if (result && typeof result.catch === 'function') result.catch(next);
+            return result;
+          } catch (error) {
+            return next(error);
+          }
+        };
+        routeLayer.handle.__asyncWrapped = true;
+      }
+    } else if (layer.handle?.stack) {
+      wrapAsyncRouter(layer.handle);
+    }
+  }
+  return router;
+}
+
+function appendMessageToPath(pathValue, message) {
+  const [pathname, query = ''] = String(pathValue || '').split('?');
+  const params = new URLSearchParams(query);
+  params.set('message', message);
+  return `${pathname || '/admin/operaciones'}?${params.toString()}`;
+}
+
+function safeDispatchRefererPath(req, fallbackPath = '/admin/operaciones') {
+  const referer = req.get('referer');
+  if (!referer) return fallbackPath;
+
+  try {
+    const parsed = new URL(referer);
+    const currentOrigin = `${req.protocol}://${req.get('host')}`;
+    const isSameOrigin = parsed.origin === currentOrigin;
+    const isDispatchPath = parsed.pathname.startsWith('/admin/operaciones') || parsed.pathname.startsWith('/operaciones/admin-');
+    if (isSameOrigin && isDispatchPath) return `${parsed.pathname}${parsed.search}`;
+  } catch (error) {
+    console.warn('No fue posible interpretar el referer de operaciones.', error);
+  }
+
+  return fallbackPath;
+}
+
+function dispatchErrorHandler(fallbackPath = '/admin/operaciones') {
+  return (err, req, res, next) => {
+    console.error(err);
+    if (res.headersSent) return next(err);
+    if (req.accepts('html')) {
+      const safePath = safeDispatchRefererPath(req, fallbackPath);
+      return res.redirect(appendMessageToPath(safePath, 'No fue posible completar la accion de despacho. Revisa los datos e intenta nuevamente.'));
+    }
+    return res.status(500).json({ error: 'dispatch_operation_failed' });
+  };
+}
+
 function mapDbRoleToSessionRole(role) {
   return role === 'DEV' ? 'dev' : 'admin';
 }
@@ -290,11 +350,13 @@ app.get('/logout', destroySession);
 
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
-app.use('/operaciones', publicDispatchClientRouter());
-app.use('/admin/operaciones', dispatchDashboardMetricsRouter(prisma));
-app.use('/admin/operaciones', dispatchClientStatsRouter(prisma));
-app.use('/admin/operaciones', dispatchOpsExtrasRouter(prisma));
-app.use('/admin/operaciones', dispatchBridgeRouter());
+app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));
+app.use('/operaciones', dispatchErrorHandler('/admin/operaciones'));
+app.use('/admin/operaciones', wrapAsyncRouter(dispatchDashboardMetricsRouter(prisma)));
+app.use('/admin/operaciones', wrapAsyncRouter(dispatchClientStatsRouter(prisma)));
+app.use('/admin/operaciones', wrapAsyncRouter(dispatchOpsExtrasRouter(prisma)));
+app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
+app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
     if (req.method === 'GET' && (req.path === '/' || req.path === '')) return res.redirect('/admin/operaciones');

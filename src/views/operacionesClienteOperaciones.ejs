@@ -56,13 +56,13 @@
       </article>
 
       <article class="card">
-        <div class="card-head"><h2>Operaciones registradas</h2><p>El link público es único por cliente. En ese formulario se elige la operación y el servicio.</p></div>
+        <div class="card-head"><h2>Operaciones registradas</h2><p>El link público del cliente es único. En ese formulario se elige la operación y el servicio.</p></div>
         <div class="card-body">
           <% const clientLink = baseUrl + '/operaciones/cliente/' + client.publicToken; %>
           <div class="copy-row" style="margin-bottom:16px;">
             <input class="copy-input" readonly value="<%= clientLink %>" />
             <a class="btn" href="/operaciones/cliente/<%= client.publicToken %>" target="_blank" rel="noopener">Abrir link del cliente</a>
-            <button class="btn btn-primary" type="button" onclick="navigator.clipboard.writeText('<%= clientLink %>')">Copiar link del cliente</button>
+            <button class="btn btn-primary copy-client-link" type="button" data-copy-value="<%= clientLink %>">Copiar link del cliente</button>
           </div>
           <% if (!client.operationPoints.length) { %><div class="empty"><strong>No hay operaciones registradas.</strong>Crea el primer punto de servicio para este cliente.</div><% } else { %>
             <div class="list">
@@ -183,6 +183,24 @@
         console.error('No fue posible cargar ciudades', error);
       }
     }
+    document.querySelectorAll('.copy-client-link').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const value = button.dataset.copyValue || '';
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+          } else {
+            const input = button.parentElement?.querySelector('.copy-input');
+            input?.select();
+            document.execCommand('copy');
+          }
+          button.textContent = 'Link copiado';
+          window.setTimeout(() => { button.textContent = 'Copiar link del cliente'; }, 1800);
+        } catch (_error) {
+          window.prompt('Copia el link del cliente:', value);
+        }
+      });
+    });
     window.addEventListener('pageshow', (event) => { if (event.persisted) window.location.reload(); });
     loadCityOptions();
   </script>
