@@ -45,8 +45,8 @@ const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué
 
 const DESCARTE_MSG = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque no cumples con uno de los requisitos definidos para esta vacante.';
 const CIERRE_NO_INTERES = 'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
-const SOLICITAR_HV = 'Gracias por compartir tus datos. Para finalizar tu postulación, adjunta tu hoja de vida (HV) como archivo PDF o Word/DOCX.';
-const RECORDATORIO_HV = 'Para continuar necesito que adjuntes tu hoja de vida (HV) como archivo PDF o Word/DOCX. Cuando la envíes, finalizamos tu proceso.';
+const SOLICITAR_HV = 'Gracias por compartir tus datos. Para finalizar tu postulación, adjunta tu hoja de vida (HV) como archivo PDF, DOC o DOCX.';
+const RECORDATORIO_HV = 'Para continuar necesito que adjuntes tu hoja de vida (HV) como archivo PDF, DOC o DOCX. Cuando la envíes, finalizamos tu proceso.';
 const MENSAJE_FINAL = 'Tu información y hoja de vida quedaron registradas correctamente. El equipo de selección revisará tu perfil y, si el proceso continúa, te contactará por este medio.';
 const MENSAJE_DONE_ACK = '¡Con gusto! Ya quedó tu registro completo. Si surge una novedad, te contactamos por este medio.';
 const MENSAJE_DONE_CV_REPEAT = 'Ya tenemos tu registro completo. Si deseas actualizar tu hoja de vida, puedes enviarla y la adjuntamos a tu postulación.';
@@ -54,7 +54,7 @@ const GUIA_CONTINUAR = 'Puedo ayudarte a continuar con la postulación. Si desea
 const CONFIRMACION_PROMPT = '¿Está correcto? Responde Sí para continuar o envíame la corrección.';
 const INTERVIEW_OFFER_SOURCES = new Set(['interview_offer', 'interview_reschedule']);
 const ASK_VACANCY_FOR_CV = 'Recibi tu hoja de vida. Para asociarla correctamente, cuentame desde que ciudad nos escribes y para que vacante o cargo estas aplicando.';
-const TEXT_ONLY_CV_FILENAME_REPLY = 'Para registrar tu hoja de vida necesito que adjuntes el archivo real en PDF o Word/DOCX; escribir solo el nombre del archivo no es suficiente.';
+const TEXT_ONLY_CV_FILENAME_REPLY = 'Para registrar tu hoja de vida necesito que adjuntes el archivo real en PDF, DOC o DOCX; escribir solo el nombre del archivo no es suficiente.';
 
 const FIELD_LABELS = {
   fullName: 'el nombre completo',
@@ -280,7 +280,13 @@ function buildInboundBody(message = {}) {
   }
   return '';
 }
-function getNaturalDelayMs(inputText = '', outputText = '') { if (process.env.NODE_ENV === 'test') return 0; const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1); return Math.max(1800, Math.min(3200, 1800 + Math.min(1400, Math.round(l * 8)))); }
+function getNaturalDelayMs(inputText = '', outputText = '') {
+  if (process.env.NODE_ENV === 'test') return 0;
+  const configuredDelay = Number.parseInt(String(process.env.LORREN_SEND_DELAY_MS || ''), 10);
+  if (Number.isFinite(configuredDelay) && configuredDelay >= 0) return configuredDelay;
+  const l = Math.max(normalizeText(inputText).length, normalizeText(outputText).length, 1);
+  return Math.max(1800, Math.min(3200, 1800 + Math.min(1400, Math.round(l * 8))));
+}
 function isQuestionLike(text = '') {
   const n = normalizeComparableText(text);
   return String(text || '').includes('?') || /\b(que|cual|cuales|como|cuando|donde|cuanto|quien|puedo|puede|podria|requisitos|condiciones|horario|pago|direccion|ubicacion|cargo)\b/.test(n);
@@ -382,7 +388,7 @@ function buildVacancyContinuePrompt(candidate, vacancy = null) {
     }
 
     if (candidate.currentStep === ConversationStep.ASK_CV) {
-      return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF o Word/DOCX.';
+      return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF, DOC o DOCX.';
     }
     if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
       const missing = getMissingFields(candidate, vacancy);
@@ -516,7 +522,7 @@ function getPrimaryEngineAction(actions = []) {
   return priority.find((type) => actions.some((action) => action?.type === type)) || 'nothing';
 }
 
-function buildInterviewReplyPayload(body, source, nextSlot) {
+function buildInterviewReplyPayload(body, source, nextSlot, vacancy = null) {
   return {
     body,
     source,
@@ -524,7 +530,8 @@ function buildInterviewReplyPayload(body, source, nextSlot) {
     scheduledAt: nextSlot?.date?.toISOString?.() || null,
     formattedDate: nextSlot?.formattedDate || null,
     reminderAt: nextSlot?.reminderAt?.toISOString?.() || null,
-    skipCount: nextSlot?.skipCount ?? 0
+    skipCount: nextSlot?.skipCount ?? 0,
+    ...(vacancy ? { safetyVacancy: vacancy } : {})
   };
 }
 
@@ -1217,14 +1224,14 @@ async function finalizeCandidateAfterCv(prisma, candidate, from) {
     });
 
     const body = await buildInterviewOfferReply(candidate, vacancy, nextSlot, false);
-    return reply(prisma, candidate.id, from, body, '', buildInterviewReplyPayload(body, 'interview_offer', nextSlot));
+    return reply(prisma, candidate.id, from, body, '', buildInterviewReplyPayload(body, 'interview_offer', nextSlot, vacancy));
   }
 
   if (!readiness.readyForDone) {
     const targetStep = readiness.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA;
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: targetStep } });
     const body = readiness.readyForCvRequest
-      ? 'Tus datos principales están listos. Para cerrar el registro, adjunta tu hoja de vida como archivo PDF o Word/DOCX.'
+      ? 'Tus datos principales están listos. Para cerrar el registro, adjunta tu hoja de vida como archivo PDF, DOC o DOCX.'
       : `Aún me falta un dato para cerrar bien tu registro: ${readiness.missingFieldLabels?.[0] || 'información pendiente'}.`;
     return reply(prisma, candidate.id, from, body, '', { body, source: 'readiness_guard' });
   }
@@ -1323,6 +1330,87 @@ async function prepareCandidateForInboundAutomation(prisma, candidate = {}) {
   return resumed;
 }
 
+
+function outboundRequestsResolvedVacancy(reply = '', candidate = {}, vacancy = null) {
+  if (!candidate?.vacancyId && !vacancy?.id) return false;
+  const n = normalizeComparableText(reply);
+  if (!n) return false;
+  const asksCity = /\b(?:desde\s+que\s+ciudad|ciudad\s+nos\s+escribes|ciudad\s+escribes|que\s+ciudad)\b/.test(n);
+  const asksVacancy = /\b(?:para\s+que\s+vacante|que\s+vacante|vacante\s+o\s+cargo|cargo\s+estas|cargo\s+te\s+interesa)\b/.test(n);
+  return asksCity || asksVacancy;
+}
+
+function outboundRequestsResolvedResidence(reply = '', candidate = {}, vacancy = null) {
+  if (!getCandidateResidenceValue(candidate, vacancy)) return false;
+  const n = normalizeComparableText(reply);
+  if (!n) return false;
+  const asksResidence = /\b(?:localidad|barrio|residencia|donde\s+vives|donde\s+estas\s+ubicad[oa])\b/.test(n);
+  const requestTone = /\b(?:falta|faltaria|me\s+falta|necesito|cuentame|confirmame|indica(?:me)?|dime|comparte(?:me)?)\b/.test(n);
+  return asksResidence && requestTone;
+}
+
+function outboundRequestsResolvedCv(reply = '', readiness = {}) {
+  if (!readiness?.hasValidCv) return false;
+  const n = normalizeComparableText(reply);
+  if (!n || !/\b(?:hoja\s+de\s+vida|hv|cv)\b/.test(n)) return false;
+  return /\b(?:envia(?:me)?|adjunta|comparte(?:me)?|reenvia|vuelve\s+a\s+enviar|me\s+falta|falta|necesito|para\s+continuar)\b/.test(n)
+    && /\b(?:pdf|docx|doc|archivo)\b/.test(n);
+}
+
+function buildStateAwareContinuationReply(candidate = {}, vacancy = null, readiness = {}) {
+  const known = [];
+  const vacancyName = vacancy?.title || vacancy?.role || null;
+  const vacancyCity = vacancy?.operation?.city?.name || vacancy?.city || null;
+  if (vacancyName) known.push(`la vacante de ${vacancyName}${vacancyCity ? ` en ${vacancyCity}` : ''}`);
+  const residence = getCandidateResidenceValue(candidate, vacancy);
+  if (residence) known.push(`tu ubicación/residencia: ${residence}`);
+  if (readiness.hasValidCv) known.push('tu hoja de vida');
+
+  const prefix = known.length
+    ? `Ya tengo registrado ${known.join(', ')}.`
+    : 'Ya tengo parte de tu información registrada.';
+
+  if (readiness.missingFieldLabels?.length) {
+    return `${prefix} Para continuar solo me falta: ${readiness.missingFieldLabels.join(', ')}.`;
+  }
+  if (!readiness.hasValidCv) {
+    return `${prefix} Para continuar, adjunta tu hoja de vida como archivo PDF, DOC o DOCX.`;
+  }
+  if (readiness.readyForScheduling) {
+    return `${prefix} Con eso puedo seguir con el agendamiento de entrevista.`;
+  }
+  return `${prefix} Con eso sigo con el siguiente paso del proceso.`;
+}
+
+export async function guardReplyWithConversationState(prisma, candidateId, replyText = '', rawPayload = {}) {
+  const source = rawPayload?.source || 'bot_flow';
+  if (/^admin_|manual/i.test(source)) return { text: replyText, blocked: false };
+  const candidate = await prisma.candidate.findUnique({ where: { id: candidateId } }).catch(() => null);
+  if (!candidate) return { text: replyText, blocked: false };
+  const vacancy = rawPayload?.safetyVacancy
+    || rawPayload?.vacancyContext
+    || (candidate.vacancyId ? await loadVacancyContext(prisma, candidate.vacancyId).catch(() => null) : null);
+  const readiness = getCandidateReadiness(candidate, vacancy);
+  const blockedReasons = [];
+
+  if (outboundRequestsResolvedVacancy(replyText, candidate, vacancy)) blockedReasons.push('resolved_vacancy_requested_again');
+  if (outboundRequestsResolvedResidence(replyText, candidate, vacancy)) blockedReasons.push('resolved_residence_requested_again');
+  if (outboundRequestsResolvedCv(replyText, readiness)) blockedReasons.push('resolved_cv_requested_again');
+
+  if (!blockedReasons.length) return { text: replyText, blocked: false };
+  return {
+    text: buildStateAwareContinuationReply(candidate, vacancy, readiness),
+    blocked: true,
+    blockedReasons,
+    readiness: {
+      missingFields: readiness.missingFields || [],
+      missingFieldLabels: readiness.missingFieldLabels || [],
+      hasValidCv: readiness.hasValidCv,
+      readyForScheduling: readiness.readyForScheduling
+    }
+  };
+}
+
 async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
   const payload = { body, source: 'bot_flow', ...(rawPayload || {}) };
   await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload: payload } });
@@ -1330,9 +1418,11 @@ async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { bod
 }
 async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload = { body, source: 'bot_flow' }) {
   let finalBody = String(body || '').trim();
+  const stateGuard = await guardReplyWithConversationState(prisma, candidateId, finalBody || buildSafeFallbackReply(), rawPayload || {});
+  finalBody = stateGuard.text || buildSafeFallbackReply();
   const safetyVacancy = rawPayload?.safetyVacancy || rawPayload?.vacancyContext || null;
   const safety = sanitizeOutboundReply({
-    reply: finalBody || buildSafeFallbackReply(),
+    reply: finalBody,
     vacancy: safetyVacancy,
     candidate: { id: candidateId },
     currentStep: rawPayload?.currentStep || null,
@@ -1342,6 +1432,10 @@ async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload
   const cleanedPayload = { ...(rawPayload || {}), body: finalBody };
   delete cleanedPayload.safetyVacancy;
   delete cleanedPayload.vacancyContext;
+  if (stateGuard.blocked) {
+    cleanedPayload.stateGuard = { blocked: true, reasons: stateGuard.blockedReasons, readiness: stateGuard.readiness };
+    console.warn('[BOT_REPLY_STATE_GUARD_BLOCKED]', JSON.stringify({ candidateId, reasons: stateGuard.blockedReasons }));
+  }
   if (safety.blocked) {
     cleanedPayload.replySafety = { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason };
     console.warn('[BOT_REPLY_SAFETY_BLOCKED]', JSON.stringify({ candidateId, blockedClaims: safety.blockedClaims, reason: safety.reason }));
@@ -1805,7 +1899,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           Object.assign(updateData, initialDecisions.persistedData);
         }
       }
-      debugTrace.vacancy_resolution_after_gate_not_persisted = resolution.vacancy.id;
+      debugTrace.vacancy_resolution_persisted = resolution.vacancy.id;
+      updateData.vacancyId = resolution.vacancy.id;
     }
     await prisma.candidate.update({ where: { id: candidate.id }, data: updateData });
 
@@ -1831,9 +1926,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     const resolution = await resolveVacancyForCandidate();
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
     if (resolution.resolved && resolution.vacancy) {
-      debugTrace.vacancy_resolution_after_gate_not_persisted = resolution.vacancy.id;
-      const candidateState = { ...candidate, currentStep: ConversationStep.GREETING_SENT };
-      return replyWithVacancyContext(candidateState, resolution.vacancy);
+      debugTrace.vacancy_resolution_persisted = resolution.vacancy.id;
+      const updatedCandidate = await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: { currentStep: ConversationStep.GREETING_SENT, vacancyId: resolution.vacancy.id }
+      });
+      return replyWithVacancyContext(updatedCandidate, resolution.vacancy);
     }
     if (await replyFromVacancyResolutionFailure(resolution)) return;
     const activeVacancies = await findActiveVacancies(prisma);
@@ -1891,8 +1989,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
     const resolution = await resolveVacancyForCandidate();
     if (resolution.resolved && resolution.vacancy) {
-      debugTrace.vacancy_resolution_after_gate_not_persisted = resolution.vacancy.id;
-      return replyWithVacancyContext(candidate, resolution.vacancy);
+      debugTrace.vacancy_resolution_persisted = resolution.vacancy.id;
+      const updatedCandidate = await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: { vacancyId: resolution.vacancy.id }
+      });
+      return replyWithVacancyContext(updatedCandidate, resolution.vacancy);
     }
 
     if (await replyFromVacancyResolutionFailure(resolution)) {
@@ -1993,7 +2095,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         }
       });
       const body = await buildInterviewOfferReply(candidate, currentVacancy, nextSlot, true);
-      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_reschedule', nextSlot));
+      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_reschedule', nextSlot, currentVacancy));
     }
 
     if (interviewIntent === 'confirm_attendance') {
@@ -2014,7 +2116,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       if (!schedulingGuard.allowed) {
         await pauseInterviewFlow(prisma, candidate.id, `Agendamiento bloqueado: ${schedulingGuard.primaryReason}`);
         const body = schedulingGuard.readiness?.readyForCvRequest
-          ? 'Antes de agendar, necesito que adjuntes tu hoja de vida como archivo PDF o Word/DOCX.'
+          ? 'Antes de agendar, necesito que adjuntes tu hoja de vida como archivo PDF, DOC o DOCX.'
           : 'No puedo confirmar la entrevista todavía porque falta validar información del proceso. Te pido el dato pendiente o el equipo te contactará para terminar el agendamiento.';
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
@@ -2034,7 +2136,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         }
       });
       const body = await buildInterviewConfirmationReply(candidate, currentVacancy, nextSlot);
-      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_booking_confirmation', nextSlot));
+      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_booking_confirmation', nextSlot, currentVacancy));
     }
 
     if (candidate.currentStep === ConversationStep.SCHEDULED && isSchedulingConfirmationIntent(cleanText)) {
@@ -2053,7 +2155,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     if (nextSlot?.slot) {
       const body = await buildInterviewOfferReply(candidate, currentVacancy, nextSlot, Boolean(nextSlot.isAlternative));
       const source = nextSlot.isAlternative ? 'interview_reschedule' : 'interview_offer';
-      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, source, nextSlot));
+      return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, source, nextSlot, currentVacancy));
     }
 
     const body = 'Quedó registrado tu interés en entrevista. En este momento no tengo un horario válido para ofrecerte, así que el equipo de selección te contactará por este medio.';
@@ -2609,7 +2711,7 @@ export function webhookRouter(prisma) {
               debugTrace.attachment_high_volume = true;
               await pauseInterviewFlow(prisma, candidate.id, 'Multiples adjuntos no procesables requieren revision humana');
               if (!automationBlocked) {
-                await reply(prisma, candidate.id, from, 'Recibí varios adjuntos. Para evitar confundirme, dejo tu caso marcado para revisión del equipo; si tu hoja de vida está en PDF o Word/DOCX, envíala en un solo archivo.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
+                await reply(prisma, candidate.id, from, 'Recibí varios adjuntos. Para evitar confundirme, dejo tu caso marcado para revisión del equipo; si tu hoja de vida está en PDF, DOC o DOCX, envíala en un solo archivo.', '', { source: 'bot_attachment_rate_limit', fallbackReason: 'attachment_high_volume' });
               }
               continue;
             }
@@ -2835,7 +2937,7 @@ export function webhookRouter(prisma) {
           } else if (!automationBlocked && freshCandidate.currentStep === ConversationStep.DONE) {
             await reply(prisma, candidate.id, from, MENSAJE_DONE_CV_REPEAT, '', { source: 'bot_cv_request' });
           } else if (!automationBlocked) {
-            await reply(prisma, candidate.id, from, 'Recibí tu mensaje. Para continuar el registro, envíame la información solicitada por escrito o la hoja de vida en PDF/Word si aplica.', '', { source: 'bot_flow' });
+            await reply(prisma, candidate.id, from, 'Recibí tu mensaje. Para continuar el registro, envíame la información solicitada por escrito o la hoja de vida en PDF, DOC o DOCX si aplica.', '', { source: 'bot_flow' });
           }
         } finally {
           const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id }, select: { currentStep: true } });
