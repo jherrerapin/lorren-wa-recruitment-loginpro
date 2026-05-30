@@ -1,19 +1,51 @@
 export const BOGOTA_LOCALIDAD_ALIASES = Object.freeze({
+  usaquen: 'Usaquén',
+  'usaquén': 'Usaquén',
+  chapinero: 'Chapinero',
+  'santa fe': 'Santa Fe',
+  sancristobal: 'San Cristóbal',
+  'san cristobal': 'San Cristóbal',
+  'san cristóbal': 'San Cristóbal',
+  usme: 'Usme',
+  tunjuelito: 'Tunjuelito',
+  bosa: 'Bosa',
+  kennedy: 'Kennedy',
+  fontibon: 'Fontibón',
+  'fontibón': 'Fontibón',
+  engativa: 'Engativá',
+  'engativá': 'Engativá',
   suba: 'Suba',
+  barriosunidos: 'Barrios Unidos',
+  'barrios unidos': 'Barrios Unidos',
+  teusaquillo: 'Teusaquillo',
+  martires: 'Los Mártires',
+  'los martires': 'Los Mártires',
+  'los mártires': 'Los Mártires',
+  antonionarino: 'Antonio Nariño',
+  'antonio narino': 'Antonio Nariño',
+  'antonio nariño': 'Antonio Nariño',
+  puentearanda: 'Puente Aranda',
+  'puente aranda': 'Puente Aranda',
+  lacandelaria: 'La Candelaria',
+  'la candelaria': 'La Candelaria',
+  rafaeluribeuribe: 'Rafael Uribe Uribe',
+  'rafael uribe': 'Rafael Uribe Uribe',
+  'rafael uribe uribe': 'Rafael Uribe Uribe',
+  ciudadbolivar: 'Ciudad Bolívar',
+  'ciudad bolivar': 'Ciudad Bolívar',
+  'ciudad bolívar': 'Ciudad Bolívar',
+  sumapaz: 'Sumapaz',
+
   lisboa: 'Suba',
   bilbao: 'Suba',
   'suba lisboa': 'Suba',
   'suba bilbao': 'Suba',
-
-  kennedy: 'Kennedy',
   'patio bonito': 'Kennedy',
   'kennedy patio bonito': 'Kennedy',
-
-  bosa: 'Bosa',
   'bosa san jose': 'Bosa',
-
-  'ciudad bolivar': 'Ciudad Bolívar',
-  'ciudad bolívar': 'Ciudad Bolívar'
+  'montevideo': 'Puente Aranda',
+  'zona industrial': 'Puente Aranda',
+  'zona industrial montevideo': 'Puente Aranda'
 });
 
 const NON_DATA_LOCATION_TEXT = new Set([
