@@ -12,6 +12,16 @@ import { evaluateContextualResponseGate, inferContextualSemanticIntent, Contextu
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PAUSED_VACANCY_FLAG = 'paused_vacancy';
 const PAUSED_VACANCY_CAPTURE = 'paused_vacancy_capture';
+
+const COMPLETION_REPLY = 'Tu información y hoja de vida quedaron registradas correctamente. El equipo de selección revisará tu perfil y, si el proceso continúa, te contactará por este medio.';
+
+function buildDeterministicProgressReply(actResult = {}) {
+  if (actResult?.finalStep === ConversationStep.DONE && actResult?.readiness?.readyForDone) {
+    return COMPLETION_REPLY;
+  }
+  return null;
+}
+
 const CONSENT_MODEL = process.env.OPENAI_EXTRACTION_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 const APPOINTMENT_ACTION_INTENTS = new Set([
   'confirm_attendance',
@@ -551,9 +561,10 @@ export async function runChatEngine({
     prisma,
   });
 
+  const progressReply = buildDeterministicProgressReply(actResult);
   const guardedReply = actResult?.blockedActions?.length
     ? buildMissingFieldReply(actResult.readiness)
-    : result.reply;
+    : (progressReply || result.reply);
   const profileScopeGuard = guardReplyAgainstReadinessDrift(
     guardedReply,
     actResult?.readiness || readiness

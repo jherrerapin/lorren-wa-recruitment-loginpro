@@ -342,6 +342,15 @@ function normalizeExperienceDuration(value = '') {
   return `${amount} ${unit}`;
 }
 
+
+function isPositiveExperienceDuration(value = '') {
+  const normalized = normalizeExperienceDuration(value);
+  if (!normalized) return false;
+  const match = String(normalized).match(/^(\d+)\s+(?:mes|meses|año|años|semana|semanas)$/i);
+  if (!match?.[1]) return false;
+  return Number.parseInt(match[1], 10) > 0;
+}
+
 function detectStandaloneAge(text = '') {
   const tokens = String(text || '')
     .split(/[\s,]+/)
@@ -474,7 +483,7 @@ function looksLikeRoleOrIntentPhrase(value = '') {
 function detectDocumentTypeHint(text = '') {
   const patterns = [
     /\b(?:tipo(?:\s+de)?\s+documento|documento|identificacion|identificación)\s*(?:es|:|-)?\s*(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[ií]a|pasaporte|ppt)\b/i,
-    /\b(c[ée]dula\s+de\s+extranjer[ií]a|tarjeta\s+de\s+identidad|pasaporte|ppt)\b/i
+    /\b(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|c[ée]dula\s+de\s+extranjer[ií]a|tarjeta\s+de\s+identidad|pasaporte|ppt)\b/i
   ];
 
   for (const pattern of patterns) {
@@ -778,6 +787,15 @@ export function normalizeCandidateFields(fields = {}) {
   if (fields.experienceInfo) normalized.experienceInfo = normalizeExperienceInfo(fields.experienceInfo) || capitalizeWords(fields.experienceInfo);
   if (fields.experienceTime) normalized.experienceTime = normalizeExperienceDuration(fields.experienceTime);
   if (fields.experienceSummary) normalized.experienceSummary = String(fields.experienceSummary).trim().slice(0, 280);
+  if (!normalized.experienceInfo && isPositiveExperienceDuration(normalized.experienceTime)) {
+    normalized.experienceInfo = 'Sí';
+  }
+  if (!normalized.experienceInfo && normalized.experienceSummary) {
+    normalized.experienceInfo = 'Sí';
+  }
+  if (normalized.experienceInfo === 'No' && !normalized.experienceTime) {
+    normalized.experienceTime = '0';
+  }
   if (fields.gender) {
     const gender = String(fields.gender).trim().toUpperCase();
     if (['MALE', 'FEMALE', 'OTHER', 'UNKNOWN'].includes(gender)) normalized.gender = gender;

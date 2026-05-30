@@ -12,7 +12,7 @@
 import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
 import { splitFieldDecisions } from './debugTrace.js';
-import { alignCandidateLocationFields, getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import { alignCandidateLocationFields, getCandidateResidenceValue, getResidenceFieldConfig, normalizeCandidateFields } from './candidateData.js';
 import { getCandidateReadiness } from './readinessGuard.js';
 import { evaluateSchedulingGuard } from './schedulingGuard.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js';
@@ -102,6 +102,11 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
   }[candidate.gender] ?? 'No determinado';
 
   const readiness = getCandidateReadiness(candidate, vacancy);
+  const inferredExperience = normalizeCandidateFields({
+    experienceInfo: candidate.experienceInfo,
+    experienceTime: candidate.experienceTime,
+    experienceSummary: candidate.experienceSummary
+  });
   const hasCv = readiness.hasValidCv;
   const coreDataComplete = readiness.coreDataComplete;
   const residenceConfig = getResidenceFieldConfig(vacancy || candidate?.vacancy);
@@ -148,8 +153,8 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
       },
       medicalRestrictions: buildFieldState(normalizeMedicalRestrictionsLabel(candidate.medicalRestrictions)),
       transportMode: buildFieldState(candidate.transportMode),
-      experienceInfo: buildFieldState(candidate.experienceInfo),
-      experienceTime: buildFieldState(candidate.experienceTime)
+      experienceInfo: buildFieldState(candidate.experienceInfo || inferredExperience.experienceInfo),
+      experienceTime: buildFieldState(candidate.experienceTime || inferredExperience.experienceTime)
     }
   };
 }
@@ -1006,7 +1011,7 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     }).catch((error) => console.error('[ACT_STEP_UPDATE_ERROR]', error?.message));
   }
 
-  return { readiness: readinessAfterMerge, blockedActions };
+  return { readiness: readinessAfterMerge, blockedActions, finalStep };
 }
 
 export function sanitizeEngineReplyForVacancy(context = {}) {

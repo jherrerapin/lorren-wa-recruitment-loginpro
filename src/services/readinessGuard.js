@@ -1,4 +1,4 @@
-import { getCandidateResidenceValue, getResidenceFieldConfig } from './candidateData.js';
+import { getCandidateResidenceValue, getResidenceFieldConfig, normalizeCandidateFields } from './candidateData.js';
 import { isCvMimeTypeAllowed } from './cvFlow.js';
 
 export const CORE_FIELDS = [
@@ -79,6 +79,20 @@ function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== '';
 }
 
+function hasCandidateFieldValue(candidate = {}, field = '') {
+  if (hasValue(candidate[field])) return true;
+
+  if (field === 'experienceInfo') {
+    const inferred = normalizeCandidateFields({
+      experienceTime: candidate.experienceTime,
+      experienceSummary: candidate.experienceSummary
+    });
+    return hasValue(inferred.experienceInfo);
+  }
+
+  return false;
+}
+
 export function hasValidCv(candidate = {}) {
   const mime = String(candidate.cvMimeType || '').trim().toLowerCase();
   const filename = String(candidate.cvOriginalName || '').trim();
@@ -124,7 +138,7 @@ export function getCandidateReadiness(candidate = {}, vacancy = null, options = 
       if (!hasValue(getCandidateResidenceValue(candidate, vacancyContext))) missingFields.push(field);
       continue;
     }
-    if (!hasValue(candidate[field])) missingFields.push(field);
+    if (!hasCandidateFieldValue(candidate, field)) missingFields.push(field);
   }
 
   const requireCv = options.requireCv !== false;
