@@ -21,6 +21,7 @@ const INTERVIEW_REMINDER_LEAD_MS = Number.parseInt(
 ) || (40 * 60 * 1000);
 const INTERVIEW_REMINDER_EARLY_TOLERANCE_MS = 5 * 60 * 1000;
 const INTERVIEW_REMINDER_LATE_TOLERANCE_MS = 10 * 60 * 1000;
+const ACTIVE_INTERVIEW_STATUSES = ['SCHEDULED', 'CONFIRMED'];
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 const INTERVIEW_BOOKING_REMINDER_SOURCE = 'interview_booking_reminder';
 
@@ -124,6 +125,24 @@ export function canScheduleReminder(candidate) {
   return canScheduleReminderPolicy(candidate);
 }
 
+async function claimCandidateProcessReminder(prisma, candidateId, now) {
+  if (typeof prisma?.candidate?.updateMany !== 'function') return false;
+  const result = await prisma.candidate.updateMany({
+    where: {
+      id: candidateId,
+      reminderState: 'SCHEDULED',
+      reminderScheduledFor: { lte: now }
+    },
+    data: {
+      reminderState: 'SENT',
+      reminderScheduledFor: null,
+      lastReminderAt: now,
+      lastOutboundAt: now
+    }
+  });
+  return result.count === 1;
+}
+
 export async function scheduleReminderForCandidate(prisma, candidateId, now = new Date()) {
   const candidate = await prisma.candidate.findUnique({ where: { id: candidateId } });
   if (!canScheduleReminder(candidate)) {
@@ -203,7 +222,7 @@ async function findActiveInterviewBooking(prisma, candidateId) {
   return prisma.interviewBooking.findFirst({
     where: {
       candidateId,
-      status: { in: ['SCHEDULED', 'CONFIRMED'] }
+      status: { in: ACTIVE_INTERVIEW_STATUSES }
     },
     orderBy: { scheduledAt: 'asc' },
     select: {
@@ -260,14 +279,122 @@ async function hasReminderReplyAfterSentAt(prisma, booking) {
   return replies.length > 0;
 }
 
+async function closeUnclaimedInterviewReminderWindow(prisma, booking) {
+  if (!booking?.id || typeof prisma?.interviewBooking?.updateMany !== 'function') return false;
+  const result = await prisma.interviewBooking.updateMany({
+    where: {
+      id: booking.id,
+      reminderSentAt: null,
+      reminderWindowClosed: false
+    },
+    data: {
+      reminderWindowClosed: true
+    }
+  });
+  return result.count === 1;
+}
+
+async function hasInterviewReminderAlreadySentInWindow(prisma, booking, windowStart, windowEnd) {
+  if (!booking?.candidateId || typeof prisma?.interviewBooking?.findFirst !== 'function') return false;
+  const existing = await prisma.interviewBooking.findFirst({
+    where: {
+      candidateId: booking.candidateId,
+      status: { in: ACTIVE_INTERVIEW_STATUSES },
+      reminderSentAt: { not: null },
+      scheduledAt: {
+        gte: windowStart,
+        lte: windowEnd
+      }
+    },
+    orderBy: { reminderSentAt: 'asc' },
+    select: { id: true }
+  });
+  return Boolean(existing?.id && existing.id !== booking.id);
+}
+
+async function claimInterviewBookingReminder(prisma, booking, now, { windowStart, windowEnd } = {}) {
+  if (!booking?.id || typeof prisma?.interviewBooking?.updateMany !== 'function') return false;
+
+  if (await hasInterviewReminderAlreadySentInWindow(prisma, booking, windowStart, windowEnd)) {
+    await closeUnclaimedInterviewReminderWindow(prisma, booking);
+    console.warn('[REMINDER_TRACE]', JSON.stringify({
+      event: 'interview_reminder_duplicate_booking_closed',
+      bookingId: booking.id,
+      candidateId: booking.candidateId
+    }));
+    return false;
+  }
+
+  const result = await prisma.interviewBooking.updateMany({
+    where: {
+      id: booking.id,
+      candidateId: booking.candidateId,
+      status: { in: ACTIVE_INTERVIEW_STATUSES },
+      reminderSentAt: null,
+      reminderWindowClosed: false,
+      scheduledAt: {
+        gte: windowStart,
+        lte: windowEnd
+      }
+    },
+    data: {
+      reminderSentAt: now,
+      reminderWindowClosed: true
+    }
+  });
+
+  return result.count === 1;
+}
+
+async function claimInterviewNoResponse(prisma, booking, now, windowEnd) {
+  if (!booking?.id || typeof prisma?.interviewBooking?.updateMany !== 'function') return false;
+  const result = await prisma.interviewBooking.updateMany({
+    where: {
+      id: booking.id,
+      candidateId: booking.candidateId,
+      status: { in: ACTIVE_INTERVIEW_STATUSES },
+      reminderSentAt: { not: null },
+      scheduledAt: {
+        gte: now,
+        lte: windowEnd
+      }
+    },
+    data: {
+      status: 'NO_RESPONSE',
+      reminderWindowClosed: true
+    }
+  });
+  return result.count === 1;
+}
+
+async function claimInterviewKeepalive(prisma, candidate, now) {
+  if (!candidate?.id || typeof prisma?.candidate?.updateMany !== 'function') return false;
+
+  const lastOutboundGuard = candidate.lastOutboundAt
+    ? { lastOutboundAt: { lte: candidate.lastOutboundAt } }
+    : { lastOutboundAt: null };
+
+  const result = await prisma.candidate.updateMany({
+    where: {
+      id: candidate.id,
+      currentStep: { in: ['SCHEDULING', 'SCHEDULED'] },
+      botPaused: false,
+      OR: [lastOutboundGuard]
+    },
+    data: { lastOutboundAt: now }
+  });
+
+  return result.count === 1;
+}
+
 async function runInterviewNoResponseDispatcher(prisma, now = new Date(), candidateId = null) {
-  if (typeof prisma?.interviewBooking?.findMany !== 'function' || typeof prisma?.interviewBooking?.update !== 'function') return;
+  if (typeof prisma?.interviewBooking?.findMany !== 'function' || typeof prisma?.interviewBooking?.updateMany !== 'function') return;
 
   const windowEnd = new Date(now.getTime() + 5 * 60 * 1000);
   const bookings = await prisma.interviewBooking.findMany({
     where: {
       ...(candidateId ? { candidateId } : {}),
-      status: { in: ['SCHEDULED', 'CONFIRMED'] },
+      status: { in: ACTIVE_INTERVIEW_STATUSES },
       reminderSentAt: { not: null },
       scheduledAt: {
         gte: now,
@@ -290,6 +417,7 @@ async function runInterviewNoResponseDispatcher(prisma, now = new Date(), candid
   for (const booking of bookings) {
     const hasReminderReply = await hasReminderReplyAfterSentAt(prisma, booking);
     if (!shouldMarkNoResponse(booking, { now, hasReminderReply })) continue;
+    if (!await claimInterviewNoResponse(prisma, booking, now, windowEnd)) continue;
 
     const candidate = await prisma.candidate.findUnique({ where: { id: booking.candidateId } });
     if (candidate?.phone) {
@@ -302,13 +430,6 @@ async function runInterviewNoResponseDispatcher(prisma, now = new Date(), candid
       });
     }
 
-    await prisma.interviewBooking.update({
-      where: { id: booking.id },
-      data: {
-        status: 'NO_RESPONSE',
-        reminderWindowClosed: true
-      }
-    });
     console.log('[REMINDER_TRACE]', JSON.stringify({
       event: 'interview_marked_no_response',
       bookingId: booking.id,
@@ -343,8 +464,9 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
   const candidateBookings = await prisma.interviewBooking.findMany({
     where: {
       ...(candidateId ? { candidateId } : {}),
-      status: { in: ['SCHEDULED', 'CONFIRMED'] },
+      status: { in: ACTIVE_INTERVIEW_STATUSES },
       reminderSentAt: null,
+      reminderWindowClosed: false,
       scheduledAt: {
         gte: windowStart,
         lte: windowEnd
@@ -371,6 +493,8 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
     count: candidateBookings.length
   }));
 
+  const processedCandidateIds = new Set();
+
   for (const booking of candidateBookings) {
     const scheduledAt = new Date(booking.scheduledAt);
     console.log('[REMINDER_TRACE]', JSON.stringify({
@@ -379,6 +503,17 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
       candidateId: booking.candidateId,
       scheduledAt: scheduledAt.toISOString()
     }));
+
+    if (processedCandidateIds.has(booking.candidateId)) {
+      await closeUnclaimedInterviewReminderWindow(prisma, booking);
+      console.warn('[REMINDER_TRACE]', JSON.stringify({
+        event: 'interview_reminder_duplicate_in_batch_closed',
+        bookingId: booking.id,
+        candidateId: booking.candidateId,
+        scheduledAt: scheduledAt.toISOString()
+      }));
+      continue;
+    }
 
     const candidate = await prisma.candidate.findUnique({ where: { id: booking.candidateId } });
     if (!candidate || !hasActiveInterviewBooking(booking)) {
@@ -391,17 +526,21 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
       continue;
     }
 
+    if (!await claimInterviewBookingReminder(prisma, booking, now, { windowStart, windowEnd })) {
+      console.warn('[REMINDER_TRACE]', JSON.stringify({
+        event: 'interview_reminder_claim_skipped',
+        bookingId: booking.id,
+        candidateId: booking.candidateId,
+        scheduledAt: scheduledAt.toISOString()
+      }));
+      continue;
+    }
+
+    processedCandidateIds.add(booking.candidateId);
+
     const vacancy = await findBookingVacancy(prisma, booking, candidate);
     const reminderText = buildInterviewReminderText(candidate, booking, vacancy);
     try {
-      // Mark as sent FIRST to prevent duplicate dispatch on next tick
-      await prisma.interviewBooking.update({
-        where: { id: booking.id },
-        data: {
-          reminderSentAt: now,
-          reminderWindowClosed: true
-        }
-      });
       await sendTextMessage(candidate.phone, reminderText);
       await storeOutbound(prisma, candidate.id, reminderText, {
         source: INTERVIEW_BOOKING_REMINDER_SOURCE,
@@ -447,6 +586,7 @@ async function runInterviewKeepaliveDispatcher(prisma, now = new Date(), candida
     const booking = await findActiveInterviewBooking(prisma, candidate.id);
     if (!booking || shouldStopInterviewAutomation(booking, now)) continue;
     if (await hasInterviewKeepaliveSinceLastInbound(prisma, candidate.id, candidate.lastInboundAt)) continue;
+    if (!await claimInterviewKeepalive(prisma, candidate, now)) continue;
 
     const body = buildInterviewKeepaliveText(candidate, booking);
     const windowState = getWhatsappWindowState(candidate.lastInboundAt, now);
@@ -457,12 +597,6 @@ async function runInterviewKeepaliveDispatcher(prisma, now = new Date(), candida
       bookingId: booking.id,
       windowExpiresAt: windowState.expiresAt?.toISOString?.() || null
     });
-    await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: {
-        lastOutboundAt: now
-      }
-    });
     console.log('[REMINDER_TRACE]', JSON.stringify({
       candidateId: candidate.id,
       bookingId: booking.id,
@@ -472,13 +606,12 @@ async function runInterviewKeepaliveDispatcher(prisma, now = new Date(), candida
   }
 }
 
-
 export async function handleInterviewReminderResponse(prisma, candidateId, responseText, { now = new Date() } = {}) {
   if (!candidateId || typeof prisma?.interviewBooking?.findFirst !== 'function') return { status: 'UNCHANGED', intent: 'none' };
   const booking = await prisma.interviewBooking.findFirst({
     where: {
       candidateId,
-      status: { in: ['SCHEDULED', 'CONFIRMED'] }
+      status: { in: ACTIVE_INTERVIEW_STATUSES }
     },
     orderBy: { scheduledAt: 'asc' }
   });
@@ -517,24 +650,21 @@ export async function runCandidateProcessReminderDispatcher(prisma, { now = new 
   for (const candidate of dueCandidates) {
     const shouldSkip = !canScheduleReminder(candidate) || !getWhatsappWindowState(candidate.lastInboundAt, now).isOpen;
     if (shouldSkip) {
-      await prisma.candidate.update({
-        where: { id: candidate.id },
+      await prisma.candidate.updateMany({
+        where: {
+          id: candidate.id,
+          reminderState: 'SCHEDULED'
+        },
         data: { reminderState: 'SKIPPED', reminderScheduledFor: null }
       });
       console.log('[REMINDER_TRACE]', JSON.stringify({ candidateId: candidate.id, event: 'reminder_skipped' }));
       continue;
     }
 
-    // Mark as SENT FIRST before sending to prevent duplicate dispatch on next tick
-    await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: {
-        reminderState: 'SENT',
-        reminderScheduledFor: null,
-        lastReminderAt: now,
-        lastOutboundAt: now
-      }
-    });
+    if (!await claimCandidateProcessReminder(prisma, candidate.id, now)) {
+      console.warn('[REMINDER_TRACE]', JSON.stringify({ candidateId: candidate.id, event: 'reminder_claim_skipped' }));
+      continue;
+    }
 
     const reminderText = buildReminderText(candidate);
     await sendTextMessage(candidate.phone, reminderText);
