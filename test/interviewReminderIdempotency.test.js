@@ -10,10 +10,10 @@ function setupWhatsappEnv() {
   process.env.META_ACCESS_TOKEN = 'meta-access-token';
 }
 
-test('recordatorio de entrevista es idempotente cuando existen bookings activos duplicados para el mismo candidato', async () => {
+test('recordatorio de entrevista es idempotente para entrevista de 10:00 a.m. Colombia con bookings activos duplicados', async () => {
   setupWhatsappEnv();
 
-  const now = new Date('2026-04-08T21:00:00.000Z');
+  const now = new Date('2026-04-08T14:20:00.000Z'); // 9:20 a.m. Colombia
   const prisma = createMockPrisma({
     candidates: [{
       id: 'cand-duplicate-bookings',
@@ -22,7 +22,7 @@ test('recordatorio de entrevista es idempotente cuando existen bookings activos 
       status: 'REGISTRADO',
       currentStep: 'SCHEDULED',
       reminderState: 'NONE',
-      lastInboundAt: new Date('2026-04-08T19:50:00.000Z'),
+      lastInboundAt: new Date('2026-04-08T13:50:00.000Z'),
       lastOutboundAt: null,
       botPaused: false,
       vacancyId: 'vac-duplicate-bookings'
@@ -38,7 +38,7 @@ test('recordatorio de entrevista es idempotente cuando existen bookings activos 
       candidateId: 'cand-duplicate-bookings',
       vacancyId: 'vac-duplicate-bookings',
       slotId: 'slot-1',
-      scheduledAt: new Date('2026-04-08T21:40:00.000Z'),
+      scheduledAt: new Date('2026-04-08T15:00:00.000Z'), // 10:00 a.m. Colombia
       status: 'SCHEDULED',
       reminderSentAt: null,
       reminderWindowClosed: false
@@ -47,7 +47,7 @@ test('recordatorio de entrevista es idempotente cuando existen bookings activos 
       candidateId: 'cand-duplicate-bookings',
       vacancyId: 'vac-duplicate-bookings',
       slotId: 'slot-2',
-      scheduledAt: new Date('2026-04-08T21:42:00.000Z'),
+      scheduledAt: new Date('2026-04-08T15:02:00.000Z'), // 10:02 a.m. Colombia
       status: 'SCHEDULED',
       reminderSentAt: null,
       reminderWindowClosed: false
