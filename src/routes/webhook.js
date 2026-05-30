@@ -1982,7 +1982,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return replyWithVacancyContext(candidate, currentVacancy);
   }
 
-  if (!shouldPreferVacancyContextReply && !shouldPreferStructuredFieldReply && await tryPrimaryEngineReply(candidate, currentVacancy)) {
+  if (!shouldPreferVacancyContextReply && !shouldPreferStructuredFieldReply && !hasDataIntent && await tryPrimaryEngineReply(candidate, currentVacancy)) {
     return;
   }
 

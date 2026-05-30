@@ -155,13 +155,13 @@ export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, 
   const clearAlternate = options.clearAlternate !== false;
 
   if (config.field === 'locality') {
-    const extractedLocality = normalized.locality || normalized.neighborhood || null;
-    const bogotaLocalidad = normalizeBogotaLocalidad(extractedLocality);
+    const explicitLocality = normalized.locality || null;
+    const bogotaLocalidad = normalizeBogotaLocalidad(explicitLocality || normalized.neighborhood || null);
     if (bogotaLocalidad) {
       normalized.locality = bogotaLocalidad;
       if (clearAlternate) normalized.neighborhood = null;
-    } else if (extractedLocality) {
-      normalized.locality = null;
+    } else if (explicitLocality) {
+      normalized.locality = explicitLocality;
       if (clearAlternate) normalized.neighborhood = null;
     }
     return normalized;
@@ -420,9 +420,10 @@ export function normalizeTransportMode(value = '') {
 
 function cleanLocationValue(value = '') {
   return String(value || '')
-    .replace(/\b(?:localidad|comuna|zona|sector|barrio|vereda|ciudadela)\s*[:\-]?\s*/i, '')
+    .replace(/\b(?:localidad|comuna|zona|sector|barrio|vereda|ciudadela)\s*(?:de\s+)?[:\-]?\s*/i, '')
     .replace(/\b(?:y\s+tengo|tengo|con|y)\b.*$/i, '')
     .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, '')
+    .replace(/^(?:de|del)\s+/i, '')
     .trim();
 }
 
