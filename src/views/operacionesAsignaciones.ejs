@@ -91,10 +91,7 @@
             <div class="field"><label for="operationalCityId">Ciudad manual</label><select id="operationalCityId" name="operationalCityId"><option value="">Todas</option><% cities.forEach((city)=>{ %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %></select></div>
             <div class="field"><label for="locality">Localidad</label><select id="locality" name="locality"><option value="">Todas</option><% localities.forEach((item)=>{ %><option value="<%= item %>" <%= filters.locality===item?'selected':'' %>><%= item %></option><% }) %></select></div>
           </div>
-          <div class="filters-row">
-            <div class="field"><label for="transportMode">Transporte</label><select id="transportMode" name="transportMode"><option value="">Todos</option><% transportModes.forEach((item)=>{ %><option value="<%= item %>" <%= filters.transportMode===item?'selected':'' %>><%= item %></option><% }) %></select></div>
-            <div class="field"><label for="vacancyId">Perfil</label><select id="vacancyId" name="vacancyId"><option value="">Todos</option><% vacancies.forEach((vacancy)=>{ %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %></option><% }) %></select></div>
-          </div>
+          <div class="field"><label for="transportMode">Transporte</label><select id="transportMode" name="transportMode"><option value="">Todos</option><% transportModes.forEach((item)=>{ %><option value="<%= item %>" <%= filters.transportMode===item?'selected':'' %>><%= item %></option><% }) %></select></div>
           <div class="field"><label for="status">Estado</label><select id="status" name="status"><option value="">Todos</option><option value="AVAILABLE" <%= filters.status==='AVAILABLE'?'selected':'' %>>Disponible</option><option value="ACTIVE" <%= filters.status==='ACTIVE'?'selected':'' %>>Activo</option><option value="INACTIVE" <%= filters.status==='INACTIVE'?'selected':'' %>>Inactivo</option></select></div>
           <button class="btn btn-primary" type="submit">Filtrar auxiliares</button>
         </form>
