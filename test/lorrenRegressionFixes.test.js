@@ -6,6 +6,7 @@ import { installOpenAIMock } from './helpers/mockOpenAI.js';
 import { buildFutureSlot } from './helpers/mockScheduler.js';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
 import { isCvMimeTypeAllowed } from '../src/services/cvFlow.js';
+import { alignCandidateLocationFields, normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
 
 process.env.NODE_ENV = 'test';
 process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
@@ -207,4 +208,57 @@ test('guard de estado evita pedir HV cuando ya hay hoja de vida válida', async 
   assert.deepEqual(guarded.blockedReasons, ['resolved_cv_requested_again']);
   assert.match(guarded.text, /hoja de vida/i);
   assert.doesNotMatch(guarded.text, /env[ií]ame tu hoja de vida como archivo/i);
+});
+
+
+test('conserva una localidad explícita de Bogotá aunque no esté en alias estáticos', () => {
+  const parsed = parseNaturalData('Localidad de Usaquen');
+  const normalized = normalizeCandidateFields(parsed);
+  const aligned = alignCandidateLocationFields(normalized, BODEGA_VACANCY, { clearAlternate: false });
+
+  assert.equal(aligned.locality, 'Usaquen');
+});
+
+test('registra bloque completo de datos y no vuelve a pedir campos ya dados', async () => {
+  const prisma = createMockPrisma({
+    candidates: [candidate({
+      currentStep: 'COLLECTING_DATA',
+      vacancyId: BODEGA_VACANCY.id,
+      cvData: Buffer.from('%PDF-1.1\n'),
+      cvOriginalName: 'HOJA DE VIDA ACTUALIZADA.pdf',
+      cvMimeType: 'application/pdf'
+    })],
+    vacancies: [BODEGA_VACANCY],
+    operations: [OP_BOG],
+    interviewSlots: [buildFutureSlot({ vacancyId: BODEGA_VACANCY.id, id: 'slot-datos-completos', hoursFromNow: 24 })]
+  });
+  const whatsappMock = createWhatsappMock();
+  const restoreAxios = installOpenAIMock({ whatsappMock });
+
+  try {
+    const fresh = await prisma.candidate.findUnique({ where: { id: 'candidate-1' } });
+    const debugTrace = createDebugTrace({ phone: fresh.phone, currentStepBefore: fresh.currentStep });
+    await processText(
+      prisma,
+      fresh,
+      fresh.phone,
+      'Oscar Eduardo Londoño Rodríguez\nC.c 1014259322\nEdad 31 años\nLocalidad de Usaquen\nNo tengo restricciones médicas\nY me movilizó en bicicleta',
+      debugTrace,
+      {}
+    );
+
+    const updated = await prisma.candidate.findUnique({ where: { id: 'candidate-1' } });
+    const lastReply = whatsappMock.sentMessages.at(-1).body;
+
+    assert.equal(updated.fullName, 'Oscar Eduardo Londoño Rodríguez');
+    assert.equal(updated.documentType, 'CC');
+    assert.equal(updated.documentNumber, '1014259322');
+    assert.equal(updated.age, 31);
+    assert.equal(updated.locality, 'Usaquen');
+    assert.equal(updated.medicalRestrictions, 'Sin restricciones médicas');
+    assert.equal(updated.transportMode, 'Bicicleta');
+    assert.doesNotMatch(lastReply, /me queda pendiente|falt(?:a|an).*nombre completo|falt(?:a|an).*tipo de documento|falt(?:a|an).*localidad|falt(?:a|an).*restricciones/i);
+  } finally {
+    restoreAxios();
+  }
 });
