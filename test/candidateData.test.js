@@ -8,12 +8,48 @@ import {
   parseNaturalData
 } from '../src/services/candidateData.js';
 import { splitFieldDecisions } from '../src/services/debugTrace.js';
+import { getCandidateReadiness } from '../src/services/readinessGuard.js';
 
 test('frase de intención no se persiste como fullName', () => {
   const normalized = normalizeCandidateFields({ fullName: 'me interesa' });
   const decisions = splitFieldDecisions(normalized, { fullName: null });
   assert.equal(decisions.suspiciousFullNameRejected, true);
   assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
+});
+
+
+test('normaliza C.C y cédula aisladas como tipo CC junto al número', () => {
+  const ccParsed = parseNaturalData(`Mauricio Alejandro Cruz Barbosa
+C.C 1110466290`);
+  const cedulaParsed = parseNaturalData('documento cédula 1110466290');
+
+  assert.equal(normalizeCandidateFields(ccParsed).documentType, 'CC');
+  assert.equal(normalizeCandidateFields(ccParsed).documentNumber, '1110466290');
+  assert.equal(normalizeCandidateFields(cedulaParsed).documentType, 'CC');
+  assert.equal(normalizeCandidateFields(cedulaParsed).documentNumber, '1110466290');
+});
+
+test('un tiempo positivo de experiencia implica experiencia afirmativa en cualquier fuente', () => {
+  const normalized = normalizeCandidateFields({ experienceTime: '3 años' });
+
+  assert.equal(normalized.experienceInfo, 'Sí');
+  assert.equal(normalized.experienceTime, '3 años');
+});
+
+test('readiness no vuelve a pedir experiencia si ya existe tiempo positivo', () => {
+  const candidate = {
+    fullName: 'Mauricio Alejandro Cruz Barbosa',
+    documentType: 'CC',
+    documentNumber: '1110466290',
+    age: 38,
+    neighborhood: 'Palermo',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    experienceTime: '3 años'
+  };
+  const vacancy = { id: 'lider-ops', city: 'Ibague', experienceRequired: 'YES' };
+
+  assert.deepEqual(getCandidateReadiness(candidate, vacancy, { requireCv: false }).missingFields, []);
 });
 
 test('captura y normaliza nombre básico sin prefijo', () => {
