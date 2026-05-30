@@ -5,12 +5,18 @@ import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { guardReplyAgainstReadinessDrift, sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
 import { detectConversationIntent } from './conversationIntent.js';
+import { detectInterviewIntent } from './interviewLifecycle.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PAUSED_VACANCY_FLAG = 'paused_vacancy';
 const PAUSED_VACANCY_CAPTURE = 'paused_vacancy_capture';
 const CONSENT_MODEL = process.env.OPENAI_EXTRACTION_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const APPOINTMENT_INTENTS_HANDLED_BY_WEBHOOK = new Set([
+  'confirm_attendance',
+  'cancel_interview',
+  'reschedule_interview'
+]);
 
 const PAUSED_CONSENT_SCHEMA = {
   type: 'object',
@@ -70,6 +76,43 @@ function buildBypassResult({ reply, nextStep, reason, consent = null }) {
     pausedVacancyGuard: reason,
     pausedVacancyConsent: consent
   };
+}
+
+function buildFallbackToDeterministicFlowResult(reason, currentStep) {
+  return {
+    reply: '',
+    actions: [],
+    nextStep: currentStep,
+    extractedFields: {},
+    candidateFields: {},
+    fallback: true,
+    fallbackReason: reason,
+    loopGuardApplied: false,
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    suppressed: false,
+    suppressedReason: null
+  };
+}
+
+async function loadActiveInterviewBooking(prisma, candidateId) {
+  if (!candidateId || typeof prisma?.interviewBooking?.findFirst !== 'function') return null;
+  return prisma.interviewBooking.findFirst({
+    where: {
+      candidateId,
+      status: { in: ['SCHEDULED', 'CONFIRMED'] }
+    },
+    orderBy: { scheduledAt: 'asc' },
+    select: {
+      id: true,
+      candidateId: true,
+      vacancyId: true,
+      slotId: true,
+      scheduledAt: true,
+      status: true,
+      reminderSentAt: true,
+      reminderWindowClosed: true
+    }
+  }).catch(() => null);
 }
 
 async function analyzePausedVacancyConsent({ candidate, vacancy, inboundText, currentStep, recentMessages }) {
@@ -269,9 +312,24 @@ export async function runChatEngine({
   candidateFieldHints = {},
 }) {
   const currentStep = candidate.currentStep || ConversationStep.MENU;
-  const activeInterviewBooking = nextSlot?.isConfirmedBooking
+  const storedActiveInterviewBooking = await loadActiveInterviewBooking(prisma, candidate.id);
+  const activeInterviewBooking = storedActiveInterviewBooking || (nextSlot?.isConfirmedBooking
     ? { status: 'SCHEDULED', scheduledAt: nextSlot.date }
-    : null;
+    : null);
+  const interviewIntent = detectInterviewIntent({
+    text: inboundText,
+    booking: activeInterviewBooking,
+    now: new Date()
+  });
+
+  if (
+    activeInterviewBooking
+    && [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(currentStep)
+    && APPOINTMENT_INTENTS_HANDLED_BY_WEBHOOK.has(interviewIntent)
+  ) {
+    return buildFallbackToDeterministicFlowResult('delegate_interview_intent_to_webhook', currentStep);
+  }
+
   const pausedGuard = await guardPausedVacancy({ prisma, candidate, vacancy, inboundText, recentMessages, currentStep });
   if (pausedGuard) return pausedGuard;
 
@@ -292,6 +350,7 @@ export async function runChatEngine({
     const semanticIntent = inferContextualSemanticIntent({
       text: inboundText,
       resolvedIntent,
+      interviewIntent,
       isQuestion: /[?¿]/.test(String(inboundText || '')),
       hasDataIntent: resolvedIntent === 'provide_data'
     });
