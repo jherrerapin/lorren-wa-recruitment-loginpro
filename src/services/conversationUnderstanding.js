@@ -75,7 +75,7 @@ function detectCorrectionIntent(text = '', aiResult = {}) {
 }
 
 function findTransportContradiction(candidateFields = {}) {
-  if (candidateFields.transportMode !== 'Sin medio de transporte') return null;
+  if (candidateFields.transportMode !== 'Publico') return null;
   return {
     field: 'transportMode',
     current: candidateFields.transportMode,

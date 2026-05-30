@@ -51,7 +51,7 @@ test('isSuspiciousFullName keeps real names valid', () => {
 test('permite sobrescritura explícita de transporte en corrección', () => {
   const decisions = splitFieldDecisions(
     { transportMode: 'Moto' },
-    { transportMode: 'Sin medio de transporte' },
+    { transportMode: 'Publico' },
     { allowOverwriteFields: ['transportMode'] }
   );
   assert.deepEqual(decisions.persistedFields, ['transportMode']);
