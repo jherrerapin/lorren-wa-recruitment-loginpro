@@ -220,8 +220,8 @@ function detectTransportKeyword(text = '') {
   if (CAR_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Carro');
   if (BIKE_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Bicicleta');
   if (
-    BUS_VARIANTS.some((variant) => normalized.includes(normalizeLooseText(variant)))
-    || RIDE_HAIL_VARIANTS.some((variant) => normalized.includes(normalizeLooseText(variant)))
+    BUS_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))
+    || RIDE_HAIL_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))
   ) {
     detected.push('Bus');
   }
@@ -381,7 +381,7 @@ function normalizeExperienceTime(value = '') {
   if (!raw) return null;
 
   const wordToNum = {
-    un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
+    un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 3, cinco: 5,
     seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11,
     doce: 12, trece: 13, catorce: 14, quince: 15
   };
@@ -416,7 +416,6 @@ function normalizeMedicalRestrictions(value = '') {
 export function normalizeTransportMode(value = '') {
   return deterministicNormalizeTransportMode(value);
 }
-
 
 function cleanLocationValue(value = '') {
   return String(value || '')
@@ -664,9 +663,14 @@ export function parseNaturalData(text = '') {
   if (neighborhoodMatch) {
     const cleaned = neighborhoodMatch[1].replace(/\b(y\s+tengo|tengo|con|y)\b.*$/i, '').trim();
     const normalized = capitalizeWords(cleaned);
-    result.neighborhood = /^ciudadela/i.test(neighborhoodMatch[0]) && !/^ciudadela\s+/i.test(normalized)
-      ? `Ciudadela ${normalized}`.trim()
-      : normalized;
+    const bogotaLocalidad = normalizeBogotaLocalidad(cleaned);
+    if (/\blocalidad\b/i.test(neighborhoodMatch[0]) && bogotaLocalidad) {
+      result.locality = bogotaLocalidad;
+    } else {
+      result.neighborhood = /^ciudadela/i.test(neighborhoodMatch[0]) && !/^ciudadela\s+/i.test(normalized)
+        ? `Ciudadela ${normalized}`.trim()
+        : normalized;
+    }
     remaining = remaining.replace(neighborhoodMatch[0], ' ');
   }
 
@@ -686,9 +690,16 @@ export function parseNaturalData(text = '') {
     if (implicit) result.neighborhood = capitalizeWords(implicit);
   }
 
+  if (!result.locality) {
+    const standaloneBogotaLocality = normalizeBogotaLocalidad(cleanLocationValue(compact));
+    if (standaloneBogotaLocality) result.locality = standaloneBogotaLocality;
+  }
+
   if (!result.neighborhood || !result.locality) {
     const inferredLocation = detectLocationFromSequence(text);
-    if (!result.locality && inferredLocation.locality) result.locality = inferredLocation.locality;
+    if (!result.locality && inferredLocation.locality) {
+      result.locality = normalizeBogotaLocalidad(inferredLocation.locality) || inferredLocation.locality;
+    }
     if (!result.neighborhood && inferredLocation.neighborhood) result.neighborhood = inferredLocation.neighborhood;
   }
 
@@ -779,7 +790,7 @@ export function normalizeCandidateFields(fields = {}) {
     if (Number.isFinite(age)) normalized.age = age;
   }
   if (fields.neighborhood && !looksLikeGreetingLocation(fields.neighborhood)) normalized.neighborhood = normalizeResidenceValue(fields.neighborhood);
-  if (fields.locality && !looksLikeGreetingLocation(fields.locality)) normalized.locality = normalizeResidenceValue(fields.locality);
+  if (fields.locality && !looksLikeGreetingLocation(fields.locality)) normalized.locality = normalizeBogotaLocalidad(fields.locality) || normalizeResidenceValue(fields.locality);
   if (fields.medicalRestrictions) normalized.medicalRestrictions = normalizeMedicalRestrictions(fields.medicalRestrictions);
   if (fields.transportMode) {
     const normalizedTransport = normalizeTransportMode(fields.transportMode);
