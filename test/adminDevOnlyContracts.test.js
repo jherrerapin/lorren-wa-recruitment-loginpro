@@ -149,3 +149,27 @@ test('logo text is visible on dark navigation', () => {
   const logo = readSource('src/public/logo-loginpro.svg');
   assert.match(logo, /fill=["']#ffffff["']>LoginPro</);
 });
+
+test('dev vacancy panel filters candidate registrations by date and exports the same range', () => {
+  const adminSource = readSource('src/routes/admin.js');
+  const vacanciesView = readSource('src/views/vacancies.ejs');
+
+  assert.match(adminSource, /function normalizeCandidateDateRangeFilter\(query = \{\}\)/);
+  assert.match(adminSource, /createdAtWhere: Object\.keys\(createdAt\)\.length \? createdAt : null/);
+  assert.match(adminSource, /function buildVacancyDevStats\(vacancies = \[\], candidates = \[\], dateFilter = \{\}\)/);
+  assert.match(adminSource, /isOperationallyRegistered\(candidate\)/);
+  assert.match(adminSource, /isOperationallyCompleteWithoutCv\(candidate\)/);
+  assert.match(adminSource, /router\.get\(\s*['"]\/vacancies['"][\s\S]*?const dateFilter = normalizeCandidateDateRangeFilter\(req\.query\)/);
+  assert.match(adminSource, /router\.get\(\s*['"]\/vacancies['"][\s\S]*?prisma\.candidate\.findMany\([\s\S]*?createdAt: dateFilter\.createdAtWhere/);
+  assert.match(adminSource, /router\.get\(\s*['"]\/export['"][\s\S]*?const dateFilter = normalizeCandidateDateRangeFilter\(req\.query\)/);
+  assert.match(adminSource, /router\.get\(\s*['"]\/export['"][\s\S]*?createdAt: dateFilter\.createdAtWhere/);
+
+  assert.match(vacanciesView, /if \(role === 'dev'\)/);
+  assert.match(vacanciesView, /Filtro dev de registros por fecha/);
+  assert.match(vacanciesView, /name="dateFrom" type="date"/);
+  assert.match(vacanciesView, /name="dateTo" type="date"/);
+  assert.match(vacanciesView, /vacancyDevStats\.byVacancyId\[v\.id\]/);
+  assert.match(vacanciesView, /Descargar total/);
+  assert.match(vacanciesView, /scope=registered&vacancyId=<%= encodeURIComponent\(v\.id\) %><%= exportDateParams %>/);
+  assert.match(vacanciesView, /scope=missing_cv_complete&vacancyId=<%= encodeURIComponent\(v\.id\) %><%= exportDateParams %>/);
+});

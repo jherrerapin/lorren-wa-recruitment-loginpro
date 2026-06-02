@@ -259,6 +259,49 @@ function isValidDateString(str) {
   return typeof str === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(str);
 }
 
+
+function normalizeCandidateDateRangeFilter(query = {}) {
+  const dateFrom = isValidDateString(query.dateFrom) ? query.dateFrom : '';
+  const dateTo = isValidDateString(query.dateTo) ? query.dateTo : '';
+  const createdAt = {};
+  if (dateFrom) createdAt.gte = colombiaDayBounds(dateFrom).start;
+  if (dateTo) createdAt.lte = colombiaDayBounds(dateTo).end;
+  return {
+    dateFrom,
+    dateTo,
+    createdAtWhere: Object.keys(createdAt).length ? createdAt : null,
+    isActive: Boolean(dateFrom || dateTo)
+  };
+}
+
+function buildVacancyDevStats(vacancies = [], candidates = [], dateFilter = {}) {
+  const statsByVacancyId = new Map(vacancies.map((vacancy) => [vacancy.id, {
+    vacancyId: vacancy.id,
+    total: 0,
+    complete: 0,
+    missingCv: 0
+  }]));
+
+  for (const rawCandidate of candidates) {
+    const vacancyId = rawCandidate?.vacancyId;
+    if (!statsByVacancyId.has(vacancyId)) continue;
+    const candidate = normalizeCandidateSnapshot(rawCandidate);
+    const stats = statsByVacancyId.get(vacancyId);
+    stats.total += 1;
+    if (isOperationallyRegistered(candidate)) stats.complete += 1;
+    if (isOperationallyCompleteWithoutCv(candidate)) stats.missingCv += 1;
+  }
+
+  return {
+    dateFrom: dateFilter.dateFrom || '',
+    dateTo: dateFilter.dateTo || '',
+    total: candidates.length,
+    complete: [...statsByVacancyId.values()].reduce((sum, stats) => sum + stats.complete, 0),
+    missingCv: [...statsByVacancyId.values()].reduce((sum, stats) => sum + stats.missingCv, 0),
+    byVacancyId: Object.fromEntries(statsByVacancyId)
+  };
+}
+
 function isFemaleHumanReviewCandidate(candidate) {
   if (!candidate || candidate.gender !== 'FEMALE' || !candidate.botPaused) return false;
   return /revision humana|revisión humana|candidata femenina/i.test(candidate.botPauseReason || '');
@@ -1611,6 +1654,7 @@ export function adminRouter(prisma) {
     const accessContext = getRequestAccessContext(req);
     const scope = normalizeString(req.query.scope) || 'all';
     const vacancyId = normalizeString(req.query.vacancyId);
+    const dateFilter = normalizeCandidateDateRangeFilter(req.query);
     if (!EXPORT_SCOPES.has(scope)) return res.status(400).send('Scope inválido.');
     if (!vacancyId) return res.status(400).send('Debes seleccionar una vacante para exportar.');
     const vacancy = await ensureVacancyIdAccess(prisma, req, vacancyId, res, '/admin');
@@ -1619,7 +1663,8 @@ export function adminRouter(prisma) {
     const allCandidates = await prisma.candidate.findMany({
       where: {
         ...buildCandidateAccessWhere(accessContext),
-        vacancyId
+        vacancyId,
+        ...(dateFilter.createdAtWhere ? { createdAt: dateFilter.createdAtWhere } : {})
       },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -3085,6 +3130,7 @@ export function adminRouter(prisma) {
 
   router.get('/vacancies', async (req, res) => {
     const accessContext = getRequestAccessContext(req);
+    const dateFilter = normalizeCandidateDateRangeFilter(req.query);
     const [vacancies, operations, pendingCvMigrationCount, devAuditEvents] = await Promise.all([
       prisma.vacancy.findMany({
         where: buildVacancyAccessWhere(accessContext),
@@ -3113,6 +3159,36 @@ export function adminRouter(prisma) {
         })
         : []
     ]);
+    const vacancyIds = vacancies.map((vacancy) => vacancy.id);
+    const devStatsCandidates = req.userRole === 'dev' && vacancyIds.length
+      ? await prisma.candidate.findMany({
+        where: {
+          vacancyId: { in: vacancyIds },
+          ...(dateFilter.createdAtWhere ? { createdAt: dateFilter.createdAtWhere } : {})
+        },
+        select: {
+          id: true,
+          vacancyId: true,
+          fullName: true,
+          documentType: true,
+          documentNumber: true,
+          age: true,
+          neighborhood: true,
+          locality: true,
+          zone: true,
+          medicalRestrictions: true,
+          transportMode: true,
+          status: true,
+          cvMimeType: true,
+          cvOriginalName: true,
+          cvStorageKey: true,
+          cvData: true,
+          createdAt: true,
+          vacancy: { select: { city: true } }
+        }
+      })
+      : [];
+    const vacancyDevStats = buildVacancyDevStats(vacancies, devStatsCandidates, dateFilter);
     const successMsg = normalizeString(req.query.success);
     const errorMsg   = normalizeString(req.query.error);
     res.render('vacancies', {
@@ -3124,6 +3200,7 @@ export function adminRouter(prisma) {
       successMsg,
       errorMsg,
       pendingCvMigrationCount,
+      vacancyDevStats,
       devAuditEvents,
       formatDevAuditAction,
       formatDevAuditDetails,
