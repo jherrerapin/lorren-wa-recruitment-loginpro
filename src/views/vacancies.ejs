@@ -51,6 +51,19 @@
     .city-section-title { font-size: 16px; font-weight: 700; color: var(--navy); }
     .city-section-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
     .city-count { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 999px; background: var(--teal-light); color: var(--teal-hover); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .dev-date-filter { margin-bottom: 18px; padding: 14px 16px; display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+    .dev-date-filter-title { font-size: 15px; font-weight: 700; color: var(--navy); }
+    .dev-date-filter-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .dev-date-filter form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+    .dev-date-field { display: flex; flex-direction: column; gap: 4px; }
+    .dev-date-field label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+    .dev-date-field input { min-width: 150px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; color: var(--text); background: var(--surface); }
+    .dev-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(86px, 1fr)); gap: 6px; min-width: 260px; }
+    .dev-stat { padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--surface-2); }
+    .dev-stat-value { font-size: 18px; line-height: 1; font-weight: 800; color: var(--navy); }
+    .dev-stat-label { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+    .dev-stat-inline { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+    .dev-stat-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 999px; background: var(--gray-light); color: var(--text-muted); font-size: 11px; font-weight: 700; }
     table { width: 100%; border-collapse: collapse; }
     thead th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); padding: 10px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
     tbody td { padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 13px; vertical-align: middle; }
@@ -239,6 +252,32 @@
   <% if (successMsg) { %><div class="alert alert-success">✅ <%= successMsg %></div><% } %>
   <% if (errorMsg)   { %><div class="alert alert-error">⚠️ <%= errorMsg %></div><% } %>
 
+  <% if (role === 'dev') { %>
+    <section class="card dev-date-filter">
+      <div>
+        <div class="dev-date-filter-title">Filtro dev de registros por fecha</div>
+        <div class="dev-date-filter-sub">Estadísticas por vacante según fecha de registro del candidato (hora Colombia).</div>
+        <div class="dev-stat-inline" style="margin-top:8px;">
+          <span class="dev-stat-pill">Total: <%= vacancyDevStats.total %></span>
+          <span class="dev-stat-pill">Completos: <%= vacancyDevStats.complete %></span>
+          <span class="dev-stat-pill">Sin HV: <%= vacancyDevStats.missingCv %></span>
+        </div>
+      </div>
+      <form method="get" action="/admin/vacancies">
+        <div class="dev-date-field">
+          <label for="dateFrom">Desde</label>
+          <input id="dateFrom" name="dateFrom" type="date" value="<%= vacancyDevStats.dateFrom %>" />
+        </div>
+        <div class="dev-date-field">
+          <label for="dateTo">Hasta</label>
+          <input id="dateTo" name="dateTo" type="date" value="<%= vacancyDevStats.dateTo %>" />
+        </div>
+        <button type="submit" class="btn btn-primary">Aplicar filtro</button>
+        <a href="/admin/vacancies" class="btn btn-secondary">Limpiar</a>
+      </form>
+    </section>
+  <% } %>
+
   <% if (vacancies.length === 0) { %>
     <div class="card">
       <div class="empty-state">
@@ -273,6 +312,7 @@
             <th>Vacante</th>
             <th>Operación</th>
             <th>Modo bot</th>
+            <% if (role === 'dev') { %><th>Registros filtro</th><% } %>
             <th>Estado</th>
             <th>Acciones</th>
           </tr></thead>
@@ -292,6 +332,9 @@
                 const reviewLabel = v.dashboardReviewEnabled ? 'Fin de revisión' : 'Revisar hojas de vida';
                 const reviewClass = v.dashboardReviewEnabled ? 'btn-danger' : 'btn-secondary';
                 const opLabel = v.operation ? (v.operation.city.name + ' > ' + v.operation.name) : (v.city || '-');
+                const devStats = vacancyDevStats.byVacancyId[v.id] || { total: 0, complete: 0, missingCv: 0 };
+                const exportDateParams = (vacancyDevStats.dateFrom ? '&dateFrom=' + encodeURIComponent(vacancyDevStats.dateFrom) : '')
+                  + (vacancyDevStats.dateTo ? '&dateTo=' + encodeURIComponent(vacancyDevStats.dateTo) : '');
               %>
               <tr>
                 <td>
@@ -300,6 +343,20 @@
                 </td>
                 <td><span style="font-size:12px;"><%= opLabel %></span></td>
                 <td><span style="font-size:12px;"><%= modeIcon %> <%= modeTxt %></span></td>
+                <% if (role === 'dev') { %>
+                  <td>
+                    <div class="dev-stat-grid">
+                      <div class="dev-stat"><div class="dev-stat-value"><%= devStats.total %></div><div class="dev-stat-label">Total</div></div>
+                      <div class="dev-stat"><div class="dev-stat-value"><%= devStats.complete %></div><div class="dev-stat-label">Completos</div></div>
+                      <div class="dev-stat"><div class="dev-stat-value"><%= devStats.missingCv %></div><div class="dev-stat-label">Sin HV</div></div>
+                    </div>
+                    <div class="dev-stat-inline">
+                      <a class="dev-stat-pill" href="/admin/export?scope=all&vacancyId=<%= encodeURIComponent(v.id) %><%= exportDateParams %>">Descargar total</a>
+                      <a class="dev-stat-pill" href="/admin/export?scope=registered&vacancyId=<%= encodeURIComponent(v.id) %><%= exportDateParams %>">Completos</a>
+                      <a class="dev-stat-pill" href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %><%= exportDateParams %>">Sin HV</a>
+                    </div>
+                  </td>
+                <% } %>
                 <td><span class="badge <%= badgeCls %>"><span class="dot <%= dotCls %>"></span><%= badgeTxt %></span></td>
                 <td>
                   <div style="display:flex;gap:6px;flex-wrap:wrap;">
