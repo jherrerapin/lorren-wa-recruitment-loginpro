@@ -7,6 +7,9 @@ export function evaluateSchedulingGuard({ candidate = {}, vacancy = null, nextSl
   const reasons = [];
 
   if (readiness.missingFields.length) reasons.push(`missing_fields:${readiness.missingFields.join(',')}`);
+  if (readiness.eligibilityFailures?.length) {
+    reasons.push(`eligibility_failed:${readiness.eligibilityFailures.map((failure) => failure.code || failure.field || 'unknown').join(',')}`);
+  }
   if (!readiness.hasValidCv) reasons.push('missing_cv');
   if (!candidate.vacancyId && !vacancy?.id) reasons.push('missing_vacancy');
   if (!vacancy?.schedulingEnabled) reasons.push('scheduling_disabled');
