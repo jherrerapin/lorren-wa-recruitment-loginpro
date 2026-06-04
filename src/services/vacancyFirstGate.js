@@ -1,5 +1,6 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
-import { detectOperationZoneEvidence, detectRoleHintFromText, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
+import { detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
+import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -24,6 +25,8 @@ export const FUTURE_PROFILE_OFFER_MODE = 'future_profile_offer';
 export const FUTURE_PROFILE_CAPTURE_MODE = 'future_profile_capture';
 export const PAUSED_VACANCY_OFFER_MODE = 'paused_vacancy';
 export const PAUSED_VACANCY_CAPTURE_MODE = 'paused_vacancy_capture';
+export const ALTERNATIVE_VACANCY_OFFER_MODE = 'alternative_vacancy_offer';
+export const ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE = 'alternative_vacancy_prequalification';
 
 const START_OR_INTAKE_STEPS = new Set([
   MENU,
@@ -123,6 +126,21 @@ function isFutureProfileOfferMode(mode = '') {
   return [FUTURE_PROFILE_OFFER_MODE, PAUSED_VACANCY_OFFER_MODE].includes(String(mode || ''));
 }
 
+function parseAlternativeMode(mode = '') {
+  const [kind, vacancyId] = String(mode || '').split(':');
+  if (![ALTERNATIVE_VACANCY_OFFER_MODE, ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE].includes(kind)) {
+    return { active: false, kind: null, vacancyId: null };
+  }
+  return { active: true, kind, vacancyId: vacancyId || null };
+}
+
+function buildAlternativeMode(kind, vacancyId = '') {
+  return vacancyId ? `${kind}:${vacancyId}` : kind;
+}
+
+function isAlternativeOfferMode(mode = '') {
+  return parseAlternativeMode(mode).active;
+}
 
 const FUTURE_PROFILE_OFFER_REPLY_KINDS = new Set([
   'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
@@ -154,6 +172,13 @@ function detectAffirmationIntent(text = '') {
   const passiveAck = /^(a\s*)?(bueno|ok|okay|entiendo|vale|gracias|listo gracias|perfecto gracias)$/.test(normalized)
     || (/\b(entendido|comprendo)\b/.test(normalized) && !hasActiveConfirmation);
   return { affirmative: hasActiveConfirmation, passiveAck };
+}
+
+function detectNegativeAlternativeIntent(text = '') {
+  const normalized = normalizeResolverText(text);
+  if (!normalized) return false;
+  return /^(no|no gracias|nop|negativo|paso|mejor no|prefiero no)\b/.test(normalized)
+    || /\b(solo|unicamente|solamente)\b.*\b(servicio|servicios|cargo que mencione|lo que dije)\b/.test(normalized);
 }
 
 function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMessages = [] } = {}) {
@@ -239,6 +264,113 @@ function isRegisteredCompleteWithoutVacancy(candidate = {}, readiness = {}) {
   );
 }
 
+async function loadVacancyById(prisma, vacancyId = null) {
+  if (!vacancyId || typeof prisma?.vacancy?.findUnique !== 'function') return null;
+  return prisma.vacancy.findUnique({
+    where: { id: vacancyId },
+    include: { operation: { include: { city: true } } }
+  }).catch(() => null);
+}
+
+async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundText = '' } = {}) {
+  const alternativeMode = parseAlternativeMode(candidate?.botResumeMode);
+  if (!alternativeMode.active) return null;
+
+  const intent = detectAffirmationIntent(inboundText);
+  if (intent.passiveAck) {
+    return {
+      action: VacancyFirstGateAction.SUPPRESS_REPLY,
+      reason: 'PASSIVE_ACK_AFTER_ALTERNATIVE_OFFER',
+      replyKind: alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE
+        ? 'ALTERNATIVE_PREQUALIFICATION_PROMPT'
+        : 'ALTERNATIVE_VACANCY_OFFER'
+    };
+  }
+
+  if (detectNegativeAlternativeIntent(inboundText)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'ALTERNATIVE_VACANCY_DECLINED',
+      replyKind: 'FUTURE_PROFILE_AFTER_ALTERNATIVE_DECLINED',
+      candidateUpdates: {
+        currentStep: GREETING_SENT,
+        botResumeMode: FUTURE_PROFILE_OFFER_MODE,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      },
+      reply: 'Entendido. En ese caso no te asigno a esa convocatoria. Si deseas, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo con tus datos si me confirmas que quieres ese registro.'
+    };
+  }
+
+  if (!intent.affirmative) return null;
+
+  const vacancy = await loadVacancyById(prisma, alternativeMode.vacancyId);
+  if (!vacancy || !isOpenVacancy(vacancy)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'ALTERNATIVE_VACANCY_NOT_AVAILABLE',
+      replyKind: 'ALTERNATIVE_NOT_AVAILABLE_FUTURE_PROFILE_OFFER',
+      candidateUpdates: {
+        currentStep: GREETING_SENT,
+        botResumeMode: FUTURE_PROFILE_OFFER_MODE,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      },
+      reply: buildNoActiveVacanciesReply(vacancyCity(vacancy))
+    };
+  }
+
+  return {
+    action: VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE,
+    reason: alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE
+      ? 'ALTERNATIVE_PREQUALIFICATION_ACCEPTED'
+      : 'ALTERNATIVE_VACANCY_ACCEPTED',
+    vacancyId: vacancy.id,
+    vacancy
+  };
+}
+
+async function buildAlternativeDecision({ prisma, resolution = {}, vacancyHints = {}, inboundText = '', recentMessages = [] } = {}) {
+  const city = resolution.city || vacancyHints?.city || null;
+  const requestedRoleText = resolution.roleHint || vacancyHints?.roleHint || detectRoleHintFromText(inboundText, { city });
+  if (!city || !requestedRoleText) return null;
+
+  const activeVacancies = vacancyHints?.activeVacancies || await findActiveVacancies(prisma);
+  const alternative = evaluateVacancyConceptAlternative({
+    city,
+    requestedRoleText,
+    activeVacancies
+  });
+
+  if (alternative.action === VacancyConceptAlternativeAction.NONE) return null;
+
+  const mode = alternative.action === VacancyConceptAlternativeAction.ASK_PREQUALIFICATION
+    ? ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE
+    : ALTERNATIVE_VACANCY_OFFER_MODE;
+
+  const decision = {
+    action: VacancyFirstGateAction.REPLY,
+    reason: alternative.reason,
+    replyKind: alternative.action === VacancyConceptAlternativeAction.ASK_PREQUALIFICATION
+      ? 'ALTERNATIVE_PREQUALIFICATION_PROMPT'
+      : 'ALTERNATIVE_VACANCY_OFFER',
+    candidateUpdates: {
+      currentStep: GREETING_SENT,
+      botResumeMode: buildAlternativeMode(mode, alternative.suggestedVacancyId),
+      reminderScheduledFor: null,
+      reminderState: 'SKIPPED'
+    },
+    reply: alternative.reply,
+    resolution: {
+      ...resolution,
+      suggestedVacancyId: alternative.suggestedVacancyId,
+      alternativeReason: alternative.reason
+    }
+  };
+
+  return preventRepeatDecision(decision, { recentMessages, inboundText, city });
+}
+
 export async function resolveVacancyFirstGate({
   prisma,
   candidate = {},
@@ -260,6 +392,9 @@ export async function resolveVacancyFirstGate({
     };
   }
 
+  const alternativeAcceptanceDecision = await evaluateAlternativeAcceptance({ prisma, candidate, inboundText });
+  if (alternativeAcceptanceDecision) return alternativeAcceptanceDecision;
+
   if (isFutureProfileCaptureMode(botResumeMode)) {
     return {
       action: VacancyFirstGateAction.ALLOW_ENGINE,
@@ -273,6 +408,14 @@ export async function resolveVacancyFirstGate({
       action: VacancyFirstGateAction.SUPPRESS_REPLY,
       reason: 'PASSIVE_ACK_AFTER_FUTURE_PROFILE_OFFER',
       replyKind: futureProfileConsent.lastReplyKind || null
+    };
+  }
+
+  if (isAlternativeOfferMode(botResumeMode)) {
+    return {
+      action: VacancyFirstGateAction.SUPPRESS_REPLY,
+      reason: 'WAITING_FOR_ALTERNATIVE_DECISION',
+      replyKind: 'ALTERNATIVE_VACANCY_OFFER'
     };
   }
 
@@ -395,6 +538,9 @@ export async function resolveVacancyFirstGate({
   }
 
   if (['city_with_active_vacancies', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
+    const alternativeDecision = await buildAlternativeDecision({ prisma, resolution, vacancyHints, inboundText, recentMessages });
+    if (alternativeDecision) return alternativeDecision;
+
     return preventRepeatDecision({
       action: VacancyFirstGateAction.REPLY,
       reason: 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS',
