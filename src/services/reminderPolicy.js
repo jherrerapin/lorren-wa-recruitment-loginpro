@@ -12,10 +12,21 @@ const REMINDER_ELIGIBLE_STEPS = new Set([
   'SCHEDULING'
 ]);
 
+const PROCESS_REMINDER_BLOCKED_RESUME_MODES = new Set([
+  'future_profile_offer',
+  'paused_vacancy',
+  'alternative_vacancy_offer',
+  'alternative_vacancy_prequalification'
+]);
+
 const INTERVIEW_KEEPALIVE_ELIGIBLE_STEPS = new Set([
   'SCHEDULING',
   'SCHEDULED'
 ]);
+
+function getResumeModeKey(botResumeMode = '') {
+  return String(botResumeMode || '').split(':')[0];
+}
 
 export function getWhatsappWindowState(lastInboundAt, now = new Date()) {
   if (!lastInboundAt) {
@@ -46,6 +57,7 @@ export function canScheduleReminderPolicy(candidate) {
   if (candidate.botPaused) return false;
   if (candidate.status === 'RECHAZADO') return false;
   if (candidate.currentStep === 'DONE') return false;
+  if (PROCESS_REMINDER_BLOCKED_RESUME_MODES.has(getResumeModeKey(candidate.botResumeMode))) return false;
   if (!REMINDER_ELIGIBLE_STEPS.has(candidate.currentStep)) return false;
   if (candidate.reminderState === 'SENT' || candidate.lastReminderAt) return false;
   if (!candidate.lastInboundAt) return false;
