@@ -6,6 +6,11 @@ export const VacancyConceptAlternativeAction = Object.freeze({
   ASK_PREQUALIFICATION: 'ASK_PREQUALIFICATION'
 });
 
+const GENERIC_TOKENS = new Set([
+  'de', 'del', 'la', 'el', 'los', 'las', 'en', 'para', 'por', 'y', 'o', 'un', 'una',
+  'vacante', 'cargo', 'puesto', 'trabajo', 'empleo', 'informacion', 'interesado', 'interesada'
+]);
+
 function vacancyCity(vacancy = {}) {
   return vacancy?.operation?.city?.name || vacancy?.city || null;
 }
@@ -22,6 +27,35 @@ function titleOf(vacancy = {}) {
 
 function isOpenVacancy(vacancy = {}) {
   return Boolean(vacancy?.isActive && vacancy?.acceptingApplications);
+}
+
+function conceptTokens(text = '') {
+  return normalizeResolverText(text)
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1 && !GENERIC_TOKENS.has(token));
+}
+
+function vacancyConceptText(vacancy = {}) {
+  return [
+    vacancy?.title,
+    vacancy?.role,
+    vacancy?.roleDescription,
+    vacancy?.requirements,
+    vacancy?.conditions,
+    vacancy?.operation?.name
+  ].filter(Boolean).join(' ');
+}
+
+function vacancyMatchesRequestedConcept(vacancy = {}, requestedRoleText = '') {
+  const requestedTokens = conceptTokens(requestedRoleText);
+  if (!requestedTokens.length) return false;
+
+  const vacancyTokenSet = new Set(conceptTokens(vacancyConceptText(vacancy)));
+  const overlap = requestedTokens.filter((token) => vacancyTokenSet.has(token)).length;
+
+  if (requestedTokens.length === 1) return overlap >= 1;
+  return overlap >= 2 || (overlap >= 1 && requestedTokens.length <= 2);
 }
 
 function hasConfiguredExperienceRequirement(vacancy = {}) {
@@ -104,6 +138,10 @@ export function evaluateVacancyConceptAlternative({ city = null, requestedRoleTe
 
   if (!cityVacancies.length) {
     return { action: VacancyConceptAlternativeAction.NONE, reason: 'no_active_vacancies_in_city' };
+  }
+
+  if (cityVacancies.some((vacancy) => vacancyMatchesRequestedConcept(vacancy, requestedRoleText))) {
+    return { action: VacancyConceptAlternativeAction.NONE, reason: 'requested_role_matches_existing_vacancy' };
   }
 
   const suggestedVacancy = pickAlternativeVacancy(cityVacancies);
