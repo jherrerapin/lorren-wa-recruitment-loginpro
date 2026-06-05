@@ -39,6 +39,11 @@ import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
 import { ContextualAllowedAction, evaluateContextualResponseGate, inferContextualSemanticIntent } from '../services/contextualResponseGate.js';
 import { FUTURE_PROFILE_CAPTURE_MODE, PAUSED_VACANCY_CAPTURE_MODE, resolveVacancyFirstGate, VacancyFirstGateAction } from '../services/vacancyFirstGate.js';
+import {
+  buildSilentProfileCaptureReply,
+  buildSilentProfileCaptureUpdate,
+  shouldSilentCaptureProfileData
+} from '../services/silentProfileCapture.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -1809,7 +1814,43 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return candidate;
   };
 
+  const maybeSilentCaptureProfileData = async (reason = 'silent_profile_capture', replyKind = null) => {
+    if (!shouldSilentCaptureProfileData({ candidate, normalizedData, hasDataIntent })) return false;
+
+    const updateData = buildSilentProfileCaptureUpdate({ candidate, normalizedData });
+    delete updateData.vacancyId;
+
+    candidate = await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: updateData
+    });
+
+    debugTrace.silent_profile_capture = {
+      applied: true,
+      fields: Object.keys(normalizedData),
+      reason,
+      replyKind
+    };
+
+    const body = buildSilentProfileCaptureReply({
+      candidate,
+      city: vacancyHints.city,
+      requestedRoleText: vacancyHints.roleHint
+    });
+
+    await reply(prisma, candidate.id, from, body, cleanText, {
+      body,
+      source: 'silent_profile_capture',
+      reason,
+      replyKind
+    });
+
+    return true;
+  };
+
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.SUPPRESS_REPLY) {
+    if (await maybeSilentCaptureProfileData(vacancyFirstGateDecision.reason, vacancyFirstGateDecision.replyKind || null)) return;
+
     await recordIntentionalSilence(prisma, candidate, cleanText, {
       reason: vacancyFirstGateDecision.reason,
       gate: 'vacancy_first_gate',
@@ -2002,6 +2043,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (hasDataIntent) {
+      if (await maybeSilentCaptureProfileData('greeting_without_vacancy_data_capture', null)) return;
+
       const activeVacancies = await findActiveVacancies(prisma);
       const cityVacancies = vacancyHints.city
         ? activeVacancies.filter((vacancy) => (
