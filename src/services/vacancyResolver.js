@@ -14,7 +14,7 @@ const ROLE_STOPWORDS = new Set([
   'publicada', 'publicado', 'empleo', 'oferta', 'averiguar', 'informarme', 'quisiera',
   'vivo', 'vive', 'vives', 'vivir', 'ciudad', 'numero', 'dieron', 'este', 'esta'
 ]);
-const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|cargar|cargando|descargue|descarge|descargar|descargando|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento)\b/i;
+const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|cargar|cargando|descargue|descarge|descargar|descargando|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento|servicio|servicios|general|generales)\b/i;
 const CITY_ALIASES = [
   { value: 'Bogota', aliases: ['bogota'] },
   { value: 'Ibague', aliases: ['ibague'] }
