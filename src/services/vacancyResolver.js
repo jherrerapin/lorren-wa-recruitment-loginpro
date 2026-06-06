@@ -243,7 +243,7 @@ function similarityScore(input = '', candidate = '') {
   if (!overlap) return 0;
   const inputNormalized = normalizeResolverText(inputTokens.join(' '));
   const candidateNormalized = normalizeResolverText(candidateTokens.join(' '));
-  let score = overlap / Math.max(inputSet.size, candidateSet.size);
+  let score = overlap / inputSet.size;
   if (candidateNormalized === inputNormalized) score += 0.9;
   else if (candidateNormalized.includes(inputNormalized) || inputNormalized.includes(candidateNormalized)) score += 0.45;
   return score;
