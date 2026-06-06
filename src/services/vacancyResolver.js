@@ -124,7 +124,7 @@ function buildVacancyLocationText(vacancy) {
 }
 
 function buildVacancyRoleText(vacancy) {
-  return [vacancy?.title, vacancy?.role, vacancy?.operation?.name, vacancy?.operationAddress]
+  return [vacancy?.title, vacancy?.role, vacancy?.roleDescription, vacancy?.operation?.name, vacancy?.operationAddress]
     .filter(Boolean)
     .join(' ');
 }
