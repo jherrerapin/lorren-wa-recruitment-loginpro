@@ -1,0 +1,16 @@
+﻿services:
+  postgres:
+    image: postgres:16
+    container_name: lorren_postgres_test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lorren
+      POSTGRES_PASSWORD: lorren
+      POSTGRES_DB: lorren_test
+    ports:
+      - "5434:5432"
+    volumes:
+      - lorren_pg_test:/var/lib/postgresql/data
+
+volumes:
+  lorren_pg_test:
