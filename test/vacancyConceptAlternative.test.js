@@ -4,129 +4,77 @@ import assert from 'node:assert/strict';
 import {
   ALTERNATIVE_VACANCY_OFFER_MODE,
   ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE,
-  VacancyFirstGateAction,
-  resolveVacancyFirstGate
+  resolveVacancyFirstGate,
+  VacancyFirstGateAction
 } from '../src/services/vacancyFirstGate.js';
-import {
-  VacancyConceptAlternativeAction,
-  evaluateVacancyConceptAlternative,
-  vacancyRequiresPrequalification
-} from '../src/services/vacancyConceptMatcher.js';
 
-const ConversationStep = Object.freeze({
-  MENU: 'MENU',
-  GREETING_SENT: 'GREETING_SENT'
-});
+function city(name = 'Bogota') {
+  return { id: `city-${name}`, name };
+}
 
-const bogotaOperation = { id: 'op-bogota', name: 'Operacion Bogota', city: { id: 'city-bogota', name: 'Bogota' } };
-const ibagueOperation = { id: 'op-ibague', name: 'Operacion Ibague', city: { id: 'city-ibague', name: 'Ibague' } };
+const bogotaCity = city('Bogota');
+const ibagueCity = city('Ibague');
+const bogotaOperation = { id: 'op-bogota', name: 'Montevideo', city: bogotaCity };
+const ibagueOperation = { id: 'op-ibague', name: 'Zona aeropuerto', city: ibagueCity };
 
 function vacancy(overrides = {}) {
   return {
-    id: 'vac-base',
-    title: 'Auxiliar de cargue y descargue',
+    id: 'vac-cargue-bogota',
+    title: 'Auxiliar de Cargue y Descargue Bogota',
     role: 'Auxiliar de cargue y descargue',
+    roleDescription: 'Apoyo operativo en bodega, cargue y descargue.',
+    requirements: '',
+    conditions: '',
+    requiredDocuments: '',
     city: 'Bogota',
     operation: bogotaOperation,
-    roleDescription: 'Apoyo operativo en cargue y descargue.',
-    requirements: 'Disponibilidad para labor operativa.',
-    conditions: 'Condiciones registradas.',
-    experienceRequired: 'NO',
-    minExperienceMonths: null,
-    experienceTimeText: null,
     isActive: true,
     acceptingApplications: true,
     ...overrides
   };
 }
 
-function candidate(overrides = {}) {
-  return {
-    id: 'cand-test',
-    status: 'NUEVO',
-    currentStep: ConversationStep.GREETING_SENT,
-    vacancyId: null,
-    botResumeMode: null,
-    ...overrides
-  };
-}
-
-async function decide({ text, candidatePatch = {}, vacancies = [], currentVacancy = null, prisma = null }) {
-  return resolveVacancyFirstGate({
-    prisma,
-    candidate: candidate(candidatePatch),
-    currentVacancy,
-    inboundText: text,
-    currentStep: candidatePatch.currentStep || ConversationStep.GREETING_SENT,
-    recentMessages: [],
-    vacancyHints: {
-      allVacancies: vacancies,
-      activeVacancies: vacancies.filter((item) => item.isActive && item.acceptingApplications)
+async function decide({ text, vacancies = [], candidatePatch = {}, prisma = null }) {
+  const effectivePrisma = prisma || {
+    vacancy: {
+      async findMany() {
+        return vacancies;
+      },
+      async findUnique({ where }) {
+        return vacancies.find((item) => item.id === where.id) || null;
+      }
     }
+  };
+
+  return resolveVacancyFirstGate({
+    prisma: effectivePrisma,
+    candidate: { id: 'cand-1', currentStep: 'GREETING_SENT', ...candidatePatch },
+    currentVacancy: null,
+    inboundText: text,
+    currentStep: candidatePatch.currentStep || 'GREETING_SENT',
+    recentMessages: [],
+    vacancyHints: { allVacancies: vacancies, activeVacancies: vacancies.filter((item) => item.isActive && item.acceptingApplications) }
   });
 }
 
-test('concept matcher ofrece alternativa abierta si el cargo pedido no existe pero hay vacante operativa en la ciudad', () => {
-  const cargueBogota = vacancy({ id: 'vac-cargue-bogota' });
-  const alternative = evaluateVacancyConceptAlternative({
-    city: 'Bogota',
-    requestedRoleText: 'servicio general',
-    activeVacancies: [cargueBogota]
-  });
-
-  assert.equal(alternative.action, VacancyConceptAlternativeAction.OFFER_ALTERNATIVE);
-  assert.equal(alternative.suggestedVacancyId, 'vac-cargue-bogota');
-  assert.equal(alternative.requiresPrequalification, false);
-  assert.match(alternative.reply, /servicio general/i);
-  assert.match(alternative.reply, /Auxiliar de cargue y descargue/i);
-});
-
-test('concept matcher pide prevalidacion si la alternativa activa requiere experiencia o formacion', () => {
-  const liderIbague = vacancy({
-    id: 'vac-lider-ibague',
-    title: 'Lider de operacion',
-    role: 'Lider de operacion',
-    city: 'Ibague',
-    operation: ibagueOperation,
-    requirements: 'Tecnico o tecnologo con experiencia liderando personal operativo.',
-    experienceRequired: 'YES',
-    experienceTimeText: '1 año liderando equipos'
-  });
-
-  assert.equal(vacancyRequiresPrequalification(liderIbague), true);
-
-  const alternative = evaluateVacancyConceptAlternative({
-    city: 'Ibague',
-    requestedRoleText: 'servicios generales',
-    activeVacancies: [liderIbague]
-  });
-
-  assert.equal(alternative.action, VacancyConceptAlternativeAction.ASK_PREQUALIFICATION);
-  assert.equal(alternative.suggestedVacancyId, 'vac-lider-ibague');
-  assert.match(alternative.reply, /requiere/i);
-  assert.match(alternative.reply, /perfil/i);
-});
-
-test('vacancyFirstGate no dice que no hay vacantes en la ciudad si existe alternativa activa abierta', async () => {
-  const cargueBogota = vacancy({ id: 'vac-cargue-bogota-flow' });
-  const decision = await decide({
-    text: 'Bogotá servicio general',
-    vacancies: [cargueBogota]
-  });
+test('concept matcher ofrece alternativa abierta si el cargo pedido no existe pero hay vacante operativa en la ciudad', async () => {
+  const cargueBogota = vacancy({ id: 'vac-cargue-alt' });
+  const decision = await decide({ text: 'Bogotá servicios generales', vacancies: [cargueBogota] });
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'open_alternative_available');
   assert.equal(decision.replyKind, 'ALTERNATIVE_VACANCY_OFFER');
   assert.equal(decision.candidateUpdates.vacancyId, undefined);
-  assert.equal(decision.candidateUpdates.botResumeMode, `${ALTERNATIVE_VACANCY_OFFER_MODE}:vac-cargue-bogota-flow`);
+  assert.equal(decision.candidateUpdates.botResumeMode, `${ALTERNATIVE_VACANCY_OFFER_MODE}:vac-cargue-alt`);
   assert.match(decision.reply, /opcion activa/i);
 });
 
-test('vacancyFirstGate prefiltra alternativa especializada antes de asignar', async () => {
+test('concept matcher pide prevalidacion si la alternativa activa requiere experiencia o formacion', async () => {
   const liderIbague = vacancy({
     id: 'vac-lider-ibague-flow',
-    title: 'Lider de operacion',
-    role: 'Lider de operacion',
+    title: 'Lider de Operaciones Ibagué',
+    role: 'Lider de Operaciones',
+    roleDescription: 'Liderar y administrar equipos de trabajo.',
     city: 'Ibague',
     operation: ibagueOperation,
     requirements: 'Tecnico o tecnologo con experiencia liderando personal operativo.',
@@ -134,10 +82,7 @@ test('vacancyFirstGate prefiltra alternativa especializada antes de asignar', as
     experienceTimeText: '1 año liderando equipos'
   });
 
-  const decision = await decide({
-    text: 'Ibagué servicios generales',
-    vacancies: [liderIbague]
-  });
+  const decision = await decide({ text: 'Ibagué servicios generales', vacancies: [liderIbague] });
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'alternative_requires_prequalification');
@@ -147,7 +92,36 @@ test('vacancyFirstGate prefiltra alternativa especializada antes de asignar', as
   assert.match(decision.reply, /cuentas con ese perfil/i);
 });
 
-test('aceptacion posterior de alternativa abierta asigna la vacante sugerida', async () => {
+test('vacancyFirstGate no dice que no hay vacantes en la ciudad si existe alternativa activa abierta', async () => {
+  const cargueBogota = vacancy({ id: 'vac-cargue-open' });
+  const decision = await decide({ text: 'Bogotá servicio general', vacancies: [cargueBogota] });
+
+  assert.equal(decision.reason, 'open_alternative_available');
+  assert.equal(decision.replyKind, 'ALTERNATIVE_VACANCY_OFFER');
+  assert.ok(!decision.reply.includes('no tengo vacantes activas en Bogota'));
+});
+
+test('vacancyFirstGate prefiltra alternativa especializada antes de asignar', async () => {
+  const liderIbague = vacancy({
+    id: 'vac-lider-ibague-pre',
+    title: 'Lider de Operaciones Ibagué',
+    role: 'Lider de Operaciones',
+    roleDescription: 'Liderar y administrar equipos de trabajo.',
+    city: 'Ibague',
+    operation: ibagueOperation,
+    requirements: 'Tecnico o tecnologo con experiencia liderando personal operativo.',
+    experienceRequired: 'YES',
+    experienceTimeText: '1 año liderando equipos'
+  });
+
+  const decision = await decide({ text: 'Ibagué servicios generales', vacancies: [liderIbague] });
+
+  assert.equal(decision.reason, 'alternative_requires_prequalification');
+  assert.equal(decision.replyKind, 'ALTERNATIVE_PREQUALIFICATION_PROMPT');
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+});
+
+test('aceptacion posterior de alternativa abierta entra a recoleccion de datos sin repetir la vacante', async () => {
   const cargueBogota = vacancy({ id: 'vac-cargue-accepted' });
   const prisma = {
     vacancy: {
@@ -165,9 +139,13 @@ test('aceptacion posterior de alternativa abierta asigna la vacante sugerida', a
     prisma
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'ALTERNATIVE_VACANCY_ACCEPTED');
+  assert.equal(decision.replyKind, 'ACTIVE_VACANCY_DATA_PROMPT');
   assert.equal(decision.vacancyId, 'vac-cargue-accepted');
+  assert.equal(decision.candidateUpdates.vacancyId, 'vac-cargue-accepted');
+  assert.equal(decision.candidateUpdates.currentStep, 'COLLECTING_DATA');
+  assert.doesNotMatch(decision.reply, /la vacante que tengo para ti/i);
 });
 
 test('rechazo de alternativa no asigna vacante y vuelve a oferta de perfil futuro', async () => {
