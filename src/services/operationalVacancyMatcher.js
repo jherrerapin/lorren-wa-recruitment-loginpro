@@ -28,6 +28,11 @@ function isOpenVacancy(vacancy = {}) {
   return Boolean(vacancy?.isActive && vacancy?.acceptingApplications);
 }
 
+function cityMatchesEntity(vacancy = {}, entity = {}) {
+  const cityText = normalizeLocationText(vacancy?.operation?.city?.name || vacancy?.city || '');
+  return Boolean(cityText && entity.normalized && cityText === entity.normalized);
+}
+
 function scoreVacancyForResidence(vacancy = {}, entity = {}, adHintVacancyId = null) {
   let score = 0;
   if (adHintVacancyId && vacancy.id === adHintVacancyId) score += 1;
@@ -42,10 +47,7 @@ function scoreVacancyForResidence(vacancy = {}, entity = {}, adHintVacancyId = n
     if (isMontevideoVacancy(vacancy)) score += 1;
   }
 
-  if (entity.type === LocationEntityType.OTHER_CITY_OR_PLACE) {
-    const cityText = normalizeLocationText(vacancy?.operation?.city?.name || vacancy?.city || '');
-    if (cityText && entity.normalized && cityText === entity.normalized) score += 2;
-  }
+  if (entity.type === LocationEntityType.OTHER_CITY_OR_PLACE && cityMatchesEntity(vacancy, entity)) score += 2;
 
   return score;
 }
@@ -72,9 +74,10 @@ export function evaluateOperationalVacancyMatch({
   if (entity.type === LocationEntityType.BOGOTA_CITY) return { action: OperationalMatchAction.NEED_BOGOTA_LOCALITY, entity };
 
   const ranked = rankVacancies(vacancies, entity, adHintVacancyId);
-  if (!ranked.length) {
-    if (entity.type === LocationEntityType.OTHER_CITY_OR_PLACE) return { action: OperationalMatchAction.NEED_NEIGHBORHOOD, entity };
-    return { action: OperationalMatchAction.NO_MATCH, entity };
+  if (!ranked.length) return { action: OperationalMatchAction.NO_MATCH, entity };
+
+  if (entity.type === LocationEntityType.OTHER_CITY_OR_PLACE && ranked.some((entry) => cityMatchesEntity(entry.vacancy, entity))) {
+    return { action: OperationalMatchAction.NEED_NEIGHBORHOOD, entity, vacancy: ranked[0].vacancy };
   }
 
   const best = ranked[0].vacancy;
