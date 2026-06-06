@@ -29,6 +29,14 @@ const siberia = vacancy({
   operation: { name: 'Siberia', city: { name: 'Siberia' } }
 });
 
+const ibague = vacancy({
+  id: 'vac-ibague',
+  title: 'Líder de operación Ibagué',
+  role: 'Líder de operación',
+  city: 'Ibagué',
+  operation: { name: 'Ibagué', city: { name: 'Ibagué' } }
+});
+
 test('Bogota como ciudad pide localidad antes de decidir vacante', () => {
   const result = evaluateOperationalVacancyMatch({ residenceText: 'Bogotá', vacancies: [montevideo, siberia] });
   assert.equal(result.action, OperationalMatchAction.NEED_BOGOTA_LOCALITY);
@@ -66,4 +74,15 @@ test('si la mejor vacante esta inactiva y no hay alternativa activa, asigna regi
   const result = evaluateOperationalVacancyMatch({ residenceText: 'Kennedy', vacancies: [inactiveMontevideo, inactiveSiberia] });
   assert.equal(result.action, OperationalMatchAction.ASSIGN_INACTIVE_REGISTER_ONLY);
   assert.equal(result.vacancy.id, 'vac-montevideo');
+});
+
+test('otra ciudad con vacante real pide barrio', () => {
+  const result = evaluateOperationalVacancyMatch({ residenceText: 'Ibagué', vacancies: [ibague] });
+  assert.equal(result.action, OperationalMatchAction.NEED_NEIGHBORHOOD);
+  assert.equal(result.vacancy.id, 'vac-ibague');
+});
+
+test('otra ciudad sin vacante real no inventa solicitud de barrio', () => {
+  const result = evaluateOperationalVacancyMatch({ residenceText: 'Cali', vacancies: [montevideo, siberia] });
+  assert.equal(result.action, OperationalMatchAction.NO_MATCH);
 });
