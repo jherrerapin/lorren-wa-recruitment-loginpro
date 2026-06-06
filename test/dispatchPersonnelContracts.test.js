@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 function readSource(path) {
@@ -13,10 +14,11 @@ test('dispatch personnel foundation exists', () => {
   assert.match(schema, /model\s+DispatchWorkerCity\s+{/);
   assert.match(schema, /model\s+DispatchWorkerVacancy\s+{/);
 
-  const migrationsDir = new URL('../prisma/migrations', import.meta.url);
-  const migrationFiles = readdirSync(migrationsDir, { withFileTypes: true })
+  const migrationsDirUrl = new URL('../prisma/migrations', import.meta.url);
+  const migrationsDirPath = fileURLToPath(migrationsDirUrl);
+  const migrationFiles = readdirSync(migrationsDirPath, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.includes('add_dispatch_worker_foundation'))
-    .map((entry) => readFileSync(join(migrationsDir.pathname, entry.name, 'migration.sql'), 'utf8'));
+    .map((entry) => readFileSync(join(migrationsDirPath, entry.name, 'migration.sql'), 'utf8'));
   assert.ok(migrationFiles.length > 0, 'Debe existir migración de personal operativo.');
   assert.ok(migrationFiles.some((m) => /CREATE TABLE "DispatchWorker"/.test(m)));
   assert.ok(migrationFiles.some((m) => /CREATE TABLE "DispatchWorkerCity"/.test(m)));
