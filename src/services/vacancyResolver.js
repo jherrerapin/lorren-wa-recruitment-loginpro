@@ -14,7 +14,7 @@ const ROLE_STOPWORDS = new Set([
   'publicada', 'publicado', 'empleo', 'oferta', 'averiguar', 'informarme', 'quisiera',
   'vivo', 'vive', 'vives', 'vivir', 'ciudad', 'numero', 'dieron', 'este', 'esta'
 ]);
-const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|cargar|cargando|descargue|descarge|descargar|descargando|bodega|bidega|operari|operativo|mensajer|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento|servicio|servicios|general|generales)\b/i;
+const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|cargar|cargando|descargue|descarge|descargar|descargando|bodega|bidega|operari|operativo|operativa|mensajer|conductor|coordinador|coordinadora|lider|lideres|logistic|logistica|logistico|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento|servicio|servicios|general|generales)\b/i;
 const CITY_ALIASES = [
   { value: 'Bogota', aliases: ['bogota'] },
   { value: 'Ibague', aliases: ['ibague'] }
@@ -56,7 +56,7 @@ function normalizeRoleToken(token = '') {
   if (/^aux$/.test(normalized)) return 'auxiliar';
   if (/^bideg[ae]$/.test(normalized)) return 'bodega';
   if (/^bodegas?$/.test(normalized)) return 'bodega';
-  if (/^operativ[ao]s?$/.test(normalized)) return 'operativo';
+  if (/^(operativ[ao]s?|operaciones?|operacion|logistic[ao]s?)$/.test(normalized)) return 'operaciones';
   if (/^coordinadoras?$/.test(normalized)) return 'coordinador';
   if (/^mensajer[oa]s?$/.test(normalized)) return 'mensajero';
   if (/^maquil/.test(normalized)) return 'maquila';
@@ -174,7 +174,7 @@ const GENERIC_ROLE_HINT_TOKENS = new Set([
   'rol'
 ]);
 
-const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|cargar|descargue|descargar|bodega|operari|operativo|operativa|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|operaciones|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ|maquila|empaque|planta|picking|packing|alistamiento)/i;
+const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|cargar|descargue|descargar|bodega|operari|operativo|operativa|operaciones|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ|maquila|empaque|planta|picking|packing|alistamiento)/i;
 
 function normalizeRoleHint(value = '', city = '') {
   const cityTokens = new Set(tokenize(city));
@@ -383,6 +383,7 @@ function isGenericInactiveRoleHint(roleHint = '') {
     ['auxiliar', 'cargue'],
     ['auxiliar', 'descargue'],
     ['auxiliar', 'cargue', 'descargue'],
+    ['operaciones'],
     ['operativo'],
     ['operario']
   ];
