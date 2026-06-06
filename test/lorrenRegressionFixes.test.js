@@ -216,7 +216,7 @@ test('conserva una localidad explícita de Bogotá aunque no esté en alias est�
   const normalized = normalizeCandidateFields(parsed);
   const aligned = alignCandidateLocationFields(normalized, BODEGA_VACANCY, { clearAlternate: false });
 
-  assert.equal(aligned.locality, 'Usaquen');
+  assert.equal(aligned.locality, 'Usaquén');
 });
 
 test('registra bloque completo de datos y no vuelve a pedir campos ya dados', async () => {
@@ -254,7 +254,7 @@ test('registra bloque completo de datos y no vuelve a pedir campos ya dados', as
     assert.equal(updated.documentType, 'CC');
     assert.equal(updated.documentNumber, '1014259322');
     assert.equal(updated.age, 31);
-    assert.equal(updated.locality, 'Usaquen');
+    assert.equal(updated.locality, 'Usaquén');
     assert.equal(updated.medicalRestrictions, 'Sin restricciones médicas');
     assert.equal(updated.transportMode, 'Bicicleta');
     assert.doesNotMatch(lastReply, /me queda pendiente|falt(?:a|an).*nombre completo|falt(?:a|an).*tipo de documento|falt(?:a|an).*localidad|falt(?:a|an).*restricciones/i);
