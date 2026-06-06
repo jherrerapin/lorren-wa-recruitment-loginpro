@@ -1349,9 +1349,12 @@ function outboundRequestsResolvedResidence(reply = '', candidate = {}, vacancy =
   if (!getCandidateResidenceValue(candidate, vacancy)) return false;
   const n = normalizeComparableText(reply);
   if (!n) return false;
+
   const asksResidence = /\b(?:localidad|barrio|residencia|donde\s+vives|donde\s+estas\s+ubicad[oa])\b/.test(n);
   const requestTone = /\b(?:falta|faltaria|me\s+falta|necesito|cuentame|confirmame|indica(?:me)?|dime|comparte(?:me)?)\b/.test(n);
-  return asksResidence && requestTone;
+  const directResidenceQuestion = /\b(?:en\s+que\s+localidad\s+estas|en\s+que\s+barrio\s+vives|en\s+que\s+barrio\s+estas|cual\s+es\s+tu\s+localidad|cual\s+es\s+tu\s+barrio)\b/.test(n);
+
+  return asksResidence && (requestTone || directResidenceQuestion);
 }
 
 function outboundRequestsResolvedCv(reply = '', readiness = {}) {
