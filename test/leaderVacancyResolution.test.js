@@ -69,6 +69,15 @@ test('Ibagué + líder de operaciones resuelve Lider de Operaciones', async () =
   assert.equal(result.reason, 'matched_active_vacancy');
 });
 
+test('Ibagué + coordinador/líder con typo operativo resuelve Lider de Operaciones', async () => {
+  const result = await resolveText('Ibague\nCoordinador l\nLíder de optaciones');
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.vacancy.id, ibagueLeaderVacancy.id);
+  assert.equal(result.reason, 'matched_active_vacancy');
+  assert.match(result.roleHint, /operaciones/);
+});
+
 test('vacancyFirstGate asigna la vacante de liderazgo y no pide referencia adicional', async () => {
   const decision = await resolveVacancyFirstGate({
     prisma: {},
