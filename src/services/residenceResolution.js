@@ -1,6 +1,7 @@
 import {
   buildResidenceFieldsFromLocation,
   LocationEntityType,
+  normalizeLocationText,
   resolveLocationEntity
 } from './locationResolver.js';
 
@@ -35,7 +36,34 @@ function mapLocationType(type) {
   return ResidenceResolutionKind.UNKNOWN;
 }
 
+function isDirectOfficialLocalityMention(entity = {}) {
+  if (entity.type !== LocationEntityType.BOGOTA_LOCALITY) return false;
+  return normalizeLocationText(entity.evidence || entity.raw || '') === normalizeLocationText(entity.name || '');
+}
+
+function buildUnconfirmedPlace(entity = {}, source = ResidenceResolutionSource.FALLBACK_RESOLVER) {
+  const rawText = cleanText(entity.evidence || entity.raw || entity.name || '');
+  return {
+    kind: rawText ? ResidenceResolutionKind.OTHER_CITY : ResidenceResolutionKind.UNKNOWN,
+    source,
+    rawText,
+    displayName: rawText,
+    city: null,
+    locality: null,
+    neighborhood: null,
+    zone: rawText || null,
+    confidence: rawText ? 0.45 : 0,
+    evidence: rawText,
+    fields: rawText ? { zone: rawText } : {},
+    needsGeocoding: Boolean(rawText)
+  };
+}
+
 function buildFromLocationEntity(entity = {}, source = ResidenceResolutionSource.FALLBACK_RESOLVER) {
+  if (entity.type === LocationEntityType.BOGOTA_LOCALITY && !isDirectOfficialLocalityMention(entity)) {
+    return buildUnconfirmedPlace(entity, source);
+  }
+
   const fields = buildResidenceFieldsFromLocation(entity);
   return {
     kind: mapLocationType(entity.type),
@@ -108,6 +136,6 @@ export function hasResolvedResidence(resolution = {}) {
   return Boolean(
     resolution.kind === ResidenceResolutionKind.BOGOTA_LOCALITY
     || resolution.kind === ResidenceResolutionKind.BOGOTA_AREA_MUNICIPALITY
-    || (resolution.kind === ResidenceResolutionKind.OTHER_CITY && resolution.displayName)
+    || (resolution.kind === ResidenceResolutionKind.OTHER_CITY && resolution.displayName && !resolution.needsGeocoding)
   );
 }
