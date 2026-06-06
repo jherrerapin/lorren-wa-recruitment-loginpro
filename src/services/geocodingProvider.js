@@ -26,7 +26,7 @@ function pickAddressComponent(components = [], types = []) {
 export function normalizeGoogleGeocodeResult(item = {}) {
   const components = item.address_components || [];
   const city = pickAddressComponent(components, ['locality', 'administrative_area_level_2']);
-  const locality = pickAddressComponent(components, ['sublocality_level_1', 'sublocality', 'neighborhood']);
+  const locality = pickAddressComponent(components, ['sublocality_level_1', 'sublocality']);
   const neighborhood = pickAddressComponent(components, ['neighborhood', 'sublocality_level_2']);
 
   return {
