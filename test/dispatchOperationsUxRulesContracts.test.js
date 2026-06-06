@@ -30,7 +30,7 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(publicRoute, /TIME_HH_MM_PATTERN/);
   assert.match(publicRoute, /normalizeOptionalTime/);
   assert.match(publicRoute, /Horario invalido\. Usa formato HH:mm/);
-  assert.match(publicRoute, /startTime,\n\s*endTime/);
+  assert.match(publicRoute, /startTime,\r?\n\s*endTime/);
   assert.match(dispatchRoute, /TIME_HH_MM_PATTERN/);
   assert.match(dispatchRoute, /normalizeOptionalTime/);
   assert.match(dispatchRoute, /resolveRequestTimes/);
