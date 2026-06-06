@@ -210,8 +210,8 @@ export function detectRoleHintFromText(text = '', options = {}) {
   const cityTokens = new Set(tokenize(options.city || ''));
   const segments = splitMeaningfulSegments(text);
   const preferredSegments = segments.filter((segment) => ROLE_SIGNAL_REGEX.test(segment));
-  for (const preferredSegment of preferredSegments) {
-    const preferredTokens = cleanRoleTokens(tokenize(preferredSegment), cityTokens);
+  if (preferredSegments.length) {
+    const preferredTokens = preferredSegments.flatMap((segment) => cleanRoleTokens(tokenize(segment), cityTokens));
     const preferredRoleHint = preferredTokens.length ? normalizeRoleHint(preferredTokens.join(' '), options.city || '') : null;
     if (preferredRoleHint) return preferredRoleHint;
   }
