@@ -517,6 +517,7 @@ model AppUser {
   scopeVacancy        Vacancy?        @relation(fields: [scopeVacancyId], references: [id], onDelete: SetNull)
   recoveryPhone       String?
   recoveryEmail       String?
+  email               String?
   createdByUsername   String?
   lastPasswordResetAt DateTime?
   isActive            Boolean         @default(true)

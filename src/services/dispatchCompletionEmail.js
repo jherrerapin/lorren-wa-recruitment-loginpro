@@ -25,7 +25,7 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
-function buildText(serviceRequest) {
+function buildText(serviceRequest, managedByUsername) {
   const assignments = serviceRequest.assignments || [];
   const workersText = assignments
     .map((assignment, index) => {
@@ -49,11 +49,13 @@ function buildText(serviceRequest) {
     'Auxiliares confirmados:',
     workersText || 'Sin auxiliares confirmados.',
     '',
-    serviceRequest.notes ? `Notas: ${serviceRequest.notes}` : null
+    serviceRequest.notes ? `Notas: ${serviceRequest.notes}` : null,
+    '',
+    managedByUsername ? `Gestionado por: ${managedByUsername}` : null
   ].filter(Boolean).join('\n');
 }
 
-function buildHtml(serviceRequest) {
+function buildHtml(serviceRequest, managedByUsername) {
   const assignments = serviceRequest.assignments || [];
   const workersRows = assignments.map((assignment, index) => {
     const worker = assignment.worker;
@@ -64,6 +66,10 @@ function buildHtml(serviceRequest) {
       <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${escapeHtml([worker.documentType, worker.documentNumber].filter(Boolean).join(' ') || '-')}</td>
     </tr>`;
   }).join('');
+
+  const managedByRow = managedByUsername
+    ? `<tr><td style="padding:6px 0;color:#64748b;">Gestionado por</td><td style="padding:6px 0;">${escapeHtml(managedByUsername)}</td></tr>`
+    : '';
 
   return `
   <div style="font-family:Arial,sans-serif;color:#172033;line-height:1.5;max-width:760px;margin:0 auto;">
@@ -83,6 +89,7 @@ function buildHtml(serviceRequest) {
           <tr><td style="padding:6px 0;color:#64748b;">Fecha</td><td style="padding:6px 0;">${escapeHtml(formatDate(serviceRequest.serviceDate))}</td></tr>
           <tr><td style="padding:6px 0;color:#64748b;">Horario</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.startTime || '-')} - ${escapeHtml(serviceRequest.endTime || '-')}</td></tr>
           <tr><td style="padding:6px 0;color:#64748b;">Auxiliares requeridos</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.requiredWorkers || 0)}</td></tr>
+          ${managedByRow}
         </tbody>
       </table>
 
@@ -110,7 +117,7 @@ function getEmailConfig() {
     provider: normalizeString(process.env.EMAIL_PROVIDER) || EMAIL_PROVIDER_RESEND,
     resendApiKey: normalizeString(process.env.RESEND_API_KEY),
     from: normalizeString(process.env.DISPATCH_EMAIL_FROM) || normalizeString(process.env.EMAIL_FROM),
-    replyTo: normalizeString(process.env.DISPATCH_EMAIL_REPLY_TO) || normalizeString(process.env.EMAIL_REPLY_TO)
+    defaultReplyTo: normalizeString(process.env.DISPATCH_EMAIL_REPLY_TO) || normalizeString(process.env.EMAIL_REPLY_TO)
   };
 }
 
@@ -140,7 +147,12 @@ async function sendWithResend({ apiKey, from, to, subject, html, text, replyTo }
   return data?.id || null;
 }
 
-export async function sendDispatchCompletionEmail(prisma, serviceRequestId) {
+/**
+ * @param {object} prisma
+ * @param {string} serviceRequestId
+ * @param {{ replyTo?: string|null, managedByUsername?: string|null }} [options]
+ */
+export async function sendDispatchCompletionEmail(prisma, serviceRequestId, options = {}) {
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
     where: { id: serviceRequestId },
     include: {
@@ -170,9 +182,13 @@ export async function sendDispatchCompletionEmail(prisma, serviceRequestId) {
     return { skipped: true, reason: 'missing_email_config' };
   }
 
+  // Usar el replyTo del usuario que gestionó, con fallback al replyTo global de env
+  const replyTo = normalizeString(options.replyTo) || config.defaultReplyTo;
+  const managedByUsername = normalizeString(options.managedByUsername);
+
   const subject = `Solicitud confirmada - ${serviceRequest.clientName} - ${serviceRequest.operationPointName || serviceRequest.cityName || ''}`.trim();
-  const html = buildHtml(serviceRequest);
-  const text = buildText(serviceRequest);
+  const html = buildHtml(serviceRequest, managedByUsername);
+  const text = buildText(serviceRequest, managedByUsername);
 
   try {
     const providerId = await sendWithResend({
@@ -182,7 +198,7 @@ export async function sendDispatchCompletionEmail(prisma, serviceRequestId) {
       subject,
       html,
       text,
-      replyTo: config.replyTo
+      replyTo
     });
 
     await prisma.dispatchServiceRequest.update({
