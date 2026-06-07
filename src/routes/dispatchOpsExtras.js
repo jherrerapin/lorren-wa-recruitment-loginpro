@@ -256,14 +256,57 @@ export function dispatchOpsExtrasRouter(prisma) {
         if (nombre) rows.push({ nombre, cedula, telefono, localidad });
       });
       if (!rows.length) throw new Error('El archivo no contiene datos válidos (recuerda que la primera fila se trata como encabezado).');
-      let creados = 0, omitidos = 0;
+      let creados = 0, omitidos = 0, reactivados = 0;
       for (const row of rows) {
-        const existing = row.cedula ? await prisma.dispatchWorker.findFirst({ where: { documentNumber: row.cedula }, select: { id: true } }) : null;
-        if (existing) { omitidos++; continue; }
-        await prisma.dispatchWorker.create({ data: { fullName: row.nombre, documentNumber: row.cedula || null, phone: row.telefono || null, residenceLocality: row.localidad || null, source: 'EXCEL_IMPORT', operationalStatus: 'CONTRATADO' } });
+        if (row.cedula) {
+          // Buscar si ya existe un worker activo (no INACTIVE) con esa cédula — eso sí es duplicado real
+          const activeExisting = await prisma.dispatchWorker.findFirst({
+            where: { documentNumber: row.cedula, operationalStatus: { not: 'INACTIVE' } },
+            select: { id: true }
+          });
+          if (activeExisting) { omitidos++; continue; }
+
+          // Si existe pero estaba INACTIVE, reactivarlo en lugar de omitirlo
+          const inactiveExisting = await prisma.dispatchWorker.findFirst({
+            where: { documentNumber: row.cedula, operationalStatus: 'INACTIVE' },
+            select: { id: true }
+          });
+          if (inactiveExisting) {
+            await prisma.dispatchWorker.update({
+              where: { id: inactiveExisting.id },
+              data: {
+                fullName: row.nombre,
+                phone: row.telefono || null,
+                residenceLocality: row.localidad || null,
+                operationalStatus: 'CONTRATADO',
+                source: 'EXCEL_IMPORT'
+              }
+            });
+            reactivados++;
+            continue;
+          }
+        }
+
+        // No existe — crear nuevo
+        await prisma.dispatchWorker.create({
+          data: {
+            fullName: row.nombre,
+            documentNumber: row.cedula || null,
+            phone: row.telefono || null,
+            residenceLocality: row.localidad || null,
+            source: 'EXCEL_IMPORT',
+            operationalStatus: 'CONTRATADO'
+          }
+        });
         creados++;
       }
-      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importación completada: ${creados} auxiliares creados, ${omitidos} omitidos por cédula duplicada.`));
+
+      const parts = [];
+      if (creados) parts.push(`${creados} auxiliar${creados !== 1 ? 'es creados' : ' creado'}`);
+      if (reactivados) parts.push(`${reactivados} reactivado${reactivados !== 1 ? 's' : ''}`);
+      if (omitidos) parts.push(`${omitidos} omitido${omitidos !== 1 ? 's' : ''} por cédula ya activa`);
+      const summary = parts.length ? parts.join(', ') : 'Sin cambios';
+      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importación completada: ${summary}.`));
     } catch (error) {
       console.error('[Excel import]', error);
       return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(error.message || 'Error al procesar el archivo.'));
