@@ -144,7 +144,7 @@ export function getResidenceFieldConfig(vacancyOrCity = null) {
 export function getCandidateResidenceValue(candidate = {}, vacancyOrCity = null) {
   const config = getResidenceFieldConfig(vacancyOrCity || candidate?.vacancy || candidate);
   if (config.field === 'locality') {
-    return candidate?.locality || candidate?.neighborhood || candidate?.zone || null;
+    return normalizeBogotaLocalidad(candidate?.locality || candidate?.neighborhood || candidate?.zone || '');
   }
   return candidate?.neighborhood || candidate?.locality || candidate?.zone || null;
 }
@@ -161,12 +161,6 @@ export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, 
 
     if (bogotaLocalidad) {
       normalized.locality = bogotaLocalidad;
-      if (clearAlternate) normalized.neighborhood = null;
-    } else if (explicitLocality && looksLikeLocationChunk(explicitLocality)) {
-      normalized.locality = normalizeResidenceValue(explicitLocality);
-      if (clearAlternate) normalized.neighborhood = null;
-    } else if (normalized.neighborhood && looksLikeLocationChunk(normalized.neighborhood)) {
-      normalized.locality = normalizeResidenceValue(normalized.neighborhood);
       if (clearAlternate) normalized.neighborhood = null;
     } else {
       normalized.locality = null;

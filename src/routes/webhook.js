@@ -1943,8 +1943,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           Object.assign(updateData, initialDecisions.persistedData);
         }
       }
-      debugTrace.vacancy_resolution_persisted = resolution.vacancy.id;
-      updateData.vacancyId = resolution.vacancy.id;
+      debugTrace.vacancy_resolution_skipped_outside_gate = resolution.vacancy.id;
     }
     await prisma.candidate.update({ where: { id: candidate.id }, data: updateData });
 
@@ -1970,12 +1969,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     const resolution = await resolveVacancyForCandidate();
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
     if (resolution.resolved && resolution.vacancy) {
-      debugTrace.vacancy_resolution_persisted = resolution.vacancy.id;
-      const updatedCandidate = await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: { currentStep: ConversationStep.GREETING_SENT, vacancyId: resolution.vacancy.id }
-      });
-      return replyWithVacancyContext(updatedCandidate, resolution.vacancy);
+      debugTrace.vacancy_resolution_skipped_outside_gate = resolution.vacancy.id;
+      return replyWithVacancyContext({ ...candidate, currentStep: ConversationStep.GREETING_SENT }, resolution.vacancy);
     }
     if (await replyFromVacancyResolutionFailure(resolution)) return;
     const activeVacancies = await findActiveVacancies(prisma);
@@ -2033,12 +2028,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
     const resolution = await resolveVacancyForCandidate();
     if (resolution.resolved && resolution.vacancy) {
-      debugTrace.vacancy_resolution_persisted = resolution.vacancy.id;
-      const updatedCandidate = await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: { vacancyId: resolution.vacancy.id }
-      });
-      return replyWithVacancyContext(updatedCandidate, resolution.vacancy);
+      debugTrace.vacancy_resolution_skipped_outside_gate = resolution.vacancy.id;
+      return replyWithVacancyContext(candidate, resolution.vacancy);
     }
 
     if (await replyFromVacancyResolutionFailure(resolution)) {

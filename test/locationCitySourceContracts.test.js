@@ -34,7 +34,8 @@ test('city usage contracts allow recruitment dispatch or both', () => {
   assert.doesNotMatch(view, /value="ADMIN"/);
 
   assert.doesNotMatch(dispatchRoute, /admin-ciudades/);
-  assert.match(dispatchRoute, /usedForDispatch:\s*true/);
+  assert.match(dispatchRoute, /loadUnifiedCityOptions\(prisma\)/);
+  assert.match(dispatchRoute, /filter\(\(city\) => city\.usedForDispatch\)/);
   assert.doesNotMatch(dispatchView, /Crear ciudad operativa/);
   assert.match(dispatchView, /Configurar ciudades/);
   assert.match(dispatchView, /Este módulo no crea ciudades/);
