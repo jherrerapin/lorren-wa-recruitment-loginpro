@@ -174,7 +174,34 @@ export function dispatchBridgeRouter() {
   router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const assignedCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId } }); if (assignedCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(serviceRequestId); return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}&message=${encodeURIComponent('La solicitud ya tiene el numero de auxiliares requerido.')}`); } const exists = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (exists) return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}&message=${encodeURIComponent('El auxiliar ya estaba asignado.')}`); await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'ASSIGNED', createdByUsername: req.session?.username || req.username || null } }); await recalculateServiceRequestStatus(serviceRequestId); return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}`); });
   router.post('/asignaciones/unassign', requireOps, async (req, res) => { const assignmentId = normalizeString(req.body.assignmentId); const serviceRequestId = normalizeString(req.body.serviceRequestId); if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos'); await prisma.dispatchAssignment.delete({ where: { id: assignmentId } }); await recalculateServiceRequestStatus(serviceRequestId); return res.redirect(`/admin/operaciones/asignaciones?serviceRequestId=${serviceRequestId}`); });
 
-  router.get('/personal', requireOps, async (req, res) => { const operationalCityId = normalizeString(req.query.operationalCityId); const vacancyId = normalizeString(req.query.vacancyId); const status = normalizeString(req.query.status); const workers = await prisma.dispatchWorker.findMany({ where: { ...buildDispatchEligibilityFilter(status), ...(operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {}), ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}) }, include: { candidate: true, cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } }); const cities = await loadDispatchCities(); const vacancies = await prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }); return res.render('operacionesPersonal', { pageTitle: 'Personal operativo', subtitle: 'Equipo disponible para asignación.', activeSection: 'personal', workers, cities, vacancies, filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', status: status || '' }, message: normalizeString(req.query.message), role: req.userRole, canAccessDispatch: req.canAccessDispatch }); });
+  router.get('/personal', requireOps, async (req, res) => {
+    const operationalCityId = normalizeString(req.query.operationalCityId);
+    const vacancyId = normalizeString(req.query.vacancyId);
+    const status = normalizeString(req.query.status);
+    const workers = await prisma.dispatchWorker.findMany({
+      where: {
+        ...buildDispatchEligibilityFilter(status),
+        ...(operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {}),
+        ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {})
+      },
+      include: { candidate: true, cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+    const cities = await loadDispatchCities();
+    const vacancies = await prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } });
+    return res.render('operacionesPersonal', {
+      pageTitle: 'Personal operativo',
+      subtitle: 'Equipo disponible para asignación.',
+      activeSection: 'personal',
+      workers,
+      cities,
+      vacancies,
+      filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', status: status || '' },
+      message: normalizeString(req.query.message),
+      role: req.session?.userRole || req.userRole,
+      canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
+    });
+  });
   router.get('/personal/nuevo', requireOps, async (req, res) => { const [cities, vacancies] = await Promise.all([loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } })]); return res.render('operacionesPersonalNuevo', { cities, vacancies, worker: null, mode: 'create', formAction: '/admin/operaciones/personal/nuevo', role: req.session?.userRole || req.userRole }); });
   router.post('/personal/nuevo', requireOps, async (req, res) => { const workerData = buildWorkerData(req.body); if (!workerData.fullName) return res.status(400).send('Nombre requerido'); const worker = await prisma.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } }); await replaceWorkerRelations(worker.id, req.body); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual creado.')}`); });
   router.get('/personal/:workerId/editar', requireOps, async (req, res) => { const [worker, cities, vacancies] = await Promise.all([findManualWorkerOr404(req.params.workerId), loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } })]); if (!worker) return res.status(404).send('Auxiliar manual no encontrado'); return res.render('operacionesPersonalNuevo', { cities, vacancies, worker, mode: 'edit', formAction: `/admin/operaciones/personal/${worker.id}/editar`, role: req.session?.userRole || req.userRole }); });
