@@ -17,6 +17,9 @@
       --navy: #1e2d3d;
       --teal: #0d7a6b;
       --teal-hover: #0a5f53;
+      --red: #b91c1c;
+      --red-light: #fee2e2;
+      --red-hover: #991b1b;
       --green: #166534;
       --green-light: #dcfce7;
       --blue: #1d4ed8;
@@ -43,10 +46,15 @@
     h1 { color: var(--navy); font-size: 28px; line-height: 1.15; margin-bottom: 8px; }
     .subtitle { color: var(--muted); line-height: 1.6; max-width: 720px; }
     .hero-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 9px 14px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 13px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow-sm); white-space: nowrap; }
     .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
     .btn-primary:hover { background: var(--teal-hover); }
     .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
+    .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
+    .btn-danger:hover { background: var(--red-hover); }
+    .btn-danger-outline { border-color: var(--red); color: var(--red); background: var(--surface); }
+    .btn-danger-outline:hover { background: var(--red-light); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
     .alert { border: 1px solid #bfdbfe; background: var(--blue-light); color: var(--blue); border-radius: 12px; padding: 12px 14px; font-size: 13px; font-weight: 700; }
     .filters-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow-sm); }
     .filters-head { margin-bottom: 14px; }
@@ -58,23 +66,39 @@
     select { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--text); font-size: 14px; outline: none; }
     select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
     .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; }
-    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid #eaecef; flex-wrap: wrap; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #eaecef; flex-wrap: wrap; }
     .panel-head h2 { color: var(--navy); font-size: 17px; }
     .panel-head p { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .bulk-bar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; background: #fff7ed; border-bottom: 1px solid #fed7aa; flex-wrap: wrap; }
+    .bulk-bar span { font-size: 13px; font-weight: 700; color: #92400e; }
+    #bulk-bar { display: none; }
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 980px; }
-    th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid #eaecef; vertical-align: top; }
+    table { width: 100%; border-collapse: collapse; min-width: 1020px; }
+    th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid #eaecef; vertical-align: middle; }
     th { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
     td { color: var(--text); font-size: 13px; }
+    td.actions-cell { white-space: nowrap; }
+    .check-col { width: 40px; text-align: center !important; padding: 10px 8px !important; }
+    input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--teal); cursor: pointer; }
+    tr.selected-row { background: #f0fdfa; }
     .muted { color: var(--muted); }
     .worker-name { color: var(--navy); font-weight: 800; }
-    .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 800; margin: 2px 4px 2px 0; }
+    .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 800; margin: 2px 3px 2px 0; }
     .pill-green { color: var(--green); background: var(--green-light); }
     .pill-blue { color: var(--blue); background: var(--blue-light); }
     .pill-amber { color: var(--amber); background: var(--amber-light); }
     .pill-purple { color: var(--purple); background: var(--purple-light); }
+    .pill-red { color: var(--red); background: var(--red-light); }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
     .empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 6px; }
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #fff; border-radius: 16px; padding: 28px 28px 24px; max-width: 480px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,.18); }
+    .modal h3 { color: var(--navy); font-size: 18px; margin-bottom: 10px; }
+    .modal p { color: var(--muted); font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
     @media (max-width: 900px) { .navbar { flex-wrap: wrap; height: auto; padding: 10px 16px; } .navbar .spacer { display: none; } .filters-grid { grid-template-columns: 1fr 1fr; } .hero { padding: 20px; } }
     @media (max-width: 640px) { .page { padding: 18px 14px 42px; } .filters-grid { grid-template-columns: 1fr; } .hero-actions, .btn { width: 100%; } }
   </style>
@@ -151,6 +175,14 @@
           <p>Personas disponibles para asignación a operaciones.</p>
         </div>
       </div>
+
+      <!-- Barra de acciones masivas -->
+      <div class="bulk-bar" id="bulk-bar">
+        <span id="bulk-count">0 seleccionados</span>
+        <button type="button" class="btn btn-danger" id="btn-bulk-delete">🗑 Eliminar seleccionados</button>
+        <button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button>
+      </div>
+
       <% if (!workers.length) { %>
         <div class="empty">
           <strong>No hay personal contratado disponible.</strong>
@@ -158,9 +190,10 @@
         </div>
       <% } else { %>
         <div class="table-wrap">
-          <table>
+          <table id="workers-table">
             <thead>
               <tr>
+                <th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th>
                 <th>Nombre</th>
                 <th>Teléfono</th>
                 <th>Documento</th>
@@ -178,8 +211,12 @@
                   const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' };
                   const sourceLabel = sourceMap[w.source] || w.source;
                   const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue';
+                  const isActive = w.operationalStatus === 'ACTIVE' || w.operationalStatus === 'CONTRATADO';
                 %>
-                <tr>
+                <tr data-id="<%= w.id %>">
+                  <td class="check-col">
+                    <input type="checkbox" class="row-check" value="<%= w.id %>" />
+                  </td>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
                   <td><%= w.phone || '-' %></td>
                   <td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
@@ -195,15 +232,18 @@
                     <% } else { %><span class="muted">Sin perfiles habilitados</span><% } %>
                   </td>
                   <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
-                  <td><span class="pill <%= w.operationalStatus === 'ACTIVE' || w.operationalStatus === 'CONTRATADO' ? 'pill-green' : 'pill-amber' %>"><%= w.operationalStatus %></span></td>
-                  <td>
-                    <% if (w.source === 'MANUAL') { %>
-                      <div class="hero-actions">
+                  <td><span class="pill <%= isActive ? 'pill-green' : 'pill-amber' %>"><%= w.operationalStatus %></span></td>
+                  <td class="actions-cell">
+                    <div class="row-actions">
+                      <% if (w.source === 'MANUAL') { %>
                         <a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/editar">Editar</a>
-                        <form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle"><button class="btn btn-secondary" type="submit"><%= w.operationalStatus === 'ACTIVE' ? 'Desactivar' : 'Reactivar' %></button></form>
-                        <form method="post" action="/admin/operaciones/personal/<%= w.id %>/eliminar"><button class="btn btn-secondary" type="submit">Eliminar</button></form>
-                      </div>
-                    <% } else { %><span class="muted">—</span><% } %>
+                        <form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline">
+                          <button class="btn btn-secondary" type="submit"><%= isActive ? 'Desactivar' : 'Reactivar' %></button>
+                        </form>
+                      <% } %>
+                      <button type="button" class="btn btn-danger-outline btn-single-delete"
+                        data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button>
+                    </div>
                   </td>
                 </tr>
               <% }) %>
@@ -213,5 +253,112 @@
       <% } %>
     </section>
   </main>
+
+  <!-- Modal confirmación eliminar uno -->
+  <div class="modal-overlay" id="modal-single">
+    <div class="modal">
+      <h3>Eliminar auxiliar</h3>
+      <p id="modal-single-msg">¿Estás seguro de que deseas eliminar a este auxiliar? Esta acción lo marcará como inactivo.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="modal-single-cancel">Cancelar</button>
+        <form method="post" id="modal-single-form">
+          <button type="submit" class="btn btn-danger">Sí, eliminar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal confirmación eliminar varios -->
+  <div class="modal-overlay" id="modal-bulk">
+    <div class="modal">
+      <h3>Eliminar seleccionados</h3>
+      <p id="modal-bulk-msg">¿Confirmas la eliminación de los auxiliares seleccionados?</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="modal-bulk-cancel">Cancelar</button>
+        <form method="post" action="/admin/operaciones/personal/eliminar-bulk" id="modal-bulk-form">
+          <input type="hidden" name="ids" id="bulk-ids-input" value="" />
+          <button type="submit" class="btn btn-danger">Sí, eliminar todos</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Selección de filas ──────────────────────────────────────────────────
+    const checkAll = document.getElementById('check-all');
+    const bulkBar = document.getElementById('bulk-bar');
+    const bulkCount = document.getElementById('bulk-count');
+    const bulkIdsInput = document.getElementById('bulk-ids-input');
+
+    function getChecked() {
+      return [...document.querySelectorAll('.row-check:checked')];
+    }
+    function refreshBulkBar() {
+      const checked = getChecked();
+      if (checked.length > 0) {
+        bulkBar.style.display = 'flex';
+        bulkCount.textContent = checked.length + ' seleccionado' + (checked.length > 1 ? 's' : '');
+      } else {
+        bulkBar.style.display = 'none';
+      }
+      const rows = document.querySelectorAll('.row-check');
+      checkAll.indeterminate = checked.length > 0 && checked.length < rows.length;
+      checkAll.checked = rows.length > 0 && checked.length === rows.length;
+    }
+    function highlightRows() {
+      document.querySelectorAll('.row-check').forEach((cb) => {
+        cb.closest('tr').classList.toggle('selected-row', cb.checked);
+      });
+    }
+
+    if (checkAll) {
+      checkAll.addEventListener('change', () => {
+        document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = checkAll.checked; });
+        highlightRows();
+        refreshBulkBar();
+      });
+    }
+    document.querySelectorAll('.row-check').forEach((cb) => {
+      cb.addEventListener('change', () => { highlightRows(); refreshBulkBar(); });
+    });
+
+    document.getElementById('btn-bulk-cancel')?.addEventListener('click', () => {
+      document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = false; });
+      if (checkAll) { checkAll.checked = false; checkAll.indeterminate = false; }
+      highlightRows();
+      refreshBulkBar();
+    });
+
+    // ── Modal eliminar uno ──────────────────────────────────────────────────
+    const modalSingle = document.getElementById('modal-single');
+    const modalSingleMsg = document.getElementById('modal-single-msg');
+    const modalSingleForm = document.getElementById('modal-single-form');
+
+    document.querySelectorAll('.btn-single-delete').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const name = btn.dataset.name;
+        modalSingleMsg.textContent = `¿Eliminar a "${name}"? Quedará marcado como inactivo.`;
+        modalSingleForm.action = `/admin/operaciones/personal/${id}/eliminar`;
+        modalSingle.classList.add('open');
+      });
+    });
+    document.getElementById('modal-single-cancel')?.addEventListener('click', () => modalSingle.classList.remove('open'));
+    modalSingle?.addEventListener('click', (e) => { if (e.target === modalSingle) modalSingle.classList.remove('open'); });
+
+    // ── Modal eliminar varios ───────────────────────────────────────────────
+    const modalBulk = document.getElementById('modal-bulk');
+    const modalBulkMsg = document.getElementById('modal-bulk-msg');
+
+    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => {
+      const checked = getChecked();
+      if (!checked.length) return;
+      bulkIdsInput.value = checked.map((cb) => cb.value).join(',');
+      modalBulkMsg.textContent = `¿Confirmas eliminar ${checked.length} auxiliar${checked.length > 1 ? 'es' : ''}? Quedarán marcados como inactivos.`;
+      modalBulk.classList.add('open');
+    });
+    document.getElementById('modal-bulk-cancel')?.addEventListener('click', () => modalBulk.classList.remove('open'));
+    modalBulk?.addEventListener('click', (e) => { if (e.target === modalBulk) modalBulk.classList.remove('open'); });
+  </script>
 </body>
 </html>

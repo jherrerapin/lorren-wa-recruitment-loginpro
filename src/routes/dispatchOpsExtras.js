@@ -98,6 +98,9 @@ async function notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUs
   if (result?.error) return ' Solicitud completa: no fue posible enviar el correo al solicitante.';
   return '';
 }
+// Busca cualquier worker (no solo MANUAL) por id
+async function findWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId }, include: { cities: true, vacancies: true } }); }
+// Busca solo workers MANUAL por id (para editar)
 async function findManualWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId, source: 'MANUAL' }, include: { cities: true, vacancies: true } }); }
 async function replaceWorkerRelations(prisma, workerId, body) {
   const cityIds = normalizeStringList(body.cityIds);
@@ -162,7 +165,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud creada.')}&created=${created.id}`);
   });
 
-  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => { const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }); return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`); });
+  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => { const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }); return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`) });
 
   router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }); if (activeCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmación de los auxiliares.')); } const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (existing) { if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya está asignado a esta solicitud.')); await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } }); } else { await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } }); } await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmación.')); });
   router.post('/asignaciones/confirmar', requireOps, async (req, res) => {
@@ -299,11 +302,23 @@ export function dispatchOpsExtrasRouter(prisma) {
     await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: nextStatus } });
     return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(nextStatus === 'ACTIVE' ? 'Auxiliar manual reactivado.' : 'Auxiliar manual desactivado.')}`);
   });
+
+  // Eliminar uno (cualquier source — marca como INACTIVE)
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
-    const worker = await findManualWorkerOr404(prisma, req.params.workerId);
-    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    const worker = await findWorkerOr404(prisma, req.params.workerId);
+    if (!worker) return res.status(404).send('Auxiliar no encontrado');
     await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'INACTIVE' } });
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual eliminado del flujo activo.')}`);
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar eliminado del flujo activo.')}`);
+  });
+
+  // Eliminar varios en bulk (cualquier source — marca como INACTIVE)
+  router.post('/personal/eliminar-bulk', requireOps, async (req, res) => {
+    const idsRaw = normalizeString(req.body.ids);
+    if (!idsRaw) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs para eliminar.')}`);
+    const ids = idsRaw.split(',').map((id) => id.trim()).filter(Boolean);
+    if (!ids.length) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs válidos.')}`);
+    const { count } = await prisma.dispatchWorker.updateMany({ where: { id: { in: ids } }, data: { operationalStatus: 'INACTIVE' } });
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`${count} auxiliar${count !== 1 ? 'es eliminados' : ' eliminado'} del flujo activo.`)}`);
   });
 
   router.post('/sync-contratados', requireOps, requireDev, async (req, res) => {
