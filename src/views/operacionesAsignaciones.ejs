@@ -138,7 +138,7 @@
               <div class="request-actions">
                 <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Seleccionar</a>
                 <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
-                <form method="post" action="/operaciones/admin-delete/solicitudes/<%= request.id %>" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
+                <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
               </div>
             </article>
           <% }) %>
