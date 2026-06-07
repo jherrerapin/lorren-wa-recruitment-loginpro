@@ -23,7 +23,8 @@ test('aceptar horario crea booking SCHEDULED y no CONFIRMED', async () => {
       create: async ({ data }) => {
         calls.push(data);
         return { id: 'book-created', status: data.status || 'SCHEDULED', ...data };
-      }
+      },
+      updateMany: async () => ({ count: 0 })
     }
   };
 

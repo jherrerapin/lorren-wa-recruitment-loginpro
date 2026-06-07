@@ -75,7 +75,7 @@ test('bloquea agenda con vacante inactiva', async () => {
   assert.equal(prisma.updates.some((u) => u.data.currentStep === ConversationStep.SCHEDULING), false);
 });
 
-test('estado del motor no trata barrio como faltante alterno en vacante Bogota', () => {
+test('estado del motor mantiene localidad pendiente si la residencia reportada es Soacha', () => {
   const state = buildCandidateStateForModel(
     completeCandidate({ locality: 'Soacha Cundinamarca', neighborhood: null, cvStorageKey: null }),
     schedulableVacancy({ schedulingEnabled: false }),
@@ -83,14 +83,13 @@ test('estado del motor no trata barrio como faltante alterno en vacante Bogota',
   );
 
   assert.equal(state.profile.residenceArea.field, 'locality');
-  assert.equal(state.profile.residenceArea.state.captured, true);
-  assert.equal(state.profile.locality.captured, true);
-  assert.equal(state.profile.locality.value, 'Soacha Cundinamarca');
-  assert.equal(state.profile.neighborhood.captured, true);
-  assert.equal(state.progress.missingFields.includes('locality'), false);
+  assert.equal(state.profile.residenceArea.state.captured, false);
+  assert.equal(state.profile.locality.captured, false);
+  assert.equal(state.profile.locality.value, null);
+  assert.equal(state.progress.missingFields.includes('locality'), true);
 });
 
-test('act alinea residencia extraida como barrio hacia localidad para Bogota', async () => {
+test('act no alinea Soacha como localidad para Bogota', async () => {
   const prisma = prismaMock();
   const candidate = completeCandidate({ locality: null, neighborhood: null, cvStorageKey: null });
 
@@ -102,7 +101,7 @@ test('act alinea residencia extraida como barrio hacia localidad para Bogota', a
   extractedFields: { neighborhood: 'Soacha Compartir' }
 });
 
-assert.equal(prisma.updates[0].data.locality, 'Soacha Cundinamarca');
-assert.equal(prisma.updates[0].data.neighborhood, undefined);
-assert.equal(result.finalStep, ConversationStep.ASK_CV);
+assert.equal(prisma.updates.some((update) => update.data.locality === 'Soacha Cundinamarca'), false);
+assert.equal(prisma.updates.some((update) => update.data.neighborhood === 'Soacha Compartir'), false);
+assert.equal(result.finalStep, ConversationStep.COLLECTING_DATA);
 });

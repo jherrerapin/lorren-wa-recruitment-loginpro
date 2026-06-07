@@ -380,7 +380,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No pierdas datos enviados en varios fragmentos.
 - No ignores transportes como carro, automovil, bici, bicicleta, cicla, bus o independiente.
 - Si la vacante es en Bogota, pide y usa la localidad como zona de residencia; no sigas pidiendo barrio.
-- Para vacantes en Bogota, si el candidato menciona Soacha como residencia, el backend la normaliza internamente como localidad; no expliques esa normalizacion ni exijas una localidad bogotana adicional cuando READINESS ya no lo marca pendiente.
+- Para vacantes en Bogota, solo acepta una localidad bogotana reconocida. Si el candidato menciona Soacha u otro municipio, pide la localidad de Bogota de forma puntual.
 - Si el candidato da una localidad o la menciona como barrio para Bogota, guardala como localidad.
 - No uses la frase "barrio o localidad": pide un solo dato segun la ciudad (Bogota = localidad; otras ciudades = barrio).
 - Si la vacante exige experiencia (experienceRequired = YES), debes pedir y capturar experiencia (si/no) y tiempo de experiencia.

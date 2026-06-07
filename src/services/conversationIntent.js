@@ -100,7 +100,7 @@ const CORRECTION_PATTERNS = [
 ];
 
 const APPLY_PATTERNS = [/\b(aplicar|postular|continuar|me interesa|quiero seguir|deseo continuar)\b/];
-const FAQ_PATTERNS = [/\b(que hacen|como funciona|cuando|donde|requisito|salario|pago|horario|entrevista|ubicacion|condiciones)\b/];
+const FAQ_PATTERNS = [/\b(que hacen|como funciona|cuando|cuanto|donde|requisito|salario|pago|horario|entrevista|ubicacion|condiciones)\b/];
 const DATA_PATTERNS = [
   /\b(edad|cc|cedula|cedula de ciudadania|ti|ce|ppt|barrio|experiencia|restricciones|moto|bicicleta|transporte|nombre|localidad)\b/,
   /\b\d{5,}\b/

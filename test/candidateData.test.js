@@ -312,6 +312,7 @@ test('no alinea Soacha como localidad valida para vacantes Bogota', () => {
 
   assert.equal(aligned.locality, null);
   assert.equal(aligned.neighborhood, null);
+  assert.equal(getCandidateResidenceValue({ locality: 'Soacha Cundinamarca' }, { city: 'Bogota' }), null);
 });
 
 test('usa localidad como residencia principal para vacantes de Bogota', () => {
