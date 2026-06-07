@@ -1,11 +1,14 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
+import multer from 'multer';
+import ExcelJS from 'exceljs';
 import { prisma } from '../lib/prisma.js';
 import { upsertDispatchWorkerFromCandidate } from '../services/dispatchWorkerSync.js';
 import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/cityOptions.js';
 import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../services/transportMode.js';
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -34,7 +37,7 @@ async function resolveCompatibleOperationalCityIds(operationalCityId) {
 }
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function buildDispatchEligibilityFilter(status = null) {
-  return status ? { operationalStatus: status } : { operationalStatus: 'ACTIVE' };
+  return status ? { operationalStatus: status } : { operationalStatus: 'CONTRATADO' };
 }
 function isOpsUser(req) { const username = normalizeString(req.session?.username || req.username); return Boolean(username?.startsWith('operaciones-despacho')); }
 function canUseOps(req) { const role = req.session?.userRole || req.userRole; const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch); return role === 'dev' || canAccessDispatch || isOpsUser(req); }
@@ -188,6 +191,68 @@ export function dispatchBridgeRouter() {
       canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
     });
   });
+
+  router.get('/personal/importar-excel', requireOps, (req, res) => {
+    return res.render('operacionesPersonalImportar', {
+      role: req.session?.userRole || req.userRole,
+      message: normalizeString(req.query.message),
+      error: normalizeString(req.query.error)
+    });
+  });
+
+  router.post('/personal/importar-excel', requireOps, excelUpload.single('excelFile'), async (req, res) => {
+    if (!req.file) return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent('Debes seleccionar un archivo Excel.'));
+    try {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(req.file.buffer);
+      const sheet = workbook.worksheets[0];
+      if (!sheet) throw new Error('El archivo no tiene hojas de cálculo.');
+
+      const rows = [];
+      sheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+        const getCellText = (col) => {
+          const cell = row.getCell(col);
+          const val = cell.value;
+          if (val === null || val === undefined) return null;
+          if (typeof val === 'object' && val.richText) return val.richText.map((r) => r.text).join('');
+          return normalizeString(String(val));
+        };
+        const nombre    = getCellText(1);
+        const cedula    = getCellText(2);
+        const telefono  = getCellText(3);
+        const localidad = getCellText(4);
+        if (nombre) rows.push({ nombre, cedula, telefono, localidad });
+      });
+
+      if (!rows.length) throw new Error('El archivo no contiene datos válidos (recuerda que la primera fila se trata como encabezado).');
+
+      let creados = 0, omitidos = 0;
+      for (const row of rows) {
+        const existing = row.cedula
+          ? await prisma.dispatchWorker.findFirst({ where: { documentNumber: row.cedula }, select: { id: true } })
+          : null;
+        if (existing) { omitidos++; continue; }
+        await prisma.dispatchWorker.create({
+          data: {
+            fullName: row.nombre,
+            documentNumber: row.cedula || null,
+            phone: row.telefono || null,
+            residenceLocality: row.localidad || null,
+            source: 'EXCEL_IMPORT',
+            operationalStatus: 'CONTRATADO'
+          }
+        });
+        creados++;
+      }
+
+      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importación completada: ${creados} auxiliares creados, ${omitidos} omitidos por cédula duplicada.`));
+    } catch (error) {
+      console.error('[Excel import]', error);
+      return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(error.message || 'Error al procesar el archivo.'));
+    }
+  });
+
   router.get('/personal/nuevo', requireOps, async (req, res) => { const [cities, vacancies] = await Promise.all([loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } })]); return res.render('operacionesPersonalNuevo', { cities, vacancies, worker: null, mode: 'create', formAction: '/admin/operaciones/personal/nuevo', role: req.session?.userRole || req.userRole }); });
   router.post('/personal/nuevo', requireOps, async (req, res) => { const workerData = buildWorkerData(req.body); if (!workerData.fullName) return res.status(400).send('Nombre requerido'); const worker = await prisma.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } }); await replaceWorkerRelations(worker.id, req.body); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual creado.')}`); });
   router.get('/personal/:workerId/editar', requireOps, async (req, res) => { const [worker, cities, vacancies] = await Promise.all([findManualWorkerOr404(req.params.workerId), loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } })]); if (!worker) return res.status(404).send('Auxiliar manual no encontrado'); return res.render('operacionesPersonalNuevo', { cities, vacancies, worker, mode: 'edit', formAction: `/admin/operaciones/personal/${worker.id}/editar`, role: req.session?.userRole || req.userRole }); });
@@ -195,7 +260,7 @@ export function dispatchBridgeRouter() {
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => { const worker = await findManualWorkerOr404(req.params.workerId); if (!worker) return res.status(404).send('Auxiliar manual no encontrado'); const nextStatus = worker.operationalStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'; await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: nextStatus } }); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(nextStatus === 'ACTIVE' ? 'Auxiliar manual reactivado.' : 'Auxiliar manual desactivado.')}`); });
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => { const worker = await findManualWorkerOr404(req.params.workerId); if (!worker) return res.status(404).send('Auxiliar manual no encontrado'); await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'INACTIVE' } }); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual eliminado del flujo activo.')}`); });
 
-  router.post('/sync-contratados', requireOps, requireDev, async (_req, res) => { const registered = await prisma.candidate.findMany({ where: { status: 'REGISTRADO' }, select: { id: true } }); for (const candidate of registered) await upsertDispatchWorkerFromCandidate(prisma, candidate.id); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Modo prueba: sincronización completada con ${registered.length} candidatos registrados procesados.`)}`); });
+  router.post('/sync-contratados', requireOps, requireDev, async (_req, res) => { const contratados = await prisma.candidate.findMany({ where: { status: 'CONTRATADO' }, select: { id: true } }); for (const candidate of contratados) await upsertDispatchWorkerFromCandidate(prisma, candidate.id); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Sincronización completada: ${contratados.length} candidatos contratados procesados.`)}`); });
   router.get('/novedades', requireOps, (_req, res) => renderOperationsDashboard(res, { pageTitle: 'Novedades operativas', activeSection: 'novedades' }));
   router.get('/solicitud/:publicToken', async (req, res) => { const operationPoint = await prisma.dispatchOperationPoint.findFirst({ where: { publicToken: req.params.publicToken, isActive: true }, include: { client: true } }); if (!operationPoint?.client?.isActive) return res.status(404).send('Link no disponible'); return res.redirect(`/operaciones/cliente/${operationPoint.client.publicToken}`); });
   router.post('/solicitud/:publicToken', async (req, res) => { const operationPoint = await prisma.dispatchOperationPoint.findFirst({ where: { publicToken: req.params.publicToken, isActive: true }, include: { client: { include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } }, services: { where: { isActive: true }, orderBy: { name: 'asc' } } } } } }); if (!operationPoint?.client?.isActive) return res.status(404).send('Link no disponible'); const requiredWorkersRaw = Number(req.body.requiredWorkers); const selectedService = operationPoint.client.services.find((service) => service.id === normalizeString(req.body.serviceId)) || null; let requestTimes; try { requestTimes = resolveRequestTimes(req.body); } catch (error) { return res.status(400).send(error.message || 'Horario invalido. Usa formato HH:mm.'); } await prisma.dispatchServiceRequest.create({ data: { operationPointId: operationPoint.id, clientName: operationPoint.client.name, operationPointName: operationPoint.name, cityName: operationPoint.cityName, address: operationPoint.address, ...serviceRequestServiceData(selectedService), serviceDate: new Date(req.body.serviceDate), ...requestTimes, requiredWorkers: Number.isFinite(requiredWorkersRaw) ? Math.max(1, Math.trunc(requiredWorkersRaw)) : 1, notes: normalizeString(req.body.notes), requestedByName: normalizeString(req.body.requestedByName), requestedByPhone: normalizeString(req.body.requestedByPhone), requestedByEmail: normalizeString(req.body.requestedByEmail), source: 'PUBLIC_LINK', status: 'PENDING_ASSIGNMENT' } }); return res.render('publicDispatchRequest', { client: operationPoint.client, operationPoints: operationPoint.client.operationPoints, services: operationPoint.client.services, operationPoint, service: selectedService, success: true }); });

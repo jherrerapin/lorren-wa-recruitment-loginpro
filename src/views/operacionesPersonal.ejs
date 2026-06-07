@@ -23,6 +23,8 @@
       --blue-light: #dbeafe;
       --amber: #92400e;
       --amber-light: #fef3c7;
+      --purple: #6b21a8;
+      --purple-light: #f3e8ff;
       --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
       --shadow-md: 0 10px 28px rgba(15,23,42,.08);
       --radius: 12px;
@@ -70,6 +72,7 @@
     .pill-green { color: var(--green); background: var(--green-light); }
     .pill-blue { color: var(--blue); background: var(--blue-light); }
     .pill-amber { color: var(--amber); background: var(--amber-light); }
+    .pill-purple { color: var(--purple); background: var(--purple-light); }
     .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
     .empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 6px; }
     @media (max-width: 900px) { .navbar { flex-wrap: wrap; height: auto; padding: 10px 16px; } .navbar .spacer { display: none; } .filters-grid { grid-template-columns: 1fr 1fr; } .hero { padding: 20px; } }
@@ -95,11 +98,12 @@
         <p class="subtitle"><%= subtitle %></p>
       </div>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">Crear auxiliar manual</a>
+        <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">+ Crear auxiliar manual</a>
+        <a class="btn btn-secondary" href="/admin/operaciones/personal/importar-excel">&#11014; Importar Excel</a>
         <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
         <% if (role === 'dev') { %>
           <form method="post" action="/admin/operaciones/sync-contratados">
-            <button type="submit" class="btn btn-primary">Sincronizar registrados</button>
+            <button type="submit" class="btn btn-primary">Sincronizar contratados</button>
           </form>
         <% } %>
       </div>
@@ -131,6 +135,7 @@
           <label for="status">Estado</label>
           <select id="status" name="status">
             <option value="">Todos los estados</option>
+            <option value="CONTRATADO" <%= filters.status==='CONTRATADO'?'selected':'' %>>Contratado</option>
             <option value="ACTIVE" <%= filters.status==='ACTIVE'?'selected':'' %>>Activo</option>
             <option value="INACTIVE" <%= filters.status==='INACTIVE'?'selected':'' %>>Inactivo</option>
           </select>
@@ -148,8 +153,8 @@
       </div>
       <% if (!workers.length) { %>
         <div class="empty">
-          <strong>No hay personal operativo registrado.</strong>
-          Para pruebas, sincroniza candidatos registrados y revisa este listado antes de asignar auxiliares.
+          <strong>No hay personal contratado disponible.</strong>
+          Solo se muestran auxiliares con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.
         </div>
       <% } else { %>
         <div class="table-wrap">
@@ -169,11 +174,16 @@
             </thead>
             <tbody>
               <% workers.forEach((w) => { %>
+                <% 
+                  const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' };
+                  const sourceLabel = sourceMap[w.source] || w.source;
+                  const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue';
+                %>
                 <tr>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
                   <td><%= w.phone || '-' %></td>
                   <td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
-                  <td><%= w.residenceCity || '-' %></td>
+                  <td><%= w.residenceCity || w.residenceLocality || '-' %></td>
                   <td>
                     <% if (w.cities.length) { %>
                       <% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %>
@@ -184,8 +194,8 @@
                       <% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %> — <%= entry.vacancy.city || 'Sin ciudad' %></span><% }) %>
                     <% } else { %><span class="muted">Sin perfiles habilitados</span><% } %>
                   </td>
-                  <td><span class="pill pill-blue"><%= w.source %></span></td>
-                  <td><span class="pill <%= w.operationalStatus === 'ACTIVE' ? 'pill-green' : 'pill-amber' %>"><%= w.operationalStatus %></span></td>
+                  <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
+                  <td><span class="pill <%= w.operationalStatus === 'ACTIVE' || w.operationalStatus === 'CONTRATADO' ? 'pill-green' : 'pill-amber' %>"><%= w.operationalStatus %></span></td>
                   <td>
                     <% if (w.source === 'MANUAL') { %>
                       <div class="hero-actions">
@@ -193,7 +203,7 @@
                         <form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle"><button class="btn btn-secondary" type="submit"><%= w.operationalStatus === 'ACTIVE' ? 'Desactivar' : 'Reactivar' %></button></form>
                         <form method="post" action="/admin/operaciones/personal/<%= w.id %>/eliminar"><button class="btn btn-secondary" type="submit">Eliminar</button></form>
                       </div>
-                    <% } else { %><span class="muted">Sin edición manual</span><% } %>
+                    <% } else { %><span class="muted">—</span><% } %>
                   </td>
                 </tr>
               <% }) %>

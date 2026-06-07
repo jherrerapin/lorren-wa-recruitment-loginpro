@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Importar auxiliares — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f4f5f7;
+      --surface: #ffffff;
+      --border: #e1e4e8;
+      --text: #1a1d23;
+      --muted: #6b7280;
+      --navy: #1e2d3d;
+      --teal: #0d7a6b;
+      --teal-hover: #0a5f53;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+      --shadow-md: 0 10px 28px rgba(15,23,42,.08);
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; }
+    .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; min-height: 52px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 600; padding: 4px 2px; border-bottom: 2px solid transparent; }
+    .navbar a:hover, .navbar a.nav-active { color: #fff; border-bottom-color: #4fd1c5; }
+    .navbar .brand img { height: 28px; display: block; }
+    .navbar .spacer { flex: 1; }
+    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 6px 12px !important; border-radius: 7px; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .page { max-width: 780px; margin: 0 auto; padding: 36px 20px 60px; display: grid; gap: 20px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow-md); }
+    h1 { color: var(--navy); font-size: 22px; margin-bottom: 8px; }
+    .sub { color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 24px; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+    .field label { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+    input[type=file] { border: 2px dashed var(--border); border-radius: 10px; padding: 20px; width: 100%; background: #f9fafb; cursor: pointer; font-size: 13px; color: var(--muted); }
+    input[type=file]:hover { border-color: var(--teal); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 9px 18px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); }
+    .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+    .btn-primary:hover { background: var(--teal-hover); }
+    .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .alert-error { border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 10px; padding: 12px 14px; font-size: 13px; font-weight: 700; margin-bottom: 18px; }
+    .info-box { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px; padding: 16px 18px; font-size: 13px; color: #0f766e; margin-bottom: 22px; }
+    .info-box strong { display: block; margin-bottom: 8px; font-size: 13px; }
+    .info-box ul { padding-left: 18px; line-height: 2; }
+    .col-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    .col-table th { text-align: left; color: #0f766e; font-weight: 900; padding: 4px 10px; border-bottom: 1px solid #99f6e4; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .col-table td { padding: 6px 10px; border-bottom: 1px solid #ccfbf1; color: #134e4a; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <div class="card">
+      <h1>&#11014; Importar auxiliares desde Excel</h1>
+      <p class="sub">Sube un archivo <strong>.xlsx</strong> con los auxiliares a registrar. Se crearán con origen <strong>📊 Excel masivo</strong> y estado <strong>Contratado</strong>. Si ya existe un auxiliar con la misma cédula, la fila se omite sin generar error.</p>
+
+      <% if (error) { %><div class="alert-error">&#9888; <%= error %></div><% } %>
+
+      <div class="info-box">
+        <strong>Formato esperado del archivo — columnas en orden:</strong>
+        <table class="col-table">
+          <thead><tr><th>Columna</th><th>Campo</th><th>Ejemplo</th></tr></thead>
+          <tbody>
+            <tr><td><strong>A</strong></td><td>Nombre completo</td><td>Oscar Antonio Montoya Hernandez</td></tr>
+            <tr><td><strong>B</strong></td><td>Cédula</td><td>2615249</td></tr>
+            <tr><td><strong>C</strong></td><td>Teléfono</td><td>3134645409</td></tr>
+            <tr><td><strong>D</strong></td><td>Localidad</td><td>Siberia</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:10px;font-size:12px;color:#0f766e;">&#9432; La primera fila del archivo se trata como encabezado y se omite automáticamente. Solo se requiere el <strong>Nombre</strong>; las demás columnas son opcionales.</p>
+      </div>
+
+      <form method="post" action="/admin/operaciones/personal/importar-excel" enctype="multipart/form-data">
+        <div class="field">
+          <label for="excelFile">Archivo Excel (.xlsx)</label>
+          <input type="file" id="excelFile" name="excelFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn btn-primary">&#9654; Iniciar importación</button>
+          <a class="btn btn-secondary" href="/admin/operaciones/personal">Cancelar</a>
+        </div>
+      </form>
+    </div>
+  </main>
+</body>
+</html>
