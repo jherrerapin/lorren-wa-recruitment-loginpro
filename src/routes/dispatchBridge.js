@@ -34,21 +34,7 @@ async function resolveCompatibleOperationalCityIds(operationalCityId) {
 }
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function buildDispatchEligibilityFilter(status = null) {
-  return {
-    operationalStatus: status || 'ACTIVE',
-    OR: [
-      { source: 'MANUAL' },
-      {
-        candidate: {
-          is: {
-            vacancyId: { not: null },
-            gender: { not: 'FEMALE' },
-            status: { in: ['REGISTRADO', 'APROBADO', 'CONTRATADO'] }
-          }
-        }
-      }
-    ]
-  };
+  return status ? { operationalStatus: status } : { operationalStatus: 'ACTIVE' };
 }
 function isOpsUser(req) { const username = normalizeString(req.session?.username || req.username); return Boolean(username?.startsWith('operaciones-despacho')); }
 function canUseOps(req) { const role = req.session?.userRole || req.userRole; const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch); return role === 'dev' || canAccessDispatch || isOpsUser(req); }
