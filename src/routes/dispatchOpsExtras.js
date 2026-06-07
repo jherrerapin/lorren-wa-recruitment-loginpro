@@ -245,6 +245,8 @@ export function dispatchOpsExtrasRouter(prisma) {
           const val = cell.value;
           if (val === null || val === undefined) return null;
           if (typeof val === 'object' && val.richText) return val.richText.map((r) => r.text).join('');
+          // Números en notación científica (ej: 1.037e+09) — convertir a entero antes de stringify
+          if (typeof val === 'number') return String(Math.round(val));
           return normalizeString(String(val));
         };
         const nombre = getCellText(1); const cedula = getCellText(2); const telefono = getCellText(3); const localidad = getCellText(4);
