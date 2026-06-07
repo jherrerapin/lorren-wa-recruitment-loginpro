@@ -156,19 +156,31 @@ export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, 
 
   if (config.field === 'locality') {
     const explicitLocality = normalized.locality || null;
-    const bogotaLocalidad = normalizeBogotaLocalidad(explicitLocality || normalized.neighborhood || null);
+    const residenceSource = explicitLocality || normalized.neighborhood || null;
+    const bogotaLocalidad = normalizeBogotaLocalidad(residenceSource);
+
     if (bogotaLocalidad) {
       normalized.locality = bogotaLocalidad;
       if (clearAlternate) normalized.neighborhood = null;
-    } else if (explicitLocality) {
-      normalized.locality = explicitLocality;
+    } else if (explicitLocality && looksLikeLocationChunk(explicitLocality)) {
+      normalized.locality = normalizeResidenceValue(explicitLocality);
+      if (clearAlternate) normalized.neighborhood = null;
+    } else if (normalized.neighborhood && looksLikeLocationChunk(normalized.neighborhood)) {
+      normalized.locality = normalizeResidenceValue(normalized.neighborhood);
+      if (clearAlternate) normalized.neighborhood = null;
+    } else {
+      normalized.locality = null;
       if (clearAlternate) normalized.neighborhood = null;
     }
+
     return normalized;
   }
 
-  if (!normalized.neighborhood && normalized.locality) {
-    normalized.neighborhood = normalized.locality;
+  if (!normalized.neighborhood && normalized.locality && looksLikeLocationChunk(normalized.locality)) {
+    normalized.neighborhood = normalizeResidenceValue(normalized.locality);
+  }
+  if (normalized.neighborhood && !looksLikeLocationChunk(normalized.neighborhood)) {
+    normalized.neighborhood = null;
   }
   if (normalized.neighborhood && clearAlternate) {
     normalized.locality = null;
