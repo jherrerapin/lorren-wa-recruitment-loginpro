@@ -185,9 +185,15 @@
               <input id="recoveryPhone" name="recoveryPhone" type="text" />
             </div>
 
-            <div class="field full">
+            <div class="field">
               <label for="recoveryEmail">Correo de recuperación</label>
               <input id="recoveryEmail" name="recoveryEmail" type="email" />
+            </div>
+
+            <div class="field">
+              <label for="email">Correo del usuario (despachos)</label>
+              <input id="email" name="email" type="email" />
+              <span class="hint">Se usa como Reply-To en correos de solicitudes completas de despacho.</span>
             </div>
           </div>
         </div>
@@ -291,7 +297,8 @@
                 </td>
                 <td>
                   <small>Tel: <%= user.recoveryPhone || '—' %></small>
-                  <small>Correo: <%= user.recoveryEmail || '—' %></small>
+                  <small>Correo recuperación: <%= user.recoveryEmail || '—' %></small>
+                  <small>Correo despachos: <%= user.email || '—' %></small>
                   <small>El usuario puede recuperar acceso desde /recover con el código vigente.</small>
                 </td>
                 <td>
