@@ -17,6 +17,8 @@ function completeCandidate(overrides = {}) {
     locality: 'Ciudad Bolívar',
     gender: Gender.MALE,
     cvStorageKey: 'cv/1.pdf',
+    cvOriginalName: 'cv.pdf',
+    cvMimeType: 'application/pdf',
     ...overrides
   };
 }
@@ -92,15 +94,15 @@ test('act alinea residencia extraida como barrio hacia localidad para Bogota', a
   const prisma = prismaMock();
   const candidate = completeCandidate({ locality: null, neighborhood: null, cvStorageKey: null });
 
-  await act({
-    prisma,
-    candidate,
-    vacancy: schedulableVacancy({ schedulingEnabled: false }),
-    actions: [{ type: 'save_fields', data: { neighborhood: 'Soacha Compartir' } }, { type: 'request_cv' }],
-    extractedFields: { neighborhood: 'Soacha Compartir' }
-  });
+  const result = await act({
+  prisma,
+  candidate,
+  vacancy: schedulableVacancy({ schedulingEnabled: false }),
+  actions: [{ type: 'save_fields', data: { neighborhood: 'Soacha Compartir' } }, { type: 'request_cv' }],
+  extractedFields: { neighborhood: 'Soacha Compartir' }
+});
 
-  assert.equal(prisma.updates[0].data.locality, 'Soacha Cundinamarca');
-  assert.equal(prisma.updates[0].data.neighborhood, undefined);
-  assert.equal(prisma.updates.at(-1).data.currentStep, ConversationStep.ASK_CV);
+assert.equal(prisma.updates[0].data.locality, 'Soacha Cundinamarca');
+assert.equal(prisma.updates[0].data.neighborhood, undefined);
+assert.equal(result.finalStep, ConversationStep.ASK_CV);
 });
