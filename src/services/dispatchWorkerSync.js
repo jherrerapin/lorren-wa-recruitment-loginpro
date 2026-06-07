@@ -40,7 +40,7 @@ export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
       residenceLocality: normalizeString(candidate.locality) || normalizeString(candidate.neighborhood),
       transportMode: normalizedTransportMode,
       source: 'CANDIDATE',
-      operationalStatus: 'ACTIVE'
+      operationalStatus: 'CONTRATADO'
     },
     update: {
       fullName: normalizeString(candidate.fullName) || 'Sin nombre',
@@ -51,7 +51,7 @@ export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
       residenceLocality: normalizeString(candidate.locality) || normalizeString(candidate.neighborhood),
       transportMode: normalizedTransportMode,
       source: 'CANDIDATE',
-      operationalStatus: 'ACTIVE'
+      operationalStatus: 'CONTRATADO'
     }
   });
 
