@@ -67,7 +67,7 @@ export function detectInterviewIntent({ text = '', booking = null, now = new Dat
     return 'cancel_interview';
   }
 
-  const hasRescheduleSignal = /\b(reagend|reprogram|aplazar|posponer|otro horario|otra hora|otro dia|otro d[ií]a|otra fecha|cambiar horario|cambiar la cita|cambiarla|mover cita|mas tarde|m[aá]s tarde|mas temprano|m[aá]s temprano|me pasas otra fecha|puede ser manana|puede ser ma[ñn]ana|podemos cambiar|puedo cambiar|me queda mejor|llego tarde|voy tarde|no llego a tiempo)\b/.test(n);
+  const hasRescheduleSignal = /\b(reagend(?:ar|o|a|emos|ada|ado|amiento)?|reprogram(?:ar|o|a|emos|ada|ado|acion)?|aplazar|posponer|otro horario|otra hora|otro dia|otro d[ií]a|otra fecha|cambiar horario|cambiar la cita|cambiarla|mover cita|mas tarde|m[aá]s tarde|mas temprano|m[aá]s temprano|me pasas otra fecha|puede ser manana|puede ser ma[ñn]ana|podemos cambiar|puedo cambiar|me queda mejor|llego tarde|voy tarde|no llego a tiempo)\b/.test(n);
   if (hasRescheduleSignal) {
     return 'reschedule_interview';
   }

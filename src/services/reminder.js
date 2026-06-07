@@ -609,6 +609,37 @@ async function runInterviewKeepaliveDispatcher(prisma, now = new Date(), candida
   }
 }
 
+function buildInterviewReminderAdminText({ candidate = {}, vacancy = {}, responseText = '', nextStatus = '' } = {}) {
+  const candidateName = candidate?.fullName || candidate?.phone || candidate?.id || 'Sin nombre';
+  const vacancyTitle = vacancy?.title || vacancy?.role || candidate?.vacancy?.title || candidate?.vacancy?.role || 'Sin vacante';
+  return [
+    'Respuesta a recordatorio de entrevista',
+    `Estado nuevo: ${nextStatus}`,
+    `Candidato: ${candidateName}`,
+    `Vacante: ${vacancyTitle}`,
+    `Respuesta candidato: ${responseText}`
+  ].join('\n');
+}
+
+async function notifyAdminInterviewReminderResponse(prisma, { booking = {}, responseText = '', nextStatus = '' } = {}) {
+  const adminPhone = process.env.ADMIN_WHATSAPP_NUMBER;
+  if (!adminPhone) return;
+
+  const candidate = typeof prisma?.candidate?.findUnique === 'function'
+    ? await prisma.candidate.findUnique({ where: { id: booking.candidateId } }).catch(() => null)
+    : null;
+
+  const vacancy = await findBookingVacancy(prisma, booking, candidate || {});
+  const body = buildInterviewReminderAdminText({
+    candidate: candidate || {},
+    vacancy: vacancy || {},
+    responseText,
+    nextStatus
+  });
+
+  await sendTextMessage(adminPhone, body);
+}
+
 export async function handleInterviewReminderResponse(prisma, candidateId, responseText, { now = new Date() } = {}) {
   if (!candidateId || typeof prisma?.interviewBooking?.findFirst !== 'function') return { status: 'UNCHANGED', intent: 'none' };
   const booking = await prisma.interviewBooking.findFirst({
@@ -629,7 +660,7 @@ export async function handleInterviewReminderResponse(prisma, candidateId, respo
   const nextStatus = statusByIntent[intent];
   if (!nextStatus) return { status: 'UNCHANGED', intent };
 
-  const updatedBooking = await prisma.interviewBooking.update({
+    const updatedBooking = await prisma.interviewBooking.update({
     where: { id: booking.id },
     data: {
       status: nextStatus,
@@ -637,6 +668,13 @@ export async function handleInterviewReminderResponse(prisma, candidateId, respo
       reminderWindowClosed: true
     }
   });
+
+  await notifyAdminInterviewReminderResponse(prisma, {
+    booking: updatedBooking || booking,
+    responseText,
+    nextStatus
+  });
+
   return { status: nextStatus, intent, booking: updatedBooking };
 }
 
