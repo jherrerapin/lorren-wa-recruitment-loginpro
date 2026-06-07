@@ -16,6 +16,7 @@
       --amber: #b45309; --amber-light: #fef3c7;
       --blue: #1d4ed8; --blue-light: #dbeafe;
       --purple: #7c3aed; --purple-light: #ede9fe;
+      --red: #b91c1c; --red-light: #fee2e2; --red-hover: #991b1b;
       --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
       --shadow-md: 0 4px 12px rgba(0,0,0,.10);
       --radius: 8px; --radius-lg: 12px;
@@ -35,10 +36,15 @@
     .page-header h1 { font-size: 22px; font-weight: 700; color: var(--navy); }
     .page-header .sub { color: var(--text-muted); margin-top: 4px; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--navy); text-decoration: none; font-weight: 700; font-size: 13px; box-shadow: var(--shadow-sm); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--navy); text-decoration: none; font-weight: 700; font-size: 13px; box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
     .btn:hover { border-color: var(--teal); color: var(--teal); }
     .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
-    .btn-primary:hover { background: var(--teal-hover); color: #fff; }
+    .btn-primary:hover { background: var(--teal-hover); color: #fff; border-color: var(--teal-hover); }
+    .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
+    .btn-danger:hover { background: var(--red-hover); border-color: var(--red-hover); color: #fff; }
+    .btn-danger-outline { border-color: var(--red); color: var(--red); background: var(--surface); }
+    .btn-danger-outline:hover { background: var(--red-light); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
     .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
     .card .label { color: var(--text-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
@@ -52,11 +58,31 @@
     .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
     .panel-head h2 { color: var(--navy); font-size: 16px; }
     .panel-head p { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
+    .bulk-bar { display: none; align-items: center; gap: 10px; padding: 10px 20px; background: #fff7ed; border-bottom: 1px solid #fed7aa; flex-wrap: wrap; }
+    .bulk-bar.visible { display: flex; }
+    .bulk-bar span { font-size: 13px; font-weight: 700; color: var(--amber); }
     table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--border-soft); }
+    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
     th { background: var(--surface-2); color: var(--text-muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+    td { font-size: 13px; }
+    .check-col { width: 40px; text-align: center !important; padding: 10px 8px !important; }
+    input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--teal); cursor: pointer; }
+    tr.selected-row { background: #f0fdfa; }
+    .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 800; }
+    .pill-teal { color: var(--teal); background: var(--teal-light); }
+    .pill-amber { color: var(--amber); background: var(--amber-light); }
+    .pill-green { color: var(--green); background: var(--green-light); }
+    .pill-blue { color: var(--blue); background: var(--blue-light); }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; white-space: nowrap; }
     .empty { padding: 32px 20px; text-align: center; color: var(--text-muted); }
     .empty strong { display: block; color: var(--navy); margin-bottom: 4px; }
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #fff; border-radius: 16px; padding: 28px 28px 24px; max-width: 480px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,.18); }
+    .modal h3 { color: var(--navy); font-size: 18px; margin-bottom: 10px; }
+    .modal p { color: var(--text-muted); font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
     @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .navbar { gap: 12px; overflow-x: auto; } }
     @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } .panel { overflow-x: auto; } .page-header { align-items: stretch; } .actions { width: 100%; } .btn { flex: 1; } }
   </style>
@@ -79,31 +105,32 @@
         <p class="sub"><%= subtitle %></p>
       </div>
       <div class="actions" aria-label="Acciones operativas">
-        <a class="btn btn-primary" href="/admin/operaciones/solicitudes">Nueva solicitud</a>
+        <a class="btn btn-primary" href="/admin/operaciones/solicitudes">+ Nueva solicitud</a>
         <a class="btn" href="/admin/operaciones/asignaciones">Ver asignaciones</a>
         <a class="btn" href="/admin/operaciones/novedades">Ver novedades</a>
+        <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
       </div>
     </header>
 
     <section class="cards" aria-label="Resumen operativo">
       <article class="card teal">
         <div class="label">Solicitudes del día</div>
-        <div class="value">0</div>
+        <div class="value"><%= typeof metrics !== 'undefined' && metrics ? metrics.solicitudesHoy : 0 %></div>
         <div class="hint">Registradas para la fecha seleccionada</div>
       </article>
       <article class="card amber">
         <div class="label">Pendientes de asignación</div>
-        <div class="value">0</div>
+        <div class="value"><%= typeof metrics !== 'undefined' && metrics ? metrics.pendientesAsignacion : 0 %></div>
         <div class="hint">Solicitudes que requieren gestión</div>
       </article>
       <article class="card green">
         <div class="label">Asignación completa</div>
-        <div class="value">0</div>
+        <div class="value"><%= typeof metrics !== 'undefined' && metrics ? metrics.asignacionCompleta : 0 %></div>
         <div class="hint">Servicios con cobertura confirmada</div>
       </article>
       <article class="card purple">
         <div class="label">Novedades abiertas</div>
-        <div class="value">0</div>
+        <div class="value"><%= typeof metrics !== 'undefined' && metrics ? metrics.novedadesAbiertas : 0 %></div>
         <div class="hint">Casos operativos en seguimiento</div>
       </article>
     </section>
@@ -114,29 +141,184 @@
           <h2 id="operations-table-title">Operaciones del día</h2>
           <p>Seguimiento diario de solicitudes, asignaciones y novedades.</p>
         </div>
+        <div class="actions">
+          <a class="btn btn-primary" href="/admin/operaciones/solicitudes">+ Nueva solicitud</a>
+        </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Cliente / punto</th>
-            <th>Fecha</th>
-            <th>Hora</th>
-            <th>Estado</th>
-            <th>Requeridos</th>
-            <th>Asignados</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td colspan="7" class="empty">
-              <strong>No hay operaciones registradas para la fecha seleccionada.</strong>
-              Usa las acciones superiores para iniciar la gestión operativa.
-            </td>
-          </tr>
-        </tbody>
-      </table>
+
+      <!-- Barra de acciones masivas -->
+      <div class="bulk-bar" id="bulk-bar">
+        <span id="bulk-count">0 seleccionados</span>
+        <button type="button" class="btn btn-danger" id="btn-bulk-delete">🗑 Eliminar seleccionados</button>
+        <button type="button" class="btn" id="btn-bulk-cancel">Cancelar</button>
+      </div>
+
+      <% if (typeof serviceRequests !== 'undefined' && serviceRequests && serviceRequests.length) { %>
+        <div style="overflow-x:auto">
+          <table id="ops-table">
+            <thead>
+              <tr>
+                <th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th>
+                <th>Cliente / punto</th>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Estado</th>
+                <th>Requeridos</th>
+                <th>Asignados</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% serviceRequests.forEach((sr) => { %>
+                <%
+                  const statusMap = {
+                    PENDING_ASSIGNMENT: { label: 'Pendiente asig.', cls: 'pill-amber' },
+                    ASSIGNMENT_PARTIAL: { label: 'Asignación parcial', cls: 'pill-blue' },
+                    PENDING_CONFIRMATION: { label: 'Pendiente conf.', cls: 'pill-blue' },
+                    ASSIGNMENT_COMPLETE: { label: 'Completo', cls: 'pill-green' },
+                    CANCELLED: { label: 'Cancelado', cls: 'pill-amber' }
+                  };
+                  const s = statusMap[sr.status] || { label: sr.status, cls: 'pill-teal' };
+                  const assignedCount = (sr.assignments || []).filter(a => ['ASSIGNED','CONFIRMATION_PENDING','CONFIRMED'].includes(a.status)).length;
+                  const serviceDate = sr.serviceDate ? new Date(sr.serviceDate).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+                %>
+                <tr data-id="<%= sr.id %>">
+                  <td class="check-col"><input type="checkbox" class="row-check" value="<%= sr.id %>" /></td>
+                  <td>
+                    <strong style="color:var(--navy)"><%= sr.clientName || '-' %></strong>
+                    <% if (sr.operationPointName) { %><br><span style="color:var(--text-muted);font-size:12px"><%= sr.operationPointName %></span><% } %>
+                  </td>
+                  <td><%= serviceDate %></td>
+                  <td>
+                    <% if (sr.startTime || sr.endTime) { %><%= [sr.startTime, sr.endTime].filter(Boolean).join(' — ') %><% } else { %><span style="color:var(--text-faint)">—</span><% } %>
+                  </td>
+                  <td><span class="pill <%= s.cls %>"><%= s.label %></span></td>
+                  <td style="text-align:center"><strong><%= sr.requiredWorkers %></strong></td>
+                  <td style="text-align:center"><strong><%= assignedCount %></strong></td>
+                  <td>
+                    <div class="row-actions">
+                      <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= sr.id %>">Asignar</a>
+                      <a class="btn" href="/admin/operaciones/solicitudes/editar/<%= sr.id %>" style="display:none" data-edit-btn>Editar</a>
+                      <button type="button" class="btn btn-danger-outline btn-single-delete"
+                        data-id="<%= sr.id %>" data-name="<%= sr.clientName %> — <%= serviceDate %>">Eliminar</button>
+                    </div>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } else { %>
+        <div class="empty">
+          <strong>No hay operaciones registradas para la fecha seleccionada.</strong>
+          Usa las acciones superiores para iniciar la gestión operativa.
+        </div>
+      <% } %>
     </section>
   </main>
+
+  <!-- Modal eliminar una solicitud -->
+  <div class="modal-overlay" id="modal-single">
+    <div class="modal">
+      <h3>Eliminar solicitud</h3>
+      <p id="modal-single-msg">¿Confirmas la eliminación de esta solicitud?</p>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="modal-single-cancel">Cancelar</button>
+        <form method="post" id="modal-single-form">
+          <button type="submit" class="btn btn-danger">Sí, eliminar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal eliminar varias solicitudes -->
+  <div class="modal-overlay" id="modal-bulk">
+    <div class="modal">
+      <h3>Eliminar seleccionadas</h3>
+      <p id="modal-bulk-msg">¿Confirmas la eliminación de las solicitudes seleccionadas?</p>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="modal-bulk-cancel">Cancelar</button>
+        <form method="post" action="/admin/operaciones/solicitudes/eliminar-bulk" id="modal-bulk-form">
+          <input type="hidden" name="ids" id="bulk-ids-input" value="" />
+          <button type="submit" class="btn btn-danger">Sí, eliminar todas</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Selección de filas ───────────────────────────────────────────────
+    const checkAll = document.getElementById('check-all');
+    const bulkBar  = document.getElementById('bulk-bar');
+    const bulkCountEl = document.getElementById('bulk-count');
+    const bulkIdsInput = document.getElementById('bulk-ids-input');
+
+    function getChecked() { return [...document.querySelectorAll('.row-check:checked')]; }
+    function refreshBulkBar() {
+      const checked = getChecked();
+      if (checked.length > 0) {
+        bulkBar.classList.add('visible');
+        bulkCountEl.textContent = checked.length + ' seleccionad' + (checked.length > 1 ? 'as' : 'a');
+      } else {
+        bulkBar.classList.remove('visible');
+      }
+      const all = document.querySelectorAll('.row-check');
+      if (checkAll) {
+        checkAll.indeterminate = checked.length > 0 && checked.length < all.length;
+        checkAll.checked = all.length > 0 && checked.length === all.length;
+      }
+    }
+    function highlightRows() {
+      document.querySelectorAll('.row-check').forEach(cb => {
+        cb.closest('tr').classList.toggle('selected-row', cb.checked);
+      });
+    }
+
+    if (checkAll) {
+      checkAll.addEventListener('change', () => {
+        document.querySelectorAll('.row-check').forEach(cb => { cb.checked = checkAll.checked; });
+        highlightRows(); refreshBulkBar();
+      });
+    }
+    document.querySelectorAll('.row-check').forEach(cb => {
+      cb.addEventListener('change', () => { highlightRows(); refreshBulkBar(); });
+    });
+    document.getElementById('btn-bulk-cancel')?.addEventListener('click', () => {
+      document.querySelectorAll('.row-check').forEach(cb => { cb.checked = false; });
+      if (checkAll) { checkAll.checked = false; checkAll.indeterminate = false; }
+      highlightRows(); refreshBulkBar();
+    });
+
+    // ── Modal eliminar una solicitud ─────────────────────────────────────
+    const modalSingle = document.getElementById('modal-single');
+    const modalSingleMsg  = document.getElementById('modal-single-msg');
+    const modalSingleForm = document.getElementById('modal-single-form');
+
+    document.querySelectorAll('.btn-single-delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id   = btn.dataset.id;
+        const name = btn.dataset.name;
+        modalSingleMsg.textContent = `¿Eliminar la solicitud "${name}"? Esta acción no se puede deshacer.`;
+        modalSingleForm.action = `/admin/operaciones/solicitudes/${id}/eliminar`;
+        modalSingle.classList.add('open');
+      });
+    });
+    document.getElementById('modal-single-cancel')?.addEventListener('click', () => modalSingle.classList.remove('open'));
+    modalSingle?.addEventListener('click', e => { if (e.target === modalSingle) modalSingle.classList.remove('open'); });
+
+    // ── Modal eliminar varias solicitudes ────────────────────────────────
+    const modalBulk    = document.getElementById('modal-bulk');
+    const modalBulkMsg = document.getElementById('modal-bulk-msg');
+
+    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => {
+      const checked = getChecked();
+      if (!checked.length) return;
+      bulkIdsInput.value = checked.map(cb => cb.value).join(',');
+      modalBulkMsg.textContent = `¿Confirmas eliminar ${checked.length} solicitud${checked.length > 1 ? 'es' : ''}? Esta acción no se puede deshacer.`;
+      modalBulk.classList.add('open');
+    });
+    document.getElementById('modal-bulk-cancel')?.addEventListener('click', () => modalBulk.classList.remove('open'));
+    modalBulk?.addEventListener('click', e => { if (e.target === modalBulk) modalBulk.classList.remove('open'); });
+  </script>
 </body>
 </html>
