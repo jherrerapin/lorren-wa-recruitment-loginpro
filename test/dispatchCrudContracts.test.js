@@ -42,6 +42,9 @@ test('dispatch CRUD contracts for clients operations services and every worker s
   assert.match(personalView, /\/operaciones\/admin-worker\/<%= w\.id %>\/editar/);
   ['mode ===', 'formAction', 'selectedCityIds', 'selectedVacancyIds', 'operationalStatus', 'Datos del panel del bot', 'medicalRestrictions', 'experienceInfo', 'experienceTime', 'experienceSummary'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
   assert.match(workerFormView, /Estos campos son opcionales/);
+  assert.match(workerFormView, /<select id="residenceCity" name="residenceCity">/);
+  assert.match(workerFormView, /cities\.forEach\(\(city\) =>/);
+  assert.doesNotMatch(workerFormView, /<input id="residenceCity"/);
 
   assert.match(publicRoute, /findWorkerOr404/);
   assert.match(publicRoute, /include: \{ cities: true, vacancies: true, candidate: true \}/);

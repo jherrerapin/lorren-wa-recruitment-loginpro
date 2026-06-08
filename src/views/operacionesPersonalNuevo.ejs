@@ -33,14 +33,28 @@
     <section class="card">
       <div class="card-head"><h2>Datos del auxiliar</h2><p>Define información básica, hoja de vida, ciudades operativas y perfiles habilitados.</p></div>
       <div class="card-body">
-        <% const w = worker || {}; const botProfile = w.candidate || {}; const selectedCityIds = new Set((w.cities || []).map((entry)=>entry.cityId)); const selectedVacancyIds = new Set((w.vacancies || []).map((entry)=>entry.vacancyId)); const normalizedTransportMode = w.transportMode || ''; %>
+        <%
+          const w = worker || {};
+          const botProfile = w.candidate || {};
+          const selectedCityIds = new Set((w.cities || []).map((entry) => entry.cityId));
+          const selectedVacancyIds = new Set((w.vacancies || []).map((entry) => entry.vacancyId));
+          const normalizedTransportMode = w.transportMode || '';
+          const residenceCityNames = new Set(cities.map((city) => city.name));
+        %>
         <form method="post" action="<%= formAction %>" enctype="multipart/form-data">
           <div class="form-grid">
             <div class="field full"><label for="fullName">Nombre completo</label><input id="fullName" name="fullName" required value="<%= w.fullName || '' %>" placeholder="Nombre y apellido" /></div>
             <div class="field"><label for="phone">Teléfono</label><input id="phone" name="phone" value="<%= w.phone || '' %>" placeholder="Celular" /></div>
             <div class="field"><label for="documentType">Tipo documento</label><input id="documentType" name="documentType" value="<%= w.documentType || '' %>" placeholder="CC, PPT..." /></div>
             <div class="field"><label for="documentNumber">Número documento</label><input id="documentNumber" name="documentNumber" value="<%= w.documentNumber || '' %>" /></div>
-            <div class="field"><label for="residenceCity">Ciudad residencia</label><input id="residenceCity" name="residenceCity" value="<%= w.residenceCity || '' %>" /></div>
+            <div class="field">
+              <label for="residenceCity">Ciudad residencia</label>
+              <select id="residenceCity" name="residenceCity">
+                <option value="" <%= !w.residenceCity ? 'selected' : '' %>>Sin dato</option>
+                <% if (w.residenceCity && !residenceCityNames.has(w.residenceCity)) { %><option value="<%= w.residenceCity %>" selected><%= w.residenceCity %> (valor actual)</option><% } %>
+                <% cities.forEach((city) => { %><option value="<%= city.name %>" <%= w.residenceCity === city.name ? 'selected' : '' %>><%= city.name %></option><% }) %>
+              </select>
+            </div>
             <div class="field"><label for="residenceLocality">Localidad / barrio</label><input id="residenceLocality" name="residenceLocality" value="<%= w.residenceLocality || '' %>" /></div>
             <div class="field"><label for="transportMode">Medio de transporte</label><select id="transportMode" name="transportMode"><option value="" <%= !normalizedTransportMode ? 'selected' : '' %>>Sin dato</option><option value="Publico" <%= normalizedTransportMode === 'Publico' ? 'selected' : '' %>>Publico</option><option value="Moto" <%= normalizedTransportMode === 'Moto' ? 'selected' : '' %>>Moto</option><option value="Bicicleta" <%= normalizedTransportMode === 'Bicicleta' ? 'selected' : '' %>>Bicicleta</option><option value="Carro" <%= normalizedTransportMode === 'Carro' ? 'selected' : '' %>>Carro</option></select><small class="muted">Bus, TransMilenio, SITP y colectivo se agrupan como Publico.</small></div>
             <div class="field"><label for="operationalStatus">Estado operativo</label><select id="operationalStatus" name="operationalStatus"><option value="ACTIVE" <%= w.operationalStatus !== 'INACTIVE' ? 'selected' : '' %>>Activo</option><option value="INACTIVE" <%= w.operationalStatus === 'INACTIVE' ? 'selected' : '' %>>Inactivo</option></select></div>
