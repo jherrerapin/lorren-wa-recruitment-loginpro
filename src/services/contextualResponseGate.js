@@ -27,7 +27,6 @@ const ACTIVE_BOOKING_STATUSES = new Set(['SCHEDULED', 'CONFIRMED']);
 const LOGISTIC_INTENTS = new Set([
   'ASK_INTERVIEW_ADDRESS',
   'ASK_INTERVIEW_TIME',
-  'ASK_INTERVIEW_AVAILABILITY',
   'ASK_INTERVIEW_CONTACT_PERSON',
   'ASK_REQUIRED_DOCUMENTS'
 ]);
@@ -62,6 +61,17 @@ function decision({
   metadata = {}
 }) {
   return { shouldReply, allowedAction, reason, responsePurpose, stateUpdates, requiresHumanReview, reply, metadata };
+}
+
+function safeReviewDecision(reason, semanticIntent = 'UNCLEAR') {
+  return decision({
+    shouldReply: true,
+    allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
+    reason,
+    responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
+    requiresHumanReview: true,
+    reply: buildSafeInformationGapReply(semanticIntent)
+  });
 }
 
 export function getLastOutboundContext(recentMessages = []) {
@@ -267,33 +277,24 @@ export function evaluateContextualResponseGate({
 
   if (activeBooking && candidate.currentStep === 'SCHEDULED') {
     if (semanticIntent === 'ASK_INTERVIEW_AVAILABILITY') {
-      return decision({
-        shouldReply: false,
-        allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
-        reason: 'Candidate asked about interview slot availability beyond the confirmed appointment; this requires human validation before replying.',
-        responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
-        requiresHumanReview: true
-      });
+      return safeReviewDecision(
+        'Candidate asked about interview slot availability beyond the confirmed appointment; this requires human validation before replying.',
+        semanticIntent
+      );
     }
 
     if (semanticIntent === 'ASK_APPLICATION_STATUS') {
-      return decision({
-        shouldReply: false,
-        allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
-        reason: 'Candidate has an active appointment and asked a question that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
-        responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
-        requiresHumanReview: true
-      });
+      return safeReviewDecision(
+        'Candidate has an active appointment and asked a question that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
+        semanticIntent
+      );
     }
 
     if (APPOINTMENT_MANUAL_REVIEW_INTENTS.has(semanticIntent)) {
-      return decision({
-        shouldReply: false,
-        allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
-        reason: 'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
-        responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
-        requiresHumanReview: true
-      });
+      return safeReviewDecision(
+        'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
+        semanticIntent
+      );
     }
 
     if (LOGISTIC_INTENTS.has(semanticIntent)) {
