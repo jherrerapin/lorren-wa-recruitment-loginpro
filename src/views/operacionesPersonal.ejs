@@ -155,15 +155,6 @@
             <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %> — <%= vacancy.city || 'Sin ciudad' %></option><% }) %>
           </select>
         </div>
-        <div class="field">
-          <label for="status">Estado</label>
-          <select id="status" name="status">
-            <option value="">Todos los estados</option>
-            <option value="CONTRATADO" <%= filters.status==='CONTRATADO'?'selected':'' %>>Contratado</option>
-            <option value="ACTIVE" <%= filters.status==='ACTIVE'?'selected':'' %>>Activo</option>
-            <option value="INACTIVE" <%= filters.status==='INACTIVE'?'selected':'' %>>Inactivo</option>
-          </select>
-        </div>
         <button type="submit" class="btn btn-primary">Filtrar</button>
       </form>
     </section>
