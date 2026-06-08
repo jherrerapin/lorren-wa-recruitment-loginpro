@@ -84,7 +84,7 @@ test('candidato citado pregunta contacto configurado y responde solo desde conte
   assert.match(result.reply, /María en recepción/);
 });
 
-test('candidato citado pregunta contacto sin dato configurado: no inventa y exige revisión interna', () => {
+test('candidato citado pregunta contacto sin dato configurado: no inventa, responde seguro y exige revisión interna', () => {
   const result = evaluateContextualResponseGate({
     candidate: completeCandidate({ currentStep: 'SCHEDULED' }),
     vacancy: vacancy({ schedulingEnabled: true, interviewContactPerson: null, contactPerson: null }),
@@ -96,6 +96,7 @@ test('candidato citado pregunta contacto sin dato configurado: no inventa y exig
   assert.equal(result.shouldReply, true);
   assert.equal(result.requiresHumanReview, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
+  assert.match(result.reply, /no tengo confirmado ese dato/i);
   assert.doesNotMatch(result.reply, /humano|revisar[aá] el chat/i);
 });
 
@@ -143,7 +144,7 @@ test('vacante CV_ONLY completa no agenda ni vuelve a pedir HV ante cierre', () =
   assert.equal(result.allowedAction, ContextualAllowedAction.NO_REPLY);
 });
 
-test('vacante CV_ONLY completa responde sin inventar próximos pasos si preguntan si falta algo', () => {
+test('vacante CV_ONLY completa continúa al motor si preguntan si falta algo', () => {
   const result = evaluateContextualResponseGate({
     candidate: completeCandidate({ currentStep: 'DONE' }),
     vacancy: vacancy({ schedulingEnabled: false }),
@@ -153,12 +154,12 @@ test('vacante CV_ONLY completa responde sin inventar próximos pasos si pregunta
   });
 
   assert.equal(result.shouldReply, true);
-  assert.equal(result.allowedAction, ContextualAllowedAction.SHORT_CONTEXTUAL_CLOSE);
-  assert.match(result.reply, /no veo datos pendientes/i);
-  assert.doesNotMatch(result.reply, /llamada|contactaremos|te llamaremos/i);
+  assert.equal(result.allowedAction, ContextualAllowedAction.CONTINUE_FLOW);
+  assert.equal(result.responsePurpose, 'FLOW');
+  assert.equal(result.metadata.postCompletionContext, true);
 });
 
-test('estado completo con dato repetido no cambia datos ni reabre recolección', () => {
+test('estado completo con dato repetido continúa al motor para decidir corrección sin reabrir desde el gate', () => {
   const result = evaluateContextualResponseGate({
     candidate: completeCandidate({ currentStep: 'DONE' }),
     vacancy: vacancy({ schedulingEnabled: false }),
@@ -167,9 +168,9 @@ test('estado completo con dato repetido no cambia datos ni reabre recolección',
     semanticIntent: 'PROVIDE_EXTRA_DATA'
   });
 
-  assert.equal(result.shouldReply, false);
-  assert.equal(result.stateUpdates && Object.keys(result.stateUpdates).length, 0);
-  assert.equal(result.allowedAction, ContextualAllowedAction.NO_REPLY);
+  assert.equal(result.shouldReply, true);
+  assert.equal(result.allowedAction, ContextualAllowedAction.CONTINUE_FLOW);
+  assert.equal(result.responsePurpose, 'FLOW');
 });
 
 test('sin vacante asignada bloquea flujo principal y obliga resolución de vacante', () => {
@@ -219,7 +220,7 @@ test('fuentes manuales autorizadas se distinguen de salidas automáticas', () =>
   assert.equal(isManualOutboundSource('bot_flow'), false);
 });
 
-test('pregunta contextual no respondible con la cita activa se escala al administrador sin respuesta automática', () => {
+test('pregunta contextual no respondible con la cita activa se escala y responde seguro sin inventar', () => {
   const semanticIntent = inferContextualSemanticIntent({
     text: '¿Solo hay entrevistas a las 10 o hay más después de las 10?',
     isQuestion: true
@@ -234,13 +235,14 @@ test('pregunta contextual no respondible con la cita activa se escala al adminis
     semanticIntent
   });
 
-  assert.equal(result.shouldReply, false);
+  assert.equal(result.shouldReply, true);
   assert.equal(result.requiresHumanReview, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
   assert.match(result.reason, /not answerable|human validation/i);
+  assert.match(result.reply, /no veo un dato adicional confirmado|responderte con precisión/i);
 });
 
-test('reporte de inconveniente para llegar a cita activa se escala sin respuesta automática', () => {
+test('reporte de inconveniente para llegar a cita activa se escala y responde seguro sin dejar al candidato en silencio', () => {
   const semanticIntent = inferContextualSemanticIntent({
     text: 'Ola buenos días 👋 Que pena tuve un inconveniente, no conozco muy bien la ciudad, me tocó transbordar y me perdí',
     isQuestion: false
@@ -255,8 +257,9 @@ test('reporte de inconveniente para llegar a cita activa se escala sin respuesta
     semanticIntent
   });
 
-  assert.equal(result.shouldReply, false);
+  assert.equal(result.shouldReply, true);
   assert.equal(result.requiresHumanReview, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
   assert.match(result.reason, /arrival issue|human validation/i);
+  assert.match(result.reply, /no veo un dato adicional confirmado|responderte con precisión/i);
 });
