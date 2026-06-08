@@ -6,6 +6,9 @@
   <title>Solicitud de servicio — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
+  </style>
 </head>
 <body>
   <main class="public-shell">
@@ -23,7 +26,7 @@
 
       <div class="public-body">
         <% if (success) { %>
-          <div class="success-box">Solicitud registrada correctamente para <strong><%= operationPoint.name %></strong><% if (service) { %> en el servicio <strong><%= service.name %></strong><% } %>. El equipo operativo revisará la asignación.</div>
+          <div class="success-box">Solicitud registrada correctamente para <strong><%= operationPoint.name %></strong><% if (service) { %> en el servicio <strong><%= service.name %></strong><% } %>. <%= typeof createdSummary !== 'undefined' && createdSummary ? createdSummary + '. ' : '' %>El equipo operativo revisará la asignación.</div>
         <% } else { %>
           <div class="card" style="box-shadow:none;margin-bottom:18px;">
             <div class="card-body">
@@ -61,9 +64,19 @@
               <div class="field"><label for="requestedByPhone">Teléfono</label><input id="requestedByPhone" name="requestedByPhone" placeholder="Número de contacto" /></div>
               <div class="field"><label for="requestedByEmail">Correo</label><input id="requestedByEmail" name="requestedByEmail" type="email" placeholder="correo@empresa.com" /></div>
               <div class="field"><label for="serviceDate">Fecha del servicio</label><input id="serviceDate" type="date" name="serviceDate" required /></div>
-              <div class="field"><label for="requiredWorkers">Cantidad de auxiliares</label><input id="requiredWorkers" type="number" min="1" name="requiredWorkers" required value="1" /></div>
-              <div class="field"><label for="startTime">Hora inicio</label><input id="startTime" type="time" name="startTime" /></div>
-              <div class="field"><label for="endTime">Hora fin</label><input id="endTime" type="time" name="endTime" /></div>
+              <div class="field full">
+                <label>Horarios y auxiliares requeridos</label>
+                <div class="shift-list" id="shiftList">
+                  <div class="shift-row">
+                    <div class="field"><label>Cantidad</label><input type="number" min="1" name="requiredWorkers" required value="1" /></div>
+                    <div class="field"><label>Hora inicio</label><input type="time" name="startTime" /></div>
+                    <div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div>
+                    <button class="shift-remove" type="button" hidden>Quitar</button>
+                  </div>
+                </div>
+                <p class="shift-summary">Si el mismo día necesitas personal en horarios distintos, agrega un bloque por cada horario. Ejemplo: 3 auxiliares de 6:00 a 14:00 y 2 auxiliares de 14:00 a 22:00.</p>
+                <button class="btn" type="button" id="addShiftBtn">Agregar otro horario</button>
+              </div>
               <div class="field full"><label for="notes">Observaciones</label><textarea id="notes" name="notes" placeholder="Describe condiciones, requisitos de ingreso o detalles del servicio"></textarea></div>
             </div>
             <div class="form-actions"><button class="btn btn-primary" type="submit" <%= operationPoints.length && services.length ? '' : 'disabled' %>>Enviar solicitud</button></div>
@@ -72,5 +85,23 @@
       </div>
     </section>
   </main>
+  <script>
+    const shiftList = document.getElementById('shiftList');
+    const addShiftBtn = document.getElementById('addShiftBtn');
+    function refreshRemoveButtons(){
+      const rows = Array.from(shiftList?.querySelectorAll('.shift-row') || []);
+      rows.forEach((row) => { const button = row.querySelector('.shift-remove'); if (button) button.hidden = rows.length === 1; });
+    }
+    addShiftBtn?.addEventListener('click', () => {
+      const first = shiftList.querySelector('.shift-row');
+      const clone = first.cloneNode(true);
+      clone.querySelectorAll('input').forEach((input) => { input.value = input.type === 'number' ? '1' : ''; });
+      clone.querySelector('.shift-remove')?.addEventListener('click', () => { clone.remove(); refreshRemoveButtons(); });
+      shiftList.appendChild(clone);
+      refreshRemoveButtons();
+    });
+    shiftList?.querySelector('.shift-remove')?.addEventListener('click', (event) => { event.currentTarget.closest('.shift-row')?.remove(); refreshRemoveButtons(); });
+    refreshRemoveButtons();
+  </script>
 </body>
 </html>
