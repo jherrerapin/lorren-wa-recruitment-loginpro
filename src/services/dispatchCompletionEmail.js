@@ -1,4 +1,7 @@
+import { buildGroupedWhereClauseForRequest, countAssignments, extractRequestGroupCode, resolveRequestServiceName, stripRequestGroupSuffix } from './dispatchRequestGrouping.js';
+
 const EMAIL_PROVIDER_RESEND = 'resend';
+const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -25,46 +28,105 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
-function buildText(serviceRequest, managedByUsername) {
-  const assignments = serviceRequest.assignments || [];
-  const workersText = assignments
-    .map((assignment, index) => {
-      const worker = assignment.worker;
-      return `${index + 1}. ${worker.fullName || 'Auxiliar'} | Tel: ${worker.phone || '-'} | Doc: ${[worker.documentType, worker.documentNumber].filter(Boolean).join(' ') || '-'}`;
-    })
-    .join('\n');
+function formatShift(request) {
+  return `${request.startTime || '-'} - ${request.endTime || '-'}`;
+}
+
+function sortRequestsByTime(requests) {
+  return [...requests].sort((a, b) => {
+    const dateA = new Date(a.serviceDate || 0).getTime();
+    const dateB = new Date(b.serviceDate || 0).getTime();
+    if (dateA !== dateB) return dateA - dateB;
+    return String(a.startTime || '').localeCompare(String(b.startTime || ''), 'es');
+  });
+}
+
+function confirmedAssignments(request) {
+  return (request.assignments || []).filter((assignment) => assignment.status === 'CONFIRMED');
+}
+
+function requestIsComplete(request) {
+  return countAssignments(request, ACTIVE_ASSIGNMENT_STATUSES).confirmedCount >= (Number(request.requiredWorkers) || 0);
+}
+
+function groupIsComplete(requests) {
+  return requests.length > 0 && requests.every(requestIsComplete);
+}
+
+function getGroupRecipient(requests) {
+  const firstWithEmail = requests.find((request) => normalizeString(request.requestedByEmail));
+  return normalizeString(firstWithEmail?.requestedByEmail);
+}
+
+function buildTextForRequests(requests, managedByUsername) {
+  const sortedRequests = sortRequestsByTime(requests);
+  const primary = sortedRequests[0] || {};
+  const serviceName = resolveRequestServiceName(primary) || '-';
+  const shiftBlocks = sortedRequests.map((request, shiftIndex) => {
+    const workersText = confirmedAssignments(request)
+      .map((assignment, index) => {
+        const worker = assignment.worker;
+        return `${index + 1}. ${worker.fullName || 'Auxiliar'} | Tel: ${worker.phone || '-'} | Doc: ${[worker.documentType, worker.documentNumber].filter(Boolean).join(' ') || '-'}`;
+      })
+      .join('\n');
+
+    return [
+      `Horario ${shiftIndex + 1}: ${formatShift(request)}`,
+      `Auxiliares requeridos: ${request.requiredWorkers || 0}`,
+      workersText || 'Sin auxiliares confirmados.'
+    ].join('\n');
+  }).join('\n\n');
 
   return [
     'Confirmación de solicitud de servicio',
     '',
-    `Cliente: ${serviceRequest.clientName || '-'}`,
-    `Operación: ${serviceRequest.operationPointName || '-'}`,
-    `Servicio: ${serviceRequest.serviceName || '-'}`,
-    `Ciudad: ${serviceRequest.cityName || '-'}`,
-    `Dirección: ${serviceRequest.address || '-'}`,
-    `Fecha: ${formatDate(serviceRequest.serviceDate)}`,
-    `Horario: ${serviceRequest.startTime || '-'} - ${serviceRequest.endTime || '-'}`,
-    `Auxiliares requeridos: ${serviceRequest.requiredWorkers || 0}`,
+    `Cliente: ${primary.clientName || '-'}`,
+    `Operación: ${primary.operationPointName || '-'}`,
+    `Servicio: ${serviceName}`,
+    `Ciudad: ${primary.cityName || '-'}`,
+    `Dirección: ${primary.address || '-'}`,
+    `Fecha: ${formatDate(primary.serviceDate)}`,
+    `Total auxiliares requeridos: ${sortedRequests.reduce((sum, request) => sum + (Number(request.requiredWorkers) || 0), 0)}`,
     '',
-    'Auxiliares confirmados:',
-    workersText || 'Sin auxiliares confirmados.',
+    'Asignación por horario:',
+    shiftBlocks,
     '',
-    serviceRequest.notes ? `Notas: ${serviceRequest.notes}` : null,
+    primary.notes ? `Notas: ${primary.notes}` : null,
     '',
     managedByUsername ? `Gestionado por: ${managedByUsername}` : null
   ].filter(Boolean).join('\n');
 }
 
-function buildHtml(serviceRequest, managedByUsername) {
-  const assignments = serviceRequest.assignments || [];
-  const workersRows = assignments.map((assignment, index) => {
-    const worker = assignment.worker;
-    return `<tr>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${index + 1}</td>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb;"><strong>${escapeHtml(worker.fullName || 'Auxiliar')}</strong></td>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${escapeHtml(worker.phone || '-')}</td>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${escapeHtml([worker.documentType, worker.documentNumber].filter(Boolean).join(' ') || '-')}</td>
-    </tr>`;
+function buildHtmlForRequests(requests, managedByUsername) {
+  const sortedRequests = sortRequestsByTime(requests);
+  const primary = sortedRequests[0] || {};
+  const serviceName = resolveRequestServiceName(primary) || '-';
+  const totalRequired = sortedRequests.reduce((sum, request) => sum + (Number(request.requiredWorkers) || 0), 0);
+  const shiftSections = sortedRequests.map((request, shiftIndex) => {
+    const workersRows = confirmedAssignments(request).map((assignment, index) => {
+      const worker = assignment.worker;
+      return `<tr>
+        <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${index + 1}</td>
+        <td style="padding:8px;border-bottom:1px solid #e5e7eb;"><strong>${escapeHtml(worker.fullName || 'Auxiliar')}</strong></td>
+        <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${escapeHtml(worker.phone || '-')}</td>
+        <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${escapeHtml([worker.documentType, worker.documentNumber].filter(Boolean).join(' ') || '-')}</td>
+      </tr>`;
+    }).join('');
+
+    return `
+      <h3 style="font-size:15px;margin:22px 0 8px;color:#1e2d3d;">Horario ${shiftIndex + 1}: ${escapeHtml(formatShift(request))}</h3>
+      <p style="margin:0 0 8px;color:#64748b;">Auxiliares requeridos: ${escapeHtml(request.requiredWorkers || 0)}</p>
+      <table style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:12px;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">#</th>
+            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">Nombre</th>
+            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">Teléfono</th>
+            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">Documento</th>
+          </tr>
+        </thead>
+        <tbody>${workersRows || '<tr><td colspan="4" style="padding:10px;">Sin auxiliares confirmados.</td></tr>'}</tbody>
+      </table>`;
   }).join('');
 
   const managedByRow = managedByUsername
@@ -75,38 +137,26 @@ function buildHtml(serviceRequest, managedByUsername) {
   <div style="font-family:Arial,sans-serif;color:#172033;line-height:1.5;max-width:760px;margin:0 auto;">
     <div style="background:#1e2d3d;color:#ffffff;padding:20px 24px;border-radius:14px 14px 0 0;">
       <h1 style="margin:0;font-size:22px;">Solicitud de servicio confirmada</h1>
-      <p style="margin:6px 0 0;color:#cbd5e1;">La asignación de auxiliares fue completada y confirmada.</p>
+      <p style="margin:6px 0 0;color:#cbd5e1;">La asignación fue completada y confirmada para todos los horarios solicitados.</p>
     </div>
     <div style="border:1px solid #e5e7eb;border-top:0;padding:22px 24px;border-radius:0 0 14px 14px;">
       <h2 style="font-size:16px;margin:0 0 12px;color:#1e2d3d;">Información de la solicitud</h2>
       <table style="border-collapse:collapse;width:100%;margin-bottom:22px;">
         <tbody>
-          <tr><td style="padding:6px 0;color:#64748b;width:180px;">Cliente</td><td style="padding:6px 0;"><strong>${escapeHtml(serviceRequest.clientName || '-')}</strong></td></tr>
-          <tr><td style="padding:6px 0;color:#64748b;">Operación</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.operationPointName || '-')}</td></tr>
-          <tr><td style="padding:6px 0;color:#64748b;">Servicio</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.serviceName || '-')}</td></tr>
-          <tr><td style="padding:6px 0;color:#64748b;">Ciudad</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.cityName || '-')}</td></tr>
-          <tr><td style="padding:6px 0;color:#64748b;">Dirección</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.address || '-')}</td></tr>
-          <tr><td style="padding:6px 0;color:#64748b;">Fecha</td><td style="padding:6px 0;">${escapeHtml(formatDate(serviceRequest.serviceDate))}</td></tr>
-          <tr><td style="padding:6px 0;color:#64748b;">Horario</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.startTime || '-')} - ${escapeHtml(serviceRequest.endTime || '-')}</td></tr>
-          <tr><td style="padding:6px 0;color:#64748b;">Auxiliares requeridos</td><td style="padding:6px 0;">${escapeHtml(serviceRequest.requiredWorkers || 0)}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;width:180px;">Cliente</td><td style="padding:6px 0;"><strong>${escapeHtml(primary.clientName || '-')}</strong></td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;">Operación</td><td style="padding:6px 0;">${escapeHtml(primary.operationPointName || '-')}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;">Servicio</td><td style="padding:6px 0;">${escapeHtml(serviceName)}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;">Ciudad</td><td style="padding:6px 0;">${escapeHtml(primary.cityName || '-')}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;">Dirección</td><td style="padding:6px 0;">${escapeHtml(primary.address || '-')}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;">Fecha</td><td style="padding:6px 0;">${escapeHtml(formatDate(primary.serviceDate))}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;">Horarios</td><td style="padding:6px 0;">${escapeHtml(sortedRequests.map(formatShift).join(' / '))}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b;">Total requeridos</td><td style="padding:6px 0;">${escapeHtml(totalRequired)}</td></tr>
           ${managedByRow}
         </tbody>
       </table>
-
-      <h2 style="font-size:16px;margin:0 0 12px;color:#1e2d3d;">Auxiliares confirmados</h2>
-      <table style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
-        <thead>
-          <tr style="background:#f8fafc;">
-            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">#</th>
-            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">Nombre</th>
-            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">Teléfono</th>
-            <th style="padding:8px;text-align:left;border-bottom:1px solid #e5e7eb;">Documento</th>
-          </tr>
-        </thead>
-        <tbody>${workersRows || '<tr><td colspan="4" style="padding:10px;">Sin auxiliares confirmados.</td></tr>'}</tbody>
-      </table>
-
-      ${serviceRequest.notes ? `<p style="margin-top:18px;"><strong>Notas:</strong> ${escapeHtml(serviceRequest.notes)}</p>` : ''}
+      <h2 style="font-size:16px;margin:0 0 12px;color:#1e2d3d;">Auxiliares confirmados por horario</h2>
+      ${shiftSections}
+      ${primary.notes ? `<p style="margin-top:18px;"><strong>Notas:</strong> ${escapeHtml(primary.notes)}</p>` : ''}
       <p style="margin-top:22px;color:#64748b;font-size:12px;">Mensaje generado automáticamente por el sistema LoginPro IA / Operaciones.</p>
     </div>
   </div>`;
@@ -147,48 +197,64 @@ async function sendWithResend({ apiKey, from, to, subject, html, text, replyTo }
   return data?.id || null;
 }
 
-/**
- * @param {object} prisma
- * @param {string} serviceRequestId
- * @param {{ replyTo?: string|null, managedByUsername?: string|null }} [options]
- */
-export async function sendDispatchCompletionEmail(prisma, serviceRequestId, options = {}) {
+async function loadRequestGroup(prisma, serviceRequestId) {
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
     where: { id: serviceRequestId },
     include: {
       assignments: {
-        where: { status: 'CONFIRMED' },
         include: { worker: true },
         orderBy: { createdAt: 'asc' }
       }
     }
   });
 
-  if (!serviceRequest) return { skipped: true, reason: 'service_request_not_found' };
-  if (serviceRequest.status !== 'ASSIGNMENT_COMPLETE') return { skipped: true, reason: 'service_request_not_complete' };
-  if (serviceRequest.completionEmailSentAt) return { skipped: true, reason: 'already_sent' };
+  if (!serviceRequest) return [];
+  const groupCode = extractRequestGroupCode(serviceRequest);
+  if (!groupCode) return [serviceRequest];
 
-  const recipient = normalizeString(serviceRequest.requestedByEmail);
+  return prisma.dispatchServiceRequest.findMany({
+    where: buildGroupedWhereClauseForRequest(serviceRequest),
+    include: {
+      assignments: {
+        include: { worker: true },
+        orderBy: { createdAt: 'asc' }
+      }
+    },
+    orderBy: [{ serviceDate: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
+  });
+}
+
+/**
+ * @param {object} prisma
+ * @param {string} serviceRequestId
+ * @param {{ replyTo?: string|null, managedByUsername?: string|null }} [options]
+ */
+export async function sendDispatchCompletionEmail(prisma, serviceRequestId, options = {}) {
+  const requestGroup = await loadRequestGroup(prisma, serviceRequestId);
+  if (!requestGroup.length) return { skipped: true, reason: 'service_request_not_found' };
+  if (!groupIsComplete(requestGroup)) return { skipped: true, reason: 'service_request_not_complete' };
+  if (requestGroup.every((request) => request.completionEmailSentAt)) return { skipped: true, reason: 'already_sent' };
+
+  const recipient = getGroupRecipient(requestGroup);
   if (!recipient) return { skipped: true, reason: 'missing_requested_by_email' };
 
   const config = getEmailConfig();
+  const firstRequest = sortRequestsByTime(requestGroup)[0];
   if (config.provider !== EMAIL_PROVIDER_RESEND) return { skipped: true, reason: 'unsupported_provider' };
   if (!config.resendApiKey || !config.from) {
     const errorMessage = 'Faltan RESEND_API_KEY y/o DISPATCH_EMAIL_FROM para enviar correo de cierre.';
-    await prisma.dispatchServiceRequest.update({
-      where: { id: serviceRequest.id },
+    await prisma.dispatchServiceRequest.updateMany({
+      where: { id: { in: requestGroup.map((request) => request.id) } },
       data: { completionEmailLastError: errorMessage }
     });
     return { skipped: true, reason: 'missing_email_config' };
   }
 
-  // Usar el replyTo del usuario que gestionó, con fallback al replyTo global de env
   const replyTo = normalizeString(options.replyTo) || config.defaultReplyTo;
   const managedByUsername = normalizeString(options.managedByUsername);
-
-  const subject = `Solicitud confirmada - ${serviceRequest.clientName} - ${serviceRequest.operationPointName || serviceRequest.cityName || ''}`.trim();
-  const html = buildHtml(serviceRequest, managedByUsername);
-  const text = buildText(serviceRequest, managedByUsername);
+  const subject = `Solicitud confirmada - ${firstRequest.clientName} - ${firstRequest.operationPointName || firstRequest.cityName || ''}`.trim();
+  const html = buildHtmlForRequests(requestGroup, managedByUsername);
+  const text = buildTextForRequests(requestGroup, managedByUsername);
 
   try {
     const providerId = await sendWithResend({
@@ -201,8 +267,8 @@ export async function sendDispatchCompletionEmail(prisma, serviceRequestId, opti
       replyTo
     });
 
-    await prisma.dispatchServiceRequest.update({
-      where: { id: serviceRequest.id },
+    await prisma.dispatchServiceRequest.updateMany({
+      where: { id: { in: requestGroup.map((request) => request.id) } },
       data: {
         completionEmailSentAt: new Date(),
         completionEmailTo: recipient,
@@ -214,8 +280,8 @@ export async function sendDispatchCompletionEmail(prisma, serviceRequestId, opti
     return { sent: true, to: recipient, providerId };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error desconocido enviando correo.';
-    await prisma.dispatchServiceRequest.update({
-      where: { id: serviceRequest.id },
+    await prisma.dispatchServiceRequest.updateMany({
+      where: { id: { in: requestGroup.map((request) => request.id) } },
       data: { completionEmailLastError: message }
     });
     return { sent: false, error: message };
