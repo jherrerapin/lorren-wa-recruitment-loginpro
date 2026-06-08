@@ -200,6 +200,15 @@ function normalizeRoleHint(value = '', city = '') {
   return [...new Set(specificTokens)].join(' ');
 }
 
+function mergeRoleHints(...values) {
+  const city = values.at(-1) || '';
+  const roleHints = values.slice(0, -1)
+    .map((value) => normalizeRoleHint(value, city))
+    .filter(Boolean);
+  if (!roleHints.length) return null;
+  return normalizeRoleHint(roleHints.join(' '), city);
+}
+
 function splitMeaningfulSegments(text = '') {
   return String(text || '').split(/[\n,;]+/).map((segment) => normalizeResolverText(segment)).filter(Boolean);
 }
@@ -416,7 +425,8 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
 
   const city = options.cityHint || detectCityFromText(text, buildCityNames(allVacancies));
   const operationZones = detectOperationZoneEvidence(text);
-  const roleHint = normalizeRoleHint(options.roleHint || detectRoleHintFromText(text, { city }), city);
+  const localRoleHint = detectRoleHintFromText(text, { city });
+  const roleHint = mergeRoleHints(options.roleHint, localRoleHint, city);
   if (!city && !roleHint) return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'missing_city_and_role' };
 
   const matchingCityVacancies = city ? activeVacancies.filter((vacancy) => cityMatchesVacancy(vacancy, city)) : activeVacancies;
