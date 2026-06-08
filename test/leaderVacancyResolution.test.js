@@ -57,6 +57,18 @@ async function resolveText(text, options = {}) {
   return resolveVacancyFromText({}, text, { allVacancies, activeVacancies, ...options });
 }
 
+async function decideGate({ text, vacancyHints = {}, recentMessages = [] }) {
+  return resolveVacancyFirstGate({
+    prisma: {},
+    candidate: { currentStep: 'GREETING_SENT' },
+    currentVacancy: null,
+    inboundText: text,
+    currentStep: 'GREETING_SENT',
+    recentMessages,
+    vacancyHints: { allVacancies, activeVacancies, ...vacancyHints }
+  });
+}
+
 test('Ibagué + líder logístico resuelve Lider de Operaciones sin pedir referencia adicional', async () => {
   const result = await resolveText('Hola, de Ibagué\nLíder logístico');
 
@@ -106,17 +118,44 @@ test('roleHint parcial de IA no debe tapar la intención completa escrita por el
   assert.match(result.roleHint, /operaciones/);
 });
 
+test('roleHint externo equivocado hacia auxiliar no derrota evidencia local de liderazgo', async () => {
+  const result = await resolveText('Ibague\nLider de optaciones', {
+    cityHint: 'Ibague',
+    roleHint: 'auxiliar'
+  });
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.vacancy.id, ibagueLeaderVacancy.id);
+  assert.notEqual(result.vacancy.id, ibagueAuxVacancy.id);
+  assert.match(result.roleHint, /auxiliar/);
+  assert.match(result.roleHint, /lider/);
+  assert.match(result.roleHint, /operaciones/);
+});
+
+test('solo ciudad Ibagué no asigna automáticamente la vacante de liderazgo', async () => {
+  const result = await resolveText('Ibague');
+
+  assert.equal(result.resolved, false);
+  assert.equal(result.vacancy, null);
+  assert.equal(result.city, 'Ibague');
+  assert.equal(result.reason, 'city_with_active_vacancies');
+});
+
+test('Bogotá auxiliar de cargue conserva la ciudad y no salta a Lider de Operaciones Ibagué', async () => {
+  const result = await resolveText('Bogotá auxiliar de cargue y descargue');
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.vacancy.id, bogotaAuxVacancy.id);
+  assert.notEqual(result.vacancy.id, ibagueLeaderVacancy.id);
+  assert.equal(result.reason, 'matched_active_vacancy');
+});
+
 test('vacancyFirstGate asigna la vacante de liderazgo y no pide referencia adicional', async () => {
-  const decision = await resolveVacancyFirstGate({
-    prisma: {},
-    candidate: { currentStep: 'GREETING_SENT' },
-    currentVacancy: null,
-    inboundText: 'Hola, de Ibagué\nLíder logístico',
-    currentStep: 'GREETING_SENT',
+  const decision = await decideGate({
+    text: 'Hola, de Ibagué\nLíder logístico',
     recentMessages: [
       { direction: 'INBOUND', body: '¡Hola! Quiero más información.' }
-    ],
-    vacancyHints: { allVacancies, activeVacancies }
+    ]
   });
 
   assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
@@ -126,26 +165,39 @@ test('vacancyFirstGate asigna la vacante de liderazgo y no pide referencia adici
 });
 
 test('vacancyFirstGate no ofrece auxiliar si existe Lider de Operaciones activo para el texto con typo', async () => {
-  const decision = await resolveVacancyFirstGate({
-    prisma: {},
-    candidate: { currentStep: 'GREETING_SENT' },
-    currentVacancy: null,
-    inboundText: 'Ibague\nCoordinador l\nLíder de optaciones',
-    currentStep: 'GREETING_SENT',
+  const decision = await decideGate({
+    text: 'Ibague\nCoordinador l\nLíder de optaciones',
     recentMessages: [
       { direction: 'INBOUND', body: 'Ibague' },
       { direction: 'INBOUND', body: 'Tolima' }
     ],
     vacancyHints: {
       city: 'Ibague',
-      roleHint: 'coordinador',
-      allVacancies,
-      activeVacancies
+      roleHint: 'coordinador'
     }
   });
 
   assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
   assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
   assert.notEqual(decision.vacancyId, ibagueAuxVacancy.id);
+  assert.notEqual(decision.replyKind, 'ALTERNATIVE_VACANCY_OFFER');
+});
+
+test('vacancyFirstGate usa ciudad del contexto reciente cuando el cargo llega en mensaje separado', async () => {
+  const decision = await decideGate({
+    text: 'Coordinador l\nLíder de optaciones',
+    recentMessages: [
+      { direction: 'INBOUND', body: '¡Hola! Quiero más información.' },
+      { direction: 'INBOUND', body: 'Ibague' },
+      { direction: 'INBOUND', body: 'Tolima' }
+    ],
+    vacancyHints: {
+      roleHint: 'coordinador'
+    }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
+  assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');
   assert.notEqual(decision.replyKind, 'ALTERNATIVE_VACANCY_OFFER');
 });
