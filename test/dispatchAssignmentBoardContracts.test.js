@@ -27,11 +27,14 @@ test('dispatch assignment board marks workers assigned to another request on the
 
   assert.match(bridge, /serviceRequestId: \{ not: selectedServiceRequest\.id \}/);
   assert.match(bridge, /status: \{ in: ACTIVE_ASSIGNMENT_STATUSES \}/);
-  assert.match(bridge, /serviceRequest: \{ serviceDate: selectedServiceRequest\.serviceDate \}/);
+  assert.match(bridge, /buildUtcDayRange\(selectedServiceRequest\.serviceDate\)/);
+  assert.match(bridge, /serviceDate: \{ gte: selectedDateRange\.start, lt: selectedDateRange\.end \}/);
   assert.match(bridge, /assignedWorkerIdsOnSelectedDate/);
   assert.match(view, /assignedWorkerIdsOnSelectedDate\.has\(worker\.id\)/);
-  assert.match(view, /Ya asignado este día/);
-  assert.match(view, /class="worker-card" draggable="true"/);
+  assert.match(view, /worker-card<%= hasSameDayAssignment/);
+  assert.match(view, /Asignado en otra solicitud este día/);
+  assert.match(view, /draggable="true"/);
+  assert.doesNotMatch(view, /hasSameDayAssignment[^\n]*(disabled|draggable="false")/);
 });
 
 test('dispatch bridge routes to visual assignment board and keeps boundaries', () => {
