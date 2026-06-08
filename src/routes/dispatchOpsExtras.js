@@ -31,7 +31,7 @@ function normalizeDateParam(value) { const rawValue = normalizeString(value); if
 function serviceRequestServiceData(service) { return { serviceId: service?.id || null, serviceName: service?.name || null }; }
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((row) => normalizeString(row[fieldName])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')); }
-function buildDispatchEligibilityFilter(status = null) { return status ? { operationalStatus: status } : { operationalStatus: 'CONTRATADO' }; }
+function buildDispatchEligibilityFilter() { return { operationalStatus: 'CONTRATADO' }; }
 function buildWorkerData(body) {
   return {
     fullName: normalizeString(body.fullName),
@@ -117,9 +117,9 @@ export function dispatchOpsExtrasRouter(prisma) {
   const router = express.Router();
 
   router.get('/asignaciones', requireOps, async (req, res) => {
-    const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const transportMode = normalizeString(req.query.transportMode); const locality = normalizeString(req.query.locality); const status = normalizeString(req.query.status); const serviceRequestId = normalizeString(req.query.serviceRequestId);
+    const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const transportMode = normalizeString(req.query.transportMode); const locality = normalizeString(req.query.locality); const serviceRequestId = normalizeString(req.query.serviceRequestId);
     const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds(prisma, operationalCityId); const operationalCityFilter = buildOperationalCityFilter(compatibleOperationalCityIds);
-    const baseWorkerWhere = { ...(status ? { operationalStatus: status } : {}), ...(q ? { OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] } : {}), ...operationalCityFilter };
+    const baseWorkerWhere = { operationalStatus: 'CONTRATADO', ...(q ? { OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] } : {}), ...operationalCityFilter };
     const workerWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}), ...(locality ? { residenceLocality: locality } : {}) };
     const localityWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}) };
     const transportModeWhere = { ...baseWorkerWhere, ...(locality ? { residenceLocality: locality } : {}) };
@@ -134,7 +134,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
     const blockedWorkerIds = new Set(selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []);
     const availableWorkers = workers.filter((worker) => !blockedWorkerIds.has(worker.id));
-    return res.render('operacionesAsignacionesConfirmacion', { activeStatuses: ACTIVE_ASSIGNMENT_STATUSES, workers, availableWorkers, cities, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', transportMode: transportMode || '', locality: locality || '', status: status || '' }, transportModes: cleanDistinctStrings(transportModeRows, 'transportMode'), localities: cleanDistinctStrings(localityRows, 'residenceLocality'), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
+    return res.render('operacionesAsignacionesConfirmacion', { activeStatuses: ACTIVE_ASSIGNMENT_STATUSES, workers, availableWorkers, cities, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', transportMode: transportMode || '', locality: locality || '' }, transportModes: cleanDistinctStrings(transportModeRows, 'transportMode'), localities: cleanDistinctStrings(localityRows, 'residenceLocality'), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
   });
 
   router.get('/solicitudes', requireOps, async (req, res) => {

@@ -42,3 +42,17 @@ test('contracted status sync and operations routes exist without webhook/fsm cha
   const fsmSource = readSource('src/services/conversationEngine.js');
   assert.doesNotMatch(fsmSource, /upsertDispatchWorkerFromCandidate|DispatchWorker/);
 });
+
+test('dispatch personnel and assignment lists only expose contracted workers', () => {
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
+  const extrasSource = readSource('src/routes/dispatchOpsExtras.js');
+  const personnelView = readSource('src/views/operacionesPersonal.ejs');
+  const assignmentView = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+
+  assert.match(bridgeSource, /function buildDispatchEligibilityFilter\(\)\s*{\s*return { operationalStatus: 'CONTRATADO' };\s*}/);
+  assert.doesNotMatch(bridgeSource, /buildDispatchEligibilityFilter\(status\)/);
+  assert.match(extrasSource, /const baseWorkerWhere = { operationalStatus: 'CONTRATADO'/);
+  assert.doesNotMatch(extrasSource, /status \? { operationalStatus: status }/);
+  assert.doesNotMatch(personnelView, /name="status"/);
+  assert.doesNotMatch(assignmentView, /name="status"/);
+});
