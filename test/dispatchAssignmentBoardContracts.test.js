@@ -21,6 +21,19 @@ test('dispatch assignment board view contracts', () => {
   assert.match(view, /name="status"/);
 });
 
+test('dispatch assignment board marks workers assigned to another request on the selected date without blocking them', () => {
+  const bridge = readSource('src/routes/dispatchBridge.js');
+  const view = readSource('src/views/operacionesAsignaciones.ejs');
+
+  assert.match(bridge, /serviceRequestId: \{ not: selectedServiceRequest\.id \}/);
+  assert.match(bridge, /status: \{ in: ACTIVE_ASSIGNMENT_STATUSES \}/);
+  assert.match(bridge, /serviceRequest: \{ serviceDate: selectedServiceRequest\.serviceDate \}/);
+  assert.match(bridge, /assignedWorkerIdsOnSelectedDate/);
+  assert.match(view, /assignedWorkerIdsOnSelectedDate\.has\(worker\.id\)/);
+  assert.match(view, /Ya asignado este día/);
+  assert.match(view, /class="worker-card" draggable="true"/);
+});
+
 test('dispatch bridge routes to visual assignment board and keeps boundaries', () => {
   const bridge = readSource('src/routes/dispatchBridge.js');
   assert.match(bridge, /router\.get\(\s*['"]\/asignaciones['"].*res\.render\(\s*['"]operacionesAsignaciones['"]/s);

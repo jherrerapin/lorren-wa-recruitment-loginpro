@@ -23,6 +23,7 @@
     .meta { color: var(--muted); font-size: 12px; display: grid; gap: 2px; }
     .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
     .chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 10px; font-weight: 900; background: var(--blue-soft); color: var(--blue); }
+    .chip.same-day-assignment { background: var(--amber-soft); color: var(--amber); }
     .request-card { color: inherit; display: block; }
     .request-card:hover, .request-card.active { border-color: var(--teal); box-shadow: var(--shadow); }
     .request-card.active { background: #f0fdfa; }
@@ -111,6 +112,7 @@
                 <span>Transporte: <%= worker.transportMode || '-' %></span>
               </div>
               <div class="chips">
+                <% if (assignedWorkerIdsOnSelectedDate.has(worker.id)) { %><span class="chip same-day-assignment" title="Este auxiliar ya tiene otra asignación activa en la fecha seleccionada, pero puedes volver a asignarlo.">Ya asignado este día</span><% } %>
                 <% worker.cities.slice(0,3).forEach((entry)=>{ %><span class="chip"><%= entry.city.name %></span><% }) %>
                 <% worker.vacancies.slice(0,2).forEach((entry)=>{ %><span class="chip"><%= entry.vacancy.title %><% if (entry.vacancy.city) { %> — <%= entry.vacancy.city %><% } %></span><% }) %>
               </div>
