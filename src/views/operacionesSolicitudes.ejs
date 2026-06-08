@@ -10,6 +10,7 @@
     .readonly-field { background: #f8fafc; color: var(--muted); cursor: not-allowed; }
     .select-hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
     select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
+    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.group-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);margin-left:6px}.schedule-list{display:grid;gap:4px}.schedule-line{font-size:12px;color:var(--navy)}.schedule-line span{color:var(--muted)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -25,6 +26,31 @@
 
   <% const statusLabel = (value) => ({ PENDING_ASSIGNMENT: 'Pendiente de asignación', ASSIGNMENT_PARTIAL: 'Asignación parcial', PENDING_CONFIRMATION: 'Pendiente de confirmación', ASSIGNMENT_COMPLETE: 'Asignación completa', CANCELLED: 'Cancelada' }[value] || value || 'Pendiente de asignación'); %>
   <% const sourceLabel = (value) => ({ INTERNAL: 'Interna', PUBLIC_LINK: 'Cliente', MANUAL: 'Manual' }[value] || value || 'Interna'); %>
+  <% const activeCodes = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']; %>
+  <% const groupPattern = /\s*·\s*Grupo\s+(GRP-[A-Z0-9-]+)/i; %>
+  <% const groupCodeOf = (request) => { const match = String(request.serviceName || '').match(groupPattern); return match ? match[1] : null; }; %>
+  <% const cleanServiceName = (request) => String(request.serviceName || request.service?.name || 'Sin servicio').replace(groupPattern, '').trim() || 'Sin servicio'; %>
+  <% const countActive = (request) => (request.assignments || []).filter((assignment) => activeCodes.includes(assignment.status)).length; %>
+  <% const countConfirmed = (request) => (request.assignments || []).filter((assignment) => assignment.status === 'CONFIRMED').length; %>
+  <% const deriveStatus = (required, active, confirmed) => confirmed >= required ? 'ASSIGNMENT_COMPLETE' : active >= required ? 'PENDING_CONFIRMATION' : active > 0 ? 'ASSIGNMENT_PARTIAL' : 'PENDING_ASSIGNMENT'; %>
+  <%
+    const groupedMap = new Map();
+    serviceRequests.forEach((request) => {
+      const groupCode = groupCodeOf(request);
+      const key = groupCode ? `group:${groupCode}` : `request:${request.id}`;
+      if (!groupedMap.has(key)) groupedMap.set(key, { key, groupCode, isGrouped: Boolean(groupCode), requests: [] });
+      groupedMap.get(key).requests.push(request);
+    });
+    const serviceRequestGroups = Array.from(groupedMap.values()).map((group) => {
+      group.requests.sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || ''), 'es'));
+      const primary = group.requests[0];
+      const requiredWorkers = group.requests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
+      const activeCount = group.requests.reduce((sum, request) => sum + countActive(request), 0);
+      const confirmedCount = group.requests.reduce((sum, request) => sum + countConfirmed(request), 0);
+      const nextRequest = group.requests.find((request) => countConfirmed(request) < Number(request.requiredWorkers || 0)) || primary;
+      return { ...group, primary, requiredWorkers, activeCount, confirmedCount, status: deriveStatus(requiredWorkers, activeCount, confirmedCount), nextRequest };
+    });
+  %>
 
   <main class="page">
     <section class="hero">
@@ -71,9 +97,19 @@
             <div class="field"><label for="addressDisplay">Dirección de la operación</label><input id="addressDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <input type="hidden" id="address" name="address" />
             <div class="field"><label>Fecha servicio</label><input type="date" name="serviceDate" value="<%= today %>" required /></div>
-            <div class="field"><label>Hora inicio</label><input type="time" name="startTime" /></div>
-            <div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div>
-            <div class="field"><label>Auxiliares requeridos</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div>
+            <div class="field full">
+              <label>Horarios y auxiliares requeridos</label>
+              <div class="shift-list" id="shiftList">
+                <div class="shift-row">
+                  <div class="field"><label>Auxiliares</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div>
+                  <div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div>
+                  <div class="field"><label>Hora fin</label><input type="time" name="endTime" required /></div>
+                  <button class="shift-remove" type="button" hidden>Quitar</button>
+                </div>
+              </div>
+              <p class="shift-summary">Si el cliente solicita varios horarios para el mismo día, agrégalos aquí. El listado los mostrará como una sola solicitud agrupada.</p>
+              <button class="btn" type="button" id="addShiftBtn">Agregar otro horario</button>
+            </div>
             <div class="field full"><label>Notas</label><textarea name="notes" placeholder="Observaciones de la solicitud"></textarea></div>
           </div>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Crear solicitud</button></div>
@@ -84,29 +120,33 @@
     <section class="card">
       <div class="card-head">
         <h2>Listado de solicitudes</h2>
-        <p>Selecciona una solicitud para asignar auxiliares, editar sus datos o eliminarla.</p>
+        <p>Las solicitudes con varios horarios aparecen agrupadas en una sola fila para evitar duplicados operativos.</p>
       </div>
       <div class="table-wrap">
-        <% if (!serviceRequests.length) { %>
+        <% if (!serviceRequestGroups.length) { %>
           <div class="empty"><strong>No hay solicitudes registradas.</strong>Crea un cliente, una operación y comparte el link público para recibir solicitudes.</div>
         <% } else { %>
           <table class="table">
-            <thead><tr><th>Cliente / operación</th><th>Fecha</th><th>Horario</th><th>Requeridos</th><th>Asignados</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Cliente / operación</th><th>Fecha</th><th>Horarios</th><th>Requeridos</th><th>Asignación</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
-              <% serviceRequests.forEach((request) => { %>
+              <% serviceRequestGroups.forEach((group) => { const request = group.primary; %>
                 <tr>
-                  <td><strong><%= request.clientName %></strong><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div><div class="muted">Servicio: <%= request.serviceName || request.service?.name || 'Sin servicio' %></div></td>
+                  <td><strong><%= request.clientName %></strong><% if (group.isGrouped) { %><span class="group-badge">Agrupada</span><% } %><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div><div class="muted">Servicio: <%= cleanServiceName(request) %></div></td>
                   <td><%= new Date(request.serviceDate).toISOString().slice(0,10) %></td>
-                  <td><%= request.startTime || '-' %> - <%= request.endTime || '-' %></td>
-                  <td><%= request.requiredWorkers %></td>
-                  <td><%= request.assignments.length %></td>
+                  <td><div class="schedule-list"><% group.requests.forEach((item, index) => { %><div class="schedule-line"><strong><%= item.startTime || '-' %> - <%= item.endTime || '-' %></strong> <span>· <%= item.requiredWorkers %> aux.</span></div><% }) %></div></td>
+                  <td><%= group.requiredWorkers %></td>
+                  <td><strong><%= group.activeCount %> / <%= group.requiredWorkers %></strong><div class="muted">Confirmados: <%= group.confirmedCount %> / <%= group.requiredWorkers %></div></td>
                   <td><span class="pill pill-amber"><%= sourceLabel(request.source || 'INTERNAL') %></span></td>
-                  <td><span class="pill <%= request.status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : request.status === 'PENDING_CONFIRMATION' ? 'pill-blue' : 'pill-amber' %>"><%= statusLabel(request.status) %></span></td>
+                  <td><span class="pill <%= group.status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : group.status === 'PENDING_CONFIRMATION' ? 'pill-blue' : 'pill-amber' %>"><%= statusLabel(group.status) %></span></td>
                   <td>
                     <div class="actions stack-actions">
-                      <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar</a>
+                      <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= group.nextRequest.id %>">Asignar</a>
                       <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
-                      <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
+                      <% if (group.isGrouped) { %>
+                        <% group.requests.forEach((item, index) => { %><form method="post" action="/admin/operaciones/solicitudes/<%= item.id %>/eliminar" onsubmit="return confirm('¿Eliminar el horario <%= item.startTime || '-' %> - <%= item.endTime || '-' %> de esta solicitud agrupada?');"><button class="btn" type="submit">Eliminar horario <%= index + 1 %></button></form><% }) %>
+                      <% } else { %>
+                        <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
+                      <% } %>
                     </div>
                   </td>
                 </tr>
@@ -177,6 +217,23 @@
     });
     serviceSelect?.addEventListener('change', () => setSelectState(serviceSelect));
     [clientSelect, operationSelect, serviceSelect].forEach((select) => select && setSelectState(select));
+
+    const shiftList = document.getElementById('shiftList');
+    const addShiftBtn = document.getElementById('addShiftBtn');
+    function refreshRemoveButtons(){
+      const rows = Array.from(shiftList?.querySelectorAll('.shift-row') || []);
+      rows.forEach((row) => { const button = row.querySelector('.shift-remove'); if (button) button.hidden = rows.length === 1; });
+    }
+    addShiftBtn?.addEventListener('click', () => {
+      const first = shiftList.querySelector('.shift-row');
+      const clone = first.cloneNode(true);
+      clone.querySelectorAll('input').forEach((input) => { input.value = input.type === 'number' ? '1' : ''; });
+      clone.querySelector('.shift-remove')?.addEventListener('click', () => { clone.remove(); refreshRemoveButtons(); });
+      shiftList.appendChild(clone);
+      refreshRemoveButtons();
+    });
+    shiftList?.querySelector('.shift-remove')?.addEventListener('click', (event) => { event.currentTarget.closest('.shift-row')?.remove(); refreshRemoveButtons(); });
+    refreshRemoveButtons();
   </script>
 </body>
 </html>
