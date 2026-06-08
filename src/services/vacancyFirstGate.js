@@ -44,6 +44,10 @@ function isBogotaCity(city = '') {
   return normalizeResolverText(city) === 'bogota';
 }
 
+function vacancyTitle(vacancy = {}) {
+  return vacancy?.title || vacancy?.role || 'la opción disponible';
+}
+
 function recentConversationText(recentMessages = []) {
   return (recentMessages || [])
     .slice(-6)
@@ -96,7 +100,7 @@ function buildNeedRoleForCityReply(city = null, roleHint = null) {
 }
 
 function buildInactiveVacancyReply(vacancy = null, city = null) {
-  const role = vacancy?.title || vacancy?.role || 'esa convocatoria';
+  const role = vacancyTitle(vacancy) || 'esa convocatoria';
   const place = vacancyCity(vacancy) || city;
   const location = place ? ` en ${place}` : '';
   return `Tengo identificada la convocatoria de ${role}${location}, pero en este momento no está activa para recibir postulaciones. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo con tus datos si me confirmas que deseas ese registro.`;
@@ -172,6 +176,50 @@ function detectNegativeAlternativeIntent(text = '') {
     || /\b(solo|unicamente|solamente)\b.*\b(servicio|servicios|cargo que mencione|lo que dije)\b/.test(normalized);
 }
 
+function isAlternativeVacancyQuestion(text = '') {
+  const normalized = normalizeResolverText(text);
+  if (!normalized) return false;
+  return /[?¿]/.test(String(text || ''))
+    || /\b(cual|que|funcion|funciones|labor|labores|hace|hacer|haria|toca|salario|pago|horario|turno|requisito|requisitos|ubicacion|direccion|zona|documentos|beneficio|beneficios|condiciones|contrato)\b/.test(normalized);
+}
+
+function buildAlternativeVacancyInfoReply(vacancy = {}, inboundText = '') {
+  const normalized = normalizeResolverText(inboundText);
+  const title = vacancyTitle(vacancy);
+  const city = vacancyCity(vacancy);
+  const location = city ? ` en ${city}` : '';
+  const roleDescription = String(vacancy?.roleDescription || '').trim();
+  const requirements = String(vacancy?.requirements || '').trim();
+  const conditions = String(vacancy?.conditions || '').trim();
+  const address = String(vacancy?.operationAddress || '').trim();
+  let answer = '';
+
+  if (/\b(funcion|funciones|labor|labores|hace|hacer|haria|toca)\b/.test(normalized)) {
+    answer = roleDescription
+      ? `La función registrada para ${title}${location} es ${roleDescription}.`
+      : `La opción disponible es ${title}${location}; no tengo una descripción más detallada registrada.`;
+  } else if (/\b(requisito|requisitos|documentos)\b/.test(normalized)) {
+    answer = requirements
+      ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
+      : `No tengo requisitos adicionales registrados para ${title}${location}.`;
+  } else if (/\b(salario|pago|horario|turno|beneficio|beneficios|condiciones|contrato)\b/.test(normalized)) {
+    answer = conditions
+      ? `Las condiciones registradas para ${title}${location} son: ${conditions}.`
+      : `Ese dato no lo tengo registrado para ${title}${location}.`;
+  } else if (/\b(ubicacion|direccion|zona)\b/.test(normalized)) {
+    answer = address
+      ? `La zona registrada para ${title}${location} es ${address}.`
+      : `No tengo una dirección o zona más detallada registrada para ${title}${location}.`;
+  } else {
+    const summary = roleDescription || conditions || requirements;
+    answer = summary
+      ? `Sobre ${title}${location}, tengo registrado: ${summary}.`
+      : `Tengo registrada la opción de ${title}${location}, pero no tengo más detalle operativo cargado.`;
+  }
+
+  return `${answer} Si esta opción te interesa, respóndeme que deseas continuar y te pido los datos necesarios.`;
+}
+
 function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMessages = [] } = {}) {
   const lastOutbound = getLastOutboundBotDecision(recentMessages);
   const lastReplyKind = lastOutbound?.rawPayload?.replyKind || null;
@@ -232,7 +280,20 @@ function isRegisteredCompleteWithoutVacancy(candidate = {}, readiness = {}) {
   return Boolean(!candidate?.vacancyId && closedOrRegistered && readiness.coreDataComplete && readiness.hasValidCv);
 }
 
-async function loadVacancyById(prisma, vacancyId = null) {
+function findVacancyInHints(vacancyHints = {}, vacancyId = null) {
+  if (!vacancyId) return null;
+  const pools = [vacancyHints?.activeVacancies, vacancyHints?.allVacancies, vacancyHints?.vacancies];
+  for (const pool of pools) {
+    if (!Array.isArray(pool)) continue;
+    const match = pool.find((vacancy) => vacancy?.id === vacancyId);
+    if (match) return match;
+  }
+  return null;
+}
+
+async function loadVacancyById(prisma, vacancyId = null, vacancyHints = {}) {
+  const hintedVacancy = findVacancyInHints(vacancyHints, vacancyId);
+  if (hintedVacancy) return hintedVacancy;
   if (!vacancyId || typeof prisma?.vacancy?.findUnique !== 'function') return null;
   return prisma.vacancy.findUnique({ where: { id: vacancyId }, include: { operation: { include: { city: true } } } }).catch(() => null);
 }
@@ -247,7 +308,7 @@ function buildCollectingDataUpdates(vacancyId = null) {
   };
 }
 
-async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundText = '' } = {}) {
+async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundText = '', vacancyHints = {} } = {}) {
   const alternativeMode = parseAlternativeMode(candidate?.botResumeMode);
   if (!alternativeMode.active) return null;
 
@@ -270,8 +331,28 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
     };
   }
 
-  if (!intent.affirmative) return null;
-  const vacancy = await loadVacancyById(prisma, alternativeMode.vacancyId);
+  const vacancy = await loadVacancyById(prisma, alternativeMode.vacancyId, vacancyHints);
+
+  if (!intent.affirmative) {
+    if (isAlternativeVacancyQuestion(inboundText) && vacancy && isOpenVacancy(vacancy)) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ALTERNATIVE_VACANCY_INFO_REQUEST',
+        replyKind: alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_PROMPT' : 'ALTERNATIVE_VACANCY_OFFER',
+        vacancyId: vacancy.id,
+        vacancy,
+        candidateUpdates: {
+          currentStep: GREETING_SENT,
+          botResumeMode: buildAlternativeMode(alternativeMode.kind, vacancy.id),
+          reminderScheduledFor: null,
+          reminderState: 'SKIPPED'
+        },
+        reply: buildAlternativeVacancyInfoReply(vacancy, inboundText)
+      };
+    }
+    return null;
+  }
+
   if (!vacancy || !isOpenVacancy(vacancy)) {
     return {
       action: VacancyFirstGateAction.REPLY,
@@ -305,6 +386,8 @@ async function buildAlternativeDecision({ prisma, resolution = {}, vacancyHints 
     action: VacancyFirstGateAction.REPLY,
     reason: alternative.reason,
     replyKind: alternative.action === VacancyConceptAlternativeAction.ASK_PREQUALIFICATION ? 'ALTERNATIVE_PREQUALIFICATION_PROMPT' : 'ALTERNATIVE_VACANCY_OFFER',
+    vacancyId: alternative.suggestedVacancyId,
+    vacancy: alternative.suggestedVacancy,
     candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: buildAlternativeMode(mode, alternative.suggestedVacancyId), reminderScheduledFor: null, reminderState: 'SKIPPED' },
     reply: alternative.reply,
     resolution: { ...resolution, suggestedVacancyId: alternative.suggestedVacancyId, alternativeReason: alternative.reason }
@@ -330,7 +413,7 @@ export async function resolveVacancyFirstGate({
     return { action: VacancyFirstGateAction.SUPPRESS_REPLY, reason: 'RECENT_ATTACHMENT_GUIDANCE_ALREADY_SENT' };
   }
 
-  const alternativeAcceptanceDecision = await evaluateAlternativeAcceptance({ prisma, candidate, inboundText });
+  const alternativeAcceptanceDecision = await evaluateAlternativeAcceptance({ prisma, candidate, inboundText, vacancyHints });
   if (alternativeAcceptanceDecision) return alternativeAcceptanceDecision;
 
   if (isFutureProfileCaptureMode(botResumeMode)) return { action: VacancyFirstGateAction.ALLOW_ENGINE, reason: 'FUTURE_PROFILE_CAPTURE_AUTHORIZED' };
@@ -374,6 +457,8 @@ export async function resolveVacancyFirstGate({
         action: VacancyFirstGateAction.REPLY,
         reason: 'ACTIVE_VACANCY_CONFIRMED_ENTER_DATA',
         replyKind: 'ACTIVE_VACANCY_DATA_PROMPT',
+        vacancyId: currentVacancy.id || candidate.vacancyId,
+        vacancy: currentVacancy,
         candidateUpdates: buildCollectingDataUpdates(currentVacancy.id || candidate.vacancyId),
         reply: buildActiveDataPrompt(candidate, currentVacancy)
       };
