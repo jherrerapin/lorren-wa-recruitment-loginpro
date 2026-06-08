@@ -61,16 +61,16 @@
                 </select>
               </div>
               <div class="field full"><label for="requestedByName">Nombre de quien solicita</label><input id="requestedByName" name="requestedByName" required placeholder="Nombre completo" /></div>
-              <div class="field"><label for="requestedByPhone">Teléfono</label><input id="requestedByPhone" name="requestedByPhone" placeholder="Número de contacto" /></div>
-              <div class="field"><label for="requestedByEmail">Correo</label><input id="requestedByEmail" name="requestedByEmail" type="email" placeholder="correo@empresa.com" /></div>
+              <div class="field"><label for="requestedByPhone">Teléfono</label><input id="requestedByPhone" name="requestedByPhone" required placeholder="Número de contacto" /></div>
+              <div class="field"><label for="requestedByEmail">Correo</label><input id="requestedByEmail" name="requestedByEmail" type="email" required placeholder="correo@empresa.com" /></div>
               <div class="field"><label for="serviceDate">Fecha del servicio</label><input id="serviceDate" type="date" name="serviceDate" required /></div>
               <div class="field full">
                 <label>Horarios y auxiliares requeridos</label>
                 <div class="shift-list" id="shiftList">
                   <div class="shift-row">
                     <div class="field"><label>Cantidad</label><input type="number" min="1" name="requiredWorkers" required value="1" /></div>
-                    <div class="field"><label>Hora inicio</label><input type="time" name="startTime" /></div>
-                    <div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div>
+                    <div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div>
+                    <div class="field"><label>Hora fin</label><input type="time" name="endTime" required /></div>
                     <button class="shift-remove" type="button" hidden>Quitar</button>
                   </div>
                 </div>
