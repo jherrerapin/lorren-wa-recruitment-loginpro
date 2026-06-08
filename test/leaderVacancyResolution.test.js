@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveVacancyFromText } from '../src/services/vacancyResolver.js';
-import { resolveVacancyFirstGate, VacancyFirstGateAction } from '../src/services/vacancyFirstGate.js';
+import {
+  ALTERNATIVE_VACANCY_OFFER_MODE,
+  resolveVacancyFirstGate,
+  VacancyFirstGateAction
+} from '../src/services/vacancyFirstGate.js';
 
 const ibagueLeaderVacancy = {
   id: 'vac-ibague-lider-operaciones',
@@ -66,6 +70,23 @@ async function decideGate({ text, vacancyHints = {}, recentMessages = [] }) {
     currentStep: 'GREETING_SENT',
     recentMessages,
     vacancyHints: { allVacancies, activeVacancies, ...vacancyHints }
+  });
+}
+
+async function decideAlternative({ text, candidatePatch = {}, vacancy = ibagueAuxVacancy }) {
+  return resolveVacancyFirstGate({
+    prisma: {},
+    candidate: {
+      currentStep: 'GREETING_SENT',
+      vacancyId: null,
+      botResumeMode: `${ALTERNATIVE_VACANCY_OFFER_MODE}:${vacancy.id}`,
+      ...candidatePatch
+    },
+    currentVacancy: null,
+    inboundText: text,
+    currentStep: candidatePatch.currentStep || 'GREETING_SENT',
+    recentMessages: [],
+    vacancyHints: { allVacancies, activeVacancies }
   });
 }
 
@@ -200,4 +221,38 @@ test('vacancyFirstGate usa ciudad del contexto reciente cuando el cargo llega en
   assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
   assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');
   assert.notEqual(decision.replyKind, 'ALTERNATIVE_VACANCY_OFFER');
+});
+
+test('pregunta sobre vacante alternativa responde información sin registrar datos ni asignar todavía', async () => {
+  const decision = await decideAlternative({ text: 'Cuál es la función de auxiliar de cargue' });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ALTERNATIVE_VACANCY_INFO_REQUEST');
+  assert.equal(decision.vacancyId, ibagueAuxVacancy.id);
+  assert.equal(decision.candidateUpdates.currentStep, 'GREETING_SENT');
+  assert.match(decision.candidateUpdates.botResumeMode, new RegExp(`${ALTERNATIVE_VACANCY_OFFER_MODE}:${ibagueAuxVacancy.id}`));
+  assert.match(decision.reply, /funci[oó]n registrada|opci[oó]n disponible/i);
+  assert.match(decision.reply, /si esta opci[oó]n te interesa/i);
+  assert.doesNotMatch(decision.reply, /dejo tus datos registrados|nombre completo|documento|edad|restricciones|medio de transporte/i);
+});
+
+test('aceptación posterior de vacante alternativa asigna vacante y pasa a captura de datos', async () => {
+  const decision = await decideAlternative({ text: 'Sí, esta es la vacante. Me interesa continuar' });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ALTERNATIVE_VACANCY_ACCEPTED');
+  assert.equal(decision.vacancyId, ibagueAuxVacancy.id);
+  assert.equal(decision.candidateUpdates.vacancyId, ibagueAuxVacancy.id);
+  assert.equal(decision.candidateUpdates.currentStep, 'COLLECTING_DATA');
+  assert.equal(decision.candidateUpdates.botResumeMode, null);
+  assert.match(decision.reply, /continuamos con esta vacante/i);
+  assert.doesNotMatch(decision.reply, /La vacante que tengo para ti|primero confirmamos/i);
+});
+
+test('acuse pasivo de alternativa no registra ni repite presentación', async () => {
+  const decision = await decideAlternative({ text: 'Ok' });
+
+  assert.equal(decision.action, VacancyFirstGateAction.SUPPRESS_REPLY);
+  assert.equal(decision.reason, 'PASSIVE_ACK_AFTER_ALTERNATIVE_OFFER');
+  assert.equal(decision.candidateUpdates, undefined);
 });
