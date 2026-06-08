@@ -11,6 +11,14 @@ const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
+function buildUtcDayRange(value) {
+  const start = new Date(value);
+  start.setUTCHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start, end };
+}
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -155,11 +163,12 @@ export function dispatchBridgeRouter() {
       loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }), prisma.dispatchWorker.findMany({ where: transportWhere, select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }), prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }), prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }), loadRequestFormClients()
     ]);
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
+    const selectedDateRange = selectedServiceRequest ? buildUtcDayRange(selectedServiceRequest.serviceDate) : null;
     const sameDateAssignments = selectedServiceRequest ? await prisma.dispatchAssignment.findMany({
       where: {
         serviceRequestId: { not: selectedServiceRequest.id },
         status: { in: ACTIVE_ASSIGNMENT_STATUSES },
-        serviceRequest: { serviceDate: selectedServiceRequest.serviceDate }
+        serviceRequest: { serviceDate: { gte: selectedDateRange.start, lt: selectedDateRange.end } }
       },
       select: { workerId: true }
     }) : [];

@@ -21,17 +21,24 @@ test('dispatch assignment board view contracts', () => {
   assert.match(view, /name="status"/);
 });
 
-test('dispatch assignment board marks workers assigned to another request on the selected date without blocking them', () => {
-  const bridge = readSource('src/routes/dispatchBridge.js');
-  const view = readSource('src/views/operacionesAsignaciones.ejs');
+test('active dispatch assignment board marks same-day workers without blocking them', () => {
+  const server = readSource('src/server.js');
+  const route = readSource('src/routes/dispatchOpsExtras.js');
+  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
 
-  assert.match(bridge, /serviceRequestId: \{ not: selectedServiceRequest\.id \}/);
-  assert.match(bridge, /status: \{ in: ACTIVE_ASSIGNMENT_STATUSES \}/);
-  assert.match(bridge, /serviceRequest: \{ serviceDate: selectedServiceRequest\.serviceDate \}/);
-  assert.match(bridge, /assignedWorkerIdsOnSelectedDate/);
+  assert.ok(server.indexOf('dispatchOpsExtrasRouter(prisma)') < server.indexOf('dispatchBridgeRouter()'));
+  assert.match(route, /router\.get\('\/asignaciones'/);
+  assert.match(route, /buildUtcDayRangeFromDateValue\(selectedServiceRequest\.serviceDate\)/);
+  assert.match(route, /serviceRequestId: \{ not: selectedServiceRequest\.id \}/);
+  assert.match(route, /status: \{ in: ACTIVE_ASSIGNMENT_STATUSES \}/);
+  assert.match(route, /serviceDate: \{ gte: selectedDateRange\.start, lt: selectedDateRange\.end \}/);
+  assert.match(route, /assignedWorkerIdsOnSelectedDate/);
+  assert.match(route, /res\.render\('operacionesAsignacionesConfirmacion'/);
   assert.match(view, /assignedWorkerIdsOnSelectedDate\.has\(worker\.id\)/);
-  assert.match(view, /Ya asignado este día/);
-  assert.match(view, /class="worker-card" draggable="true"/);
+  assert.match(view, /Ya asignado en otra solicitud este día/);
+  assert.match(view, /worker-card<%= hasSameDayAssignment/);
+  assert.match(view, /draggable="true"/);
+  assert.doesNotMatch(view, /hasSameDayAssignment[^\n]*(disabled|draggable="false")/);
 });
 
 test('dispatch bridge routes to visual assignment board and keeps boundaries', () => {
