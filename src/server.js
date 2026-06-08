@@ -16,6 +16,7 @@ import { dispatchClientStatsRouter } from './routes/dispatchClientStats.js';
 import { dispatchOpsExtrasRouter } from './routes/dispatchOpsExtras.js';
 import { dispatchBridgeRouter } from './routes/dispatchBridge.js';
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
+import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -136,7 +137,7 @@ function applySessionPayload(req, payload) {
   req.session.username = payload.username;
   req.session.userAccessScope = payload.userAccessScope || 'ALL';
   req.session.userAccessCity = payload.userAccessCity || null;
-  req.session.userAccessVacancyId = payload.userAccessVacancyId || null;
+  req.session.userAccessVacancyId = payload.scopeVacancyId || payload.userAccessVacancyId || null;
   req.session.userSource = payload.userSource || 'env';
   req.session.canAccessDispatch = Boolean(payload.canAccessDispatch);
 }
@@ -348,6 +349,7 @@ const destroySession = (req, res) => {
 app.post('/logout', destroySession);
 app.get('/logout', destroySession);
 
+app.use(wrapAsyncRouter(dispatchMultiShiftRequestsRouter()));
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));
