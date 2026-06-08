@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('dispatch CRUD contracts for clients operations services and manual workers', () => {
+test('dispatch CRUD contracts for clients operations services and every worker source', () => {
   const route = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+  const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
   const clientOpsView = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
@@ -28,7 +29,7 @@ test('dispatch CRUD contracts for clients operations services and manual workers
   ].forEach((s) => assert.match(route, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 
   assert.match(route, /source:\s*'MANUAL'/);
-  assert.match(route, /findManualWorkerOr404/);
+  assert.match(route, /findWorkerOr404/);
   assert.match(route, /dispatchOperationPoint\.update/);
   assert.match(route, /dispatchClientService\.update/);
   assert.match(route, /regenerar-link/);
@@ -37,7 +38,16 @@ test('dispatch CRUD contracts for clients operations services and manual workers
   assert.doesNotMatch(clientsView, /Acciones CRUD/);
   ['Editar operación', 'Editar servicio', 'Guardar operación', 'Guardar servicio', 'Eliminar'].forEach((label) => assert.match(clientOpsView, new RegExp(label)));
   ['Editar', 'Desactivar', 'Reactivar', 'Eliminar', 'MANUAL'].forEach((label) => assert.match(personalView, new RegExp(label)));
-  ['mode ===', 'formAction', 'selectedCityIds', 'selectedVacancyIds', 'operationalStatus'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
+  assert.doesNotMatch(personalView, /if \(w\.source === 'MANUAL'\)/);
+  assert.match(personalView, /\/operaciones\/admin-worker\/<%= w\.id %>\/editar/);
+  ['mode ===', 'formAction', 'selectedCityIds', 'selectedVacancyIds', 'operationalStatus', 'Datos del panel del bot', 'medicalRestrictions', 'experienceInfo', 'experienceTime', 'experienceSummary'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
+  assert.match(workerFormView, /Estos campos son opcionales/);
+
+  assert.match(publicRoute, /findWorkerOr404/);
+  assert.match(publicRoute, /include: \{ cities: true, vacancies: true, candidate: true \}/);
+  assert.match(publicRoute, /buildCandidateProfileData/);
+  assert.match(publicRoute, /prisma\.candidate\.update/);
+  assert.doesNotMatch(publicRoute, /where: \{ id: workerId, source: 'MANUAL' \}/);
 
   assert.doesNotMatch(route, /DISPATCH_MODULE_URL/);
   assert.doesNotMatch(route, /conversationEngine|webhook|whatsapp/i);
