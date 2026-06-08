@@ -201,11 +201,27 @@ async function saveWorkerCv(workerId, file) {
   `;
 }
 
-async function findManualWorkerOr404(workerId) {
-  return prisma.dispatchWorker.findFirst({
-    where: { id: workerId, source: 'MANUAL' },
-    include: { cities: true, vacancies: true }
+async function findWorkerOr404(workerId) {
+  return prisma.dispatchWorker.findUnique({
+    where: { id: workerId },
+    include: { cities: true, vacancies: true, candidate: true }
   });
+}
+
+function buildCandidateProfileData(body) {
+  const ageValue = normalizeString(body.age);
+  const age = ageValue === null ? null : Number(ageValue);
+  const allowedGenders = new Set(['UNKNOWN', 'FEMALE', 'MALE', 'OTHER']);
+  const gender = normalizeString(body.gender);
+
+  return {
+    age: Number.isInteger(age) && age >= 0 ? age : null,
+    gender: allowedGenders.has(gender) ? gender : 'UNKNOWN',
+    medicalRestrictions: normalizeString(body.medicalRestrictions),
+    experienceInfo: normalizeString(body.experienceInfo),
+    experienceTime: normalizeString(body.experienceTime),
+    experienceSummary: normalizeString(body.experienceSummary)
+  };
 }
 
 async function findClientByPublicToken(publicToken) {
@@ -348,15 +364,15 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-delete/personal/:workerId', requireOps, async (req, res) => {
-    const worker = await prisma.dispatchWorker.findFirst({ where: { id: req.params.workerId, source: 'MANUAL' }, select: { id: true } });
-    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    const worker = await prisma.dispatchWorker.findUnique({ where: { id: req.params.workerId }, select: { id: true } });
+    if (!worker) return res.status(404).send('Auxiliar no encontrado');
 
     return runDelete(
       res,
       '/admin/operaciones/personal',
       '/admin/operaciones/personal',
       () => prisma.dispatchWorker.delete({ where: { id: worker.id } }),
-      'Auxiliar manual eliminado correctamente.',
+      'Auxiliar eliminado correctamente.',
       'No fue posible eliminar el auxiliar porque tiene dependencias operativas.'
     );
   });
@@ -389,8 +405,8 @@ export function publicDispatchClientRouter() {
   });
 
   router.get('/admin-worker/:workerId/editar', requireOps, async (req, res) => {
-    const [worker, options] = await Promise.all([findManualWorkerOr404(req.params.workerId), loadWorkerFormOptions()]);
-    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    const [worker, options] = await Promise.all([findWorkerOr404(req.params.workerId), loadWorkerFormOptions()]);
+    if (!worker) return res.status(404).send('Auxiliar no encontrado');
     return res.render('operacionesPersonalNuevo', {
       cities: options.cities,
       vacancies: options.vacancies,
@@ -404,14 +420,28 @@ export function publicDispatchClientRouter() {
 
   router.post('/admin-worker/:workerId/editar', requireOps, workerCvUpload.single('cvFile'), async (req, res) => {
     try {
-      const existing = await findManualWorkerOr404(req.params.workerId);
-      if (!existing) return res.status(404).send('Auxiliar manual no encontrado');
+      const existing = await findWorkerOr404(req.params.workerId);
+      if (!existing) return res.status(404).send('Auxiliar no encontrado');
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect(`/operaciones/admin-worker/${existing.id}/editar?error=` + encodeURIComponent('Nombre requerido.'));
-      await prisma.dispatchWorker.update({ where: { id: existing.id }, data: workerData });
+      await prisma.$transaction([
+        prisma.dispatchWorker.update({ where: { id: existing.id }, data: workerData }),
+        ...(existing.candidateId ? [prisma.candidate.update({
+          where: { id: existing.candidateId },
+          data: {
+            fullName: workerData.fullName,
+            phone: workerData.phone || existing.candidate.phone,
+            documentType: workerData.documentType,
+            documentNumber: workerData.documentNumber,
+            locality: workerData.residenceLocality,
+            transportMode: workerData.transportMode,
+            ...buildCandidateProfileData(req.body)
+          }
+        })] : [])
+      ]);
       await replaceWorkerRelations(existing.id, req.body);
       await saveWorkerCv(existing.id, req.file);
-      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual actualizado.'));
+      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar actualizado.'));
     } catch (error) {
       console.error(error);
       return res.redirect(`/operaciones/admin-worker/${req.params.workerId}/editar?error=` + encodeURIComponent(error.message || 'No fue posible actualizar el auxiliar.'));
