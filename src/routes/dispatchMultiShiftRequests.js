@@ -1,4 +1,5 @@
 import express from 'express';
+import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -15,10 +16,10 @@ function asArray(value) {
   return [value];
 }
 
-function normalizeOptionalTime(value) {
+function normalizeRequiredTime(value, label) {
   const normalized = normalizeString(value);
-  if (!normalized) return null;
-  if (!TIME_HH_MM_PATTERN.test(normalized)) throw new Error('Horario invalido. Usa formato HH:mm.');
+  if (!normalized) throw new Error(`${label} es obligatorio en cada horario.`);
+  if (!TIME_HH_MM_PATTERN.test(normalized)) throw new Error(`${label} invalido. Usa formato HH:mm.`);
   return normalized;
 }
 
@@ -37,10 +38,9 @@ function buildTimeBlocks(body = {}) {
 
   for (let index = 0; index < count; index += 1) {
     const requiredWorkers = normalizePositiveInt(quantities[index] ?? quantities[0]);
-    const startTime = normalizeOptionalTime(starts[index] ?? null);
-    const endTime = normalizeOptionalTime(ends[index] ?? null);
-    const hasAnyValue = Boolean(quantities[index] || starts[index] || ends[index]);
-    if (!hasAnyValue && count > 1) continue;
+    const startTime = normalizeRequiredTime(starts[index] ?? null, 'Hora inicio');
+    const endTime = normalizeRequiredTime(ends[index] ?? null, 'Hora fin');
+
     if (!requiredWorkers) throw new Error('Debes ingresar una cantidad valida de auxiliares en cada horario.');
     blocks.push({ requiredWorkers, startTime, endTime });
   }
@@ -49,15 +49,27 @@ function buildTimeBlocks(body = {}) {
   return blocks;
 }
 
-function serviceData(service) {
-  return { serviceId: service?.id || null, serviceName: service?.name || null };
+function buildRequestGroupCode(blocks) {
+  if (blocks.length <= 1) return null;
+  return `GRP-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`;
 }
 
-function createdSummary(blocks) {
+function serviceNameWithGroup(service, groupCode) {
+  const baseName = service?.name || null;
+  if (!groupCode) return baseName;
+  return `${baseName || 'Servicio'} · Grupo ${groupCode}`;
+}
+
+function serviceData(service, groupCode = null) {
+  return { serviceId: service?.id || null, serviceName: serviceNameWithGroup(service, groupCode) };
+}
+
+function createdSummary(blocks, groupCode = null) {
   const total = blocks.reduce((sum, block) => sum + block.requiredWorkers, 0);
-  return blocks.length === 1
+  const base = blocks.length === 1
     ? `1 bloque creado para ${total} auxiliar${total !== 1 ? 'es' : ''}`
     : `${blocks.length} bloques creados para ${total} auxiliares en total`;
+  return groupCode ? `${base}. Grupo operativo ${groupCode}` : base;
 }
 
 function canUseOps(req) {
@@ -113,13 +125,14 @@ export function dispatchMultiShiftRequestsRouter() {
     const selectedService = serviceId ? client.services.find((item) => item.id === serviceId) || null : null;
     if (client.services.length && !selectedService) return res.status(400).send('Debes seleccionar un servicio válido para el cliente.');
 
+    const groupCode = buildRequestGroupCode(blocks);
     await createRequests({
       operationPointId: operationPoint.id,
       clientName: client.name,
       operationPointName: operationPoint.name,
       cityName: operationPoint.cityName || client.cityName,
       address: operationPoint.address || normalizeString(req.body.address),
-      ...serviceData(selectedService),
+      ...serviceData(selectedService, groupCode),
       serviceDate: new Date(serviceDate),
       notes: normalizeString(req.body.notes),
       status: 'PENDING_ASSIGNMENT',
@@ -127,7 +140,7 @@ export function dispatchMultiShiftRequestsRouter() {
       createdByUsername: req.session?.username || req.username || null
     }, blocks);
 
-    return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(`Solicitud creada: ${createdSummary(blocks)}.`)}`);
+    return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(`Solicitud creada: ${createdSummary(blocks, groupCode)}.`)}`);
   });
 
   router.post('/operaciones/cliente/:publicToken', async (req, res) => {
@@ -141,21 +154,29 @@ export function dispatchMultiShiftRequestsRouter() {
     const serviceDate = normalizeString(req.body.serviceDate);
     if (!serviceDate) return res.status(400).send('Debes ingresar la fecha del servicio.');
 
+    const requestedByName = normalizeString(req.body.requestedByName);
+    const requestedByPhone = normalizeString(req.body.requestedByPhone);
+    const requestedByEmail = normalizeString(req.body.requestedByEmail);
+    if (!requestedByName || !requestedByPhone || !requestedByEmail) {
+      return res.status(400).send('Nombre, teléfono y correo de quien solicita son obligatorios.');
+    }
+
     let blocks;
     try { blocks = buildTimeBlocks(req.body); } catch (error) { return res.status(400).send(error.message); }
 
+    const groupCode = buildRequestGroupCode(blocks);
     await createRequests({
       operationPointId: operationPoint.id,
       clientName: client.name,
       operationPointName: operationPoint.name,
       cityName: operationPoint.cityName || client.cityName,
       address: operationPoint.address,
-      ...serviceData(selectedService),
+      ...serviceData(selectedService, groupCode),
       serviceDate: new Date(serviceDate),
       notes: normalizeString(req.body.notes),
-      requestedByName: normalizeString(req.body.requestedByName),
-      requestedByPhone: normalizeString(req.body.requestedByPhone),
-      requestedByEmail: normalizeString(req.body.requestedByEmail),
+      requestedByName,
+      requestedByPhone,
+      requestedByEmail,
       source: 'PUBLIC_LINK',
       status: 'PENDING_ASSIGNMENT'
     }, blocks);
@@ -167,7 +188,7 @@ export function dispatchMultiShiftRequestsRouter() {
       operationPoint,
       service: selectedService,
       success: true,
-      createdSummary: createdSummary(blocks)
+      createdSummary: createdSummary(blocks, groupCode)
     });
   });
 
