@@ -8,6 +8,7 @@ import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/ci
 import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../services/transportMode.js';
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 function normalizeString(value) {
@@ -154,7 +155,16 @@ export function dispatchBridgeRouter() {
       loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }), prisma.dispatchWorker.findMany({ where: transportWhere, select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }), prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }), prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }), loadRequestFormClients()
     ]);
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
-    return res.render('operacionesAsignaciones', { workers, cities, vacancies, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', transportMode: transportMode || '', locality: locality || '' }, transportModes: uniqueNormalizedTransportModes(transportModeRows.map((row) => row.transportMode)), localities: localityRows.map((row) => row.residenceLocality).filter(Boolean), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
+    const sameDateAssignments = selectedServiceRequest ? await prisma.dispatchAssignment.findMany({
+      where: {
+        serviceRequestId: { not: selectedServiceRequest.id },
+        status: { in: ACTIVE_ASSIGNMENT_STATUSES },
+        serviceRequest: { serviceDate: selectedServiceRequest.serviceDate }
+      },
+      select: { workerId: true }
+    }) : [];
+    const assignedWorkerIdsOnSelectedDate = new Set(sameDateAssignments.map((assignment) => assignment.workerId));
+    return res.render('operacionesAsignaciones', { workers, cities, vacancies, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', assignedWorkerIdsOnSelectedDate, clients, message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', transportMode: transportMode || '', locality: locality || '' }, transportModes: uniqueNormalizedTransportModes(transportModeRows.map((row) => row.transportMode)), localities: localityRows.map((row) => row.residenceLocality).filter(Boolean), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
   });
 
   router.get('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res) => { const [serviceRequest, clients] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.id }, include: { service: true } }), loadRequestFormClients()]); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); return res.render('operacionesSolicitudEditar', { serviceRequest, clients, role: req.session?.userRole || req.userRole }); });
