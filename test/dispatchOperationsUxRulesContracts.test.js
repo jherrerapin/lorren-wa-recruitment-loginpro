@@ -60,6 +60,7 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(clientsView, /onsubmit="return confirm\('¿Eliminar este cliente\?/);
   assert.match(clientOpsView, /Eliminar/);
   assert.match(personalView, />Acciones<\/th>/);
+  assert.doesNotMatch(personalView, />Estado<\/th>/);
 
   assert.doesNotMatch(dispatchRoute, /DISPATCH_MODULE_URL/);
   assert.doesNotMatch(publicRoute, /conversationEngine|webhook|whatsapp/i);
