@@ -7,10 +7,14 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.field-tag{font-size:11px;font-weight:900;margin-left:5px}.field-tag.required{color:var(--red,#dc2626)}.field-tag.optional{color:var(--muted)}.success-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.success-note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}@media(max-width:720px){.shift-row{grid-template-columns:1fr}.success-actions .btn{width:100%;justify-content:center}}
+    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.field-tag{font-size:11px;font-weight:900;margin-left:5px}.field-tag.required{color:var(--red,#dc2626)}.field-tag.optional{color:var(--muted)}.success-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.success-note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}.history-section{margin-top:20px;border-top:1px solid var(--border);padding-top:18px}.history-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px}.history-head h2{color:var(--navy);font-size:18px;margin:0}.history-head p{color:var(--muted);font-size:13px;margin:3px 0 0}.history-list{display:grid;gap:10px}.history-card{border:1px solid var(--border);background:#fff;border-radius:14px;padding:13px;box-shadow:var(--shadow-sm)}.history-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.history-card strong{color:var(--navy);font-size:14px}.history-meta{display:grid;gap:3px;color:var(--muted);font-size:12px;margin-top:5px}.history-schedules{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.history-chip{border-radius:999px;background:var(--surface-2);border:1px solid var(--border);padding:4px 8px;font-size:11px;color:var(--navy);font-weight:800}.history-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.history-status{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);white-space:nowrap}.history-status.locked{background:#fffbeb;color:#92400e}.empty-history{border:1px dashed var(--border);border-radius:14px;padding:16px;color:var(--muted);font-size:13px;background:var(--surface-2)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}.success-actions .btn,.history-actions .btn{width:100%;justify-content:center}.history-head,.history-top{display:grid}}
   </style>
 </head>
 <body>
+  <% const requestHistorySafe = Array.isArray(typeof requestHistory !== 'undefined' ? requestHistory : []) ? requestHistory : []; %>
+  <% const formatDate = (value) => value ? new Date(value).toISOString().slice(0,10) : '-'; %>
+  <% const formatDateTime = (value) => value ? new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '-'; %>
+  <% const schedule = (item) => item.endTime ? `${item.startTime || '-'} - ${item.endTime}` : `${item.startTime || '-'}`; %>
   <main class="public-shell">
     <section class="public-card">
       <div class="public-head">
@@ -20,7 +24,7 @@
           <p>Tu solicitud fue enviada correctamente al equipo de Operaciones / Despacho.</p>
         <% } else { %>
           <h1>Solicitud de servicio</h1>
-          <p>Completa los datos y selecciona la operación para solicitar personal operativo.</p>
+          <p>Completa los datos y revisa el historial de solicitudes realizadas.</p>
         <% } %>
       </div>
 
@@ -35,6 +39,7 @@
             </div>
             <p class="success-note">Podrás editarla solo mientras Operaciones no haya iniciado la asignación y mientras no haya pasado la fecha y hora de inicio del servicio.</p>
           <% } %>
+          <div class="success-actions"><a class="btn" href="/operaciones/cliente/<%= client.publicToken %>">Crear otra solicitud</a></div>
         <% } else { %>
           <div class="card" style="box-shadow:none;margin-bottom:18px;">
             <div class="card-body">
@@ -90,6 +95,43 @@
             <div class="form-actions"><button class="btn btn-primary" type="submit" <%= operationPoints.length && services.length ? '' : 'disabled' %>>Enviar solicitud</button></div>
           </form>
         <% } %>
+
+        <section class="history-section">
+          <div class="history-head">
+            <div><h2>Historial de solicitudes</h2><p>Consulta o edita solicitudes anteriores, siempre que todavía no tengan asignación y no haya iniciado el servicio.</p></div>
+            <span class="history-status"><%= requestHistorySafe.length %> registradas</span>
+          </div>
+          <% if (!requestHistorySafe.length) { %>
+            <div class="empty-history">Aún no hay solicitudes registradas para este cliente.</div>
+          <% } else { %>
+            <div class="history-list">
+              <% requestHistorySafe.forEach((item) => { %>
+                <article class="history-card">
+                  <div class="history-top">
+                    <div>
+                      <strong><%= item.operationPointName %><% if (item.isGrouped) { %> · Solicitud agrupada<% } %></strong>
+                      <div class="history-meta">
+                        <span>Servicio: <%= item.serviceName %></span>
+                        <span>Fecha servicio: <%= formatDate(item.serviceDate) %> · Total auxiliares: <%= item.totalRequired %></span>
+                        <span>Asignados activos: <%= item.activeCount %> · Confirmados: <%= item.confirmedCount %></span>
+                        <span>Creada: <%= formatDateTime(item.createdAt || item.primary.createdAt) %></span>
+                      </div>
+                    </div>
+                    <span class="history-status <%= item.editable ? '' : 'locked' %>"><%= item.editable ? 'Editable' : 'Solo lectura' %></span>
+                  </div>
+                  <div class="history-schedules">
+                    <% item.requests.forEach((request) => { %><span class="history-chip"><%= schedule(request) %> · <%= request.requiredWorkers %> aux.</span><% }) %>
+                  </div>
+                  <div class="history-actions">
+                    <a class="btn btn-primary" href="<%= item.viewUrl %>">Ver</a>
+                    <% if (item.editable) { %><a class="btn" href="<%= item.editUrl %>">Editar</a><% } %>
+                    <button class="btn" type="button" onclick="window.open('<%= item.viewUrl %>', '_blank')">Abrir aparte</button>
+                  </div>
+                </article>
+              <% }) %>
+            </div>
+          <% } %>
+        </section>
       </div>
     </section>
   </main>
