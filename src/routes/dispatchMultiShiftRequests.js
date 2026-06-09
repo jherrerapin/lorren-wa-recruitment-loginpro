@@ -23,6 +23,13 @@ function normalizeRequiredTime(value, label) {
   return normalized;
 }
 
+function normalizeOptionalTime(value, label) {
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+  if (!TIME_HH_MM_PATTERN.test(normalized)) throw new Error(`${label} invalido. Usa formato HH:mm.`);
+  return normalized;
+}
+
 function normalizePositiveInt(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1) return null;
@@ -39,7 +46,7 @@ function buildTimeBlocks(body = {}) {
   for (let index = 0; index < count; index += 1) {
     const requiredWorkers = normalizePositiveInt(quantities[index] ?? quantities[0]);
     const startTime = normalizeRequiredTime(starts[index] ?? null, 'Hora inicio');
-    const endTime = normalizeRequiredTime(ends[index] ?? null, 'Hora fin');
+    const endTime = normalizeOptionalTime(ends[index] ?? null, 'Hora fin');
 
     if (!requiredWorkers) throw new Error('Debes ingresar una cantidad valida de auxiliares en cada horario.');
     blocks.push({ requiredWorkers, startTime, endTime });
