@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
+    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.field-tag{font-size:11px;font-weight:900;margin-left:5px}.field-tag.required{color:var(--red,#dc2626)}.field-tag.optional{color:var(--muted)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -43,7 +43,7 @@
           <form method="post">
             <div class="form-grid">
               <div class="field full">
-                <label for="operationPointId">Operación / punto de servicio</label>
+                <label for="operationPointId">Operación / punto de servicio <span class="field-tag required">* campo obligatorio</span></label>
                 <select id="operationPointId" name="operationPointId" required <%= operationPoints.length ? '' : 'disabled' %>>
                   <option value="">Selecciona una operación</option>
                   <% operationPoints.forEach((op)=>{ %>
@@ -52,7 +52,7 @@
                 </select>
               </div>
               <div class="field full">
-                <label for="serviceId">Servicio solicitado</label>
+                <label for="serviceId">Servicio solicitado <span class="field-tag required">* campo obligatorio</span></label>
                 <select id="serviceId" name="serviceId" required <%= services.length ? '' : 'disabled' %>>
                   <option value=""><%= services.length ? 'Selecciona un servicio' : 'Sin servicios configurados para este cliente' %></option>
                   <% services.forEach((item)=>{ %>
@@ -60,24 +60,24 @@
                   <% }) %>
                 </select>
               </div>
-              <div class="field full"><label for="requestedByName">Nombre de quien solicita</label><input id="requestedByName" name="requestedByName" required placeholder="Nombre completo" /></div>
-              <div class="field"><label for="requestedByPhone">Teléfono</label><input id="requestedByPhone" name="requestedByPhone" required placeholder="Número de contacto" /></div>
-              <div class="field"><label for="requestedByEmail">Correo</label><input id="requestedByEmail" name="requestedByEmail" type="email" required placeholder="correo@empresa.com" /></div>
-              <div class="field"><label for="serviceDate">Fecha del servicio</label><input id="serviceDate" type="date" name="serviceDate" required /></div>
+              <div class="field full"><label for="requestedByName">Nombre de quien solicita <span class="field-tag required">* campo obligatorio</span></label><input id="requestedByName" name="requestedByName" required placeholder="Nombre completo" /></div>
+              <div class="field"><label for="requestedByPhone">Teléfono <span class="field-tag required">* campo obligatorio</span></label><input id="requestedByPhone" name="requestedByPhone" required placeholder="Número de contacto" /></div>
+              <div class="field"><label for="requestedByEmail">Correo <span class="field-tag required">* campo obligatorio</span></label><input id="requestedByEmail" name="requestedByEmail" type="email" required placeholder="correo@empresa.com" /></div>
+              <div class="field"><label for="serviceDate">Fecha del servicio <span class="field-tag required">* campo obligatorio</span></label><input id="serviceDate" type="date" name="serviceDate" required /></div>
               <div class="field full">
                 <label>Horarios y auxiliares requeridos</label>
                 <div class="shift-list" id="shiftList">
                   <div class="shift-row">
-                    <div class="field"><label>Cantidad</label><input type="number" min="1" name="requiredWorkers" required value="1" /></div>
-                    <div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div>
-                    <div class="field"><label>Hora fin</label><input type="time" name="endTime" required /></div>
+                    <div class="field"><label>Cantidad <span class="field-tag required">* campo obligatorio</span></label><input type="number" min="1" name="requiredWorkers" required value="1" /></div>
+                    <div class="field"><label>Hora inicio <span class="field-tag required">* campo obligatorio</span></label><input type="time" name="startTime" required /></div>
+                    <div class="field"><label>Hora fin <span class="field-tag optional">* campo opcional</span></label><input type="time" name="endTime" /></div>
                     <button class="shift-remove" type="button" hidden>Quitar</button>
                   </div>
                 </div>
-                <p class="shift-summary">Si el mismo día necesitas personal en horarios distintos, agrega un bloque por cada horario. Ejemplo: 3 auxiliares de 6:00 a 14:00 y 2 auxiliares de 14:00 a 22:00.</p>
+                <p class="shift-summary">Si el mismo día necesitas personal en horarios distintos, agrega un bloque por cada horario. Ejemplo: 3 auxiliares desde las 6:00 y 2 auxiliares desde las 14:00. La hora de finalización es opcional y no se enviará en los mensajes de asignación.</p>
                 <button class="btn" type="button" id="addShiftBtn">Agregar otro horario</button>
               </div>
-              <div class="field full"><label for="notes">Observaciones</label><textarea id="notes" name="notes" placeholder="Describe condiciones, requisitos de ingreso o detalles del servicio"></textarea></div>
+              <div class="field full"><label for="notes">Observaciones <span class="field-tag optional">* campo opcional</span></label><textarea id="notes" name="notes" placeholder="Describe condiciones, requisitos de ingreso o detalles del servicio"></textarea></div>
             </div>
             <div class="form-actions"><button class="btn btn-primary" type="submit" <%= operationPoints.length && services.length ? '' : 'disabled' %>>Enviar solicitud</button></div>
           </form>
