@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Detalle de solicitud — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .review-grid{display:grid;gap:14px}.review-card{border:1px solid var(--border);border-radius:14px;background:#fff;padding:16px;box-shadow:var(--shadow-sm)}.review-card h2{color:var(--navy);font-size:16px;margin-bottom:10px}.summary-list{display:grid;gap:8px}.summary-row{display:grid;grid-template-columns:170px 1fr;gap:10px;font-size:14px}.summary-row strong{color:var(--navy)}.summary-row span{color:var(--muted)}.shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-item{border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:12px;display:grid;gap:4px}.field-tag{font-size:11px;font-weight:900;margin-left:5px}.field-tag.required{color:var(--red,#dc2626)}.field-tag.optional{color:var(--muted)}.review-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.blocked-box{border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:12px;padding:12px;font-size:13px;line-height:1.5}.print-only{display:none}@media print{.review-actions,.no-print{display:none!important}.print-only{display:block}.public-card{box-shadow:none!important;border:0!important}.public-shell{background:#fff!important}}@media(max-width:720px){.summary-row{grid-template-columns:1fr}.shift-row{grid-template-columns:1fr}.review-actions .btn{width:100%;justify-content:center}}
+  </style>
+</head>
+<body>
+  <% const primary = requestView.primary; %>
+  <% const formatDate = (value) => value ? new Date(value).toISOString().slice(0,10) : '-'; %>
+  <% const schedule = (item) => item.endTime ? `${item.startTime || '-'} - ${item.endTime}` : `${item.startTime || '-'}`; %>
+  <main class="public-shell">
+    <section class="public-card">
+      <div class="public-head">
+        <img src="/public/logo-loginpro.svg" alt="LoginPro" />
+        <h1><%= mode === 'edit' ? 'Editar solicitud de servicio' : 'Detalle de solicitud de servicio' %></h1>
+        <p><%= client.name %></p>
+      </div>
+      <div class="public-body">
+        <% if (message) { %><div class="section-note"><%= message %></div><% } %>
+        <% if (error) { %><div class="section-note" style="border-color:var(--red,#dc2626);color:var(--red,#dc2626);"><%= error %></div><% } %>
+
+        <% if (mode === 'view') { %>
+          <div class="review-grid">
+            <section class="review-card">
+              <h2>Resumen</h2>
+              <div class="summary-list">
+                <div class="summary-row"><strong>Cliente</strong><span><%= primary.clientName %></span></div>
+                <div class="summary-row"><strong>Operación</strong><span><%= primary.operationPointName || '-' %></span></div>
+                <div class="summary-row"><strong>Ciudad</strong><span><%= primary.cityName || '-' %></span></div>
+                <div class="summary-row"><strong>Dirección</strong><span><%= primary.address || '-' %></span></div>
+                <div class="summary-row"><strong>Servicio</strong><span><%= requestView.serviceName %></span></div>
+                <div class="summary-row"><strong>Fecha servicio</strong><span><%= formatDate(primary.serviceDate) %></span></div>
+                <div class="summary-row"><strong>Total auxiliares</strong><span><%= requestView.totalRequired %></span></div>
+                <div class="summary-row"><strong>Solicitante</strong><span><%= primary.requestedByName || '-' %> · <%= primary.requestedByPhone || '-' %> · <%= primary.requestedByEmail || '-' %></span></div>
+                <% if (primary.notes) { %><div class="summary-row"><strong>Observaciones</strong><span><%= primary.notes %></span></div><% } %>
+              </div>
+            </section>
+            <section class="review-card">
+              <h2>Horarios solicitados</h2>
+              <div class="shift-list">
+                <% requestView.requests.forEach((item, index) => { %>
+                  <article class="shift-item"><strong>Horario <%= index + 1 %>: <%= schedule(item) %></strong><span class="muted"><%= item.requiredWorkers %> auxiliar<%= item.requiredWorkers !== 1 ? 'es' : '' %></span></article>
+                <% }) %>
+              </div>
+            </section>
+            <% if (!requestView.editable) { %><div class="blocked-box">Esta solicitud está en solo lectura: <%= requestView.editBlockedReason %></div><% } %>
+            <div class="review-actions no-print">
+              <% if (requestView.editable) { %><a class="btn btn-primary" href="<%= requestView.editUrl %>">Editar solicitud</a><% } %>
+              <button class="btn" type="button" onclick="window.print()">Guardar / imprimir comprobante</button>
+              <a class="btn" href="/operaciones/cliente/<%= client.publicToken %>">Crear otra solicitud</a>
+            </div>
+          </div>
+        <% } else { %>
+          <% if (!requestView.editable) { %>
+            <div class="blocked-box">Esta solicitud ya no puede editarse: <%= requestView.editBlockedReason %></div>
+            <div class="review-actions"><a class="btn btn-primary" href="<%= requestView.viewUrl %>">Volver al detalle</a></div>
+          <% } else { %>
+            <form method="post" action="<%= requestView.editUrl %>">
+              <div class="form-grid">
+                <div class="field full"><label>Operación / punto <span class="field-tag required">* campo obligatorio</span></label><select name="operationPointId" required><option value="">Selecciona una operación</option><% operationPoints.forEach((op)=>{ %><option value="<%= op.id %>" <%= primary.operationPointId===op.id ? 'selected' : '' %>><%= op.name %><% if(op.cityName){ %> — <%= op.cityName %><% } %><% if(op.address){ %> · <%= op.address %><% } %></option><% }) %></select></div>
+                <div class="field full"><label>Servicio solicitado <span class="field-tag required">* campo obligatorio</span></label><select name="serviceId" required><option value="">Selecciona un servicio</option><% services.forEach((service)=>{ %><option value="<%= service.id %>" <%= primary.serviceId===service.id ? 'selected' : '' %>><%= service.name %><% if(service.description){ %> — <%= service.description %><% } %></option><% }) %></select></div>
+                <div class="field full"><label>Nombre de quien solicita <span class="field-tag required">* campo obligatorio</span></label><input name="requestedByName" required value="<%= primary.requestedByName || '' %>" /></div>
+                <div class="field"><label>Teléfono <span class="field-tag required">* campo obligatorio</span></label><input name="requestedByPhone" required value="<%= primary.requestedByPhone || '' %>" /></div>
+                <div class="field"><label>Correo <span class="field-tag required">* campo obligatorio</span></label><input name="requestedByEmail" type="email" required value="<%= primary.requestedByEmail || '' %>" /></div>
+                <div class="field"><label>Fecha servicio <span class="field-tag required">* campo obligatorio</span></label><input type="date" name="serviceDate" required value="<%= formatDate(primary.serviceDate) %>" /></div>
+                <div class="field full"><label>Horarios y auxiliares requeridos</label><div class="shift-list" id="shiftList"><% requestView.requests.forEach((item, index) => { %><div class="shift-row"><div class="field"><label>Cantidad <span class="field-tag required">* campo obligatorio</span></label><input type="number" min="1" name="requiredWorkers" required value="<%= item.requiredWorkers %>" /></div><div class="field"><label>Hora inicio <span class="field-tag required">* campo obligatorio</span></label><input type="time" name="startTime" required value="<%= item.startTime || '' %>" /></div><div class="field"><label>Hora fin <span class="field-tag optional">* campo opcional</span></label><input type="time" name="endTime" value="<%= item.endTime || '' %>" /></div><button class="shift-remove" type="button" <%= requestView.requests.length === 1 ? 'hidden' : '' %>>Quitar</button></div><% }) %></div><p class="muted" style="font-size:12px;margin-top:8px;">Puedes ajustar horarios solo antes de que Operaciones asigne auxiliares y antes de la hora de inicio del servicio.</p><button class="btn" type="button" id="addShiftBtn">Agregar otro horario</button></div>
+                <div class="field full"><label>Observaciones <span class="field-tag optional">* campo opcional</span></label><textarea name="notes"><%= primary.notes || '' %></textarea></div>
+              </div>
+              <div class="review-actions"><button class="btn btn-primary" type="submit">Guardar cambios</button><a class="btn" href="<%= requestView.viewUrl %>">Cancelar</a></div>
+            </form>
+          <% } %>
+        <% } %>
+      </div>
+    </section>
+  </main>
+  <script>
+    const shiftList = document.getElementById('shiftList');
+    const addShiftBtn = document.getElementById('addShiftBtn');
+    function refreshRemoveButtons(){ const rows = Array.from(shiftList?.querySelectorAll('.shift-row') || []); rows.forEach((row)=>{ const button=row.querySelector('.shift-remove'); if(button) button.hidden = rows.length === 1; }); }
+    addShiftBtn?.addEventListener('click', () => { const first = shiftList.querySelector('.shift-row'); if(!first) return; const clone = first.cloneNode(true); clone.querySelectorAll('input').forEach((input)=>{ input.value = input.type === 'number' ? '1' : ''; }); clone.querySelector('.shift-remove')?.addEventListener('click', () => { clone.remove(); refreshRemoveButtons(); }); shiftList.appendChild(clone); refreshRemoveButtons(); });
+    shiftList?.querySelectorAll('.shift-remove').forEach((button)=>button.addEventListener('click',()=>{ button.closest('.shift-row')?.remove(); refreshRemoveButtons(); }));
+    refreshRemoveButtons();
+  </script>
+</body>
+</html>
