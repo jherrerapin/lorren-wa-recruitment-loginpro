@@ -1,4 +1,4 @@
-import { buildGroupedWhereClauseForRequest, countAssignments, extractRequestGroupCode, resolveRequestServiceName, stripRequestGroupSuffix } from './dispatchRequestGrouping.js';
+import { buildGroupedWhereClauseForRequest, countAssignments, extractRequestGroupCode, resolveRequestServiceName } from './dispatchRequestGrouping.js';
 
 const EMAIL_PROVIDER_RESEND = 'resend';
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
@@ -29,7 +29,7 @@ function formatDate(value) {
 }
 
 function formatShift(request) {
-  return `${request.startTime || '-'} - ${request.endTime || '-'}`;
+  return request.startTime || '-';
 }
 
 function sortRequestsByTime(requests) {
