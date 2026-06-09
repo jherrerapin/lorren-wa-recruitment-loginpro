@@ -1,6 +1,7 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
+import { loadPublicDispatchRequestHistory } from '../services/publicDispatchRequestHistory.js';
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const GROUP_PATTERN = /\s*·\s*Grupo\s+(GRP-[A-Z0-9-]+)/i;
@@ -124,11 +125,6 @@ function serviceStartDateTime(request) {
   return new Date(`${date}T${time}:00-05:00`);
 }
 
-function getPublicRequestKey(requests = []) {
-  const first = requests[0];
-  return extractGroupCode(first) || first?.id || null;
-}
-
 function getRequestEditLock(requests = []) {
   const hasAssignments = requests.some((request) => (request.assignments || []).length > 0);
   if (hasAssignments) return { editable: false, reason: 'La solicitud ya tiene asignaciones registradas por Operaciones / Despacho.' };
@@ -208,6 +204,20 @@ function buildPublicRequestViewModel(client, requests, requestKey) {
   };
 }
 
+async function renderPublicForm(res, client, extra = {}) {
+  const requestHistory = await loadPublicDispatchRequestHistory(prisma, client);
+  return res.render('publicDispatchRequest', {
+    client,
+    operationPoints: client.operationPoints,
+    services: client.services,
+    operationPoint: null,
+    service: null,
+    success: false,
+    requestHistory,
+    ...extra
+  });
+}
+
 function validatePublicContact(body) {
   const requestedByName = normalizeString(body.requestedByName);
   const requestedByPhone = normalizeString(body.requestedByPhone);
@@ -266,6 +276,12 @@ async function updatePublicRequests(client, currentRequests, body) {
 
 export function dispatchMultiShiftRequestsRouter() {
   const router = express.Router();
+
+  router.get('/operaciones/cliente/:publicToken', async (req, res) => {
+    const client = await loadPublicClient(req.params.publicToken);
+    if (!client) return res.status(404).send('Link no disponible');
+    return renderPublicForm(res, client);
+  });
 
   router.post('/admin/operaciones/solicitudes', requireOps, async (req, res) => {
     const clientId = normalizeString(req.body.clientId);
@@ -339,6 +355,7 @@ export function dispatchMultiShiftRequestsRouter() {
 
     const requestKey = groupCode || createdRequests[0]?.id;
     const viewUrl = requestKey ? `/operaciones/cliente/${client.publicToken}/solicitudes/${encodeURIComponent(requestKey)}` : null;
+    const requestHistory = await loadPublicDispatchRequestHistory(prisma, client);
 
     return res.render('publicDispatchRequest', {
       client,
@@ -348,7 +365,8 @@ export function dispatchMultiShiftRequestsRouter() {
       service: selectedService,
       success: true,
       createdSummary: createdSummary(blocks, groupCode),
-      requestViewUrl: viewUrl
+      requestViewUrl: viewUrl,
+      requestHistory
     });
   });
 
