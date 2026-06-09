@@ -145,6 +145,24 @@ function applySessionPayload(req, payload) {
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use('/public', express.static(path.join(__dirname, 'public')));
+app.use((req, res, next) => {
+  const originalRender = res.render.bind(res);
+  res.render = (view, locals = {}, callback) => {
+    originalRender(view, locals, (error, html) => {
+      if (error) {
+        if (typeof callback === 'function') return callback(error);
+        return next(error);
+      }
+      const shouldInject = view === 'operacionesAsignacionesConfirmacion' && typeof html === 'string';
+      const output = shouldInject
+        ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script></body>')
+        : html;
+      if (typeof callback === 'function') return callback(null, output);
+      return res.send(output);
+    });
+  };
+  next();
+});
 app.use(morgan('combined'));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
