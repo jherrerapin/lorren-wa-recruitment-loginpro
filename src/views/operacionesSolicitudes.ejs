@@ -10,7 +10,17 @@
     .readonly-field { background: #f8fafc; color: var(--muted); cursor: not-allowed; }
     .select-hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
     select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
-    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.group-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);margin-left:6px}.schedule-list{display:grid;gap:4px}.schedule-line{font-size:12px;color:var(--navy)}.schedule-line span{color:var(--muted)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
+    .shift-list{display:grid;gap:10px}
+    .shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}
+    .shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}
+    .shift-summary{font-size:12px;color:var(--muted);margin-top:8px}
+    .group-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);margin-left:6px}
+    .schedule-list{display:grid;gap:4px}
+    .schedule-line{font-size:12px;color:var(--navy)}
+    .schedule-line span,.created-line{color:var(--muted)}
+    .created-line{font-size:12px;margin-top:4px;display:block}
+    .field-tag{font-size:11px;font-weight:900;margin-left:5px}.field-tag.required{color:var(--red,#dc2626)}.field-tag.optional{color:var(--muted)}
+    @media(max-width:720px){.shift-row{grid-template-columns:1fr}.table th:nth-child(2),.table td:nth-child(2){white-space:normal}}
   </style>
 </head>
 <body>
@@ -33,6 +43,8 @@
   <% const countActive = (request) => (request.assignments || []).filter((assignment) => activeCodes.includes(assignment.status)).length; %>
   <% const countConfirmed = (request) => (request.assignments || []).filter((assignment) => assignment.status === 'CONFIRMED').length; %>
   <% const deriveStatus = (required, active, confirmed) => confirmed >= required ? 'ASSIGNMENT_COMPLETE' : active >= required ? 'PENDING_CONFIRMATION' : active > 0 ? 'ASSIGNMENT_PARTIAL' : 'PENDING_ASSIGNMENT'; %>
+  <% const formatDateTime = (value) => value ? new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '-'; %>
+  <% const formatSchedule = (request) => request.endTime ? `${request.startTime || '-'} - ${request.endTime}` : `${request.startTime || '-'}`; %>
   <%
     const groupedMap = new Map();
     serviceRequests.forEach((request) => {
@@ -48,7 +60,12 @@
       const activeCount = group.requests.reduce((sum, request) => sum + countActive(request), 0);
       const confirmedCount = group.requests.reduce((sum, request) => sum + countConfirmed(request), 0);
       const nextRequest = group.requests.find((request) => countConfirmed(request) < Number(request.requiredWorkers || 0)) || primary;
-      return { ...group, primary, requiredWorkers, activeCount, confirmedCount, status: deriveStatus(requiredWorkers, activeCount, confirmedCount), nextRequest };
+      const createdAt = group.requests.reduce((oldest, request) => {
+        if (!request.createdAt) return oldest;
+        if (!oldest) return request.createdAt;
+        return new Date(request.createdAt) < new Date(oldest) ? request.createdAt : oldest;
+      }, null);
+      return { ...group, primary, requiredWorkers, activeCount, confirmedCount, status: deriveStatus(requiredWorkers, activeCount, confirmedCount), nextRequest, createdAt };
     });
   %>
 
@@ -74,7 +91,7 @@
         <form method="post" action="/admin/operaciones/solicitudes">
           <div class="form-grid">
             <div class="field">
-              <label for="clientId">Cliente</label>
+              <label for="clientId">Cliente <span class="field-tag required">* campo obligatorio</span></label>
               <select id="clientId" name="clientId" required>
                 <option value="">Selecciona un cliente</option>
                 <% clients.forEach((client)=>{ %><option value="<%= client.id %>"><%= client.name %></option><% }) %>
@@ -82,13 +99,13 @@
               <p class="select-hint">Solo aparecen clientes activos registrados en Operaciones.</p>
             </div>
             <div class="field">
-              <label for="operationPointId">Operación / punto</label>
+              <label for="operationPointId">Operación / punto <span class="field-tag required">* campo obligatorio</span></label>
               <select id="operationPointId" name="operationPointId" required disabled>
                 <option value="">Selecciona primero un cliente</option>
               </select>
             </div>
             <div class="field">
-              <label for="serviceId">Servicio del cliente</label>
+              <label for="serviceId">Servicio del cliente <span class="field-tag required">* campo obligatorio</span></label>
               <select id="serviceId" name="serviceId" disabled>
                 <option value="">Selecciona primero un cliente</option>
               </select>
@@ -96,21 +113,21 @@
             <div class="field"><label for="cityNameDisplay">Ciudad</label><input id="cityNameDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <div class="field"><label for="addressDisplay">Dirección de la operación</label><input id="addressDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <input type="hidden" id="address" name="address" />
-            <div class="field"><label>Fecha servicio</label><input type="date" name="serviceDate" value="<%= today %>" required /></div>
+            <div class="field"><label>Fecha servicio <span class="field-tag required">* campo obligatorio</span></label><input type="date" name="serviceDate" value="<%= today %>" required /></div>
             <div class="field full">
               <label>Horarios y auxiliares requeridos</label>
               <div class="shift-list" id="shiftList">
                 <div class="shift-row">
-                  <div class="field"><label>Auxiliares</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div>
-                  <div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div>
-                  <div class="field"><label>Hora fin</label><input type="time" name="endTime" required /></div>
+                  <div class="field"><label>Auxiliares <span class="field-tag required">* campo obligatorio</span></label><input type="number" name="requiredWorkers" min="1" value="1" required /></div>
+                  <div class="field"><label>Hora inicio <span class="field-tag required">* campo obligatorio</span></label><input type="time" name="startTime" required /></div>
+                  <div class="field"><label>Hora fin <span class="field-tag optional">* campo opcional</span></label><input type="time" name="endTime" /></div>
                   <button class="shift-remove" type="button" hidden>Quitar</button>
                 </div>
               </div>
-              <p class="shift-summary">Si el cliente solicita varios horarios para el mismo día, agrégalos aquí. El listado los mostrará como una sola solicitud agrupada.</p>
+              <p class="shift-summary">Si el cliente solicita varios horarios para el mismo día, agrégalos aquí. La hora de finalización es opcional y no se enviará en los mensajes de asignación.</p>
               <button class="btn" type="button" id="addShiftBtn">Agregar otro horario</button>
             </div>
-            <div class="field full"><label>Notas</label><textarea name="notes" placeholder="Observaciones de la solicitud"></textarea></div>
+            <div class="field full"><label>Notas <span class="field-tag optional">* campo opcional</span></label><textarea name="notes" placeholder="Observaciones de la solicitud"></textarea></div>
           </div>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Crear solicitud</button></div>
         </form>
@@ -127,13 +144,18 @@
           <div class="empty"><strong>No hay solicitudes registradas.</strong>Crea un cliente, una operación y comparte el link público para recibir solicitudes.</div>
         <% } else { %>
           <table class="table">
-            <thead><tr><th>Cliente / operación</th><th>Fecha</th><th>Horarios</th><th>Requeridos</th><th>Asignación</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Cliente / operación</th><th>Fecha servicio</th><th>Horarios</th><th>Requeridos</th><th>Asignación</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               <% serviceRequestGroups.forEach((group) => { const request = group.primary; %>
                 <tr>
-                  <td><strong><%= request.clientName %></strong><% if (group.isGrouped) { %><span class="group-badge">Agrupada</span><% } %><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div><div class="muted">Servicio: <%= cleanServiceName(request) %></div></td>
+                  <td>
+                    <strong><%= request.clientName %></strong><% if (group.isGrouped) { %><span class="group-badge">Agrupada</span><% } %>
+                    <div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div>
+                    <div class="muted">Servicio: <%= cleanServiceName(request) %></div>
+                    <span class="created-line">Creada: <%= formatDateTime(group.createdAt || request.createdAt) %></span>
+                  </td>
                   <td><%= new Date(request.serviceDate).toISOString().slice(0,10) %></td>
-                  <td><div class="schedule-list"><% group.requests.forEach((item, index) => { %><div class="schedule-line"><strong><%= item.startTime || '-' %> - <%= item.endTime || '-' %></strong> <span>· <%= item.requiredWorkers %> aux.</span></div><% }) %></div></td>
+                  <td><div class="schedule-list"><% group.requests.forEach((item) => { %><div class="schedule-line"><strong><%= formatSchedule(item) %></strong> <span>· <%= item.requiredWorkers %> aux.</span></div><% }) %></div></td>
                   <td><%= group.requiredWorkers %></td>
                   <td><strong><%= group.activeCount %> / <%= group.requiredWorkers %></strong><div class="muted">Confirmados: <%= group.confirmedCount %> / <%= group.requiredWorkers %></div></td>
                   <td><span class="pill pill-amber"><%= sourceLabel(request.source || 'INTERNAL') %></span></td>
@@ -143,7 +165,7 @@
                       <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= group.nextRequest.id %>">Asignar</a>
                       <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
                       <% if (group.isGrouped) { %>
-                        <% group.requests.forEach((item, index) => { %><form method="post" action="/admin/operaciones/solicitudes/<%= item.id %>/eliminar" onsubmit="return confirm('¿Eliminar el horario <%= item.startTime || '-' %> - <%= item.endTime || '-' %> de esta solicitud agrupada?');"><button class="btn" type="submit">Eliminar horario <%= index + 1 %></button></form><% }) %>
+                        <% group.requests.forEach((item, index) => { %><form method="post" action="/admin/operaciones/solicitudes/<%= item.id %>/eliminar" onsubmit="return confirm('¿Eliminar el horario <%= formatSchedule(item) %> de esta solicitud agrupada?');"><button class="btn" type="submit">Eliminar horario <%= index + 1 %></button></form><% }) %>
                       <% } else { %>
                         <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
                       <% } %>
