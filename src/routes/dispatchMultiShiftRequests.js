@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const GROUP_PATTERN = /\s*·\s*Grupo\s+(GRP-[A-Z0-9-]+)/i;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -56,6 +57,15 @@ function buildTimeBlocks(body = {}) {
   return blocks;
 }
 
+function extractGroupCode(request) {
+  const match = normalizeString(request?.serviceName)?.match(GROUP_PATTERN);
+  return match?.[1] || null;
+}
+
+function cleanServiceName(value) {
+  return normalizeString(value)?.replace(GROUP_PATTERN, '').trim() || null;
+}
+
 function buildRequestGroupCode(blocks) {
   if (blocks.length <= 1) return null;
   return `GRP-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`;
@@ -93,6 +103,46 @@ function requireOps(req, res, next) {
   return next();
 }
 
+function sortRequestBlocks(requests = []) {
+  return [...requests].sort((a, b) => {
+    const dateA = new Date(a.serviceDate || 0).getTime();
+    const dateB = new Date(b.serviceDate || 0).getTime();
+    if (dateA !== dateB) return dateA - dateB;
+    return String(a.startTime || '').localeCompare(String(b.startTime || ''), 'es');
+  });
+}
+
+function serviceDateKey(value) {
+  if (!value) return null;
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function serviceStartDateTime(request) {
+  const date = serviceDateKey(request?.serviceDate);
+  if (!date) return null;
+  const time = request?.startTime || '00:00';
+  return new Date(`${date}T${time}:00-05:00`);
+}
+
+function getPublicRequestKey(requests = []) {
+  const first = requests[0];
+  return extractGroupCode(first) || first?.id || null;
+}
+
+function getRequestEditLock(requests = []) {
+  const hasAssignments = requests.some((request) => (request.assignments || []).length > 0);
+  if (hasAssignments) return { editable: false, reason: 'La solicitud ya tiene asignaciones registradas por Operaciones / Despacho.' };
+
+  const now = new Date();
+  const hasStarted = requests.some((request) => {
+    const start = serviceStartDateTime(request);
+    return start && start <= now;
+  });
+  if (hasStarted) return { editable: false, reason: 'La fecha y hora de inicio del servicio ya pasaron.' };
+
+  return { editable: true, reason: null };
+}
+
 async function createRequests(baseData, blocks) {
   return prisma.$transaction(blocks.map((block) => prisma.dispatchServiceRequest.create({
     data: { ...baseData, ...block }
@@ -107,6 +157,111 @@ async function loadPublicClient(publicToken) {
       services: { where: { isActive: true }, orderBy: { name: 'asc' } }
     }
   });
+}
+
+async function loadPublicRequestContext(publicToken, requestKey) {
+  const client = await loadPublicClient(publicToken);
+  if (!client) return null;
+  const operationPointIds = client.operationPoints.map((operationPoint) => operationPoint.id);
+  if (!operationPointIds.length) return { client, requests: [], requestKey };
+
+  const requests = await prisma.dispatchServiceRequest.findMany({
+    where: {
+      operationPointId: { in: operationPointIds },
+      OR: [
+        { id: requestKey },
+        { serviceName: { contains: `Grupo ${requestKey}` } }
+      ]
+    },
+    include: {
+      service: true,
+      assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } }
+    },
+    orderBy: [{ serviceDate: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  return { client, requests: sortRequestBlocks(requests), requestKey };
+}
+
+function buildPublicRequestViewModel(client, requests, requestKey) {
+  const sortedRequests = sortRequestBlocks(requests);
+  const primary = sortedRequests[0] || null;
+  const groupCode = extractGroupCode(primary);
+  const editLock = getRequestEditLock(sortedRequests);
+  const totalRequired = sortedRequests.reduce((sum, request) => sum + (Number(request.requiredWorkers) || 0), 0);
+  const operationPoint = primary ? client.operationPoints.find((item) => item.id === primary.operationPointId) || null : null;
+  const selectedService = primary?.serviceId ? client.services.find((item) => item.id === primary.serviceId) || null : null;
+
+  return {
+    requestKey: groupCode || requestKey || primary?.id,
+    groupCode,
+    primary,
+    requests: sortedRequests,
+    operationPoint,
+    selectedService,
+    serviceName: cleanServiceName(primary?.serviceName) || primary?.service?.name || selectedService?.name || 'Sin servicio',
+    totalRequired,
+    editable: editLock.editable,
+    editBlockedReason: editLock.reason,
+    viewUrl: primary ? `/operaciones/cliente/${client.publicToken}/solicitudes/${encodeURIComponent(groupCode || requestKey || primary.id)}` : null,
+    editUrl: primary ? `/operaciones/cliente/${client.publicToken}/solicitudes/${encodeURIComponent(groupCode || requestKey || primary.id)}/editar` : null
+  };
+}
+
+function validatePublicContact(body) {
+  const requestedByName = normalizeString(body.requestedByName);
+  const requestedByPhone = normalizeString(body.requestedByPhone);
+  const requestedByEmail = normalizeString(body.requestedByEmail);
+  if (!requestedByName || !requestedByPhone || !requestedByEmail) {
+    throw new Error('Nombre, teléfono y correo de quien solicita son obligatorios.');
+  }
+  return { requestedByName, requestedByPhone, requestedByEmail };
+}
+
+async function updatePublicRequests(client, currentRequests, body) {
+  const operationPoint = client.operationPoints.find((item) => item.id === normalizeString(body.operationPointId));
+  if (!operationPoint) throw new Error('Debes seleccionar una operación válida.');
+  const selectedService = client.services.find((item) => item.id === normalizeString(body.serviceId)) || null;
+  if (client.services.length && !selectedService) throw new Error('Debes seleccionar un servicio válido.');
+  const serviceDate = normalizeString(body.serviceDate);
+  if (!serviceDate) throw new Error('Debes ingresar la fecha del servicio.');
+  const contact = validatePublicContact(body);
+  const blocks = buildTimeBlocks(body);
+  const existingGroupCode = extractGroupCode(currentRequests[0]);
+  const nextGroupCode = blocks.length > 1 ? (existingGroupCode || buildRequestGroupCode(blocks)) : null;
+  const existingRequests = sortRequestBlocks(currentRequests);
+  const baseData = {
+    operationPointId: operationPoint.id,
+    clientName: client.name,
+    operationPointName: operationPoint.name,
+    cityName: operationPoint.cityName || client.cityName,
+    address: operationPoint.address,
+    ...serviceData(selectedService, nextGroupCode),
+    serviceDate: new Date(serviceDate),
+    notes: normalizeString(body.notes),
+    ...contact,
+    source: 'PUBLIC_LINK',
+    status: 'PENDING_ASSIGNMENT'
+  };
+
+  await prisma.$transaction(async (tx) => {
+    for (const [index, block] of blocks.entries()) {
+      const existing = existingRequests[index];
+      if (existing) {
+        await tx.dispatchServiceRequest.update({ where: { id: existing.id }, data: { ...baseData, ...block } });
+      } else {
+        await tx.dispatchServiceRequest.create({ data: { ...baseData, ...block } });
+      }
+    }
+
+    const extraRequests = existingRequests.slice(blocks.length);
+    for (const request of extraRequests) {
+      await tx.dispatchServiceRequest.delete({ where: { id: request.id } });
+    }
+  });
+
+  const updatedKey = nextGroupCode || existingRequests[0]?.id;
+  return { updatedKey, operationPoint, selectedService };
 }
 
 export function dispatchMultiShiftRequestsRouter() {
@@ -161,18 +316,14 @@ export function dispatchMultiShiftRequestsRouter() {
     const serviceDate = normalizeString(req.body.serviceDate);
     if (!serviceDate) return res.status(400).send('Debes ingresar la fecha del servicio.');
 
-    const requestedByName = normalizeString(req.body.requestedByName);
-    const requestedByPhone = normalizeString(req.body.requestedByPhone);
-    const requestedByEmail = normalizeString(req.body.requestedByEmail);
-    if (!requestedByName || !requestedByPhone || !requestedByEmail) {
-      return res.status(400).send('Nombre, teléfono y correo de quien solicita son obligatorios.');
-    }
+    let contact;
+    try { contact = validatePublicContact(req.body); } catch (error) { return res.status(400).send(error.message); }
 
     let blocks;
     try { blocks = buildTimeBlocks(req.body); } catch (error) { return res.status(400).send(error.message); }
 
     const groupCode = buildRequestGroupCode(blocks);
-    await createRequests({
+    const createdRequests = await createRequests({
       operationPointId: operationPoint.id,
       clientName: client.name,
       operationPointName: operationPoint.name,
@@ -181,12 +332,13 @@ export function dispatchMultiShiftRequestsRouter() {
       ...serviceData(selectedService, groupCode),
       serviceDate: new Date(serviceDate),
       notes: normalizeString(req.body.notes),
-      requestedByName,
-      requestedByPhone,
-      requestedByEmail,
+      ...contact,
       source: 'PUBLIC_LINK',
       status: 'PENDING_ASSIGNMENT'
     }, blocks);
+
+    const requestKey = groupCode || createdRequests[0]?.id;
+    const viewUrl = requestKey ? `/operaciones/cliente/${client.publicToken}/solicitudes/${encodeURIComponent(requestKey)}` : null;
 
     return res.render('publicDispatchRequest', {
       client,
@@ -195,8 +347,60 @@ export function dispatchMultiShiftRequestsRouter() {
       operationPoint,
       service: selectedService,
       success: true,
-      createdSummary: createdSummary(blocks, groupCode)
+      createdSummary: createdSummary(blocks, groupCode),
+      requestViewUrl: viewUrl
     });
+  });
+
+  router.get('/operaciones/cliente/:publicToken/solicitudes/:requestKey', async (req, res) => {
+    const context = await loadPublicRequestContext(req.params.publicToken, req.params.requestKey);
+    if (!context?.client) return res.status(404).send('Link no disponible');
+    if (!context.requests.length) return res.status(404).send('Solicitud no encontrada');
+    return res.render('publicDispatchRequestReview', {
+      mode: 'view',
+      client: context.client,
+      operationPoints: context.client.operationPoints,
+      services: context.client.services,
+      requestView: buildPublicRequestViewModel(context.client, context.requests, context.requestKey),
+      message: normalizeString(req.query.message),
+      error: null
+    });
+  });
+
+  router.get('/operaciones/cliente/:publicToken/solicitudes/:requestKey/editar', async (req, res) => {
+    const context = await loadPublicRequestContext(req.params.publicToken, req.params.requestKey);
+    if (!context?.client) return res.status(404).send('Link no disponible');
+    if (!context.requests.length) return res.status(404).send('Solicitud no encontrada');
+    const requestView = buildPublicRequestViewModel(context.client, context.requests, context.requestKey);
+    if (!requestView.editable) {
+      return res.redirect(`${requestView.viewUrl}?message=${encodeURIComponent(requestView.editBlockedReason || 'La solicitud ya no puede editarse.')}`);
+    }
+    return res.render('publicDispatchRequestReview', {
+      mode: 'edit',
+      client: context.client,
+      operationPoints: context.client.operationPoints,
+      services: context.client.services,
+      requestView,
+      message: null,
+      error: normalizeString(req.query.error)
+    });
+  });
+
+  router.post('/operaciones/cliente/:publicToken/solicitudes/:requestKey/editar', async (req, res) => {
+    const context = await loadPublicRequestContext(req.params.publicToken, req.params.requestKey);
+    if (!context?.client) return res.status(404).send('Link no disponible');
+    if (!context.requests.length) return res.status(404).send('Solicitud no encontrada');
+    const requestView = buildPublicRequestViewModel(context.client, context.requests, context.requestKey);
+    if (!requestView.editable) {
+      return res.redirect(`${requestView.viewUrl}?message=${encodeURIComponent(requestView.editBlockedReason || 'La solicitud ya no puede editarse.')}`);
+    }
+
+    try {
+      const result = await updatePublicRequests(context.client, context.requests, req.body);
+      return res.redirect(`/operaciones/cliente/${context.client.publicToken}/solicitudes/${encodeURIComponent(result.updatedKey)}?message=${encodeURIComponent('Solicitud actualizada correctamente.')}`);
+    } catch (error) {
+      return res.redirect(`${requestView.editUrl}?error=${encodeURIComponent(error.message || 'No fue posible actualizar la solicitud.')}`);
+    }
   });
 
   return router;
