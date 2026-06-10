@@ -154,15 +154,22 @@
                       <details class="audit-details">
                         <summary>Ver historial dev</summary>
                         <div class="audit-timeline">
-                          <div class="audit-event"><strong>Creación de solicitud</strong><span><%= formatDateTime(group.createdAt) %> · Canal: <%= request.source === 'PUBLIC_LINK' ? 'Link público del cliente' : 'Panel interno' %> · Perfil/usuario: <%= request.source === 'PUBLIC_LINK' ? 'Cliente solicitante' : (request.createdByUsername || 'Operaciones') %></span></div>
-                          <div class="audit-event"><strong>Contexto operativo</strong><span>Ciudad: <%= request.cityName || '-' %> · Operación: <%= request.operationPointName || '-' %> · Servicio: <%= cleanServiceName(request) %></span></div>
-                          <% if (request.requestedByName || request.requestedByPhone || request.requestedByEmail) { %><div class="audit-event"><strong>Solicitante</strong><span><%= request.requestedByName || '-' %> · Tel: <%= request.requestedByPhone || '-' %> · Correo: <%= request.requestedByEmail || '-' %></span></div><% } %>
-                          <% if (group.requests.some(changedAfterCreate)) { %><div class="audit-event"><strong>Actualización detectada</strong><span><%= formatDateTime(group.updatedAt) %> · La solicitud tuvo cambios posteriores a la creación.</span></div><% } %>
+                          <div class="audit-event"><strong>Solicitud creada</strong><span><%= formatDateTime(group.createdAt) %> · Origen: <%= sourceLabel(request.source || 'INTERNAL') %> · Creador: <%= request.source === 'PUBLIC_LINK' ? 'Cliente / link público' : (request.createdByUsername || 'Operaciones') %></span></div>
+                          <% if (group.requests.some(changedAfterCreate)) { %><div class="audit-event"><strong>Solicitud actualizada</strong><span><%= formatDateTime(group.updatedAt) %> · Se detectaron cambios posteriores a la creación.</span></div><% } %>
                           <% group.requests.forEach((item, index) => { %>
                             <div class="audit-event"><strong>Bloque <%= index + 1 %></strong><span><%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || 'sin hora fin' %> · <%= item.requiredWorkers %> aux. · Estado: <%= statusLabel(item.status) %></span></div>
-                            <% (item.assignments || []).forEach((assignment) => { %><div class="audit-event"><strong>Auxiliar: <%= assignment.worker?.fullName || 'Sin nombre' %></strong><span>Estado: <%= assignment.status %> · Tel: <%= assignment.worker?.phone || '-' %> · Documento: <%= assignment.worker?.documentNumber || '-' %> · Último movimiento: <%= formatDateTime(assignment.updatedAt || assignment.createdAt) %></span></div><% }) %>
+                            <% (item.assignments || []).forEach((assignment) => { %><div class="audit-event"><strong><%= assignment.worker?.fullName || 'Auxiliar' %></strong><span>Estado: <%= assignment.status %> · Tel: <%= assignment.worker?.phone || '-' %> · Doc: <%= assignment.worker?.documentNumber || '-' %> · Movimiento: <%= formatDateTime(assignment.updatedAt || assignment.createdAt) %></span></div><% }) %>
                           <% }) %>
-                          <div class="audit-event"><strong>Resumen operativo</strong><span>Bloques: <%= group.requests.length %> · Total auxiliares requeridos: <%= group.requiredWorkers %> · Asignados activos: <%= group.activeCount %> · Confirmados: <%= group.confirmedCount %></span></div>
+                        </div>
+                        <div class="dev-audit">
+                          <div class="dev-audit-grid">
+                            <span><strong>Código grupo:</strong> <%= group.groupCode || 'No aplica' %></span>
+                            <span><strong>Solicitudes relacionadas:</strong> <%= group.requests.map((item)=>item.id).join(', ') %></span>
+                            <span><strong>Operación ID:</strong> <%= request.operationPointId || '-' %></span>
+                            <span><strong>Servicio ID:</strong> <%= request.serviceId || '-' %></span>
+                            <span><strong>Total bloques:</strong> <%= group.requests.length %> · <strong>Total auxiliares:</strong> <%= group.requiredWorkers %></span>
+                            <span><strong>Asignaciones:</strong> <%= group.requests.reduce((sum, item)=>sum + (item.assignments || []).length, 0) %></span>
+                          </div>
                         </div>
                       </details>
                     <% } %>
