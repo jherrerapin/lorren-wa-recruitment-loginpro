@@ -17,6 +17,7 @@ import { dispatchOpsExtrasRouter } from './routes/dispatchOpsExtras.js';
 import { dispatchBridgeRouter } from './routes/dispatchBridge.js';
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
+import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -203,6 +204,8 @@ app.use((req, res, next) => {
   res.locals.canAccessDispatch = req.userRole === 'dev' || req.canAccessDispatch;
   next();
 });
+
+app.use(dispatchAuditMiddleware(prisma));
 
 app.get('/health', async (_req, res) => {
   await prisma.$queryRaw`SELECT 1`;
