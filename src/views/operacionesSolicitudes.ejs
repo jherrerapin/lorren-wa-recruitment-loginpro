@@ -162,7 +162,16 @@
                             <div class="audit-event"><strong>Bloque <%= index + 1 %></strong><span><%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || 'sin hora fin' %> · <%= item.requiredWorkers %> aux. · Estado: <%= statusLabel(item.status) %></span></div>
                             <% if ((item.assignments || []).length) { %><div class="audit-event"><strong>Movimiento de asignación</strong><span>Auxiliares: <%= (item.assignments || []).map((assignment) => assignment.worker?.fullName || 'Auxiliar').join(', ') %> · Activas: <%= itemActive %> · Confirmadas: <%= itemConfirmed %> · Último movimiento: <%= formatDateTime(lastAssignmentMove) %></span></div><% } %>
                           <% }) %>
-                          <div class="audit-event"><strong>Resumen operativo</strong><span>Bloques: <%= group.requests.length %> · Total auxiliares requeridos: <%= group.requiredWorkers %> · Asignados activos: <%= group.activeCount %> · Confirmados: <%= group.confirmedCount %></span></div>
+                        </div>
+                        <div class="dev-audit">
+                          <div class="dev-audit-grid">
+                            <span><strong>Código grupo:</strong> <%= group.groupCode || 'No aplica' %></span>
+                            <span><strong>Solicitudes relacionadas:</strong> <%= group.requests.map((item)=>item.id).join(', ') %></span>
+                            <span><strong>Operación ID:</strong> <%= request.operationPointId || '-' %></span>
+                            <span><strong>Servicio ID:</strong> <%= request.serviceId || '-' %></span>
+                            <span><strong>Total bloques:</strong> <%= group.requests.length %> · <strong>Total auxiliares:</strong> <%= group.requiredWorkers %></span>
+                            <span><strong>Asignaciones:</strong> <%= group.requests.reduce((sum, item)=>sum + (item.assignments || []).length, 0) %></span>
+                          </div>
                         </div>
                       </details>
                     <% } %>
