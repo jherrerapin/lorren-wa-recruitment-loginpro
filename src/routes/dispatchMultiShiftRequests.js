@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { loadPublicDispatchRequestHistory } from '../services/publicDispatchRequestHistory.js';
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_YYYY_MM_DD_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const GROUP_PATTERN = /\s*·\s*Grupo\s+(GRP-[A-Z0-9-]+)/i;
 
 function normalizeString(value) {
@@ -16,6 +17,13 @@ function asArray(value) {
   if (Array.isArray(value)) return value;
   if (value === undefined || value === null) return [];
   return [value];
+}
+
+function normalizeRequiredDate(value, label) {
+  const normalized = normalizeString(value);
+  if (!normalized) throw new Error(`${label} es obligatoria en cada día/horario.`);
+  if (!DATE_YYYY_MM_DD_PATTERN.test(normalized)) throw new Error(`${label} inválida. Usa formato AAAA-MM-DD.`);
+  return normalized;
 }
 
 function normalizeRequiredTime(value, label) {
@@ -42,19 +50,23 @@ function buildTimeBlocks(body = {}) {
   const quantities = asArray(body.requiredWorkers);
   const starts = asArray(body.startTime);
   const ends = asArray(body.endTime);
-  const count = Math.max(quantities.length, starts.length, ends.length, 1);
+  const rowDates = asArray(body.serviceDateBlock);
+  const fallbackDates = asArray(body.serviceDate);
+  const count = Math.max(quantities.length, starts.length, ends.length, rowDates.length, fallbackDates.length, 1);
   const blocks = [];
 
   for (let index = 0; index < count; index += 1) {
     const requiredWorkers = normalizePositiveInt(quantities[index] ?? quantities[0]);
-    const startTime = normalizeRequiredTime(starts[index] ?? null, 'Hora inicio');
+    const serviceDateRaw = rowDates[index] ?? rowDates[0] ?? fallbackDates[index] ?? fallbackDates[0];
+    const serviceDate = normalizeRequiredDate(serviceDateRaw, 'Fecha del servicio');
+    const startTime = normalizeRequiredTime(starts[index] ?? starts[0] ?? null, 'Hora inicio');
     const endTime = normalizeOptionalTime(ends[index] ?? null, 'Hora fin');
 
     if (!requiredWorkers) throw new Error('Debes ingresar una cantidad valida de auxiliares en cada horario.');
-    blocks.push({ requiredWorkers, startTime, endTime });
+    blocks.push({ requiredWorkers, serviceDate: new Date(`${serviceDate}T00:00:00-05:00`), startTime, endTime });
   }
 
-  if (!blocks.length) throw new Error('Debes ingresar al menos un horario con cantidad valida de auxiliares.');
+  if (!blocks.length) throw new Error('Debes ingresar al menos un día/horario con cantidad valida de auxiliares.');
   return blocks;
 }
 
@@ -67,8 +79,17 @@ function cleanServiceName(value) {
   return normalizeString(value)?.replace(GROUP_PATTERN, '').trim() || null;
 }
 
+function blockDateKey(block) {
+  return block?.serviceDate ? new Date(block.serviceDate).toISOString().slice(0, 10) : '';
+}
+
+function needsRequestGroup(blocks) {
+  const uniqueDates = new Set(blocks.map(blockDateKey).filter(Boolean));
+  return blocks.length > 1 || uniqueDates.size > 1;
+}
+
 function buildRequestGroupCode(blocks) {
-  if (blocks.length <= 1) return null;
+  if (!needsRequestGroup(blocks)) return null;
   return `GRP-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString('hex').toUpperCase()}`;
 }
 
@@ -84,10 +105,12 @@ function serviceData(service, groupCode = null) {
 
 function createdSummary(blocks, groupCode = null) {
   const total = blocks.reduce((sum, block) => sum + block.requiredWorkers, 0);
+  const uniqueDates = new Set(blocks.map(blockDateKey).filter(Boolean));
   const base = blocks.length === 1
     ? `1 bloque creado para ${total} auxiliar${total !== 1 ? 'es' : ''}`
     : `${blocks.length} bloques creados para ${total} auxiliares en total`;
-  return groupCode ? `${base}. Grupo operativo ${groupCode}` : base;
+  const dayPart = uniqueDates.size > 1 ? ` en ${uniqueDates.size} días` : '';
+  return groupCode ? `${base}${dayPart}. Grupo operativo ${groupCode}` : `${base}${dayPart}`;
 }
 
 function canUseOps(req) {
@@ -233,12 +256,10 @@ async function updatePublicRequests(client, currentRequests, body) {
   if (!operationPoint) throw new Error('Debes seleccionar una operación válida.');
   const selectedService = client.services.find((item) => item.id === normalizeString(body.serviceId)) || null;
   if (client.services.length && !selectedService) throw new Error('Debes seleccionar un servicio válido.');
-  const serviceDate = normalizeString(body.serviceDate);
-  if (!serviceDate) throw new Error('Debes ingresar la fecha del servicio.');
   const contact = validatePublicContact(body);
   const blocks = buildTimeBlocks(body);
   const existingGroupCode = extractGroupCode(currentRequests[0]);
-  const nextGroupCode = blocks.length > 1 ? (existingGroupCode || buildRequestGroupCode(blocks)) : null;
+  const nextGroupCode = needsRequestGroup(blocks) ? (existingGroupCode || buildRequestGroupCode(blocks)) : null;
   const existingRequests = sortRequestBlocks(currentRequests);
   const baseData = {
     operationPointId: operationPoint.id,
@@ -247,7 +268,6 @@ async function updatePublicRequests(client, currentRequests, body) {
     cityName: operationPoint.cityName || client.cityName,
     address: operationPoint.address,
     ...serviceData(selectedService, nextGroupCode),
-    serviceDate: new Date(serviceDate),
     notes: normalizeString(body.notes),
     ...contact,
     source: 'PUBLIC_LINK',
@@ -287,8 +307,7 @@ export function dispatchMultiShiftRequestsRouter() {
     const clientId = normalizeString(req.body.clientId);
     const operationPointId = normalizeString(req.body.operationPointId);
     const serviceId = normalizeString(req.body.serviceId);
-    const serviceDate = normalizeString(req.body.serviceDate);
-    if (!clientId || !operationPointId || !serviceDate) return res.status(400).send('Selecciona cliente, punto de operación y fecha.');
+    if (!clientId || !operationPointId) return res.status(400).send('Selecciona cliente y punto de operación.');
 
     let blocks;
     try { blocks = buildTimeBlocks(req.body); } catch (error) { return res.status(400).send(error.message); }
@@ -311,7 +330,6 @@ export function dispatchMultiShiftRequestsRouter() {
       cityName: operationPoint.cityName || client.cityName,
       address: operationPoint.address || normalizeString(req.body.address),
       ...serviceData(selectedService, groupCode),
-      serviceDate: new Date(serviceDate),
       notes: normalizeString(req.body.notes),
       status: 'PENDING_ASSIGNMENT',
       source: 'INTERNAL',
@@ -329,8 +347,6 @@ export function dispatchMultiShiftRequestsRouter() {
     if (!operationPoint) return res.status(400).send('Debes seleccionar una operación válida.');
     const selectedService = client.services.find((item) => item.id === normalizeString(req.body.serviceId)) || null;
     if (client.services.length && !selectedService) return res.status(400).send('Debes seleccionar un servicio válido.');
-    const serviceDate = normalizeString(req.body.serviceDate);
-    if (!serviceDate) return res.status(400).send('Debes ingresar la fecha del servicio.');
 
     let contact;
     try { contact = validatePublicContact(req.body); } catch (error) { return res.status(400).send(error.message); }
@@ -346,7 +362,6 @@ export function dispatchMultiShiftRequestsRouter() {
       cityName: operationPoint.cityName || client.cityName,
       address: operationPoint.address,
       ...serviceData(selectedService, groupCode),
-      serviceDate: new Date(serviceDate),
       notes: normalizeString(req.body.notes),
       ...contact,
       source: 'PUBLIC_LINK',

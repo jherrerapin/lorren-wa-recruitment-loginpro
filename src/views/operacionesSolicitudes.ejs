@@ -10,8 +10,8 @@
     .readonly-field { background: #f8fafc; color: var(--muted); cursor: not-allowed; }
     .select-hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
     select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
-    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.group-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);margin-left:6px}.schedule-list{display:grid;gap:4px}.schedule-line{font-size:12px;color:var(--navy)}.schedule-line span{color:var(--muted)}
-    .audit-cell{min-width:210px}.audit-summary{display:grid;gap:3px;font-size:12px;color:var(--muted)}.audit-summary strong{color:var(--navy)}.audit-details{margin-top:8px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:8px}.audit-details summary{cursor:pointer;font-weight:900;color:var(--navy);font-size:12px}.audit-timeline{display:grid;gap:7px;margin-top:9px}.audit-event{border-left:3px solid var(--teal);padding-left:8px;font-size:12px;color:var(--muted)}.audit-event strong{display:block;color:var(--navy);font-size:12px}.dev-audit{margin-top:8px;border:1px dashed #94a3b8;border-radius:10px;padding:8px;background:#fff}.dev-audit pre{white-space:pre-wrap;word-break:break-word;font-size:11px;color:#334155;max-height:160px;overflow:auto}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
+    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.group-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);margin-left:6px}.schedule-list{display:grid;gap:4px}.schedule-line{font-size:12px;color:var(--navy)}.schedule-line span{color:var(--muted)}
+    .audit-cell{min-width:210px}.audit-summary{display:grid;gap:3px;font-size:12px;color:var(--muted)}.audit-summary strong{color:var(--navy)}.audit-details{margin-top:8px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:8px}.audit-details summary{cursor:pointer;font-weight:900;color:var(--navy);font-size:12px}.audit-timeline{display:grid;gap:7px;margin-top:9px}.audit-event{border-left:3px solid var(--teal);padding-left:8px;font-size:12px;color:var(--muted)}.audit-event strong{display:block;color:var(--navy);font-size:12px}.dev-audit{margin-top:8px;border:1px dashed #94a3b8;border-radius:10px;padding:8px;background:#fff}.dev-audit-grid{display:grid;gap:6px;font-size:12px;color:var(--muted)}.dev-audit-grid strong{color:var(--navy)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -34,6 +34,7 @@
   <% const countActive = (request) => (request.assignments || []).filter((assignment) => activeCodes.includes(assignment.status)).length; %>
   <% const countConfirmed = (request) => (request.assignments || []).filter((assignment) => assignment.status === 'CONFIRMED').length; %>
   <% const deriveStatus = (required, active, confirmed) => confirmed >= required ? 'ASSIGNMENT_COMPLETE' : active >= required ? 'PENDING_CONFIRMATION' : active > 0 ? 'ASSIGNMENT_PARTIAL' : 'PENDING_ASSIGNMENT'; %>
+  <% const formatDate = (value) => value ? new Date(value).toISOString().slice(0,10) : '-'; %>
   <% const formatDateTime = (value) => value ? new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '-'; %>
   <% const changedAfterCreate = (request) => request.updatedAt && request.createdAt && Math.abs(new Date(request.updatedAt).getTime() - new Date(request.createdAt).getTime()) > 1000; %>
   <%
@@ -45,7 +46,11 @@
       groupedMap.get(key).requests.push(request);
     });
     const serviceRequestGroups = Array.from(groupedMap.values()).map((group) => {
-      group.requests.sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || ''), 'es'));
+      group.requests.sort((a, b) => {
+        const dateDiff = new Date(a.serviceDate || 0).getTime() - new Date(b.serviceDate || 0).getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return String(a.startTime || '').localeCompare(String(b.startTime || ''), 'es');
+      });
       const primary = group.requests[0];
       const requiredWorkers = group.requests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
       const activeCount = group.requests.reduce((sum, request) => sum + countActive(request), 0);
@@ -53,7 +58,8 @@
       const nextRequest = group.requests.find((request) => countConfirmed(request) < Number(request.requiredWorkers || 0)) || primary;
       const createdAt = group.requests.reduce((oldest, request) => !oldest || new Date(request.createdAt) < new Date(oldest) ? request.createdAt : oldest, null);
       const updatedAt = group.requests.reduce((latest, request) => !latest || new Date(request.updatedAt) > new Date(latest) ? request.updatedAt : latest, null);
-      return { ...group, primary, requiredWorkers, activeCount, confirmedCount, status: deriveStatus(requiredWorkers, activeCount, confirmedCount), nextRequest, createdAt, updatedAt };
+      const uniqueDates = new Set(group.requests.map((request) => formatDate(request.serviceDate))).size;
+      return { ...group, primary, requiredWorkers, activeCount, confirmedCount, status: deriveStatus(requiredWorkers, activeCount, confirmedCount), nextRequest, createdAt, updatedAt, uniqueDates };
     });
   %>
 
@@ -101,19 +107,19 @@
             <div class="field"><label for="cityNameDisplay">Ciudad</label><input id="cityNameDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <div class="field"><label for="addressDisplay">Dirección de la operación</label><input id="addressDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <input type="hidden" id="address" name="address" />
-            <div class="field"><label>Fecha servicio</label><input type="date" name="serviceDate" value="<%= today %>" required /></div>
             <div class="field full">
-              <label>Horarios y auxiliares requeridos</label>
+              <label>Días, horarios y auxiliares requeridos</label>
               <div class="shift-list" id="shiftList">
                 <div class="shift-row">
+                  <div class="field"><label>Fecha servicio</label><input type="date" name="serviceDateBlock" value="<%= today %>" required /></div>
                   <div class="field"><label>Auxiliares</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div>
                   <div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div>
                   <div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div>
                   <button class="shift-remove" type="button" hidden>Quitar</button>
                 </div>
               </div>
-              <p class="shift-summary">Si el cliente solicita varios horarios para el mismo día, agrégalos aquí. El listado los mostrará como una sola solicitud agrupada.</p>
-              <button class="btn" type="button" id="addShiftBtn">Agregar otro horario</button>
+              <p class="shift-summary">Para solicitudes de varios días en la semana, agrega un bloque por cada fecha y horario. Ejemplo: lunes 6:00 con 3 auxiliares y miércoles 14:00 con 2 auxiliares.</p>
+              <button class="btn" type="button" id="addShiftBtn">Agregar otro día / horario</button>
             </div>
             <div class="field full"><label>Notas</label><textarea name="notes" placeholder="Observaciones de la solicitud"></textarea></div>
           </div>
@@ -125,39 +131,50 @@
     <section class="card">
       <div class="card-head">
         <h2>Listado de solicitudes</h2>
-        <p>Las solicitudes con varios horarios aparecen agrupadas y ahora muestran control de creación, actualización e historial básico.</p>
+        <p>Las solicitudes con varios horarios o varios días aparecen agrupadas. El historial detallado solo está disponible para perfil dev.</p>
       </div>
       <div class="table-wrap">
         <% if (!serviceRequestGroups.length) { %>
           <div class="empty"><strong>No hay solicitudes registradas.</strong>Crea un cliente, una operación y comparte el link público para recibir solicitudes.</div>
         <% } else { %>
           <table class="table">
-            <thead><tr><th>Cliente / operación</th><th>Fecha servicio</th><th>Control</th><th>Horarios</th><th>Requeridos</th><th>Asignación</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Cliente / operación</th><th>Fechas servicio</th><th>Control</th><th>Horarios</th><th>Requeridos</th><th>Asignación</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               <% serviceRequestGroups.forEach((group) => { const request = group.primary; %>
                 <tr>
-                  <td><strong><%= request.clientName %></strong><% if (group.isGrouped) { %><span class="group-badge">Agrupada</span><% } %><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div><div class="muted">Servicio: <%= cleanServiceName(request) %></div></td>
-                  <td><%= new Date(request.serviceDate).toISOString().slice(0,10) %></td>
+                  <td><strong><%= request.clientName %></strong><% if (group.isGrouped) { %><span class="group-badge"><%= group.uniqueDates > 1 ? 'Multi-día' : 'Agrupada' %></span><% } %><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div><div class="muted">Servicio: <%= cleanServiceName(request) %></div></td>
+                  <td><%= group.uniqueDates > 1 ? `${group.uniqueDates} días` : formatDate(request.serviceDate) %></td>
                   <td class="audit-cell">
                     <div class="audit-summary">
                       <span><strong>Creada:</strong> <%= formatDateTime(group.createdAt) %></span>
-                      <span><strong>Actualizada:</strong> <%= formatDateTime(group.updatedAt) %></span>
+                      <span><strong>Última actualización:</strong> <%= formatDateTime(group.updatedAt) %></span>
                       <span><strong>Creada por:</strong> <%= request.source === 'PUBLIC_LINK' ? 'Cliente / link público' : (request.createdByUsername || 'Operaciones') %></span>
                     </div>
-                    <details class="audit-details">
-                      <summary>Ver historial</summary>
-                      <div class="audit-timeline">
-                        <div class="audit-event"><strong>Solicitud creada</strong><span><%= formatDateTime(group.createdAt) %> · <%= sourceLabel(request.source || 'INTERNAL') %></span></div>
-                        <% if (group.requests.some(changedAfterCreate)) { %><div class="audit-event"><strong>Solicitud actualizada</strong><span><%= formatDateTime(group.updatedAt) %> · cambio detectado por fecha de actualización</span></div><% } %>
-                        <% group.requests.forEach((item, index) => { %>
-                          <div class="audit-event"><strong>Horario <%= index + 1 %></strong><span><%= item.startTime || '-' %> - <%= item.endTime || 'sin hora fin' %> · <%= item.requiredWorkers %> aux. · creado <%= formatDateTime(item.createdAt) %></span></div>
-                          <% (item.assignments || []).forEach((assignment) => { %><div class="audit-event"><strong>Movimiento de auxiliar</strong><span><%= assignment.worker?.fullName || 'Auxiliar' %> · estado <%= assignment.status %> · <%= formatDateTime(assignment.updatedAt || assignment.createdAt) %></span></div><% }) %>
-                        <% }) %>
-                      </div>
-                      <% if (role === 'dev') { %><div class="dev-audit"><strong>DEV · datos técnicos disponibles</strong><pre><%- JSON.stringify({ groupKey: group.key, requestIds: group.requests.map((item)=>item.id), groupCode: group.groupCode, source: request.source, createdByUsername: request.createdByUsername, createdAt: group.createdAt, updatedAt: group.updatedAt, requests: group.requests.map((item)=>({ id:item.id, status:item.status, operationPointId:item.operationPointId, serviceId:item.serviceId, requiredWorkers:item.requiredWorkers, startTime:item.startTime, endTime:item.endTime, assignmentIds:(item.assignments||[]).map((a)=>({ id:a.id, workerId:a.workerId, status:a.status, createdByUsername:a.createdByUsername, createdAt:a.createdAt, updatedAt:a.updatedAt })) })) }, null, 2) %></pre></div><% } %>
-                    </details>
+                    <% if (role === 'dev') { %>
+                      <details class="audit-details">
+                        <summary>Ver historial dev</summary>
+                        <div class="audit-timeline">
+                          <div class="audit-event"><strong>Solicitud creada</strong><span><%= formatDateTime(group.createdAt) %> · Origen: <%= sourceLabel(request.source || 'INTERNAL') %> · Creador: <%= request.source === 'PUBLIC_LINK' ? 'Cliente / link público' : (request.createdByUsername || 'Operaciones') %></span></div>
+                          <% if (group.requests.some(changedAfterCreate)) { %><div class="audit-event"><strong>Solicitud actualizada</strong><span><%= formatDateTime(group.updatedAt) %> · Se detectaron cambios posteriores a la creación.</span></div><% } %>
+                          <% group.requests.forEach((item, index) => { %>
+                            <div class="audit-event"><strong>Bloque <%= index + 1 %></strong><span><%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || 'sin hora fin' %> · <%= item.requiredWorkers %> aux. · Estado: <%= statusLabel(item.status) %></span></div>
+                            <% (item.assignments || []).forEach((assignment) => { %><div class="audit-event"><strong><%= assignment.worker?.fullName || 'Auxiliar' %></strong><span>Estado: <%= assignment.status %> · Tel: <%= assignment.worker?.phone || '-' %> · Doc: <%= assignment.worker?.documentNumber || '-' %> · Movimiento: <%= formatDateTime(assignment.updatedAt || assignment.createdAt) %></span></div><% }) %>
+                          <% }) %>
+                        </div>
+                        <div class="dev-audit">
+                          <div class="dev-audit-grid">
+                            <span><strong>Código grupo:</strong> <%= group.groupCode || 'No aplica' %></span>
+                            <span><strong>Solicitudes relacionadas:</strong> <%= group.requests.map((item)=>item.id).join(', ') %></span>
+                            <span><strong>Operación ID:</strong> <%= request.operationPointId || '-' %></span>
+                            <span><strong>Servicio ID:</strong> <%= request.serviceId || '-' %></span>
+                            <span><strong>Total bloques:</strong> <%= group.requests.length %> · <strong>Total auxiliares:</strong> <%= group.requiredWorkers %></span>
+                            <span><strong>Asignaciones:</strong> <%= group.requests.reduce((sum, item)=>sum + (item.assignments || []).length, 0) %></span>
+                          </div>
+                        </div>
+                      </details>
+                    <% } %>
                   </td>
-                  <td><div class="schedule-list"><% group.requests.forEach((item, index) => { %><div class="schedule-line"><strong><%= item.startTime || '-' %> - <%= item.endTime || '-' %></strong> <span>· <%= item.requiredWorkers %> aux.</span></div><% }) %></div></td>
+                  <td><div class="schedule-list"><% group.requests.forEach((item) => { %><div class="schedule-line"><strong><%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || '-' %></strong> <span>· <%= item.requiredWorkers %> aux.</span></div><% }) %></div></td>
                   <td><%= group.requiredWorkers %></td>
                   <td><strong><%= group.activeCount %> / <%= group.requiredWorkers %></strong><div class="muted">Confirmados: <%= group.confirmedCount %> / <%= group.requiredWorkers %></div></td>
                   <td><span class="pill pill-amber"><%= sourceLabel(request.source || 'INTERNAL') %></span></td>
@@ -167,7 +184,7 @@
                       <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= group.nextRequest.id %>">Asignar</a>
                       <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
                       <% if (group.isGrouped) { %>
-                        <% group.requests.forEach((item, index) => { %><form method="post" action="/admin/operaciones/solicitudes/<%= item.id %>/eliminar" onsubmit="return confirm('¿Eliminar el horario <%= item.startTime || '-' %> - <%= item.endTime || '-' %> de esta solicitud agrupada?');"><button class="btn" type="submit">Eliminar horario <%= index + 1 %></button></form><% }) %>
+                        <% group.requests.forEach((item, index) => { %><form method="post" action="/admin/operaciones/solicitudes/<%= item.id %>/eliminar" onsubmit="return confirm('¿Eliminar el bloque <%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || '-' %> de esta solicitud agrupada?');"><button class="btn" type="submit">Eliminar bloque <%= index + 1 %></button></form><% }) %>
                       <% } else { %>
                         <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
                       <% } %>
