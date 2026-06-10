@@ -11,9 +11,77 @@ function safeJson(value) {
       if (typeof item === 'string' && item.length > 500) return `${item.slice(0, 500)}...`;
       return item;
     }));
-  } catch (error) {
+  } catch (_error) {
     return { error: 'unserializable_payload' };
   }
+}
+
+function firstHeaderValue(req, names = []) {
+  for (const name of names) {
+    const value = normalizeString(req.get(name));
+    if (value) return value;
+  }
+  return null;
+}
+
+function normalizeForwardedIp(value) {
+  const raw = normalizeString(value);
+  if (!raw) return null;
+  return raw.split(',').map((item) => item.trim()).find(Boolean) || null;
+}
+
+function cleanIpAddress(value) {
+  const raw = normalizeString(value);
+  if (!raw) return null;
+  return raw.replace(/^::ffff:/, '').replace(/^\[/, '').split(']')[0];
+}
+
+function maskIpAddress(value) {
+  const ip = cleanIpAddress(value);
+  if (!ip) return null;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+    const parts = ip.split('.');
+    return `${parts[0]}.${parts[1]}.xxx.${parts[3]}`;
+  }
+  if (ip.includes(':')) return `${ip.split(':').slice(0, 2).join(':')}:****`;
+  return ip;
+}
+
+function inferClientIp(req) {
+  return cleanIpAddress(
+    firstHeaderValue(req, ['cf-connecting-ip', 'x-real-ip', 'x-client-ip'])
+    || normalizeForwardedIp(req.get('x-forwarded-for'))
+    || req.ip
+  );
+}
+
+function readApproximateOrigin(req) {
+  const city = firstHeaderValue(req, ['cf-ipcity', 'x-vercel-ip-city', 'x-appengine-city']);
+  const region = firstHeaderValue(req, ['cf-region', 'x-vercel-ip-country-region', 'x-appengine-region']);
+  const country = firstHeaderValue(req, ['cf-ipcountry', 'x-vercel-ip-country', 'x-appengine-country']);
+  const hasLocation = Boolean(city || region || country);
+  return {
+    source: hasLocation ? 'proxy_headers' : 'not_available',
+    city,
+    region,
+    country,
+    label: [city, region, country].filter(Boolean).join(', ') || null
+  };
+}
+
+function parseDeviceLabel(userAgent) {
+  const ua = normalizeString(userAgent) || '';
+  const browser = ua.includes('Edg/') ? 'Edge' : ua.includes('Chrome/') ? 'Chrome' : ua.includes('Firefox/') ? 'Firefox' : ua.includes('Safari/') ? 'Safari' : 'Navegador no identificado';
+  const os = ua.includes('Windows') ? 'Windows' : ua.includes('Mac OS') ? 'macOS' : ua.includes('Android') ? 'Android' : ua.includes('iPhone') || ua.includes('iPad') ? 'iOS' : ua.includes('Linux') ? 'Linux' : 'SO no identificado';
+  const formFactor = /Mobi|Android|iPhone/i.test(ua) ? 'móvil' : 'escritorio';
+  return `${browser} · ${os} · ${formFactor}`;
+}
+
+function inferChannel(req) {
+  const path = req.path || '';
+  if (path.startsWith('/operaciones/cliente/')) return 'Link público del cliente';
+  if (path.startsWith('/admin/operaciones')) return 'Panel interno de despacho';
+  return 'Operaciones';
 }
 
 function inferAuditAction(req) {
@@ -29,6 +97,7 @@ function inferAuditAction(req) {
   if (path.includes('/solicitudes') && path.includes('/eliminar')) return 'DISPATCH_SERVICE_REQUEST_DELETE';
   if (path.includes('/solicitudes')) return 'DISPATCH_SERVICE_REQUEST_CREATE';
   if (path.includes('/cliente/') && req.method === 'POST') return path.includes('/editar') ? 'PUBLIC_SERVICE_REQUEST_UPDATE' : 'PUBLIC_SERVICE_REQUEST_CREATE';
+  if (path.includes('/personal/importar-excel')) return 'DISPATCH_WORKER_IMPORT';
   if (path.includes('/personal')) return 'DISPATCH_WORKER_CHANGE';
   if (path.includes('/clientes')) return 'DISPATCH_CLIENT_CHANGE';
   return 'DISPATCH_OPERATION_MUTATION';
@@ -70,6 +139,10 @@ export function dispatchAuditMiddleware(prisma) {
     if (!canWriteAudit) return next();
 
     const startedAt = Date.now();
+    const clientIp = inferClientIp(req);
+    const origin = readApproximateOrigin(req);
+    const userAgent = normalizeString(req.get('user-agent'));
+
     res.on('finish', () => {
       if (res.statusCode >= 400) return;
 
@@ -90,9 +163,9 @@ export function dispatchAuditMiddleware(prisma) {
           actorUsername,
           actorRole,
           actorSource: normalizeString(req.session?.userSource || req.userSource) || (isPublicClient ? 'public_link' : null),
-          ipAddress: normalizeString(req.ip),
+          ipAddress: clientIp,
           forwardedFor: normalizeString(req.get('x-forwarded-for')),
-          userAgent: normalizeString(req.get('user-agent')),
+          userAgent,
           method: req.method,
           path: req.originalUrl || req.path,
           fromValue: null,
@@ -102,7 +175,14 @@ export function dispatchAuditMiddleware(prisma) {
             durationMs: Date.now() - startedAt,
             referer: normalizeString(req.get('referer')),
             params: safeJson(req.params),
-            query: safeJson(req.query)
+            query: safeJson(req.query),
+            channel: inferChannel(req),
+            maskedIp: maskIpAddress(clientIp),
+            deviceLabel: parseDeviceLabel(userAgent),
+            originLocation: origin,
+            operationCity: normalizeString(req.body?.cityName) || normalizeString(req.body?.operationCity) || null,
+            serviceRequestId: normalizeString(req.body?.serviceRequestId) || null,
+            assignmentId: normalizeString(req.body?.assignmentId) || null
           }
         }
       }).catch((error) => {
