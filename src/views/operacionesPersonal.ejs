@@ -7,32 +7,7 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #f4f5f7;
-      --surface: #ffffff;
-      --surface-2: #f9fafb;
-      --border: #e1e4e8;
-      --text: #1a1d23;
-      --muted: #6b7280;
-      --navy: #1e2d3d;
-      --teal: #0d7a6b;
-      --teal-hover: #0a5f53;
-      --red: #b91c1c;
-      --red-light: #fee2e2;
-      --red-hover: #991b1b;
-      --green: #166534;
-      --green-light: #dcfce7;
-      --blue: #1d4ed8;
-      --blue-light: #dbeafe;
-      --amber: #92400e;
-      --amber-light: #fef3c7;
-      --purple: #6b21a8;
-      --purple-light: #f3e8ff;
-      --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
-      --shadow-md: 0 10px 28px rgba(15,23,42,.08);
-      --radius: 12px;
-      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
+    :root { --bg: #f4f5f7; --surface: #ffffff; --surface-2: #f9fafb; --border: #e1e4e8; --text: #1a1d23; --muted: #6b7280; --navy: #1e2d3d; --teal: #0d7a6b; --teal-hover: #0a5f53; --red: #b91c1c; --red-light: #fee2e2; --red-hover: #991b1b; --green: #166534; --green-light: #dcfce7; --blue: #1d4ed8; --blue-light: #dbeafe; --amber: #92400e; --amber-light: #fef3c7; --purple: #6b21a8; --purple-light: #f3e8ff; --shadow-sm: 0 1px 3px rgba(0,0,0,.08); --shadow-md: 0 10px 28px rgba(15,23,42,.08); --radius: 12px; --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; }
     .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; min-height: 52px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
     .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 600; padding: 4px 2px; border-bottom: 2px solid transparent; }
@@ -73,7 +48,7 @@
     .bulk-bar span { font-size: 13px; font-weight: 700; color: #92400e; }
     #bulk-bar { display: none; }
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 1020px; }
+    table { width: 100%; border-collapse: collapse; min-width: 1100px; }
     th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid #eaecef; vertical-align: middle; }
     th { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
     td { color: var(--text); font-size: 13px; }
@@ -92,7 +67,6 @@
     .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
     .empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 6px; }
-    /* Modal */
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; align-items: center; justify-content: center; }
     .modal-overlay.open { display: flex; }
     .modal { background: #fff; border-radius: 16px; padding: 28px 28px 24px; max-width: 480px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,.18); }
@@ -160,78 +134,27 @@
     </section>
 
     <section class="panel">
-      <div class="panel-head">
-        <div>
-          <h2>Listado de personal operativo</h2>
-          <p>Personas disponibles para asignación a operaciones.</p>
-        </div>
-      </div>
-
-      <!-- Barra de acciones masivas -->
-      <div class="bulk-bar" id="bulk-bar">
-        <span id="bulk-count">0 seleccionados</span>
-        <button type="button" class="btn btn-danger" id="btn-bulk-delete">🗑 Eliminar seleccionados</button>
-        <button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button>
-      </div>
-
+      <div class="panel-head"><div><h2>Listado de personal operativo</h2><p>Personas disponibles para asignación a operaciones.</p></div></div>
+      <div class="bulk-bar" id="bulk-bar"><span id="bulk-count">0 seleccionados</span><button type="button" class="btn btn-danger" id="btn-bulk-delete">🗑 Eliminar seleccionados</button><button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button></div>
       <% if (!workers.length) { %>
-        <div class="empty">
-          <strong>No hay personal contratado disponible.</strong>
-          Solo se muestran auxiliares con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.
-        </div>
+        <div class="empty"><strong>No hay personal contratado disponible.</strong>Solo se muestran auxiliares con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.</div>
       <% } else { %>
         <div class="table-wrap">
           <table id="workers-table">
-            <thead>
-              <tr>
-                <th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th>
-                <th>Nombre</th>
-                <th>Teléfono</th>
-                <th>Documento</th>
-                <th>Ciudad residencia</th>
-                <th>Ciudades operativas</th>
-                <th>Vacantes / perfiles</th>
-                <th>Origen</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
+            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes / perfiles</th><th>Origen</th><th>Acciones</th></tr></thead>
             <tbody>
               <% workers.forEach((w) => { %>
-                <% 
-                  const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' };
-                  const sourceLabel = sourceMap[w.source] || w.source;
-                  const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue';
-                  const isActive = w.operationalStatus === 'ACTIVE' || w.operationalStatus === 'CONTRATADO';
-                %>
+                <% const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; const isActive = w.operationalStatus === 'ACTIVE' || w.operationalStatus === 'CONTRATADO'; %>
                 <tr data-id="<%= w.id %>">
-                  <td class="check-col">
-                    <input type="checkbox" class="row-check" value="<%= w.id %>" />
-                  </td>
+                  <td class="check-col"><input type="checkbox" class="row-check" value="<%= w.id %>" /></td>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
                   <td><%= w.phone || '-' %></td>
                   <td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
                   <td><%= w.residenceCity || w.residenceLocality || '-' %></td>
-                  <td>
-                    <% if (w.cities.length) { %>
-                      <% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %>
-                    <% } else { %><span class="muted">Sin ciudades habilitadas</span><% } %>
-                  </td>
-                  <td>
-                    <% if (w.vacancies.length) { %>
-                      <% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %> — <%= entry.vacancy.city || 'Sin ciudad' %></span><% }) %>
-                    <% } else { %><span class="muted">Sin perfiles habilitados</span><% } %>
-                  </td>
+                  <td><% if (w.cities.length) { %><% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %><% } else { %><span class="muted">Sin ciudades habilitadas</span><% } %></td>
+                  <td><% if (w.vacancies.length) { %><% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %> — <%= entry.vacancy.city || 'Sin ciudad' %></span><% }) %><% } else { %><span class="muted">Sin perfiles habilitados</span><% } %></td>
                   <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
-                  <td class="actions-cell">
-                    <div class="row-actions">
-                      <a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a>
-                      <form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline">
-                        <button class="btn btn-secondary" type="submit"><%= isActive ? 'Desactivar' : 'Reactivar' %></button>
-                      </form>
-                      <button type="button" class="btn btn-danger-outline btn-single-delete"
-                        data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button>
-                    </div>
-                  </td>
+                  <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn btn-secondary" type="submit"><%= isActive ? 'Desactivar' : 'Reactivar' %></button></form><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button></div></td>
                 </tr>
               <% }) %>
             </tbody>
@@ -241,111 +164,23 @@
     </section>
   </main>
 
-  <!-- Modal confirmación eliminar uno -->
-  <div class="modal-overlay" id="modal-single">
-    <div class="modal">
-      <h3>Eliminar auxiliar</h3>
-      <p id="modal-single-msg">¿Estás seguro de que deseas eliminar a este auxiliar? Esta acción lo marcará como inactivo.</p>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary" id="modal-single-cancel">Cancelar</button>
-        <form method="post" id="modal-single-form">
-          <button type="submit" class="btn btn-danger">Sí, eliminar</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal confirmación eliminar varios -->
-  <div class="modal-overlay" id="modal-bulk">
-    <div class="modal">
-      <h3>Eliminar seleccionados</h3>
-      <p id="modal-bulk-msg">¿Confirmas la eliminación de los auxiliares seleccionados?</p>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary" id="modal-bulk-cancel">Cancelar</button>
-        <form method="post" action="/admin/operaciones/personal/eliminar-bulk" id="modal-bulk-form">
-          <input type="hidden" name="ids" id="bulk-ids-input" value="" />
-          <button type="submit" class="btn btn-danger">Sí, eliminar todos</button>
-        </form>
-      </div>
-    </div>
-  </div>
+  <div class="modal-overlay" id="modal-single"><div class="modal"><h3>Eliminar auxiliar</h3><p id="modal-single-msg">¿Estás seguro de que deseas eliminar a este auxiliar? Esta acción lo marcará como inactivo.</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-single-cancel">Cancelar</button><form method="post" id="modal-single-form"><button type="submit" class="btn btn-danger">Sí, eliminar</button></form></div></div></div>
+  <div class="modal-overlay" id="modal-bulk"><div class="modal"><h3>Eliminar seleccionados</h3><p id="modal-bulk-msg">¿Confirmas la eliminación de los auxiliares seleccionados?</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-bulk-cancel">Cancelar</button><form method="post" action="/admin/operaciones/personal/eliminar-bulk" id="modal-bulk-form"><input type="hidden" name="ids" id="bulk-ids-input" value="" /><button type="submit" class="btn btn-danger">Sí, eliminar todos</button></form></div></div></div>
 
   <script>
-    // ── Selección de filas ──────────────────────────────────────────────────
-    const checkAll = document.getElementById('check-all');
-    const bulkBar = document.getElementById('bulk-bar');
-    const bulkCount = document.getElementById('bulk-count');
-    const bulkIdsInput = document.getElementById('bulk-ids-input');
-
-    function getChecked() {
-      return [...document.querySelectorAll('.row-check:checked')];
-    }
-    function refreshBulkBar() {
-      const checked = getChecked();
-      if (checked.length > 0) {
-        bulkBar.style.display = 'flex';
-        bulkCount.textContent = checked.length + ' seleccionado' + (checked.length > 1 ? 's' : '');
-      } else {
-        bulkBar.style.display = 'none';
-      }
-      const rows = document.querySelectorAll('.row-check');
-      checkAll.indeterminate = checked.length > 0 && checked.length < rows.length;
-      checkAll.checked = rows.length > 0 && checked.length === rows.length;
-    }
-    function highlightRows() {
-      document.querySelectorAll('.row-check').forEach((cb) => {
-        cb.closest('tr').classList.toggle('selected-row', cb.checked);
-      });
-    }
-
-    if (checkAll) {
-      checkAll.addEventListener('change', () => {
-        document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = checkAll.checked; });
-        highlightRows();
-        refreshBulkBar();
-      });
-    }
-    document.querySelectorAll('.row-check').forEach((cb) => {
-      cb.addEventListener('change', () => { highlightRows(); refreshBulkBar(); });
-    });
-
-    document.getElementById('btn-bulk-cancel')?.addEventListener('click', () => {
-      document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = false; });
-      if (checkAll) { checkAll.checked = false; checkAll.indeterminate = false; }
-      highlightRows();
-      refreshBulkBar();
-    });
-
-    // ── Modal eliminar uno ──────────────────────────────────────────────────
-    const modalSingle = document.getElementById('modal-single');
-    const modalSingleMsg = document.getElementById('modal-single-msg');
-    const modalSingleForm = document.getElementById('modal-single-form');
-
-    document.querySelectorAll('.btn-single-delete').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.id;
-        const name = btn.dataset.name;
-        modalSingleMsg.textContent = `¿Eliminar a "${name}"? Quedará marcado como inactivo.`;
-        modalSingleForm.action = `/admin/operaciones/personal/${id}/eliminar`;
-        modalSingle.classList.add('open');
-      });
-    });
-    document.getElementById('modal-single-cancel')?.addEventListener('click', () => modalSingle.classList.remove('open'));
-    modalSingle?.addEventListener('click', (e) => { if (e.target === modalSingle) modalSingle.classList.remove('open'); });
-
-    // ── Modal eliminar varios ───────────────────────────────────────────────
-    const modalBulk = document.getElementById('modal-bulk');
-    const modalBulkMsg = document.getElementById('modal-bulk-msg');
-
-    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => {
-      const checked = getChecked();
-      if (!checked.length) return;
-      bulkIdsInput.value = checked.map((cb) => cb.value).join(',');
-      modalBulkMsg.textContent = `¿Confirmas eliminar ${checked.length} auxiliar${checked.length > 1 ? 'es' : ''}? Quedarán marcados como inactivos.`;
-      modalBulk.classList.add('open');
-    });
-    document.getElementById('modal-bulk-cancel')?.addEventListener('click', () => modalBulk.classList.remove('open'));
-    modalBulk?.addEventListener('click', (e) => { if (e.target === modalBulk) modalBulk.classList.remove('open'); });
+    const checkAll = document.getElementById('check-all'); const bulkBar = document.getElementById('bulk-bar'); const bulkCount = document.getElementById('bulk-count'); const bulkIdsInput = document.getElementById('bulk-ids-input');
+    function getChecked() { return [...document.querySelectorAll('.row-check:checked')]; }
+    function refreshBulkBar() { const checked = getChecked(); if (checked.length > 0) { bulkBar.style.display = 'flex'; bulkCount.textContent = checked.length + ' seleccionado' + (checked.length > 1 ? 's' : ''); } else { bulkBar.style.display = 'none'; } const rows = document.querySelectorAll('.row-check'); if (checkAll) { checkAll.indeterminate = checked.length > 0 && checked.length < rows.length; checkAll.checked = rows.length > 0 && checked.length === rows.length; } }
+    function highlightRows() { document.querySelectorAll('.row-check').forEach((cb) => { cb.closest('tr').classList.toggle('selected-row', cb.checked); }); }
+    if (checkAll) { checkAll.addEventListener('change', () => { document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = checkAll.checked; }); highlightRows(); refreshBulkBar(); }); }
+    document.querySelectorAll('.row-check').forEach((cb) => { cb.addEventListener('change', () => { highlightRows(); refreshBulkBar(); }); });
+    document.getElementById('btn-bulk-cancel')?.addEventListener('click', () => { document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = false; }); if (checkAll) { checkAll.checked = false; checkAll.indeterminate = false; } highlightRows(); refreshBulkBar(); });
+    const modalSingle = document.getElementById('modal-single'); const modalSingleMsg = document.getElementById('modal-single-msg'); const modalSingleForm = document.getElementById('modal-single-form');
+    document.querySelectorAll('.btn-single-delete').forEach((btn) => { btn.addEventListener('click', () => { const id = btn.dataset.id; const name = btn.dataset.name; modalSingleMsg.textContent = `¿Eliminar a "${name}"? Quedará marcado como inactivo.`; modalSingleForm.action = `/admin/operaciones/personal/${id}/eliminar`; modalSingle.classList.add('open'); }); });
+    document.getElementById('modal-single-cancel')?.addEventListener('click', () => modalSingle.classList.remove('open')); modalSingle?.addEventListener('click', (e) => { if (e.target === modalSingle) modalSingle.classList.remove('open'); });
+    const modalBulk = document.getElementById('modal-bulk'); const modalBulkMsg = document.getElementById('modal-bulk-msg');
+    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => { const checked = getChecked(); if (!checked.length) return; bulkIdsInput.value = checked.map((cb) => cb.value).join(','); modalBulkMsg.textContent = `¿Confirmas eliminar ${checked.length} auxiliar${checked.length > 1 ? 'es' : ''}? Quedarán marcados como inactivos.`; modalBulk.classList.add('open'); });
+    document.getElementById('modal-bulk-cancel')?.addEventListener('click', () => modalBulk.classList.remove('open')); modalBulk?.addEventListener('click', (e) => { if (e.target === modalBulk) modalBulk.classList.remove('open'); });
   </script>
 </body>
 </html>

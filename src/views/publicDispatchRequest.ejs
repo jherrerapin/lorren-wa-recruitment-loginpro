@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.field-tag{font-size:11px;font-weight:900;margin-left:5px}.field-tag.required{color:var(--red,#dc2626)}.field-tag.optional{color:var(--muted)}.success-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.success-note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}.history-section{margin-top:20px;border-top:1px solid var(--border);padding-top:18px}.history-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px}.history-head h2{color:var(--navy);font-size:18px;margin:0}.history-head p{color:var(--muted);font-size:13px;margin:3px 0 0}.history-list{display:grid;gap:10px}.history-card{border:1px solid var(--border);background:#fff;border-radius:14px;padding:13px;box-shadow:var(--shadow-sm)}.history-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.history-card strong{color:var(--navy);font-size:14px}.history-meta{display:grid;gap:3px;color:var(--muted);font-size:12px;margin-top:5px}.history-schedules{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.history-chip{border-radius:999px;background:var(--surface-2);border:1px solid var(--border);padding:4px 8px;font-size:11px;color:var(--navy);font-weight:800}.history-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.history-status{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);white-space:nowrap}.history-status.locked{background:#fffbeb;color:#92400e}.empty-history{border:1px dashed var(--border);border-radius:14px;padding:16px;color:var(--muted);font-size:13px;background:var(--surface-2)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}.success-actions .btn,.history-actions .btn{width:100%;justify-content:center}.history-head,.history-top{display:grid}}
+    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.field-tag{font-size:11px;font-weight:900;margin-left:5px}.field-tag.required{color:var(--red,#dc2626)}.field-tag.optional{color:var(--muted)}.week-repeat{grid-column:1/-1;border:1px dashed var(--border);border-radius:12px;background:#fff;padding:10px}.week-repeat-toggle{display:flex;align-items:center;gap:8px;color:var(--navy);font-size:13px;font-weight:900}.week-repeat-toggle input{width:16px;height:16px;accent-color:var(--teal)}.week-days{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.week-day-option{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface-2);border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;color:var(--navy)}.week-day-option input{width:14px;height:14px;accent-color:var(--teal)}.week-day-option.is-disabled{opacity:.45;cursor:not-allowed}.week-repeat-help{color:var(--muted);font-size:12px;margin-top:7px;line-height:1.45}.success-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.success-note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}.history-section{margin-top:20px;border-top:1px solid var(--border);padding-top:18px}.history-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px}.history-head h2{color:var(--navy);font-size:18px;margin:0}.history-head p{color:var(--muted);font-size:13px;margin:3px 0 0}.history-list{display:grid;gap:10px}.history-card{border:1px solid var(--border);background:#fff;border-radius:14px;padding:13px;box-shadow:var(--shadow-sm)}.history-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.history-card strong{color:var(--navy);font-size:14px}.history-meta{display:grid;gap:3px;color:var(--muted);font-size:12px;margin-top:5px}.history-schedules{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.history-chip{border-radius:999px;background:var(--surface-2);border:1px solid var(--border);padding:4px 8px;font-size:11px;color:var(--navy);font-weight:800}.history-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.history-status{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);white-space:nowrap}.history-status.locked{background:#fffbeb;color:#92400e}.empty-history{border:1px dashed var(--border);border-radius:14px;padding:16px;color:var(--muted);font-size:13px;background:var(--surface-2)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}.success-actions .btn,.history-actions .btn{width:100%;justify-content:center}.history-head,.history-top{display:grid}}
   </style>
 </head>
 <body>
@@ -53,7 +53,7 @@
             <div class="section-note">Este cliente debe tener operaciones y servicios activos configurados antes de crear solicitudes.</div>
           <% } %>
 
-          <form method="post">
+          <form method="post" id="publicServiceRequestForm">
             <div class="form-grid">
               <div class="field full">
                 <label for="operationPointId">Operación / punto de servicio <span class="field-tag required">* campo obligatorio</span></label>
@@ -80,15 +80,20 @@
                 <label>Días, horarios y auxiliares requeridos</label>
                 <div class="shift-list" id="shiftList">
                   <div class="shift-row">
-                    <div class="field"><label>Fecha <span class="field-tag required">* campo obligatorio</span></label><input type="date" name="serviceDateBlock" required /></div>
+                    <div class="field"><label>Fecha base <span class="field-tag required">* campo obligatorio</span></label><input type="date" name="serviceDateBlock" required /></div>
                     <div class="field"><label>Cantidad <span class="field-tag required">* campo obligatorio</span></label><input type="number" min="1" name="requiredWorkers" required value="1" /></div>
                     <div class="field"><label>Hora inicio <span class="field-tag required">* campo obligatorio</span></label><input type="time" name="startTime" required /></div>
                     <div class="field"><label>Hora fin <span class="field-tag optional">* campo opcional</span></label><input type="time" name="endTime" /></div>
                     <button class="shift-remove" type="button" hidden>Quitar</button>
+                    <div class="week-repeat">
+                      <label class="week-repeat-toggle"><input type="checkbox" data-week-repeat-toggle /> Repetir este mismo horario en otros días de esta semana</label>
+                      <div class="week-days" data-week-repeat-days hidden></div>
+                      <p class="week-repeat-help">Selecciona días adicionales de la semana actual. Se usará la misma cantidad de auxiliares y el mismo horario de este bloque.</p>
+                    </div>
                   </div>
                 </div>
-                <p class="shift-summary">Puedes solicitar varios días de la semana en una sola solicitud. Agrega un bloque por cada fecha y horario. Ejemplo: lunes 6:00 con 3 auxiliares y miércoles 14:00 con 2 auxiliares.</p>
-                <button class="btn" type="button" id="addShiftBtn">Agregar otro día / horario</button>
+                <p class="shift-summary">Primero define la fecha base, cantidad y horario. Si aplica también a otros días de esta misma semana, marca el check y selecciona los días. Para horarios diferentes usa el botón normal de agregar otro horario.</p>
+                <button class="btn" type="button" id="addShiftBtn">Agregar otro horario</button>
               </div>
               <div class="field full"><label for="notes">Observaciones <span class="field-tag optional">* campo opcional</span></label><textarea id="notes" name="notes" placeholder="Describe condiciones, requisitos de ingreso o detalles del servicio"></textarea></div>
             </div>
@@ -145,7 +150,9 @@
     addShiftBtn?.addEventListener('click', () => {
       const first = shiftList.querySelector('.shift-row');
       const clone = first.cloneNode(true);
-      clone.querySelectorAll('input').forEach((input) => { input.value = input.type === 'number' ? '1' : ''; });
+      clone.querySelectorAll('input').forEach((input) => { input.value = input.type === 'number' ? '1' : ''; if (input.type === 'checkbox') input.checked = false; });
+      const box = clone.querySelector('[data-week-repeat-days]');
+      if (box) { box.hidden = true; box.innerHTML = ''; }
       clone.querySelector('.shift-remove')?.addEventListener('click', () => { clone.remove(); refreshRemoveButtons(); });
       shiftList.appendChild(clone);
       refreshRemoveButtons();
@@ -153,5 +160,6 @@
     shiftList?.querySelector('.shift-remove')?.addEventListener('click', (event) => { event.currentTarget.closest('.shift-row')?.remove(); refreshRemoveButtons(); });
     refreshRemoveButtons();
   </script>
+  <script src="/public/public-request-week-repeat.js"></script>
 </body>
 </html>
