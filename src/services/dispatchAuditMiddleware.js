@@ -131,65 +131,77 @@ function shouldAudit(req) {
   return path.startsWith('/admin/operaciones') || path.startsWith('/operaciones/admin-') || path.startsWith('/operaciones/cliente/');
 }
 
+function writeAuditEvent(prisma, req, res, auditContext) {
+  try {
+    if (res.statusCode >= 400) return;
+
+    const action = inferAuditAction(req);
+    const entityType = inferEntityType(req);
+    const entityId = inferEntityId(req);
+    const isPublicClient = (req.path || '').startsWith('/operaciones/cliente/');
+    const actorUsername = normalizeString(req.session?.username || req.username) || (isPublicClient ? 'cliente-publico' : null);
+    const actorRole = normalizeString(req.session?.userRole || req.userRole) || (isPublicClient ? 'public_client' : null);
+
+    prisma.devAuditEvent.create({
+      data: {
+        entityType,
+        entityId,
+        entityLabel: normalizeString(req.body?.clientName) || normalizeString(req.body?.fullName) || normalizeString(req.body?.name) || null,
+        action,
+        actorUserId: normalizeString(req.session?.userId || req.userId),
+        actorUsername,
+        actorRole,
+        actorSource: normalizeString(req.session?.userSource || req.userSource) || (isPublicClient ? 'public_link' : null),
+        ipAddress: auditContext.clientIp,
+        forwardedFor: normalizeString(req.get('x-forwarded-for')),
+        userAgent: auditContext.userAgent,
+        method: req.method,
+        path: req.originalUrl || req.path,
+        fromValue: null,
+        toValue: safeJson(req.body),
+        metadata: {
+          statusCode: res.statusCode,
+          durationMs: Date.now() - auditContext.startedAt,
+          referer: normalizeString(req.get('referer')),
+          params: safeJson(req.params),
+          query: safeJson(req.query),
+          channel: inferChannel(req),
+          maskedIp: maskIpAddress(auditContext.clientIp),
+          deviceLabel: parseDeviceLabel(auditContext.userAgent),
+          originLocation: auditContext.origin,
+          operationCity: normalizeString(req.body?.cityName) || normalizeString(req.body?.operationCity) || null,
+          serviceRequestId: normalizeString(req.body?.serviceRequestId) || null,
+          assignmentId: normalizeString(req.body?.assignmentId) || null
+        }
+      }
+    }).catch((error) => {
+      console.warn('No fue posible registrar auditoria de despacho.', error);
+    });
+  } catch (error) {
+    console.warn('Auditoria de despacho omitida para no bloquear la aplicacion.', error);
+  }
+}
+
 export function dispatchAuditMiddleware(prisma) {
   return (req, res, next) => {
-    if (!shouldAudit(req)) return next();
+    try {
+      if (!shouldAudit(req)) return next();
 
-    const canWriteAudit = Boolean(prisma?.devAuditEvent?.create);
-    if (!canWriteAudit) return next();
+      const canWriteAudit = Boolean(prisma?.devAuditEvent?.create);
+      if (!canWriteAudit) return next();
 
-    const startedAt = Date.now();
-    const clientIp = inferClientIp(req);
-    const origin = readApproximateOrigin(req);
-    const userAgent = normalizeString(req.get('user-agent'));
+      const auditContext = {
+        startedAt: Date.now(),
+        clientIp: inferClientIp(req),
+        origin: readApproximateOrigin(req),
+        userAgent: normalizeString(req.get('user-agent'))
+      };
 
-    res.on('finish', () => {
-      if (res.statusCode >= 400) return;
-
-      const action = inferAuditAction(req);
-      const entityType = inferEntityType(req);
-      const entityId = inferEntityId(req);
-      const isPublicClient = (req.path || '').startsWith('/operaciones/cliente/');
-      const actorUsername = normalizeString(req.session?.username || req.username) || (isPublicClient ? 'cliente-publico' : null);
-      const actorRole = normalizeString(req.session?.userRole || req.userRole) || (isPublicClient ? 'public_client' : null);
-
-      prisma.devAuditEvent.create({
-        data: {
-          entityType,
-          entityId,
-          entityLabel: normalizeString(req.body?.clientName) || normalizeString(req.body?.fullName) || normalizeString(req.body?.name) || null,
-          action,
-          actorUserId: normalizeString(req.session?.userId || req.userId),
-          actorUsername,
-          actorRole,
-          actorSource: normalizeString(req.session?.userSource || req.userSource) || (isPublicClient ? 'public_link' : null),
-          ipAddress: clientIp,
-          forwardedFor: normalizeString(req.get('x-forwarded-for')),
-          userAgent,
-          method: req.method,
-          path: req.originalUrl || req.path,
-          fromValue: null,
-          toValue: safeJson(req.body),
-          metadata: {
-            statusCode: res.statusCode,
-            durationMs: Date.now() - startedAt,
-            referer: normalizeString(req.get('referer')),
-            params: safeJson(req.params),
-            query: safeJson(req.query),
-            channel: inferChannel(req),
-            maskedIp: maskIpAddress(clientIp),
-            deviceLabel: parseDeviceLabel(userAgent),
-            originLocation: origin,
-            operationCity: normalizeString(req.body?.cityName) || normalizeString(req.body?.operationCity) || null,
-            serviceRequestId: normalizeString(req.body?.serviceRequestId) || null,
-            assignmentId: normalizeString(req.body?.assignmentId) || null
-          }
-        }
-      }).catch((error) => {
-        console.warn('No fue posible registrar auditoria de despacho.', error);
-      });
-    });
-
-    return next();
+      res.on('finish', () => writeAuditEvent(prisma, req, res, auditContext));
+      return next();
+    } catch (error) {
+      console.warn('Middleware de auditoria omitido para no bloquear la aplicacion.', error);
+      return next();
+    }
   };
 }
