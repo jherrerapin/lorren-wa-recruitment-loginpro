@@ -103,16 +103,36 @@ function workerDocumentType(worker) {
 }
 
 function workerDocumentNumber(worker) {
-  return normalizeString(worker?.documentNumber) || '-';
+  return normalizeString(worker?.documentNumber) || 'Sin documento registrado';
+}
+
+function workerDocumentLabel(worker) {
+  const documentType = normalizeString(worker?.documentType);
+  const documentNumber = normalizeString(worker?.documentNumber);
+  if (documentType && documentNumber) return `${documentType} ${documentNumber}`;
+  if (documentNumber) return documentNumber;
+  return 'Sin documento registrado';
 }
 
 function assignedWorkerNamesWithDocs(request) {
   const workers = activeAssignments(request).map((assignment) => {
     const worker = assignment.worker || {};
     const name = normalizeString(worker.fullName) || 'Auxiliar';
-    return `${name} · ${workerDocumentType(worker)} ${workerDocumentNumber(worker)}`;
+    return `${name} · ${workerDocumentLabel(worker)}`;
   });
-  return workers.length ? workers.join('\n') : '-';
+  return workers.length ? workers.join('\n') : 'Sin auxiliares asignados';
+}
+
+function assignedWorkersSummaryForRequests(requests) {
+  const rows = [];
+  for (const request of requests) {
+    for (const assignment of activeAssignments(request)) {
+      const worker = assignment.worker || {};
+      const name = normalizeString(worker.fullName) || 'Auxiliar';
+      rows.push(`${name} · ${workerDocumentLabel(worker)}`);
+    }
+  }
+  return rows.length ? rows.join('\n') : 'Sin auxiliares asignados';
 }
 
 function groupByClient(requests) {
@@ -251,7 +271,7 @@ function addSummarySheet(workbook, selectedDate, requestsByClient, requests) {
       active,
       confirmed,
       pending: Math.max(0, required - confirmed),
-      workers: clientRequests.map(assignedWorkerNamesWithDocs).filter((value) => value !== '-').join('\n') || '-'
+      workers: assignedWorkersSummaryForRequests(clientRequests)
     });
     styleDataRow(row, index);
   });
@@ -337,7 +357,7 @@ function addConsolidatedSheet(workbook, selectedDate, requests) {
     { key: 'requestStatus', width: 24 },
     { key: 'workerName', width: 30 },
     { key: 'documentType', width: 12 },
-    { key: 'documentNumber', width: 18 },
+    { key: 'documentNumber', width: 22 },
     { key: 'workerPhone', width: 18 },
     { key: 'assignmentStatus', width: 24 },
     { key: 'assignedBy', width: 22 },
@@ -370,7 +390,7 @@ function addClientSheet(workbook, clientName, selectedDate, requests, sheetIndex
     { key: 'requestStatus', width: 24 },
     { key: 'workerName', width: 30 },
     { key: 'documentType', width: 12 },
-    { key: 'documentNumber', width: 18 },
+    { key: 'documentNumber', width: 22 },
     { key: 'workerPhone', width: 18 },
     { key: 'assignmentStatus', width: 24 },
     { key: 'assignedBy', width: 22 },
