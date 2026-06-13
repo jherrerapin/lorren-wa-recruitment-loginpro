@@ -1,4 +1,5 @@
 import express from 'express';
+import ExcelJS from 'exceljs';
 
 const PENDING_STATUSES = new Set(['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION']);
 
@@ -128,41 +129,211 @@ function buildStats(serviceRequests) {
   };
 }
 
-function csvCell(value) {
-  const text = String(value ?? '');
-  return `"${text.replaceAll('"', '""')}"`;
+function safeFileName(value) {
+  return String(value || 'cliente')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase() || 'cliente';
 }
 
-function buildCsv(serviceRequests) {
-  const headers = [
-    'ID solicitud', 'Cliente', 'Operacion', 'Ciudad', 'Direccion', 'Servicio', 'Fecha',
-    'Hora inicio', 'Hora fin', 'Auxiliares requeridos', 'Auxiliares asignados',
-    'Estado', 'Origen', 'Solicitante', 'Telefono solicitante', 'Correo solicitante', 'Notas'
+function buildHorario(request) {
+  const start = normalizeString(request.startTime) || '-';
+  const end = normalizeString(request.endTime);
+  return end ? `${start} - ${end}` : start;
+}
+
+function commonBorder(color = 'FFE5E7EB') {
+  return {
+    top: { style: 'thin', color: { argb: color } },
+    left: { style: 'thin', color: { argb: color } },
+    bottom: { style: 'thin', color: { argb: color } },
+    right: { style: 'thin', color: { argb: color } }
+  };
+}
+
+function applyTitle(sheet, title, subtitle, columnCount) {
+  sheet.mergeCells(1, 1, 1, columnCount);
+  const titleCell = sheet.getCell(1, 1);
+  titleCell.value = title;
+  titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2D3D' } };
+  sheet.getRow(1).height = 28;
+
+  sheet.mergeCells(2, 1, 2, columnCount);
+  const subtitleCell = sheet.getCell(2, 1);
+  subtitleCell.value = subtitle;
+  subtitleCell.font = { bold: true, size: 11, color: { argb: 'FF0D7A6B' } };
+  subtitleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  sheet.getRow(2).height = 22;
+}
+
+function styleHeader(row) {
+  row.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D7A6B' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = commonBorder('FFCBD5E1');
+  });
+  row.height = 26;
+}
+
+function styleDataRow(row, index) {
+  row.eachCell((cell) => {
+    cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
+    cell.border = commonBorder();
+    if (index % 2 === 0) {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    }
+  });
+}
+
+function styleStatusCell(cell, status) {
+  const colors = {
+    ASSIGNMENT_COMPLETE: { fg: 'FFDCFCE7', font: 'FF166534' },
+    PENDING_CONFIRMATION: { fg: 'FFDBEAFE', font: 'FF1D4ED8' },
+    ASSIGNMENT_PARTIAL: { fg: 'FFFEF3C7', font: 'FF92400E' },
+    PENDING_ASSIGNMENT: { fg: 'FFFEE2E2', font: 'FFB91C1C' },
+    CANCELLED: { fg: 'FFFFEDD5', font: 'FF9A3412' }
+  };
+  const selected = colors[status] || { fg: 'FFF1F5F9', font: 'FF334155' };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: selected.fg } };
+  cell.font = { bold: true, color: { argb: selected.font } };
+  cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+}
+
+function addKeyValueRow(sheet, label, value) {
+  const row = sheet.addRow([label, value]);
+  row.getCell(1).font = { bold: true, color: { argb: 'FF1E2D3D' } };
+  row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+  row.eachCell((cell) => {
+    cell.border = commonBorder();
+    cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+  });
+}
+
+function addBreakdownSection(sheet, title, rows) {
+  sheet.addRow([]);
+  const titleRow = sheet.addRow([title, 'Total']);
+  styleHeader(titleRow);
+  if (!rows.length) {
+    const emptyRow = sheet.addRow(['Sin registros', 0]);
+    styleDataRow(emptyRow, 0);
+    return;
+  }
+  rows.forEach((item, index) => {
+    const row = sheet.addRow([item.label, item.total]);
+    styleDataRow(row, index);
+  });
+}
+
+function addSummarySheet(workbook, client, stats) {
+  const sheet = workbook.addWorksheet('Resumen');
+  sheet.columns = [
+    { key: 'label', width: 34 },
+    { key: 'value', width: 28 }
   ];
 
-  const rows = serviceRequests.map((request) => [
-    request.id,
-    request.clientName,
-    request.operationPointName || request.operationPoint?.name || '',
-    request.cityName,
-    request.address,
-    request.serviceName || request.service?.name || '',
-    formatDate(request.serviceDate),
-    request.startTime,
-    request.endTime,
-    request.requiredWorkers,
-    request.assignments?.length || 0,
-    statusLabel(request.status),
-    sourceLabel(request.source),
-    request.requestedByName,
-    request.requestedByPhone,
-    request.requestedByEmail,
-    request.notes
-  ]);
+  applyTitle(sheet, `Estadísticas del cliente`, client.name || 'Cliente', 2);
+  addKeyValueRow(sheet, 'Total solicitudes', stats.total);
+  addKeyValueRow(sheet, 'Solicitudes pendientes', stats.pending);
+  addKeyValueRow(sheet, 'Solicitudes completadas', stats.complete);
+  addKeyValueRow(sheet, 'Solicitudes canceladas', stats.cancelled);
+  addKeyValueRow(sheet, 'Cumplimiento', `${stats.completionRate}%`);
+  addKeyValueRow(sheet, 'Auxiliares solicitados', stats.totalRequiredWorkers);
+  addKeyValueRow(sheet, 'Auxiliares asignados', stats.totalAssignedWorkers);
+  addKeyValueRow(sheet, 'Operaciones creadas', client.operationPoints?.length || 0);
+  addKeyValueRow(sheet, 'Servicios creados', client.services?.length || 0);
 
-  return '\uFEFF' + [headers, ...rows]
-    .map((row) => row.map(csvCell).join(','))
-    .join('\r\n');
+  addBreakdownSection(sheet, 'Solicitudes por estado', stats.statusRows);
+  addBreakdownSection(sheet, 'Servicios más solicitados', stats.serviceRows);
+  addBreakdownSection(sheet, 'Operaciones con más solicitudes', stats.operationRows);
+  addBreakdownSection(sheet, 'Solicitudes por fecha', stats.dateRows);
+  addBreakdownSection(sheet, 'Solicitudes por origen', stats.sourceRows);
+
+  sheet.views = [{ state: 'frozen', ySplit: 2 }];
+}
+
+function addRequestsSheet(workbook, client, serviceRequests) {
+  const sheet = workbook.addWorksheet('Solicitudes');
+  sheet.columns = [
+    { key: 'client', width: 28 },
+    { key: 'operation', width: 28 },
+    { key: 'city', width: 18 },
+    { key: 'address', width: 34 },
+    { key: 'service', width: 28 },
+    { key: 'date', width: 14 },
+    { key: 'time', width: 16 },
+    { key: 'required', width: 16 },
+    { key: 'assigned', width: 16 },
+    { key: 'status', width: 24 },
+    { key: 'source', width: 14 },
+    { key: 'requestedBy', width: 24 },
+    { key: 'requestedPhone', width: 18 },
+    { key: 'requestedEmail', width: 30 },
+    { key: 'notes', width: 40 }
+  ];
+
+  applyTitle(sheet, 'Detalle de solicitudes', client.name || 'Cliente', 15);
+  sheet.addRow([
+    'Cliente',
+    'Operación',
+    'Ciudad',
+    'Dirección',
+    'Servicio',
+    'Fecha',
+    'Horario',
+    'Aux. requeridos',
+    'Aux. asignados',
+    'Estado',
+    'Origen',
+    'Solicitante',
+    'Teléfono solicitante',
+    'Correo solicitante',
+    'Notas'
+  ]);
+  styleHeader(sheet.getRow(3));
+
+  serviceRequests.forEach((request, index) => {
+    const row = sheet.addRow({
+      client: request.clientName || client.name || '',
+      operation: request.operationPointName || request.operationPoint?.name || '',
+      city: request.cityName || '',
+      address: request.address || '',
+      service: request.serviceName || request.service?.name || '',
+      date: formatDate(request.serviceDate),
+      time: buildHorario(request),
+      required: request.requiredWorkers || 0,
+      assigned: request.assignments?.length || 0,
+      status: statusLabel(request.status),
+      source: sourceLabel(request.source),
+      requestedBy: request.requestedByName || '',
+      requestedPhone: request.requestedByPhone || '',
+      requestedEmail: request.requestedByEmail || '',
+      notes: request.notes || ''
+    });
+    styleDataRow(row, index);
+    styleStatusCell(row.getCell('status'), request.status);
+  });
+
+  sheet.getColumn('requestedPhone').numFmt = '@';
+  sheet.views = [{ state: 'frozen', ySplit: 3 }];
+  sheet.autoFilter = { from: 'A3', to: 'O3' };
+}
+
+function buildWorkbook(client, serviceRequests) {
+  const stats = buildStats(serviceRequests);
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'LoginPro Operaciones';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  addSummarySheet(workbook, client, stats);
+  addRequestsSheet(workbook, client, serviceRequests);
+
+  return workbook;
 }
 
 export function dispatchClientStatsRouter(prisma) {
@@ -200,7 +371,10 @@ export function dispatchClientStatsRouter(prisma) {
   router.get('/clientes/:clientId/estadisticas/exportar', requireOps, async (req, res) => {
     const client = await prisma.dispatchClient.findUnique({
       where: { id: req.params.clientId },
-      include: { operationPoints: { select: { id: true } } }
+      include: {
+        operationPoints: { select: { id: true }, orderBy: { name: 'asc' } },
+        services: { select: { id: true }, orderBy: { name: 'asc' } }
+      }
     });
     if (!client) return res.status(404).send('Cliente no encontrado');
 
@@ -214,11 +388,12 @@ export function dispatchClientStatsRouter(prisma) {
       orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }]
     });
 
-    const safeClientName = String(client.name || 'cliente').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'cliente';
-    const filename = `solicitudes_${safeClientName}.csv`;
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    const workbook = buildWorkbook(client, serviceRequests);
+    const filename = `solicitudes_${safeFileName(client.name)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.send(buildCsv(serviceRequests));
+    await workbook.xlsx.write(res);
+    res.end();
   });
 
   return router;
