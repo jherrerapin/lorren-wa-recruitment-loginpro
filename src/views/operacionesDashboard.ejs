@@ -24,6 +24,8 @@
     .action-item { display: grid; gap: 6px; max-width: 210px; }
     .action-item .btn { width: 100%; }
     .action-item small { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; padding: 0 2px; }
+    .btn-excel { background: #166534; border-color: #166534; color: #fff; }
+    .btn-excel:hover { background: #14532d; }
     @media (max-width: 900px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .action-item { max-width: none; } }
     @media (max-width: 640px) { .summary-grid, .actions { grid-template-columns: 1fr; } .date-filter, .date-filter .field, .date-filter .btn { width: 100%; } }
   </style>
@@ -69,7 +71,7 @@
     <section class="dashboard-toolbar" aria-label="Filtro de fecha del panel operativo">
       <div>
         <h2>Indicadores por fecha de servicio</h2>
-        <p>Selecciona el día operativo que quieres revisar. Si no eliges fecha, se usa la fecha actual.</p>
+        <p>Selecciona el día operativo que quieres revisar. También puedes descargar la programación de ese día en Excel, separada por cliente.</p>
       </div>
       <form class="date-filter" method="get" action="/admin/operaciones">
         <div class="field">
@@ -77,6 +79,7 @@
           <input id="fecha" name="fecha" type="date" value="<%= selectedDate %>" />
         </div>
         <button class="btn btn-primary" type="submit">Aplicar fecha</button>
+        <button class="btn btn-excel" type="submit" formaction="/admin/operaciones/programacion.xlsx">Descargar Excel</button>
         <a class="btn" href="/admin/operaciones">Hoy</a>
       </form>
     </section>
