@@ -20,13 +20,12 @@
     .summary-card .label { color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
     .summary-card .value { color: var(--navy); font-size: 28px; font-weight: 900; margin-top: 7px; }
     .summary-card .hint { color: var(--muted); font-size: 12px; }
-    .ops-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-    .shortcut { display: block; background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px; color: var(--text); text-decoration: none; box-shadow: var(--shadow-sm); }
-    .shortcut:hover { border-color: var(--teal); box-shadow: var(--shadow); }
-    .shortcut strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 5px; }
-    .shortcut span { color: var(--muted); font-size: 13px; }
-    @media (max-width: 900px) { .summary-grid, .ops-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 640px) { .summary-grid, .ops-shortcuts { grid-template-columns: 1fr; } .date-filter, .date-filter .field, .date-filter .btn { width: 100%; } }
+    .actions { align-items: stretch; }
+    .action-item { display: grid; gap: 6px; max-width: 210px; }
+    .action-item .btn { width: 100%; }
+    .action-item small { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; padding: 0 2px; }
+    @media (max-width: 900px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .action-item { max-width: none; } }
+    @media (max-width: 640px) { .summary-grid, .actions { grid-template-columns: 1fr; } .date-filter, .date-filter .field, .date-filter .btn { width: 100%; } }
   </style>
 </head>
 <body>
@@ -48,10 +47,22 @@
         <p><%= subtitle %></p>
       </div>
       <div class="actions" aria-label="Acciones principales de operaciones">
-        <a class="btn btn-primary" href="/admin/operaciones/clientes">Clientes</a>
-        <a class="btn" href="/admin/operaciones/solicitudes">Solicitudes de servicio</a>
-        <a class="btn" href="/admin/operaciones/asignaciones">Asignación de auxiliares</a>
-        <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
+        <div class="action-item">
+          <a class="btn btn-primary" href="/admin/operaciones/clientes">Clientes</a>
+          <small>Crea clientes, puntos operativos y links públicos de solicitud.</small>
+        </div>
+        <div class="action-item">
+          <a class="btn" href="/admin/operaciones/solicitudes">Solicitudes de servicio</a>
+          <small>Consulta solicitudes creadas por clientes o internas.</small>
+        </div>
+        <div class="action-item">
+          <a class="btn" href="/admin/operaciones/asignaciones">Asignación de auxiliares</a>
+          <small>Arrastra auxiliares disponibles y guarda asignaciones.</small>
+        </div>
+        <div class="action-item">
+          <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
+          <small>Consulta, sincroniza o crea auxiliares manualmente.</small>
+        </div>
       </div>
     </section>
 
@@ -75,13 +86,6 @@
       <article class="summary-card amber"><div class="label">Pendientes</div><div class="value"><%= metrics?.pendingRequests ?? 0 %></div><div class="hint">Solicitudes de esa fecha que requieren asignación</div></article>
       <article class="summary-card green"><div class="label">Asignación completa</div><div class="value"><%= metrics?.completedRequests ?? 0 %></div><div class="hint">Servicios de esa fecha con cobertura confirmada</div></article>
       <article class="summary-card blue"><div class="label">Novedades abiertas</div><div class="value"><%= metrics?.openIncidents ?? 0 %></div><div class="hint">Casos operativos abiertos para esa fecha</div></article>
-    </section>
-
-    <section class="ops-shortcuts" aria-label="Módulos de Operaciones">
-      <a class="shortcut" href="/admin/operaciones/clientes"><strong>Clientes y operaciones</strong><span>Crea clientes, puntos operativos y links públicos de solicitud.</span></a>
-      <a class="shortcut" href="/admin/operaciones/solicitudes"><strong>Solicitudes de servicio</strong><span>Consulta solicitudes creadas por clientes o internas.</span></a>
-      <a class="shortcut" href="/admin/operaciones/asignaciones"><strong>Asignación de auxiliares</strong><span>Arrastra auxiliares disponibles y guarda asignaciones.</span></a>
-      <a class="shortcut" href="/admin/operaciones/personal"><strong>Personal operativo</strong><span>Consulta, sincroniza o crea auxiliares manualmente.</span></a>
     </section>
   </main>
 </body>
