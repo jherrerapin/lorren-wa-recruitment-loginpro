@@ -68,11 +68,6 @@ function assignmentStatusLabel(value) {
   }[value] || value || '-');
 }
 
-function formatDate(value) {
-  if (!value) return '-';
-  return new Date(value).toISOString().slice(0, 10);
-}
-
 function cleanSheetName(value, fallback) {
   const base = normalizeString(value) || fallback;
   return base.replace(/[\\/*?:[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || fallback;
@@ -104,30 +99,34 @@ function groupByClient(requests) {
   return [...map.entries()].sort(([a], [b]) => a.localeCompare(b, 'es'));
 }
 
+function buildHorario(request) {
+  if (request.endTime) return `${request.startTime || '-'} - ${request.endTime}`;
+  return request.startTime || '-';
+}
+
 function buildWorkerLine(assignment, index) {
   const worker = assignment?.worker || {};
   const name = normalizeString(worker.fullName) || 'Auxiliar';
   const document = workerDocumentLabel(worker);
-  const phone = normalizeString(worker.phone) || '-';
   const status = assignmentStatusLabel(assignment?.status);
-  return `${index + 1}. ${name} · Doc: ${document} · Tel: ${phone} · Estado: ${status}`;
+  return `${index + 1}. Auxiliar: ${name}\n   Documento: ${document}\n   Estado: ${status}`;
 }
 
 function buildAssignedWorkersCell(request) {
   const assignments = activeAssignments(request);
   if (!assignments.length) return 'Sin auxiliares asignados';
-  return assignments.map((assignment, index) => buildWorkerLine(assignment, index)).join('\n');
+  return assignments.map((assignment, index) => buildWorkerLine(assignment, index)).join('\n\n');
+}
+
+function buildRequestWorkerBlock(request, index) {
+  const operation = request.operationPointName || 'Sin operación';
+  const service = request.serviceName || request.service?.name || 'Sin servicio';
+  return `Bloque ${index + 1}\nHorario: ${buildHorario(request)}\nOperación: ${operation}\nServicio: ${service}\n${buildAssignedWorkersCell(request)}`;
 }
 
 function buildClientWorkersSummary(requests) {
-  const rows = [];
-  for (const request of requests) {
-    const prefix = `${formatDate(request.serviceDate)} ${request.startTime || '-'}`;
-    activeAssignments(request).forEach((assignment, index) => {
-      rows.push(`${prefix} · ${buildWorkerLine(assignment, index).replace(/^\d+\.\s*/, '')}`);
-    });
-  }
-  return rows.length ? rows.join('\n') : 'Sin auxiliares asignados';
+  if (!requests.some((request) => activeAssignments(request).length)) return 'Sin auxiliares asignados';
+  return requests.map((request, index) => buildRequestWorkerBlock(request, index)).join('\n\n');
 }
 
 function buildCoverageText(request) {
@@ -139,7 +138,7 @@ function buildCoverageText(request) {
 
 function calculateRowHeight(request) {
   const assignmentCount = Math.max(1, activeAssignments(request).length);
-  return Math.min(150, Math.max(24, 18 + assignmentCount * 16));
+  return Math.min(260, Math.max(42, 30 + assignmentCount * 48));
 }
 
 function applyTitle(worksheet, title, subtitle, columnCount) {
@@ -239,10 +238,10 @@ function addSummarySheet(workbook, selectedDate, requestsByClient, requests) {
     { key: 'active', width: 18 },
     { key: 'confirmed', width: 14 },
     { key: 'pending', width: 14 },
-    { key: 'workers', width: 76 }
+    { key: 'workers', width: 82 }
   ];
   applyTitle(sheet, 'Programación operativa por cliente', `Fecha de servicio: ${selectedDate}`, 7);
-  sheet.addRow(['Cliente', 'Solicitudes', 'Aux. requeridos', 'Asignados activos', 'Confirmados', 'Pendientes', 'Auxiliares asignados por cliente']);
+  sheet.addRow(['Cliente', 'Solicitudes', 'Aux. requeridos', 'Asignados activos', 'Confirmados', 'Pendientes', 'Detalle de auxiliares por horario']);
   styleHeader(sheet.getRow(3));
 
   requestsByClient.forEach(([clientName, clientRequests], index) => {
@@ -259,7 +258,7 @@ function addSummarySheet(workbook, selectedDate, requestsByClient, requests) {
       workers: buildClientWorkersSummary(clientRequests)
     });
     styleDataRow(row, index);
-    row.height = Math.min(180, Math.max(24, 18 + active * 14));
+    row.height = Math.min(260, Math.max(42, 28 + active * 42 + clientRequests.length * 26));
   });
 
   const totalRequired = requests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
@@ -289,9 +288,7 @@ function buildProgrammingRow(request, includeClientColumn = false) {
     city: request.cityName || '-',
     address: request.address || '-',
     service: request.serviceName || request.service?.name || 'Sin servicio',
-    date: formatDate(request.serviceDate),
-    startTime: request.startTime || '-',
-    endTime: request.endTime || '-',
+    time: buildHorario(request),
     required: request.requiredWorkers || 0,
     coverage: buildCoverageText(request),
     requestStatus: statusLabel(request.status),
@@ -328,9 +325,7 @@ function addConsolidatedSheet(workbook, selectedDate, requests) {
     { key: 'city', width: 16 },
     { key: 'address', width: 30 },
     { key: 'service', width: 26 },
-    { key: 'date', width: 13 },
-    { key: 'startTime', width: 12 },
-    { key: 'endTime', width: 12 },
+    { key: 'time', width: 16 },
     { key: 'required', width: 14 },
     { key: 'coverage', width: 22 },
     { key: 'requestStatus', width: 24 },
@@ -340,13 +335,13 @@ function addConsolidatedSheet(workbook, selectedDate, requests) {
     { key: 'requestedEmail', width: 28 },
     { key: 'notes', width: 34 }
   ];
-  applyTitle(sheet, 'Programación completa agrupada por solicitud', `Fecha de servicio: ${selectedDate}`, 16);
-  sheet.addRow(['Cliente', 'Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Fecha', 'Hora inicio', 'Hora fin', 'Aux. requeridos', 'Cobertura', 'Estado solicitud', 'Auxiliares asignados / documentos', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
+  applyTitle(sheet, 'Programación completa agrupada por solicitud', `Fecha de servicio: ${selectedDate}`, 14);
+  sheet.addRow(['Cliente', 'Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Horario', 'Aux. requeridos', 'Cobertura', 'Estado solicitud', 'Auxiliares asignados / documentos', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
   styleHeader(sheet.getRow(3));
   addProgrammingRows(sheet, requests, true);
   setTextColumns(sheet, ['assignedWorkers', 'requestedPhone']);
   sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'P3' };
+  sheet.autoFilter = { from: 'A3', to: 'N3' };
 }
 
 function addClientSheet(workbook, clientName, selectedDate, requests, sheetIndex) {
@@ -356,9 +351,7 @@ function addClientSheet(workbook, clientName, selectedDate, requests, sheetIndex
     { key: 'city', width: 16 },
     { key: 'address', width: 30 },
     { key: 'service', width: 26 },
-    { key: 'date', width: 13 },
-    { key: 'startTime', width: 12 },
-    { key: 'endTime', width: 12 },
+    { key: 'time', width: 16 },
     { key: 'required', width: 14 },
     { key: 'coverage', width: 22 },
     { key: 'requestStatus', width: 24 },
@@ -368,13 +361,13 @@ function addClientSheet(workbook, clientName, selectedDate, requests, sheetIndex
     { key: 'requestedEmail', width: 28 },
     { key: 'notes', width: 34 }
   ];
-  applyTitle(sheet, `Programación — ${clientName}`, `Fecha de servicio: ${selectedDate}`, 15);
-  sheet.addRow(['Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Fecha', 'Hora inicio', 'Hora fin', 'Aux. requeridos', 'Cobertura', 'Estado solicitud', 'Auxiliares asignados / documentos', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
+  applyTitle(sheet, `Programación — ${clientName}`, `Fecha de servicio: ${selectedDate}`, 13);
+  sheet.addRow(['Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Horario', 'Aux. requeridos', 'Cobertura', 'Estado solicitud', 'Auxiliares asignados / documentos', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
   styleHeader(sheet.getRow(3));
   addProgrammingRows(sheet, requests, false);
   setTextColumns(sheet, ['assignedWorkers', 'requestedPhone']);
   sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'O3' };
+  sheet.autoFilter = { from: 'A3', to: 'M3' };
 }
 
 async function buildScheduleWorkbook(prisma, selectedDate) {
