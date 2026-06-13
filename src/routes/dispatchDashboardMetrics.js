@@ -58,9 +58,31 @@ function statusLabel(value) {
   }[value] || value || 'Pendiente');
 }
 
+function assignmentStatusLabel(value) {
+  return ({
+    ASSIGNED: 'Asignado',
+    CONFIRMATION_PENDING: 'Pendiente confirmación',
+    CONFIRMED: 'Confirmado',
+    NO_CONFIRMO: 'No confirmó',
+    CANCELLED: 'Cancelado'
+  }[value] || value || '-');
+}
+
 function formatDate(value) {
   if (!value) return '-';
   return new Date(value).toISOString().slice(0, 10);
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(value));
 }
 
 function cleanSheetName(value, fallback) {
@@ -80,9 +102,23 @@ function confirmedAssignments(request) {
   return (request.assignments || []).filter((assignment) => assignment.status === CONFIRMED_ASSIGNMENT_STATUS);
 }
 
-function assignedWorkerNames(request) {
-  const names = activeAssignments(request).map((assignment) => assignment.worker?.fullName).filter(Boolean);
-  return names.length ? names.join(', ') : '-';
+function workerDocumentType(worker) {
+  return normalizeString(worker?.documentType) || '-';
+}
+
+function workerDocumentNumber(worker) {
+  return normalizeString(worker?.documentNumber) || '-';
+}
+
+function assignedWorkerNamesWithDocs(request) {
+  const workers = activeAssignments(request).map((assignment) => {
+    const worker = assignment.worker || {};
+    const name = normalizeString(worker.fullName) || 'Auxiliar';
+    const docType = workerDocumentType(worker);
+    const docNumber = workerDocumentNumber(worker);
+    return `${name} · ${docType} ${docNumber}`;
+  });
+  return workers.length ? workers.join('\n') : '-';
 }
 
 function groupByClient(requests) {
@@ -128,7 +164,7 @@ function styleHeader(row) {
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
     cell.border = commonBorder('FFCBD5E1');
   });
-  row.height = 24;
+  row.height = 28;
 }
 
 function styleDataRow(row, index) {
@@ -147,6 +183,18 @@ function styleStatusCell(cell, status) {
     PENDING_CONFIRMATION: { fg: 'FFDBEAFE', font: 'FF1D4ED8' },
     ASSIGNMENT_PARTIAL: { fg: 'FFFEF3C7', font: 'FF92400E' },
     PENDING_ASSIGNMENT: { fg: 'FFFEE2E2', font: 'FFB91C1C' }
+  };
+  const selected = colors[status] || { fg: 'FFF1F5F9', font: 'FF334155' };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: selected.fg } };
+  cell.font = { bold: true, color: { argb: selected.font } };
+  cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+}
+
+function styleAssignmentStatusCell(cell, status) {
+  const colors = {
+    CONFIRMED: { fg: 'FFDCFCE7', font: 'FF166534' },
+    CONFIRMATION_PENDING: { fg: 'FFDBEAFE', font: 'FF1D4ED8' },
+    ASSIGNED: { fg: 'FFFEF3C7', font: 'FF92400E' }
   };
   const selected = colors[status] || { fg: 'FFF1F5F9', font: 'FF334155' };
   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: selected.fg } };
@@ -191,17 +239,26 @@ function addSummarySheet(workbook, selectedDate, requestsByClient, requests) {
     { key: 'required', width: 16 },
     { key: 'active', width: 18 },
     { key: 'confirmed', width: 14 },
-    { key: 'pending', width: 14 }
+    { key: 'pending', width: 14 },
+    { key: 'workers', width: 58 }
   ];
-  applyTitle(sheet, 'Programación operativa por cliente', `Fecha de servicio: ${selectedDate}`, 6);
-  sheet.addRow(['Cliente', 'Solicitudes', 'Aux. requeridos', 'Asignados activos', 'Confirmados', 'Pendientes']);
+  applyTitle(sheet, 'Programación operativa por cliente', `Fecha de servicio: ${selectedDate}`, 7);
+  sheet.addRow(['Cliente', 'Solicitudes', 'Aux. requeridos', 'Asignados activos', 'Confirmados', 'Pendientes', 'Auxiliares programados con documento']);
   styleHeader(sheet.getRow(3));
 
   requestsByClient.forEach(([clientName, clientRequests], index) => {
     const required = clientRequests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
     const active = clientRequests.reduce((sum, request) => sum + activeAssignments(request).length, 0);
     const confirmed = clientRequests.reduce((sum, request) => sum + confirmedAssignments(request).length, 0);
-    const row = sheet.addRow({ client: clientName, requests: clientRequests.length, required, active, confirmed, pending: Math.max(0, required - confirmed) });
+    const row = sheet.addRow({
+      client: clientName,
+      requests: clientRequests.length,
+      required,
+      active,
+      confirmed,
+      pending: Math.max(0, required - confirmed),
+      workers: clientRequests.map(assignedWorkerNamesWithDocs).filter((value) => value !== '-').join('\n') || '-'
+    });
     styleDataRow(row, index);
   });
 
@@ -213,7 +270,8 @@ function addSummarySheet(workbook, selectedDate, requestsByClient, requests) {
     required: totalRequired,
     active: requests.reduce((sum, request) => sum + activeAssignments(request).length, 0),
     confirmed: totalConfirmed,
-    pending: Math.max(0, totalRequired - totalConfirmed)
+    pending: Math.max(0, totalRequired - totalConfirmed),
+    workers: ''
   });
   totals.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -221,50 +279,120 @@ function addSummarySheet(workbook, selectedDate, requestsByClient, requests) {
     cell.border = commonBorder('FFCBD5E1');
   });
   sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'F3' };
+  sheet.autoFilter = { from: 'A3', to: 'G3' };
+}
+
+function addProgrammingRows(sheet, requests, includeClientColumn = false) {
+  let rowIndex = 0;
+  for (const request of requests) {
+    const assignments = activeAssignments(request);
+    const rows = assignments.length ? assignments : [null];
+    rows.forEach((assignment) => {
+      const worker = assignment?.worker || {};
+      const rowValues = {
+        client: request.clientName || 'Sin cliente',
+        operation: request.operationPointName || 'Sin operación',
+        city: request.cityName || '-',
+        address: request.address || '-',
+        service: request.serviceName || request.service?.name || 'Sin servicio',
+        date: formatDate(request.serviceDate),
+        startTime: request.startTime || '-',
+        endTime: request.endTime || '-',
+        required: request.requiredWorkers || 0,
+        requestStatus: statusLabel(request.status),
+        workerName: normalizeString(worker.fullName) || 'Sin auxiliar asignado',
+        documentType: assignment ? workerDocumentType(worker) : '-',
+        documentNumber: assignment ? workerDocumentNumber(worker) : '-',
+        workerPhone: assignment ? (normalizeString(worker.phone) || '-') : '-',
+        assignmentStatus: assignment ? assignmentStatusLabel(assignment.status) : 'Sin asignación',
+        assignedBy: assignment ? (assignment.createdByUsername || 'Sin usuario') : '-',
+        assignmentCreatedAt: assignment ? formatDateTime(assignment.createdAt) : '-',
+        requestedBy: request.requestedByName || '-',
+        requestedPhone: request.requestedByPhone || '-',
+        requestedEmail: request.requestedByEmail || '-',
+        notes: request.notes || '-'
+      };
+      const row = sheet.addRow(includeClientColumn ? rowValues : { ...rowValues, client: undefined });
+      styleDataRow(row, rowIndex);
+      styleStatusCell(row.getCell(includeClientColumn ? 'requestStatus' : 'requestStatus'), request.status);
+      styleAssignmentStatusCell(row.getCell(includeClientColumn ? 'assignmentStatus' : 'assignmentStatus'), assignment?.status);
+      rowIndex += 1;
+    });
+  }
+}
+
+function setTextColumns(sheet, columnKeys) {
+  columnKeys.forEach((key) => {
+    const column = sheet.getColumn(key);
+    column.numFmt = '@';
+  });
+}
+
+function addConsolidatedSheet(workbook, selectedDate, requests) {
+  const sheet = workbook.addWorksheet('Programación completa');
+  sheet.columns = [
+    { key: 'client', width: 28 },
+    { key: 'operation', width: 26 },
+    { key: 'city', width: 16 },
+    { key: 'address', width: 30 },
+    { key: 'service', width: 26 },
+    { key: 'date', width: 13 },
+    { key: 'startTime', width: 12 },
+    { key: 'endTime', width: 12 },
+    { key: 'required', width: 14 },
+    { key: 'requestStatus', width: 24 },
+    { key: 'workerName', width: 30 },
+    { key: 'documentType', width: 12 },
+    { key: 'documentNumber', width: 18 },
+    { key: 'workerPhone', width: 18 },
+    { key: 'assignmentStatus', width: 24 },
+    { key: 'assignedBy', width: 22 },
+    { key: 'assignmentCreatedAt', width: 22 },
+    { key: 'requestedBy', width: 24 },
+    { key: 'requestedPhone', width: 18 },
+    { key: 'requestedEmail', width: 28 },
+    { key: 'notes', width: 34 }
+  ];
+  applyTitle(sheet, 'Programación completa de auxiliares', `Fecha de servicio: ${selectedDate}`, 21);
+  sheet.addRow(['Cliente', 'Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Fecha', 'Hora inicio', 'Hora fin', 'Aux. requeridos', 'Estado solicitud', 'Auxiliar asignado', 'Tipo doc.', 'Número documento', 'Teléfono auxiliar', 'Estado asignación', 'Asignado por', 'Fecha/hora asignación', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
+  styleHeader(sheet.getRow(3));
+  addProgrammingRows(sheet, requests, true);
+  setTextColumns(sheet, ['documentNumber', 'workerPhone', 'requestedPhone']);
+  sheet.views = [{ state: 'frozen', ySplit: 3 }];
+  sheet.autoFilter = { from: 'A3', to: 'U3' };
 }
 
 function addClientSheet(workbook, clientName, selectedDate, requests, sheetIndex) {
   const sheet = workbook.addWorksheet(cleanSheetName(clientName, `Cliente ${sheetIndex}`));
   sheet.columns = [
-    { key: 'operation', width: 28 },
-    { key: 'city', width: 18 },
-    { key: 'service', width: 28 },
-    { key: 'date', width: 14 },
-    { key: 'time', width: 16 },
+    { key: 'operation', width: 26 },
+    { key: 'city', width: 16 },
+    { key: 'address', width: 30 },
+    { key: 'service', width: 26 },
+    { key: 'date', width: 13 },
+    { key: 'startTime', width: 12 },
+    { key: 'endTime', width: 12 },
     { key: 'required', width: 14 },
-    { key: 'active', width: 16 },
-    { key: 'confirmed', width: 14 },
-    { key: 'status', width: 24 },
-    { key: 'workers', width: 46 },
-    { key: 'requestedBy', width: 26 },
+    { key: 'requestStatus', width: 24 },
+    { key: 'workerName', width: 30 },
+    { key: 'documentType', width: 12 },
+    { key: 'documentNumber', width: 18 },
+    { key: 'workerPhone', width: 18 },
+    { key: 'assignmentStatus', width: 24 },
+    { key: 'assignedBy', width: 22 },
+    { key: 'assignmentCreatedAt', width: 22 },
+    { key: 'requestedBy', width: 24 },
+    { key: 'requestedPhone', width: 18 },
+    { key: 'requestedEmail', width: 28 },
     { key: 'notes', width: 34 }
   ];
-  applyTitle(sheet, `Programación — ${clientName}`, `Fecha de servicio: ${selectedDate}`, 12);
-  sheet.addRow(['Operación / punto', 'Ciudad', 'Servicio', 'Fecha', 'Horario', 'Aux. requeridos', 'Asignados activos', 'Confirmados', 'Estado', 'Auxiliares programados', 'Solicitante', 'Observaciones']);
+  applyTitle(sheet, `Programación — ${clientName}`, `Fecha de servicio: ${selectedDate}`, 20);
+  sheet.addRow(['Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Fecha', 'Hora inicio', 'Hora fin', 'Aux. requeridos', 'Estado solicitud', 'Auxiliar asignado', 'Tipo doc.', 'Número documento', 'Teléfono auxiliar', 'Estado asignación', 'Asignado por', 'Fecha/hora asignación', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
   styleHeader(sheet.getRow(3));
-
-  requests.forEach((request, index) => {
-    const row = sheet.addRow({
-      operation: request.operationPointName || 'Sin operación',
-      city: request.cityName || '-',
-      service: request.serviceName || request.service?.name || 'Sin servicio',
-      date: formatDate(request.serviceDate),
-      time: buildHorario(request),
-      required: request.requiredWorkers || 0,
-      active: activeAssignments(request).length,
-      confirmed: confirmedAssignments(request).length,
-      status: statusLabel(request.status),
-      workers: assignedWorkerNames(request),
-      requestedBy: [request.requestedByName, request.requestedByPhone].filter(Boolean).join(' · ') || '-',
-      notes: request.notes || '-'
-    });
-    styleDataRow(row, index);
-    styleStatusCell(row.getCell('status'), request.status);
-  });
-
+  addProgrammingRows(sheet, requests, false);
+  setTextColumns(sheet, ['documentNumber', 'workerPhone', 'requestedPhone']);
   sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'L3' };
+  sheet.autoFilter = { from: 'A3', to: 'T3' };
 }
 
 async function buildScheduleWorkbook(prisma, selectedDate) {
@@ -276,6 +404,7 @@ async function buildScheduleWorkbook(prisma, selectedDate) {
 
   const requestsByClient = groupByClient(requests);
   addSummarySheet(workbook, selectedDate, requestsByClient, requests);
+  addConsolidatedSheet(workbook, selectedDate, requests);
   requestsByClient.forEach(([clientName, clientRequests], index) => addClientSheet(workbook, clientName, selectedDate, clientRequests, index + 1));
 
   if (!requests.length) {
