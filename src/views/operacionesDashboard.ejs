@@ -128,7 +128,7 @@
       <div class="programming-actions">
         <a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>">Descargar PDF</a>
         <a class="btn" id="programEmailLink" href="#" target="_blank" rel="noopener">Abrir correo</a>
-        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp" <%= programmingComplete ? '' : 'disabled' %>>Enviar PDF por WhatsApp a Milton y Julie</button>
+        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp" <%= programmingComplete ? '' : 'disabled' %>>Enviar PDF por WhatsApp</button>
       </div>
       <div class="programming-note">
         <strong>Estado:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas para la fecha seleccionada. El envío por WhatsApp se habilita cuando todas estén completas. El PDF solo incluye nombre completo y documento del auxiliar.
@@ -166,7 +166,7 @@
     customManagerInput?.addEventListener('keydown',(event)=>{if(event.key==='Enter'){event.preventDefault();saveManager(customManagerInput.value);customManagerInput.value='';customManagerWrap.hidden=true;}});
     customManagerInput?.addEventListener('blur',()=>{if(customManagerInput.value.trim()){saveManager(customManagerInput.value);customManagerInput.value='';}customManagerWrap.hidden=true;});
     managerSelect?.addEventListener('change',refreshProgrammingLinks);
-    whatsappButton?.addEventListener('click',async()=>{if(!programmingComplete){showToast('La programación aún no está completa.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando PDF...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager()})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name}: ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar el PDF.');}showToast('PDF enviado por WhatsApp a Milton y Julie.');}catch(error){showToast(error.message||'No fue posible enviar el PDF.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
+    whatsappButton?.addEventListener('click',async()=>{if(!programmingComplete){showToast('La programación aún no está completa.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando PDF...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager()})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name}: ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar el PDF.');}showToast('PDF enviado por WhatsApp.');}catch(error){showToast(error.message||'No fue posible enviar el PDF.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
     renderManagers();
   </script>
 </body>
