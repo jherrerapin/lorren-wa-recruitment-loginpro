@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import whatsappWeb from 'whatsapp-web.js';
 
@@ -30,6 +33,39 @@ function normalizeMessage(message) {
   return String(message || '').trim().slice(0, MAX_MESSAGE_LENGTH);
 }
 
+function resolveChromeExecutablePath() {
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.GOOGLE_CHROME_BIN,
+    process.env.CHROME_BIN,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome'
+  ].filter(Boolean);
+
+  const configuredPath = candidates.find((candidate) => existsSync(candidate));
+  if (configuredPath) return configuredPath;
+
+  try {
+    return execFileSync('sh', ['-lc', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim() || undefined;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+function buildPuppeteerOptions() {
+  const executablePath = resolveChromeExecutablePath();
+  return {
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  };
+}
+
 export function initDispatchWhatsappClient() {
   if (client || initializing) return client;
 
@@ -39,10 +75,7 @@ export function initDispatchWhatsappClient() {
       clientId: 'dispatch',
       dataPath: process.env.DISPATCH_WWEB_AUTH_PATH || './storage/dispatch-wweb-auth'
     }),
-    puppeteer: {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+    puppeteer: buildPuppeteerOptions()
   });
 
   client.on('qr', (qr) => {
@@ -86,6 +119,11 @@ export function initDispatchWhatsappClient() {
 
 export function getDispatchWhatsappStatus() {
   return { ready, lastQr, lastError, lastReadyAt };
+}
+
+export async function getDispatchWhatsappStatusView() {
+  const qrImage = lastQr ? await QRCode.toDataURL(lastQr) : null;
+  return { ready, lastQr, qrImage, lastError, lastReadyAt };
 }
 
 export async function sendDispatchWhatsappMessage({ phone, message }) {

@@ -1,6 +1,6 @@
 import express from 'express';
 import {
-  getDispatchWhatsappStatus,
+  getDispatchWhatsappStatusView,
   initDispatchWhatsappClient,
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappWebService.js';
@@ -52,8 +52,17 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
   const router = express.Router();
   router.use(requireOps);
 
-  router.get('/estado', (_req, res) => {
-    res.json({ ok: true, ...getDispatchWhatsappStatus() });
+  router.get('/', async (_req, res) => {
+    const status = await getDispatchWhatsappStatusView();
+    res.render('operacionesWhatsappEstado', {
+      pageTitle: 'WhatsApp de despacho',
+      role: _req.session?.userRole || _req.userRole,
+      ...status
+    });
+  });
+
+  router.get('/estado', async (_req, res) => {
+    res.json({ ok: true, ...(await getDispatchWhatsappStatusView()) });
   });
 
   router.post('/enviar', async (req, res) => {
