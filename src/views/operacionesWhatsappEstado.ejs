@@ -16,6 +16,8 @@
     .qr-panel { align-items: center; text-align: center; }
     .qr-image { width: min(420px, 100%); border: 10px solid #fff; border-radius: 18px; box-shadow: var(--shadow); background: #fff; }
     .alert { border: 1px solid #fecaca; background: #fff5f5; color: #991b1b; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
+    .info-box { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
+    .technical-box { border: 1px dashed #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 12px 14px; font-size: 12px; line-height: 1.45; word-break: break-word; }
     .muted-strong { color: var(--muted); font-weight: 800; }
     @media (max-width: 900px) { .status-layout { grid-template-columns: 1fr; } }
   </style>
@@ -36,7 +38,7 @@
       <div>
         <div class="eyebrow">Operaciones / Despacho</div>
         <h1>WhatsApp de despacho</h1>
-        <p>Gestiona la vinculación visual de la sesión usada para enviar notificaciones de despacho.</p>
+        <p>Gestiona la conexión visual de la línea usada para enviar notificaciones de despacho.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
@@ -47,11 +49,17 @@
 
     <section class="status-layout">
       <article class="status-card <%= ready ? 'connected' : '' %>" id="statusCard">
-        <span class="status-label <%= ready ? 'connected' : lastError ? 'error' : '' %>" id="statusLabel"><%= ready ? 'Conectado' : lastError ? 'Error de sesión' : 'No conectado' %></span>
+        <span class="status-label <%= ready ? 'connected' : lastError ? 'error' : '' %>" id="statusLabel"><%= ready ? 'Conectado' : lastError ? 'Requiere revisión' : 'No conectado' %></span>
         <h2 id="statusTitle"><%= ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión' %></h2>
         <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span data-raw-ready-at="<%= lastReadyAt || '' %>"><%= lastReadyAt || '' %></span></p>
         <p>Esta pantalla reemplaza la dependencia operativa del QR en consola. El envío sigue usando la sesión de whatsapp-web.js.</p>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
+        <% if (role === 'dev') { %>
+          <details class="technical-box" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>>
+            <summary>Detalle técnico para dev</summary>
+            <div id="technicalError"><%= technicalLastError || '' %></div>
+          </details>
+        <% } %>
       </article>
 
       <article class="status-card qr-panel" id="qrPanel">
@@ -63,25 +71,33 @@
           <img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de WhatsApp despacho" />
           <p class="muted-strong">Escanea este QR desde el celular de despacho para vincular la sesión.</p>
         </div>
-        <div id="waitingQr" <%= !ready && !qrImage ? '' : 'hidden' %>>
-          <h2>Generando QR. Espera unos segundos...</h2>
+        <div id="waitingQr" <%= !ready && !qrImage && !lastError ? '' : 'hidden' %>>
+          <h2>Preparando conexión...</h2>
           <p class="muted-strong">La pantalla se actualiza automáticamente cada 3 segundos.</p>
+        </div>
+        <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError ? '' : 'hidden' %>>
+          La conexión aún no está disponible. Actualiza el estado en unos segundos. Si continúa igual, avisa al responsable técnico.
         </div>
       </article>
     </section>
   </main>
 
   <script>
+    const isDev = <%= role === 'dev' ? 'true' : 'false' %>;
+    const fallbackOperationalError = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
     const statusLabel = document.getElementById('statusLabel');
     const statusTitle = document.getElementById('statusTitle');
     const statusCard = document.getElementById('statusCard');
     const readyAt = document.getElementById('readyAt');
     const readyAtText = readyAt?.querySelector('span');
     const errorBox = document.getElementById('errorBox');
+    const technicalDetails = document.getElementById('technicalDetails');
+    const technicalError = document.getElementById('technicalError');
     const connectedMessage = document.getElementById('connectedMessage');
     const qrContainer = document.getElementById('qrContainer');
     const qrImage = document.getElementById('qrImage');
     const waitingQr = document.getElementById('waitingQr');
+    const unavailableBox = document.getElementById('unavailableBox');
 
     function formatBogotaDateTime(value) {
       if (!value) return '';
@@ -109,17 +125,20 @@
 
     function setHidden(element, hidden) { if (element) element.hidden = hidden; }
     function renderStatus(data) {
-      const hasError = Boolean(data.lastError);
-      statusLabel.textContent = data.ready ? 'Conectado' : hasError ? 'Error de sesión' : 'No conectado';
+      const hasError = Boolean(data.lastError || data.technicalLastError);
+      statusLabel.textContent = data.ready ? 'Conectado' : hasError ? 'Requiere revisión' : 'No conectado';
       statusLabel.className = 'status-label ' + (data.ready ? 'connected' : hasError ? 'error' : '');
       statusCard.classList.toggle('connected', Boolean(data.ready));
       statusTitle.textContent = data.ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión';
       renderReadyAt(data.lastReadyAt);
       setHidden(errorBox, !hasError);
-      if (errorBox) errorBox.textContent = data.lastError || '';
+      if (errorBox) errorBox.textContent = hasError ? (data.lastError || fallbackOperationalError) : '';
+      setHidden(technicalDetails, !isDev || !data.technicalLastError);
+      if (technicalError) technicalError.textContent = data.technicalLastError || '';
       setHidden(connectedMessage, !data.ready);
       setHidden(qrContainer, data.ready || !data.qrImage);
-      setHidden(waitingQr, data.ready || Boolean(data.qrImage));
+      setHidden(waitingQr, data.ready || Boolean(data.qrImage) || hasError);
+      setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError);
       if (data.qrImage && qrImage && qrImage.src !== data.qrImage) qrImage.src = data.qrImage;
     }
     async function refreshStatus() {
