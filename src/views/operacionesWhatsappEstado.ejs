@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WhatsApp de despacho — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .status-layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 520px); gap: 18px; align-items: start; }
+    .status-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-sm); padding: 20px; display: grid; gap: 14px; }
+    .status-card.connected { border-color: var(--green); background: var(--green-soft); }
+    .status-label { display: inline-flex; width: fit-content; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 900; background: var(--amber-soft); color: var(--amber); }
+    .status-label.connected { background: #dcfce7; color: #166534; }
+    .status-label.error { background: #fee2e2; color: #991b1b; }
+    .qr-panel { align-items: center; text-align: center; }
+    .qr-image { width: min(420px, 100%); border: 10px solid #fff; border-radius: 18px; box-shadow: var(--shadow); background: #fff; }
+    .alert { border: 1px solid #fecaca; background: #fff5f5; color: #991b1b; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
+    .muted-strong { color: var(--muted); font-weight: 800; }
+    @media (max-width: 900px) { .status-layout { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Operaciones / Despacho</div>
+        <h1>WhatsApp de despacho</h1>
+        <p>Gestiona la vinculación visual de la sesión usada para enviar notificaciones de despacho.</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
+        <a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a>
+        <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
+      </div>
+    </section>
+
+    <section class="status-layout">
+      <article class="status-card <%= ready ? 'connected' : '' %>" id="statusCard">
+        <span class="status-label <%= ready ? 'connected' : lastError ? 'error' : '' %>" id="statusLabel"><%= ready ? 'Conectado' : lastError ? 'Error de sesión' : 'No conectado' %></span>
+        <h2 id="statusTitle"><%= ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión' %></h2>
+        <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span><%= lastReadyAt || '' %></span></p>
+        <p>Esta pantalla reemplaza la dependencia operativa del QR en consola. El envío sigue usando la sesión de whatsapp-web.js.</p>
+        <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
+      </article>
+
+      <article class="status-card qr-panel" id="qrPanel">
+        <div id="connectedMessage" <%= ready ? '' : 'hidden' %>>
+          <h2>WhatsApp de despacho conectado</h2>
+          <p class="muted-strong">Ya puedes volver a asignaciones y enviar mensajes.</p>
+        </div>
+        <div id="qrContainer" <%= !ready && qrImage ? '' : 'hidden' %>>
+          <img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de WhatsApp despacho" />
+          <p class="muted-strong">Escanea este QR desde el celular de despacho para vincular la sesión.</p>
+        </div>
+        <div id="waitingQr" <%= !ready && !qrImage ? '' : 'hidden' %>>
+          <h2>Generando QR. Espera unos segundos...</h2>
+          <p class="muted-strong">La pantalla se actualiza automáticamente cada 3 segundos.</p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const statusLabel = document.getElementById('statusLabel');
+    const statusTitle = document.getElementById('statusTitle');
+    const statusCard = document.getElementById('statusCard');
+    const readyAt = document.getElementById('readyAt');
+    const readyAtText = readyAt?.querySelector('span');
+    const errorBox = document.getElementById('errorBox');
+    const connectedMessage = document.getElementById('connectedMessage');
+    const qrContainer = document.getElementById('qrContainer');
+    const qrImage = document.getElementById('qrImage');
+    const waitingQr = document.getElementById('waitingQr');
+
+    function setHidden(element, hidden) { if (element) element.hidden = hidden; }
+    function renderStatus(data) {
+      const hasError = Boolean(data.lastError);
+      statusLabel.textContent = data.ready ? 'Conectado' : hasError ? 'Error de sesión' : 'No conectado';
+      statusLabel.className = 'status-label ' + (data.ready ? 'connected' : hasError ? 'error' : '');
+      statusCard.classList.toggle('connected', Boolean(data.ready));
+      statusTitle.textContent = data.ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión';
+      setHidden(readyAt, !data.lastReadyAt);
+      if (readyAtText) readyAtText.textContent = data.lastReadyAt || '';
+      setHidden(errorBox, !hasError);
+      if (errorBox) errorBox.textContent = data.lastError || '';
+      setHidden(connectedMessage, !data.ready);
+      setHidden(qrContainer, data.ready || !data.qrImage);
+      setHidden(waitingQr, data.ready || Boolean(data.qrImage));
+      if (data.qrImage && qrImage && qrImage.src !== data.qrImage) qrImage.src = data.qrImage;
+    }
+    async function refreshStatus() {
+      const response = await fetch('/admin/operaciones/whatsapp/estado', { cache: 'no-store' });
+      if (!response.ok) return;
+      renderStatus(await response.json());
+    }
+    document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);
+    window.setInterval(refreshStatus, 3000);
+  </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import whatsappWeb from 'whatsapp-web.js';
 
@@ -86,6 +87,11 @@ export function initDispatchWhatsappClient() {
 
 export function getDispatchWhatsappStatus() {
   return { ready, lastQr, lastError, lastReadyAt };
+}
+
+export async function getDispatchWhatsappStatusView() {
+  const qrImage = lastQr ? await QRCode.toDataURL(lastQr) : null;
+  return { ready, lastQr, qrImage, lastError, lastReadyAt };
 }
 
 export async function sendDispatchWhatsappMessage({ phone, message }) {
