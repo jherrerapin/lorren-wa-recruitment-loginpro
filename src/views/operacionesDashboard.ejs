@@ -26,11 +26,29 @@
     .action-item small { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; padding: 0 2px; }
     .btn-excel { background: #166534; border-color: #166534; color: #fff; }
     .btn-excel:hover { background: #14532d; }
-    @media (max-width: 900px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .action-item { max-width: none; } }
-    @media (max-width: 640px) { .summary-grid, .actions { grid-template-columns: 1fr; } .date-filter, .date-filter .field, .date-filter .btn { width: 100%; } }
+    .programming-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-sm); padding: 18px; display: grid; gap: 14px; }
+    .programming-card.complete { border-color: var(--green); background: var(--green-soft); }
+    .programming-head { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; align-items: start; }
+    .programming-head h2 { margin: 0 0 4px; color: var(--navy); font-size: 18px; }
+    .programming-head p { margin: 0; color: var(--muted); font-size: 13px; }
+    .programming-pill { display: inline-flex; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 900; background: var(--amber-soft); color: var(--amber); }
+    .programming-pill.complete { background: #dcfce7; color: #166534; }
+    .manager-row { display: grid; grid-template-columns: minmax(220px, 360px) auto minmax(180px, 260px); gap: 8px; align-items: end; }
+    .manager-row label { display: block; color: var(--navy); font-size: 12px; font-weight: 900; margin-bottom: 4px; }
+    .manager-row select, .manager-row input { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; font: inherit; background: #fff; color: var(--navy); }
+    .manager-row .btn { height: 39px; }
+    .programming-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .programming-actions .btn[disabled] { opacity: .55; cursor: not-allowed; }
+    .programming-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .async-toast{position:fixed;right:18px;bottom:18px;max-width:360px;background:#172033;color:#fff;border-radius:14px;padding:11px 13px;box-shadow:var(--shadow);font-size:13px;line-height:1.35;z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s}.async-toast.show{opacity:1;transform:translateY(0)}
+    @media (max-width: 900px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .action-item { max-width: none; } .manager-row { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { .summary-grid, .actions { grid-template-columns: 1fr; } .date-filter, .date-filter .field, .date-filter .btn { width: 100%; } .programming-actions .btn { width: 100%; } }
   </style>
 </head>
 <body>
+  <% const totalRequests = Number(metrics?.totalRequests ?? 0); %>
+  <% const completedRequests = Number(metrics?.completedRequests ?? 0); %>
+  <% const programmingComplete = totalRequests > 0 && completedRequests >= totalRequests; %>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
@@ -88,6 +106,35 @@
       </form>
     </section>
 
+    <section class="programming-card <%= programmingComplete ? 'complete' : '' %>" aria-label="Programación completa del día">
+      <div class="programming-head">
+        <div>
+          <h2>Programación completa del día</h2>
+          <p>Genera un PDF bonito con todos los clientes, horarios y auxiliares asignados. El correo se abre manualmente y el PDF se adjunta manualmente.</p>
+        </div>
+        <span class="programming-pill <%= programmingComplete ? 'complete' : '' %>"><%= programmingComplete ? 'Programación completa' : `Faltan ${Math.max(totalRequests - completedRequests, 0)} solicitud(es)` %></span>
+      </div>
+      <div class="manager-row">
+        <div>
+          <label for="programManagedBy">Gestionado por</label>
+          <select id="programManagedBy"><option value="Julián Herrera">Julián Herrera</option></select>
+        </div>
+        <button class="btn" type="button" id="addProgramManager">+ Agregar</button>
+        <div id="customProgramManagerWrap" hidden>
+          <label for="customProgramManager">Nuevo nombre</label>
+          <input id="customProgramManager" type="text" maxlength="80" placeholder="Nombre de quien gestionó" />
+        </div>
+      </div>
+      <div class="programming-actions">
+        <a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>">Descargar PDF</a>
+        <a class="btn" id="programEmailLink" href="#" target="_blank" rel="noopener">Abrir correo</a>
+        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp" <%= programmingComplete ? '' : 'disabled' %>>Enviar PDF por WhatsApp a Milton y Julie</button>
+      </div>
+      <div class="programming-note">
+        <strong>Estado:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas para la fecha seleccionada. El envío por WhatsApp se habilita cuando todas estén completas. El PDF solo incluye nombre completo y documento del auxiliar.
+      </div>
+    </section>
+
     <section class="summary-grid" aria-label="Resumen operativo">
       <article class="summary-card"><div class="label">Solicitudes del día</div><div class="value"><%= metrics?.totalRequests ?? 0 %></div><div class="hint">Servicios programados para la fecha seleccionada</div></article>
       <article class="summary-card amber"><div class="label">Pendientes</div><div class="value"><%= metrics?.pendingRequests ?? 0 %></div><div class="hint">Solicitudes de esa fecha que requieren asignación</div></article>
@@ -95,5 +142,32 @@
       <article class="summary-card blue"><div class="label">Novedades abiertas</div><div class="value"><%= metrics?.openIncidents ?? 0 %></div><div class="hint">Casos operativos abiertos para esa fecha</div></article>
     </section>
   </main>
+  <div class="async-toast" id="asyncToast" role="status" aria-live="polite"></div>
+  <script>
+    const selectedDate = <%- JSON.stringify(selectedDate) %>;
+    const programmingComplete = <%= programmingComplete ? 'true' : 'false' %>;
+    const managerSelect = document.getElementById('programManagedBy');
+    const addManagerButton = document.getElementById('addProgramManager');
+    const customManagerWrap = document.getElementById('customProgramManagerWrap');
+    const customManagerInput = document.getElementById('customProgramManager');
+    const pdfLink = document.getElementById('programPdfLink');
+    const emailLink = document.getElementById('programEmailLink');
+    const whatsappButton = document.getElementById('sendProgramWhatsapp');
+    const toast = document.getElementById('asyncToast');
+    const MANAGERS_KEY = 'dispatchProgrammingManagers';
+
+    function showToast(message){if(!toast)return;toast.textContent=message;toast.classList.add('show');window.clearTimeout(showToast._t);showToast._t=window.setTimeout(()=>toast.classList.remove('show'),3000);}
+    function currentManager(){return managerSelect?.value || 'Julián Herrera';}
+    function loadManagers(){try{return JSON.parse(localStorage.getItem(MANAGERS_KEY)||'[]');}catch(_error){return[];}}
+    function saveManager(name){const clean=String(name||'').trim();if(!clean)return;const managers=[...new Set(['Julián Herrera',...loadManagers(),clean])];localStorage.setItem(MANAGERS_KEY,JSON.stringify(managers.filter((item)=>item!=='Julián Herrera')));renderManagers(clean);}
+    function renderManagers(selected='Julián Herrera'){if(!managerSelect)return;const managers=[...new Set(['Julián Herrera',...loadManagers()])];managerSelect.innerHTML=managers.map((name)=>`<option value="${name.replace(/"/g,'&quot;')}">${name}</option>`).join('');managerSelect.value=managers.includes(selected)?selected:'Julián Herrera';refreshProgrammingLinks();}
+    function refreshProgrammingLinks(){const manager=currentManager();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(emailLink){const subject='Programación operativa completa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa completa para la fecha '+selectedDate+'.','','El PDF fue generado desde LoginPro Operaciones.','','Gestionado por: '+manager].join('\n');emailLink.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
+    addManagerButton?.addEventListener('click',()=>{customManagerWrap.hidden=false;customManagerInput?.focus();});
+    customManagerInput?.addEventListener('keydown',(event)=>{if(event.key==='Enter'){event.preventDefault();saveManager(customManagerInput.value);customManagerInput.value='';customManagerWrap.hidden=true;}});
+    customManagerInput?.addEventListener('blur',()=>{if(customManagerInput.value.trim()){saveManager(customManagerInput.value);customManagerInput.value='';}customManagerWrap.hidden=true;});
+    managerSelect?.addEventListener('change',refreshProgrammingLinks);
+    whatsappButton?.addEventListener('click',async()=>{if(!programmingComplete){showToast('La programación aún no está completa.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando PDF...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager()})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name}: ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar el PDF.');}showToast('PDF enviado por WhatsApp a Milton y Julie.');}catch(error){showToast(error.message||'No fue posible enviar el PDF.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
+    renderManagers();
+  </script>
 </body>
 </html>

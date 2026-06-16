@@ -17,6 +17,7 @@ import { dispatchOpsExtrasRouter } from './routes/dispatchOpsExtras.js';
 import { dispatchWorkerStatsRouter } from './routes/dispatchWorkerStats.js';
 import { dispatchBridgeRouter } from './routes/dispatchBridge.js';
 import { dispatchWhatsappNotificationsRouter } from './routes/dispatchWhatsappNotifications.js';
+import { dispatchProgrammingNotificationsRouter } from './routes/dispatchProgrammingNotifications.js';
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
@@ -169,7 +170,6 @@ app.use((req, res, next) => {
 app.use(morgan('combined'));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
 const PgStore = connectPgSimple(session);
 const sessionStore = new PgStore({
@@ -381,6 +381,7 @@ app.use('/admin/operaciones', wrapAsyncRouter(dispatchDashboardMetricsRouter(pri
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchClientStatsRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchWorkerStatsRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchOpsExtrasRouter(prisma)));
+app.use('/admin/operaciones', wrapAsyncRouter(dispatchProgrammingNotificationsRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
 app.use('/admin/operaciones/whatsapp', wrapAsyncRouter(dispatchWhatsappNotificationsRouter(prisma)));
 app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));

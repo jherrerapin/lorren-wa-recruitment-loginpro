@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import whatsappWeb from 'whatsapp-web.js';
 
-const { Client, LocalAuth } = whatsappWeb;
+const { Client, LocalAuth, MessageMedia } = whatsappWeb;
 const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
 
@@ -35,6 +35,7 @@ function normalizeMessage(message) {
 
 function resolveChromeExecutablePath() {
   const candidates = [
+    process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
     process.env.PUPPETEER_EXECUTABLE_PATH,
     process.env.GOOGLE_CHROME_BIN,
     process.env.CHROME_BIN,
@@ -48,7 +49,7 @@ function resolveChromeExecutablePath() {
   if (configuredPath) return configuredPath;
 
   try {
-    return execFileSync('sh', ['-lc', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome'], {
+    return execFileSync('sh', ['-c', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore']
     }).trim() || undefined;
@@ -64,6 +65,29 @@ function buildPuppeteerOptions() {
     ...(executablePath ? { executablePath } : {}),
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   };
+}
+
+function formatBrowserLaunchError(error) {
+  const rawMessage = error?.message || 'No fue posible inicializar WhatsApp de despacho.';
+  if (rawMessage.includes('ENOENT') || rawMessage.includes('Could not find Chrome') || rawMessage.includes('Failed to launch the browser process')) {
+    return 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho.';
+  }
+  return rawMessage;
+}
+
+async function getReadyClient() {
+  if (!client) initDispatchWhatsappClient();
+  if (!ready) throw buildError(NOT_CONNECTED_MESSAGE, 503);
+  return client;
+}
+
+async function getRecipientId(activeClient, phone) {
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) throw buildError('Debes indicar un número válido para enviar WhatsApp.', 400);
+  if (normalizedPhone.length < 11 || normalizedPhone.length > 15) throw buildError('El número de WhatsApp no es válido.', 400);
+  const numberId = await activeClient.getNumberId(normalizedPhone);
+  if (!numberId?._serialized) throw buildError('El número no está disponible en WhatsApp.', 400);
+  return { normalizedPhone, serializedId: numberId._serialized };
 }
 
 export function initDispatchWhatsappClient() {
@@ -124,27 +148,43 @@ export function getDispatchWhatsappStatus() {
 }
 
 export async function getDispatchWhatsappStatusView() {
-  const qrImage = lastQr ? await QRCode.toDataURL(lastQr) : null;
+  let qrImage = null;
+  if (lastQr) {
+    try {
+      qrImage = await QRCode.toDataURL(lastQr);
+    } catch (error) {
+      console.error('No fue posible generar imagen QR de WhatsApp despacho.', error);
+    }
+  }
   return { ready, lastQr, qrImage, lastError, lastReadyAt };
 }
 
 export async function sendDispatchWhatsappMessage({ phone, message }) {
-  const normalizedPhone = normalizePhone(phone);
   const normalizedMessage = normalizeMessage(message);
-
-  if (!normalizedPhone) throw buildError('Debes indicar un número válido para enviar WhatsApp.', 400);
-  if (normalizedPhone.length < 11 || normalizedPhone.length > 15) throw buildError('El número de WhatsApp no es válido.', 400);
   if (!normalizedMessage) throw buildError('El mensaje de WhatsApp no puede estar vacío.', 400);
   if (/<[^>]+>/.test(normalizedMessage)) throw buildError('El mensaje de WhatsApp no puede contener HTML.', 400);
-  if (!client) initDispatchWhatsappClient();
-  if (!ready) throw buildError(NOT_CONNECTED_MESSAGE, 503);
 
-  const numberId = await client.getNumberId(normalizedPhone);
-  if (!numberId?._serialized) throw buildError('El número no está disponible en WhatsApp.', 400);
-
-  const sent = await client.sendMessage(numberId._serialized, normalizedMessage);
+  const activeClient = await getReadyClient();
+  const recipient = await getRecipientId(activeClient, phone);
+  const sent = await activeClient.sendMessage(recipient.serializedId, normalizedMessage);
   return {
-    phone: normalizedPhone,
+    phone: recipient.normalizedPhone,
+    providerMessageId: sent?.id?._serialized || sent?.id?.id || null
+  };
+}
+
+export async function sendDispatchWhatsappMediaMessage({ phone, caption, buffer, filename, mimeType = 'application/pdf' }) {
+  const normalizedCaption = normalizeMessage(caption);
+  if (!Buffer.isBuffer(buffer)) throw buildError('El archivo de WhatsApp no es válido.', 400);
+  if (!buffer.length) throw buildError('El archivo de WhatsApp está vacío.', 400);
+  if (normalizedCaption && /<[^>]+>/.test(normalizedCaption)) throw buildError('El mensaje de WhatsApp no puede contener HTML.', 400);
+
+  const activeClient = await getReadyClient();
+  const recipient = await getRecipientId(activeClient, phone);
+  const media = new MessageMedia(mimeType, buffer.toString('base64'), filename || 'programacion.pdf');
+  const sent = await activeClient.sendMessage(recipient.serializedId, media, { caption: normalizedCaption });
+  return {
+    phone: recipient.normalizedPhone,
     providerMessageId: sent?.id?._serialized || sent?.id?.id || null
   };
 }

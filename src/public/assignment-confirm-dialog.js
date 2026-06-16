@@ -33,8 +33,9 @@
       .styled-confirm-btn,.same-day-dialog-btn{min-height:36px;border-radius:999px;border:1px solid #e1e6ef;background:#fff;color:#1e2d3d;padding:8px 14px;font-weight:900;font-size:13px;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.08)}
       .styled-confirm-btn:hover,.same-day-dialog-btn:hover{border-color:#0d7a6b;color:#0d7a6b}
       .styled-confirm-danger{background:#be123c;border-color:#be123c;color:#fff}.styled-confirm-danger:hover{background:#9f1239;border-color:#9f1239;color:#fff}
-      .same-day-dialog-confirm{background:#b45309;border-color:#b45309;color:#fff}.same-day-dialog-confirm:hover{background:#92400e;border-color:#92400e;color:#fff}
-      @media(max-width:520px){.styled-confirm-actions,.same-day-dialog-actions{display:grid;grid-template-columns:1fr}.styled-confirm-btn,.same-day-dialog-btn{width:100%}}
+      .same-day-dialog-confirm{background:#b45309;border-color:#b45309;color:#fff}.same-day-dialog-confirm:hover{background:#92400e;color:#fff}
+      .notify-manager-enhanced{display:grid;gap:7px}.notify-manager-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:center}.notify-manager-controls select,.notify-manager-custom{width:100%;border:1px solid var(--border,#d8e0ea);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px;background:#fff;color:var(--navy,#172033)}.notify-manager-add{border:1px solid var(--border,#d8e0ea);border-radius:8px;background:#fff;color:var(--navy,#172033);font-weight:900;padding:7px 10px;cursor:pointer}.notify-pdf-link{width:auto!important;min-width:140px;border-radius:999px!important;padding:7px 12px!important;font-size:12px!important;height:auto!important;text-decoration:none!important;background:#fff!important;color:var(--navy,#172033)!important;border:1px solid var(--border,#d8e0ea)!important}.notify-pdf-link:hover{border-color:#0d7a6b!important;color:#0d7a6b!important}
+      @media(max-width:520px){.styled-confirm-actions,.same-day-dialog-actions{display:grid;grid-template-columns:1fr}.styled-confirm-btn,.same-day-dialog-btn{width:100%}.notify-manager-controls{grid-template-columns:1fr}.notify-manager-add{width:100%}}
     `;
     document.head.appendChild(style);
   }
@@ -140,6 +141,70 @@
     });
   }
 
+  function enhanceManagedByField() {
+    const input = document.getElementById('notifyManagedBy');
+    if (!input || input.dataset.enhanced === 'true') return;
+    injectSharedDialogStyles();
+    input.dataset.enhanced = 'true';
+    input.type = 'hidden';
+    const field = input.closest('.notify-managed-field');
+    const managersKey = 'dispatchProgrammingManagers';
+    const getManagers = () => {
+      try { return JSON.parse(localStorage.getItem(managersKey) || '[]'); } catch (_error) { return []; }
+    };
+    const setInputValue = (value) => {
+      input.value = String(value || '').trim() || 'Julián Herrera';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const wrapper = document.createElement('div');
+    wrapper.className = 'notify-manager-enhanced';
+    wrapper.innerHTML = `
+      <div class="notify-manager-controls">
+        <select aria-label="Gestionado por"></select>
+        <button class="notify-manager-add" type="button">+</button>
+      </div>
+      <input class="notify-manager-custom" type="text" maxlength="80" placeholder="Agregar otro nombre" hidden />`;
+    field?.insertBefore(wrapper, input);
+    const select = wrapper.querySelector('select');
+    const addButton = wrapper.querySelector('button');
+    const custom = wrapper.querySelector('.notify-manager-custom');
+    const renderManagers = (selected = 'Julián Herrera') => {
+      const managers = [...new Set(['Julián Herrera', ...getManagers()])];
+      select.innerHTML = managers.map((name) => `<option value="${String(name).replace(/"/g, '&quot;')}">${String(name)}</option>`).join('');
+      select.value = managers.includes(selected) ? selected : 'Julián Herrera';
+      setInputValue(select.value);
+    };
+    const saveManager = () => {
+      const clean = custom.value.trim();
+      if (!clean) return;
+      const managers = [...new Set([...getManagers(), clean])];
+      localStorage.setItem(managersKey, JSON.stringify(managers));
+      custom.value = '';
+      custom.hidden = true;
+      renderManagers(clean);
+    };
+    select.addEventListener('change', () => setInputValue(select.value));
+    addButton.addEventListener('click', () => { custom.hidden = false; custom.focus(); });
+    custom.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); saveManager(); } });
+    custom.addEventListener('blur', saveManager);
+    renderManagers();
+
+    const actions = document.querySelector('.notify-actions');
+    const selectedRequestId = new URLSearchParams(window.location.search).get('serviceRequestId');
+    if (actions && selectedRequestId && !document.getElementById('notifyPdfLink')) {
+      const link = document.createElement('a');
+      link.id = 'notifyPdfLink';
+      link.className = 'notify-pdf-link';
+      link.textContent = 'Descargar PDF';
+      link.href = '#';
+      link.addEventListener('click', () => {
+        const params = new URLSearchParams({ requestId: selectedRequestId, managedBy: input.value || 'Julián Herrera' });
+        link.href = `/admin/operaciones/programacion.pdf?${params.toString()}`;
+      });
+      actions.prepend(link);
+    }
+  }
+
   document.addEventListener('submit', async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -156,6 +221,7 @@
   }, true);
 
   document.addEventListener('DOMContentLoaded', () => {
+    enhanceManagedByField();
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
       const url = typeof resource === 'string' ? resource : String(resource?.url || '');
