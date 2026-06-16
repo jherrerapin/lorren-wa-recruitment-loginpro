@@ -14,6 +14,7 @@ let ready = false;
 let lastQr = null;
 let lastError = null;
 let lastReadyAt = null;
+let cachedChromeExecutablePath;
 
 function buildError(message, statusCode = 400) {
   const error = new Error(message);
@@ -33,22 +34,9 @@ function normalizeMessage(message) {
   return String(message || '').trim().slice(0, MAX_MESSAGE_LENGTH);
 }
 
-function resolveChromeExecutablePath() {
-  const candidates = [
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    process.env.GOOGLE_CHROME_BIN,
-    process.env.CHROME_BIN,
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome'
-  ].filter(Boolean);
-
-  const configuredPath = candidates.find((candidate) => existsSync(candidate));
-  if (configuredPath) return configuredPath;
-
+function commandPath(command) {
   try {
-    return execFileSync('sh', ['-lc', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome'], {
+    return execFileSync('sh', ['-lc', `command -v ${command}`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore']
     }).trim() || undefined;
@@ -57,26 +45,68 @@ function resolveChromeExecutablePath() {
   }
 }
 
+function resolveChromeExecutablePath() {
+  if (cachedChromeExecutablePath !== undefined) return cachedChromeExecutablePath;
+
+  const candidates = [
+    process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.GOOGLE_CHROME_BIN,
+    process.env.CHROME_BIN,
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome'
+  ].filter(Boolean);
+
+  cachedChromeExecutablePath = candidates.find((candidate) => existsSync(candidate))
+    || commandPath('chromium-browser')
+    || commandPath('chromium')
+    || commandPath('google-chrome-stable')
+    || commandPath('google-chrome')
+    || null;
+
+  return cachedChromeExecutablePath;
+}
+
 function buildPuppeteerOptions() {
   const executablePath = resolveChromeExecutablePath();
   return {
     headless: true,
     ...(executablePath ? { executablePath } : {}),
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
   };
+}
+
+function formatBrowserLaunchError(error) {
+  const rawMessage = error?.message || 'No fue posible inicializar WhatsApp de despacho.';
+  if (rawMessage.includes('ENOENT') || rawMessage.includes('Could not find Chrome') || rawMessage.includes('Failed to launch the browser process')) {
+    return 'No se encontró el navegador necesario para iniciar WhatsApp de despacho. El responsable técnico debe revisar la configuración del entorno de despliegue.';
+  }
+  return rawMessage;
 }
 
 export function initDispatchWhatsappClient() {
   if (client || initializing) return client;
 
   initializing = true;
-  client = new Client({
-    authStrategy: new LocalAuth({
-      clientId: 'dispatch',
-      dataPath: process.env.DISPATCH_WWEB_AUTH_PATH || './storage/dispatch-wweb-auth'
-    }),
-    puppeteer: buildPuppeteerOptions()
-  });
+  try {
+    client = new Client({
+      authStrategy: new LocalAuth({
+        clientId: 'dispatch',
+        dataPath: process.env.DISPATCH_WWEB_AUTH_PATH || './storage/dispatch-wweb-auth'
+      }),
+      puppeteer: buildPuppeteerOptions()
+    });
+  } catch (error) {
+    initializing = false;
+    ready = false;
+    client = null;
+    lastQr = null;
+    lastError = formatBrowserLaunchError(error);
+    console.error('Error creando cliente de WhatsApp de despacho.', error);
+    return null;
+  }
 
   client.on('qr', (qr) => {
     lastQr = qr;
@@ -96,12 +126,14 @@ export function initDispatchWhatsappClient() {
 
   client.on('disconnected', (reason) => {
     ready = false;
+    client = null;
     lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
     console.warn(lastError);
   });
 
   client.on('auth_failure', (message) => {
     ready = false;
+    client = null;
     lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
     console.warn(lastError);
   });
@@ -137,7 +169,7 @@ export async function sendDispatchWhatsappMessage({ phone, message }) {
   if (!normalizedMessage) throw buildError('El mensaje de WhatsApp no puede estar vacío.', 400);
   if (/<[^>]+>/.test(normalizedMessage)) throw buildError('El mensaje de WhatsApp no puede contener HTML.', 400);
   if (!client) initDispatchWhatsappClient();
-  if (!ready) throw buildError(NOT_CONNECTED_MESSAGE, 503);
+  if (!ready) throw buildError(lastError || NOT_CONNECTED_MESSAGE, 503);
 
   const numberId = await client.getNumberId(normalizedPhone);
   if (!numberId?._serialized) throw buildError('El número no está disponible en WhatsApp.', 400);
