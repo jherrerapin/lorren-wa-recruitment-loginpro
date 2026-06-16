@@ -326,7 +326,7 @@ app.post('/recover', async (req, res) => {
   }
 
   const user = await prisma.appUser.findUnique({
-    where: { id: user.id },
+    where: { username },
     select: { id: true, isActive: true, recoveryCodeHash: true }
   });
 
