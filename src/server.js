@@ -16,6 +16,7 @@ import { dispatchClientStatsRouter } from './routes/dispatchClientStats.js';
 import { dispatchOpsExtrasRouter } from './routes/dispatchOpsExtras.js';
 import { dispatchWorkerStatsRouter } from './routes/dispatchWorkerStats.js';
 import { dispatchBridgeRouter } from './routes/dispatchBridge.js';
+import { dispatchWhatsappNotificationsRouter } from './routes/dispatchWhatsappNotifications.js';
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
@@ -381,6 +382,7 @@ app.use('/admin/operaciones', wrapAsyncRouter(dispatchClientStatsRouter(prisma))
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchWorkerStatsRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchOpsExtrasRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
+app.use('/admin/operaciones/whatsapp', wrapAsyncRouter(dispatchWhatsappNotificationsRouter(prisma)));
 app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
