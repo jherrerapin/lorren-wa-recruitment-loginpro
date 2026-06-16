@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
@@ -32,8 +33,17 @@ function normalizeMessage(message) {
   return String(message || '').trim().slice(0, MAX_MESSAGE_LENGTH);
 }
 
+function executableFromPath(command) {
+  try {
+    const found = execFileSync('which', [command], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return found && fs.existsSync(found) ? found : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function resolveBrowserExecutablePath() {
-  const candidates = [
+  const explicitCandidates = [
     process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
     process.env.PUPPETEER_EXECUTABLE_PATH,
     process.env.CHROME_BIN,
@@ -43,7 +53,9 @@ function resolveBrowserExecutablePath() {
     '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome'
   ].filter(Boolean);
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+  const explicitPath = explicitCandidates.find((candidate) => fs.existsSync(candidate));
+  if (explicitPath) return explicitPath;
+  return executableFromPath('chromium') || executableFromPath('chromium-browser') || executableFromPath('google-chrome-stable') || executableFromPath('google-chrome');
 }
 
 function buildPuppeteerOptions() {
