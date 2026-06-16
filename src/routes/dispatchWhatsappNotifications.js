@@ -5,6 +5,8 @@ import {
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappWebService.js';
 
+const OPERATIONAL_SESSION_ERROR = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -17,20 +19,28 @@ function setNoStore(res) {
   res.set('Expires', '0');
 }
 
+function userRole(req) {
+  return req.session?.userRole || req.userRole;
+}
+
+function isDev(req) {
+  return userRole(req) === 'dev';
+}
+
 function isOpsUser(req) {
   const username = normalizeString(req.session?.username || req.username);
   return Boolean(username?.startsWith('operaciones-despacho'));
 }
 
 function canUseOps(req) {
-  const role = req.session?.userRole || req.userRole;
+  const role = userRole(req);
   const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch);
   return role === 'dev' || canAccessDispatch || isOpsUser(req);
 }
 
 function requireOps(req, res, next) {
   setNoStore(res);
-  const role = req.session?.userRole || req.userRole;
+  const role = userRole(req);
   if (!role) return res.status(401).json({ ok: false, message: 'Debes iniciar sesión.' });
   if (!canUseOps(req)) return res.status(403).json({ ok: false, message: 'Módulo no habilitado para este usuario.' });
   return next();
@@ -47,22 +57,41 @@ function normalizeContext(context) {
   };
 }
 
+function startWhatsappSession() {
+  try {
+    initDispatchWhatsappClient();
+  } catch (error) {
+    console.error('No fue posible iniciar WhatsApp de despacho.', error);
+  }
+}
+
+function buildStatusForViewer(req, status) {
+  const technicalLastError = status.lastError || null;
+  return {
+    ...status,
+    isDev: isDev(req),
+    lastError: technicalLastError && !isDev(req) ? OPERATIONAL_SESSION_ERROR : technicalLastError,
+    technicalLastError: isDev(req) ? technicalLastError : null
+  };
+}
+
 export function dispatchWhatsappNotificationsRouter(_prisma) {
-  initDispatchWhatsappClient();
   const router = express.Router();
   router.use(requireOps);
 
-  router.get('/', async (_req, res) => {
-    const status = await getDispatchWhatsappStatusView();
+  router.get('/', async (req, res) => {
+    startWhatsappSession();
+    const status = buildStatusForViewer(req, await getDispatchWhatsappStatusView());
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
-      role: _req.session?.userRole || _req.userRole,
+      role: userRole(req),
       ...status
     });
   });
 
-  router.get('/estado', async (_req, res) => {
-    res.json({ ok: true, ...(await getDispatchWhatsappStatusView()) });
+  router.get('/estado', async (req, res) => {
+    startWhatsappSession();
+    res.json({ ok: true, ...buildStatusForViewer(req, await getDispatchWhatsappStatusView()) });
   });
 
   router.post('/enviar', async (req, res) => {
@@ -75,7 +104,8 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
       return res.json({ ok: true, providerMessageId: result.providerMessageId, phone: result.phone });
     } catch (error) {
       const statusCode = error?.statusCode === 503 ? 503 : 400;
-      return res.status(statusCode).json({ ok: false, message: error?.message || 'No se pudo enviar el mensaje.' });
+      const message = statusCode === 503 && !isDev(req) ? OPERATIONAL_SESSION_ERROR : (error?.message || 'No se pudo enviar el mensaje.');
+      return res.status(statusCode).json({ ok: false, message });
     }
   });
 
