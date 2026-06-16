@@ -108,7 +108,9 @@ export function initDispatchWhatsappClient() {
 
   client.initialize().catch((error) => {
     ready = false;
-    lastError = error?.message || 'No fue posible inicializar WhatsApp de despacho.';
+    lastQr = null;
+    lastError = formatBrowserLaunchError(error);
+    client = null;
     console.error('Error inicializando WhatsApp de despacho.', error);
   }).finally(() => {
     initializing = false;
