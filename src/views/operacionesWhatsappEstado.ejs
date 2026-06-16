@@ -49,7 +49,7 @@
       <article class="status-card <%= ready ? 'connected' : '' %>" id="statusCard">
         <span class="status-label <%= ready ? 'connected' : lastError ? 'error' : '' %>" id="statusLabel"><%= ready ? 'Conectado' : lastError ? 'Error de sesión' : 'No conectado' %></span>
         <h2 id="statusTitle"><%= ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión' %></h2>
-        <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span><%= lastReadyAt || '' %></span></p>
+        <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span data-raw-ready-at="<%= lastReadyAt || '' %>"><%= lastReadyAt || '' %></span></p>
         <p>Esta pantalla reemplaza la dependencia operativa del QR en consola. El envío sigue usando la sesión de whatsapp-web.js.</p>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
       </article>
@@ -83,6 +83,30 @@
     const qrImage = document.getElementById('qrImage');
     const waitingQr = document.getElementById('waitingQr');
 
+    function formatBogotaDateTime(value) {
+      if (!value) return '';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return value;
+      return new Intl.DateTimeFormat('es-CO', {
+        timeZone: 'America/Bogota',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      }).format(parsed).replace(/\s*a\.\s*m\./i, ' a. m.').replace(/\s*p\.\s*m\./i, ' p. m.');
+    }
+
+    function renderReadyAt(value) {
+      const formatted = formatBogotaDateTime(value);
+      setHidden(readyAt, !formatted);
+      if (readyAtText) {
+        readyAtText.dataset.rawReadyAt = value || '';
+        readyAtText.textContent = formatted;
+      }
+    }
+
     function setHidden(element, hidden) { if (element) element.hidden = hidden; }
     function renderStatus(data) {
       const hasError = Boolean(data.lastError);
@@ -90,8 +114,7 @@
       statusLabel.className = 'status-label ' + (data.ready ? 'connected' : hasError ? 'error' : '');
       statusCard.classList.toggle('connected', Boolean(data.ready));
       statusTitle.textContent = data.ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión';
-      setHidden(readyAt, !data.lastReadyAt);
-      if (readyAtText) readyAtText.textContent = data.lastReadyAt || '';
+      renderReadyAt(data.lastReadyAt);
       setHidden(errorBox, !hasError);
       if (errorBox) errorBox.textContent = data.lastError || '';
       setHidden(connectedMessage, !data.ready);
@@ -105,6 +128,7 @@
       renderStatus(await response.json());
     }
     document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);
+    renderReadyAt(readyAtText?.dataset.rawReadyAt || readyAtText?.textContent || '');
     window.setInterval(refreshStatus, 3000);
   </script>
 </body>
