@@ -95,19 +95,37 @@
     const vacancySelect = document.getElementById('vacancyIds');
     const vacancyHelp = document.getElementById('vacancyHelp');
     const normalize = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+
+    function cityKey(value) {
+      const normalized = normalize(value)
+        .replace(/\./g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!normalized) return '';
+      if (normalized.includes('bogota')) return 'bogota';
+      if (normalized.includes('siberia')) return 'siberia';
+      if (normalized.includes('ibague')) return 'ibague';
+      if (normalized.includes('neiva')) return 'neiva';
+      return normalized;
+    }
+
     const allVacancyOptions = Array.from(vacancySelect.options).map((option) => ({
       value: option.value,
       text: option.textContent,
       cityName: option.dataset.cityName,
+      cityKey: cityKey(option.dataset.cityName),
       selected: option.selected
     }));
 
-    function selectedCityNames() {
-      return Array.from(citySelect.selectedOptions).map((option) => normalize(option.dataset.cityName || option.textContent));
+    function selectedCityKeys() {
+      return Array.from(citySelect.selectedOptions)
+        .map((option) => cityKey(option.dataset.cityName || option.textContent))
+        .filter(Boolean);
     }
 
     function refreshVacancyOptions() {
-      const selectedCities = selectedCityNames();
+      const selectedCities = selectedCityKeys();
       const previousSelection = new Set(Array.from(vacancySelect.selectedOptions).map((option) => option.value));
       vacancySelect.innerHTML = '';
 
@@ -116,18 +134,21 @@
         return;
       }
 
-      const filtered = allVacancyOptions.filter((option) => selectedCities.includes(normalize(option.cityName)));
+      const selectedCitySet = new Set(selectedCities);
+      const filtered = allVacancyOptions.filter((option) => selectedCitySet.has(option.cityKey));
+
       filtered.forEach((item) => {
         const option = document.createElement('option');
         option.value = item.value;
         option.textContent = item.text;
         option.dataset.cityName = item.cityName;
+        option.dataset.cityKey = item.cityKey;
         option.selected = previousSelection.has(item.value) || item.selected;
         vacancySelect.appendChild(option);
       });
 
       vacancyHelp.textContent = filtered.length
-        ? 'Perfiles activos disponibles para las ciudades seleccionadas.'
+        ? 'Perfiles activos disponibles únicamente para las ciudades seleccionadas.'
         : 'No hay perfiles activos para las ciudades seleccionadas.';
     }
 
