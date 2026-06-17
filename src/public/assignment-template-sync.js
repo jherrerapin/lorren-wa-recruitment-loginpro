@@ -46,45 +46,73 @@
     block.replaceWith(note);
   }
 
-  function parseRequestDateTime(card) {
-    const text = card?.textContent || '';
-    const dateMatch = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-    const timeMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
-    if (!dateMatch) return null;
-    const time = timeMatch ? `${String(timeMatch[1]).padStart(2, '0')}:${timeMatch[2]}` : '23:59';
-    return new Date(`${dateMatch[1]}T${time}:00-05:00`);
+  function parseRequestStart(card) {
+    const spans = [...card.querySelectorAll('.meta span')];
+    const scheduleText = spans.map((span) => span.textContent || '').find((text) => /\d{4}-\d{2}-\d{2}/.test(text));
+    if (!scheduleText) return null;
+    const match = scheduleText.match(/(\d{4}-\d{2}-\d{2})\s*·\s*([0-2]?\d:[0-5]\d)?/);
+    if (!match) return null;
+    const date = match[1];
+    const time = match[2] || '23:59';
+    const start = new Date(`${date}T${time.padStart(5, '0')}:00-05:00`);
+    return Number.isNaN(start.getTime()) ? null : start;
   }
 
-  function filterCurrentServiceRequests() {
-    const requestList = document.querySelector('.request-list');
-    if (!requestList || requestList.dataset.currentFilterApplied === 'true') return;
-    requestList.dataset.currentFilterApplied = 'true';
+  function visibleRequestCards(cards) {
+    return cards.filter((card) => !card.hidden && card.dataset.expiredServiceRequest !== 'true');
+  }
+
+  function redirectToFirstVisibleRequest(cards) {
+    const firstVisible = visibleRequestCards(cards)[0];
+    const selectLink = firstVisible?.querySelector('.request-actions a[href*="serviceRequestId="]');
+    if (selectLink?.href && window.location.href !== selectLink.href) {
+      window.location.replace(selectLink.href);
+      return true;
+    }
+    return false;
+  }
+
+  function filterExpiredServiceRequests() {
+    const list = document.querySelector('.request-list');
+    if (!list || list.dataset.currentFilterApplied === 'true') return;
+    list.dataset.currentFilterApplied = 'true';
+
     const now = new Date();
-    const cards = Array.from(requestList.querySelectorAll('.request-card'));
+    const cards = [...list.querySelectorAll('.request-card')];
     let visibleCount = 0;
     let hiddenCount = 0;
+
     cards.forEach((card) => {
-      const requestDateTime = parseRequestDateTime(card);
-      const isCurrent = !requestDateTime || requestDateTime >= now;
-      card.hidden = !isCurrent;
-      card.dataset.hiddenByCurrentFilter = isCurrent ? 'false' : 'true';
-      if (isCurrent) visibleCount += 1;
+      const requestStart = parseRequestStart(card);
+      const isExpired = requestStart ? requestStart < now : false;
+      card.hidden = isExpired;
+      card.dataset.expiredServiceRequest = isExpired ? 'true' : 'false';
+      if (!isExpired) visibleCount += 1;
       else hiddenCount += 1;
     });
-    const head = requestList.closest('.board-panel')?.querySelector('.board-panel-head p');
-    if (head) head.textContent = hiddenCount ? `Solo se muestran solicitudes vigentes desde la hora actual. ${hiddenCount} solicitud(es) vencida(s) ocultas.` : 'Elige la solicitud vigente sobre la que vas a trabajar.';
+
+    const head = list.closest('.board-panel')?.querySelector('.board-panel-head p');
+    if (head) {
+      head.textContent = hiddenCount
+        ? `Solo se muestran solicitudes vigentes desde la hora actual. ${hiddenCount} solicitud(es) vencida(s) ocultas.`
+        : 'Elige la solicitud vigente sobre la que vas a trabajar.';
+    }
+
+    const activeCard = list.querySelector('.request-card.active');
+    if (activeCard?.hidden && redirectToFirstVisibleRequest(cards)) return;
+
     if (!visibleCount && cards.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';
-      empty.innerHTML = '<strong>No hay solicitudes vigentes.</strong>Las solicitudes de días anteriores o con hora ya vencida se ocultan para mantener limpio el tablero.';
-      requestList.appendChild(empty);
+      empty.innerHTML = '<strong>No hay solicitudes vigentes para asignar.</strong>Solo se muestran servicios cuya fecha y hora aún no han pasado.';
+      list.appendChild(empty);
     }
   }
 
   function boot() {
     hideRequesterNoticeWithoutContact();
     enhanceTemplate();
-    filterCurrentServiceRequests();
+    filterExpiredServiceRequests();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
