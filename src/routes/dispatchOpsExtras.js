@@ -9,8 +9,22 @@ const TEMPLATE_KEY = 'DISPATCH_ASSIGNMENT_WHATSAPP';
 const DEFAULT_ASSIGNMENT_TEMPLATE = 'Hola {{nombre}}, te confirmamos asignacion para {{fecha}} en {{operacion}}. Direccion: {{direccion}}. Horario: {{horaInicio}} - {{horaFin}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
+const MAX_CV_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_CV_MIME_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
+const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
 
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const workerCvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_CV_SIZE_BYTES },
+  fileFilter(_req, file, callback) {
+    const originalName = String(file.originalname || '').toLowerCase();
+    const allowedByMime = ALLOWED_CV_MIME_TYPES.has(file.mimetype);
+    const allowedByExtension = ALLOWED_CV_EXTENSIONS.some((extension) => originalName.endsWith(extension));
+    if (allowedByMime || allowedByExtension) return callback(null, true);
+    return callback(new Error('La hoja de vida debe estar en formato PDF, DOC o DOCX.'));
+  }
+});
 
 function normalizeString(value) { if (typeof value !== 'string') return null; const trimmed = value.trim(); return trimmed.length ? trimmed : null; }
 function normalizeStringList(value) {
@@ -33,7 +47,7 @@ function serviceRequestServiceData(service) { return { serviceId: service?.id ||
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((row) => normalizeString(row[fieldName])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')); }
 function buildDispatchEligibilityFilter() { return { operationalStatus: 'CONTRATADO' }; }
-function buildWorkerData(body) {
+function buildWorkerData(body = {}) {
   return {
     fullName: normalizeString(body.fullName),
     phone: normalizeString(body.phone),
@@ -45,6 +59,52 @@ function buildWorkerData(body) {
     operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
     notes: normalizeString(body.notes)
   };
+}
+function validateRequiredWorkerFields(workerData, body = {}) {
+  const missing = [];
+  if (!workerData.fullName) missing.push('nombre completo');
+  if (!workerData.phone) missing.push('teléfono');
+  if (!workerData.documentType) missing.push('tipo de documento');
+  if (!workerData.documentNumber) missing.push('número de documento');
+  if (!workerData.residenceCity) missing.push('ciudad de residencia');
+  if (!workerData.residenceLocality) missing.push('localidad / barrio');
+  if (!normalizeString(body.operationalStatus)) missing.push('estado operativo');
+  if (!normalizeStringList(body.cityIds).length) missing.push('ciudades operativas');
+  if (!normalizeStringList(body.vacancyIds).length) missing.push('vacantes / perfiles');
+  return missing;
+}
+function buildRequiredWorkerFieldsMessage(missingFields) {
+  return `Completa los campos obligatorios: ${missingFields.join(', ')}.`;
+}
+function parseWorkerCvUpload(req, res, next) {
+  workerCvUpload.single('cvFile')(req, res, (error) => {
+    if (error) req.workerCvUploadError = error.code === 'LIMIT_FILE_SIZE' ? 'La hoja de vida no puede superar 5 MB.' : error.message || 'No fue posible procesar la hoja de vida.';
+    return next();
+  });
+}
+function applyWorkerCvFile(workerData, file) {
+  if (!file || !Buffer.isBuffer(file.buffer) || !file.buffer.length) return workerData;
+  return { ...workerData, cvData: file.buffer, cvMimeType: file.mimetype || 'application/octet-stream', cvOriginalName: file.originalname || 'hoja-de-vida' };
+}
+function buildWorkerFormModelFromBody(body = {}, existing = null) {
+  const cityIds = normalizeStringList(body.cityIds);
+  const vacancyIds = normalizeStringList(body.vacancyIds);
+  return {
+    ...(existing || {}),
+    ...buildWorkerData(body),
+    cities: cityIds.map((cityId) => ({ cityId })),
+    vacancies: vacancyIds.map((vacancyId) => ({ vacancyId })),
+    cvOriginalName: existing?.cvOriginalName || null,
+    candidate: existing?.candidate || null,
+    candidateId: existing?.candidateId || null
+  };
+}
+async function loadWorkerFormLists(prisma) {
+  return Promise.all([loadDispatchCities(prisma), prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })]);
+}
+async function renderWorkerFormWithError(req, res, prisma, { worker = null, mode, formAction, error, status = 400 }) {
+  const [cities, vacancies] = await loadWorkerFormLists(prisma);
+  return res.status(status).render('operacionesPersonalNuevo', { cities, vacancies, worker: buildWorkerFormModelFromBody(req.body, worker), mode, formAction, role: req.session?.userRole || req.userRole, error });
 }
 async function resolveDispatchService(prisma, serviceId) { const normalizedServiceId = normalizeString(serviceId); if (!normalizedServiceId) return null; return prisma.dispatchClientService.findFirst({ where: { id: normalizedServiceId, isActive: true }, include: { client: true } }); }
 async function getTemplate(prisma) { const template = await prisma.dispatchMessageTemplate.findUnique({ where: { key: TEMPLATE_KEY } }); return template?.content || DEFAULT_ASSIGNMENT_TEMPLATE; }
@@ -99,9 +159,7 @@ async function notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUs
   if (result?.error) return ' Solicitud completa: no fue posible enviar el correo al solicitante.';
   return '';
 }
-// Busca cualquier worker (no solo MANUAL) por id
 async function findWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId }, include: { cities: true, vacancies: true } }); }
-// Busca solo workers MANUAL por id (para editar)
 async function findManualWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId, source: 'MANUAL' }, include: { cities: true, vacancies: true } }); }
 async function replaceWorkerRelations(prisma, workerId, body) {
   const cityIds = normalizeStringList(body.cityIds);
@@ -197,7 +255,6 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.post('/asignaciones/novedades/:incidentId/reabrir', requireOps, async (req, res) => { const incident = await prisma.dispatchIncident.findUnique({ where: { id: req.params.incidentId }, select: { id: true, serviceRequestId: true } }); if (!incident) return res.status(404).send('Novedad no encontrada'); await prisma.dispatchIncident.update({ where: { id: incident.id }, data: { status: 'OPEN', resolvedAt: null, resolvedByUsername: null, resolutionNote: null } }); return res.redirect(redirectToAssignment(incident.serviceRequestId, 'Novedad reabierta.')); });
   router.post('/novedades/:incidentId/reabrir', requireOps, async (req, res) => { const incident = await prisma.dispatchIncident.findUnique({ where: { id: req.params.incidentId }, select: { id: true } }); if (!incident) return res.status(404).send('Novedad no encontrada'); await prisma.dispatchIncident.update({ where: { id: incident.id }, data: { status: 'OPEN', resolvedAt: null, resolvedByUsername: null, resolutionNote: null } }); return res.redirect(`/admin/operaciones/novedades?fecha=${encodeURIComponent(normalizeDateParam(req.body.fecha))}&status=${encodeURIComponent(normalizeString(req.body.status) || 'ALL')}`); });
 
-  // ── Personal operativo ────────────────────────────────────────────────────
   router.get('/personal', requireOps, async (req, res) => {
     const operationalCityId = normalizeString(req.query.operationalCityId);
     const vacancyId = normalizeString(req.query.vacancyId);
@@ -252,7 +309,6 @@ export function dispatchOpsExtrasRouter(prisma) {
           const val = cell.value;
           if (val === null || val === undefined) return null;
           if (typeof val === 'object' && val.richText) return val.richText.map((r) => r.text).join('');
-          // Números en notación científica (ej: 1.037e+09) — convertir a entero antes de stringify
           if (typeof val === 'number') return String(Math.round(val));
           return normalizeString(String(val));
         };
@@ -263,14 +319,11 @@ export function dispatchOpsExtrasRouter(prisma) {
       let creados = 0, omitidos = 0, reactivados = 0;
       for (const row of rows) {
         if (row.cedula) {
-          // Buscar si ya existe un worker activo (no INACTIVE) con esa cédula — eso sí es duplicado real
           const activeExisting = await prisma.dispatchWorker.findFirst({
             where: { documentNumber: row.cedula, operationalStatus: { not: 'INACTIVE' } },
             select: { id: true }
           });
           if (activeExisting) { omitidos++; continue; }
-
-          // Si existe pero estaba INACTIVE, reactivarlo en lugar de omitirlo
           const inactiveExisting = await prisma.dispatchWorker.findFirst({
             where: { documentNumber: row.cedula, operationalStatus: 'INACTIVE' },
             select: { id: true }
@@ -278,33 +331,15 @@ export function dispatchOpsExtrasRouter(prisma) {
           if (inactiveExisting) {
             await prisma.dispatchWorker.update({
               where: { id: inactiveExisting.id },
-              data: {
-                fullName: row.nombre,
-                phone: row.telefono || null,
-                residenceLocality: row.localidad || null,
-                operationalStatus: 'CONTRATADO',
-                source: 'EXCEL_IMPORT'
-              }
+              data: { fullName: row.nombre, phone: row.telefono || null, residenceLocality: row.localidad || null, operationalStatus: 'CONTRATADO', source: 'EXCEL_IMPORT' }
             });
             reactivados++;
             continue;
           }
         }
-
-        // No existe — crear nuevo
-        await prisma.dispatchWorker.create({
-          data: {
-            fullName: row.nombre,
-            documentNumber: row.cedula || null,
-            phone: row.telefono || null,
-            residenceLocality: row.localidad || null,
-            source: 'EXCEL_IMPORT',
-            operationalStatus: 'CONTRATADO'
-          }
-        });
+        await prisma.dispatchWorker.create({ data: { fullName: row.nombre, documentNumber: row.cedula || null, phone: row.telefono || null, residenceLocality: row.localidad || null, source: 'EXCEL_IMPORT', operationalStatus: 'CONTRATADO' } });
         creados++;
       }
-
       const parts = [];
       if (creados) parts.push(`${creados} auxiliar${creados !== 1 ? 'es creados' : ' creado'}`);
       if (reactivados) parts.push(`${reactivados} reactivado${reactivados !== 1 ? 's' : ''}`);
@@ -318,29 +353,43 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
 
   router.get('/personal/nuevo', requireOps, async (req, res) => {
-    const [cities, vacancies] = await Promise.all([loadDispatchCities(prisma), prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })]);
+    const [cities, vacancies] = await loadWorkerFormLists(prisma);
     return res.render('operacionesPersonalNuevo', { cities, vacancies, worker: null, mode: 'create', formAction: '/admin/operaciones/personal/nuevo', role: req.session?.userRole || req.userRole });
   });
-  router.post('/personal/nuevo', requireOps, async (req, res) => {
+  router.post('/personal/nuevo', requireOps, parseWorkerCvUpload, async (req, res) => {
     const workerData = buildWorkerData(req.body);
-    if (!workerData.fullName) return res.status(400).send('Nombre requerido');
-    const worker = await prisma.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
-    await replaceWorkerRelations(prisma, worker.id, req.body);
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual creado.')}`);
+    const missingFields = validateRequiredWorkerFields(workerData, req.body);
+    if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: req.workerCvUploadError });
+    if (missingFields.length) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: buildRequiredWorkerFieldsMessage(missingFields) });
+    try {
+      const worker = await prisma.dispatchWorker.create({ data: { ...applyWorkerCvFile(workerData, req.file), source: 'MANUAL' } });
+      await replaceWorkerRelations(prisma, worker.id, req.body);
+      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual creado.')}`);
+    } catch (error) {
+      console.error('[Manual worker create]', error);
+      return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: 'No fue posible crear el auxiliar. Revisa los datos e intenta nuevamente.' });
+    }
   });
   router.get('/personal/:workerId/editar', requireOps, async (req, res) => {
     const [worker, cities, vacancies] = await Promise.all([findManualWorkerOr404(prisma, req.params.workerId), loadDispatchCities(prisma), prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })]);
     if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
     return res.render('operacionesPersonalNuevo', { cities, vacancies, worker, mode: 'edit', formAction: `/admin/operaciones/personal/${worker.id}/editar`, role: req.session?.userRole || req.userRole });
   });
-  router.post('/personal/:workerId/editar', requireOps, async (req, res) => {
+  router.post('/personal/:workerId/editar', requireOps, parseWorkerCvUpload, async (req, res) => {
     const existing = await findManualWorkerOr404(prisma, req.params.workerId);
     if (!existing) return res.status(404).send('Auxiliar manual no encontrado');
     const workerData = buildWorkerData(req.body);
-    if (!workerData.fullName) return res.status(400).send('Nombre requerido');
-    await prisma.dispatchWorker.update({ where: { id: existing.id }, data: workerData });
-    await replaceWorkerRelations(prisma, existing.id, req.body);
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual actualizado.')}`);
+    const missingFields = validateRequiredWorkerFields(workerData, req.body);
+    if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: req.workerCvUploadError });
+    if (missingFields.length) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: buildRequiredWorkerFieldsMessage(missingFields) });
+    try {
+      await prisma.dispatchWorker.update({ where: { id: existing.id }, data: applyWorkerCvFile(workerData, req.file) });
+      await replaceWorkerRelations(prisma, existing.id, req.body);
+      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual actualizado.')}`);
+    } catch (error) {
+      console.error('[Manual worker update]', error);
+      return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: 'No fue posible actualizar el auxiliar. Revisa los datos e intenta nuevamente.' });
+    }
   });
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await findManualWorkerOr404(prisma, req.params.workerId);
@@ -350,7 +399,6 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(nextStatus === 'ACTIVE' ? 'Auxiliar manual reactivado.' : 'Auxiliar manual desactivado.')}`);
   });
 
-  // Eliminar uno (cualquier source — marca como INACTIVE)
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
     const worker = await findWorkerOr404(prisma, req.params.workerId);
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
@@ -358,7 +406,6 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar eliminado del flujo activo.')}`);
   });
 
-  // Eliminar varios en bulk (cualquier source — marca como INACTIVE)
   router.post('/personal/eliminar-bulk', requireOps, async (req, res) => {
     const idsRaw = normalizeString(req.body.ids);
     if (!idsRaw) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs para eliminar.')}`);
