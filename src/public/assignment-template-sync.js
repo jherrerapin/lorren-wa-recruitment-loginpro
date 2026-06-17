@@ -112,7 +112,8 @@
   function boot() {
     hideRequesterNoticeWithoutContact();
     enhanceTemplate();
-    filterExpiredServiceRequests();
+    // Desactivado temporalmente por operación: vuelve a activar esta línea cuando se requiera ocultar solicitudes vencidas.
+    // filterExpiredServiceRequests();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
