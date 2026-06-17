@@ -159,7 +159,7 @@ app.use((req, res, next) => {
       }
       const shouldInject = view === 'operacionesAsignacionesConfirmacion' && typeof html === 'string';
       const output = shouldInject
-        ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script></body>')
+        ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script><script src="/public/assignment-template-sync.js"></script></body>')
         : html;
       if (typeof callback === 'function') return callback(null, output);
       return res.send(output);
