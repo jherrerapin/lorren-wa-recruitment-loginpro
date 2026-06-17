@@ -8,10 +8,43 @@ import {
 } from '../services/dispatchProgrammingPdfService.js';
 import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebService.js';
 
-const PROGRAMMING_WHATSAPP_RECIPIENTS = [
+const DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS = [
   { name: 'Milton Rodríguez', phone: '3057680685' },
   { name: 'Julie Jaso', phone: '3175868701' }
 ];
+
+function parseProgrammingWhatsappRecipients(value) {
+  const rawValue = normalizeString(value);
+  if (!rawValue) return DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS;
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (Array.isArray(parsed)) {
+      const recipients = parsed
+        .map((item, index) => ({
+          name: normalizeString(item?.name) || `Destinatario ${index + 1}`,
+          phone: normalizeString(item?.phone)
+        }))
+        .filter((item) => item.phone);
+      if (recipients.length) return recipients;
+    }
+  } catch (_error) {
+    // También se permite formato simple: Nombre|telefono;Nombre|telefono
+  }
+
+  const recipients = rawValue
+    .split(/[;\n]+/)
+    .map((entry, index) => {
+      const parts = entry.split('|').map((part) => normalizeString(part));
+      if (parts.length >= 2) return { name: parts[0] || `Destinatario ${index + 1}`, phone: parts[1] };
+      return { name: `Destinatario ${index + 1}`, phone: parts[0] };
+    })
+    .filter((item) => item.phone);
+
+  return recipients.length ? recipients : DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS;
+}
+
+const PROGRAMMING_WHATSAPP_RECIPIENTS = parseProgrammingWhatsappRecipients(process.env.DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS);
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
