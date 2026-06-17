@@ -205,6 +205,59 @@
     }
   }
 
+  function parseRequestDateTime(card) {
+    const text = card?.textContent || '';
+    const dateMatch = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+    if (!dateMatch) return null;
+    const afterDate = text.slice(text.indexOf(dateMatch[1]) + dateMatch[1].length);
+    const times = Array.from(afterDate.matchAll(/\b(\d{1,2}):(\d{2})\b/g)).map((match) => Number(match[1]) * 60 + Number(match[2]));
+    return { date: dateMatch[1], start: times[0] ?? null, end: times[1] ?? null };
+  }
+
+  function currentLocalDateAndMinutes() {
+    const now = new Date();
+    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return { date, minutes: now.getHours() * 60 + now.getMinutes() };
+  }
+
+  function isRequestCurrentOrFuture(parsed, now) {
+    if (!parsed?.date) return true;
+    if (parsed.date > now.date) return true;
+    if (parsed.date < now.date) return false;
+    if (parsed.end !== null) return parsed.end >= now.minutes;
+    if (parsed.start !== null) return parsed.start >= now.minutes;
+    return true;
+  }
+
+  function filterCurrentServiceRequests() {
+    const requestList = document.querySelector('.request-list');
+    if (!requestList || requestList.dataset.currentFilterApplied === 'true') return;
+    requestList.dataset.currentFilterApplied = 'true';
+    const cards = Array.from(requestList.querySelectorAll('.request-card'));
+    if (!cards.length) return;
+    const now = currentLocalDateAndMinutes();
+    let visibleCount = 0;
+    let activeCardWasHidden = false;
+    cards.forEach((card) => {
+      const visible = isRequestCurrentOrFuture(parseRequestDateTime(card), now);
+      card.hidden = !visible;
+      if (visible) visibleCount += 1;
+      if (!visible && card.classList.contains('active')) activeCardWasHidden = true;
+    });
+    if (!visibleCount) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.innerHTML = '<strong>No hay solicitudes vigentes para asignar.</strong>Solo se muestran solicitudes de hoy con horario vigente o futuras.';
+      requestList.appendChild(empty);
+      return;
+    }
+    if (activeCardWasHidden) {
+      const firstVisible = cards.find((card) => !card.hidden);
+      const selectLink = firstVisible?.querySelector('a[href*="serviceRequestId="]');
+      if (selectLink) window.location.href = selectLink.href;
+    }
+  }
+
   document.addEventListener('submit', async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -221,6 +274,7 @@
   }, true);
 
   document.addEventListener('DOMContentLoaded', () => {
+    filterCurrentServiceRequests();
     enhanceManagedByField();
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
