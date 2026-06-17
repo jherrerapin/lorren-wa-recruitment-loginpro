@@ -52,7 +52,7 @@
         <span class="status-label <%= ready ? 'connected' : lastError ? 'error' : '' %>" id="statusLabel"><%= ready ? 'Conectado' : lastError ? 'Requiere revisión' : 'No conectado' %></span>
         <h2 id="statusTitle"><%= ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión' %></h2>
         <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span data-raw-ready-at="<%= lastReadyAt || '' %>"><%= lastReadyAt || '' %></span></p>
-        <p>Esta pantalla reemplaza la dependencia operativa del QR en consola. El envío sigue usando la sesión de whatsapp-web.js.</p>
+        <p>Esta pantalla permite vincular y revisar la conexión de WhatsApp de despacho para enviar mensajes desde el panel.</p>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
         <% if (role === 'dev') { %>
           <details class="technical-box" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>>
