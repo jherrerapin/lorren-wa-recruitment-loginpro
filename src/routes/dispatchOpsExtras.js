@@ -60,6 +60,22 @@ function buildWorkerData(body = {}) {
     notes: normalizeString(body.notes)
   };
 }
+function validateRequiredWorkerFields(workerData, body = {}) {
+  const missing = [];
+  if (!workerData.fullName) missing.push('nombre completo');
+  if (!workerData.phone) missing.push('teléfono');
+  if (!workerData.documentType) missing.push('tipo de documento');
+  if (!workerData.documentNumber) missing.push('número de documento');
+  if (!workerData.residenceCity) missing.push('ciudad de residencia');
+  if (!workerData.residenceLocality) missing.push('localidad / barrio');
+  if (!normalizeString(body.operationalStatus)) missing.push('estado operativo');
+  if (!normalizeStringList(body.cityIds).length) missing.push('ciudades operativas');
+  if (!normalizeStringList(body.vacancyIds).length) missing.push('vacantes / perfiles');
+  return missing;
+}
+function buildRequiredWorkerFieldsMessage(missingFields) {
+  return `Completa los campos obligatorios: ${missingFields.join(', ')}.`;
+}
 function parseWorkerCvUpload(req, res, next) {
   workerCvUpload.single('cvFile')(req, res, (error) => {
     if (error) req.workerCvUploadError = error.code === 'LIMIT_FILE_SIZE' ? 'La hoja de vida no puede superar 5 MB.' : error.message || 'No fue posible procesar la hoja de vida.';
@@ -342,8 +358,9 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
   router.post('/personal/nuevo', requireOps, parseWorkerCvUpload, async (req, res) => {
     const workerData = buildWorkerData(req.body);
+    const missingFields = validateRequiredWorkerFields(workerData, req.body);
     if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: req.workerCvUploadError });
-    if (!workerData.fullName) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: 'El nombre completo es obligatorio.' });
+    if (missingFields.length) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: buildRequiredWorkerFieldsMessage(missingFields) });
     try {
       const worker = await prisma.dispatchWorker.create({ data: { ...applyWorkerCvFile(workerData, req.file), source: 'MANUAL' } });
       await replaceWorkerRelations(prisma, worker.id, req.body);
@@ -362,8 +379,9 @@ export function dispatchOpsExtrasRouter(prisma) {
     const existing = await findManualWorkerOr404(prisma, req.params.workerId);
     if (!existing) return res.status(404).send('Auxiliar manual no encontrado');
     const workerData = buildWorkerData(req.body);
+    const missingFields = validateRequiredWorkerFields(workerData, req.body);
     if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: req.workerCvUploadError });
-    if (!workerData.fullName) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: 'El nombre completo es obligatorio.' });
+    if (missingFields.length) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: buildRequiredWorkerFieldsMessage(missingFields) });
     try {
       await prisma.dispatchWorker.update({ where: { id: existing.id }, data: applyWorkerCvFile(workerData, req.file) });
       await replaceWorkerRelations(prisma, existing.id, req.body);
