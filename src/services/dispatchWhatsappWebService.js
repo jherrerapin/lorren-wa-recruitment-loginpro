@@ -7,6 +7,7 @@ import whatsappWeb from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = whatsappWeb;
 const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
+const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 
 let client = null;
 let initializing = false;
@@ -14,6 +15,7 @@ let ready = false;
 let lastQr = null;
 let lastError = null;
 let lastReadyAt = null;
+const recentSendLocks = new Map();
 
 function buildError(message, statusCode = 400) {
   const error = new Error(message);
@@ -31,6 +33,34 @@ function normalizePhone(phone) {
 
 function normalizeMessage(message) {
   return String(message || '').trim().slice(0, MAX_MESSAGE_LENGTH);
+}
+
+function buildSendLockKey({ channelType, phone, payload }) {
+  return [channelType, phone, payload].join('|');
+}
+
+function cleanupExpiredSendLocks(now = Date.now()) {
+  for (const [key, value] of recentSendLocks.entries()) {
+    if (value.expiresAt <= now) recentSendLocks.delete(key);
+  }
+}
+
+function reserveSendLock({ channelType, phone, payload }) {
+  if (!DUPLICATE_SEND_WINDOW_MS || DUPLICATE_SEND_WINDOW_MS < 1) return null;
+  const now = Date.now();
+  cleanupExpiredSendLocks(now);
+  const key = buildSendLockKey({ channelType, phone, payload });
+  const existing = recentSendLocks.get(key);
+  if (existing?.expiresAt > now) {
+    const remainingSeconds = Math.ceil((existing.expiresAt - now) / 1000);
+    throw buildError(`Este mismo mensaje ya fue enviado o está en proceso para este número. Espera ${remainingSeconds} segundos antes de repetirlo.`, 429);
+  }
+  recentSendLocks.set(key, { expiresAt: now + DUPLICATE_SEND_WINDOW_MS });
+  return key;
+}
+
+function releaseSendLock(key) {
+  if (key) recentSendLocks.delete(key);
 }
 
 function resolveChromeExecutablePath() {
@@ -166,11 +196,17 @@ export async function sendDispatchWhatsappMessage({ phone, message }) {
 
   const activeClient = await getReadyClient();
   const recipient = await getRecipientId(activeClient, phone);
-  const sent = await activeClient.sendMessage(recipient.serializedId, normalizedMessage);
-  return {
-    phone: recipient.normalizedPhone,
-    providerMessageId: sent?.id?._serialized || sent?.id?.id || null
-  };
+  const lockKey = reserveSendLock({ channelType: 'text', phone: recipient.normalizedPhone, payload: normalizedMessage });
+  try {
+    const sent = await activeClient.sendMessage(recipient.serializedId, normalizedMessage);
+    return {
+      phone: recipient.normalizedPhone,
+      providerMessageId: sent?.id?._serialized || sent?.id?.id || null
+    };
+  } catch (error) {
+    releaseSendLock(lockKey);
+    throw error;
+  }
 }
 
 export async function sendDispatchWhatsappMediaMessage({ phone, caption, buffer, filename, mimeType = 'application/pdf' }) {
@@ -181,10 +217,16 @@ export async function sendDispatchWhatsappMediaMessage({ phone, caption, buffer,
 
   const activeClient = await getReadyClient();
   const recipient = await getRecipientId(activeClient, phone);
-  const media = new MessageMedia(mimeType, buffer.toString('base64'), filename || 'programacion.pdf');
-  const sent = await activeClient.sendMessage(recipient.serializedId, media, { caption: normalizedCaption });
-  return {
-    phone: recipient.normalizedPhone,
-    providerMessageId: sent?.id?._serialized || sent?.id?.id || null
-  };
+  const lockKey = reserveSendLock({ channelType: 'media', phone: recipient.normalizedPhone, payload: `${filename || 'programacion.pdf'}:${normalizedCaption}` });
+  try {
+    const media = new MessageMedia(mimeType, buffer.toString('base64'), filename || 'programacion.pdf');
+    const sent = await activeClient.sendMessage(recipient.serializedId, media, { caption: normalizedCaption });
+    return {
+      phone: recipient.normalizedPhone,
+      providerMessageId: sent?.id?._serialized || sent?.id?.id || null
+    };
+  } catch (error) {
+    releaseSendLock(lockKey);
+    throw error;
+  }
 }
