@@ -46,9 +46,45 @@
     block.replaceWith(note);
   }
 
+  function parseRequestDateTime(card) {
+    const text = card?.textContent || '';
+    const dateMatch = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+    const timeMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+    if (!dateMatch) return null;
+    const time = timeMatch ? `${String(timeMatch[1]).padStart(2, '0')}:${timeMatch[2]}` : '23:59';
+    return new Date(`${dateMatch[1]}T${time}:00-05:00`);
+  }
+
+  function filterCurrentServiceRequests() {
+    const requestList = document.querySelector('.request-list');
+    if (!requestList || requestList.dataset.currentFilterApplied === 'true') return;
+    requestList.dataset.currentFilterApplied = 'true';
+    const now = new Date();
+    const cards = Array.from(requestList.querySelectorAll('.request-card'));
+    let visibleCount = 0;
+    let hiddenCount = 0;
+    cards.forEach((card) => {
+      const requestDateTime = parseRequestDateTime(card);
+      const isCurrent = !requestDateTime || requestDateTime >= now;
+      card.hidden = !isCurrent;
+      card.dataset.hiddenByCurrentFilter = isCurrent ? 'false' : 'true';
+      if (isCurrent) visibleCount += 1;
+      else hiddenCount += 1;
+    });
+    const head = requestList.closest('.board-panel')?.querySelector('.board-panel-head p');
+    if (head) head.textContent = hiddenCount ? `Solo se muestran solicitudes vigentes desde la hora actual. ${hiddenCount} solicitud(es) vencida(s) ocultas.` : 'Elige la solicitud vigente sobre la que vas a trabajar.';
+    if (!visibleCount && cards.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.innerHTML = '<strong>No hay solicitudes vigentes.</strong>Las solicitudes de días anteriores o con hora ya vencida se ocultan para mantener limpio el tablero.';
+      requestList.appendChild(empty);
+    }
+  }
+
   function boot() {
     hideRequesterNoticeWithoutContact();
     enhanceTemplate();
+    filterCurrentServiceRequests();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
