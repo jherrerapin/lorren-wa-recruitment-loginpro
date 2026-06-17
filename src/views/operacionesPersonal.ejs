@@ -119,14 +119,14 @@
           <label for="operationalCityId">Ciudad operativa</label>
           <select id="operationalCityId" name="operationalCityId">
             <option value="">Todas las ciudades operativas</option>
-            <% cities.forEach((city) => { %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %>
+            <% cities.forEach((city) => { %><option value="<%= city.id %>" data-city-name="<%= city.name %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %>
           </select>
         </div>
         <div class="field">
           <label for="vacancyId">Vacante / perfil</label>
           <select id="vacancyId" name="vacancyId">
             <option value="">Todas las vacantes</option>
-            <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %> — <%= vacancy.city || 'Sin ciudad' %></option><% }) %>
+            <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" data-city-name="<%= vacancy.city || '' %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %> — <%= vacancy.city || 'Sin ciudad' %></option><% }) %>
           </select>
         </div>
         <button type="submit" class="btn btn-primary">Filtrar</button>
@@ -168,6 +168,55 @@
   <div class="modal-overlay" id="modal-bulk"><div class="modal"><h3>Eliminar seleccionados</h3><p id="modal-bulk-msg">¿Confirmas la eliminación de los auxiliares seleccionados?</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-bulk-cancel">Cancelar</button><form method="post" action="/admin/operaciones/personal/eliminar-bulk" id="modal-bulk-form"><input type="hidden" name="ids" id="bulk-ids-input" value="" /><button type="submit" class="btn btn-danger">Sí, eliminar todos</button></form></div></div></div>
 
   <script>
+    const cityFilter = document.getElementById('operationalCityId');
+    const vacancyFilter = document.getElementById('vacancyId');
+    const normalizeCity = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const cityKey = (value) => {
+      const normalized = normalizeCity(value);
+      if (!normalized) return '';
+      if (normalized.includes('bogota')) return 'bogota';
+      if (normalized.includes('siberia')) return 'siberia';
+      if (normalized.includes('ibague')) return 'ibague';
+      if (normalized.includes('neiva')) return 'neiva';
+      return normalized;
+    };
+    const allVacancyFilterOptions = Array.from(vacancyFilter?.options || []).filter((option) => option.value).map((option) => ({
+      value: option.value,
+      text: option.textContent,
+      cityName: option.dataset.cityName || '',
+      cityKey: cityKey(option.dataset.cityName),
+      selected: option.selected
+    }));
+    function allowedVacancyCityKeys(selectedCityKey) {
+      if (!selectedCityKey) return null;
+      if (selectedCityKey === 'bogota') return new Set(['bogota', 'siberia']);
+      return new Set([selectedCityKey]);
+    }
+    function refreshVacancyFilterOptions() {
+      if (!cityFilter || !vacancyFilter) return;
+      const previousValue = vacancyFilter.value;
+      const selectedCityOption = cityFilter.selectedOptions[0];
+      const selectedCityKey = cityKey(selectedCityOption?.dataset.cityName || selectedCityOption?.textContent || '');
+      const allowedKeys = allowedVacancyCityKeys(selectedCityKey);
+      vacancyFilter.innerHTML = '';
+      const allOption = document.createElement('option');
+      allOption.value = '';
+      allOption.textContent = allowedKeys ? 'Todas las vacantes de la ciudad seleccionada' : 'Todas las vacantes';
+      vacancyFilter.appendChild(allOption);
+      const filtered = allowedKeys ? allVacancyFilterOptions.filter((option) => allowedKeys.has(option.cityKey)) : allVacancyFilterOptions;
+      filtered.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = item.text;
+        option.dataset.cityName = item.cityName;
+        option.selected = item.value === previousValue || item.selected;
+        vacancyFilter.appendChild(option);
+      });
+      if (vacancyFilter.value && !filtered.some((item) => item.value === vacancyFilter.value)) vacancyFilter.value = '';
+    }
+    cityFilter?.addEventListener('change', refreshVacancyFilterOptions);
+    refreshVacancyFilterOptions();
+
     const checkAll = document.getElementById('check-all'); const bulkBar = document.getElementById('bulk-bar'); const bulkCount = document.getElementById('bulk-count'); const bulkIdsInput = document.getElementById('bulk-ids-input');
     function getChecked() { return [...document.querySelectorAll('.row-check:checked')]; }
     function refreshBulkBar() { const checked = getChecked(); if (checked.length > 0) { bulkBar.style.display = 'flex'; bulkCount.textContent = checked.length + ' seleccionado' + (checked.length > 1 ? 's' : ''); } else { bulkBar.style.display = 'none'; } const rows = document.querySelectorAll('.row-check'); if (checkAll) { checkAll.indeterminate = checked.length > 0 && checked.length < rows.length; checkAll.checked = rows.length > 0 && checked.length === rows.length; } }
