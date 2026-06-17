@@ -205,6 +205,55 @@
     }
   }
 
+  function getBogotaNowParts() {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+    const hour = parts.hour === '24' ? '00' : String(parts.hour || '00').padStart(2, '0');
+    return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${hour}:${parts.minute}` };
+  }
+
+  function extractRequestDateTime(card) {
+    const text = card?.textContent || '';
+    const date = text.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] || '';
+    const time = text.match(/\b(?:[01]\d|2[0-3]):[0-5]\d\b/)?.[0] || '';
+    return { date, time };
+  }
+
+  function isRequestCurrentOrFuture(card, nowParts) {
+    const { date, time } = extractRequestDateTime(card);
+    if (!date) return true;
+    if (date > nowParts.date) return true;
+    if (date < nowParts.date) return false;
+    if (!time) return true;
+    return time > nowParts.time;
+  }
+
+  function hideExpiredServiceRequests() {
+    const requestList = document.querySelector('.request-list');
+    if (!requestList || requestList.dataset.currentFilterApplied === 'true') return;
+    requestList.dataset.currentFilterApplied = 'true';
+    const nowParts = getBogotaNowParts();
+    const cards = Array.from(requestList.querySelectorAll('.request-card'));
+    let visibleCount = 0;
+    cards.forEach((card) => {
+      const visible = isRequestCurrentOrFuture(card, nowParts);
+      card.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    if (!cards.length || visibleCount > 0) return;
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.innerHTML = '<strong>No hay solicitudes vigentes.</strong>El tablero de asignación solo muestra solicitudes futuras o de hoy que aún no han pasado de su hora de inicio.';
+    requestList.appendChild(empty);
+  }
+
   document.addEventListener('submit', async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -221,6 +270,7 @@
   }, true);
 
   document.addEventListener('DOMContentLoaded', () => {
+    hideExpiredServiceRequests();
     enhanceManagedByField();
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
