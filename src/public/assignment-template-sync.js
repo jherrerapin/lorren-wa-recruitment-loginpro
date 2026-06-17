@@ -46,9 +46,55 @@
     block.replaceWith(note);
   }
 
+  function parseRequestStart(card) {
+    const spans = [...card.querySelectorAll('.meta span')];
+    const scheduleText = spans.map((span) => span.textContent || '').find((text) => /\d{4}-\d{2}-\d{2}/.test(text));
+    if (!scheduleText) return null;
+    const match = scheduleText.match(/(\d{4}-\d{2}-\d{2})\s*·\s*([0-2]?\d:[0-5]\d)?/);
+    if (!match) return null;
+    const date = match[1];
+    const time = match[2] || '23:59';
+    const start = new Date(`${date}T${time.padStart(5, '0')}:00`);
+    return Number.isNaN(start.getTime()) ? null : start;
+  }
+
+  function filterExpiredServiceRequests() {
+    const list = document.querySelector('.request-list');
+    if (!list || list.dataset.currentFilterApplied === 'true') return;
+    list.dataset.currentFilterApplied = 'true';
+
+    const now = new Date();
+    const cards = [...list.querySelectorAll('.request-card')];
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const requestStart = parseRequestStart(card);
+      const isExpired = requestStart ? requestStart < now : false;
+      card.hidden = isExpired;
+      card.dataset.expiredServiceRequest = isExpired ? 'true' : 'false';
+      if (!isExpired) visibleCount += 1;
+    });
+
+    if (!visibleCount) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.innerHTML = '<strong>No hay solicitudes vigentes para asignar.</strong>Solo se muestran servicios cuya fecha y hora aún no han pasado.';
+      list.appendChild(empty);
+      return;
+    }
+
+    const activeCard = list.querySelector('.request-card.active');
+    if (activeCard?.hidden) {
+      const firstVisible = cards.find((card) => !card.hidden);
+      const selectLink = firstVisible?.querySelector('.request-actions a[href*="serviceRequestId="]');
+      if (selectLink?.href) window.location.replace(selectLink.href);
+    }
+  }
+
   function boot() {
     hideRequesterNoticeWithoutContact();
     enhanceTemplate();
+    filterExpiredServiceRequests();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
