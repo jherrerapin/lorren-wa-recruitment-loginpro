@@ -24,6 +24,12 @@
     .action-item { display: grid; gap: 6px; max-width: 210px; }
     .action-item .btn { width: 100%; }
     .action-item small { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; padding: 0 2px; }
+    .action-item.session-online .btn { background: #166534; border-color: #166534; color: #fff; }
+    .action-item.session-online small { color: #166534; font-weight: 900; }
+    .action-item.session-offline .btn { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+    .action-item.session-offline small { color: #b91c1c; font-weight: 900; }
+    .action-item.session-checking .btn { border-color: #f59e0b; color: #92400e; background: #fffbeb; }
+    .action-item.session-checking small { color: #92400e; font-weight: 900; }
     .btn-excel { background: #166534; border-color: #166534; color: #fff; }
     .btn-excel:hover { background: #14532d; }
     .programming-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-sm); padding: 18px; display: grid; gap: 14px; }
@@ -83,9 +89,9 @@
           <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
           <small>Consulta, sincroniza o crea auxiliares manualmente.</small>
         </div>
-        <div class="action-item">
-          <a class="btn" href="/admin/operaciones/whatsapp">WhatsApp despacho</a>
-          <small>Vincula o revisa la sesión de WhatsApp usada para despacho.</small>
+        <div class="action-item session-checking" id="dispatchSessionAction">
+          <a class="btn" id="dispatchSessionButton" href="/admin/operaciones/whatsapp">WhatsApp despacho</a>
+          <small id="dispatchSessionHint">Revisando estado de la sesión...</small>
         </div>
       </div>
     </section>
@@ -154,6 +160,9 @@
     const emailLink = document.getElementById('programEmailLink');
     const whatsappButton = document.getElementById('sendProgramWhatsapp');
     const toast = document.getElementById('asyncToast');
+    const dispatchSessionAction = document.getElementById('dispatchSessionAction');
+    const dispatchSessionButton = document.getElementById('dispatchSessionButton');
+    const dispatchSessionHint = document.getElementById('dispatchSessionHint');
     const MANAGERS_KEY = 'dispatchProgrammingManagers';
 
     function showToast(message){if(!toast)return;toast.textContent=message;toast.classList.add('show');window.clearTimeout(showToast._t);showToast._t=window.setTimeout(()=>toast.classList.remove('show'),3000);}
@@ -161,13 +170,40 @@
     function loadManagers(){try{return JSON.parse(localStorage.getItem(MANAGERS_KEY)||'[]');}catch(_error){return[];}}
     function saveManager(name){const clean=String(name||'').trim();if(!clean)return;const managers=[...new Set(['Julián Herrera',...loadManagers(),clean])];localStorage.setItem(MANAGERS_KEY,JSON.stringify(managers.filter((item)=>item!=='Julián Herrera')));renderManagers(clean);}
     function renderManagers(selected='Julián Herrera'){if(!managerSelect)return;const managers=[...new Set(['Julián Herrera',...loadManagers()])];managerSelect.innerHTML=managers.map((name)=>`<option value="${name.replace(/"/g,'&quot;')}">${name}</option>`).join('');managerSelect.value=managers.includes(selected)?selected:'Julián Herrera';refreshProgrammingLinks();}
-    function refreshProgrammingLinks(){const manager=currentManager();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(emailLink){const subject='Programación operativa completa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa completa para la fecha '+selectedDate+'.','','El PDF fue generado desde LoginPro Operaciones.','','Gestionado por: '+manager].join('\n');emailLink.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
+    function refreshProgrammingLinks(){const manager=currentManager();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(emailLink){const subject='Programación operativa completa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa completa para la fecha '+selectedDate+'.','','Gestionado por: '+manager].join('\n');emailLink.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
+    function setDispatchSessionState(state, hint){
+      if(!dispatchSessionAction||!dispatchSessionButton||!dispatchSessionHint)return;
+      dispatchSessionAction.classList.remove('session-online','session-offline','session-checking');
+      dispatchSessionAction.classList.add(state);
+      dispatchSessionHint.textContent=hint;
+      dispatchSessionButton.textContent=state==='session-online'?'WhatsApp despacho activo':state==='session-offline'?'WhatsApp despacho sin sesión':'WhatsApp despacho';
+    }
+    async function refreshDispatchSessionState(){
+      try{
+        const response=await fetch('/admin/operaciones/whatsapp/estado',{cache:'no-store'});
+        if(!response.ok)throw new Error('Estado no disponible');
+        const data=await response.json();
+        if(data.ready){
+          setDispatchSessionState('session-online','Sesión iniciada. Puedes enviar mensajes desde despacho.');
+          return;
+        }
+        if(data.qrImage){
+          setDispatchSessionState('session-offline','Sesión no iniciada. Entra y escanea el QR para habilitar envíos.');
+          return;
+        }
+        setDispatchSessionState('session-offline','Sesión no iniciada. Entra al módulo para revisar la conexión.');
+      }catch(_error){
+        setDispatchSessionState('session-offline','No se pudo validar la sesión. Entra al módulo para revisar.');
+      }
+    }
     addManagerButton?.addEventListener('click',()=>{customManagerWrap.hidden=false;customManagerInput?.focus();});
     customManagerInput?.addEventListener('keydown',(event)=>{if(event.key==='Enter'){event.preventDefault();saveManager(customManagerInput.value);customManagerInput.value='';customManagerWrap.hidden=true;}});
     customManagerInput?.addEventListener('blur',()=>{if(customManagerInput.value.trim()){saveManager(customManagerInput.value);customManagerInput.value='';}customManagerWrap.hidden=true;});
     managerSelect?.addEventListener('change',refreshProgrammingLinks);
     whatsappButton?.addEventListener('click',async()=>{if(!programmingComplete){showToast('La programación aún no está completa.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando PDF...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager()})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name}: ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar el PDF.');}showToast('PDF enviado por WhatsApp.');}catch(error){showToast(error.message||'No fue posible enviar el PDF.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
     renderManagers();
+    refreshDispatchSessionState();
+    window.setInterval(refreshDispatchSessionState,30000);
   </script>
 </body>
 </html>
