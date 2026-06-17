@@ -46,38 +46,71 @@
     block.replaceWith(note);
   }
 
-  function parseRequestDateTime(card) {
+  function getBogotaNowParts() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(new Date()).reduce((acc, item) => {
+      acc[item.type] = item.value;
+      return acc;
+    }, {});
+    return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+  }
+
+  function parseRequestSchedule(card) {
     const text = card?.textContent || '';
-    const dateMatch = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-    const timeMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
-    if (!dateMatch) return null;
-    const time = timeMatch ? `${String(timeMatch[1]).padStart(2, '0')}:${timeMatch[2]}` : '23:59';
-    return new Date(`${dateMatch[1]}T${time}:00-05:00`);
+    const match = text.match(/(20\d{2}-\d{2}-\d{2})\s*·\s*(\d{1,2}:\d{2})?/);
+    return { date: match?.[1] || '', startTime: match?.[2] ? match[2].padStart(5, '0') : '' };
+  }
+
+  function isCurrentOrFutureRequest(card, now) {
+    const schedule = parseRequestSchedule(card);
+    if (!schedule.date) return true;
+    if (schedule.date > now.date) return true;
+    if (schedule.date < now.date) return false;
+    if (!schedule.startTime) return true;
+    return schedule.startTime >= now.time;
   }
 
   function filterCurrentServiceRequests() {
     const requestList = document.querySelector('.request-list');
     if (!requestList || requestList.dataset.currentFilterApplied === 'true') return;
     requestList.dataset.currentFilterApplied = 'true';
-    const now = new Date();
     const cards = Array.from(requestList.querySelectorAll('.request-card'));
+    if (!cards.length) return;
+    const now = getBogotaNowParts();
     let visibleCount = 0;
     let hiddenCount = 0;
+    let selectedExpired = false;
+
     cards.forEach((card) => {
-      const requestDateTime = parseRequestDateTime(card);
-      const isCurrent = !requestDateTime || requestDateTime >= now;
+      const isCurrent = isCurrentOrFutureRequest(card, now);
+      const isSelected = card.classList.contains('active');
       card.hidden = !isCurrent;
       card.dataset.hiddenByCurrentFilter = isCurrent ? 'false' : 'true';
       if (isCurrent) visibleCount += 1;
       else hiddenCount += 1;
+      if (!isCurrent && isSelected) selectedExpired = true;
     });
+
     const head = requestList.closest('.board-panel')?.querySelector('.board-panel-head p');
     if (head) head.textContent = hiddenCount ? `Solo se muestran solicitudes vigentes desde la hora actual. ${hiddenCount} solicitud(es) vencida(s) ocultas.` : 'Elige la solicitud vigente sobre la que vas a trabajar.';
+
     if (!visibleCount && cards.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';
       empty.innerHTML = '<strong>No hay solicitudes vigentes.</strong>Las solicitudes de días anteriores o con hora ya vencida se ocultan para mantener limpio el tablero.';
       requestList.appendChild(empty);
+    }
+
+    if (selectedExpired && visibleCount > 0) {
+      const firstVisibleLink = cards.find((card) => !card.hidden)?.querySelector('a[href*="serviceRequestId="]');
+      if (firstVisibleLink?.href) window.location.replace(firstVisibleLink.href);
     }
   }
 
