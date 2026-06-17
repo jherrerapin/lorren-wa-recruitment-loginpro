@@ -9,8 +9,8 @@ import {
 import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebService.js';
 
 const DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS = [
-  { name: 'Milton Rodríguez', phone: '3166091634' },
-  { name: 'Julie Jaso', phone: '3052982551' }
+  { name: 'Milton Rodríguez', phone: '3057680685' },
+  { name: 'Julie Jaso', phone: '3175868701' }
 ];
 
 // Para pruebas sin tocar Railway, cambia temporalmente este arreglo en una rama de prueba.
