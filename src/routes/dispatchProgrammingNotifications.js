@@ -8,15 +8,44 @@ import {
 } from '../services/dispatchProgrammingPdfService.js';
 import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebService.js';
 
-const PROGRAMMING_WHATSAPP_RECIPIENTS = [
-  { name: 'Milton Rodríguez', phone: '3057680685' },
-  { name: 'Julie Jaso', phone: '3175868701' }
+const DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS = [
+  { name: 'Destinatario 1', phone: '3057680685' },
+  { name: 'Destinatario 2', phone: '3175868701' }
 ];
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeRecipientPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) return `57${digits}`;
+  return digits;
+}
+
+function parseProgrammingWhatsappRecipients(value) {
+  const raw = normalizeString(value);
+  if (!raw) return [];
+  return raw.split(/[;\n,]+/)
+    .map((entry, index) => {
+      const trimmed = normalizeString(entry);
+      if (!trimmed) return null;
+      const [first, ...rest] = trimmed.split(':');
+      const hasName = rest.length > 0;
+      const name = hasName ? normalizeString(first) || `Destinatario ${index + 1}` : `Destinatario ${index + 1}`;
+      const phone = normalizeRecipientPhone(hasName ? rest.join(':') : first);
+      if (!phone) return null;
+      return { name, phone };
+    })
+    .filter(Boolean);
+}
+
+function programmingWhatsappRecipients() {
+  const configuredRecipients = parseProgrammingWhatsappRecipients(process.env.DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS);
+  return configuredRecipients.length ? configuredRecipients : DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS;
 }
 
 function userRole(req) {
@@ -93,11 +122,11 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const caption = buildCaption({ selectedDate: pdf.selectedDate, summary: pdf.summary, managedBy });
     const results = [];
 
-    for (const recipient of PROGRAMMING_WHATSAPP_RECIPIENTS) {
+    for (const recipient of programmingWhatsappRecipients()) {
       try {
         const result = await sendDispatchWhatsappMediaMessage({
           phone: recipient.phone,
-          caption: `${recipient.name},\n\n${caption}`,
+          caption,
           buffer: pdf.buffer,
           filename,
           mimeType: 'application/pdf'
