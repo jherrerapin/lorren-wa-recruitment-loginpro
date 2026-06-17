@@ -54,8 +54,22 @@
     if (!match) return null;
     const date = match[1];
     const time = match[2] || '23:59';
-    const start = new Date(`${date}T${time.padStart(5, '0')}:00`);
+    const start = new Date(`${date}T${time.padStart(5, '0')}:00-05:00`);
     return Number.isNaN(start.getTime()) ? null : start;
+  }
+
+  function visibleRequestCards(cards) {
+    return cards.filter((card) => !card.hidden && card.dataset.expiredServiceRequest !== 'true');
+  }
+
+  function redirectToFirstVisibleRequest(cards) {
+    const firstVisible = visibleRequestCards(cards)[0];
+    const selectLink = firstVisible?.querySelector('.request-actions a[href*="serviceRequestId="]');
+    if (selectLink?.href && window.location.href !== selectLink.href) {
+      window.location.replace(selectLink.href);
+      return true;
+    }
+    return false;
   }
 
   function filterExpiredServiceRequests() {
@@ -66,6 +80,7 @@
     const now = new Date();
     const cards = [...list.querySelectorAll('.request-card')];
     let visibleCount = 0;
+    let hiddenCount = 0;
 
     cards.forEach((card) => {
       const requestStart = parseRequestStart(card);
@@ -73,21 +88,24 @@
       card.hidden = isExpired;
       card.dataset.expiredServiceRequest = isExpired ? 'true' : 'false';
       if (!isExpired) visibleCount += 1;
+      else hiddenCount += 1;
     });
 
-    if (!visibleCount) {
+    const head = list.closest('.board-panel')?.querySelector('.board-panel-head p');
+    if (head) {
+      head.textContent = hiddenCount
+        ? `Solo se muestran solicitudes vigentes desde la hora actual. ${hiddenCount} solicitud(es) vencida(s) ocultas.`
+        : 'Elige la solicitud vigente sobre la que vas a trabajar.';
+    }
+
+    const activeCard = list.querySelector('.request-card.active');
+    if (activeCard?.hidden && redirectToFirstVisibleRequest(cards)) return;
+
+    if (!visibleCount && cards.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';
       empty.innerHTML = '<strong>No hay solicitudes vigentes para asignar.</strong>Solo se muestran servicios cuya fecha y hora aún no han pasado.';
       list.appendChild(empty);
-      return;
-    }
-
-    const activeCard = list.querySelector('.request-card.active');
-    if (activeCard?.hidden) {
-      const firstVisible = cards.find((card) => !card.hidden);
-      const selectLink = firstVisible?.querySelector('.request-actions a[href*="serviceRequestId="]');
-      if (selectLink?.href) window.location.replace(selectLink.href);
     }
   }
 
