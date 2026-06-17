@@ -8,7 +8,7 @@ import {
 } from '../services/dispatchProgrammingPdfService.js';
 import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebService.js';
 
-const PROGRAMMING_WHATSAPP_RECIPIENTS = [
+const DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS = [
   { name: 'Milton Rodríguez', phone: '3057680685' },
   { name: 'Julie Jaso', phone: '3175868701' }
 ];
@@ -17,6 +17,18 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function parseProgrammingWhatsappRecipients() {
+  const raw = normalizeString(process.env.DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS);
+  if (!raw) return DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS;
+  const recipients = raw.split(',').map((item, index) => {
+    const [namePart, phonePart] = item.split(':');
+    const name = normalizeString(phonePart ? namePart : `Prueba ${index + 1}`);
+    const phone = normalizeString(phonePart || namePart);
+    return phone ? { name: name || `Prueba ${index + 1}`, phone } : null;
+  }).filter(Boolean);
+  return recipients.length ? recipients : DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS;
 }
 
 function userRole(req) {
@@ -93,7 +105,7 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const caption = buildCaption({ selectedDate: pdf.selectedDate, summary: pdf.summary, managedBy });
     const results = [];
 
-    for (const recipient of PROGRAMMING_WHATSAPP_RECIPIENTS) {
+    for (const recipient of parseProgrammingWhatsappRecipients()) {
       try {
         const result = await sendDispatchWhatsappMediaMessage({
           phone: recipient.phone,
