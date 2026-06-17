@@ -23,7 +23,7 @@
       <div>
         <div class="eyebrow">Personal operativo</div>
         <h1><%= mode === 'edit' ? 'Editar auxiliar' : 'Crear auxiliar manual' %></h1>
-        <p><%= mode === 'edit' ? 'Actualiza los datos operativos y, si proviene del bot, también su perfil de candidato. Solo el nombre es obligatorio.' : 'Registra personal operativo que no viene del flujo de candidatos del bot.' %></p>
+        <p><%= mode === 'edit' ? 'Actualiza los datos operativos del auxiliar. Solo hoja de vida, medio de transporte y notas operativas son opcionales.' : 'Registra personal operativo que no viene del flujo de candidatos del bot.' %></p>
       </div>
       <div class="actions"><a class="btn" href="/admin/operaciones/personal">Volver a personal</a></div>
     </section>
@@ -31,7 +31,7 @@
     <% if (typeof error !== 'undefined' && error) { %><div class="alert"><%= error %></div><% } %>
 
     <section class="card">
-      <div class="card-head"><h2>Datos del auxiliar</h2><p>Define información básica, hoja de vida, ciudades operativas y perfiles habilitados.</p></div>
+      <div class="card-head"><h2>Datos del auxiliar</h2><p>Completa los campos obligatorios. Hoja de vida, medio de transporte y notas operativas son opcionales.</p></div>
       <div class="card-body">
         <%
           const w = worker || {};
@@ -43,29 +43,29 @@
         %>
         <form method="post" action="<%= formAction %>" enctype="multipart/form-data">
           <div class="form-grid">
-            <div class="field full"><label for="fullName">Nombre completo</label><input id="fullName" name="fullName" required value="<%= w.fullName || '' %>" placeholder="Nombre y apellido" /></div>
-            <div class="field"><label for="phone">Teléfono</label><input id="phone" name="phone" value="<%= w.phone || '' %>" placeholder="Celular" /></div>
-            <div class="field"><label for="documentType">Tipo documento</label><input id="documentType" name="documentType" value="<%= w.documentType || '' %>" placeholder="CC, PPT..." /></div>
-            <div class="field"><label for="documentNumber">Número documento</label><input id="documentNumber" name="documentNumber" value="<%= w.documentNumber || '' %>" /></div>
+            <div class="field full"><label for="fullName">Nombre completo <span class="muted">* obligatorio</span></label><input id="fullName" name="fullName" required value="<%= w.fullName || '' %>" placeholder="Nombre y apellido" /></div>
+            <div class="field"><label for="phone">Teléfono <span class="muted">* obligatorio</span></label><input id="phone" name="phone" required value="<%= w.phone || '' %>" placeholder="Celular" /></div>
+            <div class="field"><label for="documentType">Tipo documento <span class="muted">* obligatorio</span></label><input id="documentType" name="documentType" required value="<%= w.documentType || '' %>" placeholder="CC, PPT..." /></div>
+            <div class="field"><label for="documentNumber">Número documento <span class="muted">* obligatorio</span></label><input id="documentNumber" name="documentNumber" required value="<%= w.documentNumber || '' %>" /></div>
             <div class="field">
-              <label for="residenceCity">Ciudad residencia</label>
-              <select id="residenceCity" name="residenceCity">
-                <option value="" <%= !w.residenceCity ? 'selected' : '' %>>Sin dato</option>
+              <label for="residenceCity">Ciudad residencia <span class="muted">* obligatorio</span></label>
+              <select id="residenceCity" name="residenceCity" required>
+                <option value="" <%= !w.residenceCity ? 'selected' : '' %>>Selecciona una ciudad</option>
                 <% if (w.residenceCity && !residenceCityNames.has(w.residenceCity)) { %><option value="<%= w.residenceCity %>" selected><%= w.residenceCity %> (valor actual)</option><% } %>
                 <% cities.forEach((city) => { %><option value="<%= city.name %>" <%= w.residenceCity === city.name ? 'selected' : '' %>><%= city.name %></option><% }) %>
               </select>
             </div>
-            <div class="field"><label for="residenceLocality">Localidad / barrio</label><input id="residenceLocality" name="residenceLocality" value="<%= w.residenceLocality || '' %>" /></div>
-            <div class="field"><label for="transportMode">Medio de transporte</label><select id="transportMode" name="transportMode"><option value="" <%= !normalizedTransportMode ? 'selected' : '' %>>Sin dato</option><option value="Publico" <%= normalizedTransportMode === 'Publico' ? 'selected' : '' %>>Publico</option><option value="Moto" <%= normalizedTransportMode === 'Moto' ? 'selected' : '' %>>Moto</option><option value="Bicicleta" <%= normalizedTransportMode === 'Bicicleta' ? 'selected' : '' %>>Bicicleta</option><option value="Carro" <%= normalizedTransportMode === 'Carro' ? 'selected' : '' %>>Carro</option></select><small class="muted">Bus, TransMilenio, SITP y colectivo se agrupan como Publico.</small></div>
-            <div class="field"><label for="operationalStatus">Estado operativo</label><select id="operationalStatus" name="operationalStatus"><option value="CONTRATADO" <%= w.operationalStatus !== 'INACTIVE' ? 'selected' : '' %>>Contratado / disponible</option><option value="INACTIVE" <%= w.operationalStatus === 'INACTIVE' ? 'selected' : '' %>>Inactivo</option></select></div>
+            <div class="field"><label for="residenceLocality">Localidad / barrio <span class="muted">* obligatorio</span></label><input id="residenceLocality" name="residenceLocality" required value="<%= w.residenceLocality || '' %>" /></div>
+            <div class="field"><label for="transportMode">Medio de transporte <span class="muted">* opcional</span></label><select id="transportMode" name="transportMode"><option value="" <%= !normalizedTransportMode ? 'selected' : '' %>>Sin dato</option><option value="Publico" <%= normalizedTransportMode === 'Publico' ? 'selected' : '' %>>Publico</option><option value="Moto" <%= normalizedTransportMode === 'Moto' ? 'selected' : '' %>>Moto</option><option value="Bicicleta" <%= normalizedTransportMode === 'Bicicleta' ? 'selected' : '' %>>Bicicleta</option><option value="Carro" <%= normalizedTransportMode === 'Carro' ? 'selected' : '' %>>Carro</option></select><small class="muted">Bus, TransMilenio, SITP y colectivo se agrupan como Publico.</small></div>
+            <div class="field"><label for="operationalStatus">Estado operativo <span class="muted">* obligatorio</span></label><select id="operationalStatus" name="operationalStatus" required><option value="CONTRATADO" <%= w.operationalStatus !== 'INACTIVE' ? 'selected' : '' %>>Contratado / disponible</option><option value="INACTIVE" <%= w.operationalStatus === 'INACTIVE' ? 'selected' : '' %>>Inactivo</option></select></div>
             <div class="field full">
-              <label for="cvFile">Hoja de vida</label>
+              <label for="cvFile">Hoja de vida <span class="muted">* opcional</span></label>
               <input id="cvFile" name="cvFile" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
               <small class="muted">Formatos permitidos: PDF, DOC o DOCX. Tamaño máximo: 5 MB.</small>
               <% if (w.cvOriginalName) { %><small class="muted">Hoja de vida actual: <strong><%= w.cvOriginalName %></strong>. Si adjuntas otra, se reemplaza.</small><% } %>
             </div>
             <% if (w.candidateId) { %>
-              <div class="field full"><div class="section-note"><strong>Datos del panel del bot</strong><br />Estos campos son opcionales. Si dejas uno vacío, se guardará sin dato en el perfil del candidato.</div></div>
+              <div class="field full"><div class="section-note"><strong>Datos del panel del bot</strong><br />Estos campos son informativos. Si dejas uno vacío, se guardará sin dato en el perfil del candidato.</div></div>
               <div class="field"><label for="age">Edad</label><input id="age" name="age" type="number" min="0" value="<%= botProfile.age ?? '' %>" /></div>
               <div class="field"><label for="gender">Género</label><select id="gender" name="gender"><option value="UNKNOWN" <%= !botProfile.gender || botProfile.gender === 'UNKNOWN' ? 'selected' : '' %>>Sin definir</option><option value="FEMALE" <%= botProfile.gender === 'FEMALE' ? 'selected' : '' %>>Mujer</option><option value="MALE" <%= botProfile.gender === 'MALE' ? 'selected' : '' %>>Hombre</option><option value="OTHER" <%= botProfile.gender === 'OTHER' ? 'selected' : '' %>>Otro</option></select></div>
               <div class="field full"><label for="medicalRestrictions">Restricciones médicas</label><input id="medicalRestrictions" name="medicalRestrictions" value="<%= botProfile.medicalRestrictions || '' %>" /></div>
@@ -73,11 +73,11 @@
               <div class="field"><label for="experienceTime">Tiempo de experiencia</label><input id="experienceTime" name="experienceTime" value="<%= botProfile.experienceTime || '' %>" /></div>
               <div class="field full"><label for="experienceSummary">Contexto de experiencia</label><textarea id="experienceSummary" name="experienceSummary"><%= botProfile.experienceSummary || '' %></textarea></div>
             <% } %>
-            <div class="field full"><label for="notes">Notas operativas</label><textarea id="notes" name="notes" placeholder="Disponibilidad, restricciones o comentarios"><%= w.notes || '' %></textarea></div>
-            <div class="field"><label for="cityIds">Ciudades operativas</label><select id="cityIds" name="cityIds" multiple size="7"><% cities.forEach((c)=>{ %><option value="<%= c.id %>" data-city-name="<%= c.name %>" <%= selectedCityIds.has(c.id) ? 'selected' : '' %>><%= c.name %></option><% }) %></select></div>
+            <div class="field full"><label for="notes">Notas operativas <span class="muted">* opcional</span></label><textarea id="notes" name="notes" placeholder="Disponibilidad, restricciones o comentarios"><%= w.notes || '' %></textarea></div>
+            <div class="field"><label for="cityIds">Ciudades operativas <span class="muted">* obligatorio</span></label><select id="cityIds" name="cityIds" multiple size="7" required><% cities.forEach((c)=>{ %><option value="<%= c.id %>" data-city-name="<%= c.name %>" <%= selectedCityIds.has(c.id) ? 'selected' : '' %>><%= c.name %></option><% }) %></select></div>
             <div class="field">
-              <label for="vacancyIds">Vacantes / perfiles</label>
-              <select id="vacancyIds" name="vacancyIds" multiple size="7">
+              <label for="vacancyIds">Vacantes / perfiles <span class="muted">* obligatorio</span></label>
+              <select id="vacancyIds" name="vacancyIds" multiple size="7" required>
                 <% vacancies.forEach((v)=>{ %><option value="<%= v.id %>" data-city-name="<%= v.city %>" <%= selectedVacancyIds.has(v.id) ? 'selected' : '' %>><%= v.title %> — <%= v.city %></option><% }) %>
               </select>
               <small id="vacancyHelp" class="muted">Selecciona una ciudad para ver perfiles disponibles.</small>
