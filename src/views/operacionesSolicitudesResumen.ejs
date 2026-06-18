@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= pageTitle %> — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; background:#fff; border:1px solid var(--border); border-radius:16px; padding:14px 16px; box-shadow:var(--shadow-sm); }
+    .toolbar h2 { color:var(--navy); font-size:16px; margin:0 0 4px; }
+    .toolbar p { color:var(--muted); font-size:13px; margin:0; }
+    .metric-tabs { display:flex; gap:8px; flex-wrap:wrap; }
+    .metric-tabs .btn.active { background:var(--teal); border-color:var(--teal); color:#fff; }
+    .readonly-note { border:1px solid #fbbf24; background:#fffbeb; color:#92400e; border-radius:14px; padding:12px 14px; font-size:13px; font-weight:800; }
+    .request-list { display:grid; gap:14px; }
+    .request-card { background:#fff; border:1px solid var(--border); border-radius:18px; padding:16px; box-shadow:var(--shadow-sm); display:grid; gap:12px; }
+    .request-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start; }
+    .request-head h2 { color:var(--navy); font-size:18px; margin:0 0 4px; }
+    .request-head p { color:var(--muted); font-size:13px; margin:0; }
+    .pill { display:inline-flex; border-radius:999px; padding:5px 9px; font-size:11px; font-weight:900; }
+    .pill-green { color:#166534; background:#dcfce7; }
+    .pill-blue { color:#1d4ed8; background:#dbeafe; }
+    .pill-amber { color:#92400e; background:#fef3c7; }
+    .pill-red { color:#b91c1c; background:#fee2e2; }
+    .detail-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+    .detail-box { background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:10px; }
+    .detail-box span { display:block; color:var(--muted); font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+    .detail-box strong { display:block; color:var(--navy); font-size:13px; line-height:1.35; }
+    .assignments { border-top:1px solid #e5e7eb; padding-top:12px; display:grid; gap:8px; }
+    .assignment-row, .incident-row { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; border:1px solid #e5e7eb; border-radius:12px; padding:9px 10px; background:#fff; font-size:13px; }
+    .assignment-row strong, .incident-row strong { color:var(--navy); }
+    .muted { color:var(--muted); }
+    .card-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .empty-state { background:#fff; border:1px solid var(--border); border-radius:18px; padding:38px 18px; text-align:center; color:var(--muted); box-shadow:var(--shadow-sm); }
+    .empty-state strong { display:block; color:var(--navy); font-size:17px; margin-bottom:6px; }
+    @media(max-width:900px){ .detail-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media(max-width:560px){ .detail-grid { grid-template-columns:1fr; } .toolbar .btn, .metric-tabs .btn { width:100%; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <% const metricUrl = (nextType) => `/admin/operaciones/solicitudes/resumen?fecha=${encodeURIComponent(selectedDate)}&tipo=${encodeURIComponent(nextType)}`; %>
+  <% const statusClass = (status) => status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : status === 'PENDING_CONFIRMATION' ? 'pill-blue' : status === 'CANCELLED' ? 'pill-red' : 'pill-amber'; %>
+  <% const formatDate = (value) => value ? new Date(value).toISOString().slice(0,10) : '-'; %>
+  <% const activeCount = (request) => activeAssignments(request).length; %>
+  <% const confirmedCount = (request) => confirmedAssignments(request).length; %>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Detalle por indicador</div>
+        <h1><%= pageTitle %></h1>
+        <p><%= subtitle %></p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones?fecha=<%= selectedDate %>">Volver al inicio</a>
+        <a class="btn" href="/admin/operaciones/solicitudes">Ver todas las solicitudes</a>
+        <a class="btn" href="/admin/operaciones/programacion.xlsx?fecha=<%= selectedDate %>">Descargar Excel del día</a>
+      </div>
+    </section>
+
+    <section class="toolbar">
+      <div>
+        <h2><%= typeLabel %> — <%= selectedDate %></h2>
+        <p>Listado detallado de solicitudes correspondiente al indicador seleccionado.</p>
+      </div>
+      <div class="metric-tabs" aria-label="Indicadores disponibles">
+        <a class="btn <%= type === 'total' ? 'active' : '' %>" href="<%= metricUrl('total') %>">Solicitudes del día (<%= metrics.totalRequests %>)</a>
+        <a class="btn <%= type === 'pending' ? 'active' : '' %>" href="<%= metricUrl('pending') %>">Pendientes (<%= metrics.pendingRequests %>)</a>
+        <a class="btn <%= type === 'complete' ? 'active' : '' %>" href="<%= metricUrl('complete') %>">Asignación completa (<%= metrics.completedRequests %>)</a>
+        <a class="btn <%= type === 'incidents' ? 'active' : '' %>" href="<%= metricUrl('incidents') %>">Novedades abiertas (<%= metrics.openIncidents %>)</a>
+      </div>
+    </section>
+
+    <% if (isHistoricalDate) { %>
+      <div class="readonly-note">La fecha seleccionada ya pasó. Estas solicitudes se muestran en modo consulta: puedes revisarlas a detalle, pero no editarlas desde esta vista.</div>
+    <% } %>
+
+    <section class="request-list">
+      <% if (!requests.length) { %>
+        <div class="empty-state"><strong>No hay solicitudes para este indicador.</strong>Cambia de indicador o vuelve al panel de Operaciones para seleccionar otra fecha.</div>
+      <% } %>
+
+      <% requests.forEach((request) => { const required = Number(request.requiredWorkers || 0); const active = activeCount(request); const confirmed = confirmedCount(request); %>
+        <article class="request-card">
+          <div class="request-head">
+            <div>
+              <h2><%= request.clientName || 'Sin cliente' %></h2>
+              <p><%= request.operationPointName || 'Sin operación' %> · <%= request.cityName || 'Sin ciudad' %></p>
+            </div>
+            <span class="pill <%= statusClass(request.status) %>"><%= statusLabel(request.status) %></span>
+          </div>
+
+          <div class="detail-grid">
+            <div class="detail-box"><span>Fecha</span><strong><%= formatDate(request.serviceDate) %></strong></div>
+            <div class="detail-box"><span>Horario</span><strong><%= buildHorario(request) %></strong></div>
+            <div class="detail-box"><span>Servicio</span><strong><%= request.serviceName || request.service?.name || 'Sin servicio' %></strong></div>
+            <div class="detail-box"><span>Cobertura</span><strong><%= active %>/<%= required %> asignados · <%= confirmed %>/<%= required %> confirmados</strong></div>
+            <div class="detail-box"><span>Dirección</span><strong><%= request.address || 'Sin dirección' %></strong></div>
+            <div class="detail-box"><span>Solicitante</span><strong><%= request.requestedByName || 'No registrado' %></strong></div>
+            <div class="detail-box"><span>Teléfono solicitante</span><strong><%= request.requestedByPhone || '-' %></strong></div>
+            <div class="detail-box"><span>Correo solicitante</span><strong><%= request.requestedByEmail || '-' %></strong></div>
+          </div>
+
+          <% if (request.notes) { %><div class="detail-box"><span>Observaciones</span><strong><%= request.notes %></strong></div><% } %>
+
+          <div class="assignments">
+            <strong>Auxiliares asignados</strong>
+            <% if (!request.assignments.length) { %>
+              <span class="muted">Sin auxiliares asignados.</span>
+            <% } %>
+            <% request.assignments.forEach((assignment) => { %>
+              <div class="assignment-row">
+                <div><strong><%= assignment.worker?.fullName || 'Auxiliar' %></strong><div class="muted"><%= [assignment.worker?.documentType, assignment.worker?.documentNumber].filter(Boolean).join(' ') || 'Sin documento' %></div></div>
+                <span class="pill <%= assignment.status === 'CONFIRMED' ? 'pill-green' : assignment.status === 'NO_CONFIRMO' ? 'pill-red' : 'pill-blue' %>"><%= assignmentStatusLabel(assignment.status) %></span>
+              </div>
+            <% }) %>
+          </div>
+
+          <% if (request.incidents && request.incidents.length) { %>
+            <div class="assignments">
+              <strong>Novedades abiertas</strong>
+              <% request.incidents.forEach((incident) => { %>
+                <div class="incident-row">
+                  <div><strong><%= incident.type %></strong><div class="muted"><%= incident.description %></div></div>
+                  <span class="pill pill-red"><%= incident.status %></span>
+                </div>
+              <% }) %>
+            </div>
+          <% } %>
+
+          <div class="card-actions">
+            <% if (!isHistoricalDate) { %>
+              <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar / revisar</a>
+              <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar solicitud</a>
+            <% } else { %>
+              <span class="muted">Modo consulta: edición bloqueada por fecha vencida.</span>
+            <% } %>
+          </div>
+        </article>
+      <% }) %>
+    </section>
+  </main>
+</body>
+</html>
