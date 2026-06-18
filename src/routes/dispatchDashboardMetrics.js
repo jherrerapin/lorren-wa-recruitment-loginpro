@@ -3,6 +3,8 @@ import ExcelJS from 'exceljs';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
+const PENDING_REQUEST_STATUSES = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
+const OPEN_INCIDENT_STATUSES = ['OPEN', 'IN_PROGRESS'];
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -203,15 +205,68 @@ function styleStatusCell(cell, status) {
 async function buildOperationsDashboardMetrics(prisma, selectedDate) {
   const { start, end } = buildUtcDayRange(selectedDate);
   const whereForDate = { serviceDate: { gte: start, lt: end } };
-  const pendingStatuses = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
 
   const [totalRequests, pendingRequests, completedRequests, openIncidents] = await Promise.all([
     prisma.dispatchServiceRequest.count({ where: whereForDate }),
-    prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: { in: pendingStatuses } } }),
+    prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: { in: PENDING_REQUEST_STATUSES } } }),
     prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: 'ASSIGNMENT_COMPLETE' } }),
-    prisma.dispatchIncident.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] }, serviceRequest: whereForDate } })
+    prisma.dispatchIncident.count({ where: { status: { in: OPEN_INCIDENT_STATUSES }, serviceRequest: whereForDate } })
   ]);
   return { totalRequests, pendingRequests, completedRequests, openIncidents };
+}
+
+function normalizeSummaryType(value) {
+  const type = normalizeString(value) || 'total';
+  return ['total', 'pending', 'complete', 'incidents'].includes(type) ? type : 'total';
+}
+
+function summaryTypeMeta(type) {
+  return ({
+    total: {
+      title: 'Solicitudes del día',
+      description: 'Todas las solicitudes programadas para la fecha seleccionada.'
+    },
+    pending: {
+      title: 'Solicitudes pendientes',
+      description: 'Solicitudes que aún requieren asignación, cobertura parcial o confirmación.'
+    },
+    complete: {
+      title: 'Solicitudes con asignación completa',
+      description: 'Solicitudes cuya cobertura ya está confirmada para la fecha seleccionada.'
+    },
+    incidents: {
+      title: 'Solicitudes con novedades abiertas',
+      description: 'Solicitudes de la fecha seleccionada que tienen novedades abiertas o en proceso.'
+    }
+  }[type]);
+}
+
+function buildSummaryWhere(selectedDate, type) {
+  const { start, end } = buildUtcDayRange(selectedDate);
+  const where = { serviceDate: { gte: start, lt: end } };
+  if (type === 'pending') where.status = { in: PENDING_REQUEST_STATUSES };
+  if (type === 'complete') where.status = 'ASSIGNMENT_COMPLETE';
+  if (type === 'incidents') where.incidents = { some: { status: { in: OPEN_INCIDENT_STATUSES } } };
+  return where;
+}
+
+async function loadSummaryServiceRequests(prisma, selectedDate, type) {
+  return prisma.dispatchServiceRequest.findMany({
+    where: buildSummaryWhere(selectedDate, type),
+    include: {
+      service: true,
+      assignments: {
+        include: { worker: true },
+        orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
+      },
+      incidents: {
+        where: { status: { in: OPEN_INCIDENT_STATUSES } },
+        include: { worker: true, assignment: { include: { worker: true } } },
+        orderBy: { createdAt: 'desc' }
+      }
+    },
+    orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
+  });
 }
 
 async function loadScheduleRequests(prisma, selectedDate) {
@@ -398,10 +453,38 @@ async function renderOperationsDashboard(req, res, prisma) {
   return res.render('operacionesDashboard', { pageTitle: 'Operaciones / Despacho', subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.', activeSection: 'dashboard', selectedDate, metrics, role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
 }
 
+async function renderServiceRequestsSummary(req, res, prisma) {
+  const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
+  const type = normalizeSummaryType(req.query.tipo || req.query.type);
+  const meta = summaryTypeMeta(type);
+  const [requests, metrics] = await Promise.all([
+    loadSummaryServiceRequests(prisma, selectedDate, type),
+    buildOperationsDashboardMetrics(prisma, selectedDate)
+  ]);
+  return res.render('operacionesSolicitudesResumen', {
+    pageTitle: meta.title,
+    subtitle: meta.description,
+    selectedDate,
+    type,
+    typeLabel: meta.title,
+    requests,
+    metrics,
+    isHistoricalDate: selectedDate < todayIsoDate(),
+    statusLabel,
+    assignmentStatusLabel,
+    activeAssignments,
+    confirmedAssignments,
+    buildHorario,
+    role: req.session?.userRole || req.userRole,
+    canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
+  });
+}
+
 export function dispatchDashboardMetricsRouter(prisma) {
   const router = express.Router();
   router.get('/', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
   router.get('/abrir', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
+  router.get('/solicitudes/resumen', requireOps, async (req, res) => renderServiceRequestsSummary(req, res, prisma));
   router.get('/programacion.xlsx', requireOps, async (req, res) => {
     const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
     const workbook = await buildScheduleWorkbook(prisma, selectedDate);
