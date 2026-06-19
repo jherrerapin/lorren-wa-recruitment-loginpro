@@ -9,9 +9,22 @@
     return Number.isNaN(start.getTime()) ? null : start;
   }
 
+  function parseServiceStartFromText(text) {
+    const match = String(text || '').match(/(\d{4}-\d{2}-\d{2})\s*·\s*([0-2]?\d:[0-5]\d)?/);
+    if (!match) return null;
+    return buildServiceStart(match[1], match[2]);
+  }
+
+  function findContextStart(element) {
+    const directStart = buildServiceStart(element?.dataset?.serviceDate, element?.dataset?.startTime);
+    if (directStart) return directStart;
+    const context = element?.closest?.('.request-card, tr, .card, .assigned-card');
+    return parseServiceStartFromText(context?.textContent || '');
+  }
+
   function isLocked(element) {
     if (element?.dataset?.expiredEdit === 'true') return true;
-    const start = buildServiceStart(element?.dataset?.serviceDate, element?.dataset?.startTime);
+    const start = findContextStart(element);
     if (!start) return false;
     return Date.now() > start.getTime() + TWO_HOURS_MS;
   }
@@ -57,14 +70,14 @@
   }
 
   document.addEventListener('click', (event) => {
-    const link = event.target.closest?.('[data-expired-edit-link="true"]');
+    const link = event.target.closest?.('a[href*="/asignaciones/solicitudes/"][href$="/editar"], [data-expired-edit-link="true"]');
     if (!link || !isLocked(link)) return;
     event.preventDefault();
     showModal(link.dataset.expiredMessage || DEFAULT_MESSAGE);
   });
 
   document.addEventListener('submit', (event) => {
-    const form = event.target.closest?.('[data-expired-delete-form="true"]');
+    const form = event.target.closest?.('form[action*="/solicitudes/"][action$="/eliminar"], [data-expired-delete-form="true"]');
     if (!form || !isLocked(form)) return;
     event.preventDefault();
     showModal(form.dataset.expiredMessage || DEFAULT_MESSAGE);
