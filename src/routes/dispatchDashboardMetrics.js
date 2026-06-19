@@ -49,8 +49,7 @@ function buildUtcDayRange(dateText) {
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 1);
   return { start, end };
-}
-
+}\n
 function serviceRequestDateText(request) {
   if (!request?.serviceDate) return todayIsoDate();
   return new Date(request.serviceDate).toISOString().slice(0, 10);
@@ -289,8 +288,9 @@ async function loadSummaryServiceRequests(prisma, selectedDate, type) {
 }
 
 async function guardEditableServiceRequest(prisma, req, res, next) {
+  const requestId = req.params.id || req.params.serviceRequestId;
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
-    where: { id: req.params.id },
+    where: { id: requestId },
     select: { id: true, serviceDate: true, startTime: true }
   });
   if (!serviceRequest || !isServiceRequestEditLocked(serviceRequest)) return next();
@@ -521,6 +521,7 @@ export function dispatchDashboardMetricsRouter(prisma) {
   router.get('/solicitudes/resumen', requireOps, async (req, res) => renderServiceRequestsSummary(req, res, prisma));
   router.get('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
   router.post('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
+  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
   router.get('/programacion.xlsx', requireOps, async (req, res) => {
     const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
     const workbook = await buildScheduleWorkbook(prisma, selectedDate);
