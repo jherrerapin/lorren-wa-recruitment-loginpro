@@ -49,7 +49,8 @@ function buildUtcDayRange(dateText) {
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 1);
   return { start, end };
-}\n
+}
+
 function serviceRequestDateText(request) {
   if (!request?.serviceDate) return todayIsoDate();
   return new Date(request.serviceDate).toISOString().slice(0, 10);
