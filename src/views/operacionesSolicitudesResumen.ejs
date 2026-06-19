@@ -69,6 +69,8 @@
       </div>
     </section>
 
+    <% if (message) { %><div class="section-note"><%= message %></div><% } %>
+
     <section class="toolbar">
       <div>
         <h2><%= typeLabel %> — <%= selectedDate %></h2>
@@ -82,16 +84,14 @@
       </div>
     </section>
 
-    <% if (isHistoricalDate) { %>
-      <div class="readonly-note">La fecha seleccionada ya pasó. Estas solicitudes se muestran en modo consulta: puedes revisarlas a detalle, pero no editarlas desde esta vista.</div>
-    <% } %>
+    <div class="readonly-note">Las solicitudes solo se pueden editar hasta 2 horas después de la hora de inicio del servicio. Después quedan disponibles únicamente para consulta.</div>
 
     <section class="request-list">
       <% if (!requests.length) { %>
         <div class="empty-state"><strong>No hay solicitudes para este indicador.</strong>Cambia de indicador o vuelve al panel de Operaciones para seleccionar otra fecha.</div>
       <% } %>
 
-      <% requests.forEach((request) => { const required = Number(request.requiredWorkers || 0); const active = activeCount(request); const confirmed = confirmedCount(request); %>
+      <% requests.forEach((request) => { const required = Number(request.requiredWorkers || 0); const active = activeCount(request); const confirmed = confirmedCount(request); const editLocked = isServiceRequestEditLocked(request); %>
         <article class="request-card">
           <div class="request-head">
             <div>
@@ -140,11 +140,11 @@
           <% } %>
 
           <div class="card-actions">
-            <% if (!isHistoricalDate) { %>
+            <% if (!editLocked) { %>
               <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar / revisar</a>
               <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar solicitud</a>
             <% } else { %>
-              <span class="muted">Modo consulta: edición bloqueada por fecha vencida.</span>
+              <span class="muted">Modo consulta: edición bloqueada porque ya pasaron más de 2 horas desde la hora del servicio.</span>
             <% } %>
           </div>
         </article>

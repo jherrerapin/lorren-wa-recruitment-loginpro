@@ -5,6 +5,7 @@ const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRM
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const PENDING_REQUEST_STATUSES = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
 const OPEN_INCIDENT_STATUSES = ['OPEN', 'IN_PROGRESS'];
+const EDIT_GRACE_PERIOD_MS = 2 * 60 * 60 * 1000;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -48,6 +49,24 @@ function buildUtcDayRange(dateText) {
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 1);
   return { start, end };
+}
+
+function serviceRequestDateText(request) {
+  if (!request?.serviceDate) return todayIsoDate();
+  return new Date(request.serviceDate).toISOString().slice(0, 10);
+}
+
+function serviceRequestStartAt(request) {
+  const date = serviceRequestDateText(request);
+  const startTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(request?.startTime || '')) ? request.startTime : '00:00';
+  const start = new Date(`${date}T${startTime}:00-05:00`);
+  return Number.isNaN(start.getTime()) ? null : start;
+}
+
+function isServiceRequestEditLocked(request, now = new Date()) {
+  const start = serviceRequestStartAt(request);
+  if (!start) return false;
+  return now.getTime() > start.getTime() + EDIT_GRACE_PERIOD_MS;
 }
 
 function statusLabel(value) {
@@ -269,6 +288,21 @@ async function loadSummaryServiceRequests(prisma, selectedDate, type) {
   });
 }
 
+async function guardEditableServiceRequest(prisma, req, res, next) {
+  const requestId = req.params.id || req.params.serviceRequestId;
+  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: requestId },
+    select: { id: true, serviceDate: true, startTime: true }
+  });
+  if (!serviceRequest || !isServiceRequestEditLocked(serviceRequest)) return next();
+  const selectedDate = serviceRequestDateText(serviceRequest);
+  const message = 'Esta solicitud ya superó las 2 horas posteriores a la hora del servicio. Solo puede consultarse.';
+  if (req.method === 'GET') {
+    return res.redirect(`/admin/operaciones/solicitudes/resumen?fecha=${encodeURIComponent(selectedDate)}&tipo=total&message=${encodeURIComponent(message)}`);
+  }
+  return res.status(403).send(message);
+}
+
 async function loadScheduleRequests(prisma, selectedDate) {
   const { start, end } = buildUtcDayRange(selectedDate);
   return prisma.dispatchServiceRequest.findMany({
@@ -469,7 +503,8 @@ async function renderServiceRequestsSummary(req, res, prisma) {
     typeLabel: meta.title,
     requests,
     metrics,
-    isHistoricalDate: selectedDate < todayIsoDate(),
+    message: normalizeString(req.query.message),
+    isServiceRequestEditLocked,
     statusLabel,
     assignmentStatusLabel,
     activeAssignments,
@@ -485,6 +520,9 @@ export function dispatchDashboardMetricsRouter(prisma) {
   router.get('/', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
   router.get('/abrir', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
   router.get('/solicitudes/resumen', requireOps, async (req, res) => renderServiceRequestsSummary(req, res, prisma));
+  router.get('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
+  router.post('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
+  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
   router.get('/programacion.xlsx', requireOps, async (req, res) => {
     const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
     const workbook = await buildScheduleWorkbook(prisma, selectedDate);
