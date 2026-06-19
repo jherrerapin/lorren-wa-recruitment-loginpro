@@ -54,6 +54,7 @@
   <% const formatDate = (value) => value ? new Date(value).toISOString().slice(0,10) : '-'; %>
   <% const activeCount = (request) => activeAssignments(request).length; %>
   <% const confirmedCount = (request) => confirmedAssignments(request).length; %>
+  <% const expiredMessage = 'Esta solicitud ya superó las 2 horas posteriores a la hora del servicio. Puedes verla a detalle, pero no editarla.'; %>
 
   <main class="page">
     <section class="hero">
@@ -142,8 +143,9 @@
           <div class="card-actions">
             <% if (!editLocked) { %>
               <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar / revisar</a>
-              <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar solicitud</a>
-            <% } else { %>
+            <% } %>
+            <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar" data-expired-edit-link="true" data-expired-edit="<%= editLocked ? 'true' : 'false' %>" data-service-date="<%= formatDate(request.serviceDate) %>" data-start-time="<%= request.startTime || '' %>" data-expired-message="<%= expiredMessage %>">Editar solicitud</a>
+            <% if (editLocked) { %>
               <span class="muted">Modo consulta: edición bloqueada porque ya pasaron más de 2 horas desde la hora del servicio.</span>
             <% } %>
           </div>
@@ -151,5 +153,6 @@
       <% }) %>
     </section>
   </main>
+  <script src="/public/expired-service-request-modal.js"></script>
 </body>
 </html>

@@ -201,6 +201,7 @@
     </section>
   </main>
 
+  <script src="/public/expired-service-request-modal.js"></script>
   <script type="application/json" id="clients-data"><%- JSON.stringify(clients.map((client) => ({ id: client.id, name: client.name, cityName: client.cityName, operationPoints: client.operationPoints || [], services: client.services || [] }))) %></script>
   <script>
     const clientsData = JSON.parse(document.getElementById('clients-data').textContent || '[]');
