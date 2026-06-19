@@ -1,4 +1,15 @@
 (() => {
+  const DEFAULT_ASSIGNMENT_TEMPLATE = [
+    'Buenas tardes {{nombre}},',
+    '',
+    'Mañana: {{fecha}} ',
+    'Estar en: {{operacion}}  - {{direccion}}',
+    'Hora : {{horaInicio}} por favor.',
+    '',
+    '',
+    'Confirmado?'
+  ].join('\n');
+
   function refreshMessageData() {
     if (typeof window.refreshWhatsappLinks === 'function') {
       window.refreshWhatsappLinks();
@@ -18,12 +29,73 @@
     refreshMessageData();
   }
 
+  function showBulkSendToast(message) {
+    if (typeof window.showToast === 'function') {
+      window.showToast(message);
+      return;
+    }
+    const toast = document.getElementById('asyncToast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.add('show');
+    window.clearTimeout(showBulkSendToast._t);
+    showBulkSendToast._t = window.setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+
+  function shouldReplaceTemplate(value) {
+    const current = String(value || '').trim();
+    if (!current) return true;
+    return /te\s+confirmamos\s+asignaci/i.test(current) || /Por\s+favor\s+confirma\s+recibido/i.test(current);
+  }
+
+  function addBulkSendButton(template) {
+    const templateCard = template.closest('.template-card');
+    if (!templateCard || templateCard.querySelector('#sendAllAssignmentMessages')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'sendAllAssignmentMessages';
+    button.className = 'btn btn-primary';
+    button.textContent = 'Enviar mensaje a todos';
+    button.style.marginTop = '8px';
+    button.addEventListener('click', async () => {
+      syncTemplateToMessages();
+      refreshMessageData();
+      const buttons = [...document.querySelectorAll('.assigned-card .whatsapp-link.dispatch-wa-button')]
+        .filter((item) => !item.disabled && item.dataset.waPhone && item.dataset.waMessage);
+      if (!buttons.length) {
+        showBulkSendToast('No hay auxiliares con WhatsApp y mensaje listo para enviar.');
+        return;
+      }
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = `Enviando 0/${buttons.length}...`;
+      for (let index = 0; index < buttons.length; index += 1) {
+        const whatsappButton = buttons[index];
+        button.textContent = `Enviando ${index + 1}/${buttons.length}...`;
+        if (typeof window.sendDispatchWhatsapp === 'function') {
+          await window.sendDispatchWhatsapp(whatsappButton);
+        } else {
+          whatsappButton.click();
+          await new Promise((resolve) => window.setTimeout(resolve, 900));
+        }
+      }
+      button.disabled = false;
+      button.textContent = originalText;
+      showBulkSendToast('Mensajes enviados a los auxiliares con número disponible.');
+    });
+    const variables = templateCard.querySelector('.variable-row');
+    if (variables) variables.insertAdjacentElement('afterend', button);
+    else templateCard.appendChild(button);
+  }
+
   function enhanceTemplate() {
     const template = document.getElementById('globalTemplate');
     if (!template || template.dataset.syncEnhanced === 'true') return;
     template.dataset.syncEnhanced = 'true';
+    if (shouldReplaceTemplate(template.value)) template.value = DEFAULT_ASSIGNMENT_TEMPLATE;
     const helper = template.closest('.template-card')?.querySelector('p.muted');
     if (helper) helper.textContent = 'Edita esta plantilla general. El mensaje de cada auxiliar se actualizará automáticamente con este mismo contenido.';
+    addBulkSendButton(template);
     template.addEventListener('input', syncTemplateToMessages);
     document.addEventListener('click', (event) => {
       const button = event.target.closest?.('.variable-row[data-target="globalTemplate"] .variable-btn');
