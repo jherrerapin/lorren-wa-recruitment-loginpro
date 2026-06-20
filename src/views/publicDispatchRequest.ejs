@@ -82,8 +82,8 @@
                   <div class="shift-row">
                     <div class="field"><label>Fecha base <span class="field-tag required">* campo obligatorio</span></label><input type="date" name="serviceDateBlock" required /></div>
                     <div class="field"><label>Cantidad <span class="field-tag required">* campo obligatorio</span></label><input type="number" min="1" name="requiredWorkers" required value="1" /></div>
-                    <div class="field"><label>Hora inicio <span class="field-tag required">* campo obligatorio</span></label><input type="time" name="startTime" required /></div>
-                    <div class="field"><label>Hora fin <span class="field-tag optional">* campo opcional</span></label><input type="time" name="endTime" /></div>
+                    <div class="field"><label>Hora inicio <span class="field-tag required">* campo obligatorio</span></label><input id="startTime" type="time" name="startTime" required /></div>
+                    <div class="field"><label>Hora fin <span class="field-tag optional">* campo opcional</span></label><input id="endTime" type="time" name="endTime" /></div>
                     <button class="shift-remove" type="button" hidden>Quitar</button>
                     <div class="week-repeat">
                       <label class="week-repeat-toggle"><input type="checkbox" data-week-repeat-toggle /> Repetir este mismo horario en otros días de esta semana</label>

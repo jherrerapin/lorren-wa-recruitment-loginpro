@@ -5,6 +5,7 @@ import fs from 'node:fs';
 test('dispatch operations UX rules for delete, time inputs, manual CV and dependent vacancies', () => {
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const dispatchRoute = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+  const dashboardMetricsRoute = fs.readFileSync('src/routes/dispatchDashboardMetrics.js', 'utf8');
   const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
   const clientOpsView = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
@@ -36,6 +37,7 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(dispatchRoute, /resolveRequestTimes/);
   assert.match(dispatchRoute, /Horario invalido\. Usa formato HH:mm/);
   assert.match(dispatchRoute, /\.\.\.requestTimes/);
+  assert.match(dashboardMetricsRoute, /serviceRequest:\s*\{\s*is:\s*whereForDate\s*\}/);
 
   assert.match(workerFormView, /enctype="multipart\/form-data"/);
   assert.match(workerFormView, /name="cvFile"/);
