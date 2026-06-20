@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import whatsappWeb from 'whatsapp-web.js';
@@ -69,6 +69,7 @@ function releaseSendLock(key) {
 function resolveAuthDataPath() {
   if (process.env.DISPATCH_WWEB_AUTH_PATH) return process.env.DISPATCH_WWEB_AUTH_PATH;
   if (process.env.RAILWAY_VOLUME_MOUNT_PATH) return `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/dispatch-wweb-auth`;
+  if (existsSync('/data')) return '/data/dispatch-wweb-auth';
   return './storage/dispatch-wweb-auth';
 }
 
@@ -82,6 +83,19 @@ function ensureAuthDataPath() {
   return dataPath;
 }
 
+function findNixChromiumExecutable() {
+  const nixStorePath = '/nix/store';
+  if (!existsSync(nixStorePath)) return undefined;
+  try {
+    const chromiumPackageDir = readdirSync(nixStorePath).find((entry) => entry.includes('chromium'));
+    if (!chromiumPackageDir) return undefined;
+    const chromiumPath = `${nixStorePath}/${chromiumPackageDir}/bin/chromium`;
+    return existsSync(chromiumPath) ? chromiumPath : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
 function resolveChromeExecutablePath() {
   const candidates = [
     process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
@@ -91,14 +105,15 @@ function resolveChromeExecutablePath() {
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
     '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome'
+    '/usr/bin/google-chrome',
+    findNixChromiumExecutable()
   ].filter(Boolean);
 
   const configuredPath = candidates.find((candidate) => existsSync(candidate));
   if (configuredPath) return configuredPath;
 
   try {
-    return execFileSync('sh', ['-c', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome'], {
+    return execFileSync('sh', ['-c', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome || find /nix/store -path '*/bin/chromium' -type f 2>/dev/null | head -n 1'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore']
     }).trim() || undefined;
@@ -109,6 +124,10 @@ function resolveChromeExecutablePath() {
 
 function buildPuppeteerOptions() {
   const executablePath = resolveChromeExecutablePath();
+  if (!executablePath) {
+    lastError = 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho. Verifica que el despliegue instale Chromium y exponga DISPATCH_BROWSER_EXECUTABLE_PATH, PUPPETEER_EXECUTABLE_PATH, GOOGLE_CHROME_BIN o CHROME_BIN.';
+    console.warn(lastError);
+  }
   return {
     headless: true,
     ...(executablePath ? { executablePath } : {}),
@@ -119,7 +138,10 @@ function buildPuppeteerOptions() {
       '--disable-gpu',
       '--no-first-run',
       '--no-default-browser-check',
-      '--disable-extensions'
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-features=site-per-process',
+      '--disable-software-rasterizer'
     ]
   };
 }
