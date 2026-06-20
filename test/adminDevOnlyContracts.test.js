@@ -55,6 +55,16 @@ test('operations bridge allows DEV or canAccessDispatch and still protects sessi
   );
 });
 
+test('operations bridge dashboard fallback renders required locals', () => {
+  const bridgeSource = readSource('src/routes/dispatchBridge.js');
+
+  assert.match(bridgeSource, /function\s+renderOperationsDashboard\s*\(\s*req\s*,\s*res\s*,\s*options\s*=\s*\{\}\s*\)/);
+  assert.match(bridgeSource, /selectedDate:\s*todayIsoDate\(\)/);
+  assert.match(bridgeSource, /metrics:\s*\{[\s\S]*?totalRequests:\s*0[\s\S]*?pendingRequests:\s*0[\s\S]*?completedRequests:\s*0[\s\S]*?openIncidents:\s*0[\s\S]*?\}/);
+  assert.match(bridgeSource, /role:\s*req\.session\?\.userRole\s*\|\|\s*req\.userRole/);
+  assert.match(bridgeSource, /router\.get\(\s*['"]\/novedades['"][\s\S]*?renderOperationsDashboard\(req,\s*res/);
+});
+
 test('admin user creation restricts canAccessDispatch to DEV in backend', () => {
   const adminSource = readSource('src/routes/admin.js');
 

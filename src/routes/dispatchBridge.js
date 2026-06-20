@@ -24,6 +24,9 @@ function normalizeString(value) {
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
 }
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
 function normalizeStringList(value) {
   if (Array.isArray(value)) return value.map((item) => normalizeString(item)).filter(Boolean);
   const single = normalizeString(value);
@@ -60,7 +63,23 @@ async function recalculateServiceRequestStatus(serviceRequestId) {
   if (assignedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE'; else if (assignedCount > 0) status = 'ASSIGNMENT_PARTIAL';
   await prisma.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
 }
-function renderOperationsDashboard(res, options = {}) { return res.render('operacionesDashboard', { pageTitle: 'Operaciones / Despacho', subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.', activeSection: 'dashboard', ...options }); }
+function renderOperationsDashboard(req, res, options = {}) {
+  return res.render('operacionesDashboard', {
+    pageTitle: 'Operaciones / Despacho',
+    subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.',
+    activeSection: 'dashboard',
+    selectedDate: todayIsoDate(),
+    metrics: {
+      totalRequests: 0,
+      pendingRequests: 0,
+      completedRequests: 0,
+      openIncidents: 0
+    },
+    role: req.session?.userRole || req.userRole,
+    canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch),
+    ...options
+  });
+}
 async function resolveDispatchService(serviceId) {
   const normalizedServiceId = normalizeString(serviceId);
   if (!normalizedServiceId) return null;
@@ -112,8 +131,8 @@ async function resolveRequestSelection(body) {
 
 export function dispatchBridgeRouter() {
   const router = express.Router();
-  router.get('/', requireOps, (_req, res) => renderOperationsDashboard(res));
-  router.get('/abrir', requireOps, (_req, res) => renderOperationsDashboard(res));
+  router.get('/', requireOps, (req, res) => renderOperationsDashboard(req, res));
+  router.get('/abrir', requireOps, (req, res) => renderOperationsDashboard(req, res));
   router.get('/solicitudes', requireOps, async (req, res) => {
     const serviceRequests = await prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] });
     return res.render('operacionesSolicitudes', { serviceRequests, role: req.session?.userRole || req.userRole });
@@ -279,7 +298,7 @@ export function dispatchBridgeRouter() {
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => { const worker = await findWorkerOr404(req.params.workerId); if (!worker) return res.status(404).send('Auxiliar no encontrado'); await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'INACTIVE' } }); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar eliminado del flujo activo.')}`); });
 
   router.post('/sync-contratados', requireOps, requireDev, async (_req, res) => { const contratados = await prisma.candidate.findMany({ where: { status: 'CONTRATADO' }, select: { id: true } }); for (const candidate of contratados) await upsertDispatchWorkerFromCandidate(prisma, candidate.id); return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Sincronización completada: ${contratados.length} candidatos contratados procesados.`)}`); });
-  router.get('/novedades', requireOps, (_req, res) => renderOperationsDashboard(res, { pageTitle: 'Novedades operativas', activeSection: 'novedades' }));
+  router.get('/novedades', requireOps, (req, res) => renderOperationsDashboard(req, res, { pageTitle: 'Novedades operativas', activeSection: 'novedades' }));
   router.get('/solicitud/:publicToken', async (req, res) => { const operationPoint = await prisma.dispatchOperationPoint.findFirst({ where: { publicToken: req.params.publicToken, isActive: true }, include: { client: true } }); if (!operationPoint?.client?.isActive) return res.status(404).send('Link no disponible'); return res.redirect(`/operaciones/cliente/${operationPoint.client.publicToken}`); });
   router.post('/solicitud/:publicToken', async (req, res) => { const operationPoint = await prisma.dispatchOperationPoint.findFirst({ where: { publicToken: req.params.publicToken, isActive: true }, include: { client: { include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } }, services: { where: { isActive: true }, orderBy: { name: 'asc' } } } } } }); if (!operationPoint?.client?.isActive) return res.status(404).send('Link no disponible'); const requiredWorkersRaw = Number(req.body.requiredWorkers); const selectedService = operationPoint.client.services.find((service) => service.id === normalizeString(req.body.serviceId)) || null; let requestTimes; try { requestTimes = resolveRequestTimes(req.body); } catch (error) { return res.status(400).send(error.message || 'Horario invalido. Usa formato HH:mm.'); } await prisma.dispatchServiceRequest.create({ data: { operationPointId: operationPoint.id, clientName: operationPoint.client.name, operationPointName: operationPoint.name, cityName: operationPoint.cityName, address: operationPoint.address, ...serviceRequestServiceData(selectedService), serviceDate: new Date(req.body.serviceDate), ...requestTimes, requiredWorkers: Number.isFinite(requiredWorkersRaw) ? Math.max(1, Math.trunc(requiredWorkersRaw)) : 1, notes: normalizeString(req.body.notes), requestedByName: normalizeString(req.body.requestedByName), requestedByPhone: normalizeString(req.body.requestedByPhone), requestedByEmail: normalizeString(req.body.requestedByEmail), source: 'PUBLIC_LINK', status: 'PENDING_ASSIGNMENT' } }); return res.render('publicDispatchRequest', { client: operationPoint.client, operationPoints: operationPoint.client.operationPoints, services: operationPoint.client.services, operationPoint, service: selectedService, success: true }); });
 
