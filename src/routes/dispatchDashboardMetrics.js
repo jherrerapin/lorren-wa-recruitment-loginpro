@@ -229,7 +229,7 @@ async function buildOperationsDashboardMetrics(prisma, selectedDate) {
     prisma.dispatchServiceRequest.count({ where: whereForDate }),
     prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: { in: PENDING_REQUEST_STATUSES } } }),
     prisma.dispatchServiceRequest.count({ where: { ...whereForDate, status: 'ASSIGNMENT_COMPLETE' } }),
-    prisma.dispatchIncident.count({ where: { status: { in: OPEN_INCIDENT_STATUSES }, serviceRequest: whereForDate } })
+    prisma.dispatchIncident.count({ where: { status: { in: OPEN_INCIDENT_STATUSES }, serviceRequest: { is: whereForDate } } })
   ]);
   return { totalRequests, pendingRequests, completedRequests, openIncidents };
 }
