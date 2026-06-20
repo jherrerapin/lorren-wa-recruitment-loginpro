@@ -1,38 +1,22 @@
 (() => {
   const EXPIRED_EDIT_MESSAGE = 'Esta solicitud ya superó las 2 horas posteriores a la hora del servicio. Puedes verla a detalle, pero no editarla.';
-  const WHATSAPP_BOLD_VARIABLES = {
-    nombre: 'nombre',
-    fecha: 'fecha',
-    operacion: 'operacion',
-    direccion: 'direccion',
-    horainicio: 'horaInicio'
-  };
 
-  function boldWhatsappVariables(value) {
-    return String(value || '').replace(/\*?\{\{\s*(nombre|fecha|operacion|direccion|horaInicio)\s*\}\}\*?/gi, (_match, token) => {
-      const normalized = WHATSAPP_BOLD_VARIABLES[String(token || '').toLowerCase()] || token;
-      return `*{{${normalized}}}*`;
-    });
-  }
-
-  function currentGreeting(date = new Date()) {
-    const hour = Number(new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', hour12: false }).format(date));
-    if (hour >= 5 && hour < 12) return 'Buenos días';
-    if (hour >= 12 && hour < 19) return 'Buenas tardes';
-    return 'Buenas noches';
+  function normalizeAssignmentTemplate(value) {
+    return String(value || '').replace(/\*?\{\{\s*operacion\s*\}\}\*?/gi, '*{{operacion}}*');
   }
 
   function buildDefaultAssignmentTemplate() {
-    return boldWhatsappVariables([
-      `${currentGreeting()} {{nombre}},`,
+    return [
+      'Hola {{nombre}},',
       '',
-      'Mañana: {{fecha}} ',
-      'Estar en: {{operacion}}  - {{direccion}}',
+      'Mañana: {{fecha}}',
+      'Llegar a: *{{operacion}}*',
+      'Ubicacion: {{direccion}}',
       'Hora : {{horaInicio}} por favor.',
       '',
       '',
       'Confirmado?'
-    ].join('\n'));
+    ].join('\n');
   }
 
   function ensureExpiredModal() {
@@ -124,7 +108,7 @@
   function syncTemplateToMessages() {
     const template = document.getElementById('globalTemplate');
     if (!template) return;
-    const normalizedTemplate = boldWhatsappVariables(template.value || '');
+    const normalizedTemplate = normalizeAssignmentTemplate(template.value || '');
     if (template.value !== normalizedTemplate) template.value = normalizedTemplate;
     document.querySelectorAll('.assignment-message').forEach((textarea) => {
       textarea.value = normalizedTemplate;
@@ -150,7 +134,8 @@
     if (!current) return true;
     return /te\s+confirmamos\s+asignaci/i.test(current)
       || /Por\s+favor\s+confirma\s+recibido/i.test(current)
-      || /^Buenas\s+(d[ií]as|tardes|noches)\s+\*?\{\{\s*nombre\s*\}\}\*?/i.test(current);
+      || /^Buenas\s+(d[ií]as|tardes|noches)\s+\*?\{\{\s*nombre\s*\}\}\*?/i.test(current)
+      || (/^Hola\s+\*?\{\{\s*nombre\s*\}\}\*?/i.test(current) && !/Llegar\s+a:/i.test(current));
   }
 
   function addBulkSendButton(template) {
@@ -198,7 +183,7 @@
     if (!template || template.dataset.syncEnhanced === 'true') return;
     template.dataset.syncEnhanced = 'true';
     if (shouldReplaceTemplate(template.value)) template.value = buildDefaultAssignmentTemplate();
-    else template.value = boldWhatsappVariables(template.value || '');
+    else template.value = normalizeAssignmentTemplate(template.value || '');
     const helper = template.closest('.template-card')?.querySelector('p.muted');
     if (helper) helper.textContent = 'Edita esta plantilla general. El mensaje de cada auxiliar se actualizará automáticamente con este mismo contenido.';
     addBulkSendButton(template);
