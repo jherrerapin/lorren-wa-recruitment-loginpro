@@ -157,10 +157,16 @@ app.use((req, res, next) => {
         if (typeof callback === 'function') return callback(error);
         return next(error);
       }
-      const shouldInject = view === 'operacionesAsignacionesConfirmacion' && typeof html === 'string';
-      const output = shouldInject
-        ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script><script src="/public/assignment-template-sync.js"></script></body>')
-        : html;
+      const isStringHtml = typeof html === 'string';
+      const shouldInjectTimeFormat = isStringHtml && typeof view === 'string' && (view.startsWith('operaciones') || view.startsWith('publicDispatch'));
+      const shouldInjectAssignment = isStringHtml && view === 'operacionesAsignacionesConfirmacion';
+      let output = isStringHtml ? html : '';
+      if (shouldInjectTimeFormat && !output.includes('/public/dispatch-time-format.js')) {
+        output = output.replace('</body>', '<script src="/public/dispatch-time-format.js"></script></body>');
+      }
+      if (shouldInjectAssignment && !output.includes('/public/assignment-template-sync.js')) {
+        output = output.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script><script src="/public/assignment-template-sync.js"></script></body>');
+      }
       if (typeof callback === 'function') return callback(null, output);
       return res.send(output);
     });
