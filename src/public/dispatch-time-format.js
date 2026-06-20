@@ -50,9 +50,28 @@
     });
   }
 
+  function getSelectedDate() {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get('fecha');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fromUrl || '')) return fromUrl;
+    const dateInput = document.querySelector('input[name="fecha"], input[type="date"]');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput?.value || '')) return dateInput.value;
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function normalizeAllRequestsLinks(root = document.body) {
+    root.querySelectorAll?.('a[href="/admin/operaciones/solicitudes"]').forEach((link) => {
+      const label = String(link.textContent || '').trim().toLowerCase();
+      if (!label.includes('solicitudes')) return;
+      const target = `/admin/operaciones/solicitudes/resumen?fecha=${encodeURIComponent(getSelectedDate())}&tipo=total`;
+      link.setAttribute('href', target);
+    });
+  }
+
   function boot() {
     normalizeTimeDataAttributes();
     formatVisibleTimes();
+    normalizeAllRequestsLinks();
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
@@ -60,6 +79,7 @@
           if (node.nodeType === Node.ELEMENT_NODE) {
             normalizeTimeDataAttributes(node);
             formatVisibleTimes(node);
+            normalizeAllRequestsLinks(node);
           }
         });
       });
@@ -67,7 +87,7 @@
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  window.LoginProTimeFormat = { formatTimeAmPm, formatTimeText, formatVisibleTimes };
+  window.LoginProTimeFormat = { formatTimeAmPm, formatTimeText, formatVisibleTimes, normalizeAllRequestsLinks };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 })();
