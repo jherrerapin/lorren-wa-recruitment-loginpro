@@ -68,12 +68,12 @@ function buildStatusForViewer(req, status) {
 }
 
 export function dispatchWhatsappNotificationsRouter(_prisma) {
-  initDispatchWhatsappClient();
   const router = express.Router();
   router.use(requireOps);
 
   router.get('/', async (req, res) => {
-    const status = buildStatusForViewer(req, await getDispatchWhatsappStatusView());
+    initDispatchWhatsappClient();
+    const status = buildStatusForViewer(req, await getDispatchWhatsappStatusView({ autoStart: false }));
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
       role: userRole(req),
@@ -82,7 +82,8 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
   });
 
   router.get('/estado', async (req, res) => {
-    res.json({ ok: true, ...buildStatusForViewer(req, await getDispatchWhatsappStatusView()) });
+    const shouldStart = req.query?.start === '1' || req.query?.start === 'true';
+    res.json({ ok: true, ...buildStatusForViewer(req, await getDispatchWhatsappStatusView({ autoStart: shouldStart })) });
   });
 
   router.post('/enviar', async (req, res) => {
