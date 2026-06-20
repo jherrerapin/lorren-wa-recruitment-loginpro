@@ -3,15 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Solicitudes de servicio — LoginPro</title>
+  <title>Crear solicitud de servicio — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
     .readonly-field { background: #f8fafc; color: var(--muted); cursor: not-allowed; }
     .select-hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
     select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
-    .shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.shift-summary{font-size:12px;color:var(--muted);margin-top:8px}.group-badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:900;background:var(--blue-soft);color:var(--blue);margin-left:6px}.schedule-list{display:grid;gap:4px}.schedule-line{font-size:12px;color:var(--navy)}.schedule-line span{color:var(--muted)}
-    .audit-cell{min-width:210px}.audit-summary{display:grid;gap:3px;font-size:12px;color:var(--muted)}.audit-summary strong{color:var(--navy)}.audit-details{margin-top:8px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:8px}.audit-details summary{cursor:pointer;font-weight:900;color:var(--navy);font-size:12px}.audit-timeline{display:grid;gap:7px;margin-top:9px}.audit-event{border-left:3px solid var(--teal);padding-left:8px;font-size:12px;color:var(--muted)}.audit-event strong{display:block;color:var(--navy);font-size:12px}.dev-audit{margin-top:8px;border:1px dashed #94a3b8;border-radius:10px;padding:8px;background:#fff}.dev-audit-grid{display:grid;gap:6px;font-size:12px;color:var(--muted)}.dev-audit-grid strong{color:var(--navy)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
+    .shift-list{display:grid;gap:10px}
+    .shift-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}
+    .shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}
+    .shift-summary{font-size:12px;color:var(--muted);margin-top:8px}
+    .quick-note{background:#fff;border:1px solid var(--border);border-left:4px solid var(--teal);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-sm);color:var(--muted);font-size:13px;line-height:1.45}
+    .quick-note strong{display:block;color:var(--navy);font-size:15px;margin-bottom:4px}
+    @media(max-width:720px){.shift-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -25,50 +30,12 @@
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
-  <% const statusLabel = (value) => ({ PENDING_ASSIGNMENT: 'Pendiente de asignación', ASSIGNMENT_PARTIAL: 'Asignación parcial', PENDING_CONFIRMATION: 'Pendiente de confirmación', ASSIGNMENT_COMPLETE: 'Asignación completa', CANCELLED: 'Cancelada' }[value] || value || 'Pendiente de asignación'); %>
-  <% const sourceLabel = (value) => ({ INTERNAL: 'Interna', PUBLIC_LINK: 'Cliente', MANUAL: 'Manual' }[value] || value || 'Interna'); %>
-  <% const activeCodes = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']; %>
-  <% const groupPattern = /\s*·\s*Grupo\s+(GRP-[A-Z0-9-]+)/i; %>
-  <% const groupCodeOf = (request) => { const match = String(request.serviceName || '').match(groupPattern); return match ? match[1] : null; }; %>
-  <% const cleanServiceName = (request) => String(request.serviceName || request.service?.name || 'Sin servicio').replace(groupPattern, '').trim() || 'Sin servicio'; %>
-  <% const countActive = (request) => (request.assignments || []).filter((assignment) => activeCodes.includes(assignment.status)).length; %>
-  <% const countConfirmed = (request) => (request.assignments || []).filter((assignment) => assignment.status === 'CONFIRMED').length; %>
-  <% const deriveStatus = (required, active, confirmed) => confirmed >= required ? 'ASSIGNMENT_COMPLETE' : active >= required ? 'PENDING_CONFIRMATION' : active > 0 ? 'ASSIGNMENT_PARTIAL' : 'PENDING_ASSIGNMENT'; %>
-  <% const formatDate = (value) => value ? new Date(value).toISOString().slice(0,10) : '-'; %>
-  <% const formatDateTime = (value) => value ? new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '-'; %>
-  <% const changedAfterCreate = (request) => request.updatedAt && request.createdAt && Math.abs(new Date(request.updatedAt).getTime() - new Date(request.createdAt).getTime()) > 1000; %>
-  <%
-    const groupedMap = new Map();
-    serviceRequests.forEach((request) => {
-      const groupCode = groupCodeOf(request);
-      const key = groupCode ? `group:${groupCode}` : `request:${request.id}`;
-      if (!groupedMap.has(key)) groupedMap.set(key, { key, groupCode, isGrouped: Boolean(groupCode), requests: [] });
-      groupedMap.get(key).requests.push(request);
-    });
-    const serviceRequestGroups = Array.from(groupedMap.values()).map((group) => {
-      group.requests.sort((a, b) => {
-        const dateDiff = new Date(a.serviceDate || 0).getTime() - new Date(b.serviceDate || 0).getTime();
-        if (dateDiff !== 0) return dateDiff;
-        return String(a.startTime || '').localeCompare(String(b.startTime || ''), 'es');
-      });
-      const primary = group.requests[0];
-      const requiredWorkers = group.requests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
-      const activeCount = group.requests.reduce((sum, request) => sum + countActive(request), 0);
-      const confirmedCount = group.requests.reduce((sum, request) => sum + countConfirmed(request), 0);
-      const nextRequest = group.requests.find((request) => countConfirmed(request) < Number(request.requiredWorkers || 0)) || primary;
-      const createdAt = group.requests.reduce((oldest, request) => !oldest || new Date(request.createdAt) < new Date(oldest) ? request.createdAt : oldest, null);
-      const updatedAt = group.requests.reduce((latest, request) => !latest || new Date(request.updatedAt) > new Date(latest) ? request.updatedAt : latest, null);
-      const uniqueDates = new Set(group.requests.map((request) => formatDate(request.serviceDate))).size;
-      return { ...group, primary, requiredWorkers, activeCount, confirmedCount, status: deriveStatus(requiredWorkers, activeCount, confirmedCount), nextRequest, createdAt, updatedAt, uniqueDates };
-    });
-  %>
-
   <main class="page">
     <section class="hero">
       <div>
         <div class="eyebrow">Solicitudes operativas</div>
-        <h1>Solicitudes de servicio</h1>
-        <p>Consulta, crea, edita y elimina solicitudes creadas desde links públicos de clientes o solicitudes internas.</p>
+        <h1>Crear solicitud de servicio</h1>
+        <p>Registra una solicitud interna. Para consultar solicitudes existentes, usa el inicio de Operaciones y filtra por fecha.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
@@ -78,6 +45,11 @@
     </section>
 
     <% if (message) { %><div class="section-note"><%= message %></div><% } %>
+
+    <div class="quick-note">
+      <strong>Consulta de solicitudes</strong>
+      El listado general se retiró de esta pantalla para evitar duplicidad. Desde el inicio de Operaciones puedes seleccionar una fecha y entrar a los indicadores: solicitudes del día, pendientes, asignación completa o novedades abiertas.
+    </div>
 
     <details class="card" open>
       <summary style="cursor:pointer;font-weight:900;color:var(--navy);padding:18px;">Crear solicitud de servicio</summary>
@@ -127,81 +99,8 @@
         </form>
       </div>
     </details>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>Listado de solicitudes</h2>
-        <p>Las solicitudes con varios horarios o varios días aparecen agrupadas. El historial detallado solo está disponible para perfil dev.</p>
-      </div>
-      <div class="table-wrap">
-        <% if (!serviceRequestGroups.length) { %>
-          <div class="empty"><strong>No hay solicitudes registradas.</strong>Crea un cliente, una operación y comparte el link público para recibir solicitudes.</div>
-        <% } else { %>
-          <table class="table">
-            <thead><tr><th>Cliente / operación</th><th>Fechas servicio</th><th>Control</th><th>Horarios</th><th>Requeridos</th><th>Asignación</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
-            <tbody>
-              <% serviceRequestGroups.forEach((group) => { const request = group.primary; %>
-                <tr>
-                  <td><strong><%= request.clientName %></strong><% if (group.isGrouped) { %><span class="group-badge"><%= group.uniqueDates > 1 ? 'Multi-día' : 'Agrupada' %></span><% } %><div class="muted"><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></div><div class="muted">Servicio: <%= cleanServiceName(request) %></div></td>
-                  <td><%= group.uniqueDates > 1 ? `${group.uniqueDates} días` : formatDate(request.serviceDate) %></td>
-                  <td class="audit-cell">
-                    <div class="audit-summary">
-                      <span><strong>Creada:</strong> <%= formatDateTime(group.createdAt) %></span>
-                      <span><strong>Última actualización:</strong> <%= formatDateTime(group.updatedAt) %></span>
-                      <span><strong>Creada por:</strong> <%= request.source === 'PUBLIC_LINK' ? 'Cliente / link público' : (request.createdByUsername || 'Operaciones') %></span>
-                    </div>
-                    <% if (role === 'dev') { %>
-                      <details class="audit-details">
-                        <summary>Ver historial dev</summary>
-                        <div class="audit-timeline">
-                          <div class="audit-event"><strong>Creación de solicitud</strong><span><%= formatDateTime(group.createdAt) %> · Canal: <%= request.source === 'PUBLIC_LINK' ? 'Link público del cliente' : 'Panel interno' %> · Perfil/usuario: <%= request.source === 'PUBLIC_LINK' ? 'Cliente solicitante' : (request.createdByUsername || 'Operaciones') %></span></div>
-                          <div class="audit-event"><strong>Contexto operativo</strong><span>Ciudad: <%= request.cityName || '-' %> · Operación: <%= request.operationPointName || '-' %> · Servicio: <%= cleanServiceName(request) %></span></div>
-                          <% if (request.requestedByName || request.requestedByPhone || request.requestedByEmail) { %><div class="audit-event"><strong>Solicitante</strong><span><%= request.requestedByName || '-' %> · Tel: <%= request.requestedByPhone || '-' %> · Correo: <%= request.requestedByEmail || '-' %></span></div><% } %>
-                          <% if (group.requests.some(changedAfterCreate)) { %><div class="audit-event"><strong>Actualización detectada</strong><span><%= formatDateTime(group.updatedAt) %> · La solicitud tuvo cambios posteriores a la creación.</span></div><% } %>
-                          <% group.requests.forEach((item, index) => { const itemActive = countActive(item); const itemConfirmed = countConfirmed(item); const lastAssignmentMove = (item.assignments || []).reduce((latest, assignment) => { const value = assignment.updatedAt || assignment.createdAt; return !latest || new Date(value) > new Date(latest) ? value : latest; }, null); %>
-                            <div class="audit-event"><strong>Bloque <%= index + 1 %></strong><span><%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || 'sin hora fin' %> · <%= item.requiredWorkers %> aux. · Estado: <%= statusLabel(item.status) %></span></div>
-                            <% if ((item.assignments || []).length) { %><div class="audit-event"><strong>Movimiento de asignación</strong><span>Auxiliares: <%= (item.assignments || []).map((assignment) => assignment.worker?.fullName || 'Auxiliar').join(', ') %> · Activas: <%= itemActive %> · Confirmadas: <%= itemConfirmed %> · Último movimiento: <%= formatDateTime(lastAssignmentMove) %></span></div><% } %>
-                          <% }) %>
-                        </div>
-                        <div class="dev-audit">
-                          <div class="dev-audit-grid">
-                            <span><strong>Código grupo:</strong> <%= group.groupCode || 'No aplica' %></span>
-                            <span><strong>Solicitudes relacionadas:</strong> <%= group.requests.map((item)=>item.id).join(', ') %></span>
-                            <span><strong>Operación ID:</strong> <%= request.operationPointId || '-' %></span>
-                            <span><strong>Servicio ID:</strong> <%= request.serviceId || '-' %></span>
-                            <span><strong>Total bloques:</strong> <%= group.requests.length %> · <strong>Total auxiliares:</strong> <%= group.requiredWorkers %></span>
-                            <span><strong>Asignaciones:</strong> <%= group.requests.reduce((sum, item)=>sum + (item.assignments || []).length, 0) %></span>
-                          </div>
-                        </div>
-                      </details>
-                    <% } %>
-                  </td>
-                  <td><div class="schedule-list"><% group.requests.forEach((item) => { %><div class="schedule-line"><strong><%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || '-' %></strong> <span>· <%= item.requiredWorkers %> aux.</span></div><% }) %></div></td>
-                  <td><%= group.requiredWorkers %></td>
-                  <td><strong><%= group.activeCount %> / <%= group.requiredWorkers %></strong><div class="muted">Confirmados: <%= group.confirmedCount %> / <%= group.requiredWorkers %></div></td>
-                  <td><span class="pill pill-amber"><%= sourceLabel(request.source || 'INTERNAL') %></span></td>
-                  <td><span class="pill <%= group.status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : group.status === 'PENDING_CONFIRMATION' ? 'pill-blue' : 'pill-amber' %>"><%= statusLabel(group.status) %></span></td>
-                  <td>
-                    <div class="actions stack-actions">
-                      <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= group.nextRequest.id %>">Asignar</a>
-                      <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
-                      <% if (group.isGrouped) { %>
-                        <% group.requests.forEach((item, index) => { %><form method="post" action="/admin/operaciones/solicitudes/<%= item.id %>/eliminar" onsubmit="return confirm('¿Eliminar el bloque <%= formatDate(item.serviceDate) %> · <%= item.startTime || '-' %> - <%= item.endTime || '-' %> de esta solicitud agrupada?');"><button class="btn" type="submit">Eliminar bloque <%= index + 1 %></button></form><% }) %>
-                      <% } else { %>
-                        <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
-                      <% } %>
-                    </div>
-                  </td>
-                </tr>
-              <% }) %>
-            </tbody>
-          </table>
-        <% } %>
-      </div>
-    </section>
   </main>
 
-  <script src="/public/expired-service-request-modal.js"></script>
   <script type="application/json" id="clients-data"><%- JSON.stringify(clients.map((client) => ({ id: client.id, name: client.name, cityName: client.cityName, operationPoints: client.operationPoints || [], services: client.services || [] }))) %></script>
   <script>
     const clientsData = JSON.parse(document.getElementById('clients-data').textContent || '[]');
