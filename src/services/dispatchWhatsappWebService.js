@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import path from 'node:path';
 import QRCode from 'qrcode';
 
 const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
+const CHROMIUM_LOCK_FILES = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket']);
 
 let Client = null;
 let LocalAuth = null;
@@ -118,6 +120,52 @@ function ensureAuthDataPath() {
   return dataPath;
 }
 
+function shellQuote(value) {
+  return `'${String(value || '').replace(/'/g, `'\\''`)}'`;
+}
+
+function killStaleChromiumProcesses(dataPath) {
+  if (!dataPath || process.env.DISPATCH_WWEB_SKIP_STALE_PROCESS_CLEANUP === 'true') return;
+  try {
+    execFileSync('sh', ['-c', `pkill -f ${shellQuote(dataPath)} || true`], {
+      stdio: ['ignore', 'ignore', 'ignore']
+    });
+  } catch (error) {
+    console.warn('No fue posible limpiar procesos Chromium anteriores de WhatsApp despacho.', error);
+  }
+}
+
+function cleanupChromiumProfileLocks(rootPath, depth = 0) {
+  if (!rootPath || depth > 5 || !existsSync(rootPath)) return;
+  let entries = [];
+  try {
+    entries = readdirSync(rootPath, { withFileTypes: true });
+  } catch (error) {
+    console.warn(`No fue posible leer carpeta de sesión WhatsApp despacho: ${rootPath}`, error);
+    return;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(rootPath, entry.name);
+    if (entry.isDirectory()) {
+      cleanupChromiumProfileLocks(entryPath, depth + 1);
+      continue;
+    }
+    if (!CHROMIUM_LOCK_FILES.has(entry.name)) continue;
+    try {
+      rmSync(entryPath, { force: true, recursive: true });
+      console.log(`Lock stale de Chromium eliminado: ${entryPath}`);
+    } catch (error) {
+      console.warn(`No fue posible eliminar lock stale de Chromium: ${entryPath}`, error);
+    }
+  }
+}
+
+function prepareChromiumProfile(dataPath) {
+  killStaleChromiumProcesses(dataPath);
+  cleanupChromiumProfileLocks(dataPath);
+}
+
 function findNixChromiumExecutable() {
   const nixStorePath = '/nix/store';
   if (!existsSync(nixStorePath)) return undefined;
@@ -183,6 +231,9 @@ function buildPuppeteerOptions() {
 
 function formatBrowserLaunchError(error) {
   const rawMessage = error?.message || 'No fue posible inicializar WhatsApp de despacho.';
+  if (rawMessage.includes('The profile appears to be in use') || rawMessage.includes('process_singleton_posix')) {
+    return 'El perfil de WhatsApp despacho estaba bloqueado por Chromium. El sistema limpió el lock y reintentará la conexión.';
+  }
   if (rawMessage.includes('ENOENT') || rawMessage.includes('Could not find Chrome') || rawMessage.includes('Failed to launch the browser process')) {
     return 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho.';
   }
@@ -235,6 +286,7 @@ export function initDispatchWhatsappClient() {
   if (client || initializing) return client;
 
   const dataPath = ensureAuthDataPath();
+  prepareChromiumProfile(dataPath);
   clearReconnectTimer();
   initializing = true;
 
