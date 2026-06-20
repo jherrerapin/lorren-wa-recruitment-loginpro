@@ -245,10 +245,11 @@ export function initDispatchWhatsappClient() {
 }
 
 export function getDispatchWhatsappStatus() {
-  return { ready, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
+  return { ready, initializing, reconnecting: Boolean(reconnectTimer), lastQr, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
 }
 
 export async function getDispatchWhatsappStatusView() {
+  if (!ready && !lastQr && !initializing && !client) initDispatchWhatsappClient();
   let qrImage = null;
   if (lastQr) {
     try {
@@ -257,7 +258,7 @@ export async function getDispatchWhatsappStatusView() {
       console.error('No fue posible generar imagen QR de WhatsApp despacho.', error);
     }
   }
-  return { ready, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
+  return { ready, initializing, reconnecting: Boolean(reconnectTimer), lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
 }
 
 export async function sendDispatchWhatsappMessage({ phone, message }) {
