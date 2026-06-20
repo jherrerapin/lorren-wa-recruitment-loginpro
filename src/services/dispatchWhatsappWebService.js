@@ -1,15 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import QRCode from 'qrcode';
-import qrcode from 'qrcode-terminal';
-import whatsappWeb from 'whatsapp-web.js';
 
-const { Client, LocalAuth, MessageMedia } = whatsappWeb;
 const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
 
+let Client = null;
+let LocalAuth = null;
+let MessageMedia = null;
+let whatsappModuleLoadPromise = null;
 let client = null;
 let initializing = false;
 let ready = false;
@@ -66,6 +67,40 @@ function releaseSendLock(key) {
   if (key) recentSendLocks.delete(key);
 }
 
+async function loadWhatsappWebModule() {
+  if (Client && LocalAuth && MessageMedia) return { Client, LocalAuth, MessageMedia };
+  if (!whatsappModuleLoadPromise) {
+    whatsappModuleLoadPromise = import('whatsapp-web.js')
+      .then((module) => {
+        const whatsappWeb = module.default || module;
+        Client = whatsappWeb.Client;
+        LocalAuth = whatsappWeb.LocalAuth;
+        MessageMedia = whatsappWeb.MessageMedia;
+        if (!Client || !LocalAuth || !MessageMedia) {
+          throw new Error('El módulo whatsapp-web.js no expuso Client, LocalAuth o MessageMedia.');
+        }
+        return { Client, LocalAuth, MessageMedia };
+      })
+      .catch((error) => {
+        whatsappModuleLoadPromise = null;
+        lastError = `No fue posible cargar whatsapp-web.js: ${error?.message || 'error desconocido'}`;
+        console.error(lastError, error);
+        throw error;
+      });
+  }
+  return whatsappModuleLoadPromise;
+}
+
+async function printTerminalQr(qr) {
+  try {
+    const module = await import('qrcode-terminal');
+    const terminalQr = module.default || module;
+    terminalQr.generate(qr, { small: true });
+  } catch (error) {
+    console.warn('No fue posible imprimir el QR de WhatsApp despacho en consola.', error);
+  }
+}
+
 function resolveAuthDataPath() {
   if (process.env.DISPATCH_WWEB_AUTH_PATH) return process.env.DISPATCH_WWEB_AUTH_PATH;
   if (process.env.RAILWAY_VOLUME_MOUNT_PATH) return `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/dispatch-wweb-auth`;
@@ -113,7 +148,7 @@ function resolveChromeExecutablePath() {
   if (configuredPath) return configuredPath;
 
   try {
-    return execFileSync('sh', ['-c', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome || find /nix/store -path '*/bin/chromium' -type f 2>/dev/null | head -n 1'], {
+    return execFileSync('sh', ['-c', 'command -v chromium || command -v chromium-browser || command -v google-chrome-stable || command -v google-chrome || find /nix/store -path \'*/bin/chromium\' -type f 2>/dev/null | head -n 1'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore']
     }).trim() || undefined;
@@ -202,66 +237,80 @@ export function initDispatchWhatsappClient() {
   const dataPath = ensureAuthDataPath();
   clearReconnectTimer();
   initializing = true;
-  client = new Client({
-    authStrategy: new LocalAuth({
-      clientId: 'dispatch',
-      dataPath
-    }),
-    takeoverOnConflict: true,
-    takeoverTimeoutMs: 0,
-    puppeteer: buildPuppeteerOptions()
-  });
 
-  client.on('qr', (qr) => {
-    lastQr = qr;
-    ready = false;
-    lastError = null;
-    console.log('QR de WhatsApp despacho pendiente. Escanéalo para vincular la sesión:');
-    qrcode.generate(qr, { small: true });
-  });
+  loadWhatsappWebModule()
+    .then(({ Client: WhatsappClient, LocalAuth: WhatsappLocalAuth }) => {
+      if (client) return client;
+      client = new WhatsappClient({
+        authStrategy: new WhatsappLocalAuth({
+          clientId: 'dispatch',
+          dataPath
+        }),
+        takeoverOnConflict: true,
+        takeoverTimeoutMs: 0,
+        puppeteer: buildPuppeteerOptions()
+      });
 
-  client.on('authenticated', () => {
-    lastAuthenticatedAt = new Date().toISOString();
-    lastError = null;
-    console.log('WhatsApp de despacho autenticado.');
-  });
+      client.on('qr', (qr) => {
+        lastQr = qr;
+        ready = false;
+        lastError = null;
+        console.log('QR de WhatsApp despacho pendiente. Escanéalo para vincular la sesión:');
+        printTerminalQr(qr);
+      });
 
-  client.on('ready', () => {
-    ready = true;
-    lastQr = null;
-    lastError = null;
-    lastReadyAt = new Date().toISOString();
-    console.log('WhatsApp de despacho conectado.');
-  });
+      client.on('authenticated', () => {
+        lastAuthenticatedAt = new Date().toISOString();
+        lastError = null;
+        console.log('WhatsApp de despacho autenticado.');
+      });
 
-  client.on('disconnected', (reason) => {
-    ready = false;
-    lastQr = null;
-    lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
-    console.warn(lastError);
-    resetClientReference();
-    scheduleReconnect(reason || 'desconectado');
-  });
+      client.on('ready', () => {
+        ready = true;
+        lastQr = null;
+        lastError = null;
+        lastReadyAt = new Date().toISOString();
+        console.log('WhatsApp de despacho conectado.');
+      });
 
-  client.on('auth_failure', (message) => {
-    ready = false;
-    lastQr = null;
-    lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
-    console.warn(lastError);
-    resetClientReference();
-    scheduleReconnect('fallo de autenticación');
-  });
+      client.on('disconnected', (reason) => {
+        ready = false;
+        lastQr = null;
+        lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
+        console.warn(lastError);
+        resetClientReference();
+        scheduleReconnect(reason || 'desconectado');
+      });
 
-  client.initialize().catch((error) => {
-    ready = false;
-    lastQr = null;
-    lastError = formatBrowserLaunchError(error);
-    resetClientReference();
-    console.error('Error inicializando WhatsApp de despacho.', error);
-    scheduleReconnect('error de inicio');
-  }).finally(() => {
-    initializing = false;
-  });
+      client.on('auth_failure', (message) => {
+        ready = false;
+        lastQr = null;
+        lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
+        console.warn(lastError);
+        resetClientReference();
+        scheduleReconnect('fallo de autenticación');
+      });
+
+      client.initialize().catch((error) => {
+        ready = false;
+        lastQr = null;
+        lastError = formatBrowserLaunchError(error);
+        resetClientReference();
+        console.error('Error inicializando WhatsApp de despacho.', error);
+        scheduleReconnect('error de inicio');
+      }).finally(() => {
+        initializing = false;
+      });
+
+      return client;
+    })
+    .catch((error) => {
+      ready = false;
+      lastQr = null;
+      lastError = error?.message || 'No fue posible preparar WhatsApp de despacho.';
+      initializing = false;
+      console.error('Error preparando WhatsApp de despacho.', error);
+    });
 
   return client;
 }
@@ -270,8 +319,9 @@ export function getDispatchWhatsappStatus() {
   return { ready, initializing, reconnecting: Boolean(reconnectTimer), lastQr, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
 }
 
-export async function getDispatchWhatsappStatusView() {
-  if (!ready && !lastQr && !initializing && !client) initDispatchWhatsappClient();
+export async function getDispatchWhatsappStatusView(options = {}) {
+  const autoStart = Boolean(options?.autoStart);
+  if (autoStart && !ready && !lastQr && !initializing && !client) initDispatchWhatsappClient();
   let qrImage = null;
   if (lastQr) {
     try {
@@ -309,6 +359,7 @@ export async function sendDispatchWhatsappMediaMessage({ phone, caption, buffer,
   if (!buffer.length) throw buildError('El archivo de WhatsApp está vacío.', 400);
   if (normalizedCaption && /<[^>]+>/.test(normalizedCaption)) throw buildError('El mensaje de WhatsApp no puede contener HTML.', 400);
 
+  await loadWhatsappWebModule();
   const activeClient = await getReadyClient();
   const recipient = await getRecipientId(activeClient, phone);
   const lockKey = reserveSendLock({ channelType: 'media', phone: recipient.normalizedPhone, payload: `${filename || 'programacion.pdf'}:${normalizedCaption}` });
