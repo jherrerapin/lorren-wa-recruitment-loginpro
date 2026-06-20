@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import whatsappWeb from 'whatsapp-web.js';
@@ -8,6 +8,8 @@ const { Client, LocalAuth, MessageMedia } = whatsappWeb;
 const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
+const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WHATSAPP_RECONNECT_DELAY_MS || 5000);
+const AUTH_DATA_PATH = resolveAuthDataPath();
 
 let client = null;
 let initializing = false;
@@ -15,6 +17,8 @@ let ready = false;
 let lastQr = null;
 let lastError = null;
 let lastReadyAt = null;
+let lastAuthenticatedAt = null;
+let reconnectTimer = null;
 const recentSendLocks = new Map();
 
 function buildError(message, statusCode = 400) {
@@ -63,6 +67,30 @@ function releaseSendLock(key) {
   if (key) recentSendLocks.delete(key);
 }
 
+function ensureDirectory(path) {
+  try {
+    mkdirSync(path, { recursive: true });
+    return path;
+  } catch (error) {
+    console.warn(`No fue posible preparar el directorio de sesión WhatsApp (${path}).`, error?.message || error);
+    return null;
+  }
+}
+
+function resolveAuthDataPath() {
+  const configured = process.env.DISPATCH_WWEB_AUTH_PATH || process.env.DISPATCH_WHATSAPP_AUTH_PATH;
+  if (configured) return ensureDirectory(configured) || configured;
+
+  const volumeBase = process.env.RAILWAY_VOLUME_MOUNT_PATH || (existsSync('/data') ? '/data' : null);
+  if (volumeBase) {
+    const volumePath = `${volumeBase.replace(/\/$/, '')}/dispatch-wweb-auth`;
+    const prepared = ensureDirectory(volumePath);
+    if (prepared) return prepared;
+  }
+
+  return ensureDirectory('./storage/dispatch-wweb-auth') || './storage/dispatch-wweb-auth';
+}
+
 function resolveChromeExecutablePath() {
   const candidates = [
     process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
@@ -93,7 +121,15 @@ function buildPuppeteerOptions() {
   return {
     headless: true,
     ...(executablePath ? { executablePath } : {}),
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu'
+    ]
   };
 }
 
@@ -103,6 +139,28 @@ function formatBrowserLaunchError(error) {
     return 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho.';
   }
   return rawMessage;
+}
+
+async function destroyCurrentClient() {
+  const current = client;
+  client = null;
+  ready = false;
+  if (!current) return;
+  try {
+    await current.destroy();
+  } catch (error) {
+    console.warn('No fue posible cerrar limpiamente la sesión interna de WhatsApp despacho.', error?.message || error);
+  }
+}
+
+function scheduleReconnect(reason) {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    await destroyCurrentClient();
+    lastError = reason ? `Reintentando conexión de WhatsApp despacho: ${reason}` : 'Reintentando conexión de WhatsApp despacho.';
+    initDispatchWhatsappClient();
+  }, Number.isFinite(RECONNECT_DELAY_MS) && RECONNECT_DELAY_MS >= 1000 ? RECONNECT_DELAY_MS : 5000);
 }
 
 async function getReadyClient() {
@@ -127,8 +185,10 @@ export function initDispatchWhatsappClient() {
   client = new Client({
     authStrategy: new LocalAuth({
       clientId: 'dispatch',
-      dataPath: process.env.DISPATCH_WWEB_AUTH_PATH || './storage/dispatch-wweb-auth'
+      dataPath: AUTH_DATA_PATH
     }),
+    takeoverOnConflict: true,
+    takeoverTimeoutMs: 15000,
     puppeteer: buildPuppeteerOptions()
   });
 
@@ -140,32 +200,42 @@ export function initDispatchWhatsappClient() {
     qrcode.generate(qr, { small: true });
   });
 
+  client.on('authenticated', () => {
+    lastAuthenticatedAt = new Date().toISOString();
+    lastError = null;
+    console.log('WhatsApp de despacho autenticado.');
+  });
+
   client.on('ready', () => {
     ready = true;
     lastQr = null;
     lastError = null;
     lastReadyAt = new Date().toISOString();
-    console.log('WhatsApp de despacho conectado.');
+    console.log('WhatsApp de despacho conectado. Sesión persistente en:', AUTH_DATA_PATH);
   });
 
   client.on('disconnected', (reason) => {
     ready = false;
+    lastQr = null;
     lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
     console.warn(lastError);
+    scheduleReconnect(reason || 'desconexión inesperada');
   });
 
   client.on('auth_failure', (message) => {
     ready = false;
+    lastQr = null;
     lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
     console.warn(lastError);
+    scheduleReconnect(message || 'fallo de autenticación');
   });
 
   client.initialize().catch((error) => {
     ready = false;
     lastQr = null;
     lastError = formatBrowserLaunchError(error);
-    client = null;
     console.error('Error inicializando WhatsApp de despacho.', error);
+    scheduleReconnect(lastError);
   }).finally(() => {
     initializing = false;
   });
@@ -174,7 +244,7 @@ export function initDispatchWhatsappClient() {
 }
 
 export function getDispatchWhatsappStatus() {
-  return { ready, lastQr, lastError, lastReadyAt };
+  return { ready, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: AUTH_DATA_PATH };
 }
 
 export async function getDispatchWhatsappStatusView() {
@@ -186,7 +256,7 @@ export async function getDispatchWhatsappStatusView() {
       console.error('No fue posible generar imagen QR de WhatsApp despacho.', error);
     }
   }
-  return { ready, lastQr, qrImage, lastError, lastReadyAt };
+  return { ready, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: AUTH_DATA_PATH };
 }
 
 export async function sendDispatchWhatsappMessage({ phone, message }) {
