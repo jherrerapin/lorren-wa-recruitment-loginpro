@@ -30,10 +30,10 @@
     return [
       'Hola {{nombre}},',
       '',
-      'Mañana: {{fecha}}',
+      'Mañana: *{{fecha}}*',
       'Llegar a: *{{operacion}}*',
-      'Ubicacion: {{direccion}}',
-      'Hora : {{horaInicio}} por favor.',
+      'Ubicacion: *{{direccion}}*',
+      'Hora : *{{horaInicio}}* por favor.',
       '',
       '',
       'Confirmado?'
