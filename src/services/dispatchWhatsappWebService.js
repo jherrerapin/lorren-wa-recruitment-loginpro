@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import whatsappWeb from 'whatsapp-web.js';
@@ -10,6 +11,7 @@ const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea 
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
 const STALE_CONNECTING_WINDOW_MS = Number(process.env.DISPATCH_WWEB_STALE_CONNECTING_MS || 45000);
+const CHROME_LOCK_FILENAMES = new Set(['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort']);
 
 let client = null;
 let initializing = false;
@@ -84,6 +86,50 @@ function ensureAuthDataPath() {
   return dataPath;
 }
 
+function removeChromeProfileLocks(rootPath) {
+  if (!rootPath || !existsSync(rootPath)) return;
+  const pending = [rootPath];
+  while (pending.length) {
+    const currentPath = pending.pop();
+    let entries = [];
+    try {
+      entries = readdirSync(currentPath, { withFileTypes: true });
+    } catch (_error) {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = join(currentPath, entry.name);
+      if (CHROME_LOCK_FILENAMES.has(entry.name)) {
+        try {
+          rmSync(entryPath, { force: true, recursive: true });
+          console.warn(`Archivo de bloqueo de Chrome eliminado para WhatsApp despacho: ${entryPath}`);
+        } catch (error) {
+          console.warn(`No fue posible eliminar bloqueo de Chrome ${entryPath}.`, error);
+        }
+        continue;
+      }
+      if (entry.isDirectory()) pending.push(entryPath);
+    }
+  }
+}
+
+function killChromeProcessesForProfile(rootPath) {
+  if (!rootPath || !existsSync(rootPath)) return;
+  const escapedPath = rootPath.replace(/'/g, `'\\''`);
+  try {
+    execFileSync('sh', ['-c', `pkill -f '${escapedPath}' || true`], { stdio: 'ignore' });
+  } catch (_error) {
+    // pkill returns non-zero when there is no matching process. That is acceptable.
+  }
+}
+
+function cleanupStaleChromeState(dataPath, reason = 'inicio') {
+  if (process.env.DISPATCH_WWEB_CLEAN_PROFILE_LOCKS === 'false') return;
+  killChromeProcessesForProfile(dataPath);
+  removeChromeProfileLocks(dataPath);
+  if (reason) console.warn(`Limpieza de bloqueos de Chrome para WhatsApp despacho ejecutada: ${reason}.`);
+}
+
 function resolveChromeExecutablePath() {
   const candidates = [
     process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
@@ -126,8 +172,16 @@ function buildPuppeteerOptions() {
   };
 }
 
+function isChromeProfileLockedError(error) {
+  const rawMessage = error?.message || '';
+  return /profile appears to be in use|ProcessSingleton|SingletonLock|Code:\s*21/i.test(rawMessage);
+}
+
 function formatBrowserLaunchError(error) {
   const rawMessage = error?.message || 'No fue posible inicializar WhatsApp de despacho.';
+  if (isChromeProfileLockedError(error)) {
+    return 'El perfil de Chrome de WhatsApp despacho quedó bloqueado por un proceso anterior. El sistema limpió el bloqueo y reintentará la conexión.';
+  }
   if (rawMessage.includes('ENOENT') || rawMessage.includes('Could not find Chrome') || rawMessage.includes('Failed to launch the browser process')) {
     return 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho.';
   }
@@ -187,6 +241,7 @@ export function initDispatchWhatsappClient() {
   if (client || initializing) return client;
 
   const dataPath = ensureAuthDataPath();
+  cleanupStaleChromeState(dataPath, 'antes de iniciar cliente');
   clearReconnectTimer();
   initializing = true;
   lastInitializationAt = new Date().toISOString();
@@ -250,9 +305,10 @@ export function initDispatchWhatsappClient() {
     lastReadyAt = null;
     lastAuthenticatedAt = null;
     lastError = formatBrowserLaunchError(error);
+    if (isChromeProfileLockedError(error)) cleanupStaleChromeState(dataPath, 'perfil bloqueado tras fallo de inicio');
     resetClientReference();
     console.error('Error inicializando WhatsApp de despacho.', error);
-    scheduleReconnect('error de inicio');
+    scheduleReconnect(isChromeProfileLockedError(error) ? 'perfil de Chrome bloqueado' : 'error de inicio');
   }).finally(() => {
     initializing = false;
   });
@@ -276,6 +332,7 @@ export function restartDispatchWhatsappClient(reason = 'reinicio manual') {
   resetClientReference();
   lastQr = null;
   lastError = null;
+  cleanupStaleChromeState(resolveAuthDataPath(), reason);
   initDispatchWhatsappClient();
 }
 
