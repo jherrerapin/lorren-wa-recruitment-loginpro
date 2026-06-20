@@ -2,7 +2,6 @@ import express from 'express';
 import {
   getDispatchWhatsappStatusView,
   initDispatchWhatsappClient,
-  restartDispatchWhatsappClient,
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappWebService.js';
 
@@ -83,11 +82,6 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
   });
 
   router.get('/estado', async (req, res) => {
-    res.json({ ok: true, ...buildStatusForViewer(req, await getDispatchWhatsappStatusView()) });
-  });
-
-  router.post('/reiniciar', async (req, res) => {
-    restartDispatchWhatsappClient(`reinicio solicitado por ${req.session?.username || req.username || 'operaciones'}`);
     res.json({ ok: true, ...buildStatusForViewer(req, await getDispatchWhatsappStatusView()) });
   });
 

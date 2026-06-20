@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
 import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import whatsappWeb from 'whatsapp-web.js';
@@ -10,8 +9,6 @@ const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
-const STALE_CONNECTING_WINDOW_MS = Number(process.env.DISPATCH_WWEB_STALE_CONNECTING_MS || 45000);
-const CHROME_LOCK_FILENAMES = new Set(['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort']);
 
 let client = null;
 let initializing = false;
@@ -20,7 +17,6 @@ let lastQr = null;
 let lastError = null;
 let lastReadyAt = null;
 let lastAuthenticatedAt = null;
-let lastInitializationAt = null;
 let reconnectTimer = null;
 const recentSendLocks = new Map();
 
@@ -86,50 +82,6 @@ function ensureAuthDataPath() {
   return dataPath;
 }
 
-function removeChromeProfileLocks(rootPath) {
-  if (!rootPath || !existsSync(rootPath)) return;
-  const pending = [rootPath];
-  while (pending.length) {
-    const currentPath = pending.pop();
-    let entries = [];
-    try {
-      entries = readdirSync(currentPath, { withFileTypes: true });
-    } catch (_error) {
-      continue;
-    }
-    for (const entry of entries) {
-      const entryPath = join(currentPath, entry.name);
-      if (CHROME_LOCK_FILENAMES.has(entry.name)) {
-        try {
-          rmSync(entryPath, { force: true, recursive: true });
-          console.warn(`Archivo de bloqueo de Chrome eliminado para WhatsApp despacho: ${entryPath}`);
-        } catch (error) {
-          console.warn(`No fue posible eliminar bloqueo de Chrome ${entryPath}.`, error);
-        }
-        continue;
-      }
-      if (entry.isDirectory()) pending.push(entryPath);
-    }
-  }
-}
-
-function killChromeProcessesForProfile(rootPath) {
-  if (!rootPath || !existsSync(rootPath)) return;
-  const escapedPath = rootPath.replace(/'/g, `'\\''`);
-  try {
-    execFileSync('sh', ['-c', `pkill -f '${escapedPath}' || true`], { stdio: 'ignore' });
-  } catch (_error) {
-    // pkill returns non-zero when there is no matching process. That is acceptable.
-  }
-}
-
-function cleanupStaleChromeState(dataPath, reason = 'inicio') {
-  if (process.env.DISPATCH_WWEB_CLEAN_PROFILE_LOCKS === 'false') return;
-  killChromeProcessesForProfile(dataPath);
-  removeChromeProfileLocks(dataPath);
-  if (reason) console.warn(`Limpieza de bloqueos de Chrome para WhatsApp despacho ejecutada: ${reason}.`);
-}
-
 function resolveChromeExecutablePath() {
   const candidates = [
     process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
@@ -172,16 +124,8 @@ function buildPuppeteerOptions() {
   };
 }
 
-function isChromeProfileLockedError(error) {
-  const rawMessage = error?.message || '';
-  return /profile appears to be in use|ProcessSingleton|SingletonLock|Code:\s*21/i.test(rawMessage);
-}
-
 function formatBrowserLaunchError(error) {
   const rawMessage = error?.message || 'No fue posible inicializar WhatsApp de despacho.';
-  if (isChromeProfileLockedError(error)) {
-    return 'El perfil de Chrome de WhatsApp despacho quedó bloqueado por un proceso anterior. El sistema limpió el bloqueo y reintentará la conexión.';
-  }
   if (rawMessage.includes('ENOENT') || rawMessage.includes('Could not find Chrome') || rawMessage.includes('Failed to launch the browser process')) {
     return 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho.';
   }
@@ -215,15 +159,8 @@ function resetClientReference() {
   }
 }
 
-function hasStaleClientWithoutQr(now = Date.now()) {
-  if (!client || ready || lastQr || initializing) return false;
-  if (lastError) return true;
-  if (!lastInitializationAt) return true;
-  return now - new Date(lastInitializationAt).getTime() > STALE_CONNECTING_WINDOW_MS;
-}
-
 async function getReadyClient() {
-  ensureDispatchWhatsappClientRunning();
+  if (!client) initDispatchWhatsappClient();
   if (!ready) throw buildError(NOT_CONNECTED_MESSAGE, 503);
   return client;
 }
@@ -241,10 +178,8 @@ export function initDispatchWhatsappClient() {
   if (client || initializing) return client;
 
   const dataPath = ensureAuthDataPath();
-  cleanupStaleChromeState(dataPath, 'antes de iniciar cliente');
   clearReconnectTimer();
   initializing = true;
-  lastInitializationAt = new Date().toISOString();
   client = new Client({
     authStrategy: new LocalAuth({
       clientId: 'dispatch',
@@ -280,8 +215,6 @@ export function initDispatchWhatsappClient() {
   client.on('disconnected', (reason) => {
     ready = false;
     lastQr = null;
-    lastReadyAt = null;
-    lastAuthenticatedAt = null;
     lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
     console.warn(lastError);
     resetClientReference();
@@ -291,8 +224,6 @@ export function initDispatchWhatsappClient() {
   client.on('auth_failure', (message) => {
     ready = false;
     lastQr = null;
-    lastReadyAt = null;
-    lastAuthenticatedAt = null;
     lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
     console.warn(lastError);
     resetClientReference();
@@ -302,13 +233,10 @@ export function initDispatchWhatsappClient() {
   client.initialize().catch((error) => {
     ready = false;
     lastQr = null;
-    lastReadyAt = null;
-    lastAuthenticatedAt = null;
     lastError = formatBrowserLaunchError(error);
-    if (isChromeProfileLockedError(error)) cleanupStaleChromeState(dataPath, 'perfil bloqueado tras fallo de inicio');
     resetClientReference();
     console.error('Error inicializando WhatsApp de despacho.', error);
-    scheduleReconnect(isChromeProfileLockedError(error) ? 'perfil de Chrome bloqueado' : 'error de inicio');
+    scheduleReconnect('error de inicio');
   }).finally(() => {
     initializing = false;
   });
@@ -316,33 +244,11 @@ export function initDispatchWhatsappClient() {
   return client;
 }
 
-export function ensureDispatchWhatsappClientRunning() {
-  if (!client && !initializing) {
-    initDispatchWhatsappClient();
-    return;
-  }
-  if (hasStaleClientWithoutQr()) {
-    restartDispatchWhatsappClient('cliente sin QR ni estado listo');
-  }
-}
-
-export function restartDispatchWhatsappClient(reason = 'reinicio manual') {
-  console.warn(`Reiniciando WhatsApp de despacho: ${reason}.`);
-  clearReconnectTimer();
-  resetClientReference();
-  lastQr = null;
-  lastError = null;
-  cleanupStaleChromeState(resolveAuthDataPath(), reason);
-  initDispatchWhatsappClient();
-}
-
 export function getDispatchWhatsappStatus() {
-  ensureDispatchWhatsappClientRunning();
-  return { ready, initializing, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, lastInitializationAt, authDataPath: resolveAuthDataPath() };
+  return { ready, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
 }
 
 export async function getDispatchWhatsappStatusView() {
-  ensureDispatchWhatsappClientRunning();
   let qrImage = null;
   if (lastQr) {
     try {
@@ -351,7 +257,7 @@ export async function getDispatchWhatsappStatusView() {
       console.error('No fue posible generar imagen QR de WhatsApp despacho.', error);
     }
   }
-  return { ready, initializing, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, lastInitializationAt, authDataPath: resolveAuthDataPath() };
+  return { ready, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
 }
 
 export async function sendDispatchWhatsappMessage({ phone, message }) {
