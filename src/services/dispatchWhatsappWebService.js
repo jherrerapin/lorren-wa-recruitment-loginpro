@@ -9,6 +9,7 @@ const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
+const STALE_CONNECTING_WINDOW_MS = Number(process.env.DISPATCH_WWEB_STALE_CONNECTING_MS || 45000);
 
 let client = null;
 let initializing = false;
@@ -17,6 +18,7 @@ let lastQr = null;
 let lastError = null;
 let lastReadyAt = null;
 let lastAuthenticatedAt = null;
+let lastInitializationAt = null;
 let reconnectTimer = null;
 const recentSendLocks = new Map();
 
@@ -159,8 +161,15 @@ function resetClientReference() {
   }
 }
 
+function hasStaleClientWithoutQr(now = Date.now()) {
+  if (!client || ready || lastQr || initializing) return false;
+  if (lastError) return true;
+  if (!lastInitializationAt) return true;
+  return now - new Date(lastInitializationAt).getTime() > STALE_CONNECTING_WINDOW_MS;
+}
+
 async function getReadyClient() {
-  if (!client) initDispatchWhatsappClient();
+  ensureDispatchWhatsappClientRunning();
   if (!ready) throw buildError(NOT_CONNECTED_MESSAGE, 503);
   return client;
 }
@@ -180,6 +189,7 @@ export function initDispatchWhatsappClient() {
   const dataPath = ensureAuthDataPath();
   clearReconnectTimer();
   initializing = true;
+  lastInitializationAt = new Date().toISOString();
   client = new Client({
     authStrategy: new LocalAuth({
       clientId: 'dispatch',
@@ -215,6 +225,8 @@ export function initDispatchWhatsappClient() {
   client.on('disconnected', (reason) => {
     ready = false;
     lastQr = null;
+    lastReadyAt = null;
+    lastAuthenticatedAt = null;
     lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
     console.warn(lastError);
     resetClientReference();
@@ -224,6 +236,8 @@ export function initDispatchWhatsappClient() {
   client.on('auth_failure', (message) => {
     ready = false;
     lastQr = null;
+    lastReadyAt = null;
+    lastAuthenticatedAt = null;
     lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
     console.warn(lastError);
     resetClientReference();
@@ -233,6 +247,8 @@ export function initDispatchWhatsappClient() {
   client.initialize().catch((error) => {
     ready = false;
     lastQr = null;
+    lastReadyAt = null;
+    lastAuthenticatedAt = null;
     lastError = formatBrowserLaunchError(error);
     resetClientReference();
     console.error('Error inicializando WhatsApp de despacho.', error);
@@ -244,11 +260,32 @@ export function initDispatchWhatsappClient() {
   return client;
 }
 
+export function ensureDispatchWhatsappClientRunning() {
+  if (!client && !initializing) {
+    initDispatchWhatsappClient();
+    return;
+  }
+  if (hasStaleClientWithoutQr()) {
+    restartDispatchWhatsappClient('cliente sin QR ni estado listo');
+  }
+}
+
+export function restartDispatchWhatsappClient(reason = 'reinicio manual') {
+  console.warn(`Reiniciando WhatsApp de despacho: ${reason}.`);
+  clearReconnectTimer();
+  resetClientReference();
+  lastQr = null;
+  lastError = null;
+  initDispatchWhatsappClient();
+}
+
 export function getDispatchWhatsappStatus() {
-  return { ready, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
+  ensureDispatchWhatsappClientRunning();
+  return { ready, initializing, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, lastInitializationAt, authDataPath: resolveAuthDataPath() };
 }
 
 export async function getDispatchWhatsappStatusView() {
+  ensureDispatchWhatsappClientRunning();
   let qrImage = null;
   if (lastQr) {
     try {
@@ -257,7 +294,7 @@ export async function getDispatchWhatsappStatusView() {
       console.error('No fue posible generar imagen QR de WhatsApp despacho.', error);
     }
   }
-  return { ready, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
+  return { ready, initializing, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, lastInitializationAt, authDataPath: resolveAuthDataPath() };
 }
 
 export async function sendDispatchWhatsappMessage({ phone, message }) {
