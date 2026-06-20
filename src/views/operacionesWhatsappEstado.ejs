@@ -7,45 +7,19 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    .status-layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 520px); gap: 18px; align-items: start; }
-    .status-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-sm); padding: 20px; display: grid; gap: 14px; }
-    .status-card.connected { border-color: var(--green); background: var(--green-soft); }
-    .status-label { display: inline-flex; width: fit-content; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 900; background: var(--amber-soft); color: var(--amber); }
-    .status-label.connected { background: #dcfce7; color: #166534; }
-    .status-label.error { background: #fee2e2; color: #991b1b; }
-    .qr-panel { align-items: center; text-align: center; }
-    .qr-image { width: min(420px, 100%); border: 10px solid #fff; border-radius: 18px; box-shadow: var(--shadow); background: #fff; }
-    .alert { border: 1px solid #fecaca; background: #fff5f5; color: #991b1b; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
-    .info-box { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
-    .technical-box { border: 1px dashed #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 12px 14px; font-size: 12px; line-height: 1.45; word-break: break-word; }
-    .muted-strong { color: var(--muted); font-weight: 800; }
-    @media (max-width: 900px) { .status-layout { grid-template-columns: 1fr; } }
+    .status-layout{display:grid;grid-template-columns:minmax(280px,1fr) minmax(320px,520px);gap:18px;align-items:start}.status-card{background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:20px;display:grid;gap:14px}.status-card.connected{border-color:var(--green);background:var(--green-soft)}.status-label{display:inline-flex;width:fit-content;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:900;background:var(--amber-soft);color:var(--amber)}.status-label.connected{background:#dcfce7;color:#166534}.status-label.error{background:#fee2e2;color:#991b1b}.qr-panel{align-items:center;text-align:center}.qr-image{width:min(420px,100%);border:10px solid #fff;border-radius:18px;box-shadow:var(--shadow);background:#fff}.alert{border:1px solid #fecaca;background:#fff5f5;color:#991b1b;border-radius:14px;padding:12px 14px;font-weight:800}.info-box{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:14px;padding:12px 14px;font-weight:800}.restart-box{border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:14px;padding:12px 14px;display:grid;gap:10px;text-align:left}.technical-box{border:1px dashed #cbd5e1;background:#f8fafc;color:#334155;border-radius:14px;padding:12px 14px;font-size:12px;line-height:1.45;word-break:break-word}.muted-strong{color:var(--muted);font-weight:800}@media(max-width:900px){.status-layout{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
-    <a href="/admin">Panel</a>
-    <a href="/admin/vacancies">Vacantes</a>
-    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
-    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
-    <span class="spacer"></span>
+    <a href="/admin">Panel</a><a href="/admin/vacancies">Vacantes</a><a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %><span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
   <main class="page">
-    <section class="hero">
-      <div>
-        <div class="eyebrow">Operaciones / Despacho</div>
-        <h1>WhatsApp de despacho</h1>
-        <p>Gestiona la conexión visual de la línea usada para enviar notificaciones de despacho.</p>
-      </div>
-      <div class="actions">
-        <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
-        <a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a>
-        <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
-      </div>
-    </section>
+    <section class="hero"><div><div class="eyebrow">Operaciones / Despacho</div><h1>WhatsApp de despacho</h1><p>Gestiona la conexión visual de la línea usada para enviar notificaciones de despacho.</p></div><div class="actions"><a class="btn" href="/admin/operaciones">Volver a Operaciones</a><a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a><button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button><button class="btn" type="button" id="restartWhatsapp" <%= ready ? 'hidden' : '' %>>Reiniciar conexión y generar QR</button></div></section>
 
     <section class="status-layout">
       <article class="status-card <%= ready ? 'connected' : '' %>" id="statusCard">
@@ -54,30 +28,15 @@
         <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span data-raw-ready-at="<%= lastReadyAt || '' %>"><%= lastReadyAt || '' %></span></p>
         <p>Esta pantalla permite vincular y revisar la conexión de WhatsApp de despacho para enviar mensajes desde el panel.</p>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
-        <% if (role === 'dev') { %>
-          <details class="technical-box" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>>
-            <summary>Detalle técnico para dev</summary>
-            <div id="technicalError"><%= technicalLastError || '' %></div>
-          </details>
-        <% } %>
+        <% if (role === 'dev') { %><details class="technical-box" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>><summary>Detalle técnico para dev</summary><div id="technicalError"><%= technicalLastError || '' %></div></details><% } %>
       </article>
 
       <article class="status-card qr-panel" id="qrPanel">
-        <div id="connectedMessage" <%= ready ? '' : 'hidden' %>>
-          <h2>WhatsApp de despacho conectado</h2>
-          <p class="muted-strong">Ya puedes volver a asignaciones y enviar mensajes.</p>
-        </div>
-        <div id="qrContainer" <%= !ready && qrImage ? '' : 'hidden' %>>
-          <img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de WhatsApp despacho" />
-          <p class="muted-strong">Escanea este QR desde el celular de despacho para vincular la sesión.</p>
-        </div>
-        <div id="waitingQr" <%= !ready && !qrImage && !lastError ? '' : 'hidden' %>>
-          <h2>Preparando conexión...</h2>
-          <p class="muted-strong">La pantalla se actualiza automáticamente cada 3 segundos.</p>
-        </div>
-        <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError ? '' : 'hidden' %>>
-          La conexión aún no está disponible. Actualiza el estado en unos segundos. Si continúa igual, avisa al responsable técnico.
-        </div>
+        <div id="connectedMessage" <%= ready ? '' : 'hidden' %>><h2>WhatsApp de despacho conectado</h2><p class="muted-strong">Ya puedes volver a asignaciones y enviar mensajes.</p></div>
+        <div id="qrContainer" <%= !ready && qrImage ? '' : 'hidden' %>><img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de WhatsApp despacho" /><p class="muted-strong">Escanea este QR desde el celular de despacho para vincular la sesión.</p></div>
+        <div id="waitingQr" <%= !ready && !qrImage && !lastError ? '' : 'hidden' %>><h2>Preparando conexión...</h2><p class="muted-strong">La pantalla se actualiza automáticamente cada 3 segundos.</p></div>
+        <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError ? '' : 'hidden' %>>La conexión aún no está disponible. Actualiza el estado en unos segundos. Si continúa igual, reinicia la conexión para generar un nuevo QR.</div>
+        <div class="restart-box" id="restartBox" <%= !ready && !qrImage ? '' : 'hidden' %>><strong>No hay QR disponible en este momento.</strong><span>Usa esta acción para cerrar el cliente actual e iniciar uno nuevo. Después de unos segundos debería aparecer un QR o reconectar la sesión.</span><button class="btn btn-primary" type="button" id="restartWhatsappPanel">Reiniciar conexión y generar QR</button></div>
       </article>
     </section>
   </main>
@@ -85,70 +44,15 @@
   <script>
     const isDev = <%= role === 'dev' ? 'true' : 'false' %>;
     const fallbackOperationalError = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
-    const statusLabel = document.getElementById('statusLabel');
-    const statusTitle = document.getElementById('statusTitle');
-    const statusCard = document.getElementById('statusCard');
-    const readyAt = document.getElementById('readyAt');
-    const readyAtText = readyAt?.querySelector('span');
-    const errorBox = document.getElementById('errorBox');
-    const technicalDetails = document.getElementById('technicalDetails');
-    const technicalError = document.getElementById('technicalError');
-    const connectedMessage = document.getElementById('connectedMessage');
-    const qrContainer = document.getElementById('qrContainer');
-    const qrImage = document.getElementById('qrImage');
-    const waitingQr = document.getElementById('waitingQr');
-    const unavailableBox = document.getElementById('unavailableBox');
-
-    function formatBogotaDateTime(value) {
-      if (!value) return '';
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return value;
-      return new Intl.DateTimeFormat('es-CO', {
-        timeZone: 'America/Bogota',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      }).format(parsed).replace(/\s*a\.\s*m\./i, ' a. m.').replace(/\s*p\.\s*m\./i, ' p. m.');
-    }
-
-    function renderReadyAt(value) {
-      const formatted = formatBogotaDateTime(value);
-      setHidden(readyAt, !formatted);
-      if (readyAtText) {
-        readyAtText.dataset.rawReadyAt = value || '';
-        readyAtText.textContent = formatted;
-      }
-    }
-
-    function setHidden(element, hidden) { if (element) element.hidden = hidden; }
-    function renderStatus(data) {
-      const hasError = Boolean(data.lastError || data.technicalLastError);
-      statusLabel.textContent = data.ready ? 'Conectado' : hasError ? 'Requiere revisión' : 'No conectado';
-      statusLabel.className = 'status-label ' + (data.ready ? 'connected' : hasError ? 'error' : '');
-      statusCard.classList.toggle('connected', Boolean(data.ready));
-      statusTitle.textContent = data.ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión';
-      renderReadyAt(data.lastReadyAt);
-      setHidden(errorBox, !hasError);
-      if (errorBox) errorBox.textContent = hasError ? (data.lastError || fallbackOperationalError) : '';
-      setHidden(technicalDetails, !isDev || !data.technicalLastError);
-      if (technicalError) technicalError.textContent = data.technicalLastError || '';
-      setHidden(connectedMessage, !data.ready);
-      setHidden(qrContainer, data.ready || !data.qrImage);
-      setHidden(waitingQr, data.ready || Boolean(data.qrImage) || hasError);
-      setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError);
-      if (data.qrImage && qrImage && qrImage.src !== data.qrImage) qrImage.src = data.qrImage;
-    }
-    async function refreshStatus() {
-      const response = await fetch('/admin/operaciones/whatsapp/estado', { cache: 'no-store' });
-      if (!response.ok) return;
-      renderStatus(await response.json());
-    }
-    document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);
-    renderReadyAt(readyAtText?.dataset.rawReadyAt || readyAtText?.textContent || '');
-    window.setInterval(refreshStatus, 3000);
+    const statusLabel=document.getElementById('statusLabel'),statusTitle=document.getElementById('statusTitle'),statusCard=document.getElementById('statusCard'),readyAt=document.getElementById('readyAt'),readyAtText=readyAt?.querySelector('span'),errorBox=document.getElementById('errorBox'),technicalDetails=document.getElementById('technicalDetails'),technicalError=document.getElementById('technicalError'),connectedMessage=document.getElementById('connectedMessage'),qrContainer=document.getElementById('qrContainer'),qrImage=document.getElementById('qrImage'),waitingQr=document.getElementById('waitingQr'),unavailableBox=document.getElementById('unavailableBox'),restartBox=document.getElementById('restartBox');
+    const restartButtons=[document.getElementById('restartWhatsapp'),document.getElementById('restartWhatsappPanel')].filter(Boolean);
+    function setHidden(el,hidden){if(el)el.hidden=hidden;}function setRestartBusy(busy){restartButtons.forEach((button)=>{button.disabled=busy;button.textContent=busy?'Reiniciando...':'Reiniciar conexión y generar QR';});}
+    function formatBogotaDateTime(value){if(!value)return'';const parsed=new Date(value);if(Number.isNaN(parsed.getTime()))return value;return new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',hour12:true}).format(parsed).replace(/\s*a\.\s*m\./i,' a. m.').replace(/\s*p\.\s*m\./i,' p. m.');}
+    function renderReadyAt(value){const formatted=formatBogotaDateTime(value);setHidden(readyAt,!formatted);if(readyAtText){readyAtText.dataset.rawReadyAt=value||'';readyAtText.textContent=formatted;}}
+    function renderStatus(data){const hasError=Boolean(data.lastError||data.technicalLastError);const shouldRestart=!data.ready&&!data.qrImage;statusLabel.textContent=data.ready?'Conectado':hasError?'Requiere revisión':data.initializing?'Inicializando':'No conectado';statusLabel.className='status-label '+(data.ready?'connected':hasError?'error':'');statusCard.classList.toggle('connected',Boolean(data.ready));statusTitle.textContent=data.ready?'WhatsApp de despacho conectado':data.initializing?'Generando conexión de WhatsApp':'Sesión pendiente de conexión';renderReadyAt(data.lastReadyAt);setHidden(errorBox,!hasError);if(errorBox)errorBox.textContent=hasError?(data.lastError||fallbackOperationalError):'';setHidden(technicalDetails,!isDev||!data.technicalLastError);if(technicalError)technicalError.textContent=data.technicalLastError||'';setHidden(connectedMessage,!data.ready);setHidden(qrContainer,data.ready||!data.qrImage);setHidden(waitingQr,data.ready||Boolean(data.qrImage)||hasError);setHidden(unavailableBox,data.ready||Boolean(data.qrImage)||!hasError);setHidden(restartBox,!shouldRestart);restartButtons.forEach((button)=>setHidden(button,!shouldRestart));if(data.qrImage&&qrImage&&qrImage.src!==data.qrImage)qrImage.src=data.qrImage;}
+    async function refreshStatus(){const response=await fetch('/admin/operaciones/whatsapp/estado',{cache:'no-store'});if(response.ok)renderStatus(await response.json());}
+    async function restartWhatsapp(){setRestartBusy(true);try{const response=await fetch('/admin/operaciones/whatsapp/reiniciar',{method:'POST',cache:'no-store'});if(response.ok)renderStatus(await response.json());window.setTimeout(refreshStatus,2500);}finally{window.setTimeout(()=>setRestartBusy(false),1200);}}
+    document.getElementById('refreshStatus')?.addEventListener('click',refreshStatus);restartButtons.forEach((button)=>button.addEventListener('click',restartWhatsapp));renderReadyAt(readyAtText?.dataset.rawReadyAt||readyAtText?.textContent||'');window.setInterval(refreshStatus,3000);
   </script>
 </body>
 </html>
