@@ -41,18 +41,22 @@
 
   function normalizeAssignmentTemplate(value) {
     return String(value || '')
+      .replace(/\*?\{\{\s*nombre\s*\}\}\*?/gi, '*{{nombre}}*')
+      .replace(/\*?\{\{\s*fecha\s*\}\}\*?/gi, '*{{fecha}}*')
       .replace(/\*?\{\{\s*operacion\s*\}\}\*?/gi, '*{{operacion}}*')
+      .replace(/\*?\{\{\s*direccion\s*\}\}\*?/gi, '*{{direccion}}*')
+      .replace(/\*?\{\{\s*horaInicio\s*\}\}\*?/gi, '*{{horaInicio}}*')
       .replace(/\*\*+/g, '*');
   }
 
   function buildDefaultAssignmentTemplate() {
     return [
-      'Hola {{nombre}},',
+      'Hola *{{nombre}}*,',
       '',
-      'Mañana: {{fecha}}',
+      'Mañana: *{{fecha}}*',
       'Llegar a: *{{operacion}}*',
-      'Ubicacion: {{direccion}}',
-      'Hora : {{horaInicio}} por favor.',
+      'Ubicacion: *{{direccion}}*',
+      'Hora : *{{horaInicio}}* por favor.',
       '',
       '',
       'Confirmado?'
