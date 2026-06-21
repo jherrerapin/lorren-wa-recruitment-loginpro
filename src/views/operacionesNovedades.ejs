@@ -19,6 +19,15 @@
     .incident-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
     .incident-actions form { margin:0; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .resolution-input { min-width:260px; border:1px solid var(--border); border-radius:10px; padding:9px 10px; }
+    .create-incident-card { background:#fff; border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow-sm); padding:18px; display:grid; gap:12px; }
+    .create-incident-card h2 { color:var(--navy); margin:0; }
+    .create-incident-card p { margin:0; }
+    .incident-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .incident-form-grid .full { grid-column:1 / -1; }
+    .selected-request-box { border:1px solid #bfdbfe; background:#eff6ff; color:#1e40af; border-radius:12px; padding:10px 12px; font-size:13px; font-weight:800; display:none; }
+    .manual-id-box { color:var(--muted); font-size:12px; }
+    .danger-text { color:#b91c1c; font-weight:800; }
+    @media(max-width:760px){.toolbar-form,.incident-form-grid{display:grid;grid-template-columns:1fr;width:100%}.incident-form-grid .full{grid-column:auto}.incident-actions form,.incident-actions .resolution-input{width:100%}}
   </style>
 </head>
 <body>
@@ -37,12 +46,55 @@
       <div>
         <div class="eyebrow">Seguimiento operativo</div>
         <h1>Novedades operativas</h1>
-        <p>Consulta y cierra novedades relacionadas con solicitudes, asignaciones o auxiliares.</p>
+        <p>Registra, consulta, resuelve y reabre novedades relacionadas con solicitudes, asignaciones o auxiliares.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
+        <a class="btn" href="/admin/operaciones/solicitudes">Solicitudes</a>
         <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Asignaciones</a>
       </div>
+    </section>
+
+    <section class="create-incident-card">
+      <div>
+        <h2>Registrar novedad</h2>
+        <p class="muted">Lo ideal es crear la novedad desde una solicitud específica. En Solicitudes usa el botón <strong>Reportar novedad</strong> para traer el ID automáticamente.</p>
+      </div>
+      <div class="selected-request-box" id="selectedRequestBox"></div>
+      <form method="post" action="/admin/operaciones/asignaciones/novedades" id="incidentCreateForm">
+        <div class="incident-form-grid">
+          <div class="field">
+            <label for="serviceRequestId">Solicitud de servicio</label>
+            <input id="serviceRequestId" name="serviceRequestId" required placeholder="ID de la solicitud" />
+            <p class="manual-id-box">Si entraste desde Solicitudes, este campo se llena solo. Si no, copia el ID desde la URL o desde el tablero de asignaciones.</p>
+          </div>
+          <div class="field">
+            <label for="type">Tipo de novedad</label>
+            <select id="type" name="type" required>
+              <option value="">Selecciona tipo</option>
+              <option value="INASISTENCIA">Inasistencia</option>
+              <option value="RETRASO">Retraso</option>
+              <option value="REEMPLAZO">Reemplazo / cambio de auxiliar</option>
+              <option value="CLIENTE">Novedad del cliente</option>
+              <option value="OPERATIVA">Novedad operativa</option>
+              <option value="OTRO">Otro</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="reportedBy">Reportado por</label>
+            <input id="reportedBy" name="reportedBy" placeholder="Nombre de quien reporta" />
+          </div>
+          <div class="field">
+            <label for="workerId">Auxiliar asociado, opcional</label>
+            <input id="workerId" name="workerId" placeholder="ID del auxiliar si aplica" />
+          </div>
+          <div class="field full">
+            <label for="description">Descripción</label>
+            <textarea id="description" name="description" required placeholder="Describe qué ocurrió, impacto y acción esperada"></textarea>
+          </div>
+        </div>
+        <div class="form-actions"><button class="btn btn-primary" type="submit">Registrar novedad</button></div>
+      </form>
     </section>
 
     <section class="toolbar">
@@ -59,7 +111,7 @@
 
     <section class="incident-grid">
       <% if (!incidents.length) { %>
-        <div class="empty"><strong>No hay novedades para este filtro.</strong>Las novedades se crean desde el tablero de asignaciones, dentro de cada auxiliar asignado.</div>
+        <div class="empty"><strong>No hay novedades para este filtro.</strong> Puedes registrar una novedad desde el formulario superior o desde una solicitud específica.</div>
       <% } %>
       <% incidents.forEach((incident)=>{ const request = incident.serviceRequest; const worker = incident.worker || incident.assignment?.worker; %>
         <article class="incident-card <%= incident.status === 'RESOLVED' ? 'resolved' : 'open' %>">
@@ -89,5 +141,25 @@
       <% }) %>
     </section>
   </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const serviceRequestId = params.get('serviceRequestId') || '';
+    const serviceRequestInput = document.getElementById('serviceRequestId');
+    const selectedRequestBox = document.getElementById('selectedRequestBox');
+    if (serviceRequestId && serviceRequestInput) {
+      serviceRequestInput.value = serviceRequestId;
+      if (selectedRequestBox) {
+        selectedRequestBox.style.display = 'block';
+        selectedRequestBox.textContent = 'Solicitud seleccionada para registrar novedad: ' + serviceRequestId;
+      }
+    }
+    document.getElementById('incidentCreateForm')?.addEventListener('submit', (event) => {
+      if (!serviceRequestInput?.value?.trim()) {
+        event.preventDefault();
+        alert('Debes seleccionar o ingresar el ID de una solicitud de servicio.');
+      }
+    });
+  </script>
 </body>
 </html>
