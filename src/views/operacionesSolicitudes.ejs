@@ -16,19 +16,7 @@
     .shift-summary { font-size: 12px; color: var(--muted); margin-top: 8px; }
     .service-list-note { background: #f0fdfa; border: 1px solid rgba(13,122,107,.25); color: var(--navy); border-radius: 16px; padding: 14px 16px; line-height: 1.45; }
     .service-list-note strong { color: var(--teal); }
-    .request-grid { display: grid; gap: 12px; }
-    .request-card { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-sm); display: grid; gap: 10px; }
-    .request-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: start; }
-    .request-head strong { color: var(--navy); font-size: 16px; }
-    .request-meta { color: var(--muted); font-size: 13px; display: grid; gap: 4px; }
-    .request-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .request-actions form { margin: 0; }
-    .status-pill { display: inline-flex; border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 900; background: var(--amber-soft); color: var(--amber); white-space: nowrap; }
-    .status-pill.complete { background: var(--green-soft); color: var(--green); }
-    .status-pill.pending-confirmation { background: var(--blue-soft); color: var(--blue); }
-    .danger-btn { border: 1px solid #fecaca; background: #fff5f5; color: #b91c1c; }
-    .danger-btn:hover { background: #fee2e2; }
-    @media(max-width:720px){.shift-row{grid-template-columns:1fr}.request-head{display:grid}.request-actions .btn,.request-actions button{width:100%}}
+    @media(max-width:720px){.shift-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -42,22 +30,16 @@
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
-  <% const requestLabel=(value)=>({PENDING_ASSIGNMENT:'Pendiente de asignación',ASSIGNMENT_PARTIAL:'Asignación parcial',PENDING_CONFIRMATION:'Pendiente de confirmación',ASSIGNMENT_COMPLETE:'Asignación completa',CANCELLED:'Cancelada'}[value]||value||'Pendiente'); %>
-  <% const activeCodes=['ASSIGNED','CONFIRMATION_PENDING','CONFIRMED']; %>
-  <% const cleanGroup=(value)=>String(value||'').replace(/\s*·\s*Grupo\s+GRP-[A-Z0-9-]+/i,'').trim(); %>
-  <% const scheduleLabel=(request)=>request.endTime ? `${request.startTime || '-'} - ${request.endTime}` : `${request.startTime || '-'}`; %>
-
   <main class="page">
     <section class="hero">
       <div>
         <div class="eyebrow">Solicitudes operativas</div>
-        <h1>Solicitudes de servicio</h1>
-        <p>Crea, consulta, edita y elimina solicitudes internas antes de gestionarlas en el tablero de asignación.</p>
+        <h1>Crear solicitud de servicio</h1>
+        <p>Registra solicitudes internas para que luego sean gestionadas desde el inicio del módulo de Operaciones / Despacho.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
         <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Ir a asignación</a>
-        <a class="btn" href="/admin/operaciones/novedades">Novedades</a>
         <a class="btn" href="/admin/operaciones/clientes">Clientes</a>
       </div>
     </section>
@@ -65,7 +47,7 @@
     <% if (message) { %><div class="section-note"><%= message %></div><% } %>
 
     <section class="service-list-note">
-      <strong>CRUD de solicitudes:</strong> desde esta pantalla puedes crear solicitudes nuevas, ver las existentes, editar datos, reportar novedades y eliminar registros que ya no correspondan.
+      <strong>Consulta de solicitudes:</strong> el listado por día ahora se revisa desde el inicio de Operaciones / Despacho usando las tarjetas de estadísticas y el filtro de fecha. Esta pantalla queda enfocada solo en crear solicitudes nuevas.
     </section>
 
     <details class="card" open>
@@ -116,43 +98,6 @@
         </form>
       </div>
     </details>
-
-    <section class="card">
-      <div class="card-body">
-        <h2>Solicitudes registradas</h2>
-        <p class="muted">Listado operativo para completar el CRUD: consultar, editar, asignar, reportar novedad o eliminar.</p>
-        <div class="request-grid">
-          <% if (!serviceRequests.length) { %>
-            <div class="empty"><strong>No hay solicitudes registradas.</strong>Crea una solicitud para iniciar la asignación.</div>
-          <% } %>
-          <% serviceRequests.forEach((request)=>{ const activeCount=(request.assignments||[]).filter((item)=>activeCodes.includes(item.status)).length; const confirmedCount=(request.assignments||[]).filter((item)=>item.status==='CONFIRMED').length; const complete=confirmedCount>=request.requiredWorkers; const waiting=!complete&&activeCount>=request.requiredWorkers; const serviceName=cleanGroup(request.serviceName || request.service?.name || 'Sin servicio'); %>
-            <article class="request-card">
-              <div class="request-head">
-                <div>
-                  <strong><%= request.clientName %></strong>
-                  <div class="request-meta">
-                    <span><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></span>
-                    <span>Servicio: <%= serviceName %></span>
-                    <span>Fecha: <%= new Date(request.serviceDate).toISOString().slice(0,10) %> · <%= scheduleLabel(request) %></span>
-                    <span>Auxiliares: <%= activeCount %> activos / <%= request.requiredWorkers %> requeridos · <%= confirmedCount %> confirmados</span>
-                    <% if (request.notes) { %><span>Notas: <%= request.notes %></span><% } %>
-                  </div>
-                </div>
-                <span class="status-pill <%= complete?'complete':waiting?'pending-confirmation':'' %>"><%= requestLabel(request.status) %></span>
-              </div>
-              <div class="request-actions">
-                <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Ver / asignar</a>
-                <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
-                <a class="btn" href="/admin/operaciones/novedades?serviceRequestId=<%= request.id %>&fecha=<%= new Date(request.serviceDate).toISOString().slice(0,10) %>">Reportar novedad</a>
-                <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio? También se eliminarán sus asignaciones y novedades asociadas.');">
-                  <button class="btn danger-btn" type="submit">Eliminar</button>
-                </form>
-              </div>
-            </article>
-          <% }) %>
-        </div>
-      </div>
-    </section>
   </main>
 
   <script type="application/json" id="clients-data"><%- JSON.stringify(clients.map((client) => ({ id: client.id, name: client.name, cityName: client.cityName, operationPoints: client.operationPoints || [], services: client.services || [] }))) %></script>
