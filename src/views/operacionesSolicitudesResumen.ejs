@@ -32,10 +32,13 @@
     .assignment-row strong, .incident-row strong { color:var(--navy); }
     .muted { color:var(--muted); }
     .card-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .card-actions form { margin:0; }
+    .danger-btn { border:1px solid #fecaca; background:#fff5f5; color:#b91c1c; }
+    .danger-btn:hover { background:#fee2e2; }
     .empty-state { background:#fff; border:1px solid var(--border); border-radius:18px; padding:38px 18px; text-align:center; color:var(--muted); box-shadow:var(--shadow-sm); }
     .empty-state strong { display:block; color:var(--navy); font-size:17px; margin-bottom:6px; }
     @media(max-width:900px){ .detail-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-    @media(max-width:560px){ .detail-grid { grid-template-columns:1fr; } .toolbar .btn, .metric-tabs .btn { width:100%; } }
+    @media(max-width:560px){ .detail-grid { grid-template-columns:1fr; } .toolbar .btn, .metric-tabs .btn, .card-actions .btn, .card-actions button { width:100%; } }
   </style>
 </head>
 <body>
@@ -84,14 +87,14 @@
       </div>
     </section>
 
-    <div class="readonly-note">Las solicitudes solo se pueden editar hasta 2 horas después de la hora de inicio del servicio. Después quedan disponibles únicamente para consulta.</div>
+    <div class="readonly-note">Las solicitudes solo se pueden editar o eliminar hasta 2 horas después de la hora de inicio del servicio. Después quedan disponibles únicamente para consulta.</div>
 
     <section class="request-list">
       <% if (!requests.length) { %>
         <div class="empty-state"><strong>No hay solicitudes para este indicador.</strong>Cambia de indicador o vuelve al panel de Operaciones para seleccionar otra fecha.</div>
       <% } %>
 
-      <% requests.forEach((request) => { const required = Number(request.requiredWorkers || 0); const active = activeCount(request); const confirmed = confirmedCount(request); const editLocked = isServiceRequestEditLocked(request); %>
+      <% requests.forEach((request) => { const required = Number(request.requiredWorkers || 0); const active = activeCount(request); const confirmed = confirmedCount(request); const editLocked = isServiceRequestEditLocked(request); const requestDate = formatDate(request.serviceDate); %>
         <article class="request-card">
           <div class="request-head">
             <div>
@@ -102,7 +105,7 @@
           </div>
 
           <div class="detail-grid">
-            <div class="detail-box"><span>Fecha</span><strong><%= formatDate(request.serviceDate) %></strong></div>
+            <div class="detail-box"><span>Fecha</span><strong><%= requestDate %></strong></div>
             <div class="detail-box"><span>Horario</span><strong><%= buildHorario(request) %></strong></div>
             <div class="detail-box"><span>Servicio</span><strong><%= request.serviceName || request.service?.name || 'Sin servicio' %></strong></div>
             <div class="detail-box"><span>Cobertura</span><strong><%= active %>/<%= required %> asignados · <%= confirmed %>/<%= required %> confirmados</strong></div>
@@ -143,9 +146,15 @@
             <% if (!editLocked) { %>
               <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar / revisar</a>
             <% } %>
-            <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar" data-expired-edit-link="true" data-expired-edit="<%= editLocked ? 'true' : 'false' %>" data-service-date="<%= formatDate(request.serviceDate) %>" data-start-time="<%= request.startTime || '' %>" data-expired-message="<%= expiredMessage %>">Editar solicitud</a>
+            <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar" data-expired-edit-link="true" data-expired-edit="<%= editLocked ? 'true' : 'false' %>" data-service-date="<%= requestDate %>" data-start-time="<%= request.startTime || '' %>" data-expired-message="<%= expiredMessage %>">Editar solicitud</a>
+            <a class="btn" href="/admin/operaciones/novedades?serviceRequestId=<%= request.id %>&fecha=<%= requestDate %>">Reportar novedad</a>
+            <% if (!editLocked) { %>
+              <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio? También se eliminarán sus asignaciones y novedades asociadas.');">
+                <button class="btn danger-btn" type="submit">Eliminar</button>
+              </form>
+            <% } %>
             <% if (editLocked) { %>
-              <span class="muted">Modo consulta: edición bloqueada porque ya pasaron más de 2 horas desde la hora del servicio.</span>
+              <span class="muted">Modo consulta: edición y eliminación bloqueadas porque ya pasaron más de 2 horas desde la hora del servicio.</span>
             <% } %>
           </div>
         </article>
