@@ -35,10 +35,16 @@
     .card-actions form { margin:0; }
     .danger-btn { border:1px solid #fecaca; background:#fff5f5; color:#b91c1c; }
     .danger-btn:hover { background:#fee2e2; }
+    .incident-report { border:1px solid #bfdbfe; background:#eff6ff; border-radius:14px; padding:12px; display:grid; gap:10px; }
+    .incident-report summary { cursor:pointer; color:#1e40af; font-weight:900; }
+    .incident-context { background:#fff; border:1px solid #bfdbfe; border-radius:12px; padding:10px; color:var(--navy); font-size:13px; display:grid; gap:3px; }
+    .incident-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .incident-form-grid .full { grid-column:1 / -1; }
+    .incident-worker-field[hidden] { display:none; }
     .empty-state { background:#fff; border:1px solid var(--border); border-radius:18px; padding:38px 18px; text-align:center; color:var(--muted); box-shadow:var(--shadow-sm); }
     .empty-state strong { display:block; color:var(--navy); font-size:17px; margin-bottom:6px; }
     @media(max-width:900px){ .detail-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-    @media(max-width:560px){ .detail-grid { grid-template-columns:1fr; } .toolbar .btn, .metric-tabs .btn, .card-actions .btn, .card-actions button { width:100%; } }
+    @media(max-width:560px){ .detail-grid,.incident-form-grid { grid-template-columns:1fr; } .incident-form-grid .full{grid-column:auto}.toolbar .btn, .metric-tabs .btn, .card-actions .btn, .card-actions button { width:100%; } }
   </style>
 </head>
 <body>
@@ -147,7 +153,6 @@
               <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar / revisar</a>
             <% } %>
             <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar" data-expired-edit-link="true" data-expired-edit="<%= editLocked ? 'true' : 'false' %>" data-service-date="<%= requestDate %>" data-start-time="<%= request.startTime || '' %>" data-expired-message="<%= expiredMessage %>">Editar solicitud</a>
-            <a class="btn" href="/admin/operaciones/novedades?serviceRequestId=<%= request.id %>&fecha=<%= requestDate %>">Reportar novedad</a>
             <% if (!editLocked) { %>
               <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio? También se eliminarán sus asignaciones y novedades asociadas.');">
                 <button class="btn danger-btn" type="submit">Eliminar</button>
@@ -157,11 +162,86 @@
               <span class="muted">Modo consulta: edición y eliminación bloqueadas porque ya pasaron más de 2 horas desde la hora del servicio.</span>
             <% } %>
           </div>
+
+          <details class="incident-report">
+            <summary>Reportar novedad de esta solicitud</summary>
+            <div class="incident-context">
+              <span><strong>Cliente:</strong> <%= request.clientName || 'Sin cliente' %></span>
+              <span><strong>Operación:</strong> <%= request.operationPointName || 'Sin operación' %> · <%= request.cityName || 'Sin ciudad' %></span>
+              <span><strong>Fecha y hora:</strong> <%= requestDate %> · <%= buildHorario(request) %></span>
+              <span><strong>Auxiliares asignados:</strong> <%= request.assignments.length || 0 %></span>
+            </div>
+            <form method="post" action="/admin/operaciones/asignaciones/novedades" class="incident-create-form">
+              <input type="hidden" name="serviceRequestId" value="<%= request.id %>" />
+              <div class="incident-form-grid">
+                <div class="field">
+                  <label>Tipo de novedad</label>
+                  <select name="type" class="incident-type" required>
+                    <option value="">Selecciona tipo</option>
+                    <option value="INASISTENCIA">Inasistencia</option>
+                    <option value="RETRASO">Retraso</option>
+                    <option value="REEMPLAZO">Reemplazo / cambio de auxiliar</option>
+                    <option value="CLIENTE">Novedad del cliente</option>
+                    <option value="OPERATIVA">Novedad operativa</option>
+                    <option value="OTRO">Otro</option>
+                  </select>
+                </div>
+                <div class="field incident-worker-field" hidden>
+                  <label>Auxiliar asignado relacionado</label>
+                  <select name="assignmentWorker" class="incident-worker-select">
+                    <option value="">Selecciona auxiliar asignado</option>
+                    <% request.assignments.forEach((assignment) => { %>
+                      <option value="<%= assignment.id %>|<%= assignment.workerId %>"><%= assignment.worker?.fullName || 'Auxiliar' %> — <%= assignmentStatusLabel(assignment.status) %></option>
+                    <% }) %>
+                  </select>
+                  <input type="hidden" name="assignmentId" class="incident-assignment-id" />
+                  <input type="hidden" name="workerId" class="incident-worker-id" />
+                </div>
+                <div class="field"><label>Reportado por</label><input name="reportedBy" placeholder="Nombre de quien reporta" /></div>
+                <div class="field full"><label>Descripción</label><textarea name="description" required placeholder="Describe qué ocurrió, impacto y acción esperada"></textarea></div>
+              </div>
+              <div class="form-actions"><button class="btn btn-primary" type="submit">Registrar novedad</button></div>
+            </form>
+          </details>
         </article>
       <% }) %>
     </section>
   </main>
   <script src="/public/expired-service-request-modal.js"></script>
   <script src="/public/dispatch-time-format.js"></script>
+  <script>
+    const incidentTypesWithWorker = new Set(['INASISTENCIA', 'RETRASO', 'REEMPLAZO']);
+    document.querySelectorAll('.incident-create-form').forEach((form) => {
+      const typeSelect = form.querySelector('.incident-type');
+      const workerField = form.querySelector('.incident-worker-field');
+      const workerSelect = form.querySelector('.incident-worker-select');
+      const assignmentInput = form.querySelector('.incident-assignment-id');
+      const workerInput = form.querySelector('.incident-worker-id');
+      function syncWorkerRequirement() {
+        const requiresWorker = incidentTypesWithWorker.has(typeSelect.value);
+        workerField.hidden = !requiresWorker;
+        workerSelect.required = requiresWorker;
+        if (!requiresWorker) {
+          workerSelect.value = '';
+          assignmentInput.value = '';
+          workerInput.value = '';
+        }
+      }
+      workerSelect?.addEventListener('change', () => {
+        const [assignmentId = '', workerId = ''] = String(workerSelect.value || '').split('|');
+        assignmentInput.value = assignmentId;
+        workerInput.value = workerId;
+      });
+      typeSelect?.addEventListener('change', syncWorkerRequirement);
+      form.addEventListener('submit', (event) => {
+        syncWorkerRequirement();
+        if (workerSelect.required && !workerSelect.value) {
+          event.preventDefault();
+          alert('Selecciona el auxiliar asignado relacionado con esta novedad.');
+        }
+      });
+      syncWorkerRequirement();
+    });
+  </script>
 </body>
 </html>
