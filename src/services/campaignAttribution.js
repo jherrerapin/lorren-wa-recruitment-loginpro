@@ -1,3 +1,5 @@
+import { extractMessages } from './whatsapp.js';
+
 function normalizeCampaignCode(value) {
   return String(value || '')
     .trim()
@@ -134,5 +136,41 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
     reason: 'matched_referral_metadata',
     campaignId: matchedCampaign.id,
     campaignCodeRaw
+  };
+}
+
+export function campaignAttributionMiddleware(prisma) {
+  return async (req, _res, next) => {
+    try {
+      const messages = extractMessages(req.body);
+      if (!messages.length) return next();
+
+      for (const message of messages) {
+        const from = message?.from;
+        if (!from || !collectReferralAttributionValues(message).length) continue;
+
+        const candidate = await prisma.candidate.upsert({
+          where: { phone: from },
+          update: {},
+          create: { phone: from }
+        });
+
+        const result = await attributeCandidateCampaignFromMessage(prisma, candidate.id, message);
+        if (result.attributed || result.reason === 'metadata_saved_without_campaign_match') {
+          console.info('[CAMPAIGN_ATTRIBUTION]', JSON.stringify({
+            phone: from,
+            candidateId: candidate.id,
+            attributed: result.attributed,
+            reason: result.reason,
+            campaignId: result.campaignId || null
+          }));
+        }
+      }
+
+      return next();
+    } catch (error) {
+      console.warn('[CAMPAIGN_ATTRIBUTION_ERROR]', error?.message || error);
+      return next();
+    }
   };
 }
