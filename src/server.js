@@ -23,6 +23,7 @@ import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftReq
 import { lorenV2Router } from './routes/lorenV2.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
+import { referralAttributionMiddleware } from './services/referralAttribution.js';
 import { canSeeLorenV2 } from './services/lorenV2Gate.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -391,6 +392,7 @@ app.get('/logout', destroySession);
 
 app.use(wrapAsyncRouter(dispatchMultiShiftRequestsRouter()));
 app.use('/webhook', campaignAttributionMiddleware(prisma));
+app.use('/webhook', referralAttributionMiddleware(prisma));
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));
