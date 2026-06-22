@@ -170,10 +170,119 @@
     return Number.isNaN(start.getTime()) ? null : start;
   }
 
+  function getAssignmentDateParam() {
+    const params = new URLSearchParams(window.location.search);
+    const rawDate = params.get('fecha') || params.get('date') || '';
+    return /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : '';
+  }
+
+  function requestCardDate(card) {
+    const text = [...card.querySelectorAll('.meta span')].map((span) => span.textContent || '').join(' ');
+    return text.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
+  }
+
+  function requestCardSelectionUrl(card, selectedDate) {
+    const link = card.querySelector('a[href*="/admin/operaciones/asignaciones?serviceRequestId="]');
+    if (!link) return null;
+    const url = new URL(link.href, window.location.origin);
+    if (selectedDate) url.searchParams.set('fecha', selectedDate);
+    else url.searchParams.delete('fecha');
+    return url;
+  }
+
+  function updateAssignmentSelectionLinks(selectedDate) {
+    document.querySelectorAll('.request-card a[href*="/admin/operaciones/asignaciones?serviceRequestId="]').forEach((link) => {
+      const url = new URL(link.href, window.location.origin);
+      if (selectedDate) url.searchParams.set('fecha', selectedDate);
+      else url.searchParams.delete('fecha');
+      link.href = `${url.pathname}${url.search}`;
+    });
+  }
+
+  function applyAssignmentDateFilter(selectedDate) {
+    const list = document.querySelector('.request-list');
+    if (!list) return;
+    const cards = [...list.querySelectorAll('.request-card')];
+    let visibleCount = 0;
+    cards.forEach((card) => {
+      const matchesDate = !selectedDate || requestCardDate(card) === selectedDate;
+      const isExpiredHidden = card.dataset.expiredServiceRequest === 'true';
+      card.hidden = !matchesDate || (!selectedDate && isExpiredHidden);
+      if (!card.hidden) visibleCount += 1;
+    });
+    let empty = list.querySelector('#assignmentDateFilterEmpty');
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.id = 'assignmentDateFilterEmpty';
+      empty.className = 'empty';
+      list.prepend(empty);
+    }
+    empty.hidden = visibleCount > 0;
+    empty.innerHTML = selectedDate
+      ? `<strong>No hay solicitudes para ${selectedDate}.</strong>Cambia la fecha o limpia el filtro.`
+      : '<strong>No hay solicitudes visibles.</strong>Cambia la fecha o revisa solicitudes vencidas.';
+    const head = list.closest('.board-panel')?.querySelector('.board-panel-head p');
+    if (head && selectedDate) head.textContent = `Mostrando solicitudes de servicio del ${selectedDate}.`;
+  }
+
+  function submitAssignmentDateFilter(selectedDate) {
+    const params = new URLSearchParams(window.location.search);
+    if (selectedDate) params.set('fecha', selectedDate);
+    else params.delete('fecha');
+    params.delete('date');
+    const cards = [...document.querySelectorAll('.request-list .request-card')];
+    const firstMatchingCard = selectedDate ? cards.find((card) => requestCardDate(card) === selectedDate) : null;
+    const firstUrl = firstMatchingCard ? requestCardSelectionUrl(firstMatchingCard, selectedDate) : null;
+    if (firstUrl) {
+      window.location.href = `${firstUrl.pathname}${firstUrl.search}`;
+      return;
+    }
+    params.delete('serviceRequestId');
+    window.location.href = `/admin/operaciones/asignaciones${params.toString() ? `?${params.toString()}` : ''}`;
+  }
+
+  function enhanceAssignmentDateFilter() {
+    const requestPanel = [...document.querySelectorAll('.board-panel')].find((panel) => panel.querySelector('.request-list'));
+    const panelHead = requestPanel?.querySelector('.board-panel-head');
+    const requestList = requestPanel?.querySelector('.request-list');
+    if (!panelHead || !requestList || panelHead.querySelector('#assignmentDateFilterForm')) return;
+    const selectedDate = getAssignmentDateParam();
+    const form = document.createElement('form');
+    form.id = 'assignmentDateFilterForm';
+    form.className = 'filters';
+    form.method = 'get';
+    form.action = '/admin/operaciones/asignaciones';
+    form.style.marginTop = '8px';
+    form.innerHTML = `
+      <div class="field">
+        <label for="assignmentDateFilterInput">Fecha de solicitudes</label>
+        <input id="assignmentDateFilterInput" name="fecha" type="date" value="${selectedDate}" />
+      </div>
+      <div class="worker-toolbar-actions">
+        <button class="btn btn-primary" type="submit">Filtrar fecha</button>
+        <button class="btn" type="button" id="clearAssignmentDateFilter">Limpiar</button>
+      </div>
+    `;
+    panelHead.appendChild(form);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const nextDate = form.querySelector('#assignmentDateFilterInput')?.value || '';
+      submitAssignmentDateFilter(nextDate);
+    });
+    form.querySelector('#clearAssignmentDateFilter')?.addEventListener('click', () => submitAssignmentDateFilter(''));
+    updateAssignmentSelectionLinks(selectedDate);
+    applyAssignmentDateFilter(selectedDate);
+  }
+
   function filterExpiredServiceRequests() {
     const list = document.querySelector('.request-list');
     if (!list || list.dataset.currentFilterApplied === 'true') return;
     list.dataset.currentFilterApplied = 'true';
+    const selectedDate = getAssignmentDateParam();
+    if (selectedDate) {
+      applyAssignmentDateFilter(selectedDate);
+      return;
+    }
     const cards = [...list.querySelectorAll('.request-card')];
     let hiddenCount = 0;
     cards.forEach((card) => {
@@ -204,6 +313,7 @@
     formatVisibleTimes();
     hideRequesterNoticeWithoutContact();
     enhanceTemplate();
+    enhanceAssignmentDateFilter();
     enhanceExpiredEditModal();
     filterExpiredServiceRequests();
     refreshMessageData();
