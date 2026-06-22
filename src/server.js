@@ -120,6 +120,18 @@ function dispatchErrorHandler(fallbackPath = '/admin/operaciones') {
   };
 }
 
+function injectLorenV2NavbarLink(html, req) {
+  if (typeof html !== 'string') return html;
+  if (!canSeeLorenV2(req)) return html;
+  if (html.includes('href="/admin/v2"')) return html;
+  if (!html.includes('<span class="spacer"></span>')) return html;
+
+  return html.replace(
+    '<span class="spacer"></span>',
+    '  <a href="/admin/v2">Loren V2</a>\n  <span class="spacer"></span>'
+  );
+}
+
 function mapDbRoleToSessionRole(role) {
   return role === 'DEV' ? 'dev' : 'admin';
 }
@@ -159,10 +171,11 @@ app.use((req, res, next) => {
         if (typeof callback === 'function') return callback(error);
         return next(error);
       }
-      const shouldInject = view === 'operacionesAsignacionesConfirmacion' && typeof html === 'string';
-      const output = shouldInject
+      const shouldInjectDispatchScripts = view === 'operacionesAsignacionesConfirmacion' && typeof html === 'string';
+      const htmlWithDispatchScripts = shouldInjectDispatchScripts
         ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script><script src="/public/assignment-template-sync.js"></script></body>')
         : html;
+      const output = injectLorenV2NavbarLink(htmlWithDispatchScripts, req);
       if (typeof callback === 'function') return callback(null, output);
       return res.send(output);
     });
@@ -385,7 +398,7 @@ app.use('/admin/operaciones', wrapAsyncRouter(dispatchClientStatsRouter(prisma))
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchWorkerStatsRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchOpsExtrasRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchProgrammingNotificationsRouter(prisma)));
-app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()))
+app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
 app.use('/admin/operaciones/whatsapp', wrapAsyncRouter(dispatchWhatsappNotificationsRouter(prisma)));
 app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));
 app.use('/admin/v2', wrapAsyncRouter(lorenV2Router()));
