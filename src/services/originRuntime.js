@@ -3,6 +3,8 @@ import * as ai from './leadOriginAi.js';
 
 const MIN_SCORE = 0.78;
 const contactKey = ['fr', 'om'].join('');
+const personKey = ['referrer', 'Name'].join('');
+const sourceKey = ['source', 'Type'].join('');
 
 // Ejecuta clasificacion IA estructurada de origen. No contiene frases quemadas.
 export function runtime(prisma) {
