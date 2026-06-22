@@ -17,6 +17,14 @@ enum CandidateStatus {
   CONTRATADO
 }
 
+enum CandidateSourceType {
+  UNKNOWN
+  META_ADS
+  REFERRED
+  MANUAL
+  OTHER
+}
+
 enum AppUserRole {
   DEV
   ADMIN
@@ -162,10 +170,35 @@ model Vacancy {
   operationId           String?
   operation             Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
   candidates            Candidate[]
+  campaigns             Campaign[]
   interviewSlots        InterviewSlot[]
   interviewBookings     InterviewBooking[]
   accessUsers           AppUser[]
   dispatchWorkers       DispatchWorkerVacancy[]
+}
+
+model Campaign {
+  id                String              @id @default(cuid())
+  code              String              @unique
+  name              String
+  sourceType        CandidateSourceType @default(META_ADS)
+  city              String?
+  zone              String?
+  vacancyId         String?
+  vacancy           Vacancy?            @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
+  isActive          Boolean             @default(true)
+  startsAt          DateTime?
+  endsAt            DateTime?
+  notes             String?
+  createdByUsername String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  candidates        Candidate[]
+
+  @@index([sourceType])
+  @@index([city])
+  @@index([vacancyId])
+  @@index([isActive])
 }
 
 model InterviewSlot {
@@ -201,15 +234,21 @@ model InterviewBooking {
 }
 
 model Candidate {
-  id                     String            @id @default(cuid())
-  phone                  String            @unique
+  id                     String              @id @default(cuid())
+  phone                  String              @unique
   vacancyId              String?
-  vacancy                Vacancy?          @relation(fields: [vacancyId], references: [id])
+  vacancy                Vacancy?            @relation(fields: [vacancyId], references: [id])
+  campaignId             String?
+  campaign               Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  sourceType             CandidateSourceType @default(UNKNOWN)
+  campaignCodeRaw        String?
+  referrerName           String?
+  referrerPhone          String?
   fullName               String?
   documentType           String?
   documentNumber         String?
   age                    Int?
-  gender                 Gender            @default(UNKNOWN)
+  gender                 Gender              @default(UNKNOWN)
   neighborhood           String?
   locality               String?
   zoneViable             Boolean?
@@ -222,36 +261,40 @@ model Candidate {
   zone                   String?
   experienceSummary      String?
   availability           String?
-  status                 CandidateStatus   @default(NUEVO)
-  currentStep            ConversationStep  @default(MENU)
+  status                 CandidateStatus     @default(NUEVO)
+  currentStep            ConversationStep    @default(MENU)
   cvOriginalName         String?
   cvMimeType             String?
   cvStorageKey           String?
   cvData                 Bytes?
   multilineWindowUntil   DateTime?
-  multilineBatchVersion  Int               @default(0)
+  multilineBatchVersion  Int                 @default(0)
   lastInboundAt          DateTime?
   lastOutboundAt         DateTime?
   devLastSeenAt          DateTime?
   lastReminderAt         DateTime?
   reminderScheduledFor   DateTime?
-  reminderState          ReminderState     @default(NONE)
-  botPaused              Boolean           @default(false)
+  reminderState          ReminderState       @default(NONE)
+  botPaused              Boolean             @default(false)
   botPausedAt            DateTime?
   botPausedBy            String?
   botPauseReason         String?
   botResumeMode          String?
-  potentialDuplicate     Boolean           @default(false)
+  potentialDuplicate     Boolean             @default(false)
   potentialDuplicateAt   DateTime?
   potentialDuplicateNote String?
   interviewNotes         String?
-  createdAt              DateTime          @default(now())
-  updatedAt              DateTime          @updatedAt
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
   messages               Message[]
   interviewBookings      InterviewBooking[]
   adminEvents            CandidateAdminEvent[]
   attachmentAnalyses     AttachmentAnalysis[]
   dispatchWorker         DispatchWorker?
+
+  @@index([campaignId])
+  @@index([sourceType])
+  @@index([status, createdAt])
 }
 
 model Message {
