@@ -99,6 +99,31 @@ function groupCount(items, getKey) {
   return [...map.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
+function isDevRequest(req) {
+  return req.userRole === 'dev';
+}
+
+function buildMailHref(report = {}) {
+  const subject = `Reporte Loren V2 ${report.period === 'month' ? 'mensual' : 'semanal'} ${report.startDay} a ${report.endDay}`;
+  const body = [
+    'Hola,',
+    '',
+    `Adjunto reporte ${report.period === 'month' ? 'mensual' : 'semanal'} de Loren V2 correspondiente al rango ${report.startDay} a ${report.endDay}.`,
+    '',
+    'Resumen ejecutivo:',
+    `- Candidatos: ${report.metrics?.newCandidates || 0}`,
+    `- Con HV: ${report.metrics?.withCv || 0}`,
+    `- Agendados: ${report.metrics?.scheduled || 0}`,
+    `- Asistieron: ${report.metrics?.attended || 0}`,
+    `- No show: ${report.metrics?.noShow || 0}`,
+    '',
+    'Nota: adjuntar manualmente el archivo Excel descargado desde Loren V2.',
+    '',
+    'Saludos.'
+  ].join('\n');
+  return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 function buildDailyRows(candidates = [], bookings = []) {
   const days = new Map();
   for (const candidate of candidates) {
@@ -171,7 +196,9 @@ function renderLayout({ title, body }) {
     .metric span { color: #6b7280; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
     label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 700; color: #6b7280; }
     input, select { border: 1px solid #e1e4e8; border-radius: 8px; padding: 8px 10px; font-size: 14px; font-family: inherit; }
-    button, .btn { border: 0; border-radius: 8px; padding: 9px 14px; background: #0d7a6b; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; }
+    button, .btn { border: 0; border-radius: 8px; padding: 9px 14px; background: #0d7a6b; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; justify-content: center; }
+    .btn-secondary { background: #1e2d3d; }
+    .dev-note { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { text-align: left; color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: #f9fafb; }
     th, td { padding: 9px 10px; border-bottom: 1px solid #eaecef; vertical-align: top; }
@@ -194,8 +221,20 @@ function renderLayout({ title, body }) {
 </html>`;
 }
 
-function renderFilters(report = {}) {
+function renderDevActions(report = {}, canGenerate = false) {
+  if (!canGenerate) {
+    return `<div class="dev-note">La generación de Excel y preparación de correo está visible solo para el perfil dev.</div>`;
+  }
+
   const downloadQuery = new URLSearchParams({ period: report.period, date: report.baseDay }).toString();
+  return `<div class="grid">
+    <a class="btn" href="/admin/v2/reports/xlsx?${escapeHtml(downloadQuery)}">Generar y descargar Excel</a>
+    <a class="btn btn-secondary" href="${escapeHtml(buildMailHref(report))}">Preparar correo para adjuntar</a>
+  </div>
+  <p class="muted">El sistema no envía el correo automáticamente. Descarga el Excel y luego usa el botón para abrir un correo con asunto y cuerpo sugerido; el archivo se adjunta manualmente.</p>`;
+}
+
+function renderFilters(report = {}, canGenerate = false) {
   return `<section class="card">
     <h1>Reportes semanales y mensuales</h1>
     <p>Rango: <strong>${escapeHtml(report.startDay)}</strong> a <strong>${escapeHtml(report.endDay)}</strong>. Los cálculos usan horario de Bogotá.</p>
@@ -210,8 +249,8 @@ function renderFilters(report = {}) {
         <input type="date" name="date" value="${escapeHtml(report.baseDay)}">
       </label>
       <label>&nbsp;<button type="submit">Actualizar reporte</button></label>
-      <label>&nbsp;<a class="btn" href="/admin/v2/reports/xlsx?${escapeHtml(downloadQuery)}">Descargar Excel bonito</a></label>
     </form>
+    ${renderDevActions(report, canGenerate)}
   </section>`;
 }
 
@@ -291,8 +330,8 @@ async function loadReport(prisma, query = {}) {
   };
 }
 
-function renderReport(report = {}) {
-  return `${renderFilters(report)}
+function renderReport(report = {}, canGenerate = false) {
+  return `${renderFilters(report, canGenerate)}
   ${renderMetrics(report.metrics)}
   ${renderTable('Desglose por día', ['Día', 'Candidatos', 'HV', 'Pend. HV', 'Agendados', 'Confirmados', 'Asistieron', 'No show', 'Revisión'], report.dailyRows, (row) => `<tr><td>${escapeHtml(row.day)}</td><td>${row.newCandidates}</td><td>${row.withCv}</td><td>${row.pendingCv}</td><td>${row.scheduled}</td><td>${row.confirmed}</td><td>${row.attended}</td><td>${row.noShow}</td><td>${row.humanReview}</td></tr>`)}
   ${renderTable('Candidatos por vacante', ['Vacante', 'Candidatos'], report.byVacancy, (row) => `<tr><td>${escapeHtml(row.label)}</td><td>${row.count}</td></tr>`)}
@@ -307,7 +346,7 @@ export function lorenV2ReportsRouter(prisma) {
 
   router.get('/', async (req, res) => {
     const report = await loadReport(prisma, req.query);
-    res.send(renderLayout({ title: 'Reportes Loren V2', body: renderReport(report) }));
+    res.send(renderLayout({ title: 'Reportes Loren V2', body: renderReport(report, isDevRequest(req)) }));
   });
 
   router.get('/json', async (req, res) => {
@@ -316,6 +355,7 @@ export function lorenV2ReportsRouter(prisma) {
   });
 
   router.get('/xlsx', async (req, res) => {
+    if (!isDevRequest(req)) return res.status(403).send('Generación de Excel disponible solo para dev.');
     const { workbook, data } = await buildLorenV2ReportsWorkbook(prisma, req.query);
     const fileName = `loren-v2-${data.period}-${data.startDay}-${data.endDay}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
