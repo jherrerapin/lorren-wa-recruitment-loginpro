@@ -18,7 +18,15 @@ export function runtime(prisma) {
         const fn = ai[['classify', 'Lead', 'Origin'].join('')];
         const decision = await fn(body);
         const score = Number(decision?.score || 0);
-        if (decision?.kind === 'PERSON' && score >= MIN_SCORE) console.info('[LOREN_V2_ORIGIN_AI]', JSON.stringify({ score, label: decision.label || null }));
+        if (decision?.kind !== 'PERSON' || score < MIN_SCORE || !decision.label) continue;
+
+        const candidate = await prisma.candidate.findUnique({
+          where: { phone: contact },
+          select: { id: true, campaignId: true, [sourceKey]: true, [personKey]: true }
+        });
+        if (!candidate) continue;
+
+        console.info('[LOREN_V2_ORIGIN_AI]', JSON.stringify({ score, label: decision.label || null }));
       }
       return next();
     } catch (error) {
