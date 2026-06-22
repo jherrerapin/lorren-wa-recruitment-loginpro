@@ -312,18 +312,18 @@ model Candidate {
 }
 
 model CandidateDataConsentEvent {
-  id           String            @id @default(cuid())
-  candidateId  String
-  candidate    Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  status       DataConsentStatus
-  version      String
-  text         String
-  source       String
+  id            String            @id @default(cuid())
+  candidateId   String
+  candidate     Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  status        DataConsentStatus
+  version       String
+  text          String
+  source        String
   actorUsername String?
-  ipAddress    String?
-  userAgent    String?
-  note         String?
-  createdAt    DateTime          @default(now())
+  ipAddress     String?
+  userAgent     String?
+  note          String?
+  createdAt     DateTime          @default(now())
 
   @@index([candidateId, createdAt])
   @@index([status, createdAt])
@@ -359,61 +359,324 @@ model CandidateAdminEvent {
 
 
 model DispatchClient {
-  id            String   @id @default(cuid())
-  name          String
-  email         String?
-  phone         String?
-  nit           String?
-  operationName String?
-  city          String?
-  address       String?
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  requests      DispatchRequest[]
+  id                String                   @id @default(cuid())
+  name              String
+  nit               String?
+  cityName          String?
+  contactName       String?
+  contactPhone      String?
+  contactEmail      String?
+  publicToken       String                   @unique
+  notes             String?
+  isActive          Boolean                  @default(true)
+  createdByUsername String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  operationPoints   DispatchOperationPoint[]
+  services          DispatchClientService[]
+  @@index([name])
+  @@index([cityName])
+  @@index([isActive])
+}
+
+model DispatchClientService {
+  id                String                   @id @default(cuid())
+  clientId          String
+  client            DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name              String
+  description       String?
+  isActive          Boolean                  @default(true)
+  createdByUsername String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  serviceRequests   DispatchServiceRequest[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+  @@index([isActive])
+}
+
+model DispatchOperationPoint {
+  id                String                   @id @default(cuid())
+  clientId          String
+  client            DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name              String
+  cityName          String?
+  address           String?
+  contactName       String?
+  contactPhone      String?
+  publicToken       String                   @unique
+  isActive          Boolean                  @default(true)
+  notes             String?
+  createdByUsername String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  serviceRequests   DispatchServiceRequest[]
+  @@index([clientId])
+  @@index([cityName])
+  @@index([isActive])
 }
 
 model DispatchWorker {
-  id                     String   @id @default(cuid())
-  fullName               String
-  documentNumber         String   @unique
-  phone                  String?
-  city                   String?
-  baseZone               String?
-  role                   String?
-  shiftAvailability      String?
-  status                 String   @default("ACTIVE")
-  isAvailable            Boolean  @default(true)
-  currentAssignments     Int      @default(0)
-  monthlyAssignments     Int      @default(0)
-  totalAssignments       Int      @default(0)
-  lastAssignedAt         DateTime?
-  notes                  String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-  cities                 DispatchWorkerCity[]
-  vacancies              DispatchWorkerVacancy[]
-  assignments            DispatchAssignment[]
+  id                String                 @id @default(cuid())
+  candidateId       String?                @unique
+  candidate         Candidate?             @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+
+  fullName          String
+  phone             String?
+  documentType      String?
+  documentNumber    String?
+  residenceCity     String?
+  residenceLocality String?
+  transportMode     String?
+  cvOriginalName    String?
+  cvMimeType        String?
+  cvData            Bytes?
+
+  source            String                 @default("CANDIDATE")
+  operationalStatus String                 @default("ACTIVE")
+  notes             String?
+
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  cities            DispatchWorkerCity[]
+  vacancies         DispatchWorkerVacancy[]
+  assignments       DispatchAssignment[]
+  incidents         DispatchIncident[]
+
+  @@index([candidateId])
+  @@index([documentNumber])
+  @@index([phone])
+  @@index([operationalStatus])
+}
+
+model DispatchServiceRequest {
+  id                       String               @id @default(cuid())
+  clientName               String
+  operationPointName       String?
+  cityName                 String?
+  address                  String?
+  serviceDate              DateTime
+  startTime                String?
+  endTime                  String?
+  requiredWorkers          Int                  @default(1)
+  status                   String               @default("PENDING_ASSIGNMENT")
+  notes                    String?
+  createdByUsername        String?
+  operationPointId         String?
+  operationPoint           DispatchOperationPoint? @relation(fields: [operationPointId], references: [id], onDelete: SetNull)
+  serviceId                String?
+  service                  DispatchClientService?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  serviceName              String?
+  requestedByName          String?
+  requestedByPhone         String?
+  requestedByEmail         String?
+  completionEmailSentAt    DateTime?
+  completionEmailTo        String?
+  completionEmailProviderId String?
+  completionEmailLastError String?
+  source                   String               @default("INTERNAL")
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  assignments              DispatchAssignment[]
+  incidents                DispatchIncident[]
+
+  @@index([serviceDate])
+  @@index([status])
+  @@index([cityName])
+  @@index([operationPointId])
+  @@index([serviceId])
+  @@index([source])
+  @@index([completionEmailSentAt])
+}
+
+model DispatchAssignment {
+  id                String                 @id @default(cuid())
+  serviceRequestId  String
+  serviceRequest    DispatchServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  workerId          String
+  worker            DispatchWorker         @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  status            String                 @default("ASSIGNED")
+  notes             String?
+  createdByUsername String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  incidents         DispatchIncident[]
+
+  @@unique([serviceRequestId, workerId])
+  @@index([serviceRequestId])
+  @@index([workerId])
+  @@index([status])
+}
+
+model DispatchIncident {
+  id                String                  @id @default(cuid())
+  serviceRequestId  String
+  serviceRequest    DispatchServiceRequest  @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  assignmentId      String?
+  assignment        DispatchAssignment?      @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  workerId          String?
+  worker            DispatchWorker?          @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  type              String
+  status            String                  @default("OPEN")
+  description       String
+  reportedBy        String?
+  resolutionNote    String?
+  createdByUsername String?
+  resolvedByUsername String?
+  resolvedAt        DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  @@index([serviceRequestId])
+  @@index([assignmentId])
+  @@index([workerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DispatchMessageTemplate {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  content           String
+  createdByUsername String?
+  updatedByUsername String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([key])
 }
 
 model DispatchWorkerCity {
-  id       String @id @default(cuid())
-  workerId String
-  cityId   String
-  worker   DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  city     City           @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  id        String         @id @default(cuid())
+  workerId  String
+  worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  cityId    String
+  city      City           @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime       @default(now())
+
   @@unique([workerId, cityId])
+  @@index([cityId])
 }
 
 model DispatchWorkerVacancy {
-  id        String @id @default(cuid())
+  id        String         @id @default(cuid())
   workerId  String
-  vacancyId String
   worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  vacancyId String
   vacancy   Vacancy        @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime       @default(now())
+
   @@unique([workerId, vacancyId])
+  @@index([vacancyId])
+}
+model AppUser {
+  id                  String          @id @default(cuid())
+  username            String          @unique
+  passwordHash        String
+  recoveryCodeHash    String?
+  role                AppUserRole     @default(ADMIN)
+  accessScope         UserAccessScope @default(ALL)
+  scopeCity           String?
+  scopeVacancyId      String?
+  scopeVacancy        Vacancy?        @relation(fields: [scopeVacancyId], references: [id], onDelete: SetNull)
+  recoveryPhone       String?
+  recoveryEmail       String?
+  email               String?
+  createdByUsername   String?
+  lastPasswordResetAt DateTime?
+  isActive            Boolean         @default(true)
+  canAccessDispatch   Boolean         @default(false)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  @@index([accessScope, scopeCity])
+  @@index([scopeVacancyId])
+  @@index([canAccessDispatch])
 }
 
-model DispatchRequest {
-  id             String   @id @default(cuid())
-  clientId       String
+
+
+model DevAuditEvent {
+  id            String   @id @default(cuid())
+  entityType    String
+  entityId      String?
+  entityLabel   String?
+  action        String
+  actorUserId   String?
+  actorUsername String?
+  actorRole     String?
+  actorSource   String?
+  ipAddress     String?
+  forwardedFor  String?
+  userAgent     String?
+  method        String?
+  path          String?
+  fromValue     Json?
+  toValue       Json?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUsername, createdAt])
+  @@index([action, createdAt])
+}
+
+model JobQueue {
+  id          String   @id @default(cuid())
+  type        String
+  payload     Json
+  dedupeKey   String?  @map("dedupe_key")
+  runAt       DateTime @map("run_at")
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5) @map("max_attempts")
+  status      JobStatus @default(PENDING)
+  lastError   String?  @map("last_error")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([status, runAt])
+  @@unique([type, dedupeKey])
+}
+
+model AttachmentAnalysis {
+  id             String                   @id @default(cuid())
+  candidateId    String
+  candidate      Candidate                @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  messageId      String?
+  classification AttachmentClassification
+  confidence     Float
+  evidence       String?
+  mimeType       String?
+  fileName       String?
+  createdAt      DateTime                 @default(now())
+
+  @@index([candidateId, createdAt])
+}
+
+model BotKnowledge {
+  id          String   @id @default(cuid())
+  scope       String   @default("GLOBAL")
+  content     String
+  tags        String?
+  vacancyId   String?
+  candidateId String?
+  isActive    Boolean  @default(true)
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([scope, isActive, updatedAt])
+  @@index([vacancyId, isActive])
+  @@index([candidateId, isActive])
+}
