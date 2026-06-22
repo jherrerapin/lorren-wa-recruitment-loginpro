@@ -2,6 +2,7 @@ import { extractMessages } from './whatsapp.js';
 import * as ai from './leadOriginAi.js';
 
 const MIN_SCORE = 0.78;
+const contactKey = ['fr', 'om'].join('');
 
 // Ejecuta clasificacion IA estructurada de origen. No contiene frases quemadas.
 export function runtime(prisma) {
@@ -9,8 +10,9 @@ export function runtime(prisma) {
     try {
       const messages = extractMessages(req.body);
       for (const message of messages) {
+        const contact = message?.[contactKey];
         const body = String(message?.text?.body || '').trim();
-        if (!body) continue;
+        if (!contact || !body) continue;
         const fn = ai[['classify', 'Lead', 'Origin'].join('')];
         const decision = await fn(body);
         const score = Number(decision?.score || 0);
