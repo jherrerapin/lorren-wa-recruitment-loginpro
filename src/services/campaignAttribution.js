@@ -1,4 +1,5 @@
 import { extractMessages } from './whatsapp.js';
+import { dataConsentGateMiddleware } from './dataConsentGate.js';
 
 function normalizeCampaignCode(value) {
   return String(value || '')
@@ -139,38 +140,41 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
   };
 }
 
-export function campaignAttributionMiddleware(prisma) {
-  return async (req, _res, next) => {
-    try {
-      const messages = extractMessages(req.body);
-      if (!messages.length) return next();
+async function runCampaignAttribution(prisma, req, next) {
+  try {
+    const messages = extractMessages(req.body);
+    if (!messages.length) return next();
 
-      for (const message of messages) {
-        const from = message?.from;
-        if (!from || !collectReferralAttributionValues(message).length) continue;
+    for (const message of messages) {
+      const from = message?.from;
+      if (!from || !collectReferralAttributionValues(message).length) continue;
 
-        const candidate = await prisma.candidate.upsert({
-          where: { phone: from },
-          update: {},
-          create: { phone: from }
-        });
+      const candidate = await prisma.candidate.upsert({
+        where: { phone: from },
+        update: {},
+        create: { phone: from }
+      });
 
-        const result = await attributeCandidateCampaignFromMessage(prisma, candidate.id, message);
-        if (result.attributed || result.reason === 'metadata_saved_without_campaign_match') {
-          console.info('[CAMPAIGN_ATTRIBUTION]', JSON.stringify({
-            phone: from,
-            candidateId: candidate.id,
-            attributed: result.attributed,
-            reason: result.reason,
-            campaignId: result.campaignId || null
-          }));
-        }
+      const result = await attributeCandidateCampaignFromMessage(prisma, candidate.id, message);
+      if (result.attributed || result.reason === 'metadata_saved_without_campaign_match') {
+        console.info('[CAMPAIGN_ATTRIBUTION]', JSON.stringify({
+          phone: from,
+          candidateId: candidate.id,
+          attributed: result.attributed,
+          reason: result.reason,
+          campaignId: result.campaignId || null
+        }));
       }
-
-      return next();
-    } catch (error) {
-      console.warn('[CAMPAIGN_ATTRIBUTION_ERROR]', error?.message || error);
-      return next();
     }
-  };
+
+    return next();
+  } catch (error) {
+    console.warn('[CAMPAIGN_ATTRIBUTION_ERROR]', error?.message || error);
+    return next();
+  }
+}
+
+export function campaignAttributionMiddleware(prisma) {
+  const consentGate = dataConsentGateMiddleware(prisma);
+  return (req, res, next) => consentGate(req, res, () => runCampaignAttribution(prisma, req, next));
 }
