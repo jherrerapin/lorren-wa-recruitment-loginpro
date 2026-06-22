@@ -31,8 +31,24 @@ function normalizeCampaignCode(value) {
     .replace(/[^A-Z0-9_-]/g, '');
 }
 
+function normalizeAttributionToken(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/HTTPS?:\/\//g, '')
+    .replace(/WWW\./g, '')
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function isValidCampaignCode(value) {
-  return /^[A-Z0-9_-]{3,50}$/.test(value);
+  return /^[A-Z0-9_-]{3,80}$/.test(value);
+}
+
+function compactUnique(values = []) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function hasCandidateData(candidate = {}) {
@@ -70,8 +86,94 @@ function requiresHumanReview(candidate = {}) {
   return Boolean(candidate.potentialDuplicate || candidate.botPaused || candidate.rejectionDetails);
 }
 
+function collectReferralValues(rawPayload = {}) {
+  const referral = rawPayload?.referral || rawPayload?.context?.referral || null;
+  if (!referral || typeof referral !== 'object') return [];
+
+  return compactUnique([
+    referral.source_id,
+    referral.source_url,
+    referral.headline,
+    referral.body,
+    referral.ctwa_clid,
+    referral.ad_id,
+    referral.adgroup_id,
+    referral.campaign_id,
+    referral.campaign_name,
+    referral.ad_name
+  ].map((value) => String(value || '').trim()));
+}
+
+function collectCandidateAttributionValues(candidate = {}) {
+  const values = [candidate.campaignCodeRaw];
+
+  for (const message of candidate.messages || []) {
+    values.push(...collectReferralValues(message.rawPayload || {}));
+  }
+
+  return compactUnique(values);
+}
+
+function campaignTokens(campaign = {}) {
+  return compactUnique([
+    normalizeCampaignCode(campaign.code),
+    normalizeAttributionToken(campaign.code),
+    normalizeAttributionToken(campaign.name),
+    normalizeAttributionToken(campaign.notes)
+  ]).filter((token) => token.length >= 3);
+}
+
+function candidateTokens(candidate = {}) {
+  return compactUnique(
+    collectCandidateAttributionValues(candidate)
+      .flatMap((value) => [normalizeCampaignCode(value), normalizeAttributionToken(value)])
+      .filter((token) => token.length >= 3)
+  );
+}
+
+function tokenMatchesCampaign(candidateToken, campaignToken) {
+  if (!candidateToken || !campaignToken) return false;
+  if (candidateToken === campaignToken) return true;
+  if (candidateToken.length < 8 || campaignToken.length < 8) return false;
+  return candidateToken.includes(campaignToken) || campaignToken.includes(candidateToken);
+}
+
+function candidateBelongsToCampaign(candidate = {}, campaign = {}) {
+  if (candidate.campaignId && candidate.campaignId === campaign.id) return { matched: true, mode: 'direct' };
+
+  const tokensFromCandidate = candidateTokens(candidate);
+  if (!tokensFromCandidate.length) return { matched: false, mode: null };
+
+  const tokensFromCampaign = campaignTokens(campaign);
+  const matched = tokensFromCandidate.some((candidateToken) => (
+    tokensFromCampaign.some((campaignToken) => tokenMatchesCampaign(candidateToken, campaignToken))
+  ));
+
+  return { matched, mode: matched ? 'metadata' : null };
+}
+
+function enrichCampaignsWithAttribution(campaigns = [], candidates = []) {
+  return campaigns.map((campaign) => {
+    const attributedCandidates = [];
+    let inferredAttributions = 0;
+
+    for (const candidate of candidates) {
+      const result = candidateBelongsToCampaign(candidate, campaign);
+      if (!result.matched) continue;
+      attributedCandidates.push(candidate);
+      if (result.mode === 'metadata') inferredAttributions += 1;
+    }
+
+    return {
+      ...campaign,
+      attributedCandidates,
+      inferredAttributions
+    };
+  });
+}
+
 function buildCampaignMetric(campaign = {}) {
-  const candidates = campaign.candidates || [];
+  const candidates = campaign.attributedCandidates || campaign.candidates || [];
   return {
     conversationsStarted: candidates.length,
     startedProcess: candidates.filter(hasCandidateData).length,
@@ -85,7 +187,8 @@ function buildCampaignMetric(campaign = {}) {
     hired: candidates.filter((candidate) => candidate.status === 'CONTRATADO').length,
     abandoned: candidates.filter((candidate) => candidate.status === 'NUEVO' && !hasCandidateData(candidate) && !hasCv(candidate)).length,
     pendingCv: candidates.filter((candidate) => hasCompleteCoreData(candidate) && !hasCv(candidate)).length,
-    humanReview: candidates.filter(requiresHumanReview).length
+    humanReview: candidates.filter(requiresHumanReview).length,
+    inferredAttributions: campaign.inferredAttributions || 0
   };
 }
 
@@ -149,14 +252,15 @@ function renderCampaignForm({ vacancies = [] }) {
     .join('');
 
   return `<section class="card">
-    <h2>Nueva campaña</h2>
+    <h2>Nueva campaña interna</h2>
+    <p class="muted">Este dato no se le pide al candidato. Usa un ID interno de campaña/anuncio, nombre de anuncio o etiqueta administrativa que pueda compararse con los metadatos entrantes de WhatsApp.</p>
     <form method="post" action="/admin/v2/campaigns">
       <div class="grid">
-        <label>Código interno
-          <input name="code" placeholder="FB-BOG-AUX-01" required maxlength="50">
+        <label>ID / código interno
+          <input name="code" placeholder="META-AD-238000000000000" required maxlength="80">
         </label>
         <label>Nombre
-          <input name="name" placeholder="Auxiliar Bogotá" required maxlength="120">
+          <input name="name" placeholder="Auxiliar Bogotá - pauta junio" required maxlength="120">
         </label>
         <label>Fuente
           <select name="sourceType">${sourceOptions}</select>
@@ -174,8 +278,8 @@ function renderCampaignForm({ vacancies = [] }) {
           <input name="zone" placeholder="Montevideo, Siberia, Ibagué...">
         </label>
       </div>
-      <label style="margin-top:12px;">Notas
-        <textarea name="notes" placeholder="Contexto de pauta, público, presupuesto o hipótesis de campaña"></textarea>
+      <label style="margin-top:12px;">Notas / nombres alternos
+        <textarea name="notes" placeholder="Nombre del anuncio, URL de pauta, hipótesis, público o presupuesto"></textarea>
       </label>
       <div style="margin-top:12px;"><button type="submit">Crear campaña</button></div>
     </form>
@@ -192,7 +296,7 @@ function renderCampaignTable(campaigns = []) {
     return `<tr>
       <td><strong>${escapeHtml(campaign.name)}</strong><br><span class="badge">${escapeHtml(campaign.code)}</span><br><span class="muted">${escapeHtml(campaign.city || 'Sin ciudad')} ${campaign.zone ? '· ' + escapeHtml(campaign.zone) : ''}</span></td>
       <td>${escapeHtml(campaign.vacancy?.title || 'Sin vacante')}</td>
-      <td>${escapeHtml(campaign.sourceType)}</td>
+      <td>${escapeHtml(campaign.sourceType)}<br><span class="muted">${metric.inferredAttributions} inferidos por metadatos</span></td>
       <td><strong>${metric.conversationsStarted}</strong><br><span class="muted">conversaciones</span></td>
       <td><strong>${metric.dataCompleted}</strong><br><span class="muted">${conversionRate(metric.dataCompleted, metric.conversationsStarted)} de conversaciones</span></td>
       <td><strong>${metric.cvReceived}</strong><br><span class="muted">HV recibidas</span></td>
@@ -232,26 +336,32 @@ function renderCampaignTable(campaigns = []) {
 }
 
 async function loadCampaignDashboardData(prisma) {
-  const [campaigns, vacancies] = await Promise.all([
+  const [campaigns, vacancies, candidates] = await Promise.all([
     prisma.campaign.findMany({
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
       include: {
-        vacancy: { select: { id: true, title: true, city: true } },
-        candidates: {
-          include: {
-            interviewBookings: { select: { status: true } }
-          }
-        }
+        vacancy: { select: { id: true, title: true, city: true } }
       }
     }),
     prisma.vacancy.findMany({
       where: { isActive: true },
       orderBy: [{ city: 'asc' }, { title: 'asc' }],
       select: { id: true, title: true, city: true }
+    }),
+    prisma.candidate.findMany({
+      include: {
+        interviewBookings: { select: { status: true } },
+        messages: {
+          where: { direction: 'INBOUND' },
+          orderBy: { createdAt: 'asc' },
+          take: 5,
+          select: { body: true, rawPayload: true, createdAt: true }
+        }
+      }
     })
   ]);
 
-  return { campaigns, vacancies };
+  return { campaigns: enrichCampaignsWithAttribution(campaigns, candidates), vacancies };
 }
 
 export function lorenV2Router(prisma) {
@@ -300,7 +410,7 @@ export function lorenV2Router(prisma) {
     const body = `${message ? `<div class="alert alert-success">${escapeHtml(message)}</div>` : ''}${error ? `<div class="alert alert-error">${escapeHtml(error)}</div>` : ''}
       <section class="card">
         <h1>Campañas y estadísticas</h1>
-        <p>Registra códigos de pauta y revisa conversiones por campaña. Ejemplo de mensaje prellenado: <strong>Hola, quiero aplicar a Auxiliar Bogotá. Código: FB-BOG-AUX-01</strong></p>
+        <p>La atribución no depende de que el candidato escriba códigos. Loren V2 cruza candidatos con campañas usando asociación directa y metadatos internos del mensaje entrante, especialmente datos de referencia enviados por WhatsApp cuando el chat nace desde pauta.</p>
       </section>
       ${renderCampaignForm({ vacancies })}
       ${renderCampaignTable(campaigns)}`;
@@ -332,7 +442,7 @@ export function lorenV2Router(prisma) {
       : 'META_ADS';
 
     if (!isValidCampaignCode(code)) {
-      return res.redirect('/admin/v2/campaigns?error=' + encodeURIComponent('El código debe tener entre 3 y 50 caracteres, usando letras, números, guion o guion bajo.'));
+      return res.redirect('/admin/v2/campaigns?error=' + encodeURIComponent('El ID o código interno debe tener entre 3 y 80 caracteres, usando letras, números, guion o guion bajo.'));
     }
     if (!name) {
       return res.redirect('/admin/v2/campaigns?error=' + encodeURIComponent('El nombre de la campaña es obligatorio.'));
