@@ -1,12 +1,12 @@
-import { MessageDirection, MessageType } from '@prisma/client';
+import { ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 
 export const DATA_CONSENT_VERSION = 'loren-v2-2026-06-v1';
 
-export const DATA_CONSENT_TEXT = 'Autorizo de manera libre, previa, expresa e informada el tratamiento de mis datos personales y documentos aportados dentro del proceso de reclutamiento y selección de LoginPro / Loren. Esto incluye contacto por WhatsApp u otros canales digitales, registro de mis datos, análisis de hoja de vida, validación de información suministrada y conservación de la trazabilidad del proceso. Entiendo que puedo solicitar información, actualización, rectificación o revocatoria de esta autorización.';
+export const DATA_CONSENT_TEXT = 'Para continuar con tu postulación necesito solicitar y tratar algunos datos personales y documentos relacionados con el proceso de selección. Autorizo de manera libre, previa, expresa e informada el tratamiento de mis datos personales y documentos aportados dentro del proceso de reclutamiento y selección de LoginPro / Loren. Esto incluye contacto por WhatsApp u otros canales digitales, registro de mis datos, análisis de hoja de vida, validación de información suministrada y conservación de la trazabilidad del proceso. Entiendo que puedo solicitar información, actualización, rectificación o revocatoria de esta autorización.';
 
-const CONSENT_PROMPT = `${DATA_CONSENT_TEXT}\n\nPara continuar con tu postulación, responde exactamente: Acepto.\nSi no autorizas el tratamiento de datos, responde: No autorizo.`;
-const CONSENT_ACCEPTED_REPLY = 'Gracias. Tu autorización quedó registrada. Para continuar, cuéntame desde qué ciudad nos escribes y para qué vacante o cargo estás interesado.';
+const CONSENT_PROMPT = `${DATA_CONSENT_TEXT}\n\nSi deseas continuar con la postulación, responde: Acepto.\nSi no autorizas el tratamiento de datos, responde: No autorizo.`;
+const CONSENT_ACCEPTED_REPLY = 'Gracias. Tu autorización quedó registrada. Ahora sí puedo continuar con tu postulación. Por favor compárteme tus datos para el registro.';
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribir: Acepto.';
 
 function normalize(value = '') {
@@ -30,6 +30,12 @@ function isConsentRejection(text = '') {
 
 function isConsentAlreadyAccepted(candidate = {}) {
   return candidate?.dataConsentStatus === 'ACCEPTED';
+}
+
+function shouldAllowInformationalFlow(candidate = {}, message = {}) {
+  if (message.type !== 'text') return false;
+  if (candidate?.dataConsentStatus === 'REVOKED') return false;
+  return [ConversationStep.MENU, ConversationStep.GREETING_SENT].includes(candidate?.currentStep);
 }
 
 async function saveInboundConsentGateMessage(prisma, candidateId, message, body, type) {
@@ -119,6 +125,8 @@ export function dataConsentGateMiddleware(prisma) {
       const messages = extractMessages(req.body);
       if (!messages.length) return next();
 
+      let blockedByConsent = false;
+
       for (const message of messages) {
         const from = message?.from;
         if (!from) continue;
@@ -133,29 +141,39 @@ export function dataConsentGateMiddleware(prisma) {
 
         const type = inboundMessageType(message);
         const body = inboundBody(message);
-        await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
 
         if (message.type === 'text' && isConsentAcceptance(body)) {
+          await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
           await recordConsent(prisma, req, candidate, 'ACCEPTED');
           await sendAndStore(prisma, candidate.id, from, CONSENT_ACCEPTED_REPLY, 'data_consent_accepted');
+          blockedByConsent = true;
           continue;
         }
 
         if (message.type === 'text' && isConsentRejection(body)) {
+          await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
           await recordConsent(prisma, req, candidate, 'REVOKED');
           await sendAndStore(prisma, candidate.id, from, CONSENT_REVOKED_REPLY, 'data_consent_revoked');
+          blockedByConsent = true;
           continue;
         }
 
+        if (shouldAllowInformationalFlow(candidate, message)) continue;
+
+        await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
+
         if (candidate.dataConsentStatus === 'REVOKED') {
           await sendAndStore(prisma, candidate.id, from, CONSENT_REVOKED_REPLY, 'data_consent_revoked_reminder');
+          blockedByConsent = true;
           continue;
         }
 
         await sendAndStore(prisma, candidate.id, from, CONSENT_PROMPT, 'data_consent_prompt');
+        blockedByConsent = true;
       }
 
-      return res.sendStatus(200);
+      if (blockedByConsent) return res.sendStatus(200);
+      return next();
     } catch (error) {
       console.warn('[DATA_CONSENT_GATE_ERROR]', error?.message || error);
       return next();
