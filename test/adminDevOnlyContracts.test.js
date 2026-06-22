@@ -65,6 +65,15 @@ test('operations bridge dashboard fallback renders required locals', () => {
   assert.match(bridgeSource, /router\.get\(\s*['"]\/novedades['"][\s\S]*?renderOperationsDashboard\(req,\s*res/);
 });
 
+test('legacy admin operations fallback renders dashboard required locals', () => {
+  const adminSource = readSource('src/routes/admin.js');
+
+  assert.match(adminSource, /router\.get\(\s*['"]\/operaciones['"][\s\S]*?res\.render\(\s*['"]operacionesDashboard['"]/);
+  assert.match(adminSource, /router\.get\(\s*['"]\/operaciones['"][\s\S]*?selectedDate:\s*todayCO\(\)/);
+  assert.match(adminSource, /router\.get\(\s*['"]\/operaciones['"][\s\S]*?metrics:\s*\{[\s\S]*?totalRequests:\s*0[\s\S]*?pendingRequests:\s*0[\s\S]*?completedRequests:\s*0[\s\S]*?openIncidents:\s*0[\s\S]*?\}/);
+  assert.match(adminSource, /router\.get\(\s*['"]\/operaciones['"][\s\S]*?canAccessDispatch:\s*Boolean\(req\.canAccessDispatch\)/);
+});
+
 test('admin user creation restricts canAccessDispatch to DEV in backend', () => {
   const adminSource = readSource('src/routes/admin.js');
 
