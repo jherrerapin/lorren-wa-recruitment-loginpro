@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireLorenV2 } from '../services/lorenV2Gate.js';
+import { buildLorenV2ReportsWorkbook } from '../services/lorenV2ReportsWorkbook.js';
 
 function escapeHtml(value = '') {
   return String(value)
@@ -194,6 +195,7 @@ function renderLayout({ title, body }) {
 }
 
 function renderFilters(report = {}) {
+  const downloadQuery = new URLSearchParams({ period: report.period, date: report.baseDay }).toString();
   return `<section class="card">
     <h1>Reportes semanales y mensuales</h1>
     <p>Rango: <strong>${escapeHtml(report.startDay)}</strong> a <strong>${escapeHtml(report.endDay)}</strong>. Los cálculos usan horario de Bogotá.</p>
@@ -208,6 +210,7 @@ function renderFilters(report = {}) {
         <input type="date" name="date" value="${escapeHtml(report.baseDay)}">
       </label>
       <label>&nbsp;<button type="submit">Actualizar reporte</button></label>
+      <label>&nbsp;<a class="btn" href="/admin/v2/reports/xlsx?${escapeHtml(downloadQuery)}">Descargar Excel bonito</a></label>
     </form>
   </section>`;
 }
@@ -310,6 +313,15 @@ export function lorenV2ReportsRouter(prisma) {
   router.get('/json', async (req, res) => {
     const report = await loadReport(prisma, req.query);
     res.json({ ok: true, ...report });
+  });
+
+  router.get('/xlsx', async (req, res) => {
+    const { workbook, data } = await buildLorenV2ReportsWorkbook(prisma, req.query);
+    const fileName = `loren-v2-${data.period}-${data.startDay}-${data.endDay}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    await workbook.xlsx.write(res);
+    res.end();
   });
 
   return router;
