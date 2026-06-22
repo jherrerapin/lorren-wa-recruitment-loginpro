@@ -401,7 +401,7 @@ app.use('/admin/operaciones', wrapAsyncRouter(dispatchProgrammingNotificationsRo
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
 app.use('/admin/operaciones/whatsapp', wrapAsyncRouter(dispatchWhatsappNotificationsRouter(prisma)));
 app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));
-app.use('/admin/v2', wrapAsyncRouter(lorenV2Router()));
+app.use('/admin/v2', wrapAsyncRouter(lorenV2Router(prisma)));
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
     if (req.method === 'GET' && (req.path === '/' || req.path === '')) return res.redirect('/admin/operaciones');
