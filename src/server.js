@@ -22,6 +22,7 @@ import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { lorenV2Router } from './routes/lorenV2.js';
 import { lorenV2ReferralsRouter } from './routes/lorenV2Referrals.js';
+import { lorenV2DailySummaryRouter } from './routes/lorenV2DailySummary.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
 import { referralAttributionMiddleware } from './services/referralAttribution.js';
@@ -407,6 +408,7 @@ app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
 app.use('/admin/operaciones/whatsapp', wrapAsyncRouter(dispatchWhatsappNotificationsRouter(prisma)));
 app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));
 app.use('/admin/v2/referrals', wrapAsyncRouter(lorenV2ReferralsRouter(prisma)));
+app.use('/admin/v2/daily-summary', wrapAsyncRouter(lorenV2DailySummaryRouter(prisma)));
 app.use('/admin/v2', wrapAsyncRouter(lorenV2Router(prisma)));
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
