@@ -20,7 +20,9 @@ import { dispatchWhatsappNotificationsRouter } from './routes/dispatchWhatsappNo
 import { dispatchProgrammingNotificationsRouter } from './routes/dispatchProgrammingNotifications.js';
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
+import { lorenV2Router } from './routes/lorenV2.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
+import { canSeeLorenV2 } from './services/lorenV2Gate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -204,6 +206,7 @@ app.use((req, res, next) => {
   req.canAccessDispatch = Boolean(req.session?.canAccessDispatch);
   res.locals.role = req.userRole;
   res.locals.canAccessDispatch = req.userRole === 'dev' || req.canAccessDispatch;
+  res.locals.canSeeLorenV2 = canSeeLorenV2(req);
   next();
 });
 
@@ -382,9 +385,10 @@ app.use('/admin/operaciones', wrapAsyncRouter(dispatchClientStatsRouter(prisma))
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchWorkerStatsRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchOpsExtrasRouter(prisma)));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchProgrammingNotificationsRouter(prisma)));
-app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
+app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()))
 app.use('/admin/operaciones/whatsapp', wrapAsyncRouter(dispatchWhatsappNotificationsRouter(prisma)));
 app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));
+app.use('/admin/v2', wrapAsyncRouter(lorenV2Router()));
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
     if (req.method === 'GET' && (req.path === '/' || req.path === '')) return res.redirect('/admin/operaciones');
