@@ -1,6 +1,7 @@
 import { extractMessages } from './whatsapp.js';
 import * as ai from './leadOriginAi.js';
 
+// Ejecuta clasificacion IA estructurada de origen. No contiene frases quemadas.
 export function runtime(prisma) {
   return async (req, _res, next) => {
     try {
