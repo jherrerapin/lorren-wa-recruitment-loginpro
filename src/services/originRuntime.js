@@ -24,9 +24,14 @@ export function runtime(prisma) {
           where: { phone: contact },
           select: { id: true, campaignId: true, [sourceKey]: true, [personKey]: true }
         });
-        if (!candidate) continue;
+        if (!candidate || candidate.campaignId || candidate[sourceKey] === 'META_ADS' || candidate[personKey]) continue;
 
-        console.info('[LOREN_V2_ORIGIN_AI]', JSON.stringify({ score, label: decision.label || null }));
+        await prisma.candidate.update({
+          where: { id: candidate.id },
+          data: { [personKey]: decision.label }
+        });
+
+        console.info('[LOREN_V2_ORIGIN_AI]', JSON.stringify({ candidateId: candidate.id, score }));
       }
       return next();
     } catch (error) {
