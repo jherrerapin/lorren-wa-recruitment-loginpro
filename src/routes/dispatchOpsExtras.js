@@ -50,18 +50,22 @@ function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compati
 function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((row) => normalizeString(row[fieldName])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')); }
 
 /**
- * FIX: buildDispatchEligibilityFilter ahora acepta el parámetro status
- * para poder filtrar por estado desde la vista de personal.
+ * buildDispatchEligibilityFilter — controla qué auxiliares se muestran en /personal.
  *
- * Los auxiliares activos/disponibles para asignación son los que tienen
- * operationalStatus = 'CONTRATADO'. Un auxiliar desactivado tiene 'INACTIVE'.
- * Al reactivar un auxiliar se vuelve a poner en 'CONTRATADO' para que aparezca
- * en asignaciones.
+ * Estados de operationalStatus:
+ *   CONTRATADO — activo y elegible para asignaciones (estado normal de trabajo)
+ *   DISABLED   — desactivado manualmente desde el botón toggle. No aparece en asignaciones.
+ *                Se puede reactivar volviendo a CONTRATADO.
+ *   INACTIVE   — eliminado del flujo (botón eliminar / eliminar masivo). No se reactiva
+ *                desde la UI; requiere reimportación o sincronización manual.
+ *
+ * Sin filtro de status → muestra solo CONTRATADO (vista por defecto).
+ * status=DISABLED → muestra solo los desactivados manualmente (toggle).
+ * status=INACTIVE → muestra solo los eliminados del flujo.
  */
 function buildDispatchEligibilityFilter(status) {
-  // Si se pide explícitamente ver inactivos, mostrar solo INACTIVE
+  if (status === 'DISABLED') return { operationalStatus: 'DISABLED' };
   if (status === 'INACTIVE') return { operationalStatus: 'INACTIVE' };
-  // Si no hay filtro de estado, mostrar solo los contratados (activos para despacho)
   return { operationalStatus: 'CONTRATADO' };
 }
 
@@ -177,7 +181,9 @@ async function notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUs
   if (result?.error) return ' Solicitud completa: no fue posible enviar el correo al solicitante.';
   return '';
 }
+// findWorkerOr404: busca cualquier auxiliar sin importar source (MANUAL, EXCEL_IMPORT, BOT, etc.)
 async function findWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId }, include: { cities: true, vacancies: true } }); }
+// findManualWorkerOr404: solo para edición de datos completos, que solo aplica a auxiliares MANUAL
 async function findManualWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId, source: 'MANUAL' }, include: { cities: true, vacancies: true } }); }
 async function replaceWorkerRelations(prisma, workerId, body) {
   const cityIds = normalizeStringList(body.cityIds);
@@ -285,7 +291,6 @@ export function dispatchOpsExtrasRouter(prisma) {
     const operationalCityId = normalizeString(req.query.operationalCityId);
     const vacancyId = normalizeString(req.query.vacancyId);
     const status = normalizeString(req.query.status);
-    // FIX: pasar status al filtro para que se aplique correctamente
     const eligibilityFilter = buildDispatchEligibilityFilter(status);
     const [workers, cities, vacancies] = await Promise.all([
       prisma.dispatchWorker.findMany({
@@ -421,23 +426,26 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
 
   /**
-   * FIX: Toggle activar/desactivar auxiliar.
+   * Toggle activar/desactivar auxiliar.
    *
-   * Problema original: el toggle usaba ACTIVE ↔ INACTIVE, pero el resto del sistema
-   * (asignaciones, filtros de personal, elegibilidad para despacho) filtra por
-   * operationalStatus = 'CONTRATADO'. Un auxiliar reactivado a 'ACTIVE' nunca volvía
-   * a aparecer en la lista de asignaciones ni en el panel de personal.
+   * FIX CRÍTICO: el toggle ahora usa findWorkerOr404 en lugar de findManualWorkerOr404.
+   * La versión anterior filtraba por source='MANUAL', por lo que auxiliares de Excel o Bot
+   * devolvían null y la ruta respondía con pantalla blanca "Auxiliar manual no encontrado".
+   * Ahora aplica a CUALQUIER auxiliar independientemente de su source.
    *
-   * Corrección: el toggle ahora usa CONTRATADO ↔ INACTIVE, que es el par correcto
-   * para que un auxiliar sea elegible para despacho al reactivarse.
+   * Estados usados por el toggle:
+   *   CONTRATADO -> DISABLED  (desactivar: sale de asignaciones y del panel activo)
+   *   DISABLED   -> CONTRATADO (reactivar: vuelve a aparecer disponible)
+   *
+   * Se usa DISABLED en lugar de INACTIVE para distinguir "desactivado temporalmente"
+   * de "eliminado del flujo" (INACTIVE). El filtro status=DISABLED en /personal
+   * muestra solo los desactivados manuales; status=INACTIVE muestra los eliminados.
    */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
-    const worker = await findManualWorkerOr404(prisma, req.params.workerId);
-    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
-    // Si está activo para despacho (CONTRATADO), pasa a INACTIVE.
-    // Si está INACTIVE (o cualquier otro estado no activo), vuelve a CONTRATADO.
+    const worker = await findWorkerOr404(prisma, req.params.workerId);
+    if (!worker) return res.status(404).send('Auxiliar no encontrado');
     const isCurrentlyActive = worker.operationalStatus === 'CONTRATADO';
-    const nextStatus = isCurrentlyActive ? 'INACTIVE' : 'CONTRATADO';
+    const nextStatus = isCurrentlyActive ? 'DISABLED' : 'CONTRATADO';
     await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: nextStatus } });
     const message = nextStatus === 'CONTRATADO'
       ? 'Auxiliar reactivado. Ya aparece disponible para asignaciones.'
