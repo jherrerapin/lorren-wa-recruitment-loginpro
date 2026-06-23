@@ -58,13 +58,16 @@ function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((ro
  *                Se puede reactivar desde la pestaña "Desactivados".
  *   INACTIVE   — eliminado del flujo (botón eliminar / eliminar masivo). Aparece en la misma
  *                pestaña "Desactivados" para que pueda ser reactivado manualmente si se requiere.
+ *   ACTIVE     — estado huérfano: fue asignado por error en versiones anteriores (bug corregido).
+ *                Se incluye en la vista de desactivados para que el operador pueda rescatarlo
+ *                usando el botón toggle (reactivar → CONTRATADO).
  *
  * Sin filtro de status → muestra solo CONTRATADO (vista por defecto).
- * status=DISABLED → muestra DISABLED e INACTIVE (todos los no-activos, reactivables).
+ * status=DISABLED → muestra DISABLED, INACTIVE y ACTIVE (todos los no-activos, reactivables).
  * status=INACTIVE → alias de DISABLED para compatibilidad; mismo resultado.
  */
 function buildDispatchEligibilityFilter(status) {
-  if (status === 'DISABLED' || status === 'INACTIVE') return { operationalStatus: { in: ['DISABLED', 'INACTIVE'] } };
+  if (status === 'DISABLED' || status === 'INACTIVE') return { operationalStatus: { in: ['DISABLED', 'INACTIVE', 'ACTIVE'] } };
   return { operationalStatus: 'CONTRATADO' };
 }
 
@@ -77,7 +80,8 @@ function buildWorkerData(body = {}) {
     residenceCity: normalizeString(body.residenceCity),
     residenceLocality: normalizeString(body.residenceLocality),
     transportMode: normalizeTransportMode(body.transportMode),
-    operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
+    // FIX: el fallback era 'ACTIVE' (estado huérfano). Ahora es 'CONTRATADO' (estado válido).
+    operationalStatus: normalizeString(body.operationalStatus) || 'CONTRATADO',
     notes: normalizeString(body.notes)
   };
 }
@@ -258,7 +262,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud creada.')}&created=${created.id}`);
   });
 
-  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => { const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }); return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`) });
+  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => { const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }); return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`); });
 
   router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }); if (activeCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmación de los auxiliares.')); } const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (existing) { if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya está asignado a esta solicitud.')); await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } }); } else { await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } }); } await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmación.')); });
   router.post('/asignaciones/confirmar', requireOps, async (req, res) => {
@@ -430,11 +434,8 @@ export function dispatchOpsExtrasRouter(prisma) {
    * Comportamiento:
    *   CONTRATADO → DISABLED   Al desactivar: redirige a ?status=DISABLED para que el operador
    *                            vea inmediatamente al auxiliar en la lista de desactivados.
-   *   DISABLED / INACTIVE → CONTRATADO   Al reactivar: redirige a /personal (sin status) para
-   *                            confirmar que ya aparece en el panel activo.
-   *
-   * El toggle acepta reactivar desde CUALQUIER estado inactivo (DISABLED o INACTIVE)
-   * para recuperar auxiliares que quedaron en estados intermedios por bugs anteriores.
+   *   ANY otro estado → CONTRATADO   Al reactivar: acepta DISABLED, INACTIVE o ACTIVE (huérfano).
+   *                            Redirige a /personal (sin status) para confirmar que aparece activo.
    */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await findWorkerOr404(prisma, req.params.workerId);
@@ -462,6 +463,20 @@ export function dispatchOpsExtrasRouter(prisma) {
     if (!ids.length) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs válidos.')}`);
     const { count } = await prisma.dispatchWorker.updateMany({ where: { id: { in: ids } }, data: { operationalStatus: 'INACTIVE' } });
     return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`${count} auxiliar${count !== 1 ? 'es eliminados' : ' eliminado'} del flujo activo.`)}`);
+  });
+
+  /**
+   * GET /personal/rescatar-huerfanos  (solo DEV)
+   * Migración de emergencia: corrige todos los registros con operationalStatus='ACTIVE'
+   * (estado huérfano creado por el bug del fallback) moviéndolos a 'CONTRATADO'.
+   * Ejecutar una sola vez después del deploy de este fix.
+   */
+  router.get('/personal/rescatar-huerfanos', requireOps, requireDev, async (req, res) => {
+    const { count } = await prisma.dispatchWorker.updateMany({
+      where: { operationalStatus: 'ACTIVE' },
+      data: { operationalStatus: 'CONTRATADO' }
+    });
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Rescate completado: ${count} auxiliar${count !== 1 ? 'es con estado ACTIVE corregidos' : ' con estado ACTIVE corregido'} → CONTRATADO.`)}`);
   });
 
   router.post('/sync-contratados', requireOps, requireDev, async (req, res) => {
