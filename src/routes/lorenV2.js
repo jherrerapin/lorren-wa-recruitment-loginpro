@@ -1,12 +1,8 @@
 import express from 'express';
 import { canSeeLorenV2, requireLorenV2 } from '../services/lorenV2Gate.js';
 
-const CAMPAIGN_SOURCE_OPTIONS = [
-  { value: 'META_ADS', label: 'Meta / Facebook Ads' },
-  { value: 'REFERRED', label: 'Referido / recomendado' },
-  { value: 'MANUAL', label: 'Registro manual' },
-  { value: 'OTHER', label: 'Otro' }
-];
+const CAMPAIGN_SOURCE_TYPE = 'META_ADS';
+const CAMPAIGN_SOURCE_LABEL = 'Meta / Facebook Ads';
 
 function escapeHtml(value = '') {
   return String(value)
@@ -21,6 +17,30 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeDateInput(value) {
+  const text = normalizeString(value);
+  if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  return text;
+}
+
+function dateRangeFromQuery(query = {}) {
+  const from = normalizeDateInput(query.from);
+  const to = normalizeDateInput(query.to);
+  return {
+    from,
+    to,
+    start: from ? new Date(`${from}T00:00:00-05:00`) : null,
+    end: to ? new Date(`${to}T23:59:59.999-05:00`) : null
+  };
+}
+
+function candidateCreatedAtWhere(range = {}) {
+  const createdAt = {};
+  if (range.start) createdAt.gte = range.start;
+  if (range.end) createdAt.lte = range.end;
+  return Object.keys(createdAt).length ? { createdAt } : {};
 }
 
 function normalizeCampaignCode(value) {
@@ -192,6 +212,26 @@ function buildCampaignMetric(campaign = {}) {
   };
 }
 
+function buildAggregateCampaignMetric(campaigns = []) {
+  return campaigns.reduce((total, campaign) => {
+    const metric = buildCampaignMetric(campaign);
+    for (const [key, value] of Object.entries(metric)) {
+      total[key] = (total[key] || 0) + Number(value || 0);
+    }
+    return total;
+  }, {});
+}
+
+function hasMetaAttributionEvidence(candidate = {}) {
+  return Boolean(candidate.campaignCodeRaw || (candidate.messages || []).some((message) => collectReferralValues(message.rawPayload || {}).length));
+}
+
+function buildUnmatchedMetaCandidates(candidates = []) {
+  return candidates
+    .filter((candidate) => candidate.sourceType === CAMPAIGN_SOURCE_TYPE && !candidate.campaignId && hasMetaAttributionEvidence(candidate))
+    .slice(0, 50);
+}
+
 function conversionRate(part, total) {
   if (!total) return '0%';
   return `${Math.round((part / total) * 100)}%`;
@@ -243,10 +283,76 @@ function renderLayout({ title, body }) {
 </html>`;
 }
 
-function renderCampaignForm({ vacancies = [] }) {
-  const sourceOptions = CAMPAIGN_SOURCE_OPTIONS
-    .map((option) => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
+function renderCampaignFilters({ filters = {}, vacancies = [] }) {
+  const vacancyOptions = vacancies
+    .map((vacancy) => `<option value="${escapeHtml(vacancy.id)}" ${filters.vacancyId === vacancy.id ? 'selected' : ''}>${escapeHtml(vacancy.title)} — ${escapeHtml(vacancy.city)}</option>`)
     .join('');
+
+  return `<section class="card">
+    <h2>Filtros de análisis</h2>
+    <form method="get" action="/admin/v2/campaigns" class="grid">
+      <label>Desde
+        <input type="date" name="from" value="${escapeHtml(filters.from || '')}">
+      </label>
+      <label>Hasta
+        <input type="date" name="to" value="${escapeHtml(filters.to || '')}">
+      </label>
+      <label>Ciudad
+        <input name="city" value="${escapeHtml(filters.city || '')}" placeholder="Bogotá">
+      </label>
+      <label>Vacante
+        <select name="vacancyId">
+          <option value="">Todas</option>
+          ${vacancyOptions}
+        </select>
+      </label>
+      <label>&nbsp;<button type="submit">Actualizar métricas</button></label>
+    </form>
+  </section>`;
+}
+
+function renderCampaignFunnel(campaigns = []) {
+  const metric = buildAggregateCampaignMetric(campaigns);
+  const items = [
+    ['Datos completos / conversaciones', conversionRate(metric.dataCompleted, metric.conversationsStarted), `${metric.dataCompleted || 0} de ${metric.conversationsStarted || 0}`],
+    ['HV / conversaciones', conversionRate(metric.cvReceived, metric.conversationsStarted), `${metric.cvReceived || 0} de ${metric.conversationsStarted || 0}`],
+    ['Aptos / HV', conversionRate(metric.apt, metric.cvReceived), `${metric.apt || 0} de ${metric.cvReceived || 0}`],
+    ['Agendados / aptos', conversionRate(metric.scheduled, metric.apt), `${metric.scheduled || 0} de ${metric.apt || 0}`],
+    ['Asistencia / confirmados', conversionRate(metric.attended, metric.confirmed), `${metric.attended || 0} de ${metric.confirmed || 0}`]
+  ];
+
+  return `<section class="card">
+    <h2>Embudo general de campañas Meta</h2>
+    <div class="grid">
+      ${items.map(([label, rate, detail]) => `<div><strong>${escapeHtml(rate)}</strong><br><span class="muted">${escapeHtml(label)} · ${escapeHtml(detail)}</span></div>`).join('')}
+    </div>
+  </section>`;
+}
+
+function renderUnmatchedMetaCandidates(candidates = []) {
+  if (!candidates.length) {
+    return `<section class="card"><h2>Metadata Meta sin campaña asociada</h2><p>No hay candidatos Meta pendientes de asociación en el rango seleccionado.</p></section>`;
+  }
+
+  const rows = candidates.map((candidate) => `<tr>
+    <td>${escapeHtml(candidate.fullName || 'Sin nombre')}<br><span class="muted">${escapeHtml(candidate.phone || '')}</span></td>
+    <td>${escapeHtml(candidate.vacancy?.title || 'Sin vacante')}</td>
+    <td><span class="muted">${escapeHtml(String(candidate.campaignCodeRaw || '').slice(0, 220))}</span></td>
+  </tr>`).join('');
+
+  return `<section class="card">
+    <h2>Metadata Meta sin campaña asociada</h2>
+    <p>Estos candidatos llegaron con evidencia de pauta Meta, pero todavía no coinciden con una campaña interna. Úsalos para ajustar el ID, nombre o notas de la campaña.</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Candidato</th><th>Vacante</th><th>Metadata recibida</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderCampaignForm({ vacancies = [] }) {
   const vacancyOptions = vacancies
     .map((vacancy) => `<option value="${escapeHtml(vacancy.id)}">${escapeHtml(vacancy.title)} — ${escapeHtml(vacancy.city)}</option>`)
     .join('');
@@ -261,9 +367,6 @@ function renderCampaignForm({ vacancies = [] }) {
         </label>
         <label>Nombre
           <input name="name" placeholder="Auxiliar Bogotá - pauta junio" required maxlength="120">
-        </label>
-        <label>Fuente
-          <select name="sourceType">${sourceOptions}</select>
         </label>
         <label>Vacante asociada
           <select name="vacancyId">
@@ -296,7 +399,7 @@ function renderCampaignTable(campaigns = []) {
     return `<tr>
       <td><strong>${escapeHtml(campaign.name)}</strong><br><span class="badge">${escapeHtml(campaign.code)}</span><br><span class="muted">${escapeHtml(campaign.city || 'Sin ciudad')} ${campaign.zone ? '· ' + escapeHtml(campaign.zone) : ''}</span></td>
       <td>${escapeHtml(campaign.vacancy?.title || 'Sin vacante')}</td>
-      <td>${escapeHtml(campaign.sourceType)}<br><span class="muted">${metric.inferredAttributions} inferidos por metadatos</span></td>
+      <td>${escapeHtml(CAMPAIGN_SOURCE_LABEL)}<br><span class="muted">${metric.inferredAttributions} inferidos por metadatos Meta</span></td>
       <td><strong>${metric.conversationsStarted}</strong><br><span class="muted">conversaciones</span></td>
       <td><strong>${metric.dataCompleted}</strong><br><span class="muted">${conversionRate(metric.dataCompleted, metric.conversationsStarted)} de conversaciones</span></td>
       <td><strong>${metric.cvReceived}</strong><br><span class="muted">HV recibidas</span></td>
@@ -317,7 +420,7 @@ function renderCampaignTable(campaigns = []) {
           <tr>
             <th>Campaña</th>
             <th>Vacante</th>
-            <th>Fuente</th>
+            <th>Origen de pauta</th>
             <th>Conversaciones</th>
             <th>Datos completos</th>
             <th>HV</th>
@@ -335,9 +438,26 @@ function renderCampaignTable(campaigns = []) {
   </section>`;
 }
 
-async function loadCampaignDashboardData(prisma) {
+async function loadCampaignDashboardData(prisma, query = {}) {
+  const range = dateRangeFromQuery(query);
+  const filters = {
+    from: range.from,
+    to: range.to,
+    city: normalizeString(query.city),
+    vacancyId: normalizeString(query.vacancyId)
+  };
+  const campaignWhere = {
+    ...(filters.city ? { city: { contains: filters.city, mode: 'insensitive' } } : {}),
+    ...(filters.vacancyId ? { vacancyId: filters.vacancyId } : {})
+  };
+  const candidateWhere = {
+    ...candidateCreatedAtWhere(range),
+    ...(filters.vacancyId ? { vacancyId: filters.vacancyId } : {})
+  };
+
   const [campaigns, vacancies, candidates] = await Promise.all([
     prisma.campaign.findMany({
+      where: campaignWhere,
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
       include: {
         vacancy: { select: { id: true, title: true, city: true } }
@@ -349,7 +469,9 @@ async function loadCampaignDashboardData(prisma) {
       select: { id: true, title: true, city: true }
     }),
     prisma.candidate.findMany({
+      where: candidateWhere,
       include: {
+        vacancy: { select: { id: true, title: true, city: true } },
         interviewBookings: { select: { status: true } },
         messages: {
           where: { direction: 'INBOUND' },
@@ -361,7 +483,17 @@ async function loadCampaignDashboardData(prisma) {
     })
   ]);
 
-  return { campaigns: enrichCampaignsWithAttribution(campaigns, candidates), vacancies };
+  const filteredCandidates = filters.city
+    ? candidates.filter((candidate) => (candidate.vacancy?.city || '').toLowerCase().includes(filters.city.toLowerCase()))
+    : candidates;
+
+  const enrichedCampaigns = enrichCampaignsWithAttribution(campaigns, filteredCandidates);
+  return {
+    campaigns: enrichedCampaigns,
+    vacancies,
+    filters,
+    unmatchedMetaCandidates: buildUnmatchedMetaCandidates(filteredCandidates)
+  };
 }
 
 export function lorenV2Router(prisma) {
@@ -404,7 +536,7 @@ export function lorenV2Router(prisma) {
   });
 
   router.get('/campaigns', async (req, res) => {
-    const { campaigns, vacancies } = await loadCampaignDashboardData(prisma);
+    const { campaigns, vacancies, filters, unmatchedMetaCandidates } = await loadCampaignDashboardData(prisma, req.query);
     const message = normalizeString(req.query.message);
     const error = normalizeString(req.query.error);
     const body = `${message ? `<div class="alert alert-success">${escapeHtml(message)}</div>` : ''}${error ? `<div class="alert alert-error">${escapeHtml(error)}</div>` : ''}
@@ -412,20 +544,25 @@ export function lorenV2Router(prisma) {
         <h1>Campañas y estadísticas</h1>
         <p>La atribución no depende de que el candidato escriba códigos. Loren V2 cruza candidatos con campañas usando asociación directa y metadatos internos del mensaje entrante, especialmente datos de referencia enviados por WhatsApp cuando el chat nace desde pauta.</p>
       </section>
+      ${renderCampaignFilters({ filters, vacancies })}
+      ${renderCampaignFunnel(campaigns)}
       ${renderCampaignForm({ vacancies })}
-      ${renderCampaignTable(campaigns)}`;
+      ${renderCampaignTable(campaigns)}
+      ${renderUnmatchedMetaCandidates(unmatchedMetaCandidates)}`;
     res.send(renderLayout({ title: 'Campañas Loren V2', body }));
   });
 
-  router.get('/campaigns.json', async (_req, res) => {
-    const { campaigns } = await loadCampaignDashboardData(prisma);
+  router.get('/campaigns.json', async (req, res) => {
+    const { campaigns, filters, unmatchedMetaCandidates } = await loadCampaignDashboardData(prisma, req.query);
     res.json({
       ok: true,
+      filters,
+      unmatchedMetaCandidates: unmatchedMetaCandidates.length,
       campaigns: campaigns.map((campaign) => ({
         id: campaign.id,
         code: campaign.code,
         name: campaign.name,
-        sourceType: campaign.sourceType,
+        sourceType: CAMPAIGN_SOURCE_TYPE,
         city: campaign.city,
         zone: campaign.zone,
         vacancy: campaign.vacancy,
@@ -437,10 +574,6 @@ export function lorenV2Router(prisma) {
   router.post('/campaigns', async (req, res) => {
     const code = normalizeCampaignCode(req.body.code);
     const name = normalizeString(req.body.name);
-    const sourceType = CAMPAIGN_SOURCE_OPTIONS.some((option) => option.value === req.body.sourceType)
-      ? req.body.sourceType
-      : 'META_ADS';
-
     if (!isValidCampaignCode(code)) {
       return res.redirect('/admin/v2/campaigns?error=' + encodeURIComponent('El ID o código interno debe tener entre 3 y 80 caracteres, usando letras, números, guion o guion bajo.'));
     }
@@ -452,7 +585,7 @@ export function lorenV2Router(prisma) {
       data: {
         code,
         name,
-        sourceType,
+        sourceType: CAMPAIGN_SOURCE_TYPE,
         vacancyId: normalizeString(req.body.vacancyId),
         city: normalizeString(req.body.city),
         zone: normalizeString(req.body.zone),
