@@ -19,6 +19,9 @@ const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
 // (fueron promovidos por el flujo del bot), pero NO pueden ser editados/eliminados desde aqui.
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT'];
 
+// Estados que equivalen a "desactivado" (INACTIVE es el valor legacy, DISABLED es el actual).
+const DISABLED_STATUSES = ['DISABLED', 'INACTIVE'];
+
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const workerCvUpload = multer({
   storage: multer.memoryStorage(),
@@ -56,17 +59,22 @@ function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((ro
 /**
  * buildDispatchEligibilityFilter — controla que auxiliares se muestran en /personal.
  *
- * Regla: el criterio de pertenencia al modulo es operationalStatus='CONTRATADO'.
- * Esto incluye MANUAL, EXCEL_IMPORT y CANDIDATE (bot) que hayan sido promovidos.
- * Los CANDIDATE con otro estado no fueron promovidos y no aparecen.
+ * Vista activos (default): operationalStatus='CONTRATADO', cualquier source.
+ *   Incluye MANUAL, EXCEL_IMPORT y CANDIDATE promovidos por el bot.
  *
- * Sin filtro de status -> muestra solo CONTRATADO (vista por defecto).
- * status=DISABLED -> muestra DISABLED (solo MANUAL/EXCEL_IMPORT pueden ser desactivados).
+ * Vista desactivados (status=DISABLED): operationalStatus IN ['DISABLED','INACTIVE']
+ *   restringido a source MANUAL o EXCEL_IMPORT (CANDIDATE nunca se desactiva desde aqui).
+ *   Se incluye INACTIVE por compatibilidad con registros desactivados antes del fix.
+ *
+ * Al reactivar un auxiliar con status INACTIVE via toggle, el sistema lo mueve a CONTRATADO
+ * (no a INACTIVE), por lo que con el tiempo todos migraran a DISABLED/CONTRATADO.
  */
 function buildDispatchEligibilityFilter(status) {
   if (status === 'DISABLED' || status === 'INACTIVE') {
-    // Desactivados: solo MANUAL/EXCEL_IMPORT porque CANDIDATE nunca pasa por toggle
-    return { source: { in: DISPATCH_OWNED_SOURCES }, operationalStatus: 'DISABLED' };
+    return {
+      source: { in: DISPATCH_OWNED_SOURCES },
+      operationalStatus: { in: DISABLED_STATUSES }
+    };
   }
   // Vista activos: CONTRATADO sin importar source (incluye bot promovido)
   return { operationalStatus: 'CONTRATADO' };
@@ -358,7 +366,7 @@ export function dispatchOpsExtrasRouter(prisma) {
           });
           if (activeExisting) { omitidos++; continue; }
           const disabledExisting = await prisma.dispatchWorker.findFirst({
-            where: { documentNumber: row.cedula, source: { in: DISPATCH_OWNED_SOURCES }, operationalStatus: 'DISABLED' },
+            where: { documentNumber: row.cedula, source: { in: DISPATCH_OWNED_SOURCES }, operationalStatus: { in: DISABLED_STATUSES } },
             select: { id: true }
           });
           if (disabledExisting) {
@@ -429,6 +437,7 @@ export function dispatchOpsExtrasRouter(prisma) {
    * Toggle activar/desactivar auxiliar.
    * Solo aplica a auxiliares MANUAL o EXCEL_IMPORT.
    * CANDIDATE=CONTRATADO aparece en la vista activos pero no tiene toggle.
+   * Al reactivar un auxiliar con INACTIVE (legacy) lo mueve a CONTRATADO.
    */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await prisma.dispatchWorker.findFirst({
