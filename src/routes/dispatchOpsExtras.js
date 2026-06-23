@@ -55,17 +55,16 @@ function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((ro
  * Estados de operationalStatus:
  *   CONTRATADO — activo y elegible para asignaciones (estado normal de trabajo)
  *   DISABLED   — desactivado manualmente desde el botón toggle. No aparece en asignaciones.
- *                Se puede reactivar volviendo a CONTRATADO.
- *   INACTIVE   — eliminado del flujo (botón eliminar / eliminar masivo). No se reactiva
- *                desde la UI; requiere reimportación o sincronización manual.
+ *                Se puede reactivar desde la pestaña "Desactivados".
+ *   INACTIVE   — eliminado del flujo (botón eliminar / eliminar masivo). Aparece en la misma
+ *                pestaña "Desactivados" para que pueda ser reactivado manualmente si se requiere.
  *
  * Sin filtro de status → muestra solo CONTRATADO (vista por defecto).
- * status=DISABLED → muestra solo los desactivados manualmente (toggle).
- * status=INACTIVE → muestra solo los eliminados del flujo.
+ * status=DISABLED → muestra DISABLED e INACTIVE (todos los no-activos, reactivables).
+ * status=INACTIVE → alias de DISABLED para compatibilidad; mismo resultado.
  */
 function buildDispatchEligibilityFilter(status) {
-  if (status === 'DISABLED') return { operationalStatus: 'DISABLED' };
-  if (status === 'INACTIVE') return { operationalStatus: 'INACTIVE' };
+  if (status === 'DISABLED' || status === 'INACTIVE') return { operationalStatus: { in: ['DISABLED', 'INACTIVE'] } };
   return { operationalStatus: 'CONTRATADO' };
 }
 
@@ -428,18 +427,14 @@ export function dispatchOpsExtrasRouter(prisma) {
   /**
    * Toggle activar/desactivar auxiliar.
    *
-   * FIX CRÍTICO: el toggle ahora usa findWorkerOr404 en lugar de findManualWorkerOr404.
-   * La versión anterior filtraba por source='MANUAL', por lo que auxiliares de Excel o Bot
-   * devolvían null y la ruta respondía con pantalla blanca "Auxiliar manual no encontrado".
-   * Ahora aplica a CUALQUIER auxiliar independientemente de su source.
+   * Comportamiento:
+   *   CONTRATADO → DISABLED   Al desactivar: redirige a ?status=DISABLED para que el operador
+   *                            vea inmediatamente al auxiliar en la lista de desactivados.
+   *   DISABLED / INACTIVE → CONTRATADO   Al reactivar: redirige a /personal (sin status) para
+   *                            confirmar que ya aparece en el panel activo.
    *
-   * Estados usados por el toggle:
-   *   CONTRATADO -> DISABLED  (desactivar: sale de asignaciones y del panel activo)
-   *   DISABLED   -> CONTRATADO (reactivar: vuelve a aparecer disponible)
-   *
-   * Se usa DISABLED en lugar de INACTIVE para distinguir "desactivado temporalmente"
-   * de "eliminado del flujo" (INACTIVE). El filtro status=DISABLED en /personal
-   * muestra solo los desactivados manuales; status=INACTIVE muestra los eliminados.
+   * El toggle acepta reactivar desde CUALQUIER estado inactivo (DISABLED o INACTIVE)
+   * para recuperar auxiliares que quedaron en estados intermedios por bugs anteriores.
    */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await findWorkerOr404(prisma, req.params.workerId);
@@ -447,10 +442,10 @@ export function dispatchOpsExtrasRouter(prisma) {
     const isCurrentlyActive = worker.operationalStatus === 'CONTRATADO';
     const nextStatus = isCurrentlyActive ? 'DISABLED' : 'CONTRATADO';
     await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: nextStatus } });
-    const message = nextStatus === 'CONTRATADO'
-      ? 'Auxiliar reactivado. Ya aparece disponible para asignaciones.'
-      : 'Auxiliar desactivado. No aparecerá en asignaciones ni en el panel de personal activo.';
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(message)}`);
+    if (nextStatus === 'CONTRATADO') {
+      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar reactivado. Ya aparece disponible para asignaciones.')}`);
+    }
+    return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent('Auxiliar desactivado. Aparece en la lista de desactivados. Puedes reactivarlo desde aquí.')}`);
   });
 
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
