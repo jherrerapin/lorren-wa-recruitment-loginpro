@@ -15,6 +15,11 @@ const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
 // Límite de días hacia atrás para cargar solicitudes en la vista de asignaciones
 const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
 
+// Fuentes que pertenecen al módulo de despacho manual.
+// Los workers con source='CANDIDATE' son creados automáticamente por el bot/sync
+// y NO deben aparecer en /personal hasta que un operador los promueva explícitamente.
+const DISPATCH_MANUAL_SOURCES = ['MANUAL', 'EXCEL_IMPORT'];
+
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const workerCvUpload = multer({
   storage: multer.memoryStorage(),
@@ -52,23 +57,25 @@ function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((ro
 /**
  * buildDispatchEligibilityFilter — controla qué auxiliares se muestran en /personal.
  *
- * Estados de operationalStatus:
+ * REGLA FUNDAMENTAL: solo se muestran workers con source IN ('MANUAL', 'EXCEL_IMPORT').
+ * Los workers con source='CANDIDATE' son creados por el bot/sync automáticamente y
+ * NO pertenecen a este módulo hasta que un operador los promueva.
+ *
+ * Estados de operationalStatus (solo aplica a MANUAL/EXCEL_IMPORT):
  *   CONTRATADO — activo y elegible para asignaciones (estado normal de trabajo)
  *   DISABLED   — desactivado manualmente desde el botón toggle. No aparece en asignaciones.
  *                Se puede reactivar desde la pestaña "Desactivados".
- *   INACTIVE   — eliminado del flujo (botón eliminar / eliminar masivo). Aparece en la misma
- *                pestaña "Desactivados" para que pueda ser reactivado manualmente si se requiere.
- *   ACTIVE     — estado huérfano: fue asignado por error en versiones anteriores (bug corregido).
- *                Se incluye en la vista de desactivados para que el operador pueda rescatarlo
- *                usando el botón toggle (reactivar → CONTRATADO).
  *
  * Sin filtro de status → muestra solo CONTRATADO (vista por defecto).
- * status=DISABLED → muestra DISABLED, INACTIVE y ACTIVE (todos los no-activos, reactivables).
- * status=INACTIVE → alias de DISABLED para compatibilidad; mismo resultado.
+ * status=DISABLED → muestra DISABLED (todos los desactivados, reactivables).
+ * status=INACTIVE → alias de DISABLED para compatibilidad.
  */
 function buildDispatchEligibilityFilter(status) {
-  if (status === 'DISABLED' || status === 'INACTIVE') return { operationalStatus: { in: ['DISABLED', 'INACTIVE', 'ACTIVE'] } };
-  return { operationalStatus: 'CONTRATADO' };
+  const sourceFilter = { source: { in: DISPATCH_MANUAL_SOURCES } };
+  if (status === 'DISABLED' || status === 'INACTIVE') {
+    return { ...sourceFilter, operationalStatus: 'DISABLED' };
+  }
+  return { ...sourceFilter, operationalStatus: 'CONTRATADO' };
 }
 
 function buildWorkerData(body = {}) {
@@ -80,7 +87,6 @@ function buildWorkerData(body = {}) {
     residenceCity: normalizeString(body.residenceCity),
     residenceLocality: normalizeString(body.residenceLocality),
     transportMode: normalizeTransportMode(body.transportMode),
-    // FIX: el fallback era 'ACTIVE' (estado huérfano). Ahora es 'CONTRATADO' (estado válido).
     operationalStatus: normalizeString(body.operationalStatus) || 'CONTRATADO',
     notes: normalizeString(body.notes)
   };
@@ -205,12 +211,10 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.get('/asignaciones', requireOps, async (req, res) => {
     const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const transportMode = normalizeString(req.query.transportMode); const locality = normalizeString(req.query.locality); const serviceRequestId = normalizeString(req.query.serviceRequestId);
     const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds(prisma, operationalCityId); const operationalCityFilter = buildOperationalCityFilter(compatibleOperationalCityIds);
-    const baseWorkerWhere = { operationalStatus: 'CONTRATADO', ...(q ? { OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] } : {}), ...operationalCityFilter };
+    const baseWorkerWhere = { operationalStatus: 'CONTRATADO', source: { in: DISPATCH_MANUAL_SOURCES }, ...(q ? { OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] } : {}), ...operationalCityFilter };
     const workerWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}), ...(locality ? { residenceLocality: locality } : {}) };
     const localityWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}) };
     const transportModeWhere = { ...baseWorkerWhere, ...(locality ? { residenceLocality: locality } : {}) };
-    // FIX: limitar solicitudes a los últimos ASSIGNMENT_REQUESTS_LOOKBACK_DAYS días
-    // para evitar cargar toda la tabla sin límite de fecha (causa principal de lentitud).
     const requestsLookbackDate = new Date();
     requestsLookbackDate.setDate(requestsLookbackDate.getDate() - ASSIGNMENT_REQUESTS_LOOKBACK_DAYS);
     const [workers, cities, transportModeRows, localityRows, serviceRequests, clients] = await Promise.all([
@@ -262,7 +266,8 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud creada.')}&created=${created.id}`);
   });
 
-  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => { const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }); return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`); });
+  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => { const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }); return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`);
+  });
 
   router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }); if (activeCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmación de los auxiliares.')); } const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (existing) { if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya está asignado a esta solicitud.')); await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } }); } else { await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } }); } await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmación.')); });
   router.post('/asignaciones/confirmar', requireOps, async (req, res) => {
@@ -356,17 +361,17 @@ export function dispatchOpsExtrasRouter(prisma) {
       for (const row of rows) {
         if (row.cedula) {
           const activeExisting = await prisma.dispatchWorker.findFirst({
-            where: { documentNumber: row.cedula, operationalStatus: { not: 'INACTIVE' } },
+            where: { documentNumber: row.cedula, source: { in: DISPATCH_MANUAL_SOURCES }, operationalStatus: 'CONTRATADO' },
             select: { id: true }
           });
           if (activeExisting) { omitidos++; continue; }
-          const inactiveExisting = await prisma.dispatchWorker.findFirst({
-            where: { documentNumber: row.cedula, operationalStatus: 'INACTIVE' },
+          const disabledExisting = await prisma.dispatchWorker.findFirst({
+            where: { documentNumber: row.cedula, source: { in: DISPATCH_MANUAL_SOURCES }, operationalStatus: 'DISABLED' },
             select: { id: true }
           });
-          if (inactiveExisting) {
+          if (disabledExisting) {
             await prisma.dispatchWorker.update({
-              where: { id: inactiveExisting.id },
+              where: { id: disabledExisting.id },
               data: { fullName: row.nombre, phone: row.telefono || null, residenceLocality: row.localidad || null, operationalStatus: 'CONTRATADO', source: 'EXCEL_IMPORT' }
             });
             reactivados++;
@@ -430,15 +435,14 @@ export function dispatchOpsExtrasRouter(prisma) {
 
   /**
    * Toggle activar/desactivar auxiliar.
-   *
-   * Comportamiento:
-   *   CONTRATADO → DISABLED   Al desactivar: redirige a ?status=DISABLED para que el operador
-   *                            vea inmediatamente al auxiliar en la lista de desactivados.
-   *   ANY otro estado → CONTRATADO   Al reactivar: acepta DISABLED, INACTIVE o ACTIVE (huérfano).
-   *                            Redirige a /personal (sin status) para confirmar que aparece activo.
+   * Solo aplica a auxiliares MANUAL o EXCEL_IMPORT.
+   *   CONTRATADO → DISABLED  (desactivar)
+   *   DISABLED   → CONTRATADO (reactivar)
    */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
-    const worker = await findWorkerOr404(prisma, req.params.workerId);
+    const worker = await prisma.dispatchWorker.findFirst({
+      where: { id: req.params.workerId, source: { in: DISPATCH_MANUAL_SOURCES } }
+    });
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
     const isCurrentlyActive = worker.operationalStatus === 'CONTRATADO';
     const nextStatus = isCurrentlyActive ? 'DISABLED' : 'CONTRATADO';
@@ -449,34 +453,57 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent('Auxiliar desactivado. Aparece en la lista de desactivados. Puedes reactivarlo desde aquí.')}`);
   });
 
+  /**
+   * Eliminar auxiliar — DELETE REAL en base de datos.
+   * Solo aplica a auxiliares MANUAL o EXCEL_IMPORT.
+   * Si tiene asignaciones activas, devuelve error 409 con mensaje claro.
+   */
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
-    const worker = await findWorkerOr404(prisma, req.params.workerId);
+    const worker = await prisma.dispatchWorker.findFirst({
+      where: { id: req.params.workerId, source: { in: DISPATCH_MANUAL_SOURCES } },
+      select: { id: true, fullName: true }
+    });
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
-    await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'INACTIVE' } });
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar eliminado del flujo activo.')}`);
+    const activeAssignmentCount = await prisma.dispatchAssignment.count({
+      where: { workerId: worker.id, status: { in: ACTIVE_ASSIGNMENT_STATUSES } }
+    });
+    if (activeAssignmentCount > 0) {
+      const backUrl = normalizeString(req.headers.referer) || '/admin/operaciones/personal?status=DISABLED';
+      return res.redirect(`${backUrl.includes('?') ? backUrl + '&' : backUrl + '?'}message=${encodeURIComponent(`No se puede eliminar: ${worker.fullName} tiene ${activeAssignmentCount} asignación${activeAssignmentCount !== 1 ? 'es' : ''} activa${activeAssignmentCount !== 1 ? 's' : ''}. Retírala primero.`)}`);
+    }
+    await prisma.dispatchWorker.delete({ where: { id: worker.id } });
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar eliminado permanentemente.')}`);
   });
 
+  /**
+   * Eliminación masiva — DELETE REAL en base de datos.
+   * Solo elimina auxiliares MANUAL o EXCEL_IMPORT sin asignaciones activas.
+   * Los que tienen asignaciones activas se omiten e informan en el mensaje.
+   */
   router.post('/personal/eliminar-bulk', requireOps, async (req, res) => {
     const idsRaw = normalizeString(req.body.ids);
     if (!idsRaw) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs para eliminar.')}`);
     const ids = idsRaw.split(',').map((id) => id.trim()).filter(Boolean);
     if (!ids.length) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs válidos.')}`);
-    const { count } = await prisma.dispatchWorker.updateMany({ where: { id: { in: ids } }, data: { operationalStatus: 'INACTIVE' } });
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`${count} auxiliar${count !== 1 ? 'es eliminados' : ' eliminado'} del flujo activo.`)}`);
-  });
-
-  /**
-   * GET /personal/rescatar-huerfanos  (solo DEV)
-   * Migración de emergencia: corrige todos los registros con operationalStatus='ACTIVE'
-   * (estado huérfano creado por el bug del fallback) moviéndolos a 'CONTRATADO'.
-   * Ejecutar una sola vez después del deploy de este fix.
-   */
-  router.get('/personal/rescatar-huerfanos', requireOps, requireDev, async (req, res) => {
-    const { count } = await prisma.dispatchWorker.updateMany({
-      where: { operationalStatus: 'ACTIVE' },
-      data: { operationalStatus: 'CONTRATADO' }
+    // Solo procesar los que pertenecen al módulo
+    const workers = await prisma.dispatchWorker.findMany({
+      where: { id: { in: ids }, source: { in: DISPATCH_MANUAL_SOURCES } },
+      select: { id: true, fullName: true }
     });
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Rescate completado: ${count} auxiliar${count !== 1 ? 'es con estado ACTIVE corregidos' : ' con estado ACTIVE corregido'} → CONTRATADO.`)}`);
+    let eliminados = 0;
+    let omitidos = 0;
+    for (const worker of workers) {
+      const activeCount = await prisma.dispatchAssignment.count({
+        where: { workerId: worker.id, status: { in: ACTIVE_ASSIGNMENT_STATUSES } }
+      });
+      if (activeCount > 0) { omitidos++; continue; }
+      await prisma.dispatchWorker.delete({ where: { id: worker.id } });
+      eliminados++;
+    }
+    const parts = [];
+    if (eliminados) parts.push(`${eliminados} auxiliar${eliminados !== 1 ? 'es eliminados' : ' eliminado'} permanentemente`);
+    if (omitidos) parts.push(`${omitidos} omitido${omitidos !== 1 ? 's' : ''} por tener asignaciones activas`);
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(parts.join('. ') || 'Sin cambios.')  }`);
   });
 
   router.post('/sync-contratados', requireOps, requireDev, async (req, res) => {
