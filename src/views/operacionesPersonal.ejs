@@ -135,9 +135,15 @@
         </div>
         <div class="field">
           <label for="status">Estado operativo</label>
+          <%
+            /* DISABLED = desactivados manualmente (toggle). Incluye INACTIVE para
+               rescatar auxiliares desactivados antes del fix que quedaron con INACTIVE.
+               El backend filtra por operationalStatus IN ['DISABLED','INACTIVE']
+               cuando recibe status=DISABLED. */
+          %>
           <select id="status" name="status">
             <option value="" <%= !filters.status ? 'selected' : '' %>>Activos (Contratados)</option>
-            <option value="INACTIVE" <%= filters.status === 'INACTIVE' ? 'selected' : '' %>>Inactivos / Desactivados</option>
+            <option value="DISABLED" <%= filters.status === 'DISABLED' ? 'selected' : '' %>>Desactivados</option>
           </select>
         </div>
         <button type="submit" class="btn btn-primary">Filtrar</button>
@@ -149,8 +155,8 @@
         <div>
           <h2>Listado de personal operativo</h2>
           <p>
-            <% if (filters.status === 'INACTIVE') { %>
-              Auxiliares desactivados. Usa el botón <strong>Reactivar</strong> para devolverlos al flujo de asignaciones.
+            <% if (filters.status === 'DISABLED') { %>
+              Auxiliares desactivados manualmente. Usa <strong>Reactivar</strong> para devolverlos al flujo de asignaciones.
             <% } else { %>
               Personas disponibles para asignación a operaciones.
             <% } %>
@@ -160,7 +166,7 @@
       <div class="bulk-bar" id="bulk-bar"><span id="bulk-count">0 seleccionados</span><button type="button" class="btn btn-danger" id="btn-bulk-delete">🗑 Eliminar seleccionados</button><button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button></div>
       <% if (!workers.length) { %>
         <div class="empty">
-          <% if (filters.status === 'INACTIVE') { %>
+          <% if (filters.status === 'DISABLED') { %>
             <strong>No hay auxiliares desactivados.</strong>Todos los auxiliares están activos en el flujo de despacho.
           <% } else { %>
             <strong>No hay personal contratado disponible.</strong>Solo se muestran auxiliares con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.
@@ -182,7 +188,7 @@
                   <td><% if (w.cities.length) { %><% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %><% } else { %><span class="muted">Sin ciudades habilitadas</span><% } %></td>
                   <td><% if (w.vacancies.length) { %><% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %> — <%= entry.vacancy.city || 'Sin ciudad' %></span><% }) %><% } else { %><span class="muted">Sin perfiles habilitados</span><% } %></td>
                   <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
-                  <td><span class="pill <%= isActive ? 'pill-green' : 'pill-gray' %>"><%= isActive ? 'Activo' : 'Inactivo' %></span></td>
+                  <td><span class="pill <%= isActive ? 'pill-green' : 'pill-gray' %>"><%= isActive ? 'Activo' : 'Desactivado' %></span></td>
                   <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><% if (w.source === 'MANUAL') { %><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><% } %><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn <%= isActive ? 'btn-danger-outline' : 'btn-success' %>" type="submit"><%= isActive ? 'Desactivar' : 'Reactivar' %></button></form><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button></div></td>
                 </tr>
               <% }) %>
@@ -193,7 +199,7 @@
     </section>
   </main>
 
-  <div class="modal-overlay" id="modal-single"><div class="modal"><h3>Eliminar auxiliar</h3><p id="modal-single-msg">¿Estás seguro de que deseas eliminar a este auxiliar? Esta acción lo marcará como inactivo.</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-single-cancel">Cancelar</button><form method="post" id="modal-single-form"><button type="submit" class="btn btn-danger">Sí, eliminar</button></form></div></div></div>
+  <div class="modal-overlay" id="modal-single"><div class="modal"><h3>Eliminar auxiliar</h3><p id="modal-single-msg">¿Estás seguro de que deseas eliminar a este auxiliar? Esta acción lo quitará definitivamente del flujo.</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-single-cancel">Cancelar</button><form method="post" id="modal-single-form"><button type="submit" class="btn btn-danger">Sí, eliminar</button></form></div></div></div>
   <div class="modal-overlay" id="modal-bulk"><div class="modal"><h3>Eliminar seleccionados</h3><p id="modal-bulk-msg">¿Confirmas la eliminación de los auxiliares seleccionados?</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-bulk-cancel">Cancelar</button><form method="post" action="/admin/operaciones/personal/eliminar-bulk" id="modal-bulk-form"><input type="hidden" name="ids" id="bulk-ids-input" value="" /><button type="submit" class="btn btn-danger">Sí, eliminar todos</button></form></div></div></div>
 
   <script>
@@ -254,10 +260,10 @@
     document.querySelectorAll('.row-check').forEach((cb) => { cb.addEventListener('change', () => { highlightRows(); refreshBulkBar(); }); });
     document.getElementById('btn-bulk-cancel')?.addEventListener('click', () => { document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = false; }); if (checkAll) { checkAll.checked = false; checkAll.indeterminate = false; } highlightRows(); refreshBulkBar(); });
     const modalSingle = document.getElementById('modal-single'); const modalSingleMsg = document.getElementById('modal-single-msg'); const modalSingleForm = document.getElementById('modal-single-form');
-    document.querySelectorAll('.btn-single-delete').forEach((btn) => { btn.addEventListener('click', () => { const id = btn.dataset.id; const name = btn.dataset.name; modalSingleMsg.textContent = `¿Eliminar a "${name}"? Quedará marcado como inactivo.`; modalSingleForm.action = `/admin/operaciones/personal/${id}/eliminar`; modalSingle.classList.add('open'); }); });
+    document.querySelectorAll('.btn-single-delete').forEach((btn) => { btn.addEventListener('click', () => { const id = btn.dataset.id; const name = btn.dataset.name; modalSingleMsg.textContent = `¿Eliminar a "${name}" definitivamente del flujo? Esta acción no se puede deshacer desde la UI.`; modalSingleForm.action = `/admin/operaciones/personal/${id}/eliminar`; modalSingle.classList.add('open'); }); });
     document.getElementById('modal-single-cancel')?.addEventListener('click', () => modalSingle.classList.remove('open')); modalSingle?.addEventListener('click', (e) => { if (e.target === modalSingle) modalSingle.classList.remove('open'); });
     const modalBulk = document.getElementById('modal-bulk'); const modalBulkMsg = document.getElementById('modal-bulk-msg');
-    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => { const checked = getChecked(); if (!checked.length) return; bulkIdsInput.value = checked.map((cb) => cb.value).join(','); modalBulkMsg.textContent = `¿Confirmas eliminar ${checked.length} auxiliar${checked.length > 1 ? 'es' : ''}? Quedarán marcados como inactivos.`; modalBulk.classList.add('open'); });
+    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => { const checked = getChecked(); if (!checked.length) return; bulkIdsInput.value = checked.map((cb) => cb.value).join(','); modalBulkMsg.textContent = `¿Confirmas eliminar ${checked.length} auxiliar${checked.length > 1 ? 'es' : ''} definitivamente del flujo?`; modalBulk.classList.add('open'); });
     document.getElementById('modal-bulk-cancel')?.addEventListener('click', () => modalBulk.classList.remove('open')); modalBulk?.addEventListener('click', (e) => { if (e.target === modalBulk) modalBulk.classList.remove('open'); });
   </script>
 </body>
