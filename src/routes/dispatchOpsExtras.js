@@ -15,12 +15,11 @@ const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
 const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
 
 // Fuentes que pertenecen al modulo de despacho manual (para toggle/eliminar).
-// Los workers con source='CANDIDATE' solo se muestran si tienen operationalStatus='CONTRATADO'
-// (fueron promovidos por el flujo del bot), pero NO pueden ser editados/eliminados desde aqui.
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT'];
 
-// Estados que equivalen a "desactivado" (INACTIVE es el valor legacy, DISABLED es el actual).
-const DISABLED_STATUSES = ['DISABLED', 'INACTIVE'];
+// TEMPORAL: ELIMINADO incluido para rescatar a Juan Jose Garcia.
+// Revertir a ['DISABLED', 'INACTIVE'] despues de reactivarlo.
+const DISABLED_STATUSES = ['DISABLED', 'INACTIVE', 'ELIMINADO'];
 
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const workerCvUpload = multer({
@@ -60,14 +59,11 @@ function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((ro
  * buildDispatchEligibilityFilter — controla que auxiliares se muestran en /personal.
  *
  * Vista activos (default): operationalStatus='CONTRATADO', cualquier source.
- *   Incluye MANUAL, EXCEL_IMPORT y CANDIDATE promovidos por el bot.
+ * Vista desactivados (status=DISABLED): operationalStatus IN DISABLED_STATUSES
+ *   restringido a source MANUAL o EXCEL_IMPORT.
  *
- * Vista desactivados (status=DISABLED): operationalStatus IN ['DISABLED','INACTIVE']
- *   restringido a source MANUAL o EXCEL_IMPORT (CANDIDATE nunca se desactiva desde aqui).
- *   Se incluye INACTIVE por compatibilidad con registros desactivados antes del fix.
- *
- * Al reactivar un auxiliar con status INACTIVE via toggle, el sistema lo mueve a CONTRATADO
- * (no a INACTIVE), por lo que con el tiempo todos migraran a DISABLED/CONTRATADO.
+ * NOTA TEMPORAL: DISABLED_STATUSES incluye 'ELIMINADO' para rescatar a Juan Jose Garcia.
+ * Revertir despues de que sea reactivado.
  */
 function buildDispatchEligibilityFilter(status) {
   if (status === 'DISABLED' || status === 'INACTIVE') {
@@ -76,7 +72,6 @@ function buildDispatchEligibilityFilter(status) {
       operationalStatus: { in: DISABLED_STATUSES }
     };
   }
-  // Vista activos: CONTRATADO sin importar source (incluye bot promovido)
   return { operationalStatus: 'CONTRATADO' };
 }
 
@@ -436,8 +431,7 @@ export function dispatchOpsExtrasRouter(prisma) {
   /**
    * Toggle activar/desactivar auxiliar.
    * Solo aplica a auxiliares MANUAL o EXCEL_IMPORT.
-   * CANDIDATE=CONTRATADO aparece en la vista activos pero no tiene toggle.
-   * Al reactivar un auxiliar con INACTIVE (legacy) lo mueve a CONTRATADO.
+   * Al reactivar cualquier status en DISABLED_STATUSES lo mueve a CONTRATADO.
    */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await prisma.dispatchWorker.findFirst({
@@ -453,11 +447,6 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent('Auxiliar desactivado. Aparece en la lista de desactivados. Puedes reactivarlo desde aqui.')}`);
   });
 
-  /**
-   * Eliminar auxiliar — DELETE REAL en base de datos.
-   * Solo aplica a auxiliares MANUAL o EXCEL_IMPORT.
-   * Si tiene asignaciones activas, devuelve error con mensaje claro.
-   */
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
     const worker = await prisma.dispatchWorker.findFirst({
       where: { id: req.params.workerId, source: { in: DISPATCH_OWNED_SOURCES } },
@@ -476,10 +465,6 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar eliminado permanentemente.')}`);
   });
 
-  /**
-   * Eliminacion masiva — DELETE REAL en base de datos.
-   * Solo elimina MANUAL o EXCEL_IMPORT sin asignaciones activas.
-   */
   router.post('/personal/eliminar-bulk', requireOps, async (req, res) => {
     const idsRaw = normalizeString(req.body.ids);
     if (!idsRaw) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs para eliminar.')}`);
