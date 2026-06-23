@@ -1616,7 +1616,15 @@ export function adminRouter(prisma) {
       role: req.userRole,
       pageTitle: 'Operaciones / Despacho',
       subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.',
-      activeSection: 'dashboard'
+      activeSection: 'dashboard',
+      selectedDate: todayCO(),
+      metrics: {
+        totalRequests: 0,
+        pendingRequests: 0,
+        completedRequests: 0,
+        openIncidents: 0
+      },
+      canAccessDispatch: Boolean(req.canAccessDispatch)
     });
   });
 
