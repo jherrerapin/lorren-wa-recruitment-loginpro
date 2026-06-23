@@ -14,11 +14,11 @@ const ALLOWED_CV_MIME_TYPES = new Set(['application/pdf', 'application/msword', 
 const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
 const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
 
-// Fuentes que pertenecen al modulo de despacho manual (para toggle/eliminar).
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT'];
 
-// TEMPORAL: ELIMINADO incluido para rescatar a Juan Jose Garcia.
-// Revertir a ['DISABLED', 'INACTIVE'] despues de reactivarlo.
+// TEMPORAL: lista amplia de estados desactivados para rescatar a Juan Jose Garcia.
+// Incluye ELIMINADO y quita restriccion de source.
+// Revertir a ['DISABLED', 'INACTIVE'] con source filter despues de reactivarlo.
 const DISABLED_STATUSES = ['DISABLED', 'INACTIVE', 'ELIMINADO'];
 
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -56,21 +56,16 @@ function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compati
 function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((row) => normalizeString(row[fieldName])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')); }
 
 /**
- * buildDispatchEligibilityFilter — controla que auxiliares se muestran en /personal.
+ * buildDispatchEligibilityFilter
  *
- * Vista activos (default): operationalStatus='CONTRATADO', cualquier source.
- * Vista desactivados (status=DISABLED): operationalStatus IN DISABLED_STATUSES
- *   restringido a source MANUAL o EXCEL_IMPORT.
- *
- * NOTA TEMPORAL: DISABLED_STATUSES incluye 'ELIMINADO' para rescatar a Juan Jose Garcia.
- * Revertir despues de que sea reactivado.
+ * TEMPORAL: vista desactivados sin filtro de source — busca cualquier auxiliar
+ * con operationalStatus IN DISABLED_STATUSES sin importar source.
+ * Revertir despues de rescatar a Juan Jose Garcia.
  */
 function buildDispatchEligibilityFilter(status) {
   if (status === 'DISABLED' || status === 'INACTIVE') {
-    return {
-      source: { in: DISPATCH_OWNED_SOURCES },
-      operationalStatus: { in: DISABLED_STATUSES }
-    };
+    // TEMPORAL: sin restriccion de source para capturar cualquier valor legacy
+    return { operationalStatus: { in: DISABLED_STATUSES } };
   }
   return { operationalStatus: 'CONTRATADO' };
 }
@@ -429,9 +424,9 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
 
   /**
-   * Toggle activar/desactivar auxiliar.
-   * Solo aplica a auxiliares MANUAL o EXCEL_IMPORT.
-   * Al reactivar cualquier status en DISABLED_STATUSES lo mueve a CONTRATADO.
+   * Toggle activar/desactivar.
+   * TEMPORAL: acepta cualquier status en DISABLED_STATUSES como "inactivo"
+   * para poder reactivar a Juan Jose Garcia desde ELIMINADO.
    */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await prisma.dispatchWorker.findFirst({
