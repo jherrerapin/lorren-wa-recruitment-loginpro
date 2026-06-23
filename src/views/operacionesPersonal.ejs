@@ -25,6 +25,8 @@
     .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
     .btn-primary:hover { background: var(--teal-hover); }
     .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
+    .btn-success { background: var(--green); border-color: var(--green); color: #fff; }
+    .btn-success:hover { background: #14532d; }
     .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
     .btn-danger:hover { background: var(--red-hover); }
     .btn-danger-outline { border-color: var(--red); color: var(--red); background: var(--surface); }
@@ -56,6 +58,7 @@
     .check-col { width: 40px; text-align: center !important; padding: 10px 8px !important; }
     input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--teal); cursor: pointer; }
     tr.selected-row { background: #f0fdfa; }
+    tr.row-inactive { opacity: .65; background: #fafafa; }
     .muted { color: var(--muted); }
     .worker-name { color: var(--navy); font-weight: 800; }
     .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 800; margin: 2px 3px 2px 0; }
@@ -64,6 +67,7 @@
     .pill-amber { color: var(--amber); background: var(--amber-light); }
     .pill-purple { color: var(--purple); background: var(--purple-light); }
     .pill-red { color: var(--red); background: var(--red-light); }
+    .pill-gray { color: var(--muted); background: #f3f4f6; }
     .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
     .empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 6px; }
@@ -129,23 +133,47 @@
             <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" data-city-name="<%= vacancy.city || '' %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %> — <%= vacancy.city || 'Sin ciudad' %></option><% }) %>
           </select>
         </div>
+        <div class="field">
+          <label for="status">Estado operativo</label>
+          <select id="status" name="status">
+            <option value="" <%= !filters.status ? 'selected' : '' %>>Activos (Contratados)</option>
+            <option value="INACTIVE" <%= filters.status === 'INACTIVE' ? 'selected' : '' %>>Inactivos / Desactivados</option>
+          </select>
+        </div>
         <button type="submit" class="btn btn-primary">Filtrar</button>
       </form>
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>Listado de personal operativo</h2><p>Personas disponibles para asignación a operaciones.</p></div></div>
+      <div class="panel-head">
+        <div>
+          <h2>Listado de personal operativo</h2>
+          <p>
+            <% if (filters.status === 'INACTIVE') { %>
+              Auxiliares desactivados. Usa el botón <strong>Reactivar</strong> para devolverlos al flujo de asignaciones.
+            <% } else { %>
+              Personas disponibles para asignación a operaciones.
+            <% } %>
+          </p>
+        </div>
+      </div>
       <div class="bulk-bar" id="bulk-bar"><span id="bulk-count">0 seleccionados</span><button type="button" class="btn btn-danger" id="btn-bulk-delete">🗑 Eliminar seleccionados</button><button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button></div>
       <% if (!workers.length) { %>
-        <div class="empty"><strong>No hay personal contratado disponible.</strong>Solo se muestran auxiliares con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.</div>
+        <div class="empty">
+          <% if (filters.status === 'INACTIVE') { %>
+            <strong>No hay auxiliares desactivados.</strong>Todos los auxiliares están activos en el flujo de despacho.
+          <% } else { %>
+            <strong>No hay personal contratado disponible.</strong>Solo se muestran auxiliares con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.
+          <% } %>
+        </div>
       <% } else { %>
         <div class="table-wrap">
           <table id="workers-table">
-            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes / perfiles</th><th>Origen</th><th>Acciones</th></tr></thead>
+            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes / perfiles</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               <% workers.forEach((w) => { %>
-                <% const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; const isActive = w.operationalStatus === 'ACTIVE' || w.operationalStatus === 'CONTRATADO'; %>
-                <tr data-id="<%= w.id %>">
+                <% const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; const isActive = w.operationalStatus === 'CONTRATADO'; %>
+                <tr data-id="<%= w.id %>" class="<%= !isActive ? 'row-inactive' : '' %>">
                   <td class="check-col"><input type="checkbox" class="row-check" value="<%= w.id %>" /></td>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
                   <td><%= w.phone || '-' %></td>
@@ -154,7 +182,8 @@
                   <td><% if (w.cities.length) { %><% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %><% } else { %><span class="muted">Sin ciudades habilitadas</span><% } %></td>
                   <td><% if (w.vacancies.length) { %><% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %> — <%= entry.vacancy.city || 'Sin ciudad' %></span><% }) %><% } else { %><span class="muted">Sin perfiles habilitados</span><% } %></td>
                   <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
-                  <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn btn-secondary" type="submit"><%= isActive ? 'Desactivar' : 'Reactivar' %></button></form><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button></div></td>
+                  <td><span class="pill <%= isActive ? 'pill-green' : 'pill-gray' %>"><%= isActive ? 'Activo' : 'Inactivo' %></span></td>
+                  <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><% if (w.source === 'MANUAL') { %><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><% } %><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn <%= isActive ? 'btn-danger-outline' : 'btn-success' %>" type="submit"><%= isActive ? 'Desactivar' : 'Reactivar' %></button></form><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button></div></td>
                 </tr>
               <% }) %>
             </tbody>
