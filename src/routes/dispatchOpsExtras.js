@@ -12,6 +12,8 @@ const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const MAX_CV_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_CV_MIME_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
 const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
+// Límite de días hacia atrás para cargar solicitudes en la vista de asignaciones
+const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
 
 const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const workerCvUpload = multer({
@@ -46,7 +48,23 @@ function buildUtcDayRangeFromDateValue(value) { const start = new Date(value); s
 function serviceRequestServiceData(service) { return { serviceId: service?.id || null, serviceName: service?.name || null }; }
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((row) => normalizeString(row[fieldName])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')); }
-function buildDispatchEligibilityFilter() { return { operationalStatus: 'CONTRATADO' }; }
+
+/**
+ * FIX: buildDispatchEligibilityFilter ahora acepta el parámetro status
+ * para poder filtrar por estado desde la vista de personal.
+ *
+ * Los auxiliares activos/disponibles para asignación son los que tienen
+ * operationalStatus = 'CONTRATADO'. Un auxiliar desactivado tiene 'INACTIVE'.
+ * Al reactivar un auxiliar se vuelve a poner en 'CONTRATADO' para que aparezca
+ * en asignaciones.
+ */
+function buildDispatchEligibilityFilter(status) {
+  // Si se pide explícitamente ver inactivos, mostrar solo INACTIVE
+  if (status === 'INACTIVE') return { operationalStatus: 'INACTIVE' };
+  // Si no hay filtro de estado, mostrar solo los contratados (activos para despacho)
+  return { operationalStatus: 'CONTRATADO' };
+}
+
 function buildWorkerData(body = {}) {
   return {
     fullName: normalizeString(body.fullName),
@@ -182,12 +200,20 @@ export function dispatchOpsExtrasRouter(prisma) {
     const workerWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}), ...(locality ? { residenceLocality: locality } : {}) };
     const localityWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}) };
     const transportModeWhere = { ...baseWorkerWhere, ...(locality ? { residenceLocality: locality } : {}) };
+    // FIX: limitar solicitudes a los últimos ASSIGNMENT_REQUESTS_LOOKBACK_DAYS días
+    // para evitar cargar toda la tabla sin límite de fecha (causa principal de lentitud).
+    const requestsLookbackDate = new Date();
+    requestsLookbackDate.setDate(requestsLookbackDate.getDate() - ASSIGNMENT_REQUESTS_LOOKBACK_DAYS);
     const [workers, cities, transportModeRows, localityRows, serviceRequests, clients] = await Promise.all([
       prisma.dispatchWorker.findMany({ where: workerWhere, include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } }),
       loadDispatchCities(prisma),
       prisma.dispatchWorker.findMany({ where: transportModeWhere, select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }),
       prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }),
-      prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }),
+      prisma.dispatchServiceRequest.findMany({
+        where: { serviceDate: { gte: requestsLookbackDate } },
+        include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } },
+        orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }]
+      }),
       loadActiveClientsForServiceRequestForm(prisma)
     ]);
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
@@ -259,10 +285,12 @@ export function dispatchOpsExtrasRouter(prisma) {
     const operationalCityId = normalizeString(req.query.operationalCityId);
     const vacancyId = normalizeString(req.query.vacancyId);
     const status = normalizeString(req.query.status);
+    // FIX: pasar status al filtro para que se aplique correctamente
+    const eligibilityFilter = buildDispatchEligibilityFilter(status);
     const [workers, cities, vacancies] = await Promise.all([
       prisma.dispatchWorker.findMany({
         where: {
-          ...buildDispatchEligibilityFilter(status),
+          ...eligibilityFilter,
           ...(operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {}),
           ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {})
         },
@@ -391,12 +419,30 @@ export function dispatchOpsExtrasRouter(prisma) {
       return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: 'No fue posible actualizar el auxiliar. Revisa los datos e intenta nuevamente.' });
     }
   });
+
+  /**
+   * FIX: Toggle activar/desactivar auxiliar.
+   *
+   * Problema original: el toggle usaba ACTIVE ↔ INACTIVE, pero el resto del sistema
+   * (asignaciones, filtros de personal, elegibilidad para despacho) filtra por
+   * operationalStatus = 'CONTRATADO'. Un auxiliar reactivado a 'ACTIVE' nunca volvía
+   * a aparecer en la lista de asignaciones ni en el panel de personal.
+   *
+   * Corrección: el toggle ahora usa CONTRATADO ↔ INACTIVE, que es el par correcto
+   * para que un auxiliar sea elegible para despacho al reactivarse.
+   */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await findManualWorkerOr404(prisma, req.params.workerId);
     if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
-    const nextStatus = worker.operationalStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    // Si está activo para despacho (CONTRATADO), pasa a INACTIVE.
+    // Si está INACTIVE (o cualquier otro estado no activo), vuelve a CONTRATADO.
+    const isCurrentlyActive = worker.operationalStatus === 'CONTRATADO';
+    const nextStatus = isCurrentlyActive ? 'INACTIVE' : 'CONTRATADO';
     await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: nextStatus } });
-    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(nextStatus === 'ACTIVE' ? 'Auxiliar manual reactivado.' : 'Auxiliar manual desactivado.')}`);
+    const message = nextStatus === 'CONTRATADO'
+      ? 'Auxiliar reactivado. Ya aparece disponible para asignaciones.'
+      : 'Auxiliar desactivado. No aparecerá en asignaciones ni en el panel de personal activo.';
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(message)}`);
   });
 
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
