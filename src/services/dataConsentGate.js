@@ -5,8 +5,8 @@ export const DATA_CONSENT_VERSION = 'loren-v2-2026-06-v1';
 
 export const DATA_CONSENT_TEXT = 'Para continuar con tu postulación necesito solicitar y tratar algunos datos personales y documentos relacionados con el proceso de selección. Autorizo de manera libre, previa, expresa e informada el tratamiento de mis datos personales y documentos aportados dentro del proceso de reclutamiento y selección de LoginPro / Loren. Esto incluye contacto por WhatsApp u otros canales digitales, registro de mis datos, análisis de hoja de vida, validación de información suministrada y conservación de la trazabilidad del proceso. Entiendo que puedo solicitar información, actualización, rectificación o revocatoria de esta autorización.';
 
-const CONSENT_PROMPT = `${DATA_CONSENT_TEXT}\n\nSi deseas continuar con la postulación, responde: Acepto.\nSi no autorizas el tratamiento de datos, responde: No autorizo.`;
-const CONSENT_ACCEPTED_REPLY = 'Gracias. Tu autorización quedó registrada. Ahora sí puedo continuar con tu postulación. Por favor compárteme tus datos para el registro.';
+const CONSENT_PROMPT = `Antes de avanzar con tu registro para esta vacante, necesito tu autorización para tratar tus datos personales, hoja de vida y documentos enviados por este medio con fines de reclutamiento, validación de información y contacto laboral.\n\n${DATA_CONSENT_TEXT}\n\nSi estás de acuerdo, responde: Acepto. Si prefieres no autorizar, responde: No autorizo.`;
+const CONSENT_ACCEPTED_REPLY = 'Gracias. Tu autorización quedó registrada. Continuemos con tu postulación.';
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribir: Acepto.';
 
 function normalize(value = '') {
@@ -33,9 +33,10 @@ function isConsentAlreadyAccepted(candidate = {}) {
 }
 
 function shouldAllowInformationalFlow(candidate = {}, message = {}) {
-  if (message.type !== 'text') return false;
   if (candidate?.dataConsentStatus === 'REVOKED') return false;
-  return [ConversationStep.MENU, ConversationStep.GREETING_SENT].includes(candidate?.currentStep);
+  if (message.type !== 'text') return false;
+  if (!candidate?.vacancyId) return true;
+  return candidate?.currentStep === ConversationStep.MENU;
 }
 
 async function saveInboundConsentGateMessage(prisma, candidateId, message, body, type) {

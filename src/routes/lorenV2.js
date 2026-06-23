@@ -1,12 +1,8 @@
 import express from 'express';
 import { canSeeLorenV2, requireLorenV2 } from '../services/lorenV2Gate.js';
 
-const CAMPAIGN_SOURCE_OPTIONS = [
-  { value: 'META_ADS', label: 'Meta / Facebook Ads' },
-  { value: 'REFERRED', label: 'Referido / recomendado' },
-  { value: 'MANUAL', label: 'Registro manual' },
-  { value: 'OTHER', label: 'Otro' }
-];
+const CAMPAIGN_SOURCE_TYPE = 'META_ADS';
+const CAMPAIGN_SOURCE_LABEL = 'Meta / Facebook Ads';
 
 function escapeHtml(value = '') {
   return String(value)
@@ -244,9 +240,6 @@ function renderLayout({ title, body }) {
 }
 
 function renderCampaignForm({ vacancies = [] }) {
-  const sourceOptions = CAMPAIGN_SOURCE_OPTIONS
-    .map((option) => `<option value="${option.value}">${escapeHtml(option.label)}</option>`)
-    .join('');
   const vacancyOptions = vacancies
     .map((vacancy) => `<option value="${escapeHtml(vacancy.id)}">${escapeHtml(vacancy.title)} — ${escapeHtml(vacancy.city)}</option>`)
     .join('');
@@ -261,9 +254,6 @@ function renderCampaignForm({ vacancies = [] }) {
         </label>
         <label>Nombre
           <input name="name" placeholder="Auxiliar Bogotá - pauta junio" required maxlength="120">
-        </label>
-        <label>Fuente
-          <select name="sourceType">${sourceOptions}</select>
         </label>
         <label>Vacante asociada
           <select name="vacancyId">
@@ -296,7 +286,7 @@ function renderCampaignTable(campaigns = []) {
     return `<tr>
       <td><strong>${escapeHtml(campaign.name)}</strong><br><span class="badge">${escapeHtml(campaign.code)}</span><br><span class="muted">${escapeHtml(campaign.city || 'Sin ciudad')} ${campaign.zone ? '· ' + escapeHtml(campaign.zone) : ''}</span></td>
       <td>${escapeHtml(campaign.vacancy?.title || 'Sin vacante')}</td>
-      <td>${escapeHtml(campaign.sourceType)}<br><span class="muted">${metric.inferredAttributions} inferidos por metadatos</span></td>
+      <td>${escapeHtml(CAMPAIGN_SOURCE_LABEL)}<br><span class="muted">${metric.inferredAttributions} inferidos por metadatos Meta</span></td>
       <td><strong>${metric.conversationsStarted}</strong><br><span class="muted">conversaciones</span></td>
       <td><strong>${metric.dataCompleted}</strong><br><span class="muted">${conversionRate(metric.dataCompleted, metric.conversationsStarted)} de conversaciones</span></td>
       <td><strong>${metric.cvReceived}</strong><br><span class="muted">HV recibidas</span></td>
@@ -317,7 +307,7 @@ function renderCampaignTable(campaigns = []) {
           <tr>
             <th>Campaña</th>
             <th>Vacante</th>
-            <th>Fuente</th>
+            <th>Origen de pauta</th>
             <th>Conversaciones</th>
             <th>Datos completos</th>
             <th>HV</th>
@@ -425,7 +415,7 @@ export function lorenV2Router(prisma) {
         id: campaign.id,
         code: campaign.code,
         name: campaign.name,
-        sourceType: campaign.sourceType,
+        sourceType: CAMPAIGN_SOURCE_TYPE,
         city: campaign.city,
         zone: campaign.zone,
         vacancy: campaign.vacancy,
@@ -437,10 +427,6 @@ export function lorenV2Router(prisma) {
   router.post('/campaigns', async (req, res) => {
     const code = normalizeCampaignCode(req.body.code);
     const name = normalizeString(req.body.name);
-    const sourceType = CAMPAIGN_SOURCE_OPTIONS.some((option) => option.value === req.body.sourceType)
-      ? req.body.sourceType
-      : 'META_ADS';
-
     if (!isValidCampaignCode(code)) {
       return res.redirect('/admin/v2/campaigns?error=' + encodeURIComponent('El ID o código interno debe tener entre 3 y 80 caracteres, usando letras, números, guion o guion bajo.'));
     }
@@ -452,7 +438,7 @@ export function lorenV2Router(prisma) {
       data: {
         code,
         name,
-        sourceType,
+        sourceType: CAMPAIGN_SOURCE_TYPE,
         vacancyId: normalizeString(req.body.vacancyId),
         city: normalizeString(req.body.city),
         zone: normalizeString(req.body.zone),
