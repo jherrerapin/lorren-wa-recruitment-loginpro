@@ -141,6 +141,22 @@ export function canScheduleReminder(candidate) {
   return canScheduleReminderPolicy(candidate);
 }
 
+/**
+ * Guard: retorna true si existe al menos una vacante activa con agendamiento habilitado.
+ * Evita que el dispatcher de entrevistas corra en vano cuando no hay vacantes con scheduling.
+ */
+async function hasVacanciesWithActiveScheduling(prisma) {
+  if (typeof prisma?.vacancy?.findFirst !== 'function') return false;
+  const vacancy = await prisma.vacancy.findFirst({
+    where: {
+      isActive: true,
+      schedulingEnabled: true
+    },
+    select: { id: true }
+  });
+  return vacancy !== null;
+}
+
 async function claimCandidateProcessReminder(prisma, candidateId, now) {
   if (typeof prisma?.candidate?.updateMany !== 'function') return false;
   const result = await prisma.candidate.updateMany({
@@ -455,14 +471,6 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
   if (typeof prisma?.interviewBooking?.findMany !== 'function') return;
 
   const { reminderTarget, windowStart, windowEnd } = getInterviewReminderWindow(now);
-  console.log('[REMINDER_TRACE]', JSON.stringify({
-    event: 'interview_reminder_check_started',
-    now: now.toISOString(),
-    reminderTarget: reminderTarget.toISOString(),
-    windowStart: windowStart.toISOString(),
-    windowEnd: windowEnd.toISOString(),
-    candidateId
-  }));
 
   const candidateBookings = await prisma.interviewBooking.findMany({
     where: {
@@ -488,9 +496,12 @@ async function runInterviewBookingReminderDispatcher(prisma, now = new Date(), c
     }
   });
 
+  if (!candidateBookings.length) return;
+
   console.log('[REMINDER_TRACE]', JSON.stringify({
     event: 'interview_reminder_due_bookings_found',
     now: now.toISOString(),
+    reminderTarget: reminderTarget.toISOString(),
     windowStart: windowStart.toISOString(),
     windowEnd: windowEnd.toISOString(),
     count: candidateBookings.length
@@ -678,6 +689,11 @@ export async function runCandidateProcessReminderDispatcher(prisma, { now = new 
 }
 
 export async function runInterviewReminderDispatcher(prisma, { now = new Date(), candidateId = null } = {}) {
+  // Guard: solo corre si hay al menos una vacante activa con agendamiento habilitado.
+  // Cuando no hay vacantes con schedulingEnabled, el dispatcher sale sin hacer queries
+  // adicionales ni emitir logs, eliminando el ruido en Railway durante periodos inactivos.
+  if (!candidateId && !await hasVacanciesWithActiveScheduling(prisma)) return;
+
   await runInterviewBookingReminderDispatcher(prisma, now, candidateId);
   await runInterviewNoResponseDispatcher(prisma, now, candidateId);
   await runInterviewKeepaliveDispatcher(prisma, now, candidateId);
