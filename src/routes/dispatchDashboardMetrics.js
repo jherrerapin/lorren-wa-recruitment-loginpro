@@ -221,9 +221,6 @@ function styleStatusCell(cell, status) {
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 }
 
-/**
- * buildOperationsDashboardMetrics
- */
 async function buildOperationsDashboardMetrics(prisma, selectedDate) {
   const { start, end } = buildUtcDayRange(selectedDate);
   const whereForDate = { serviceDate: { gte: start, lt: end } };
@@ -302,12 +299,11 @@ async function guardEditableServiceRequest(prisma, req, res, next) {
   return next();
 }
 
-export function createDispatchDashboardMetricsRouter(prisma) {
+export function dispatchDashboardMetricsRouter(prisma) {
   const router = express.Router();
 
   router.use(requireOps);
 
-  // Dashboard principal de operaciones
   router.get('/dispatch/operations', async (req, res) => {
     try {
       const selectedDate = normalizeDateParam(req.query.date);
@@ -354,7 +350,6 @@ export function createDispatchDashboardMetricsRouter(prisma) {
     }
   });
 
-  // Vista de resumen / detalle por tipo
   router.get('/dispatch/operations/summary', async (req, res) => {
     try {
       const selectedDate = normalizeDateParam(req.query.date);
@@ -386,7 +381,6 @@ export function createDispatchDashboardMetricsRouter(prisma) {
     }
   });
 
-  // Exportar Excel del día
   router.get('/dispatch/operations/export', async (req, res) => {
     try {
       const selectedDate = normalizeDateParam(req.query.date);
@@ -413,7 +407,6 @@ export function createDispatchDashboardMetricsRouter(prisma) {
       workbook.creator = 'Lórren Dispatch';
       workbook.created = new Date();
 
-      // Hoja 1: Resumen general
       const summarySheet = workbook.addWorksheet('Resumen');
       const summaryColumns = [
         { header: 'Cliente', key: 'client', width: 28 },
@@ -451,7 +444,6 @@ export function createDispatchDashboardMetricsRouter(prisma) {
         row.height = 22;
       });
 
-      // Hoja 2: Detalle por cliente
       const groupedByClient = groupByClient(serviceRequests);
       for (const [clientName, clientRequests] of groupedByClient) {
         const sheetName = cleanSheetName(clientName, 'Cliente');
@@ -471,12 +463,11 @@ export function createDispatchDashboardMetricsRouter(prisma) {
         styleHeader(clientHeaderRow);
 
         clientRequests.forEach((request, index) => {
-          const workersText = buildAssignedWorkersCell(request);
           const row = clientSheet.addRow({
             operation: request.operationPointName || '-',
             service: request.serviceName || request.service?.name || '-',
             horario: buildHorario(request),
-            workers: workersText,
+            workers: buildAssignedWorkersCell(request),
             coverage: buildCoverageText(request),
             status: statusLabel(request.status)
           });
@@ -486,7 +477,6 @@ export function createDispatchDashboardMetricsRouter(prisma) {
         });
       }
 
-      // Hoja 3: Consolidado auxiliares
       const workersSheet = workbook.addWorksheet('Auxiliares');
       const workersColumns = [
         { header: 'Auxiliar', key: 'name', width: 30 },
@@ -533,7 +523,6 @@ export function createDispatchDashboardMetricsRouter(prisma) {
     }
   });
 
-  // Exportar resumen por cliente (para envío)
   router.get('/dispatch/operations/export-client/:clientName', async (req, res) => {
     try {
       const selectedDate = normalizeDateParam(req.query.date);
@@ -597,7 +586,6 @@ export function createDispatchDashboardMetricsRouter(prisma) {
     }
   });
 
-  // Consolidado de auxiliares para envío por WhatsApp
   router.get('/dispatch/operations/workers-summary', async (req, res) => {
     try {
       const selectedDate = normalizeDateParam(req.query.date);
