@@ -141,45 +141,46 @@ model Operation {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   vacancies Vacancy[]
+
   @@unique([name, cityId])
 }
 
 model Vacancy {
-  id                    String                @id @default(cuid())
-  title                 String
-  key                   String                @unique
-  role                  String
-  roleDescription       String?
-  city                  String
-  operationAddress      String
-  interviewAddress      String?
-  requirements          String
-  conditions            String
-  requiredDocuments     String?
-  minAge                Int?
-  maxAge                Int?
-  experienceRequired    ExperienceRequirement @default(INDIFFERENT)
-  experienceTimeText    String?
-  minExperienceMonths   Int?
-  maxExperienceMonths   Int?
-  imageData             Bytes?
-  imageMimeType         String?
-  zoneFilterEnabled     Boolean               @default(false)
-  zoneContext           String?
-  schedulingEnabled     Boolean               @default(false)
-  acceptingApplications Boolean               @default(true)
+  id                     String                @id @default(cuid())
+  title                  String
+  key                    String                @unique
+  role                   String
+  roleDescription        String?
+  city                   String
+  operationAddress       String
+  interviewAddress       String?
+  requirements           String
+  conditions             String
+  requiredDocuments      String?
+  minAge                 Int?
+  maxAge                 Int?
+  experienceRequired     ExperienceRequirement @default(INDIFFERENT)
+  experienceTimeText     String?
+  minExperienceMonths    Int?
+  maxExperienceMonths    Int?
+  imageData              Bytes?
+  imageMimeType          String?
+  zoneFilterEnabled      Boolean               @default(false)
+  zoneContext            String?
+  schedulingEnabled      Boolean               @default(false)
+  acceptingApplications  Boolean               @default(true)
   dashboardReviewEnabled Boolean               @default(false)
-  isActive              Boolean               @default(true)
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
-  operationId           String?
-  operation             Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
-  candidates            Candidate[]
-  campaigns             Campaign[]
-  interviewSlots        InterviewSlot[]
-  interviewBookings     InterviewBooking[]
-  accessUsers           AppUser[]
-  dispatchWorkers       DispatchWorkerVacancy[]
+  isActive               Boolean               @default(true)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  operationId            String?
+  operation              Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  candidates             Candidate[]
+  campaigns              Campaign[]
+  interviewSlots         InterviewSlot[]
+  interviewBookings      InterviewBooking[]
+  accessUsers            AppUser[]
+  dispatchWorkers        DispatchWorkerVacancy[]
 }
 
 model Campaign {
@@ -206,17 +207,17 @@ model Campaign {
 }
 
 model InterviewSlot {
-  id            String             @id @default(cuid())
-  vacancyId     String
-  vacancy       Vacancy            @relation(fields: [vacancyId], references: [id])
-  dayOfWeek     Int?
-  specificDate  DateTime?
-  startTime     String
+  id              String             @id @default(cuid())
+  vacancyId       String
+  vacancy         Vacancy            @relation(fields: [vacancyId], references: [id])
+  dayOfWeek       Int?
+  specificDate    DateTime?
+  startTime       String
   maxCandidates   Int                @default(10)
   currentWeekOnly Boolean            @default(false)
   isActive        Boolean            @default(true)
-  createdAt     DateTime           @default(now())
-  bookings      InterviewBooking[]
+  createdAt       DateTime           @default(now())
+  bookings        InterviewBooking[]
 }
 
 model InterviewBooking {
@@ -248,7 +249,6 @@ model Candidate {
   campaignCodeRaw        String?
   referrerName           String?
   referrerPhone          String?
-  // Metadatos exactos de Meta Ads (del objeto referral de WhatsApp)
   metaCtwaClid           String?
   metaAdId               String?
   metaCampaignId         String?
@@ -359,7 +359,77 @@ model CandidateAdminEvent {
   toValue     String?
   note        String?
   createdAt   DateTime  @default(now())
+
   @@index([candidateId, createdAt])
+}
+
+model AttachmentAnalysis {
+  id                  String                   @id @default(cuid())
+  candidateId         String
+  candidate           Candidate                @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  originalName        String?
+  mimeType            String?
+  classification      AttachmentClassification @default(OTHER)
+  extractedText       String?
+  summary             String?
+  confidence          Float?
+  analysedAt          DateTime                 @default(now())
+  modelUsed           String?
+  rawResponse         Json?
+
+  @@index([candidateId])
+  @@index([classification])
+}
+
+model AppUser {
+  id          String          @id @default(cuid())
+  username    String          @unique
+  password    String
+  role        AppUserRole     @default(ADMIN)
+  accessScope UserAccessScope @default(ALL)
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  vacancies   Vacancy[]
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model BotKnowledge {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model DevAuditEvent {
+  id        String   @id @default(cuid())
+  username  String
+  action    String
+  target    String?
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([username, createdAt])
+  @@index([action])
+}
+
+model JobQueueItem {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json?
+  status      JobStatus @default(PENDING)
+  attempts    Int       @default(0)
+  lastError   String?
+  scheduledAt DateTime  @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([type])
 }
 
 model DispatchClient {
@@ -378,6 +448,7 @@ model DispatchClient {
   updatedAt         DateTime                 @updatedAt
   operationPoints   DispatchOperationPoint[]
   services          DispatchClientService[]
+
   @@index([name])
   @@index([cityName])
   @@index([isActive])
@@ -416,16 +487,16 @@ model DispatchOperationPoint {
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
   serviceRequests   DispatchServiceRequest[]
+
   @@index([clientId])
   @@index([cityName])
   @@index([isActive])
 }
 
 model DispatchWorker {
-  id                String                 @id @default(cuid())
-  candidateId       String?                @unique
-  candidate         Candidate?             @relation(fields: [candidateId], references: [id], onDelete: SetNull)
-
+  id                String                  @id @default(cuid())
+  candidateId       String?                 @unique
+  candidate         Candidate?              @relation(fields: [candidateId], references: [id], onDelete: SetNull)
   fullName          String
   phone             String?
   documentType      String?
@@ -436,14 +507,11 @@ model DispatchWorker {
   cvOriginalName    String?
   cvMimeType        String?
   cvData            Bytes?
-
-  source            String                 @default("CANDIDATE")
-  operationalStatus String                 @default("ACTIVE")
+  source            String                  @default("CANDIDATE")
+  operationalStatus String                  @default("ACTIVE")
   notes             String?
-
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
   cities            DispatchWorkerCity[]
   vacancies         DispatchWorkerVacancy[]
   assignments       DispatchAssignment[]
@@ -455,37 +523,62 @@ model DispatchWorker {
   @@index([operationalStatus])
 }
 
-model DispatchServiceRequest {
-  id                       String               @id @default(cuid())
-  clientName               String
-  operationPointName       String?
-  cityName                 String?
-  address                  String?
-  serviceDate              DateTime
-  startTime                String?
-  endTime                  String?
-  requiredWorkers          Int                  @default(1)
-  status                   String               @default("PENDING_ASSIGNMENT")
-  notes                    String?
-  createdByUsername        String?
-  operationPointId         String?
-  operationPoint           DispatchOperationPoint? @relation(fields: [operationPointId], references: [id], onDelete: SetNull)
-  serviceId                String?
-  service                  DispatchClientService?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  serviceName              String?
-  requestedByName          String?
-  requestedByPhone         String?
-  requestedByEmail         String?
-  completionEmailSentAt    DateTime?
-  completionEmailTo        String?
-  completionEmailProviderId String?
-  completionEmailLastError String?
-  source                   String               @default("INTERNAL")
-  createdAt                DateTime             @default(now())
-  updatedAt                DateTime             @updatedAt
+model DispatchWorkerCity {
+  id        String         @id @default(cuid())
+  workerId  String
+  worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  cityId    String
+  city      City           @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
 
-  assignments              DispatchAssignment[]
-  incidents                DispatchIncident[]
+  @@unique([workerId, cityId])
+  @@index([workerId])
+  @@index([cityId])
+}
+
+model DispatchWorkerVacancy {
+  id        String         @id @default(cuid())
+  workerId  String
+  worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  vacancyId String
+  vacancy   Vacancy        @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+
+  @@unique([workerId, vacancyId])
+  @@index([workerId])
+  @@index([vacancyId])
+}
+
+model DispatchServiceRequest {
+  id                        String                  @id @default(cuid())
+  clientName                String
+  operationPointName        String?
+  cityName                  String?
+  address                   String?
+  serviceDate               DateTime
+  startTime                 String?
+  endTime                   String?
+  requiredWorkers           Int                     @default(1)
+  status                    String                  @default("PENDING_ASSIGNMENT")
+  notes                     String?
+  createdByUsername         String?
+  operationPointId          String?
+  operationPoint            DispatchOperationPoint? @relation(fields: [operationPointId], references: [id], onDelete: SetNull)
+  serviceId                 String?
+  service                   DispatchClientService?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  serviceName               String?
+  requestedByName           String?
+  requestedByPhone          String?
+  requestedByEmail          String?
+  completionEmailSentAt     DateTime?
+  completionEmailTo         String?
+  completionEmailProviderId String?
+  completionEmailLastError  String?
+  source                    String                  @default("INTERNAL")
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  assignments               DispatchAssignment[]
+  incidents                 DispatchIncident[]
 
   @@index([serviceDate])
   @@index([status])
@@ -500,16 +593,13 @@ model DispatchAssignment {
   id                String                 @id @default(cuid())
   serviceRequestId  String
   serviceRequest    DispatchServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-
   workerId          String
   worker            DispatchWorker         @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
   status            String                 @default("ASSIGNED")
   notes             String?
   createdByUsername String?
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
-
   incidents         DispatchIncident[]
 
   @@unique([serviceRequestId, workerId])
@@ -519,24 +609,26 @@ model DispatchAssignment {
 }
 
 model DispatchIncident {
-  id                String                  @id @default(cuid())
-  serviceRequestId  String
-  serviceRequest    DispatchServiceRequest  @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  assignmentId      String?
-  assignment        DispatchAssignment?      @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
-  workerId          String?
-  worker            DispatchWorker?          @relation(fields: [workerId], references: [id], onDelete: SetNull)
-  type              String
-  status            String                  @default("OPEN")
-  description       String
-  reportedBy        String?
-  resolutionNote    String?
-  createdByUsername String?
+  id                 String                 @id @default(cuid())
+  serviceRequestId   String
+  serviceRequest     DispatchServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  assignmentId       String?
+  assignment         DispatchAssignment?    @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  workerId           String?
+  worker             DispatchWorker?        @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  type               String
+  status             String                 @default("OPEN")
+  description        String
+  reportedBy         String?
+  resolutionNote     String?
+  createdByUsername  String?
   resolvedByUsername String?
-  resolvedAt        DateTime?
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
+  resolvedAt         DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   @@index([serviceRequestId])
   @@index([assignmentId])
-  @@index([w
+  @@index([workerId])
+  @@index([status])
+}
