@@ -222,7 +222,6 @@ function buildCampaignMetric(campaign = {}, schedulingEnabled = false) {
   const pendingCv = candidates.filter((c) => hasCompleteCoreData(c) && !hasCv(c)).length;
   const humanReview = candidates.filter(requiresHumanReview).length;
 
-  // Quality Score: ponderación de conversiones clave (0–100)
   const qsCV = cvReceived / (conversationsStarted || 1);
   const qsApt = apt / (cvReceived || 1);
   const qsHired = hired / (conversationsStarted || 1);
@@ -245,7 +244,6 @@ function buildCampaignMetric(campaign = {}, schedulingEnabled = false) {
     inferredAttributions: campaign.inferredAttributions || 0,
     directAttributions: campaign.directAttributions || 0,
     qualityScore,
-    // Costos por etapa (solo si hay presupuesto)
     cplConversation: budget ? calcCPL(budget, conversationsStarted) : null,
     cplDataCompleted: budget ? calcCPL(budget, dataCompleted) : null,
     cplCvReceived: budget ? calcCPL(budget, cvReceived) : null,
@@ -424,18 +422,12 @@ function renderLayout({ title, body }) {
     .page-header { margin-bottom: 20px; }
     .page-header h1 { font-size: 20px; font-weight: 700; color: #1e2d3d; }
     .page-header p { color: #64748b; font-size: 13px; margin-top: 2px; }
-
-    /* Cards */
     .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
     .card-title { font-size: 13px; font-weight: 700; color: #1e2d3d; margin-bottom: 14px; text-transform: uppercase; letter-spacing: .04em; }
-
-    /* Grid */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
     .grid-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
     .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
-
-    /* KPI */
     .kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; }
     .kpi-value { font-size: 28px; font-weight: 800; color: #1e2d3d; line-height: 1; }
     .kpi-label { font-size: 11px; color: #64748b; margin-top: 4px; font-weight: 500; }
@@ -448,8 +440,6 @@ function renderLayout({ title, body }) {
     .kpi.danger .kpi-value { color: #dc2626; }
     .kpi.purple { border-color: #a78bfa44; background: #f5f3ff; }
     .kpi.purple .kpi-value { color: #7c3aed; }
-
-    /* Funnel */
     .funnel { display: flex; align-items: stretch; gap: 0; margin: 4px 0; overflow-x: auto; }
     .funnel-step { flex: 1; min-width: 90px; text-align: center; padding: 12px 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-right: none; position: relative; }
     .funnel-step:first-child { border-radius: 8px 0 0 8px; }
@@ -461,14 +451,10 @@ function renderLayout({ title, body }) {
     .funnel-step-rate { font-size: 10px; color: #0d7a6b; font-weight: 700; margin-top: 3px; }
     .funnel-step-cpl { font-size: 9px; color: #7c3aed; font-weight: 600; margin-top: 2px; }
     .funnel-arrow { align-self: center; color: #cbd5e1; font-size: 16px; padding: 0 2px; flex-shrink: 0; }
-
-    /* Quality Score */
     .qs-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 10px; font-weight: 800; font-size: 12px; }
     .qs-high { background: #dcfce7; color: #15803d; }
     .qs-mid { background: #fef3c7; color: #92400e; }
     .qs-low { background: #fee2e2; color: #dc2626; }
-
-    /* Forms */
     label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: #475569; }
     input, select, textarea { border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; color: #1a1d23; background: #fff; width: 100%; transition: border-color .15s; }
     input:focus, select:focus, textarea:focus { outline: none; border-color: #0d7a6b; box-shadow: 0 0 0 3px #0d7a6b18; }
@@ -481,16 +467,12 @@ function renderLayout({ title, body }) {
     .btn-danger { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; }
     .btn-danger:hover { background: #fecaca; }
     .btn-sm { padding: 5px 10px; font-size: 12px; }
-
-    /* Table */
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { text-align: left; color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; background: #f8fafc; padding: 9px 10px; border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
     td { padding: 10px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
     tr:hover td { background: #f8fafc; }
     tr:last-child td { border-bottom: 0; }
-
-    /* Badges */
     .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 11px; line-height: 1.4; }
     .badge-green { background: #dcfce7; color: #15803d; }
     .badge-blue { background: #dbeafe; color: #1d4ed8; }
@@ -499,8 +481,6 @@ function renderLayout({ title, body }) {
     .badge-amber { background: #fef3c7; color: #92400e; }
     .badge-teal { background: #e6f4f1; color: #0d7a6b; }
     .badge-purple { background: #f5f3ff; color: #7c3aed; }
-
-    /* Misc */
     .muted { color: #64748b; font-size: 12px; }
     .text-sm { font-size: 12px; }
     .text-xs { font-size: 11px; }
@@ -517,7 +497,6 @@ function renderLayout({ title, body }) {
     .divider { border: none; border-top: 1px solid #e2e8f0; margin: 20px 0; }
     .empty-state { text-align: center; padding: 40px 20px; color: #94a3b8; }
     .empty-state p { font-size: 13px; margin-top: 6px; }
-
     @media (max-width: 768px) {
       .grid-2, .grid-3 { grid-template-columns: 1fr; }
       .funnel { flex-wrap: wrap; }
@@ -541,26 +520,18 @@ function renderLayout({ title, body }) {
 </html>`;
 }
 
-// ─── Render: Filtros ───────────────────────────────────────────────────────────
-
 function renderFilters({ filters = {}, cities = [], vacancies = [] }) {
   const cityOptions = cities
     .map((c) => `<option value="${escapeHtml(c.name)}" ${filters.city === c.name ? 'selected' : ''}>${escapeHtml(c.name)}</option>`)
     .join('');
-
   const vacancyOptions = vacancies
     .map((v) => `<option value="${escapeHtml(v.id)}" ${filters.vacancyId === v.id ? 'selected' : ''}>${escapeHtml(v.title)} — ${escapeHtml(v.city)}</option>`)
     .join('');
-
   return `<section class="card">
     <div class="card-title">Filtros de análisis</div>
     <form method="get" action="/admin/v2/campaigns" class="grid-form">
-      <label>Desde
-        <input type="date" name="from" value="${escapeHtml(filters.from || '')}">
-      </label>
-      <label>Hasta
-        <input type="date" name="to" value="${escapeHtml(filters.to || '')}">
-      </label>
+      <label>Desde <input type="date" name="from" value="${escapeHtml(filters.from || '')}"></label>
+      <label>Hasta <input type="date" name="to" value="${escapeHtml(filters.to || '')}"></label>
       <label>Ciudad
         <select name="city">
           <option value="">Todas las ciudades</option>
@@ -578,8 +549,6 @@ function renderFilters({ filters = {}, cities = [], vacancies = [] }) {
   </section>`;
 }
 
-// ─── Render: Embudo agregado ───────────────────────────────────────────────────
-
 function renderFunnel(campaigns = []) {
   const metric = buildAggregateCampaignMetric(campaigns);
   const hasScheduling = campaigns.some((c) => c.vacancy?.schedulingEnabled);
@@ -594,7 +563,6 @@ function renderFunnel(campaigns = []) {
     { label: 'HV recibida', value: metric.cvReceived || 0, rate: conversionRate(metric.cvReceived, total), cpl: hasBudget ? calcCPL(totalBudget, metric.cvReceived) : null, cls: '' },
     { label: 'Aptos', value: metric.apt || 0, rate: conversionRate(metric.apt, metric.cvReceived || 1), cpl: hasBudget ? calcCPL(totalBudget, metric.apt) : null, cls: 'highlight' }
   ];
-
   if (hasScheduling) {
     steps.push(
       { label: 'Agendados', value: metric.scheduled || 0, rate: conversionRate(metric.scheduled, metric.apt), cpl: hasBudget ? calcCPL(totalBudget, metric.scheduled) : null, cls: '' },
@@ -602,7 +570,6 @@ function renderFunnel(campaigns = []) {
       { label: 'Asistieron', value: metric.attended || 0, rate: conversionRate(metric.attended, metric.confirmed), cpl: hasBudget ? calcCPL(totalBudget, metric.attended) : null, cls: '' }
     );
   }
-
   steps.push({ label: 'Contratados', value: metric.hired || 0, rate: conversionRate(metric.hired, total), cpl: hasBudget ? calcCPL(totalBudget, metric.hired) : null, cls: 'highlight' });
 
   const stepsHtml = steps.map((s, i) => {
@@ -628,28 +595,11 @@ function renderFunnel(campaigns = []) {
     <hr class="divider">
     <div class="section-label">Inversión Meta Ads — presupuesto registrado</div>
     <div class="grid-auto">
-      <div class="kpi purple">
-        <div class="kpi-value">${formatCOP(totalBudget)}</div>
-        <div class="kpi-label">Presupuesto total</div>
-        <div class="kpi-rate">${campaigns.filter(c => c.budgetCOP).length} campañas con budget</div>
-      </div>
-      <div class="kpi purple">
-        <div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.conversationsStarted))}</div>
-        <div class="kpi-label">Costo por conversación</div>
-      </div>
-      <div class="kpi purple">
-        <div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.cvReceived))}</div>
-        <div class="kpi-label">Costo por HV</div>
-      </div>
-      <div class="kpi purple">
-        <div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.apt))}</div>
-        <div class="kpi-label">Costo por candidato apto</div>
-      </div>
-      <div class="kpi accent">
-        <div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.hired))}</div>
-        <div class="kpi-label">Costo por contratado</div>
-        <div class="kpi-rate">Métrica clave de ROI</div>
-      </div>
+      <div class="kpi purple"><div class="kpi-value">${formatCOP(totalBudget)}</div><div class="kpi-label">Presupuesto total</div><div class="kpi-rate">${campaigns.filter(c => c.budgetCOP).length} campañas con budget</div></div>
+      <div class="kpi purple"><div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.conversationsStarted))}</div><div class="kpi-label">Costo por conversación</div></div>
+      <div class="kpi purple"><div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.cvReceived))}</div><div class="kpi-label">Costo por HV</div></div>
+      <div class="kpi purple"><div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.apt))}</div><div class="kpi-label">Costo por candidato apto</div></div>
+      <div class="kpi accent"><div class="kpi-value">${formatCOP(calcCPL(totalBudget, metric.hired))}</div><div class="kpi-label">Costo por contratado</div><div class="kpi-rate">Métrica clave de ROI</div></div>
     </div>`;
   }
 
@@ -658,38 +608,15 @@ function renderFunnel(campaigns = []) {
     <div class="funnel">${stepsHtml}</div>
     <hr class="divider">
     <div class="grid-auto" style="margin-top: 0;">
-      <div class="kpi warn">
-        <div class="kpi-value">${abandoned}</div>
-        <div class="kpi-label">Abandonaron sin datos</div>
-        <div class="kpi-rate">${conversionRate(abandoned, total)} de conversaciones</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-value">${pendingCv}</div>
-        <div class="kpi-label">Pendientes de HV</div>
-        <div class="kpi-rate">Datos completos sin HV</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-value">${humanReview}</div>
-        <div class="kpi-label">Revisión manual</div>
-        <div class="kpi-rate">Duplicados, pausados, rechazados</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-value">${metric.rejected || 0}</div>
-        <div class="kpi-label">Rechazados</div>
-        <div class="kpi-rate">${conversionRate(metric.rejected, total)} de conversaciones</div>
-      </div>
-      ${hasScheduling ? `
-      <div class="kpi ${noShow > 0 ? 'warn' : ''}">
-        <div class="kpi-value">${noShow}</div>
-        <div class="kpi-label">No show (no asistieron)</div>
-        <div class="kpi-rate">${attendanceRate ? `${attendanceRate} asistencia efectiva` : '—'}</div>
-      </div>` : ''}
+      <div class="kpi warn"><div class="kpi-value">${abandoned}</div><div class="kpi-label">Abandonaron sin datos</div><div class="kpi-rate">${conversionRate(abandoned, total)} de conversaciones</div></div>
+      <div class="kpi"><div class="kpi-value">${pendingCv}</div><div class="kpi-label">Pendientes de HV</div><div class="kpi-rate">Datos completos sin HV</div></div>
+      <div class="kpi"><div class="kpi-value">${humanReview}</div><div class="kpi-label">Revisión manual</div><div class="kpi-rate">Duplicados, pausados, rechazados</div></div>
+      <div class="kpi"><div class="kpi-value">${metric.rejected || 0}</div><div class="kpi-label">Rechazados</div><div class="kpi-rate">${conversionRate(metric.rejected, total)} de conversaciones</div></div>
+      ${hasScheduling ? `<div class="kpi ${noShow > 0 ? 'warn' : ''}"><div class="kpi-value">${noShow}</div><div class="kpi-label">No show</div><div class="kpi-rate">${attendanceRate ? `${attendanceRate} asistencia efectiva` : '—'}</div></div>` : ''}
     </div>
     ${budgetSummary}
   </section>`;
 }
-
-// ─── Render: Tabla de campañas ─────────────────────────────────────────────────
 
 function renderQualityBadge(qs) {
   if (qs === null || qs === undefined) return '<span class="muted text-xs">—</span>';
@@ -702,10 +629,7 @@ function renderCampaignTable(campaigns = []) {
   if (!campaigns.length) {
     return `<section class="card">
       <div class="card-title">Campañas registradas</div>
-      <div class="empty-state">
-        <div style="font-size:32px">📭</div>
-        <p>Aún no hay campañas. Crea la primera usando el formulario de abajo.</p>
-      </div>
+      <div class="empty-state"><div style="font-size:32px">📭</div><p>Aún no hay campañas. Crea la primera usando el formulario de abajo.</p></div>
     </section>`;
   }
 
@@ -723,21 +647,17 @@ function renderCampaignTable(campaigns = []) {
       schedulingCells = `
         <td class="text-sm">${metric.scheduled || 0}<br><span class="muted">${conversionRate(metric.scheduled, metric.apt)} de aptos</span></td>
         <td class="text-sm">${metric.confirmed || 0}<br><span class="muted">confirmaron</span></td>
-        <td class="text-sm">
-          <strong>${metric.attended || 0}</strong><br>
-          <span class="muted">${metric.attendanceRate != null ? `${metric.attendanceRate}% asistencia` : '—'}</span>
-          ${noShowCount > 0 ? `<br><span style="color:#dc2626;font-size:10px">⚠ ${noShowCount} no show</span>` : ''}
-        </td>`;
+        <td class="text-sm"><strong>${metric.attended || 0}</strong><br><span class="muted">${metric.attendanceRate != null ? `${metric.attendanceRate}% asistencia` : '—'}</span>${noShowCount > 0 ? `<br><span style="color:#dc2626;font-size:10px">⚠ ${noShowCount} no show</span>` : ''}</td>`;
     } else {
       schedulingCells = `<td class="muted text-xs" colspan="3" style="text-align:center">Sin entrevistas</td>`;
     }
 
     const attrLabel = metric.directAttributions > 0
-      ? `<span class="badge badge-teal text-xs" title="Atribución directa FK">${metric.directAttributions} directo</span>`
+      ? `<span class="badge badge-teal text-xs">${metric.directAttributions} directo</span>`
       : metric.exactAttributions > 0
-        ? `<span class="badge badge-teal text-xs" title="Meta campaign_id exacto">${metric.exactAttributions} Meta ID</span>`
+        ? `<span class="badge badge-teal text-xs">${metric.exactAttributions} Meta ID</span>`
         : metric.inferredAttributions > 0
-          ? `<span class="badge badge-blue text-xs" title="Inferido por tokens">${metric.inferredAttributions} token</span>`
+          ? `<span class="badge badge-blue text-xs">${metric.inferredAttributions} token</span>`
           : '';
 
     const cplHired = campaign.budgetCOP && metric.hired
@@ -745,15 +665,8 @@ function renderCampaignTable(campaigns = []) {
       : '';
 
     return `<tr>
-      <td>
-        <a href="/admin/v2/campaigns/${escapeHtml(campaign.id)}" class="fw-700" style="color:#0d7a6b;text-decoration:none;">${escapeHtml(campaign.name)}</a><br>
-        <span class="badge badge-gray text-xs" style="margin-top:3px;font-family:monospace">${escapeHtml(campaign.code)}</span>
-        ${attrLabel ? `<br><span style="margin-top:2px;display:inline-block">${attrLabel}</span>` : ''}
-      </td>
-      <td>
-        ${campaign.vacancy ? escapeHtml(campaign.vacancy.title) : '<span class="muted">Sin vacante</span>'}<br>
-        <span class="muted">${escapeHtml(campaign.city || campaign.vacancy?.city || '—')}</span>
-      </td>
+      <td><a href="/admin/v2/campaigns/${escapeHtml(campaign.id)}" class="fw-700" style="color:#0d7a6b;text-decoration:none;">${escapeHtml(campaign.name)}</a><br><span class="badge badge-gray text-xs" style="margin-top:3px;font-family:monospace">${escapeHtml(campaign.code)}</span>${attrLabel ? `<br><span style="margin-top:2px;display:inline-block">${attrLabel}</span>` : ''}</td>
+      <td>${campaign.vacancy ? escapeHtml(campaign.vacancy.title) : '<span class="muted">Sin vacante</span>'}<br><span class="muted">${escapeHtml(campaign.city || campaign.vacancy?.city || '—')}</span></td>
       <td>${activeLabel}</td>
       <td>${renderQualityBadge(metric.qualityScore)}</td>
       <td class="fw-700">${total}<br><span class="muted text-xs">conversaciones</span></td>
@@ -762,162 +675,66 @@ function renderCampaignTable(campaigns = []) {
       <td class="text-sm"><strong>${metric.apt}</strong><br><span class="muted">${conversionRate(metric.apt, metric.cvReceived)} de HV</span></td>
       ${schedulingCells}
       <td class="text-sm"><strong style="color:#0d7a6b">${metric.hired}</strong>${cplHired}</td>
-      <td>
-        <a href="/admin/v2/campaigns/${escapeHtml(campaign.id)}" class="btn btn-secondary btn-sm">Ver →</a>
-      </td>
+      <td><a href="/admin/v2/campaigns/${escapeHtml(campaign.id)}" class="btn btn-secondary btn-sm">Ver →</a></td>
     </tr>`;
   }).join('');
 
   return `<section class="card">
     <div class="card-title">Campañas registradas (${campaigns.length})</div>
-    <div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">
-      <strong>Quality Score</strong>: puntaje 0–100 calculado en base a las tasas de conversión de HV, aptos y contratados. ≥60 = bueno · 35–59 = regular · &lt;35 = bajo rendimiento. Solo se calcula con ≥3 conversaciones.
-    </div>
+    <div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px"><strong>Quality Score</strong>: puntaje 0–100 calculado en base a las tasas de conversión de HV, aptos y contratados. ≥60 = bueno · 35–59 = regular · &lt;35 = bajo rendimiento. Solo se calcula con ≥3 conversaciones.</div>
     <div class="table-wrap">
       <table>
-        <thead>
-          <tr>
-            <th>Campaña</th>
-            <th>Vacante / Ciudad</th>
-            <th>Estado</th>
-            <th>Quality</th>
-            <th>Conversaciones</th>
-            <th>Datos completos</th>
-            <th>HV</th>
-            <th>Aptos</th>
-            <th>Agendados</th>
-            <th>Confirmados</th>
-            <th>Asistieron</th>
-            <th>Contratados</th>
-            <th></th>
-          </tr>
-        </thead>
+        <thead><tr><th>Campaña</th><th>Vacante / Ciudad</th><th>Estado</th><th>Quality</th><th>Conversaciones</th><th>Datos completos</th><th>HV</th><th>Aptos</th><th>Agendados</th><th>Confirmados</th><th>Asistieron</th><th>Contratados</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
   </section>`;
 }
 
-// ─── Render: Formulario de creación ───────────────────────────────────────────
-
 function renderCreateForm({ cities = [], vacancies = [], error = null, success = null }) {
-  // Ciudad solo como select con ciudades del bot — sin campo abierto
-  const cityOptions = cities
-    .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`)
-    .join('');
-
-  const vacancyOptions = vacancies
-    .map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.title)} — ${escapeHtml(v.city)}${v.schedulingEnabled ? ' ✓ entrevista' : ''}</option>`)
-    .join('');
-
-  const noCities = !cities.length
-    ? `<div class="alert alert-info" style="margin-top:8px;font-size:12px">No hay ciudades configuradas en el bot. Crea una ciudad con <strong>usedForRecruitment = true</strong> para que aparezca aquí.</div>`
-    : '';
+  const cityOptions = cities.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  const vacancyOptions = vacancies.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.title)} — ${escapeHtml(v.city)}${v.schedulingEnabled ? ' ✓ entrevista' : ''}</option>`).join('');
+  const noCities = !cities.length ? `<div class="alert alert-info" style="margin-top:8px;font-size:12px">No hay ciudades configuradas en el bot.</div>` : '';
 
   return `<section class="card">
     <div class="card-title">Nueva campaña</div>
-    <p class="muted mb-4">El código interno debe coincidir con el ID de campaña, nombre del anuncio o etiqueta de Meta Ads. Se usa para atribuir automáticamente los candidatos que lleguen de esa pauta. El presupuesto es opcional pero permite calcular CPL y costo por contratado.</p>
+    <p class="muted mb-4">El código interno debe coincidir con el ID de campaña, nombre del anuncio o etiqueta de Meta Ads.</p>
     ${error ? `<div class="alert alert-error">${escapeHtml(error)}</div>` : ''}
     ${success ? `<div class="alert alert-success">${escapeHtml(success)}</div>` : ''}
     <form method="post" action="/admin/v2/campaigns">
       <div class="grid-form">
         <label>Código interno de Meta Ads *
           <input name="code" placeholder="23856238000000000 o BOGOTA-JUN-2026" required maxlength="80" style="font-family:monospace">
-          <span class="muted text-xs">ID de campaña, ad_id o etiqueta — se normaliza automáticamente</span>
         </label>
-        <label>Nombre de la campaña *
-          <input name="name" placeholder="Auxiliares Bogotá — junio 2026" required maxlength="120">
-        </label>
-        <label>Ciudad
-          <select name="city">
-            <option value="">Sin ciudad específica</option>
-            ${cityOptions}
-          </select>
-          ${noCities}
-        </label>
-        <label>Vacante asociada
-          <select name="vacancyId">
-            <option value="">Sin vacante específica</option>
-            ${vacancyOptions}
-          </select>
-        </label>
-        <label>Presupuesto pauta (COP)
-          <input type="number" name="budgetCOP" placeholder="500000" min="0" step="1000">
-          <span class="muted text-xs">Opcional — habilita métricas de costo por lead y por contratado</span>
-        </label>
-        <label>Fecha inicio pauta
-          <input type="date" name="startsAt">
-        </label>
-        <label>Fecha fin pauta
-          <input type="date" name="endsAt">
-        </label>
+        <label>Nombre de la campaña * <input name="name" placeholder="Auxiliares Bogotá — junio 2026" required maxlength="120"></label>
+        <label>Ciudad <select name="city"><option value="">Sin ciudad específica</option>${cityOptions}</select>${noCities}</label>
+        <label>Vacante asociada <select name="vacancyId"><option value="">Sin vacante específica</option>${vacancyOptions}</select></label>
+        <label>Presupuesto pauta (COP) <input type="number" name="budgetCOP" placeholder="500000" min="0" step="1000"></label>
+        <label>Fecha inicio pauta <input type="date" name="startsAt"></label>
+        <label>Fecha fin pauta <input type="date" name="endsAt"></label>
       </div>
-      <label style="margin-top:12px;">Notas adicionales
-        <textarea name="notes" placeholder="Público objetivo, segmentación, nombres alternativos del anuncio en Meta..."></textarea>
-      </label>
-      <div style="margin-top:14px;">
-        <button type="submit" class="btn btn-primary">Crear campaña</button>
-      </div>
+      <label style="margin-top:12px;">Notas adicionales <textarea name="notes" placeholder="Público objetivo, segmentación..."></textarea></label>
+      <div style="margin-top:14px;"><button type="submit" class="btn btn-primary">Crear campaña</button></div>
     </form>
   </section>`;
 }
 
-// ─── Render: Candidatos sin match ──────────────────────────────────────────────
-
 function renderUnmatched(candidates = [], campaigns = []) {
   if (!candidates.length) {
-    return `<section class="card">
-      <div class="card-title">Candidatos Meta sin campaña asociada</div>
-      <div class="empty-state"><p>No hay candidatos Meta pendientes de asociación en el rango seleccionado. ✅</p></div>
-    </section>`;
+    return `<section class="card"><div class="card-title">Candidatos Meta sin campaña asociada</div><div class="empty-state"><p>No hay candidatos Meta pendientes de asociación. ✅</p></div></section>`;
   }
-
-  const campaignOptions = campaigns
-    .filter((c) => c.isActive)
-    .map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`)
-    .join('');
-
+  const campaignOptions = campaigns.filter((c) => c.isActive).map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`).join('');
   const rows = candidates.map((c) => {
-    const metaInfo = [
-      c.metaCampaignId ? `campaign_id: ${c.metaCampaignId}` : null,
-      c.metaAdId ? `ad_id: ${c.metaAdId}` : null,
-      c.metaCampaignName ? `"${c.metaCampaignName}"` : null,
-      c.campaignCodeRaw ? `raw: ${String(c.campaignCodeRaw).slice(0, 60)}` : null
-    ].filter(Boolean).join(' · ');
-
+    const metaInfo = [c.metaCampaignId ? `campaign_id: ${c.metaCampaignId}` : null, c.metaAdId ? `ad_id: ${c.metaAdId}` : null, c.metaCampaignName ? `"${c.metaCampaignName}"` : null, c.campaignCodeRaw ? `raw: ${String(c.campaignCodeRaw).slice(0, 60)}` : null].filter(Boolean).join(' · ');
     return `<tr>
-      <td>
-        <span class="fw-700">${escapeHtml(c.fullName || 'Sin nombre')}</span><br>
-        <span class="muted">${escapeHtml(c.phone || '')}</span>
-      </td>
+      <td><span class="fw-700">${escapeHtml(c.fullName || 'Sin nombre')}</span><br><span class="muted">${escapeHtml(c.phone || '')}</span></td>
       <td>${escapeHtml(c.vacancy?.title || 'Sin vacante')}</td>
       <td><span class="muted text-xs" style="font-family:monospace">${escapeHtml(metaInfo || '—')}</span></td>
-      <td>
-        <form method="post" action="/admin/v2/campaigns/associate" style="display:flex;gap:6px;align-items:center">
-          <input type="hidden" name="candidateId" value="${escapeHtml(c.id)}">
-          <select name="campaignId" style="min-width:160px;font-size:12px;padding:5px 8px">
-            <option value="">Seleccionar campaña…</option>
-            ${campaignOptions}
-          </select>
-          <button type="submit" class="btn btn-secondary btn-sm">Asociar</button>
-        </form>
-      </td>
+      <td><form method="post" action="/admin/v2/campaigns/associate" style="display:flex;gap:6px;align-items:center"><input type="hidden" name="candidateId" value="${escapeHtml(c.id)}"><select name="campaignId" style="min-width:160px;font-size:12px;padding:5px 8px"><option value="">Seleccionar campaña…</option>${campaignOptions}</select><button type="submit" class="btn btn-secondary btn-sm">Asociar</button></form></td>
     </tr>`;
   }).join('');
-
-  return `<section class="card">
-    <div class="card-title">Candidatos Meta sin campaña asociada (${candidates.length})</div>
-    <p class="muted mb-4">Estos candidatos llegaron con evidencia de pauta Meta pero no coinciden con ninguna campaña registrada. Asócialos manualmente o ajusta el código/notas de la campaña.</p>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Candidato</th><th>Vacante</th><th>Metadata Meta recibida</th><th>Asociar a campaña</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  </section>`;
+  return `<section class="card"><div class="card-title">Candidatos Meta sin campaña asociada (${candidates.length})</div><div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Vacante</th><th>Metadata Meta</th><th>Asociar</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
-
-// ─── Render: Detalle de campaña ────────────────────────────────────────────────
 
 function renderCampaignDetail({ campaign, candidates = [], cities = [], vacancies = [], error = null, success = null }) {
   const schedulingEnabled = Boolean(campaign.vacancy?.schedulingEnabled);
@@ -942,173 +759,72 @@ function renderCampaignDetail({ campaign, candidates = [], cities = [], vacancie
 
   const funnelHtml = statusSteps.map((s, i) => {
     const arrow = i < statusSteps.length - 1 ? '<span class="funnel-arrow">›</span>' : '';
-    return `<div class="funnel-step ${s.cls || ''}">
-      <div class="funnel-step-value">${s.value ?? 0}</div>
-      <div class="funnel-step-label">${escapeHtml(s.label)}</div>
-      ${s.rate ? `<div class="funnel-step-rate">${escapeHtml(s.rate)}</div>` : ''}
-      ${s.cpl ? `<div class="funnel-step-cpl">${formatCOP(s.cpl)}/lead</div>` : ''}
-    </div>${arrow}`;
+    return `<div class="funnel-step ${s.cls || ''}"><div class="funnel-step-value">${s.value ?? 0}</div><div class="funnel-step-label">${escapeHtml(s.label)}</div>${s.rate ? `<div class="funnel-step-rate">${escapeHtml(s.rate)}</div>` : ''}${s.cpl ? `<div class="funnel-step-cpl">${formatCOP(s.cpl)}/lead</div>` : ''}</div>${arrow}`;
   }).join('');
 
-  // KPIs secundarios
   const kpiRows = [
     { label: 'Abandonaron sin datos', value: metric.abandoned, cls: metric.abandoned > 0 ? 'warn' : '' },
     { label: 'Pendientes de HV', value: metric.pendingCv, cls: '' },
     { label: 'Revisión manual', value: metric.humanReview, cls: '' },
     { label: 'Rechazados', value: metric.rejected, cls: metric.rejected > 0 ? 'danger' : '' }
   ];
-  if (schedulingEnabled) {
-    kpiRows.push({
-      label: 'No show (confirmaron, no asistieron)',
-      value: metric.noShow || 0,
-      cls: (metric.noShow || 0) > 0 ? 'warn' : ''
-    });
-  }
+  if (schedulingEnabled) kpiRows.push({ label: 'No show', value: metric.noShow || 0, cls: (metric.noShow || 0) > 0 ? 'warn' : '' });
 
-  const kpisHtml = kpiRows.map((k) => `
-    <div class="kpi ${k.cls}">
-      <div class="kpi-value">${k.value}</div>
-      <div class="kpi-label">${escapeHtml(k.label)}</div>
-    </div>`).join('');
+  const kpisHtml = kpiRows.map((k) => `<div class="kpi ${k.cls}"><div class="kpi-value">${k.value}</div><div class="kpi-label">${escapeHtml(k.label)}</div></div>`).join('');
 
-  // Costos si hay budget
-  const budgetSection = hasBudget ? `
-    <section class="card">
-      <div class="card-title">Inversión y costos por etapa</div>
-      <div class="grid-auto">
-        <div class="kpi purple"><div class="kpi-value">${formatCOP(campaign.budgetCOP)}</div><div class="kpi-label">Presupuesto pauta</div></div>
-        <div class="kpi purple"><div class="kpi-value">${formatCOP(metric.cplConversation)}</div><div class="kpi-label">CPL conversación</div></div>
-        <div class="kpi purple"><div class="kpi-value">${formatCOP(metric.cplCvReceived)}</div><div class="kpi-label">Costo por HV</div></div>
-        <div class="kpi purple"><div class="kpi-value">${formatCOP(metric.cplApt)}</div><div class="kpi-label">Costo por apto</div></div>
-        ${schedulingEnabled ? `<div class="kpi purple"><div class="kpi-value">${formatCOP(metric.cplAttended)}</div><div class="kpi-label">Costo por asistencia</div></div>` : ''}
-        <div class="kpi accent"><div class="kpi-value">${formatCOP(metric.cplHired)}</div><div class="kpi-label">Costo por contratado</div><div class="kpi-rate">Métrica ROI clave</div></div>
-      </div>
-    </section>` : '';
+  const budgetSection = hasBudget ? `<section class="card"><div class="card-title">Inversión y costos por etapa</div><div class="grid-auto"><div class="kpi purple"><div class="kpi-value">${formatCOP(campaign.budgetCOP)}</div><div class="kpi-label">Presupuesto pauta</div></div><div class="kpi purple"><div class="kpi-value">${formatCOP(metric.cplConversation)}</div><div class="kpi-label">CPL conversación</div></div><div class="kpi purple"><div class="kpi-value">${formatCOP(metric.cplCvReceived)}</div><div class="kpi-label">Costo por HV</div></div><div class="kpi purple"><div class="kpi-value">${formatCOP(metric.cplApt)}</div><div class="kpi-label">Costo por apto</div></div><div class="kpi accent"><div class="kpi-value">${formatCOP(metric.cplHired)}</div><div class="kpi-label">Costo por contratado</div><div class="kpi-rate">Métrica ROI clave</div></div></div></section>` : '';
 
   function statusBadge(status) {
-    const map = {
-      NUEVO: 'badge-gray', REGISTRADO: 'badge-blue', VALIDANDO: 'badge-amber',
-      APROBADO: 'badge-green', RECHAZADO: 'badge-red', CONTACTADO: 'badge-blue',
-      CONTRATADO: 'badge-teal'
-    };
+    const map = { NUEVO: 'badge-gray', REGISTRADO: 'badge-blue', VALIDANDO: 'badge-amber', APROBADO: 'badge-green', RECHAZADO: 'badge-red', CONTACTADO: 'badge-blue', CONTRATADO: 'badge-teal' };
     return `<span class="badge ${map[status] || 'badge-gray'}">${escapeHtml(status)}</span>`;
   }
 
   const candidateRows = candidates.map((c) => {
     const attrMode = c.campaignId === campaign.id ? 'Directo' : c.metaCampaignId ? 'Meta ID' : 'Token';
-    const flags = [
-      hasCandidateData(c) ? '✓ Datos' : null,
-      hasCv(c) ? '✓ HV' : null,
-      schedulingEnabled && hasBooking(c) ? '✓ Cita' : null,
-      schedulingEnabled && hasAttendedBooking(c) ? '✓ Asistió' : null,
-      c.potentialDuplicate ? '⚠ Dup.' : null,
-      c.botPaused ? '⏸ Pausado' : null
-    ].filter(Boolean).join(' · ');
-
-    return `<tr>
-      <td>
-        <a href="/admin/candidates/${escapeHtml(c.id)}" style="color:#0d7a6b;text-decoration:none;font-weight:600">${escapeHtml(c.fullName || 'Sin nombre')}</a><br>
-        <span class="muted">${escapeHtml(c.phone || '')}</span>
-      </td>
-      <td>${statusBadge(c.status)}</td>
-      <td class="muted text-xs">${escapeHtml(flags || '—')}</td>
-      <td class="muted text-xs">${escapeHtml(attrMode)}</td>
-      <td class="muted text-xs">${c.createdAt ? new Date(c.createdAt).toLocaleDateString('es-CO') : '—'}</td>
-    </tr>`;
+    const flags = [hasCandidateData(c) ? '✓ Datos' : null, hasCv(c) ? '✓ HV' : null, schedulingEnabled && hasBooking(c) ? '✓ Cita' : null, schedulingEnabled && hasAttendedBooking(c) ? '✓ Asistió' : null, c.potentialDuplicate ? '⚠ Dup.' : null, c.botPaused ? '⏸ Pausado' : null].filter(Boolean).join(' · ');
+    return `<tr><td><a href="/admin/candidates/${escapeHtml(c.id)}" style="color:#0d7a6b;text-decoration:none;font-weight:600">${escapeHtml(c.fullName || 'Sin nombre')}</a><br><span class="muted">${escapeHtml(c.phone || '')}</span></td><td>${statusBadge(c.status)}</td><td class="muted text-xs">${escapeHtml(flags || '—')}</td><td class="muted text-xs">${escapeHtml(attrMode)}</td><td class="muted text-xs">${c.createdAt ? new Date(c.createdAt).toLocaleDateString('es-CO') : '—'}</td></tr>`;
   }).join('');
 
   const candidateTable = candidates.length
-    ? `<div class="table-wrap"><table>
-        <thead><tr><th>Candidato</th><th>Estado</th><th>Avance en proceso</th><th>Atribución</th><th>Registro</th></tr></thead>
-        <tbody>${candidateRows}</tbody>
-      </table></div>`
-    : `<div class="empty-state"><p>No hay candidatos atribuidos a esta campaña en el período seleccionado.</p></div>`;
+    ? `<div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Estado</th><th>Avance</th><th>Atribución</th><th>Registro</th></tr></thead><tbody>${candidateRows}</tbody></table></div>`
+    : `<div class="empty-state"><p>No hay candidatos atribuidos a esta campaña.</p></div>`;
 
-  const activeLabel = campaign.isActive
-    ? '<span class="badge badge-green">Activa</span>'
-    : '<span class="badge badge-gray">Inactiva</span>';
-
-  // Ciudad como select en edición también
-  const editCityOptions = cities
-    .map((c) => `<option value="${escapeHtml(c.name)}" ${campaign.city === c.name ? 'selected' : ''}>${escapeHtml(c.name)}</option>`)
-    .join('');
-
-  const editVacancyOptions = vacancies
-    .map((v) => `<option value="${escapeHtml(v.id)}" ${campaign.vacancyId === v.id ? 'selected' : ''}>${escapeHtml(v.title)} — ${escapeHtml(v.city)}${v.schedulingEnabled ? ' ✓ entrevista' : ''}</option>`)
-    .join('');
+  const activeLabel = campaign.isActive ? '<span class="badge badge-green">Activa</span>' : '<span class="badge badge-gray">Inactiva</span>';
+  const editCityOptions = cities.map((c) => `<option value="${escapeHtml(c.name)}" ${campaign.city === c.name ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+  const editVacancyOptions = vacancies.map((v) => `<option value="${escapeHtml(v.id)}" ${campaign.vacancyId === v.id ? 'selected' : ''}>${escapeHtml(v.title)} — ${escapeHtml(v.city)}${v.schedulingEnabled ? ' ✓ entrevista' : ''}</option>`).join('');
 
   return renderLayout({
     title: `Campaña: ${campaign.name}`,
     body: `
       <div class="page-header">
-        <div class="flex gap-2" style="margin-bottom:8px">
-          <a href="/admin/v2/campaigns" class="btn btn-secondary btn-sm">← Campañas</a>
-          ${activeLabel}
-          ${renderQualityBadge(metric.qualityScore)}
-        </div>
+        <div class="flex gap-2" style="margin-bottom:8px"><a href="/admin/v2/campaigns" class="btn btn-secondary btn-sm">← Campañas</a>${activeLabel}${renderQualityBadge(metric.qualityScore)}</div>
         <h1>${escapeHtml(campaign.name)}</h1>
         <p style="font-family:monospace;color:#64748b;font-size:12px">${escapeHtml(campaign.code)}</p>
       </div>
-
       ${error ? `<div class="alert alert-error">${escapeHtml(error)}</div>` : ''}
       ${success ? `<div class="alert alert-success">${escapeHtml(success)}</div>` : ''}
-
       <div class="grid-2">
-        <section class="card">
-          <div class="card-title">Embudo de esta campaña</div>
-          <div class="funnel">${funnelHtml}</div>
-          <hr class="divider">
-          <div class="grid-auto" style="margin-top:0">${kpisHtml}</div>
-        </section>
-        <section class="card">
-          <div class="card-title">Editar campaña</div>
+        <section class="card"><div class="card-title">Embudo de esta campaña</div><div class="funnel">${funnelHtml}</div><hr class="divider"><div class="grid-auto" style="margin-top:0">${kpisHtml}</div></section>
+        <section class="card"><div class="card-title">Editar campaña</div>
           <form method="post" action="/admin/v2/campaigns/${escapeHtml(campaign.id)}/edit">
             <div style="display:grid;gap:10px">
-              <label>Nombre
-                <input name="name" value="${escapeHtml(campaign.name)}" required maxlength="120">
-              </label>
-              <label>Ciudad
-                <select name="city">
-                  <option value="">Sin ciudad específica</option>
-                  ${editCityOptions}
-                </select>
-              </label>
-              <label>Vacante
-                <select name="vacancyId">
-                  <option value="">Sin vacante específica</option>
-                  ${editVacancyOptions}
-                </select>
-              </label>
-              <label>Presupuesto pauta (COP)
-                <input type="number" name="budgetCOP" value="${escapeHtml(String(campaign.budgetCOP || ''))}" min="0" step="1000" placeholder="Opcional">
-              </label>
-              <label>Notas
-                <textarea name="notes">${escapeHtml(campaign.notes || '')}</textarea>
-              </label>
+              <label>Nombre <input name="name" value="${escapeHtml(campaign.name)}" required maxlength="120"></label>
+              <label>Ciudad <select name="city"><option value="">Sin ciudad específica</option>${editCityOptions}</select></label>
+              <label>Vacante <select name="vacancyId"><option value="">Sin vacante específica</option>${editVacancyOptions}</select></label>
+              <label>Presupuesto pauta (COP) <input type="number" name="budgetCOP" value="${escapeHtml(String(campaign.budgetCOP || ''))}" min="0" step="1000" placeholder="Opcional"></label>
+              <label>Notas <textarea name="notes">${escapeHtml(campaign.notes || '')}</textarea></label>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <label>Fecha inicio
-                  <input type="date" name="startsAt" value="${escapeHtml(campaign.startsAt ? formatDate(campaign.startsAt.toISOString()) : '')}">
-                </label>
-                <label>Fecha fin
-                  <input type="date" name="endsAt" value="${escapeHtml(campaign.endsAt ? formatDate(campaign.endsAt.toISOString()) : '')}">
-                </label>
+                <label>Fecha inicio <input type="date" name="startsAt" value="${escapeHtml(campaign.startsAt ? formatDate(campaign.startsAt.toISOString()) : '')}"></label>
+                <label>Fecha fin <input type="date" name="endsAt" value="${escapeHtml(campaign.endsAt ? formatDate(campaign.endsAt.toISOString()) : '')}"></label>
               </div>
-              <label style="flex-direction:row;align-items:center;gap:8px;cursor:pointer">
-                <input type="checkbox" name="isActive" value="1" ${campaign.isActive ? 'checked' : ''} style="width:auto">
-                <span>Campaña activa</span>
-              </label>
+              <label style="flex-direction:row;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="isActive" value="1" ${campaign.isActive ? 'checked' : ''} style="width:auto"> <span>Campaña activa</span></label>
               <button type="submit" class="btn btn-primary">Guardar cambios</button>
             </div>
           </form>
         </section>
       </div>
-
       ${budgetSection}
-
-      <section class="card">
-        <div class="card-title">Candidatos atribuidos a esta campaña (${candidates.length})</div>
-        ${candidateTable}
-      </section>`
+      <section class="card"><div class="card-title">Candidatos atribuidos (${candidates.length})</div>${candidateTable}</section>`
   });
 }
 
@@ -1116,31 +832,19 @@ function renderCampaignDetail({ campaign, candidates = [], cities = [], vacancie
 
 const router = express.Router();
 
-// GET /admin/v2/campaigns — Dashboard principal
 router.get('/campaigns', canSeeLorenV2, async (req, res) => {
   try {
     const { prisma } = req;
     const data = await loadCampaignDashboardData(prisma, req.query);
-
-    const successMsg = req.query.success
-      ? req.query.success === 'asociado'
-        ? 'Candidato asociado correctamente a la campaña.'
-        : 'Campaña creada correctamente.'
-      : null;
-
+    const successMsg = req.query.success ? (req.query.success === 'asociado' ? 'Candidato asociado correctamente.' : 'Campaña creada correctamente.') : null;
     const body = `
-      <div class="page-header">
-        <h1>Campañas Meta Ads</h1>
-        <p>Seguimiento de efectividad por pauta publicitaria — ${CAMPAIGN_SOURCE_LABEL}</p>
-      </div>
+      <div class="page-header"><h1>Campañas Meta Ads</h1><p>Seguimiento de efectividad por pauta publicitaria — ${CAMPAIGN_SOURCE_LABEL}</p></div>
       ${successMsg ? `<div class="alert alert-success">${escapeHtml(successMsg)}</div>` : ''}
       ${renderFilters({ filters: data.filters, cities: data.cities, vacancies: data.vacancies })}
       ${data.campaigns.length ? renderFunnel(data.campaigns) : ''}
       ${renderCampaignTable(data.campaigns)}
       ${renderUnmatched(data.unmatched, data.campaigns)}
-      ${renderCreateForm({ cities: data.cities, vacancies: data.vacancies })}
-    `;
-
+      ${renderCreateForm({ cities: data.cities, vacancies: data.vacancies })}`;
     res.send(renderLayout({ title: 'Campañas — Loren V2', body }));
   } catch (err) {
     console.error('[lorenV2 campaigns GET]', err);
@@ -1148,17 +852,12 @@ router.get('/campaigns', canSeeLorenV2, async (req, res) => {
   }
 });
 
-// GET /admin/v2/campaigns.json — API JSON
 router.get('/campaigns.json', canSeeLorenV2, async (req, res) => {
   try {
     const data = await loadCampaignDashboardData(req.prisma, req.query);
     const result = data.campaigns.map((campaign) => ({
-      id: campaign.id,
-      code: campaign.code,
-      name: campaign.name,
-      city: campaign.city,
-      isActive: campaign.isActive,
-      budgetCOP: campaign.budgetCOP ? Number(campaign.budgetCOP) : null,
+      id: campaign.id, code: campaign.code, name: campaign.name, city: campaign.city,
+      isActive: campaign.isActive, budgetCOP: campaign.budgetCOP ? Number(campaign.budgetCOP) : null,
       vacancy: campaign.vacancy ? { id: campaign.vacancy.id, title: campaign.vacancy.title } : null,
       metric: buildCampaignMetric(campaign, Boolean(campaign.vacancy?.schedulingEnabled))
     }));
@@ -1169,7 +868,6 @@ router.get('/campaigns.json', canSeeLorenV2, async (req, res) => {
   }
 });
 
-// GET /admin/v2/campaigns/:id — Detalle de campaña
 router.get('/campaigns/:id', canSeeLorenV2, async (req, res) => {
   try {
     const { prisma } = req;
@@ -1178,16 +876,10 @@ router.get('/campaigns/:id', canSeeLorenV2, async (req, res) => {
       include: { vacancy: { select: { id: true, title: true, city: true, schedulingEnabled: true } } }
     });
     if (!campaign) return res.status(404).send(renderLayout({ title: 'No encontrada', body: '<div class="alert alert-error">Campaña no encontrada.</div>' }));
-
     const range = dateRangeFromQuery(req.query);
-    const [candidates, cities, vacancies] = await Promise.all([
-      loadCandidatesForCampaigns(prisma, range),
-      loadCities(prisma),
-      loadVacancies(prisma, {})
-    ]);
+    const [candidates, cities, vacancies] = await Promise.all([loadCandidatesForCampaigns(prisma, range), loadCities(prisma), loadVacancies(prisma, {})]);
     const enriched = enrichCampaignsWithAttribution([campaign], candidates);
     const attributed = enriched[0]?.attributedCandidates || [];
-
     const successMsg = req.query.success ? 'Cambios guardados correctamente.' : null;
     res.send(renderCampaignDetail({ campaign, candidates: attributed, cities, vacancies, success: successMsg }));
   } catch (err) {
@@ -1196,7 +888,6 @@ router.get('/campaigns/:id', canSeeLorenV2, async (req, res) => {
   }
 });
 
-// POST /admin/v2/campaigns — Crear campaña
 router.post('/campaigns', requireLorenV2, async (req, res) => {
   const { prisma, body } = req;
   const code = normalizeCampaignCode(body.code || '');
@@ -1210,42 +901,27 @@ router.post('/campaigns', requireLorenV2, async (req, res) => {
 
   const reload = async (error) => {
     const data = await loadCampaignDashboardData(prisma, {});
-    const body2 = `
-      <div class="page-header"><h1>Campañas Meta Ads</h1><p>${CAMPAIGN_SOURCE_LABEL}</p></div>
-      ${renderFilters({ filters: {}, cities: data.cities, vacancies: data.vacancies })}
-      ${data.campaigns.length ? renderFunnel(data.campaigns) : ''}
-      ${renderCampaignTable(data.campaigns)}
-      ${renderUnmatched(data.unmatched, data.campaigns)}
-      ${renderCreateForm({ cities: data.cities, vacancies: data.vacancies, error })}
-    `;
+    const body2 = `<div class="page-header"><h1>Campañas Meta Ads</h1><p>${CAMPAIGN_SOURCE_LABEL}</p></div>${renderFilters({ filters: {}, cities: data.cities, vacancies: data.vacancies })}${data.campaigns.length ? renderFunnel(data.campaigns) : ''}${renderCampaignTable(data.campaigns)}${renderUnmatched(data.unmatched, data.campaigns)}${renderCreateForm({ cities: data.cities, vacancies: data.vacancies, error })}`;
     res.status(400).send(renderLayout({ title: 'Campañas — Loren V2', body: body2 }));
   };
 
-  if (!code || !isValidCampaignCode(code)) return reload('El código ingresado no es válido. Usa solo letras, números, guiones o guiones bajos (mínimo 3 caracteres).');
+  if (!code || !isValidCampaignCode(code)) return reload('El código ingresado no es válido.');
   if (!name) return reload('El nombre de la campaña es obligatorio.');
   if (budgetCOP !== null && (isNaN(budgetCOP) || budgetCOP < 0)) return reload('El presupuesto debe ser un número positivo en COP.');
 
   try {
     const existing = await prisma.campaign.findUnique({ where: { code } });
-    if (existing) return reload(`Ya existe una campaña con el código "${code}". Usa un código diferente o edita la existente.`);
-
+    if (existing) return reload(`Ya existe una campaña con el código "${code}".`);
     await prisma.campaign.create({
       data: {
-        id: `cmp_${Date.now()}`,
-        code,
-        name,
-        sourceType: CAMPAIGN_SOURCE_TYPE,
-        city: city || null,
-        vacancyId: vacancyId || null,
-        notes: notes || null,
+        id: `cmp_${Date.now()}`, code, name, sourceType: CAMPAIGN_SOURCE_TYPE,
+        city: city || null, vacancyId: vacancyId || null, notes: notes || null,
         budgetCOP: budgetCOP ? budgetCOP : null,
         startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null,
         endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null,
-        isActive: true,
-        createdByUsername: req.session?.username || null
+        isActive: true, createdByUsername: req.session?.username || null
       }
     });
-
     res.redirect('/admin/v2/campaigns?success=1');
   } catch (err) {
     console.error('[lorenV2 campaigns POST]', err);
@@ -1253,7 +929,6 @@ router.post('/campaigns', requireLorenV2, async (req, res) => {
   }
 });
 
-// POST /admin/v2/campaigns/:id/edit — Editar campaña
 router.post('/campaigns/:id/edit', requireLorenV2, async (req, res) => {
   const { prisma, body } = req;
   const name = normalizeString(body.name);
@@ -1264,20 +939,10 @@ router.post('/campaigns/:id/edit', requireLorenV2, async (req, res) => {
   const endsAt = normalizeDateInput(body.endsAt);
   const isActive = body.isActive === '1';
   const budgetCOP = body.budgetCOP ? parseFloat(body.budgetCOP) : null;
-
   try {
     await prisma.campaign.update({
       where: { id: req.params.id },
-      data: {
-        name: name || undefined,
-        city: city || null,
-        vacancyId: vacancyId || null,
-        notes: notes || null,
-        budgetCOP: budgetCOP !== null ? budgetCOP : null,
-        startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null,
-        endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null,
-        isActive
-      }
+      data: { name: name || undefined, city: city || null, vacancyId: vacancyId || null, notes: notes || null, budgetCOP: budgetCOP !== null ? budgetCOP : null, startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null, endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null, isActive }
     });
     res.redirect(`/admin/v2/campaigns/${req.params.id}?success=1`);
   } catch (err) {
@@ -1286,24 +951,25 @@ router.post('/campaigns/:id/edit', requireLorenV2, async (req, res) => {
   }
 });
 
-// POST /admin/v2/campaigns/associate — Asociar candidato a campaña manualmente
 router.post('/campaigns/associate', requireLorenV2, async (req, res) => {
   const { prisma, body } = req;
   const candidateId = normalizeString(body.candidateId);
   const campaignId = normalizeString(body.campaignId);
-
   if (!candidateId || !campaignId) return res.redirect('/admin/v2/campaigns?error=missing');
-
   try {
-    await prisma.candidate.update({
-      where: { id: candidateId },
-      data: { campaignId, sourceType: CAMPAIGN_SOURCE_TYPE }
-    });
+    await prisma.candidate.update({ where: { id: candidateId }, data: { campaignId, sourceType: CAMPAIGN_SOURCE_TYPE } });
     res.redirect('/admin/v2/campaigns?success=asociado');
   } catch (err) {
     console.error('[lorenV2 associate]', err);
     res.redirect('/admin/v2/campaigns?error=1');
   }
 });
+
+// Named export para compatibilidad con server.js
+export function lorenV2Router(prisma) {
+  // Inyectar prisma en req para todas las rutas
+  router.use((req, _res, next) => { req.prisma = req.prisma || prisma; next(); });
+  return router;
+}
 
 export default router;
