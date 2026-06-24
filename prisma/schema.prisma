@@ -97,7 +97,6 @@ enum BookingStatus {
   CANCELLED
 }
 
-
 enum JobStatus {
   PENDING
   RUNNING
@@ -117,6 +116,7 @@ enum CitySourceModule {
   RECRUITMENT
   DISPATCH
 }
+
 model City {
   id                 String           @id @default(cuid())
   name               String           @unique
@@ -188,7 +188,6 @@ model Campaign {
   name              String
   sourceType        CandidateSourceType @default(META_ADS)
   city              String?
-  zone              String?
   vacancyId         String?
   vacancy           Vacancy?            @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
   isActive          Boolean             @default(true)
@@ -249,6 +248,11 @@ model Candidate {
   campaignCodeRaw        String?
   referrerName           String?
   referrerPhone          String?
+  // Metadatos exactos de Meta Ads (del objeto referral de WhatsApp)
+  metaCtwaClid           String?
+  metaAdId               String?
+  metaCampaignId         String?
+  metaCampaignName       String?
   dataConsentStatus      DataConsentStatus   @default(PENDING)
   dataConsentVersion     String?
   dataConsentText        String?
@@ -309,6 +313,8 @@ model Candidate {
   @@index([sourceType])
   @@index([dataConsentStatus])
   @@index([status, createdAt])
+  @@index([metaAdId])
+  @@index([metaCampaignId])
 }
 
 model CandidateDataConsentEvent {
@@ -355,8 +361,6 @@ model CandidateAdminEvent {
   createdAt   DateTime  @default(now())
   @@index([candidateId, createdAt])
 }
-
-
 
 model DispatchClient {
   id                String                   @id @default(cuid())
@@ -535,148 +539,4 @@ model DispatchIncident {
 
   @@index([serviceRequestId])
   @@index([assignmentId])
-  @@index([workerId])
-  @@index([status])
-  @@index([createdAt])
-}
-
-model DispatchMessageTemplate {
-  id                String   @id @default(cuid())
-  key               String   @unique
-  content           String
-  createdByUsername String?
-  updatedByUsername String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  @@index([key])
-}
-
-model DispatchWorkerCity {
-  id        String         @id @default(cuid())
-  workerId  String
-  worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  cityId    String
-  city      City           @relation(fields: [cityId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime       @default(now())
-
-  @@unique([workerId, cityId])
-  @@index([cityId])
-}
-
-model DispatchWorkerVacancy {
-  id        String         @id @default(cuid())
-  workerId  String
-  worker    DispatchWorker @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  vacancyId String
-  vacancy   Vacancy        @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime       @default(now())
-
-  @@unique([workerId, vacancyId])
-  @@index([vacancyId])
-}
-model AppUser {
-  id                  String          @id @default(cuid())
-  username            String          @unique
-  passwordHash        String
-  recoveryCodeHash    String?
-  role                AppUserRole     @default(ADMIN)
-  accessScope         UserAccessScope @default(ALL)
-  scopeCity           String?
-  scopeVacancyId      String?
-  scopeVacancy        Vacancy?        @relation(fields: [scopeVacancyId], references: [id], onDelete: SetNull)
-  recoveryPhone       String?
-  recoveryEmail       String?
-  email               String?
-  createdByUsername   String?
-  lastPasswordResetAt DateTime?
-  isActive            Boolean         @default(true)
-  canAccessDispatch   Boolean         @default(false)
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  @@index([accessScope, scopeCity])
-  @@index([scopeVacancyId])
-  @@index([canAccessDispatch])
-}
-
-
-
-model DevAuditEvent {
-  id            String   @id @default(cuid())
-  entityType    String
-  entityId      String?
-  entityLabel   String?
-  action        String
-  actorUserId   String?
-  actorUsername String?
-  actorRole     String?
-  actorSource   String?
-  ipAddress     String?
-  forwardedFor  String?
-  userAgent     String?
-  method        String?
-  path          String?
-  fromValue     Json?
-  toValue       Json?
-  metadata      Json?
-  createdAt     DateTime @default(now())
-
-  @@index([entityType, entityId, createdAt])
-  @@index([actorUsername, createdAt])
-  @@index([action, createdAt])
-}
-
-model JobQueue {
-  id          String   @id @default(cuid())
-  type        String
-  payload     Json
-  dedupeKey   String?  @map("dedupe_key")
-  runAt       DateTime @map("run_at")
-  attempts    Int      @default(0)
-  maxAttempts Int      @default(5) @map("max_attempts")
-  status      JobStatus @default(PENDING)
-  lastError   String?  @map("last_error")
-  completedAt DateTime? @map("completed_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  @@index([status, runAt])
-  @@unique([type, dedupeKey])
-}
-
-model AttachmentAnalysis {
-  id             String                   @id @default(cuid())
-  candidateId    String
-  candidate      Candidate                @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  messageId      String?
-  classification AttachmentClassification
-  confidence     Float
-  evidence       String?
-  mimeType       String?
-  fileName       String?
-  createdAt      DateTime                 @default(now())
-
-  @@index([candidateId, createdAt])
-}
-
-model BotKnowledge {
-  id          String   @id @default(cuid())
-  scope       String   @default("GLOBAL")
-  content     String
-  tags        String?
-  vacancyId   String?
-  candidateId String?
-  isActive    Boolean  @default(true)
-  createdBy   String?
-  updatedBy   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([scope, isActive, updatedAt])
-  @@index([vacancyId, isActive])
-  @@index([candidateId, isActive])
-}
+  @@index([w
