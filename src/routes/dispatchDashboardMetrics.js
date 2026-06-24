@@ -223,9 +223,6 @@ function styleStatusCell(cell, status) {
 
 /**
  * buildOperationsDashboardMetrics
- *
- * Usa COUNT puro — no trae filas completas a memoria.
- * Es la query del encabezado del dashboard (4 conteos en paralelo).
  */
 async function buildOperationsDashboardMetrics(prisma, selectedDate) {
   const { start, end } = buildUtcDayRange(selectedDate);
@@ -275,12 +272,6 @@ function buildSummaryWhere(selectedDate, type) {
   return where;
 }
 
-/**
- * loadSummaryServiceRequests
- *
- * Vista detalle (solicitudes/resumen): trae assignments + incidents completos
- * porque la plantilla los necesita para mostrar auxiliares y novedades.
- */
 async function loadSummaryServiceRequests(prisma, selectedDate, type) {
   return prisma.dispatchServiceRequest.findMany({
     where: buildSummaryWhere(selectedDate, type),
@@ -304,4 +295,341 @@ async function guardEditableServiceRequest(prisma, req, res, next) {
   const requestId = req.params.id || req.params.serviceRequestId;
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
     where: { id: requestId },
-    sele
+    select: { id: true, serviceDate: true, startTime: true, status: true }
+  });
+  if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
+  req.serviceRequest = serviceRequest;
+  return next();
+}
+
+export function createDispatchDashboardMetricsRouter(prisma) {
+  const router = express.Router();
+
+  router.use(requireOps);
+
+  // Dashboard principal de operaciones
+  router.get('/dispatch/operations', async (req, res) => {
+    try {
+      const selectedDate = normalizeDateParam(req.query.date);
+      const metrics = await buildOperationsDashboardMetrics(prisma, selectedDate);
+      const { start, end } = buildUtcDayRange(selectedDate);
+
+      const serviceRequests = await prisma.dispatchServiceRequest.findMany({
+        where: { serviceDate: { gte: start, lt: end } },
+        include: {
+          service: true,
+          assignments: {
+            include: { worker: true },
+            orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
+          },
+          incidents: {
+            where: { status: { in: OPEN_INCIDENT_STATUSES } },
+            orderBy: { createdAt: 'desc' }
+          }
+        },
+        orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }]
+      });
+
+      const groupedByClient = groupByClient(serviceRequests);
+      const now = new Date();
+
+      res.render('dispatch/operations-dashboard', {
+        selectedDate,
+        metrics,
+        serviceRequests,
+        groupedByClient,
+        now,
+        isServiceRequestEditLocked,
+        activeAssignments,
+        confirmedAssignments,
+        statusLabel,
+        assignmentStatusLabel,
+        buildHorario,
+        buildCoverageText,
+        isOpsUser: isOpsUser(req)
+      });
+    } catch (err) {
+      console.error('[DispatchOps] Error cargando dashboard:', err);
+      res.status(500).send('Error cargando el dashboard de operaciones');
+    }
+  });
+
+  // Vista de resumen / detalle por tipo
+  router.get('/dispatch/operations/summary', async (req, res) => {
+    try {
+      const selectedDate = normalizeDateParam(req.query.date);
+      const type = normalizeSummaryType(req.query.type);
+      const meta = summaryTypeMeta(type);
+      const serviceRequests = await loadSummaryServiceRequests(prisma, selectedDate, type);
+      const groupedByClient = groupByClient(serviceRequests);
+      const now = new Date();
+
+      res.render('dispatch/operations-summary', {
+        selectedDate,
+        type,
+        meta,
+        serviceRequests,
+        groupedByClient,
+        now,
+        isServiceRequestEditLocked,
+        activeAssignments,
+        confirmedAssignments,
+        statusLabel,
+        assignmentStatusLabel,
+        buildHorario,
+        buildCoverageText,
+        isOpsUser: isOpsUser(req)
+      });
+    } catch (err) {
+      console.error('[DispatchOps] Error cargando resumen:', err);
+      res.status(500).send('Error cargando el resumen de operaciones');
+    }
+  });
+
+  // Exportar Excel del día
+  router.get('/dispatch/operations/export', async (req, res) => {
+    try {
+      const selectedDate = normalizeDateParam(req.query.date);
+      const { start, end } = buildUtcDayRange(selectedDate);
+
+      const serviceRequests = await prisma.dispatchServiceRequest.findMany({
+        where: { serviceDate: { gte: start, lt: end } },
+        include: {
+          service: true,
+          assignments: {
+            include: { worker: true },
+            orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
+          },
+          incidents: {
+            where: { status: { in: OPEN_INCIDENT_STATUSES } },
+            include: { worker: true },
+            orderBy: { createdAt: 'desc' }
+          }
+        },
+        orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }]
+      });
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Lórren Dispatch';
+      workbook.created = new Date();
+
+      // Hoja 1: Resumen general
+      const summarySheet = workbook.addWorksheet('Resumen');
+      const summaryColumns = [
+        { header: 'Cliente', key: 'client', width: 28 },
+        { header: 'Operación', key: 'operation', width: 28 },
+        { header: 'Servicio', key: 'service', width: 24 },
+        { header: 'Horario', key: 'horario', width: 18 },
+        { header: 'Requeridos', key: 'required', width: 13 },
+        { header: 'Asignados', key: 'assigned', width: 13 },
+        { header: 'Confirmados', key: 'confirmed', width: 13 },
+        { header: 'Estado', key: 'status', width: 26 },
+        { header: 'Novedades', key: 'incidents', width: 12 }
+      ];
+      applyTitle(summarySheet, 'Reporte de Operaciones', `Fecha: ${selectedDate}`, summaryColumns.length);
+      summarySheet.columns = summaryColumns;
+      const summaryHeaderRow = summarySheet.getRow(3);
+      summaryHeaderRow.values = summaryColumns.map((c) => c.header);
+      styleHeader(summaryHeaderRow);
+
+      serviceRequests.forEach((request, index) => {
+        const active = activeAssignments(request);
+        const confirmed = confirmedAssignments(request);
+        const row = summarySheet.addRow({
+          client: request.clientName || '-',
+          operation: request.operationPointName || '-',
+          service: request.serviceName || request.service?.name || '-',
+          horario: buildHorario(request),
+          required: request.requiredWorkers || 0,
+          assigned: active.length,
+          confirmed: confirmed.length,
+          status: statusLabel(request.status),
+          incidents: (request.incidents || []).length
+        });
+        styleDataRow(row, index);
+        styleStatusCell(row.getCell('status'), request.status);
+        row.height = 22;
+      });
+
+      // Hoja 2: Detalle por cliente
+      const groupedByClient = groupByClient(serviceRequests);
+      for (const [clientName, clientRequests] of groupedByClient) {
+        const sheetName = cleanSheetName(clientName, 'Cliente');
+        const clientSheet = workbook.addWorksheet(sheetName);
+        const clientColumns = [
+          { header: 'Operación', key: 'operation', width: 28 },
+          { header: 'Servicio', key: 'service', width: 24 },
+          { header: 'Horario', key: 'horario', width: 18 },
+          { header: 'Auxiliares asignados', key: 'workers', width: 52 },
+          { header: 'Cobertura', key: 'coverage', width: 28 },
+          { header: 'Estado', key: 'status', width: 26 }
+        ];
+        applyTitle(clientSheet, clientName, `Fecha: ${selectedDate}`, clientColumns.length);
+        clientSheet.columns = clientColumns;
+        const clientHeaderRow = clientSheet.getRow(3);
+        clientHeaderRow.values = clientColumns.map((c) => c.header);
+        styleHeader(clientHeaderRow);
+
+        clientRequests.forEach((request, index) => {
+          const workersText = buildAssignedWorkersCell(request);
+          const row = clientSheet.addRow({
+            operation: request.operationPointName || '-',
+            service: request.serviceName || request.service?.name || '-',
+            horario: buildHorario(request),
+            workers: workersText,
+            coverage: buildCoverageText(request),
+            status: statusLabel(request.status)
+          });
+          styleDataRow(row, index);
+          styleStatusCell(row.getCell('status'), request.status);
+          row.height = calculateRowHeight(request);
+        });
+      }
+
+      // Hoja 3: Consolidado auxiliares
+      const workersSheet = workbook.addWorksheet('Auxiliares');
+      const workersColumns = [
+        { header: 'Auxiliar', key: 'name', width: 30 },
+        { header: 'Documento', key: 'document', width: 22 },
+        { header: 'Cliente', key: 'client', width: 28 },
+        { header: 'Operación', key: 'operation', width: 28 },
+        { header: 'Servicio', key: 'service', width: 24 },
+        { header: 'Horario', key: 'horario', width: 18 },
+        { header: 'Estado asignación', key: 'assignStatus', width: 24 }
+      ];
+      applyTitle(workersSheet, 'Auxiliares del día', `Fecha: ${selectedDate}`, workersColumns.length);
+      workersSheet.columns = workersColumns;
+      const workersHeaderRow = workersSheet.getRow(3);
+      workersHeaderRow.values = workersColumns.map((c) => c.header);
+      styleHeader(workersHeaderRow);
+
+      let workerRowIndex = 0;
+      for (const request of serviceRequests) {
+        for (const assignment of activeAssignments(request)) {
+          const worker = assignment.worker || {};
+          const row = workersSheet.addRow({
+            name: normalizeString(worker.fullName) || 'Auxiliar',
+            document: workerDocumentLabel(worker),
+            client: request.clientName || '-',
+            operation: request.operationPointName || '-',
+            service: request.serviceName || request.service?.name || '-',
+            horario: buildHorario(request),
+            assignStatus: assignmentStatusLabel(assignment.status)
+          });
+          styleDataRow(row, workerRowIndex);
+          row.height = 22;
+          workerRowIndex++;
+        }
+      }
+
+      const filename = `operaciones-${selectedDate}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (err) {
+      console.error('[DispatchOps] Error exportando Excel:', err);
+      res.status(500).send('Error generando el archivo de exportación');
+    }
+  });
+
+  // Exportar resumen por cliente (para envío)
+  router.get('/dispatch/operations/export-client/:clientName', async (req, res) => {
+    try {
+      const selectedDate = normalizeDateParam(req.query.date);
+      const { start, end } = buildUtcDayRange(selectedDate);
+      const clientName = decodeURIComponent(req.params.clientName || '');
+
+      const serviceRequests = await prisma.dispatchServiceRequest.findMany({
+        where: {
+          serviceDate: { gte: start, lt: end },
+          clientName
+        },
+        include: {
+          service: true,
+          assignments: {
+            include: { worker: true },
+            orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
+          }
+        },
+        orderBy: [{ operationPointName: 'asc' }, { startTime: 'asc' }]
+      });
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Lórren Dispatch';
+      workbook.created = new Date();
+
+      const sheet = workbook.addWorksheet('Auxiliares');
+      const columns = [
+        { header: 'Operación', key: 'operation', width: 30 },
+        { header: 'Servicio', key: 'service', width: 26 },
+        { header: 'Horario', key: 'horario', width: 18 },
+        { header: 'Auxiliares', key: 'workers', width: 56 },
+        { header: 'Cobertura', key: 'coverage', width: 28 }
+      ];
+      applyTitle(sheet, clientName, `Fecha: ${selectedDate}`, columns.length);
+      sheet.columns = columns;
+      const headerRow = sheet.getRow(3);
+      headerRow.values = columns.map((c) => c.header);
+      styleHeader(headerRow);
+
+      serviceRequests.forEach((request, index) => {
+        const row = sheet.addRow({
+          operation: request.operationPointName || '-',
+          service: request.serviceName || request.service?.name || '-',
+          horario: buildHorario(request),
+          workers: buildAssignedWorkersCell(request),
+          coverage: buildCoverageText(request)
+        });
+        styleDataRow(row, index);
+        row.height = calculateRowHeight(request);
+      });
+
+      const safeClientName = clientName.replace(/[^a-zA-Z0-9\-_]/g, '-').slice(0, 40);
+      const filename = `${safeClientName}-${selectedDate}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (err) {
+      console.error('[DispatchOps] Error exportando cliente:', err);
+      res.status(500).send('Error generando el archivo del cliente');
+    }
+  });
+
+  // Consolidado de auxiliares para envío por WhatsApp
+  router.get('/dispatch/operations/workers-summary', async (req, res) => {
+    try {
+      const selectedDate = normalizeDateParam(req.query.date);
+      const { start, end } = buildUtcDayRange(selectedDate);
+
+      const serviceRequests = await prisma.dispatchServiceRequest.findMany({
+        where: { serviceDate: { gte: start, lt: end } },
+        include: {
+          service: true,
+          assignments: {
+            include: { worker: true },
+            orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
+          }
+        },
+        orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }]
+      });
+
+      const groupedByClient = groupByClient(serviceRequests);
+
+      res.render('dispatch/workers-summary', {
+        selectedDate,
+        groupedByClient,
+        buildClientWorkersSummary,
+        activeAssignments,
+        buildHorario,
+        isOpsUser: isOpsUser(req)
+      });
+    } catch (err) {
+      console.error('[DispatchOps] Error cargando resumen auxiliares:', err);
+      res.status(500).send('Error cargando el resumen de auxiliares');
+    }
+  });
+
+  return router;
+}
