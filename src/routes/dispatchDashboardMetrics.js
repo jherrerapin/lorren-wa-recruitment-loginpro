@@ -221,6 +221,12 @@ function styleStatusCell(cell, status) {
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 }
 
+/**
+ * buildOperationsDashboardMetrics
+ *
+ * Usa COUNT puro — no trae filas completas a memoria.
+ * Es la query del encabezado del dashboard (4 conteos en paralelo).
+ */
 async function buildOperationsDashboardMetrics(prisma, selectedDate) {
   const { start, end } = buildUtcDayRange(selectedDate);
   const whereForDate = { serviceDate: { gte: start, lt: end } };
@@ -269,6 +275,12 @@ function buildSummaryWhere(selectedDate, type) {
   return where;
 }
 
+/**
+ * loadSummaryServiceRequests
+ *
+ * Vista detalle (solicitudes/resumen): trae assignments + incidents completos
+ * porque la plantilla los necesita para mostrar auxiliares y novedades.
+ */
 async function loadSummaryServiceRequests(prisma, selectedDate, type) {
   return prisma.dispatchServiceRequest.findMany({
     where: buildSummaryWhere(selectedDate, type),
@@ -292,245 +304,4 @@ async function guardEditableServiceRequest(prisma, req, res, next) {
   const requestId = req.params.id || req.params.serviceRequestId;
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
     where: { id: requestId },
-    select: { id: true, serviceDate: true, startTime: true }
-  });
-  if (!serviceRequest || !isServiceRequestEditLocked(serviceRequest)) return next();
-  const selectedDate = serviceRequestDateText(serviceRequest);
-  const message = 'Esta solicitud ya superó las 2 horas posteriores a la hora del servicio. Solo puede consultarse.';
-  if (req.method === 'GET') {
-    return res.redirect(`/admin/operaciones/solicitudes/resumen?fecha=${encodeURIComponent(selectedDate)}&tipo=total&message=${encodeURIComponent(message)}`);
-  }
-  return res.status(403).send(message);
-}
-
-async function loadScheduleRequests(prisma, selectedDate) {
-  const { start, end } = buildUtcDayRange(selectedDate);
-  return prisma.dispatchServiceRequest.findMany({
-    where: { serviceDate: { gte: start, lt: end } },
-    include: {
-      service: true,
-      assignments: {
-        include: { worker: true },
-        orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
-      }
-    },
-    orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
-  });
-}
-
-function addSummarySheet(workbook, selectedDate, requestsByClient, requests) {
-  const sheet = workbook.addWorksheet('Resumen');
-  sheet.columns = [
-    { key: 'client', width: 32 },
-    { key: 'requests', width: 14 },
-    { key: 'required', width: 16 },
-    { key: 'active', width: 18 },
-    { key: 'confirmed', width: 14 },
-    { key: 'pending', width: 14 },
-    { key: 'workers', width: 82 }
-  ];
-  applyTitle(sheet, 'Programación operativa por cliente', `Fecha de servicio: ${selectedDate}`, 7);
-  sheet.addRow(['Cliente', 'Solicitudes', 'Aux. requeridos', 'Asignados activos', 'Confirmados', 'Pendientes', 'Detalle de auxiliares por horario']);
-  styleHeader(sheet.getRow(3));
-
-  requestsByClient.forEach(([clientName, clientRequests], index) => {
-    const required = clientRequests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
-    const active = clientRequests.reduce((sum, request) => sum + activeAssignments(request).length, 0);
-    const confirmed = clientRequests.reduce((sum, request) => sum + confirmedAssignments(request).length, 0);
-    const row = sheet.addRow({
-      client: clientName,
-      requests: clientRequests.length,
-      required,
-      active,
-      confirmed,
-      pending: Math.max(0, required - confirmed),
-      workers: buildClientWorkersSummary(clientRequests)
-    });
-    styleDataRow(row, index);
-    row.height = Math.min(260, Math.max(42, 28 + active * 42 + clientRequests.length * 26));
-  });
-
-  const totalRequired = requests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
-  const totalConfirmed = requests.reduce((sum, request) => sum + confirmedAssignments(request).length, 0);
-  const totals = sheet.addRow({
-    client: 'TOTAL GENERAL',
-    requests: requests.length,
-    required: totalRequired,
-    active: requests.reduce((sum, request) => sum + activeAssignments(request).length, 0),
-    confirmed: totalConfirmed,
-    pending: Math.max(0, totalRequired - totalConfirmed),
-    workers: ''
-  });
-  totals.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2D3D' } };
-    cell.border = commonBorder('FFCBD5E1');
-  });
-  sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'G3' };
-}
-
-function buildProgrammingRow(request, includeClientColumn = false) {
-  const base = {
-    client: request.clientName || 'Sin cliente',
-    operation: request.operationPointName || 'Sin operación',
-    city: request.cityName || '-',
-    address: request.address || '-',
-    service: request.serviceName || request.service?.name || 'Sin servicio',
-    time: buildHorario(request),
-    required: request.requiredWorkers || 0,
-    coverage: buildCoverageText(request),
-    requestStatus: statusLabel(request.status),
-    assignedWorkers: buildAssignedWorkersCell(request),
-    requestedBy: request.requestedByName || '-',
-    requestedPhone: request.requestedByPhone || '-',
-    requestedEmail: request.requestedByEmail || '-',
-    notes: request.notes || '-'
-  };
-  return includeClientColumn ? base : { ...base, client: undefined };
-}
-
-function addProgrammingRows(sheet, requests, includeClientColumn = false) {
-  requests.forEach((request, index) => {
-    const row = sheet.addRow(buildProgrammingRow(request, includeClientColumn));
-    styleDataRow(row, index);
-    styleStatusCell(row.getCell('requestStatus'), request.status);
-    row.height = calculateRowHeight(request);
-  });
-}
-
-function setTextColumns(sheet, columnKeys) {
-  columnKeys.forEach((key) => {
-    const column = sheet.getColumn(key);
-    column.numFmt = '@';
-  });
-}
-
-function addConsolidatedSheet(workbook, selectedDate, requests) {
-  const sheet = workbook.addWorksheet('Programación completa');
-  sheet.columns = [
-    { key: 'client', width: 28 },
-    { key: 'operation', width: 26 },
-    { key: 'city', width: 16 },
-    { key: 'address', width: 30 },
-    { key: 'service', width: 26 },
-    { key: 'time', width: 16 },
-    { key: 'required', width: 14 },
-    { key: 'coverage', width: 22 },
-    { key: 'requestStatus', width: 24 },
-    { key: 'assignedWorkers', width: 86 },
-    { key: 'requestedBy', width: 24 },
-    { key: 'requestedPhone', width: 18 },
-    { key: 'requestedEmail', width: 28 },
-    { key: 'notes', width: 34 }
-  ];
-  applyTitle(sheet, 'Programación completa agrupada por solicitud', `Fecha de servicio: ${selectedDate}`, 14);
-  sheet.addRow(['Cliente', 'Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Horario', 'Aux. requeridos', 'Cobertura', 'Estado solicitud', 'Auxiliares asignados / documentos', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
-  styleHeader(sheet.getRow(3));
-  addProgrammingRows(sheet, requests, true);
-  setTextColumns(sheet, ['assignedWorkers', 'requestedPhone']);
-  sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'N3' };
-}
-
-function addClientSheet(workbook, clientName, selectedDate, requests, sheetIndex) {
-  const sheet = workbook.addWorksheet(cleanSheetName(clientName, `Cliente ${sheetIndex}`));
-  sheet.columns = [
-    { key: 'operation', width: 26 },
-    { key: 'city', width: 16 },
-    { key: 'address', width: 30 },
-    { key: 'service', width: 26 },
-    { key: 'time', width: 16 },
-    { key: 'required', width: 14 },
-    { key: 'coverage', width: 22 },
-    { key: 'requestStatus', width: 24 },
-    { key: 'assignedWorkers', width: 86 },
-    { key: 'requestedBy', width: 24 },
-    { key: 'requestedPhone', width: 18 },
-    { key: 'requestedEmail', width: 28 },
-    { key: 'notes', width: 34 }
-  ];
-  applyTitle(sheet, `Programación — ${clientName}`, `Fecha de servicio: ${selectedDate}`, 13);
-  sheet.addRow(['Operación / punto', 'Ciudad', 'Dirección', 'Servicio', 'Horario', 'Aux. requeridos', 'Cobertura', 'Estado solicitud', 'Auxiliares asignados / documentos', 'Solicitante', 'Tel. solicitante', 'Correo solicitante', 'Observaciones']);
-  styleHeader(sheet.getRow(3));
-  addProgrammingRows(sheet, requests, false);
-  setTextColumns(sheet, ['assignedWorkers', 'requestedPhone']);
-  sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'M3' };
-}
-
-async function buildScheduleWorkbook(prisma, selectedDate) {
-  const requests = await loadScheduleRequests(prisma, selectedDate);
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'LoginPro Operaciones';
-  workbook.created = new Date();
-  workbook.modified = new Date();
-
-  const requestsByClient = groupByClient(requests);
-  addSummarySheet(workbook, selectedDate, requestsByClient, requests);
-  addConsolidatedSheet(workbook, selectedDate, requests);
-  requestsByClient.forEach(([clientName, clientRequests], index) => addClientSheet(workbook, clientName, selectedDate, clientRequests, index + 1));
-
-  if (!requests.length) {
-    const sheet = workbook.addWorksheet('Sin programación');
-    applyTitle(sheet, 'Sin programación registrada', `Fecha de servicio: ${selectedDate}`, 3);
-    sheet.addRow(['No hay solicitudes de servicio programadas para esta fecha.']);
-    sheet.mergeCells(3, 1, 3, 3);
-  }
-
-  return workbook;
-}
-
-async function renderOperationsDashboard(req, res, prisma) {
-  const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
-  const metrics = await buildOperationsDashboardMetrics(prisma, selectedDate);
-  return res.render('operacionesDashboard', { pageTitle: 'Operaciones / Despacho', subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.', activeSection: 'dashboard', selectedDate, metrics, role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
-}
-
-async function renderServiceRequestsSummary(req, res, prisma) {
-  const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
-  const type = normalizeSummaryType(req.query.tipo || req.query.type);
-  const meta = summaryTypeMeta(type);
-  const [requests, metrics] = await Promise.all([
-    loadSummaryServiceRequests(prisma, selectedDate, type),
-    buildOperationsDashboardMetrics(prisma, selectedDate)
-  ]);
-  return res.render('operacionesSolicitudesResumen', {
-    pageTitle: meta.title,
-    subtitle: meta.description,
-    selectedDate,
-    type,
-    typeLabel: meta.title,
-    requests,
-    metrics,
-    message: normalizeString(req.query.message),
-    isServiceRequestEditLocked,
-    statusLabel,
-    assignmentStatusLabel,
-    activeAssignments,
-    confirmedAssignments,
-    buildHorario,
-    role: req.session?.userRole || req.userRole,
-    canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
-  });
-}
-
-export function dispatchDashboardMetricsRouter(prisma) {
-  const router = express.Router();
-  router.get('/', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
-  router.get('/abrir', requireOps, async (req, res) => renderOperationsDashboard(req, res, prisma));
-  router.get('/solicitudes/resumen', requireOps, async (req, res) => renderServiceRequestsSummary(req, res, prisma));
-  router.get('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
-  router.post('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
-  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res, next) => guardEditableServiceRequest(prisma, req, res, next));
-  router.get('/programacion.xlsx', requireOps, async (req, res) => {
-    const selectedDate = normalizeDateParam(req.query.fecha || req.query.date);
-    const workbook = await buildScheduleWorkbook(prisma, selectedDate);
-    const filename = `programacion-despacho-${selectedDate}.xlsx`;
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    await workbook.xlsx.write(res);
-    res.end();
-  });
-  return router;
-}
+    sele

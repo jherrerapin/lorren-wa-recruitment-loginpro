@@ -195,6 +195,40 @@ async function replaceWorkerRelations(prisma, workerId, body) {
   ]);
 }
 
+/**
+ * cancelWorkerActiveAssignments
+ *
+ * Al desactivar un auxiliar, cancela sus asignaciones pendientes
+ * (ASSIGNED, CONFIRMATION_PENDING) y marca las CONFIRMED como NO_CONFIRMO
+ * para que el operador sepa que necesita buscar reemplazo.
+ * Recalcula el estado de cada solicitud afectada.
+ */
+async function cancelWorkerActiveAssignments(prisma, workerId) {
+  const activeAssignments = await prisma.dispatchAssignment.findMany({
+    where: { workerId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } },
+    select: { id: true, serviceRequestId: true, status: true }
+  });
+  if (!activeAssignments.length) return [];
+
+  const affectedRequestIds = [...new Set(activeAssignments.map((a) => a.serviceRequestId))];
+
+  await prisma.$transaction(
+    activeAssignments.map((a) =>
+      prisma.dispatchAssignment.update({
+        where: { id: a.id },
+        data: {
+          status: a.status === CONFIRMED_ASSIGNMENT_STATUS ? 'NO_CONFIRMO' : 'CANCELLED',
+          notes: 'Auxiliar desactivado desde el modulo de personal.'
+        }
+      })
+    )
+  );
+
+  await Promise.all(affectedRequestIds.map((id) => recalculateServiceRequestStatus(prisma, id)));
+
+  return affectedRequestIds;
+}
+
 export function dispatchOpsExtrasRouter(prisma) {
   const router = express.Router();
 
@@ -423,11 +457,6 @@ export function dispatchOpsExtrasRouter(prisma) {
     }
   });
 
-  /**
-   * Toggle activar/desactivar.
-   * TEMPORAL: acepta cualquier status en DISABLED_STATUSES como "inactivo"
-   * para poder reactivar a Juan Jose Garcia desde ELIMINADO.
-   */
   router.post('/personal/:workerId/toggle', requireOps, async (req, res) => {
     const worker = await prisma.dispatchWorker.findFirst({
       where: { id: req.params.workerId, source: { in: DISPATCH_OWNED_SOURCES } }
@@ -435,11 +464,19 @@ export function dispatchOpsExtrasRouter(prisma) {
     if (!worker) return res.status(404).send('Auxiliar no encontrado o no editable desde este modulo');
     const isCurrentlyActive = worker.operationalStatus === 'CONTRATADO';
     const nextStatus = isCurrentlyActive ? 'DISABLED' : 'CONTRATADO';
+
     await prisma.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: nextStatus } });
-    if (nextStatus === 'CONTRATADO') {
-      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar reactivado. Ya aparece disponible para asignaciones.')}`);
+
+    if (nextStatus === 'DISABLED') {
+      const affectedRequestIds = await cancelWorkerActiveAssignments(prisma, worker.id);
+      const affectedCount = affectedRequestIds.length;
+      const warningNote = affectedCount > 0
+        ? ` Se cancelaron sus asignaciones activas en ${affectedCount} solicitud${affectedCount !== 1 ? 'es' : ''}. Revisa y asigna reemplazos.`
+        : '';
+      return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent(`Auxiliar desactivado.${warningNote} Puedes reactivarlo desde aqui.`)}`);
     }
-    return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent('Auxiliar desactivado. Aparece en la lista de desactivados. Puedes reactivarlo desde aqui.')}`);
+
+    return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar reactivado. Ya aparece disponible para asignaciones.')}`);
   });
 
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
