@@ -38,7 +38,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 COPY prisma ./prisma
-RUN npx prisma generate
+RUN npm run prisma:generate
 
 # cache-bust: 2026-06-24T20:37
 COPY src ./src
