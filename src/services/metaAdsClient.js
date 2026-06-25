@@ -6,6 +6,8 @@ const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
 const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
 const FAVICON_MARKER = 'data-lorren-stats-favicon="true"';
+const SUMMARY_MARKER = 'data-meta-summary-panel="true"';
+const SUMMARY_SCRIPT_MARKER = 'data-meta-summary-script="true"';
 
 function normalizeAdAccountId(value) {
   const raw = String(value || '').trim();
@@ -44,6 +46,32 @@ function removeSectionByTitle(html, title) {
   return html.slice(0, sectionStart) + html.slice(sectionEnd + '</section>'.length);
 }
 
+function renderSummaryPanel() {
+  return [
+    '<section class="card" ' + SUMMARY_MARKER + '>',
+    '  <div class="card-title">Indicadores clave de pauta</div>',
+    '  <div id="metaSummaryCards" class="grid-auto">',
+    '    <div class="kpi"><div class="kpi-value">Cargando...</div><div class="kpi-label">Resumen Meta Ads</div></div>',
+    '  </div>',
+    '</section>'
+  ].join('\n');
+}
+
+function renderSummaryScript() {
+  return [
+    '<script ' + SUMMARY_SCRIPT_MARKER + '>',
+    '(function(){',
+    'function money(v){if(!v){return "—";}return new Intl.NumberFormat("es-CO",{style:"currency",currency:"COP",maximumFractionDigits:0}).format(v);}',
+    'function num(v){return new Intl.NumberFormat("es-CO").format(v||0);}',
+    'function card(label,value,sub){return "<div class=\"kpi\"><div class=\"kpi-value\">"+value+"</div><div class=\"kpi-label\">"+label+"</div><div class=\"kpi-rate\">"+(sub||"")+"</div></div>";}',
+    'function paint(data){var box=document.getElementById("metaSummaryCards");if(!box||!data||!data.ok){return;}var t=data.totals||{};box.innerHTML=card("Inversión Meta",money(t.spend),data.since+" a "+data.until)+card("Clics a WhatsApp/enlace",num(t.inlineLinkClicks||t.clicks),"Costo: "+money(t.costPerLinkClick))+card("Registros completos",num(t.completedRegistrations),"Costo: "+money(t.costPerCompletedRegistration))+card("HV recibidas",num(t.cvReceived),"Costo: "+money(t.costPerCv))+card("Aptos",num(t.apt),"Costo: "+money(t.costPerApt))+card("Contratados",num(t.hired),"Costo: "+money(t.costPerHired));}',
+    'function quickFilter(){var form=document.querySelector("form[action=\"/admin/estadisticas/campaigns\"]");if(!form||document.getElementById("metaQuickFilter")){return;}var wrap=document.createElement("label");wrap.innerHTML="Buscar anuncio, ciudad, vacante o estado <input id=\"metaQuickFilter\" type=\"search\" placeholder=\"Ej: Ibagué, auxiliar, líder...\">";form.insertBefore(wrap,form.firstChild);wrap.querySelector("input").addEventListener("input",function(){var q=this.value.trim().toLowerCase();document.querySelectorAll("table tbody tr").forEach(function(row){row.style.display=!q||row.textContent.toLowerCase().indexOf(q)>-1?"":"none";});});}',
+    'quickFilter();fetch("/admin/estadisticas/meta/summary"+window.location.search,{credentials:"include"}).then(function(r){return r.json();}).then(paint).catch(function(){var box=document.getElementById("metaSummaryCards");if(box){box.innerHTML=card("Resumen Meta Ads","No disponible","Revisa logs si persiste");}});',
+    '})();',
+    '</script>'
+  ].join('\n');
+}
+
 function cleanStatsHtml(html, req) {
   if (typeof html !== 'string' || !isStatsPath(req)) return html;
   let output = html;
@@ -63,6 +91,11 @@ function cleanStatsHtml(html, req) {
   output = removeSectionByTitle(output, 'Nueva campaña');
   output = removeSectionByTitle(output, 'Metadata Meta sin campaña asociada');
   output = removeSectionByTitle(output, 'Sincronización Meta Ads');
+  if (!output.includes(SUMMARY_MARKER)) {
+    const filtersSectionStart = '<section class="card">\n    <div class="card-title">Filtros de análisis</div>';
+    if (output.includes(filtersSectionStart)) output = output.replace(filtersSectionStart, renderSummaryPanel() + '\n' + filtersSectionStart);
+  }
+  if (!output.includes(SUMMARY_SCRIPT_MARKER) && output.includes('</body>')) output = output.replace('</body>', renderSummaryScript() + '\n</body>');
   return output;
 }
 
