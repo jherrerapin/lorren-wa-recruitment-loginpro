@@ -8,6 +8,7 @@ const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
 const FAVICON_HREF = '/public/favicon-loginpro.svg?v=stats';
 const CLEANER_MARKER = 'data-estadisticas-cleaner="true"';
+const QUALITY_COPY = '<strong>Semáforo de calidad</strong>: resume qué tan efectivo fue el anuncio para generar candidatos útiles. Se calcula cuando hay datos suficientes.';
 
 let prismaForStatsPatch = null;
 
@@ -100,6 +101,22 @@ function injectListCleaner(body, req) {
       }
     });
   }
+  function removeManualReviewKpi(){
+    document.querySelectorAll('.kpi-label').forEach(function(label){
+      if (normalize(label.textContent) === 'revisión manual' || normalize(label.textContent) === 'revision manual') {
+        var card = label.closest('.kpi');
+        if (card) card.remove();
+      }
+    });
+  }
+  function fixQualityText(){
+    document.querySelectorAll('.alert').forEach(function(alert){
+      var text = normalize(alert.textContent);
+      if (text.indexOf('quality score') >= 0 || text.indexOf('puntaje 0') >= 0) {
+        alert.innerHTML = '${QUALITY_COPY}';
+      }
+    });
+  }
   function removeSeeButtons(){
     document.querySelectorAll('a[href^="/admin/estadisticas/campaigns/"]').forEach(function(link){
       var text = normalize(link.textContent);
@@ -119,6 +136,8 @@ function injectListCleaner(body, req) {
     document.querySelectorAll('th').forEach(function(el){ if (normalize(el.textContent) === 'campaña') el.textContent = 'Anuncio'; if (normalize(el.textContent) === 'estado') el.textContent = 'Estado Meta'; });
   }
   removeSections();
+  removeManualReviewKpi();
+  fixQualityText();
   removeSeeButtons();
   rename();
 })();
@@ -131,6 +150,8 @@ function installStatsCleaner() {
   const originalSend = express.response.send;
   express.response.send = function patchedSend(body) {
     let output = injectStatsFavicon(body, this.req);
+    output = output.replace(/<div class="kpi"><div class="kpi-value">\$\{humanReview\}<\/div><div class="kpi-label">Revisión manual<\/div><div class="kpi-rate">Duplicados, pausados, rechazados<\/div><\/div>/g, '');
+    output = output.replace(/<div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px"><strong>Quality Score<\/strong>:[\s\S]*?Solo se calcula con ≥3 conversaciones\.<\/div>/g, `<div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">${QUALITY_COPY}</div>`);
     output = injectListCleaner(output, this.req);
     return originalSend.call(this, output);
   };
@@ -190,7 +211,7 @@ async function renderStatsClassificationPage(req, res, campaignId) {
     return `<option value="${escapeHtml(vacancy.id)}" ${selected}>${escapeHtml(vacancy.title)} — ${escapeHtml(vacancy.city)}</option>`;
   }).join('');
 
-  return res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="${FAVICON_HREF}"><title>Clasificación interna del anuncio</title><style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#1a1d23}.navbar{height:52px;background:#1e2d3d;display:flex;align-items:center;gap:8px;padding:0 24px}.navbar a{color:#94a3b8;text-decoration:none;font-size:13px;font-weight:600;padding:6px 10px;border-radius:6px}.navbar a.active,.navbar a:hover{color:#fff;background:rgba(255,255,255,.08)}.spacer{flex:1}.page{max-width:760px;margin:0 auto;padding:24px 18px 56px}.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px}.title{font-size:20px;font-weight:800;color:#1e2d3d;margin:0 0 2px}.muted{font-size:12px;color:#64748b;font-family:monospace;margin-bottom:18px}.card-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#1e2d3d;margin-bottom:12px}.alert{background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;font-weight:600}form{display:grid;gap:12px}label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700;color:#475569}select{width:100%;min-height:40px;border:1px solid #cbd5e1;border-radius:7px;padding:8px 10px;background:#fff}.btn{border:0;border-radius:7px;padding:10px 14px;font-weight:800;cursor:pointer}.btn-primary{background:#0d7a6b;color:#fff}.btn-secondary{display:inline-block;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;text-decoration:none;margin-bottom:12px}.status{font-size:12px;font-weight:800;color:#0d7a6b}@media(max-width:760px){.navbar{padding:0 10px;overflow-x:auto}.navbar a{white-space:nowrap}.page{padding:16px 10px}.card{padding:14px}.btn{width:100%}}</style></head><body><nav class="navbar"><a href="/admin">Panel</a><a href="/admin/estadisticas">Estadísticas</a><a href="/admin/estadisticas/campaigns" class="active">Anuncios</a><span class="spacer"></span><a href="/logout">Cerrar sesión</a></nav><main class="page"><a class="btn btn-secondary" href="/admin/estadisticas/campaigns">← Volver a anuncios</a><h1 class="title">${escapeHtml(campaign.name)}</h1><div class="muted">${escapeHtml(campaign.code || campaign.id)}</div><section class="card"><div class="card-title">Clasificación interna del anuncio</div><div class="alert">Este panel es solo informativo. Aquí únicamente se asigna ciudad y vacante interna; no se crea ni se modifica la campaña publicitaria en Meta Ads.</div><form method="post" action="/admin/estadisticas/campaigns/${escapeHtml(campaign.id)}/edit"><label>Ciudad<select name="city"><option value="">Sin ciudad asignada</option>${cityOptions}</select></label><label>Vacante<select name="vacancyId"><option value="">Sin vacante asignada</option>${vacancyOptions}</select></label><button class="btn btn-primary" type="submit">Guardar clasificación</button><div class="status" id="status"></div></form></section></main><script>function clean(v){return String(v||'').trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')}function optCity(o){var t=String(o.textContent||'');var p=t.lastIndexOf('—');return p>=0?t.slice(p+1).trim():''}var c=document.querySelector('select[name="city"]');var v=document.querySelector('select[name="vacancyId"]');function sync(){var city=clean(c.value);Array.prototype.forEach.call(v.options,function(o){if(!o.value){o.hidden=false;o.disabled=false;return}var ok=!city||clean(optCity(o))===city;o.hidden=!ok;o.disabled=!ok;if(!ok&&o.selected)v.value=''})}c.addEventListener('change',sync);sync();document.querySelector('form').addEventListener('submit',function(){document.getElementById('status').textContent='Guardando clasificación...'})</script></body></html>`);
+  return res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" type="image/svg+xml" href="${FAVICON_HREF}"><title>Clasificación interna del anuncio</title><style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#1a1d23}.navbar{height:52px;background:#1e2d3d;display:flex;align-items:center;gap:8px;padding:0 24px}.navbar a{color:#94a3b8;text-decoration:none;font-size:13px;font-weight:600;padding:6px 10px;border-radius:6px}.navbar a.active,.navbar a:hover{color:#fff;background:rgba(255,255,255,.08)}.spacer{flex:1}.page{max-width:760px;margin:0 auto;padding:24px 18px 56px}.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px}.title{font-size:20px;font-weight:800;color:#1e2d3d;margin:0 0 2px}.muted{font-size:12px;color:#64748b;font-family:monospace;margin-bottom:18px}.card-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#1e2d3d;margin-bottom:12px}.alert{background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;font-weight:600}form{display:grid;gap:12px}label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700;color:#475569}select{width:100%;min-height:40px;border:1px solid #cbd5e1;border-radius:7px;padding:8px 10px;background:#fff}.btn{border:0;border-radius:7px;padding:10px 14px;font-weight:800;cursor:pointer}.btn-primary{background:#0d7a6b;color:#fff}.btn-secondary{display:inline-block;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;text-decoration:none;margin-bottom:12px}.status{font-size:12px;font-weight:800;color:#0d7a6b}@media(max-width:760px){.navbar{padding:0 10px;overflow-x:auto}.navbar a{white-space:nowrap}.page{padding:16px 10px}.btn{width:100%}}</style></head><body><nav class="navbar"><a href="/admin">Panel</a><a href="/admin/estadisticas">Estadísticas</a><a href="/admin/estadisticas/campaigns" class="active">Anuncios</a><span class="spacer"></span><a href="/logout">Cerrar sesión</a></nav><main class="page"><a class="btn btn-secondary" href="/admin/estadisticas/campaigns">← Volver a anuncios</a><h1 class="title">${escapeHtml(campaign.name)}</h1><div class="muted">${escapeHtml(campaign.code || campaign.id)}</div><section class="card"><div class="card-title">Clasificación interna del anuncio</div><div class="alert">Este panel es solo informativo. Aquí únicamente se asigna ciudad y vacante interna; no se crea ni se modifica la campaña publicitaria en Meta Ads.</div><form method="post" action="/admin/estadisticas/campaigns/${escapeHtml(campaign.id)}/edit"><label>Ciudad<select name="city"><option value="">Sin ciudad asignada</option>${cityOptions}</select></label><label>Vacante<select name="vacancyId"><option value="">Sin vacante asignada</option>${vacancyOptions}</select></label><button class="btn btn-primary" type="submit">Guardar clasificación</button><div class="status" id="status"></div></form></section></main><script>function clean(v){return String(v||'').trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')}function optCity(o){var t=String(o.textContent||'');var p=t.lastIndexOf('—');return p>=0?t.slice(p+1).trim():''}var c=document.querySelector('select[name="city"]');var v=document.querySelector('select[name="vacancyId"]');function sync(){var city=clean(c.value);Array.prototype.forEach.call(v.options,function(o){if(!o.value){o.hidden=false;o.disabled=false;return}var ok=!city||clean(optCity(o))===city;o.hidden=!ok;o.disabled=!ok;if(!ok&&o.selected)v.value=''})}c.addEventListener('change',sync);sync();document.querySelector('form').addEventListener('submit',function(){document.getElementById('status').textContent='Guardando clasificación...'})</script></body></html>`);
 }
 
 function installStatsClassificationRouter() {
