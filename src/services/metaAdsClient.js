@@ -6,10 +6,11 @@ const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
 const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
 const FAVICON_MARKER = 'data-lorren-stats-favicon="true"';
-const FAVICON_HREF = '/public/logo-loginpro.svg';
+const FAVICON_HREF = '/favicon.ico';
 const SUMMARY_MARKER = 'data-meta-summary-panel="true"';
 const SUMMARY_SCRIPT_MARKER = 'data-meta-summary-script="true"';
 const CLASSIFICATION_SCRIPT_MARKER = 'data-meta-classification-script="true"';
+const RESPONSIVE_STYLE_MARKER = 'data-meta-responsive-style="true"';
 
 function normalizeAdAccountId(value) {
   const raw = String(value || '').trim();
@@ -58,11 +59,40 @@ function removeSectionByTitle(html, title) {
 
 function injectFavicon(html) {
   if (typeof html !== 'string' || outputHasFavicon(html) || !html.includes('<head>')) return html;
-  return html.replace('<head>', `<head>\n  <link ${FAVICON_MARKER} rel="icon" type="image/svg+xml" href="${FAVICON_HREF}">`);
+  return html.replace('<head>', `<head>\n  <link ${FAVICON_MARKER} rel="icon" href="${FAVICON_HREF}">`);
 }
 
 function outputHasFavicon(html) {
   return html.includes(FAVICON_MARKER) || html.includes(`href="${FAVICON_HREF}"`);
+}
+
+function renderResponsiveStyle() {
+  return `<style ${RESPONSIVE_STYLE_MARKER}>
+    .classification-save-status { margin-top: 10px; font-size: 12px; font-weight: 700; color: #0d7a6b; }
+    .classification-save-status.error { color: #dc2626; }
+    @media (max-width: 920px) {
+      .page { padding: 16px 10px 40px !important; max-width: 100% !important; }
+      .navbar { padding: 0 10px !important; overflow-x: auto !important; }
+      .navbar a { white-space: nowrap !important; }
+      .card { padding: 14px !important; border-radius: 9px !important; }
+      .grid-2, .grid-3, .grid-form { grid-template-columns: 1fr !important; }
+      .grid-auto { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)) !important; gap: 8px !important; }
+      .kpi { padding: 10px 11px !important; }
+      .kpi-value { font-size: 21px !important; line-height: 1.1 !important; word-break: break-word !important; }
+      .kpi-label, .kpi-rate { font-size: 10px !important; }
+      .btn { width: 100% !important; justify-content: center !important; min-height: 38px !important; }
+      .btn-sm { width: auto !important; min-height: 30px !important; }
+      .table-wrap { width: 100% !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; }
+      table { min-width: 980px !important; font-size: 12px !important; }
+      th, td { padding: 8px 7px !important; }
+      .funnel { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important; gap: 8px !important; overflow: visible !important; }
+      .funnel-step { border: 1px solid #e2e8f0 !important; border-radius: 8px !important; min-width: 0 !important; }
+      .funnel-arrow { display: none !important; }
+      .funnel-step-value { font-size: 20px !important; }
+      input, select, textarea { min-height: 38px !important; }
+      form[method="post"] button[type="submit"] { width: 100% !important; }
+    }
+  </style>`;
 }
 
 function renderSummaryPanel() {
@@ -79,14 +109,8 @@ function renderSummaryPanel() {
 function renderStatsUiScript() {
   return `<script ${SUMMARY_SCRIPT_MARKER}>
 (function(){
-  function norm(value){
-    return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  }
-  function optionCity(option){
-    var text = String(option && option.textContent || '').trim();
-    var index = text.lastIndexOf('—');
-    return index >= 0 ? text.slice(index + 1).trim() : '';
-  }
+  function norm(value){ return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+  function optionCity(option){ var text = String(option && option.textContent || '').trim(); var index = text.lastIndexOf('—'); return index >= 0 ? text.slice(index + 1).replace('✓ entrevista','').trim() : ''; }
   function wireCityVacancySync(){
     document.querySelectorAll('select[name="city"]').forEach(function(citySelect){
       var form = citySelect.closest('form') || document;
@@ -96,33 +120,19 @@ function renderStatsUiScript() {
       function sync(){
         var selectedCity = norm(citySelect.value);
         Array.prototype.forEach.call(vacancySelect.options, function(option){
-          if (!option.value) {
-            option.hidden = false;
-            option.disabled = false;
-            return;
-          }
+          if (!option.value) { option.hidden = false; option.disabled = false; return; }
           var matches = !selectedCity || norm(optionCity(option)) === selectedCity;
-          option.hidden = !matches;
-          option.disabled = !matches;
+          option.hidden = !matches; option.disabled = !matches;
           if (!matches && option.selected) vacancySelect.value = '';
         });
       }
-      citySelect.addEventListener('change', sync);
-      sync();
+      citySelect.addEventListener('change', sync); sync();
     });
   }
-  function money(v){
-    if(!v){return '—';}
-    return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(v);
-  }
+  function money(v){ if(!v){return '—';} return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(v); }
   function num(v){return new Intl.NumberFormat('es-CO').format(v||0);}
   function card(label,value,sub){return '<div class="kpi"><div class="kpi-value">'+value+'</div><div class="kpi-label">'+label+'</div><div class="kpi-rate">'+(sub||'')+'</div></div>';}
-  function paint(data){
-    var box=document.getElementById('metaSummaryCards');
-    if(!box||!data||!data.ok){return;}
-    var t=data.totals||{};
-    box.innerHTML=card('Inversión Meta',money(t.spend),data.since+' a '+data.until)+card('Clics a WhatsApp/enlace',num(t.inlineLinkClicks||t.clicks),'Costo: '+money(t.costPerLinkClick))+card('Registros completos',num(t.completedRegistrations),'Costo: '+money(t.costPerCompletedRegistration))+card('HV recibidas',num(t.cvReceived),'Costo: '+money(t.costPerCv))+card('Aptos',num(t.apt),'Costo: '+money(t.costPerApt))+card('Contratados',num(t.hired),'Costo: '+money(t.costPerHired));
-  }
+  function paint(data){ var box=document.getElementById('metaSummaryCards'); if(!box||!data||!data.ok){return;} var t=data.totals||{}; box.innerHTML=card('Inversión Meta',money(t.spend),data.since+' a '+data.until)+card('Clics a WhatsApp/enlace',num(t.inlineLinkClicks||t.clicks),'Costo: '+money(t.costPerLinkClick))+card('Registros completos',num(t.completedRegistrations),'Costo: '+money(t.costPerCompletedRegistration))+card('HV recibidas',num(t.cvReceived),'Costo: '+money(t.costPerCv))+card('Aptos',num(t.apt),'Costo: '+money(t.costPerApt))+card('Contratados',num(t.hired),'Costo: '+money(t.costPerHired)); }
   function quickFilter(){
     var form=document.querySelector('form[action="/admin/estadisticas/campaigns"]');
     if(!form||document.getElementById('metaQuickFilter')){return;}
@@ -131,13 +141,11 @@ function renderStatsUiScript() {
     form.insertBefore(wrap,form.firstChild);
     wrap.querySelector('input').addEventListener('input',function(){
       var q=this.value.trim().toLowerCase();
-      document.querySelectorAll('table tbody tr').forEach(function(row){
-        row.style.display=!q||row.textContent.toLowerCase().indexOf(q)>-1?'':'none';
-      });
+      document.querySelectorAll('table tbody tr').forEach(function(row){ row.style.display=!q||row.textContent.toLowerCase().indexOf(q)>-1?'':'none'; });
     });
   }
-  wireCityVacancySync();
-  quickFilter();
+  document.querySelectorAll('.funnel-step-value').forEach(function(el){ if(!el.textContent.trim()) el.textContent='0'; });
+  wireCityVacancySync(); quickFilter();
   fetch('/admin/estadisticas/meta/summary'+window.location.search,{credentials:'include'}).then(function(r){return r.json();}).then(paint).catch(function(){var box=document.getElementById('metaSummaryCards');if(box){box.innerHTML=card('Resumen Meta Ads','No disponible','Revisa logs si persiste');}});
 })();
 </script>`;
@@ -146,14 +154,8 @@ function renderStatsUiScript() {
 function renderClassificationScript() {
   return `<script ${CLASSIFICATION_SCRIPT_MARKER}>
 (function(){
-  function norm(value){
-    return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  }
-  function optionCity(option){
-    var text = String(option && option.textContent || '').trim();
-    var index = text.lastIndexOf('—');
-    return index >= 0 ? text.slice(index + 1).trim() : '';
-  }
+  function norm(value){ return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+  function optionCity(option){ var text = String(option && option.textContent || '').trim(); var index = text.lastIndexOf('—'); return index >= 0 ? text.slice(index + 1).replace('✓ entrevista','').trim() : ''; }
   function wireCityVacancySync(){
     document.querySelectorAll('select[name="city"]').forEach(function(citySelect){
       var form = citySelect.closest('form') || document;
@@ -163,31 +165,19 @@ function renderClassificationScript() {
       function sync(){
         var selectedCity = norm(citySelect.value);
         Array.prototype.forEach.call(vacancySelect.options, function(option){
-          if (!option.value) {
-            option.hidden = false;
-            option.disabled = false;
-            return;
-          }
+          if (!option.value) { option.hidden = false; option.disabled = false; return; }
           var matches = !selectedCity || norm(optionCity(option)) === selectedCity;
-          option.hidden = !matches;
-          option.disabled = !matches;
+          option.hidden = !matches; option.disabled = !matches;
           if (!matches && option.selected) vacancySelect.value = '';
         });
       }
-      citySelect.addEventListener('change', sync);
-      sync();
+      citySelect.addEventListener('change', sync); sync();
     });
   }
-  document.querySelectorAll('.page-header h1').forEach(function(el){
-    el.textContent = el.textContent.replace(/^Campaña:/, 'Anuncio:');
-  });
-  document.querySelectorAll('a.btn').forEach(function(el){
-    var text = (el.textContent || '').trim();
-    if (text.indexOf('← Campañas') === 0) el.textContent = '← Anuncios';
-  });
-  document.querySelectorAll('.card-title').forEach(function(el){
-    if ((el.textContent || '').trim() === 'Editar campaña') el.textContent = 'Clasificación interna del anuncio';
-  });
+  document.querySelectorAll('.page-header h1').forEach(function(el){ el.textContent = el.textContent.replace(/^Campaña:/, 'Anuncio:'); });
+  document.querySelectorAll('a.btn').forEach(function(el){ var text = (el.textContent || '').trim(); if (text.indexOf('← Campañas') === 0) el.textContent = '← Anuncios'; });
+  document.querySelectorAll('.card-title').forEach(function(el){ if ((el.textContent || '').trim() === 'Editar campaña') el.textContent = 'Clasificación interna del anuncio'; });
+  document.querySelectorAll('.funnel-step-value').forEach(function(el){ if(!el.textContent.trim()) el.textContent='0'; });
   var form = document.querySelector('form[action*="/admin/estadisticas/campaigns/"][action$="/edit"]');
   if (form) {
     if (!form.querySelector('[data-classification-help="true"]')) {
@@ -199,13 +189,19 @@ function renderClassificationScript() {
       form.insertBefore(help, form.firstChild);
     }
     ['name','budgetCOP','notes','startsAt','endsAt','isActive'].forEach(function(field){
-      form.querySelectorAll('[name="'+field+'"]').forEach(function(input){
-        var label = input.closest('label');
-        if (label) label.style.display = 'none';
-      });
+      form.querySelectorAll('[name="'+field+'"]').forEach(function(input){ var label = input.closest('label'); if (label) label.style.display = 'none'; });
     });
     var button = form.querySelector('button[type="submit"]');
-    if (button) button.textContent = 'Guardar clasificación interna';
+    if (button) { button.textContent = 'Guardar clasificación interna'; button.style.width = '100%'; button.style.justifyContent = 'center'; }
+    var status = document.createElement('div');
+    status.className = 'classification-save-status';
+    status.textContent = '';
+    form.appendChild(status);
+    form.addEventListener('submit', function(){
+      if (button) button.textContent = 'Guardando clasificación...';
+      status.className = 'classification-save-status';
+      status.textContent = 'Guardando ciudad y vacante asociada...';
+    });
   }
   wireCityVacancySync();
 })();
@@ -215,6 +211,7 @@ function renderClassificationScript() {
 function cleanStatsHtml(html, req) {
   if (typeof html !== 'string' || !isStatsPath(req)) return html;
   let output = injectFavicon(html);
+  if (!output.includes(RESPONSIVE_STYLE_MARKER) && output.includes('</head>')) output = output.replace('</head>', renderResponsiveStyle() + '\n</head>');
 
   if (isCampaignDetailPath(req)) {
     output = output.replace(/Campaña:/g, 'Anuncio:');
@@ -229,6 +226,7 @@ function cleanStatsHtml(html, req) {
   output = output.replace('<div class="alert alert-info">Meta Ads no configurado. Las métricas internas de Lórren siguen disponibles.</div>', '');
   output = output.replace(/Campañas Meta Ads/g, 'Anuncios Meta Ads');
   output = output.replace(/Campañas registradas/g, 'Anuncios Meta sincronizados');
+  output = output.replace(/Embudo de conversión — todas las campañas/g, 'Embudo de conversión — anuncios sincronizados');
   output = output.replace(/<th>Campaña<\/th>/g, '<th>Anuncio</th>');
   output = output.replace(/<th>Estado<\/th>/g, '<th>Estado Meta</th>');
   output = output.replace(/>Ver →<\/a>/g, '>Clasificar</a>');
