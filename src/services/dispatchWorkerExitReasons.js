@@ -5,7 +5,6 @@ const BASE_PATH = '/admin/operaciones';
 const TOGGLE_PATH_PATTERN = /^\/admin\/operaciones\/personal\/([^/]+)\/toggle$/;
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
-const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT'];
 const SCRIPT_MARKER = 'data-dispatch-exit-reasons="true"';
 const AUDIT_ACTION = 'DISPATCH_WORKER_EXIT_REASON';
 const SUBSTANCE_WORD = 'estupefac' + 'ientes';
@@ -33,10 +32,28 @@ let prisma = null;
 function db() { if (!prisma) prisma = new PrismaClient(); return prisma; }
 function text(value) { if (typeof value !== 'string') return null; const out = value.trim(); return out ? out : null; }
 function requestPath(req = {}) { return String(req.originalUrl || req.url || '').split('?')[0]; }
-function opsAllowed(req = {}) { const role = req.session?.userRole || req.userRole; const user = text(req.session?.username || req.username); return role === 'dev' || Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) || Boolean(user?.startsWith('operaciones-despacho')); }
+function opsAllowed(req = {}) {
+  const role = req.session?.userRole || req.userRole;
+  const user = text(req.session?.username || req.username);
+  return role === 'dev' || Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) || Boolean(user?.startsWith('operaciones-despacho'));
+}
 function reasonByCode(code) { return EXIT_REASONS.find((reason) => reason.code === code) || null; }
-function addMessage(pathValue, message) { const [pathname, query = ''] = String(pathValue || '/admin/operaciones/personal').split('?'); const params = new URLSearchParams(query); params.set('message', message); return `${pathname}?${params.toString()}`; }
-function safeBack(req) { const referer = req.get?.('referer'); if (!referer) return '/admin/operaciones/personal'; try { const parsed = new URL(referer); const origin = `${req.protocol}://${req.get('host')}`; if (parsed.origin === origin && parsed.pathname.startsWith('/admin/operaciones/personal')) return `${parsed.pathname}${parsed.search}`; } catch (_error) {} return '/admin/operaciones/personal'; }
+function addMessage(pathValue, message) {
+  const [pathname, query = ''] = String(pathValue || '/admin/operaciones/personal').split('?');
+  const params = new URLSearchParams(query);
+  params.set('message', message);
+  return `${pathname}?${params.toString()}`;
+}
+function safeBack(req) {
+  const referer = req.get?.('referer');
+  if (!referer) return '/admin/operaciones/personal';
+  try {
+    const parsed = new URL(referer);
+    const origin = `${req.protocol}://${req.get('host')}`;
+    if (parsed.origin === origin && parsed.pathname.startsWith('/admin/operaciones/personal')) return `${parsed.pathname}${parsed.search}`;
+  } catch (_error) {}
+  return '/admin/operaciones/personal';
+}
 
 async function recalculateRequest(prismaClient, serviceRequestId) {
   const serviceRequest = await prismaClient.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } });
@@ -67,7 +84,11 @@ async function cancelAssignments(prismaClient, workerId, reasonLabel) {
 
 async function saveExitReason(prismaClient, worker, req) {
   const reason = reasonByCode(text(req.body?.exitReasonCode));
-  if (!reason) { const error = new Error('Debes seleccionar una causal de retiro para desactivar el auxiliar.'); error.statusCode = 400; throw error; }
+  if (!reason) {
+    const error = new Error('Debes seleccionar una causal de retiro para desactivar el auxiliar.');
+    error.statusCode = 400;
+    throw error;
+  }
   const note = text(req.body?.exitReasonNote);
   const actor = text(req.session?.username || req.username) || 'sistema';
   await prismaClient.$transaction([
@@ -87,8 +108,8 @@ async function saveExitReason(prismaClient, worker, req) {
 async function handleToggle(req, res, next, workerId) {
   if (!opsAllowed(req)) return res.status(403).send('Módulo no habilitado para este usuario');
   const prismaClient = db();
-  const worker = await prismaClient.dispatchWorker.findFirst({ where: { id: workerId, source: { in: DISPATCH_OWNED_SOURCES } }, select: { id: true, fullName: true, operationalStatus: true } });
-  if (!worker) return res.status(404).send('Auxiliar no encontrado o no editable desde este módulo');
+  const worker = await prismaClient.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true, fullName: true, operationalStatus: true } });
+  if (!worker) return res.redirect(addMessage(safeBack(req), 'No se encontró el auxiliar. Recarga la lista e intenta nuevamente.'));
   try {
     if (worker.operationalStatus === 'CONTRATADO') {
       const reason = await saveExitReason(prismaClient, worker, req);
@@ -125,8 +146,15 @@ function installRouterPatch() {
     const router = originalRouter.apply(express, args);
     router.use(async (req, res, next) => {
       const path = requestPath(req);
-      if (req.method === 'POST') { const match = path.match(TOGGLE_PATH_PATTERN); if (match) return handleToggle(req, res, next, decodeURIComponent(match[1])); }
-      if (req.method === 'GET' && path === `${BASE_PATH}/personal/exit-reasons`) { if (!opsAllowed(req)) return res.status(403).json({ ok: false }); const workerIds = String(req.query?.workerIds || '').split(',').map((id) => id.trim()).filter(Boolean).slice(0, 500); return res.json({ ok: true, ...(await statsPayload(workerIds)) }); }
+      if (req.method === 'POST') {
+        const match = path.match(TOGGLE_PATH_PATTERN);
+        if (match) return handleToggle(req, res, next, decodeURIComponent(match[1]));
+      }
+      if (req.method === 'GET' && path === `${BASE_PATH}/personal/exit-reasons`) {
+        if (!opsAllowed(req)) return res.status(403).json({ ok: false });
+        const workerIds = String(req.query?.workerIds || '').split(',').map((id) => id.trim()).filter(Boolean).slice(0, 500);
+        return res.json({ ok: true, ...(await statsPayload(workerIds)) });
+      }
       return next();
     });
     return router;
@@ -143,10 +171,66 @@ function uiScript() {
   function n(v){return String(v||'').trim().toLowerCase();}
   function opts(){return reasons.map(function(r){return '<option value="'+h(r.code)+'">'+h(r.label)+'</option>';}).join('');}
   var selectedForm=null;
-  function modal(){var m=document.getElementById('exit-reason-modal'); if(m) return m; m=document.createElement('div'); m.className='modal-overlay'; m.id='exit-reason-modal'; m.innerHTML='<div class="modal"><h3>Desactivar auxiliar</h3><p>Selecciona la causal de retiro. Esta información alimentará las estadísticas del módulo de despacho.</p><div class="field" style="margin-bottom:12px"><label>Causal de retiro *</label><select id="exitReasonCode" required><option value="">Selecciona una causal</option>'+opts()+'</select></div><div class="field" style="margin-bottom:16px"><label>Nota opcional</label><textarea id="exitReasonNote" rows="3" style="width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:inherit"></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" id="exitReasonCancel">Cancelar</button><button type="button" class="btn btn-danger" id="exitReasonConfirm">Desactivar auxiliar</button></div></div>'; document.body.appendChild(m); m.addEventListener('click',function(e){if(e.target===m)m.classList.remove('open')}); document.getElementById('exitReasonCancel').addEventListener('click',function(){m.classList.remove('open')}); return m;}
-  document.querySelectorAll('form[action*="/admin/operaciones/personal/"][action$="/toggle"]').forEach(function(form){var b=form.querySelector('button[type="submit"]'); if(!b||n(b.textContent)!=='desactivar') return; form.addEventListener('submit',function(e){e.preventDefault(); selectedForm=form; modal().classList.add('open'); document.getElementById('exitReasonCode').value=''; document.getElementById('exitReasonNote').value=''; document.getElementById('exitReasonCode').focus();});});
-  document.addEventListener('click',function(e){if(!e.target||e.target.id!=='exitReasonConfirm')return; var code=document.getElementById('exitReasonCode'); var note=document.getElementById('exitReasonNote'); if(!code.value){code.focus();return;} selectedForm.querySelectorAll('input[name="exitReasonCode"],input[name="exitReasonNote"]').forEach(function(i){i.remove()}); var a=document.createElement('input'); a.type='hidden'; a.name='exitReasonCode'; a.value=code.value; var b=document.createElement('input'); b.type='hidden'; b.name='exitReasonNote'; b.value=note.value||''; selectedForm.appendChild(a); selectedForm.appendChild(b); selectedForm.submit();});
-  function loadStats(){var table=document.getElementById('workers-table'); if(!table)return; var rows=[].slice.call(table.querySelectorAll('tbody tr[data-id]')); var ids=rows.map(function(r){return r.dataset.id}).filter(Boolean); fetch('/admin/operaciones/personal/exit-reasons?workerIds='+encodeURIComponent(ids.join(',')),{credentials:'include'}).then(function(r){return r.json()}).then(function(p){if(!p||!p.ok)return; var workers=p.workers||{}; var disabled=rows.filter(function(row){return workers[row.dataset.id]&&workers[row.dataset.id].label}); if(disabled.length){var head=table.querySelector('thead tr'); if(head&&!head.querySelector('[data-exit-head]')){var th=document.createElement('th'); th.textContent='Causal retiro'; th.setAttribute('data-exit-head','true'); head.insertBefore(th,head.lastElementChild);} disabled.forEach(function(row){if(row.querySelector('[data-exit-cell]'))return; var data=workers[row.dataset.id]; var td=document.createElement('td'); td.setAttribute('data-exit-cell','true'); td.innerHTML='<span class="pill pill-red">'+h(data.label)+'</span>'+(data.note?'<br><span class="muted">'+h(data.note)+'</span>':''); row.insertBefore(td,row.lastElementChild);});} if(p.stats&&p.stats.length&&!document.getElementById('exit-reason-stats')){var panel=document.querySelector('.panel'); var card=document.createElement('section'); card.className='filters-card'; card.id='exit-reason-stats'; card.innerHTML='<div class="filters-head"><h2>Causales de retiro</h2><p>Resumen histórico de auxiliares desactivados por causal.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap">'+p.stats.slice(0,6).map(function(s){return '<span class="pill pill-red">'+h(s.reasonLabel)+' · '+Number(s.count||0)+'</span>';}).join('')+'</div>'; if(panel)panel.parentNode.insertBefore(card,panel);}}).catch(function(){});}
+  function modal(){
+    var m=document.getElementById('exit-reason-modal');
+    if(m) return m;
+    m=document.createElement('div');
+    m.className='modal-overlay';
+    m.id='exit-reason-modal';
+    m.innerHTML='<div class="modal"><h3>Desactivar auxiliar</h3><p>Selecciona la causal de retiro. Esta información alimentará las estadísticas del módulo de despacho.</p><div class="field" style="margin-bottom:12px"><label>Causal de retiro *</label><select id="exitReasonCode" required><option value="">Selecciona una causal</option>'+opts()+'</select></div><div class="field" style="margin-bottom:16px"><label>Nota opcional</label><textarea id="exitReasonNote" rows="3" style="width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:inherit"></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" id="exitReasonCancel">Cancelar</button><button type="button" class="btn btn-danger" id="exitReasonConfirm">Desactivar auxiliar</button></div></div>';
+    document.body.appendChild(m);
+    m.addEventListener('click',function(e){if(e.target===m)m.classList.remove('open')});
+    document.getElementById('exitReasonCancel').addEventListener('click',function(){m.classList.remove('open')});
+    return m;
+  }
+  document.querySelectorAll('form[action*="/admin/operaciones/personal/"][action$="/toggle"]').forEach(function(form){
+    var b=form.querySelector('button[type="submit"]');
+    if(!b||n(b.textContent)!=='desactivar') return;
+    form.addEventListener('submit',function(e){
+      e.preventDefault();
+      selectedForm=form;
+      modal().classList.add('open');
+      document.getElementById('exitReasonCode').value='';
+      document.getElementById('exitReasonNote').value='';
+      document.getElementById('exitReasonCode').focus();
+    });
+  });
+  document.addEventListener('click',function(e){
+    if(!e.target||e.target.id!=='exitReasonConfirm')return;
+    var code=document.getElementById('exitReasonCode');
+    var note=document.getElementById('exitReasonNote');
+    if(!code.value){code.focus();return;}
+    selectedForm.querySelectorAll('input[name="exitReasonCode"],input[name="exitReasonNote"]').forEach(function(i){i.remove()});
+    var a=document.createElement('input'); a.type='hidden'; a.name='exitReasonCode'; a.value=code.value;
+    var b=document.createElement('input'); b.type='hidden'; b.name='exitReasonNote'; b.value=note.value||'';
+    selectedForm.appendChild(a); selectedForm.appendChild(b); selectedForm.submit();
+  });
+  function loadStats(){
+    var table=document.getElementById('workers-table');
+    if(!table)return;
+    var rows=[].slice.call(table.querySelectorAll('tbody tr[data-id]'));
+    var ids=rows.map(function(r){return r.dataset.id}).filter(Boolean);
+    fetch('/admin/operaciones/personal/exit-reasons?workerIds='+encodeURIComponent(ids.join(',')),{credentials:'include'})
+      .then(function(r){return r.json()})
+      .then(function(p){
+        if(!p||!p.ok)return;
+        var workers=p.workers||{};
+        var disabled=rows.filter(function(row){return workers[row.dataset.id]&&workers[row.dataset.id].label});
+        if(disabled.length){
+          var head=table.querySelector('thead tr');
+          if(head&&!head.querySelector('[data-exit-head]')){
+            var th=document.createElement('th'); th.textContent='Causal retiro'; th.setAttribute('data-exit-head','true'); head.insertBefore(th,head.lastElementChild);
+          }
+          disabled.forEach(function(row){
+            if(row.querySelector('[data-exit-cell]'))return;
+            var data=workers[row.dataset.id];
+            var td=document.createElement('td'); td.setAttribute('data-exit-cell','true');
+            td.innerHTML='<span class="pill pill-red">'+h(data.label)+'</span>'+(data.note?'<br><span class="muted">'+h(data.note)+'</span>':'');
+            row.insertBefore(td,row.lastElementChild);
+          });
+        }
+      }).catch(function(){});
+  }
   loadStats();
 })();
 </script>`;
