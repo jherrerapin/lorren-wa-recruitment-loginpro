@@ -829,147 +829,228 @@ function renderCampaignDetail({ campaign, candidates = [], cities = [], vacancie
 }
 
 // ─── Router ────────────────────────────────────────────────────────────────────
+// FIX: Se crea el router dentro de la función factory para que el middleware
+// de inyección de prisma quede PRIMERO en el stack, antes de los handlers.
 
-const router = express.Router();
-
-router.get('/campaigns', canSeeLorenV2, async (req, res) => {
-  try {
-    const { prisma } = req;
-    const data = await loadCampaignDashboardData(prisma, req.query);
-    const successMsg = req.query.success ? (req.query.success === 'asociado' ? 'Candidato asociado correctamente.' : 'Campaña creada correctamente.') : null;
-    const body = `
-      <div class="page-header"><h1>Campañas Meta Ads</h1><p>Seguimiento de efectividad por pauta publicitaria — ${CAMPAIGN_SOURCE_LABEL}</p></div>
-      ${successMsg ? `<div class="alert alert-success">${escapeHtml(successMsg)}</div>` : ''}
-      ${renderFilters({ filters: data.filters, cities: data.cities, vacancies: data.vacancies })}
-      ${data.campaigns.length ? renderFunnel(data.campaigns) : ''}
-      ${renderCampaignTable(data.campaigns)}
-      ${renderUnmatched(data.unmatched, data.campaigns)}
-      ${renderCreateForm({ cities: data.cities, vacancies: data.vacancies })}`;
-    res.send(renderLayout({ title: 'Campañas — Loren V2', body }));
-  } catch (err) {
-    console.error('[lorenV2 campaigns GET]', err);
-    res.status(500).send(renderLayout({ title: 'Error', body: '<div class="alert alert-error">Error interno cargando las campañas.</div>' }));
-  }
-});
-
-router.get('/campaigns.json', canSeeLorenV2, async (req, res) => {
-  try {
-    const data = await loadCampaignDashboardData(req.prisma, req.query);
-    const result = data.campaigns.map((campaign) => ({
-      id: campaign.id, code: campaign.code, name: campaign.name, city: campaign.city,
-      isActive: campaign.isActive, budgetCOP: campaign.budgetCOP ? Number(campaign.budgetCOP) : null,
-      vacancy: campaign.vacancy ? { id: campaign.vacancy.id, title: campaign.vacancy.title } : null,
-      metric: buildCampaignMetric(campaign, Boolean(campaign.vacancy?.schedulingEnabled))
-    }));
-    res.json({ ok: true, campaigns: result, total: result.length });
-  } catch (err) {
-    console.error('[lorenV2 campaigns.json]', err);
-    res.status(500).json({ ok: false, error: 'Error interno' });
-  }
-});
-
-router.get('/campaigns/:id', canSeeLorenV2, async (req, res) => {
-  try {
-    const { prisma } = req;
-    const campaign = await prisma.campaign.findUnique({
-      where: { id: req.params.id },
-      include: { vacancy: { select: { id: true, title: true, city: true, schedulingEnabled: true } } }
-    });
-    if (!campaign) return res.status(404).send(renderLayout({ title: 'No encontrada', body: '<div class="alert alert-error">Campaña no encontrada.</div>' }));
-    const range = dateRangeFromQuery(req.query);
-    const [candidates, cities, vacancies] = await Promise.all([loadCandidatesForCampaigns(prisma, range), loadCities(prisma), loadVacancies(prisma, {})]);
-    const enriched = enrichCampaignsWithAttribution([campaign], candidates);
-    const attributed = enriched[0]?.attributedCandidates || [];
-    const successMsg = req.query.success ? 'Cambios guardados correctamente.' : null;
-    res.send(renderCampaignDetail({ campaign, candidates: attributed, cities, vacancies, success: successMsg }));
-  } catch (err) {
-    console.error('[lorenV2 campaign detail]', err);
-    res.status(500).send(renderLayout({ title: 'Error', body: '<div class="alert alert-error">Error cargando la campaña.</div>' }));
-  }
-});
-
-router.post('/campaigns', requireLorenV2, async (req, res) => {
-  const { prisma, body } = req;
-  const code = normalizeCampaignCode(body.code || '');
-  const name = normalizeString(body.name);
-  const city = normalizeString(body.city);
-  const vacancyId = normalizeString(body.vacancyId);
-  const notes = normalizeString(body.notes);
-  const startsAt = normalizeDateInput(body.startsAt);
-  const endsAt = normalizeDateInput(body.endsAt);
-  const budgetCOP = body.budgetCOP ? parseFloat(body.budgetCOP) : null;
-
-  const reload = async (error) => {
-    const data = await loadCampaignDashboardData(prisma, {});
-    const body2 = `<div class="page-header"><h1>Campañas Meta Ads</h1><p>${CAMPAIGN_SOURCE_LABEL}</p></div>${renderFilters({ filters: {}, cities: data.cities, vacancies: data.vacancies })}${data.campaigns.length ? renderFunnel(data.campaigns) : ''}${renderCampaignTable(data.campaigns)}${renderUnmatched(data.unmatched, data.campaigns)}${renderCreateForm({ cities: data.cities, vacancies: data.vacancies, error })}`;
-    res.status(400).send(renderLayout({ title: 'Campañas — Loren V2', body: body2 }));
-  };
-
-  if (!code || !isValidCampaignCode(code)) return reload('El código ingresado no es válido.');
-  if (!name) return reload('El nombre de la campaña es obligatorio.');
-  if (budgetCOP !== null && (isNaN(budgetCOP) || budgetCOP < 0)) return reload('El presupuesto debe ser un número positivo en COP.');
-
-  try {
-    const existing = await prisma.campaign.findUnique({ where: { code } });
-    if (existing) return reload(`Ya existe una campaña con el código "${code}".`);
-    await prisma.campaign.create({
-      data: {
-        id: `cmp_${Date.now()}`, code, name, sourceType: CAMPAIGN_SOURCE_TYPE,
-        city: city || null, vacancyId: vacancyId || null, notes: notes || null,
-        budgetCOP: budgetCOP ? budgetCOP : null,
-        startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null,
-        endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null,
-        isActive: true, createdByUsername: req.session?.username || null
-      }
-    });
-    res.redirect('/admin/v2/campaigns?success=1');
-  } catch (err) {
-    console.error('[lorenV2 campaigns POST]', err);
-    reload('Error al guardar la campaña. Intenta de nuevo.');
-  }
-});
-
-router.post('/campaigns/:id/edit', requireLorenV2, async (req, res) => {
-  const { prisma, body } = req;
-  const name = normalizeString(body.name);
-  const city = normalizeString(body.city);
-  const vacancyId = normalizeString(body.vacancyId);
-  const notes = normalizeString(body.notes);
-  const startsAt = normalizeDateInput(body.startsAt);
-  const endsAt = normalizeDateInput(body.endsAt);
-  const isActive = body.isActive === '1';
-  const budgetCOP = body.budgetCOP ? parseFloat(body.budgetCOP) : null;
-  try {
-    await prisma.campaign.update({
-      where: { id: req.params.id },
-      data: { name: name || undefined, city: city || null, vacancyId: vacancyId || null, notes: notes || null, budgetCOP: budgetCOP !== null ? budgetCOP : null, startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null, endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null, isActive }
-    });
-    res.redirect(`/admin/v2/campaigns/${req.params.id}?success=1`);
-  } catch (err) {
-    console.error('[lorenV2 campaign edit]', err);
-    res.redirect(`/admin/v2/campaigns/${req.params.id}?error=1`);
-  }
-});
-
-router.post('/campaigns/associate', requireLorenV2, async (req, res) => {
-  const { prisma, body } = req;
-  const candidateId = normalizeString(body.candidateId);
-  const campaignId = normalizeString(body.campaignId);
-  if (!candidateId || !campaignId) return res.redirect('/admin/v2/campaigns?error=missing');
-  try {
-    await prisma.candidate.update({ where: { id: candidateId }, data: { campaignId, sourceType: CAMPAIGN_SOURCE_TYPE } });
-    res.redirect('/admin/v2/campaigns?success=asociado');
-  } catch (err) {
-    console.error('[lorenV2 associate]', err);
-    res.redirect('/admin/v2/campaigns?error=1');
-  }
-});
-
-// Named export para compatibilidad con server.js
 export function lorenV2Router(prisma) {
-  // Inyectar prisma en req para todas las rutas
-  router.use((req, _res, next) => { req.prisma = req.prisma || prisma; next(); });
+  const router = express.Router();
+
+  // Inyectar prisma en req — debe ir ANTES de todos los handlers
+  router.use((req, _res, next) => {
+    req.prisma = req.prisma || prisma;
+    next();
+  });
+
+  // ── Hub: /admin/v2 ─────────────────────────────────────────────────────────
+  router.get('/', canSeeLorenV2, (_req, res) => {
+    const html = `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loren V2</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1d23; font-size: 14px; }
+    .navbar { background: #1e2d3d; padding: 0 24px; display: flex; align-items: center; gap: 8px; height: 52px; border-bottom: 1px solid #0f1a26; }
+    .navbar a { color: #94a3b8; text-decoration: none; font-size: 13px; font-weight: 500; padding: 6px 10px; border-radius: 6px; transition: all .15s; }
+    .navbar a:hover, .navbar a.active { color: #fff; background: rgba(255,255,255,.08); }
+    .navbar .sep { color: #334155; font-size: 16px; }
+    .navbar .spacer { flex: 1; }
+    .page { max-width: 960px; margin: 0 auto; padding: 40px 20px 60px; }
+    h1 { font-size: 22px; font-weight: 800; color: #1e2d3d; margin-bottom: 6px; }
+    .subtitle { color: #64748b; font-size: 13px; margin-bottom: 36px; }
+    .hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .hub-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px 20px; text-decoration: none; color: #1a1d23; transition: box-shadow .15s, border-color .15s; display: flex; flex-direction: column; gap: 8px; }
+    .hub-card:hover { border-color: #0d7a6b; box-shadow: 0 4px 16px rgba(13,122,107,.12); }
+    .hub-card-icon { font-size: 28px; }
+    .hub-card-title { font-size: 15px; font-weight: 700; color: #1e2d3d; }
+    .hub-card-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/admin">Panel</a>
+    <span class="sep">›</span>
+    <a href="/admin/v2" class="active">Loren V2</a>
+    <span class="spacer"></span>
+    <a href="/logout">Cerrar sesión</a>
+  </nav>
+  <main class="page">
+    <h1>Loren V2 — Centro de inteligencia</h1>
+    <p class="subtitle">Análisis avanzado de reclutamiento, campañas y calidad de candidatos.</p>
+    <div class="hub-grid">
+      <a href="/admin/v2/campaigns" class="hub-card">
+        <div class="hub-card-icon">📣</div>
+        <div class="hub-card-title">Campañas</div>
+        <div class="hub-card-desc">Seguimiento de pautas Meta Ads, embudo de conversión y costo por etapa.</div>
+      </a>
+      <a href="/admin/v2/referrals" class="hub-card">
+        <div class="hub-card-icon">🔗</div>
+        <div class="hub-card-title">Referidos</div>
+        <div class="hub-card-desc">Candidatos que llegaron por recomendación de otros candidatos.</div>
+      </a>
+      <a href="/admin/v2/reports" class="hub-card">
+        <div class="hub-card-icon">📊</div>
+        <div class="hub-card-title">Reportes</div>
+        <div class="hub-card-desc">Exportar datos de candidatos y métricas en Excel.</div>
+      </a>
+      <a href="/admin/v2/cv-analysis" class="hub-card">
+        <div class="hub-card-icon">🧠</div>
+        <div class="hub-card-title">Análisis de HV</div>
+        <div class="hub-card-desc">Revisión de hojas de vida procesadas por IA.</div>
+      </a>
+      <a href="/admin/v2/daily-summary" class="hub-card">
+        <div class="hub-card-icon">📋</div>
+        <div class="hub-card-title">Resumen diario</div>
+        <div class="hub-card-desc">Resumen de actividad del día y candidatos nuevos.</div>
+      </a>
+      <a href="/admin/v2/data-consents" class="hub-card">
+        <div class="hub-card-icon">🔒</div>
+        <div class="hub-card-title">Consentimientos</div>
+        <div class="hub-card-desc">Gestión de consentimientos de datos personales.</div>
+      </a>
+    </div>
+  </main>
+</body>
+</html>`;
+    res.send(html);
+  });
+
+  // ── Campañas ───────────────────────────────────────────────────────────────
+
+  router.get('/campaigns', canSeeLorenV2, async (req, res) => {
+    try {
+      const data = await loadCampaignDashboardData(prisma, req.query);
+      const successMsg = req.query.success ? (req.query.success === 'asociado' ? 'Candidato asociado correctamente.' : 'Campaña creada correctamente.') : null;
+      const body = `
+        <div class="page-header"><h1>Campañas Meta Ads</h1><p>Seguimiento de efectividad por pauta publicitaria — ${CAMPAIGN_SOURCE_LABEL}</p></div>
+        ${successMsg ? `<div class="alert alert-success">${escapeHtml(successMsg)}</div>` : ''}
+        ${renderFilters({ filters: data.filters, cities: data.cities, vacancies: data.vacancies })}
+        ${data.campaigns.length ? renderFunnel(data.campaigns) : ''}
+        ${renderCampaignTable(data.campaigns)}
+        ${renderUnmatched(data.unmatched, data.campaigns)}
+        ${renderCreateForm({ cities: data.cities, vacancies: data.vacancies })}`;
+      res.send(renderLayout({ title: 'Campañas — Loren V2', body }));
+    } catch (err) {
+      console.error('[lorenV2 campaigns GET]', err);
+      res.status(500).send(renderLayout({ title: 'Error', body: '<div class="alert alert-error">Error interno cargando las campañas.</div>' }));
+    }
+  });
+
+  router.get('/campaigns.json', canSeeLorenV2, async (req, res) => {
+    try {
+      const data = await loadCampaignDashboardData(prisma, req.query);
+      const result = data.campaigns.map((campaign) => ({
+        id: campaign.id, code: campaign.code, name: campaign.name, city: campaign.city,
+        isActive: campaign.isActive, budgetCOP: campaign.budgetCOP ? Number(campaign.budgetCOP) : null,
+        vacancy: campaign.vacancy ? { id: campaign.vacancy.id, title: campaign.vacancy.title } : null,
+        metric: buildCampaignMetric(campaign, Boolean(campaign.vacancy?.schedulingEnabled))
+      }));
+      res.json({ ok: true, campaigns: result, total: result.length });
+    } catch (err) {
+      console.error('[lorenV2 campaigns.json]', err);
+      res.status(500).json({ ok: false, error: 'Error interno' });
+    }
+  });
+
+  router.get('/campaigns/:id', canSeeLorenV2, async (req, res) => {
+    try {
+      const campaign = await prisma.campaign.findUnique({
+        where: { id: req.params.id },
+        include: { vacancy: { select: { id: true, title: true, city: true, schedulingEnabled: true } } }
+      });
+      if (!campaign) return res.status(404).send(renderLayout({ title: 'No encontrada', body: '<div class="alert alert-error">Campaña no encontrada.</div>' }));
+      const range = dateRangeFromQuery(req.query);
+      const [candidates, cities, vacancies] = await Promise.all([loadCandidatesForCampaigns(prisma, range), loadCities(prisma), loadVacancies(prisma, {})]);
+      const enriched = enrichCampaignsWithAttribution([campaign], candidates);
+      const attributed = enriched[0]?.attributedCandidates || [];
+      const successMsg = req.query.success ? 'Cambios guardados correctamente.' : null;
+      res.send(renderCampaignDetail({ campaign, candidates: attributed, cities, vacancies, success: successMsg }));
+    } catch (err) {
+      console.error('[lorenV2 campaign detail]', err);
+      res.status(500).send(renderLayout({ title: 'Error', body: '<div class="alert alert-error">Error cargando la campaña.</div>' }));
+    }
+  });
+
+  router.post('/campaigns', requireLorenV2, async (req, res) => {
+    const { body } = req;
+    const code = normalizeCampaignCode(body.code || '');
+    const name = normalizeString(body.name);
+    const city = normalizeString(body.city);
+    const vacancyId = normalizeString(body.vacancyId);
+    const notes = normalizeString(body.notes);
+    const startsAt = normalizeDateInput(body.startsAt);
+    const endsAt = normalizeDateInput(body.endsAt);
+    const budgetCOP = body.budgetCOP ? parseFloat(body.budgetCOP) : null;
+
+    const reload = async (error) => {
+      const data = await loadCampaignDashboardData(prisma, {});
+      const body2 = `<div class="page-header"><h1>Campañas Meta Ads</h1><p>${CAMPAIGN_SOURCE_LABEL}</p></div>${renderFilters({ filters: {}, cities: data.cities, vacancies: data.vacancies })}${data.campaigns.length ? renderFunnel(data.campaigns) : ''}${renderCampaignTable(data.campaigns)}${renderUnmatched(data.unmatched, data.campaigns)}${renderCreateForm({ cities: data.cities, vacancies: data.vacancies, error })}`;
+      res.status(400).send(renderLayout({ title: 'Campañas — Loren V2', body: body2 }));
+    };
+
+    if (!code || !isValidCampaignCode(code)) return reload('El código ingresado no es válido.');
+    if (!name) return reload('El nombre de la campaña es obligatorio.');
+    if (budgetCOP !== null && (isNaN(budgetCOP) || budgetCOP < 0)) return reload('El presupuesto debe ser un número positivo en COP.');
+
+    try {
+      const existing = await prisma.campaign.findUnique({ where: { code } });
+      if (existing) return reload(`Ya existe una campaña con el código "${code}".`);
+      await prisma.campaign.create({
+        data: {
+          id: `cmp_${Date.now()}`, code, name, sourceType: CAMPAIGN_SOURCE_TYPE,
+          city: city || null, vacancyId: vacancyId || null, notes: notes || null,
+          budgetCOP: budgetCOP ? budgetCOP : null,
+          startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null,
+          endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null,
+          isActive: true, createdByUsername: req.session?.username || null
+        }
+      });
+      res.redirect('/admin/v2/campaigns?success=1');
+    } catch (err) {
+      console.error('[lorenV2 campaigns POST]', err);
+      reload('Error al guardar la campaña. Intenta de nuevo.');
+    }
+  });
+
+  router.post('/campaigns/:id/edit', requireLorenV2, async (req, res) => {
+    const { body } = req;
+    const name = normalizeString(body.name);
+    const city = normalizeString(body.city);
+    const vacancyId = normalizeString(body.vacancyId);
+    const notes = normalizeString(body.notes);
+    const startsAt = normalizeDateInput(body.startsAt);
+    const endsAt = normalizeDateInput(body.endsAt);
+    const isActive = body.isActive === '1';
+    const budgetCOP = body.budgetCOP ? parseFloat(body.budgetCOP) : null;
+    try {
+      await prisma.campaign.update({
+        where: { id: req.params.id },
+        data: { name: name || undefined, city: city || null, vacancyId: vacancyId || null, notes: notes || null, budgetCOP: budgetCOP !== null ? budgetCOP : null, startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null, endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null, isActive }
+      });
+      res.redirect(`/admin/v2/campaigns/${req.params.id}?success=1`);
+    } catch (err) {
+      console.error('[lorenV2 campaign edit]', err);
+      res.redirect(`/admin/v2/campaigns/${req.params.id}?error=1`);
+    }
+  });
+
+  router.post('/campaigns/associate', requireLorenV2, async (req, res) => {
+    const { body } = req;
+    const candidateId = normalizeString(body.candidateId);
+    const campaignId = normalizeString(body.campaignId);
+    if (!candidateId || !campaignId) return res.redirect('/admin/v2/campaigns?error=missing');
+    try {
+      await prisma.candidate.update({ where: { id: candidateId }, data: { campaignId, sourceType: CAMPAIGN_SOURCE_TYPE } });
+      res.redirect('/admin/v2/campaigns?success=asociado');
+    } catch (err) {
+      console.error('[lorenV2 associate]', err);
+      res.redirect('/admin/v2/campaigns?error=1');
+    }
+  });
+
   return router;
 }
 
-export default router;
+export default lorenV2Router;
