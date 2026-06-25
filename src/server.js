@@ -39,6 +39,7 @@ const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 const sessionCookieName = process.env.SESSION_COOKIE_NAME || 'loginpro.sid';
 const sessionSecret = process.env.SESSION_SECRET || 'dev-session-secret-change-me';
+const LOREN_V2_UI_LABEL = 'Estadísticas';
 
 if (!process.env.SESSION_SECRET) {
   console.warn('SESSION_SECRET no esta configurada. Usa un valor robusto en produccion.');
@@ -127,6 +128,17 @@ function dispatchErrorHandler(fallbackPath = '/admin/operaciones') {
   };
 }
 
+function replaceLorenV2UiLabel(html) {
+  if (typeof html !== 'string') return html;
+  return html.replace(/Loren V2/g, LOREN_V2_UI_LABEL);
+}
+
+function shouldReplaceLorenV2UiLabel(body, res) {
+  if (typeof body !== 'string') return false;
+  const contentType = String(res.getHeader('Content-Type') || '').toLowerCase();
+  return contentType.includes('text/html') || body.trimStart().startsWith('<!doctype html') || body.trimStart().startsWith('<html');
+}
+
 function injectLorenV2NavbarLink(html, req) {
   if (typeof html !== 'string') return html;
   if (!canSeeLorenV2(req)) return html;
@@ -135,7 +147,7 @@ function injectLorenV2NavbarLink(html, req) {
 
   return html.replace(
     '<span class="spacer"></span>',
-    '  <a href="/admin/v2">Loren V2</a>\n  <span class="spacer"></span>'
+    `  <a href="/admin/v2">${LOREN_V2_UI_LABEL}</a>\n  <span class="spacer"></span>`
   );
 }
 
@@ -170,6 +182,11 @@ function applySessionPayload(req, payload) {
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use('/public', express.static(path.join(__dirname, 'public')));
+app.use((req, res, next) => {
+  const originalSend = res.send.bind(res);
+  res.send = (body) => originalSend(shouldReplaceLorenV2UiLabel(body, res) ? replaceLorenV2UiLabel(body) : body);
+  next();
+});
 app.use((req, res, next) => {
   const originalRender = res.render.bind(res);
   res.render = (view, locals = {}, callback) => {
