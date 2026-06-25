@@ -7,7 +7,7 @@ const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRM
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT'];
 const SCRIPT_MARKER = 'data-dispatch-exit-reasons="true"';
-const INCIDENT_TYPE = 'WORKER_EXIT_REASON';
+const AUDIT_ACTION = 'DISPATCH_WORKER_EXIT_REASON';
 const SUBSTANCE_WORD = 'estupefac' + 'ientes';
 
 const EXIT_REASONS = [
@@ -69,21 +69,15 @@ async function saveExitReason(prismaClient, worker, req) {
   const reason = reasonByCode(text(req.body?.exitReasonCode));
   if (!reason) { const error = new Error('Debes seleccionar una causal de retiro para desactivar el auxiliar.'); error.statusCode = 400; throw error; }
   const note = text(req.body?.exitReasonNote);
-  const actor = text(req.session?.username || req.username);
+  const actor = text(req.session?.username || req.username) || 'sistema';
   await prismaClient.$transaction([
     prismaClient.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'DISABLED' } }),
-    prismaClient.dispatchIncident.create({
+    prismaClient.devAuditEvent.create({
       data: {
-        serviceRequestId: worker.lastServiceRequestId,
-        workerId: worker.id,
-        type: INCIDENT_TYPE,
-        status: 'RESOLVED',
-        description: reason.label,
-        reportedBy: actor,
-        resolutionNote: note,
-        createdByUsername: actor,
-        resolvedByUsername: actor,
-        resolvedAt: new Date()
+        username: actor,
+        action: AUDIT_ACTION,
+        target: worker.id,
+        detail: { reasonCode: reason.code, reasonLabel: reason.label, category: reason.category, note, previousStatus: worker.operationalStatus || null, newStatus: 'DISABLED', workerName: worker.fullName || null }
       }
     })
   ]);
@@ -93,17 +87,11 @@ async function saveExitReason(prismaClient, worker, req) {
 async function handleToggle(req, res, next, workerId) {
   if (!opsAllowed(req)) return res.status(403).send('Módulo no habilitado para este usuario');
   const prismaClient = db();
-  const worker = await prismaClient.dispatchWorker.findFirst({
-    where: { id: workerId, source: { in: DISPATCH_OWNED_SOURCES } },
-    select: { id: true, fullName: true, operationalStatus: true, assignments: { orderBy: { createdAt: 'desc' }, take: 1, select: { serviceRequestId: true } } }
-  });
+  const worker = await prismaClient.dispatchWorker.findFirst({ where: { id: workerId, source: { in: DISPATCH_OWNED_SOURCES } }, select: { id: true, fullName: true, operationalStatus: true } });
   if (!worker) return res.status(404).send('Auxiliar no encontrado o no editable desde este módulo');
-  const lastServiceRequestId = worker.assignments?.[0]?.serviceRequestId || null;
-  if (!lastServiceRequestId && worker.operationalStatus === 'CONTRATADO') return res.redirect(addMessage(safeBack(req), 'No fue posible registrar la causal: el auxiliar no tiene una solicitud operativa asociada para guardar la novedad.'));
-  const workerContext = { ...worker, lastServiceRequestId };
   try {
     if (worker.operationalStatus === 'CONTRATADO') {
-      const reason = await saveExitReason(prismaClient, workerContext, req);
+      const reason = await saveExitReason(prismaClient, worker, req);
       const affected = await cancelAssignments(prismaClient, worker.id, reason.label);
       const extra = affected.length ? ` Se cancelaron sus asignaciones activas en ${affected.length} solicitud${affected.length !== 1 ? 'es' : ''}.` : '';
       return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent(`Auxiliar desactivado. Causal: ${reason.label}.${extra}`)}`);
@@ -117,14 +105,14 @@ async function handleToggle(req, res, next, workerId) {
 }
 
 async function statsPayload(workerIds = []) {
-  const prismaClient = db();
-  const rows = await prismaClient.dispatchIncident.findMany({ where: { type: INCIDENT_TYPE }, select: { workerId: true, description: true, resolutionNote: true, createdAt: true, createdByUsername: true }, orderBy: { createdAt: 'desc' }, take: 1000 });
+  const rows = await db().devAuditEvent.findMany({ where: { action: AUDIT_ACTION }, select: { target: true, detail: true, createdAt: true, username: true }, orderBy: { createdAt: 'desc' }, take: 1000 });
   const countMap = new Map();
   const workers = {};
   for (const row of rows) {
-    const label = row.description || 'Sin causal';
+    const detail = row.detail && typeof row.detail === 'object' ? row.detail : {};
+    const label = detail.reasonLabel || 'Sin causal';
     countMap.set(label, (countMap.get(label) || 0) + 1);
-    if (workerIds.includes(row.workerId) && !workers[row.workerId]) workers[row.workerId] = { label, note: row.resolutionNote || null, createdAt: row.createdAt, by: row.createdByUsername || null };
+    if (workerIds.includes(row.target) && !workers[row.target]) workers[row.target] = { label, note: detail.note || null, createdAt: row.createdAt, by: row.username || null };
   }
   const stats = [...countMap.entries()].map(([label, count]) => ({ reasonLabel: label, count })).sort((a, b) => b.count - a.count || a.reasonLabel.localeCompare(b.reasonLabel, 'es'));
   return { reasons: EXIT_REASONS, stats, workers };
@@ -138,11 +126,7 @@ function installRouterPatch() {
     router.use(async (req, res, next) => {
       const path = requestPath(req);
       if (req.method === 'POST') { const match = path.match(TOGGLE_PATH_PATTERN); if (match) return handleToggle(req, res, next, decodeURIComponent(match[1])); }
-      if (req.method === 'GET' && path === `${BASE_PATH}/personal/exit-reasons`) {
-        if (!opsAllowed(req)) return res.status(403).json({ ok: false });
-        const workerIds = String(req.query?.workerIds || '').split(',').map((id) => id.trim()).filter(Boolean).slice(0, 500);
-        return res.json({ ok: true, ...(await statsPayload(workerIds)) });
-      }
+      if (req.method === 'GET' && path === `${BASE_PATH}/personal/exit-reasons`) { if (!opsAllowed(req)) return res.status(403).json({ ok: false }); const workerIds = String(req.query?.workerIds || '').split(',').map((id) => id.trim()).filter(Boolean).slice(0, 500); return res.json({ ok: true, ...(await statsPayload(workerIds)) }); }
       return next();
     });
     return router;
