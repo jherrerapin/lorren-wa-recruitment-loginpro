@@ -3,6 +3,7 @@ import express from 'express';
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const NO_CONFIRM_STATUS = 'NO_CONFIRMO';
+const EXIT_REASON_AUDIT_ACTION = 'DISPATCH_WORKER_EXIT_REASON';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -68,6 +69,18 @@ function buildWorkerStats(assignments = []) {
   };
 }
 
+function buildExitReason(auditEvent) {
+  const detail = auditEvent?.detail && typeof auditEvent.detail === 'object' ? auditEvent.detail : null;
+  if (!detail?.reasonLabel) return null;
+  return {
+    label: detail.reasonLabel,
+    category: detail.category || null,
+    note: detail.note || null,
+    createdAt: auditEvent.createdAt,
+    by: auditEvent.username || null
+  };
+}
+
 export function dispatchWorkerStatsRouter(prisma) {
   const router = express.Router();
 
@@ -82,19 +95,27 @@ export function dispatchWorkerStatsRouter(prisma) {
 
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
 
-    const assignments = await prisma.dispatchAssignment.findMany({
-      where: { workerId: worker.id },
-      include: {
-        serviceRequest: {
-          include: { service: true }
-        }
-      },
-      orderBy: [{ createdAt: 'desc' }]
-    });
+    const [assignments, latestExitReasonEvent] = await Promise.all([
+      prisma.dispatchAssignment.findMany({
+        where: { workerId: worker.id },
+        include: {
+          serviceRequest: {
+            include: { service: true }
+          }
+        },
+        orderBy: [{ createdAt: 'desc' }]
+      }),
+      prisma.devAuditEvent.findFirst({
+        where: { action: EXIT_REASON_AUDIT_ACTION, target: worker.id },
+        select: { detail: true, createdAt: true, username: true },
+        orderBy: { createdAt: 'desc' }
+      })
+    ]);
 
     return res.render('operacionesPersonalHistorial', {
       worker,
       assignments,
+      exitReason: buildExitReason(latestExitReasonEvent),
       stats: buildWorkerStats(assignments),
       activeStatuses: ACTIVE_ASSIGNMENT_STATUSES,
       role: req.session?.userRole || req.userRole,
