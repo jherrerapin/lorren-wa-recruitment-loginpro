@@ -156,13 +156,14 @@ function buildUserSessionPayload(user) {
   };
 }
 
+// FIX: payload.scopeVacancyId no existe en el payload — debe leerse userAccessVacancyId
 function applySessionPayload(req, payload) {
   req.session.userId = payload.userId || null;
   req.session.userRole = payload.userRole;
   req.session.username = payload.username;
   req.session.userAccessScope = payload.userAccessScope || 'ALL';
   req.session.userAccessCity = payload.userAccessCity || null;
-  req.session.userAccessVacancyId = payload.scopeVacancyId || payload.userAccessVacancyId || null;
+  req.session.userAccessVacancyId = payload.userAccessVacancyId || null;
   req.session.userSource = payload.userSource || 'env';
   req.session.canAccessDispatch = Boolean(payload.canAccessDispatch);
 }
@@ -199,6 +200,11 @@ const sessionStore = new PgStore({
   tableName: 'session',
   createTableIfMissing: true,
   pruneSessionInterval: 60 * 60
+});
+
+// FIX: loggear errores del store de sesión para detectar fallos de BD
+sessionStore.on('error', (err) => {
+  console.error('[SESSION_STORE_ERROR]', err);
 });
 
 app.use(session({
@@ -308,6 +314,7 @@ app.post('/login', async (req, res) => {
 
   req.session.regenerate((regenError) => {
     if (regenError) {
+      console.error('[LOGIN_REGEN_ERROR]', regenError);
       return res.status(500).render('login', buildLoginViewModel({
         error: 'No fue posible iniciar sesion. Intenta nuevamente.',
         username
@@ -316,6 +323,7 @@ app.post('/login', async (req, res) => {
     applySessionPayload(req, sessionPayload);
     req.session.save((saveError) => {
       if (saveError) {
+        console.error('[LOGIN_SAVE_ERROR]', saveError);
         return res.status(500).render('login', buildLoginViewModel({
           error: 'No fue posible iniciar sesion. Intenta nuevamente.',
           username
