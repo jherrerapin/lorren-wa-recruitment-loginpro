@@ -6,7 +6,7 @@ const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
 const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
 const FAVICON_MARKER = 'data-lorren-stats-favicon="true"';
-const FAVICON_HREF = '/favicon.ico';
+const FAVICON_HREF = '/public/favicon-loginpro.svg?v=stats';
 const SUMMARY_MARKER = 'data-meta-summary-panel="true"';
 const SUMMARY_SCRIPT_MARKER = 'data-meta-summary-script="true"';
 const CLASSIFICATION_SCRIPT_MARKER = 'data-meta-classification-script="true"';
@@ -58,19 +58,19 @@ function removeSectionByTitle(html, title) {
 }
 
 function injectFavicon(html) {
-  if (typeof html !== 'string' || outputHasFavicon(html) || !html.includes('<head>')) return html;
-  return html.replace('<head>', `<head>\n  <link ${FAVICON_MARKER} rel="icon" href="${FAVICON_HREF}">`);
-}
-
-function outputHasFavicon(html) {
-  return html.includes(FAVICON_MARKER) || html.includes(`href="${FAVICON_HREF}"`);
+  if (typeof html !== 'string' || !html.includes('<head>')) return html;
+  let output = html.replace(/<link[^>]+rel=["']icon["'][^>]*>/gi, '');
+  output = output.replace(/<link[^>]+href=["'][^"']*favicon[^"']*["'][^>]*>/gi, '');
+  if (output.includes(FAVICON_MARKER)) return output;
+  return output.replace('<head>', `<head>\n  <link ${FAVICON_MARKER} rel="icon" type="image/svg+xml" href="${FAVICON_HREF}">`);
 }
 
 function renderResponsiveStyle() {
   return `<style ${RESPONSIVE_STYLE_MARKER}>
     .classification-save-status { margin-top: 10px; font-size: 12px; font-weight: 700; color: #0d7a6b; }
     .classification-save-status.error { color: #dc2626; }
-    @media (max-width: 920px) {
+    .meta-action-cell { white-space: nowrap; text-align: right; }
+    @media (max-width: 1100px) {
       .page { padding: 16px 10px 40px !important; max-width: 100% !important; }
       .navbar { padding: 0 10px !important; overflow-x: auto !important; }
       .navbar a { white-space: nowrap !important; }
@@ -83,7 +83,7 @@ function renderResponsiveStyle() {
       .btn { width: 100% !important; justify-content: center !important; min-height: 38px !important; }
       .btn-sm { width: auto !important; min-height: 30px !important; }
       .table-wrap { width: 100% !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; }
-      table { min-width: 980px !important; font-size: 12px !important; }
+      table { min-width: 760px !important; font-size: 12px !important; }
       th, td { padding: 8px 7px !important; }
       .funnel { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important; gap: 8px !important; overflow: visible !important; }
       .funnel-step { border: 1px solid #e2e8f0 !important; border-radius: 8px !important; min-width: 0 !important; }
@@ -106,10 +106,9 @@ function renderSummaryPanel() {
   ].join('\n');
 }
 
-function renderStatsUiScript() {
-  return `<script ${SUMMARY_SCRIPT_MARKER}>
-(function(){
-  function norm(value){ return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function sharedClientHelpers() {
+  return `
+  function norm(value){ return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''); }
   function optionCity(option){ var text = String(option && option.textContent || '').trim(); var index = text.lastIndexOf('—'); return index >= 0 ? text.slice(index + 1).replace('✓ entrevista','').trim() : ''; }
   function wireCityVacancySync(){
     document.querySelectorAll('select[name="city"]').forEach(function(citySelect){
@@ -129,6 +128,14 @@ function renderStatsUiScript() {
       citySelect.addEventListener('change', sync); sync();
     });
   }
+  function forceZeroes(){ document.querySelectorAll('.funnel-step-value').forEach(function(el){ if(!el.textContent.trim()) el.textContent='0'; }); }
+  `;
+}
+
+function renderStatsUiScript() {
+  return `<script ${SUMMARY_SCRIPT_MARKER}>
+(function(){
+  ${sharedClientHelpers()}
   function money(v){ if(!v){return '—';} return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(v); }
   function num(v){return new Intl.NumberFormat('es-CO').format(v||0);}
   function card(label,value,sub){return '<div class="kpi"><div class="kpi-value">'+value+'</div><div class="kpi-label">'+label+'</div><div class="kpi-rate">'+(sub||'')+'</div></div>';}
@@ -144,8 +151,20 @@ function renderStatsUiScript() {
       document.querySelectorAll('table tbody tr').forEach(function(row){ row.style.display=!q||row.textContent.toLowerCase().indexOf(q)>-1?'':'none'; });
     });
   }
-  document.querySelectorAll('.funnel-step-value').forEach(function(el){ if(!el.textContent.trim()) el.textContent='0'; });
-  wireCityVacancySync(); quickFilter();
+  function simplifyAdTable(){
+    document.querySelectorAll('table').forEach(function(table){
+      var headers = Array.prototype.map.call(table.querySelectorAll('thead th'), function(th){ return (th.textContent || '').trim().toLowerCase(); });
+      if (!headers.includes('agendados') && !headers.includes('confirmados') && !headers.includes('asistieron')) return;
+      var removeLabels = ['agendados','confirmados','asistieron'];
+      var removeIndexes = headers.map(function(text, index){ return removeLabels.includes(text) ? index : -1; }).filter(function(index){ return index >= 0; }).sort(function(a,b){ return b-a; });
+      table.querySelectorAll('tr').forEach(function(row){
+        removeIndexes.forEach(function(index){ if (row.cells[index]) row.cells[index].remove(); });
+        var last = row.cells[row.cells.length - 1];
+        if (last) last.classList.add('meta-action-cell');
+      });
+    });
+  }
+  wireCityVacancySync(); quickFilter(); forceZeroes(); simplifyAdTable();
   fetch('/admin/estadisticas/meta/summary'+window.location.search,{credentials:'include'}).then(function(r){return r.json();}).then(paint).catch(function(){var box=document.getElementById('metaSummaryCards');if(box){box.innerHTML=card('Resumen Meta Ads','No disponible','Revisa logs si persiste');}});
 })();
 </script>`;
@@ -154,30 +173,11 @@ function renderStatsUiScript() {
 function renderClassificationScript() {
   return `<script ${CLASSIFICATION_SCRIPT_MARKER}>
 (function(){
-  function norm(value){ return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
-  function optionCity(option){ var text = String(option && option.textContent || '').trim(); var index = text.lastIndexOf('—'); return index >= 0 ? text.slice(index + 1).replace('✓ entrevista','').trim() : ''; }
-  function wireCityVacancySync(){
-    document.querySelectorAll('select[name="city"]').forEach(function(citySelect){
-      var form = citySelect.closest('form') || document;
-      var vacancySelect = form.querySelector('select[name="vacancyId"]');
-      if (!vacancySelect || vacancySelect.dataset.citySynced === 'true') return;
-      vacancySelect.dataset.citySynced = 'true';
-      function sync(){
-        var selectedCity = norm(citySelect.value);
-        Array.prototype.forEach.call(vacancySelect.options, function(option){
-          if (!option.value) { option.hidden = false; option.disabled = false; return; }
-          var matches = !selectedCity || norm(optionCity(option)) === selectedCity;
-          option.hidden = !matches; option.disabled = !matches;
-          if (!matches && option.selected) vacancySelect.value = '';
-        });
-      }
-      citySelect.addEventListener('change', sync); sync();
-    });
-  }
+  ${sharedClientHelpers()}
   document.querySelectorAll('.page-header h1').forEach(function(el){ el.textContent = el.textContent.replace(/^Campaña:/, 'Anuncio:'); });
   document.querySelectorAll('a.btn').forEach(function(el){ var text = (el.textContent || '').trim(); if (text.indexOf('← Campañas') === 0) el.textContent = '← Anuncios'; });
   document.querySelectorAll('.card-title').forEach(function(el){ if ((el.textContent || '').trim() === 'Editar campaña') el.textContent = 'Clasificación interna del anuncio'; });
-  document.querySelectorAll('.funnel-step-value').forEach(function(el){ if(!el.textContent.trim()) el.textContent='0'; });
+  forceZeroes();
   var form = document.querySelector('form[action*="/admin/estadisticas/campaigns/"][action$="/edit"]');
   if (form) {
     if (!form.querySelector('[data-classification-help="true"]')) {
@@ -197,10 +197,21 @@ function renderClassificationScript() {
     status.className = 'classification-save-status';
     status.textContent = '';
     form.appendChild(status);
-    form.addEventListener('submit', function(){
-      if (button) button.textContent = 'Guardando clasificación...';
+    form.addEventListener('submit', async function(event){
+      event.preventDefault();
+      if (button) { button.disabled = true; button.textContent = 'Guardando clasificación...'; }
       status.className = 'classification-save-status';
       status.textContent = 'Guardando ciudad y vacante asociada...';
+      try {
+        var response = await fetch(form.action, { method: 'POST', credentials: 'include', body: new FormData(form) });
+        if (!response.ok || (response.url && response.url.indexOf('error=1') > -1)) throw new Error('save_failed');
+        status.textContent = 'Clasificación guardada. Volviendo al listado...';
+        window.location.href = '/admin/estadisticas/campaigns?classification=1';
+      } catch (error) {
+        status.className = 'classification-save-status error';
+        status.textContent = 'No fue posible guardar. Revisa logs de Railway o intenta de nuevo.';
+        if (button) { button.disabled = false; button.textContent = 'Guardar clasificación interna'; }
+      }
     });
   }
   wireCityVacancySync();
