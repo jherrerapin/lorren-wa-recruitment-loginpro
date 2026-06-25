@@ -6,12 +6,15 @@ const DEFAULT_META_API_VERSION = 'v23.0';
 const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
 const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
-const FAVICON_MARKER = 'data-lorren-stats-favicon="true"';
 const FAVICON_HREF = '/public/favicon-loginpro.svg?v=stats';
-const SUMMARY_MARKER = 'data-meta-summary-panel="true"';
-const SUMMARY_SCRIPT_MARKER = 'data-meta-summary-script="true"';
-const CLASSIFICATION_SCRIPT_MARKER = 'data-meta-classification-script="true"';
-const RESPONSIVE_STYLE_MARKER = 'data-meta-responsive-style="true"';
+
+const MARKERS = {
+  favicon: 'data-lorren-stats-favicon="true"',
+  style: 'data-meta-responsive-style="true"',
+  summary: 'data-meta-summary-panel="true"',
+  summaryScript: 'data-meta-summary-script="true"',
+  classificationScript: 'data-meta-classification-script="true"'
+};
 
 let classificationPrisma = null;
 
@@ -40,6 +43,16 @@ function readEnv(env, parts) {
   return env[parts.join('_')];
 }
 
+function normalizeText(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeCompare(value) {
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function currentPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0];
 }
@@ -61,16 +74,6 @@ function isStatsUser(req = {}) {
   return role === 'dev' || role === 'admin';
 }
 
-function normalizeText(value) {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : null;
-}
-
-function normalizeCompare(value) {
-  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
 function removeSectionByTitle(html, title) {
   const titleIndex = html.toLowerCase().indexOf(`<div class="card-title">${title.toLowerCase()}`);
   if (titleIndex < 0) return html;
@@ -84,14 +87,15 @@ function injectFavicon(html) {
   if (typeof html !== 'string' || !html.includes('<head>')) return html;
   let output = html.replace(/<link[^>]+rel=["']icon["'][^>]*>/gi, '');
   output = output.replace(/<link[^>]+href=["'][^"']*favicon[^"']*["'][^>]*>/gi, '');
-  if (output.includes(FAVICON_MARKER)) return output;
-  return output.replace('<head>', `<head>\n  <link ${FAVICON_MARKER} rel="icon" type="image/svg+xml" href="${FAVICON_HREF}">`);
+  return output.replace('<head>', `<head>\n  <link ${MARKERS.favicon} rel="icon" type="image/svg+xml" href="${FAVICON_HREF}">`);
 }
 
 function renderResponsiveStyle() {
-  return `<style ${RESPONSIVE_STYLE_MARKER}>
+  return `<style ${MARKERS.style}>
     .classification-save-status { margin-top: 10px; font-size: 12px; font-weight: 700; color: #0d7a6b; }
     .classification-save-status.error { color: #dc2626; }
+    .classification-only-card form { display: grid; gap: 12px; }
+    .classification-only-card button { width: 100%; justify-content: center; }
     .meta-action-cell { white-space: nowrap; text-align: right; }
     @media (max-width: 1100px) {
       .page { padding: 16px 10px 40px !important; max-width: 100% !important; }
@@ -113,20 +117,15 @@ function renderResponsiveStyle() {
       .funnel-arrow { display: none !important; }
       .funnel-step-value { font-size: 20px !important; }
       input, select, textarea { min-height: 38px !important; }
-      form[method="post"] button[type="submit"] { width: 100% !important; }
     }
   </style>`;
 }
 
 function renderSummaryPanel() {
-  return [
-    '<section class="card" ' + SUMMARY_MARKER + '>',
-    '  <div class="card-title">Indicadores clave de pauta</div>',
-    '  <div id="metaSummaryCards" class="grid-auto">',
-    '    <div class="kpi"><div class="kpi-value">Cargando...</div><div class="kpi-label">Resumen Meta Ads</div></div>',
-    '  </div>',
-    '</section>'
-  ].join('\n');
+  return `<section class="card" ${MARKERS.summary}>
+    <div class="card-title">Indicadores clave de pauta</div>
+    <div id="metaSummaryCards" class="grid-auto"><div class="kpi"><div class="kpi-value">Cargando...</div><div class="kpi-label">Resumen Meta Ads</div></div></div>
+  </section>`;
 }
 
 function sharedClientHelpers() {
@@ -156,7 +155,7 @@ function sharedClientHelpers() {
 }
 
 function renderStatsUiScript() {
-  return `<script ${SUMMARY_SCRIPT_MARKER}>
+  return `<script ${MARKERS.summaryScript}>
 (function(){
   ${sharedClientHelpers()}
   function money(v){ if(!v){return '—';} return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(v); }
@@ -177,9 +176,9 @@ function renderStatsUiScript() {
   function simplifyAdTable(){
     document.querySelectorAll('table').forEach(function(table){
       var headers = Array.prototype.map.call(table.querySelectorAll('thead th'), function(th){ return (th.textContent || '').trim().toLowerCase(); });
-      if (!headers.includes('agendados') && !headers.includes('confirmados') && !headers.includes('asistieron')) return;
       var removeLabels = ['agendados','confirmados','asistieron'];
       var removeIndexes = headers.map(function(text, index){ return removeLabels.includes(text) ? index : -1; }).filter(function(index){ return index >= 0; }).sort(function(a,b){ return b-a; });
+      if (!removeIndexes.length) return;
       table.querySelectorAll('tr').forEach(function(row){
         removeIndexes.forEach(function(index){ if (row.cells[index]) row.cells[index].remove(); });
         var last = row.cells[row.cells.length - 1];
@@ -194,31 +193,15 @@ function renderStatsUiScript() {
 }
 
 function renderClassificationScript() {
-  return `<script ${CLASSIFICATION_SCRIPT_MARKER}>
+  return `<script ${MARKERS.classificationScript}>
 (function(){
   ${sharedClientHelpers()}
-  document.querySelectorAll('.page-header h1').forEach(function(el){ el.textContent = el.textContent.replace(/^Campaña:/, 'Anuncio:'); });
-  document.querySelectorAll('a.btn').forEach(function(el){ var text = (el.textContent || '').trim(); if (text.indexOf('← Campañas') === 0) el.textContent = '← Anuncios'; });
-  document.querySelectorAll('.card-title').forEach(function(el){ if ((el.textContent || '').trim() === 'Editar campaña') el.textContent = 'Clasificación interna del anuncio'; });
   forceZeroes();
-  var form = document.querySelector('form[action*="/admin/estadisticas/campaigns/"][action$="/edit"]');
+  var form = document.querySelector('[data-classification-only-form="true"]');
   if (form) {
-    if (!form.querySelector('[data-classification-help="true"]')) {
-      var help = document.createElement('div');
-      help.setAttribute('data-classification-help','true');
-      help.className = 'alert alert-info';
-      help.style.marginBottom = '12px';
-      help.textContent = 'Este módulo es informativo. Aquí solo se clasifica el anuncio con ciudad y vacante interna; no se modifican los datos reales de Meta Ads.';
-      form.insertBefore(help, form.firstChild);
-    }
-    ['name','budgetCOP','notes','startsAt','endsAt','isActive'].forEach(function(field){
-      form.querySelectorAll('[name="'+field+'"]').forEach(function(input){ var label = input.closest('label'); if (label) label.style.display = 'none'; });
-    });
     var button = form.querySelector('button[type="submit"]');
-    if (button) { button.textContent = 'Guardar clasificación interna'; button.style.width = '100%'; button.style.justifyContent = 'center'; }
     var status = document.createElement('div');
     status.className = 'classification-save-status';
-    status.textContent = '';
     form.appendChild(status);
     form.addEventListener('submit', async function(event){
       event.preventDefault();
@@ -226,17 +209,15 @@ function renderClassificationScript() {
       status.className = 'classification-save-status';
       status.textContent = 'Guardando ciudad y vacante asociada...';
       try {
-        var campaignId = decodeURIComponent((window.location.pathname.match(/\/campaigns\/([^/]+)/) || [])[1] || '');
-        var payload = {
-          campaignId: campaignId,
-          city: (form.querySelector('[name="city"]') || {}).value || '',
-          vacancyId: (form.querySelector('[name="vacancyId"]') || {}).value || ''
-        };
         var response = await fetch('/admin/estadisticas/meta/classify', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            campaignId: form.querySelector('[name="campaignId"]').value,
+            city: form.querySelector('[name="city"]').value || '',
+            vacancyId: form.querySelector('[name="vacancyId"]').value || ''
+          })
         });
         var result = await response.json().catch(function(){ return {}; });
         if (!response.ok || result.ok === false) throw new Error(result.message || 'save_failed');
@@ -254,15 +235,50 @@ function renderClassificationScript() {
 </script>`;
 }
 
+function extractFirstSelectLabel(html, name) {
+  const pattern = new RegExp(`<label>[^<]*<select name="${name}">[\\s\\S]*?<\\/select><\\/label>`);
+  const match = html.match(pattern);
+  return match ? match[0] : '';
+}
+
+function replaceEditSectionWithClassification(html, req) {
+  const sectionTitle = '<div class="card-title">Editar campaña</div>';
+  const titleIndex = html.indexOf(sectionTitle);
+  if (titleIndex < 0) return html;
+  const sectionStart = html.lastIndexOf('<section class="card">', titleIndex);
+  const sectionEnd = html.indexOf('</section>', titleIndex);
+  if (sectionStart < 0 || sectionEnd < 0) return html;
+
+  const cityLabel = extractFirstSelectLabel(html.slice(sectionStart, sectionEnd), 'city');
+  const vacancyLabel = extractFirstSelectLabel(html.slice(sectionStart, sectionEnd), 'vacancyId');
+  const idMatch = currentPath(req).match(/\/campaigns\/([^/]+)$/);
+  const campaignId = idMatch ? decodeURIComponent(idMatch[1]) : '';
+
+  const replacement = `<section class="card classification-only-card">
+    <div class="card-title">Clasificación interna del anuncio</div>
+    <div class="alert alert-info" style="margin-bottom:12px">Este módulo es informativo. Aquí solo se asigna ciudad y vacante interna; no se modifica el anuncio real ni la campaña publicitaria en Meta Ads.</div>
+    <form data-classification-only-form="true">
+      <input type="hidden" name="campaignId" value="${campaignId.replace(/"/g, '&quot;')}">
+      ${cityLabel || '<label>Ciudad <select name="city"><option value="">Sin ciudad específica</option></select></label>'}
+      ${vacancyLabel || '<label>Vacante <select name="vacancyId"><option value="">Sin vacante específica</option></select></label>'}
+      <button type="submit" class="btn btn-primary">Guardar clasificación interna</button>
+    </form>
+  </section>`;
+
+  return html.slice(0, sectionStart) + replacement + html.slice(sectionEnd + '</section>'.length);
+}
+
 function cleanStatsHtml(html, req) {
   if (typeof html !== 'string' || !isStatsPath(req)) return html;
   let output = injectFavicon(html);
-  if (!output.includes(RESPONSIVE_STYLE_MARKER) && output.includes('</head>')) output = output.replace('</head>', renderResponsiveStyle() + '\n</head>');
+  if (!output.includes(MARKERS.style) && output.includes('</head>')) output = output.replace('</head>', renderResponsiveStyle() + '\n</head>');
 
   if (isCampaignDetailPath(req)) {
     output = output.replace(/Campaña:/g, 'Anuncio:');
     output = output.replace(/← Campañas/g, '← Anuncios');
-    if (!output.includes(CLASSIFICATION_SCRIPT_MARKER) && output.includes('</body>')) output = output.replace('</body>', renderClassificationScript() + '\n</body>');
+    output = output.replace(/Embudo de esta campaña/g, 'Embudo de este anuncio');
+    output = replaceEditSectionWithClassification(output, req);
+    if (!output.includes(MARKERS.classificationScript) && output.includes('</body>')) output = output.replace('</body>', renderClassificationScript() + '\n</body>');
     return output;
   }
 
@@ -281,11 +297,11 @@ function cleanStatsHtml(html, req) {
   output = removeSectionByTitle(output, 'Nueva campaña');
   output = removeSectionByTitle(output, 'Metadata Meta sin campaña asociada');
   output = removeSectionByTitle(output, 'Sincronización Meta Ads');
-  if (!output.includes(SUMMARY_MARKER)) {
+  if (!output.includes(MARKERS.summary)) {
     const filtersSectionStart = '<section class="card">\n    <div class="card-title">Filtros de análisis</div>';
     if (output.includes(filtersSectionStart)) output = output.replace(filtersSectionStart, renderSummaryPanel() + '\n' + filtersSectionStart);
   }
-  if (!output.includes(SUMMARY_SCRIPT_MARKER) && output.includes('</body>')) output = output.replace('</body>', renderStatsUiScript() + '\n</body>');
+  if (!output.includes(MARKERS.summaryScript) && output.includes('</body>')) output = output.replace('</body>', renderStatsUiScript() + '\n</body>');
   return output;
 }
 
@@ -307,36 +323,28 @@ function installClassificationEndpoint() {
     const result = originalUse.apply(this, args);
     const justInstalledSession = args.some((arg) => typeof arg === 'function' && arg.name === 'session');
     if (justInstalledSession && !this.__metaAdsClassificationEndpointInstalled) {
-      originalUse.call(
-        this,
-        `${STATS_BASE_PATH}/meta/classify`,
-        express.json({ limit: '20kb' }),
-        async (req, res) => {
-          if (!isStatsUser(req)) return res.status(403).json({ ok: false, message: 'No autorizado.' });
-          const campaignId = normalizeText(req.body?.campaignId);
-          const city = normalizeText(req.body?.city);
-          const requestedVacancyId = normalizeText(req.body?.vacancyId);
-          if (!campaignId) return res.status(400).json({ ok: false, message: 'Falta anuncio.' });
-          try {
-            let vacancyId = null;
-            if (requestedVacancyId) {
-              const vacancy = await getClassificationPrisma().vacancy.findUnique({
-                where: { id: requestedVacancyId },
-                select: { id: true, city: true }
-              });
-              if (vacancy && (!city || normalizeCompare(vacancy.city) === normalizeCompare(city))) vacancyId = vacancy.id;
-            }
-            await getClassificationPrisma().campaign.update({
-              where: { id: campaignId },
-              data: { city: city || null, vacancyId }
+      originalUse.call(this, `${STATS_BASE_PATH}/meta/classify`, express.json({ limit: '20kb' }), async (req, res) => {
+        if (!isStatsUser(req)) return res.status(403).json({ ok: false, message: 'No autorizado.' });
+        const campaignId = normalizeText(req.body?.campaignId);
+        const city = normalizeText(req.body?.city);
+        const requestedVacancyId = normalizeText(req.body?.vacancyId);
+        if (!campaignId) return res.status(400).json({ ok: false, message: 'Falta anuncio.' });
+        try {
+          let vacancyId = null;
+          if (requestedVacancyId) {
+            const vacancy = await getClassificationPrisma().vacancy.findUnique({
+              where: { id: requestedVacancyId },
+              select: { id: true, city: true }
             });
-            return res.json({ ok: true });
-          } catch (error) {
-            console.error('[metaAdsClassificationEndpoint]', error);
-            return res.status(500).json({ ok: false, message: 'No fue posible guardar clasificación.' });
+            if (vacancy && (!city || normalizeCompare(vacancy.city) === normalizeCompare(city))) vacancyId = vacancy.id;
           }
+          await getClassificationPrisma().campaign.update({ where: { id: campaignId }, data: { city: city || null, vacancyId } });
+          return res.json({ ok: true });
+        } catch (error) {
+          console.error('[metaAdsClassificationEndpoint]', error);
+          return res.status(500).json({ ok: false, message: 'No fue posible guardar clasificación.' });
         }
-      );
+      });
       this.__metaAdsClassificationEndpointInstalled = true;
     }
     return result;
@@ -370,10 +378,7 @@ export function createMetaAdsClient(env = process.env, httpClient = axios) {
 
     const response = await httpClient.get(buildGraphUrl(config.apiVersion, path), {
       timeout: 30000,
-      params: {
-        ...params,
-        [GRAPH_AUTH_PARAM]: config.credential
-      }
+      params: { ...params, [GRAPH_AUTH_PARAM]: config.credential }
     });
 
     return response.data;
@@ -391,11 +396,7 @@ export function createMetaAdsClient(env = process.env, httpClient = axios) {
     return response.data;
   }
 
-  return {
-    ...config,
-    graphGet,
-    graphGetUrl
-  };
+  return { ...config, graphGet, graphGetUrl };
 }
 
 export default { createMetaAdsClient, getMetaAdsConfig };
