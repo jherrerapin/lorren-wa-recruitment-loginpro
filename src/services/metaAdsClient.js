@@ -1,5 +1,6 @@
 import express from 'express';
 import axios from 'axios';
+import { PrismaClient } from '@prisma/client';
 
 const DEFAULT_META_API_VERSION = 'v23.0';
 const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
@@ -11,6 +12,13 @@ const SUMMARY_MARKER = 'data-meta-summary-panel="true"';
 const SUMMARY_SCRIPT_MARKER = 'data-meta-summary-script="true"';
 const CLASSIFICATION_SCRIPT_MARKER = 'data-meta-classification-script="true"';
 const RESPONSIVE_STYLE_MARKER = 'data-meta-responsive-style="true"';
+
+let classificationPrisma = null;
+
+function getClassificationPrisma() {
+  if (!classificationPrisma) classificationPrisma = new PrismaClient();
+  return classificationPrisma;
+}
 
 function normalizeAdAccountId(value) {
   const raw = String(value || '').trim();
@@ -46,6 +54,21 @@ function isCampaignsPath(req = {}) {
 
 function isCampaignDetailPath(req = {}) {
   return new RegExp(`^${STATS_BASE_PATH}/campaigns/[^/]+$`).test(currentPath(req));
+}
+
+function isStatsUser(req = {}) {
+  const role = req.userRole || req.session?.userRole;
+  return role === 'dev' || role === 'admin';
+}
+
+function normalizeText(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeCompare(value) {
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function removeSectionByTitle(html, title) {
@@ -203,8 +226,20 @@ function renderClassificationScript() {
       status.className = 'classification-save-status';
       status.textContent = 'Guardando ciudad y vacante asociada...';
       try {
-        var response = await fetch(form.action, { method: 'POST', credentials: 'include', body: new FormData(form) });
-        if (!response.ok || (response.url && response.url.indexOf('error=1') > -1)) throw new Error('save_failed');
+        var campaignId = decodeURIComponent((window.location.pathname.match(/\/campaigns\/([^/]+)/) || [])[1] || '');
+        var payload = {
+          campaignId: campaignId,
+          city: (form.querySelector('[name="city"]') || {}).value || '',
+          vacancyId: (form.querySelector('[name="vacancyId"]') || {}).value || ''
+        };
+        var response = await fetch('/admin/estadisticas/meta/classify', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        var result = await response.json().catch(function(){ return {}; });
+        if (!response.ok || result.ok === false) throw new Error(result.message || 'save_failed');
         status.textContent = 'Clasificación guardada. Volviendo al listado...';
         window.location.href = '/admin/estadisticas/campaigns?classification=1';
       } catch (error) {
@@ -264,6 +299,52 @@ function installStatsHtmlCleaner() {
   responsePrototype.__metaAdsStatsHtmlCleanerInstalled = true;
 }
 
+function installClassificationEndpoint() {
+  const appPrototype = express.application;
+  if (appPrototype.__metaAdsClassificationEndpointPatchInstalled) return;
+  const originalUse = appPrototype.use;
+  appPrototype.use = function useWithMetaAdsClassificationEndpoint(...args) {
+    const result = originalUse.apply(this, args);
+    const justInstalledSession = args.some((arg) => typeof arg === 'function' && arg.name === 'session');
+    if (justInstalledSession && !this.__metaAdsClassificationEndpointInstalled) {
+      originalUse.call(
+        this,
+        `${STATS_BASE_PATH}/meta/classify`,
+        express.json({ limit: '20kb' }),
+        async (req, res) => {
+          if (!isStatsUser(req)) return res.status(403).json({ ok: false, message: 'No autorizado.' });
+          const campaignId = normalizeText(req.body?.campaignId);
+          const city = normalizeText(req.body?.city);
+          const requestedVacancyId = normalizeText(req.body?.vacancyId);
+          if (!campaignId) return res.status(400).json({ ok: false, message: 'Falta anuncio.' });
+          try {
+            let vacancyId = null;
+            if (requestedVacancyId) {
+              const vacancy = await getClassificationPrisma().vacancy.findUnique({
+                where: { id: requestedVacancyId },
+                select: { id: true, city: true }
+              });
+              if (vacancy && (!city || normalizeCompare(vacancy.city) === normalizeCompare(city))) vacancyId = vacancy.id;
+            }
+            await getClassificationPrisma().campaign.update({
+              where: { id: campaignId },
+              data: { city: city || null, vacancyId }
+            });
+            return res.json({ ok: true });
+          } catch (error) {
+            console.error('[metaAdsClassificationEndpoint]', error);
+            return res.status(500).json({ ok: false, message: 'No fue posible guardar clasificación.' });
+          }
+        }
+      );
+      this.__metaAdsClassificationEndpointInstalled = true;
+    }
+    return result;
+  };
+  appPrototype.__metaAdsClassificationEndpointPatchInstalled = true;
+}
+
+installClassificationEndpoint();
 installStatsHtmlCleaner();
 
 export function getMetaAdsConfig(env = process.env) {
