@@ -25,6 +25,17 @@ function compactUnique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function dateOnlyFromDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function defaultDateRange() {
+  const until = new Date();
+  const since = new Date(until);
+  since.setUTCDate(since.getUTCDate() - 30);
+  return { since: dateOnlyFromDate(since), until: dateOnlyFromDate(until) };
+}
+
 function safeError(error) {
   const meta = error?.response?.data?.error || error?.metaError || null;
   return {
@@ -170,8 +181,8 @@ async function syncAdRows(prisma, rows = []) {
 export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
   const client = createMetaAdsClient();
   if (!client.enabled) return { ok: true, enabled: false, message: 'Meta Ads no configurado. Las métricas internas de Lórren siguen disponibles.', missing: client.missing };
-  const today = new Date().toISOString().slice(0, 10);
-  const range = { since: since || today, until: until || today };
+  const fallbackRange = defaultDateRange();
+  const range = { since: since || fallbackRange.since, until: until || fallbackRange.until };
   console.info('[metaAdsInsightsSync] inicio', { since: range.since, until: range.until, adAccountId: client.adAccountId });
   try {
     await syncAdAccount(prisma, client);
@@ -185,11 +196,11 @@ export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
       syncAdRows(prisma, adRows)
     ]);
     console.info('[metaAdsInsightsSync] fin', { autoCampaigns, campaignSnapshots, adSnapshots });
-    return { ok: true, enabled: true, autoCampaigns, campaignSnapshots, adSnapshots };
+    return { ok: true, enabled: true, since: range.since, until: range.until, autoCampaigns, campaignSnapshots, adSnapshots };
   } catch (error) {
     const safe = safeError(error);
     console.warn('[metaAdsInsightsSync] error', safe);
-    return { ok: false, enabled: true, error: safe };
+    return { ok: false, enabled: true, since: range.since, until: range.until, error: safe };
   }
 }
 
