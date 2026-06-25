@@ -1,10 +1,13 @@
 import express from 'express';
 import { requireLorenV2 } from '../services/lorenV2Gate.js';
+import { getMetaAdsConfig } from '../services/metaAdsClient.js';
+import { syncMetaAdsInsights } from '../services/metaAdsInsightsSync.js';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 
 const CAMPAIGN_SOURCE_TYPE = 'META_ADS';
 const CAMPAIGN_SOURCE_LABEL = 'Meta / Facebook Ads';
+const STATS_BASE_PATH = '/admin/estadisticas';
 
 // ─── Utilidades de escape y normalización ──────────────────────────────────────
 
@@ -15,6 +18,10 @@ function escapeHtml(value = '') {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function isDevRequest(req) {
+  return req.userRole === 'dev' || req.session?.userRole === 'dev';
 }
 
 function normalizeString(value) {
@@ -398,7 +405,8 @@ async function loadCampaignDashboardData(prisma, query = {}) {
   const enriched = enrichCampaignsWithAttribution(campaigns, candidates);
   const unmatchedMetaCandidates = buildUnmatchedMetaCandidates(candidates, campaigns);
 
-  return { filters, cities, vacancies, campaigns: enriched, unmatchedMetaCandidates };
+  const metaConfig = getMetaAdsConfig();
+  return { filters, cities, vacancies, campaigns: enriched, unmatchedMetaCandidates, metaConfig };
 }
 
 // ─── Render: Layout ────────────────────────────────────────────────────────────
@@ -509,15 +517,22 @@ function renderLayout({ title, body }) {
   <nav class="navbar">
     <a href="/admin">Panel</a>
     <span class="sep">›</span>
-    <a href="/admin/v2">Loren V2</a>
+    <a href="/admin/estadisticas">Estadísticas</a>
     <span class="sep">›</span>
-    <a href="/admin/v2/campaigns" class="active">Campañas</a>
+    <a href="/admin/estadisticas/campaigns" class="active">Campañas</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
   <main class="page">${body}</main>
 </body>
 </html>`;
+}
+
+function renderMetaAdsStatus(metaConfig = {}) {
+  if (metaConfig.enabled) {
+    return `<div class="alert alert-success">Meta Ads configurado para sincronización. El dashboard usa snapshots guardados para evitar llamadas a Meta en cada carga.</div>`;
+  }
+  return `<div class="alert alert-info">Meta Ads no configurado. Las métricas internas de Lórren siguen disponibles.</div>`;
 }
 
 function renderCampaignFilters({ filters = {}, cities = [], vacancies = [] }) {
@@ -529,7 +544,7 @@ function renderCampaignFilters({ filters = {}, cities = [], vacancies = [] }) {
     .join('');
   return `<section class="card">
     <div class="card-title">Filtros de análisis</div>
-    <form method="get" action="/admin/v2/campaigns" class="grid-form">
+    <form method="get" action="/admin/estadisticas/campaigns" class="grid-form">
       <label>Desde <input type="date" name="from" value="${escapeHtml(filters.from || '')}"></label>
       <label>Hasta <input type="date" name="to" value="${escapeHtml(filters.to || '')}"></label>
       <label>Ciudad
@@ -665,7 +680,7 @@ function renderCampaignTable(campaigns = []) {
       : '';
 
     return `<tr>
-      <td><a href="/admin/v2/campaigns/${escapeHtml(campaign.id)}" class="fw-700" style="color:#0d7a6b;text-decoration:none;">${escapeHtml(campaign.name)}</a><br><span class="badge badge-gray text-xs" style="margin-top:3px;font-family:monospace">${escapeHtml(campaign.code)}</span>${attrLabel ? `<br><span style="margin-top:2px;display:inline-block">${attrLabel}</span>` : ''}</td>
+      <td><a href="/admin/estadisticas/campaigns/${escapeHtml(campaign.id)}" class="fw-700" style="color:#0d7a6b;text-decoration:none;">${escapeHtml(campaign.name)}</a><br><span class="badge badge-gray text-xs" style="margin-top:3px;font-family:monospace">${escapeHtml(campaign.code)}</span>${attrLabel ? `<br><span style="margin-top:2px;display:inline-block">${attrLabel}</span>` : ''}</td>
       <td>${campaign.vacancy ? escapeHtml(campaign.vacancy.title) : '<span class="muted">Sin vacante</span>'}<br><span class="muted">${escapeHtml(campaign.city || campaign.vacancy?.city || '—')}</span></td>
       <td>${activeLabel}</td>
       <td>${renderQualityBadge(metric.qualityScore)}</td>
@@ -675,7 +690,7 @@ function renderCampaignTable(campaigns = []) {
       <td class="text-sm"><strong>${metric.apt}</strong><br><span class="muted">${conversionRate(metric.apt, metric.cvReceived)} de HV</span></td>
       ${schedulingCells}
       <td class="text-sm"><strong style="color:#0d7a6b">${metric.hired}</strong>${cplHired}</td>
-      <td><a href="/admin/v2/campaigns/${escapeHtml(campaign.id)}" class="btn btn-secondary btn-sm">Ver →</a></td>
+      <td><a href="/admin/estadisticas/campaigns/${escapeHtml(campaign.id)}" class="btn btn-secondary btn-sm">Ver →</a></td>
     </tr>`;
   }).join('');
 
@@ -701,7 +716,7 @@ function renderCreateForm({ cities = [], vacancies = [], error = null, success =
     <p class="muted mb-4">El código interno debe coincidir con el ID de campaña, nombre del anuncio o etiqueta de Meta Ads.</p>
     ${error ? `<div class="alert alert-error">${escapeHtml(error)}</div>` : ''}
     ${success ? `<div class="alert alert-success">${escapeHtml(success)}</div>` : ''}
-    <form method="post" action="/admin/v2/campaigns">
+    <form method="post" action="/admin/estadisticas/campaigns">
       <div class="grid-form">
         <label>Código interno de Meta Ads *
           <input name="code" placeholder="23856238000000000 o BOGOTA-JUN-2026" required maxlength="80" style="font-family:monospace">
@@ -730,7 +745,7 @@ function renderUnmatchedMetaCandidates(candidates = [], campaigns = []) {
       <td><span class="fw-700">${escapeHtml(c.fullName || 'Sin nombre')}</span><br><span class="muted">${escapeHtml(c.phone || '')}</span></td>
       <td>${escapeHtml(c.vacancy?.title || 'Sin vacante')}</td>
       <td><span class="muted text-xs" style="font-family:monospace">${escapeHtml(metaInfo || '—')}</span></td>
-      <td><form method="post" action="/admin/v2/campaigns/associate" style="display:flex;gap:6px;align-items:center"><input type="hidden" name="candidateId" value="${escapeHtml(c.id)}"><select name="campaignId" style="min-width:160px;font-size:12px;padding:5px 8px"><option value="">Seleccionar campaña…</option>${campaignOptions}</select><button type="submit" class="btn btn-secondary btn-sm">Asociar</button></form></td>
+      <td><form method="post" action="/admin/estadisticas/campaigns/associate" style="display:flex;gap:6px;align-items:center"><input type="hidden" name="candidateId" value="${escapeHtml(c.id)}"><select name="campaignId" style="min-width:160px;font-size:12px;padding:5px 8px"><option value="">Seleccionar campaña…</option>${campaignOptions}</select><button type="submit" class="btn btn-secondary btn-sm">Asociar</button></form></td>
     </tr>`;
   }).join('');
   return `<section class="card"><div class="card-title">Metadata Meta sin campaña asociada (${candidates.length})</div><div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Vacante</th><th>Metadata Meta</th><th>Asociar</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
@@ -797,7 +812,7 @@ function renderCampaignDetail({ campaign, candidates = [], cities = [], vacancie
     title: `Campaña: ${campaign.name}`,
     body: `
       <div class="page-header">
-        <div class="flex gap-2" style="margin-bottom:8px"><a href="/admin/v2/campaigns" class="btn btn-secondary btn-sm">← Campañas</a>${activeLabel}${renderQualityBadge(metric.qualityScore)}</div>
+        <div class="flex gap-2" style="margin-bottom:8px"><a href="/admin/estadisticas/campaigns" class="btn btn-secondary btn-sm">← Campañas</a>${activeLabel}${renderQualityBadge(metric.qualityScore)}</div>
         <h1>${escapeHtml(campaign.name)}</h1>
         <p style="font-family:monospace;color:#64748b;font-size:12px">${escapeHtml(campaign.code)}</p>
       </div>
@@ -806,7 +821,7 @@ function renderCampaignDetail({ campaign, candidates = [], cities = [], vacancie
       <div class="grid-2">
         <section class="card"><div class="card-title">Embudo de esta campaña</div><div class="funnel">${funnelHtml}</div><hr class="divider"><div class="grid-auto" style="margin-top:0">${kpisHtml}</div></section>
         <section class="card"><div class="card-title">Editar campaña</div>
-          <form method="post" action="/admin/v2/campaigns/${escapeHtml(campaign.id)}/edit">
+          <form method="post" action="/admin/estadisticas/campaigns/${escapeHtml(campaign.id)}/edit">
             <div style="display:grid;gap:10px">
               <label>Nombre <input name="name" value="${escapeHtml(campaign.name)}" required maxlength="120"></label>
               <label>Ciudad <select name="city"><option value="">Sin ciudad específica</option>${editCityOptions}</select></label>
@@ -841,14 +856,14 @@ export function lorenV2Router(prisma) {
     next();
   });
 
-  // ── Hub: /admin/v2 ─────────────────────────────────────────────────────────
+  // ── Hub: /admin/estadisticas ─────────────────────────────────────────────────────────
   router.get('/', requireLorenV2, (_req, res) => {
     const html = `<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Loren V2</title>
+  <title>Estadísticas</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1d23; font-size: 14px; }
@@ -872,40 +887,35 @@ export function lorenV2Router(prisma) {
   <nav class="navbar">
     <a href="/admin">Panel</a>
     <span class="sep">›</span>
-    <a href="/admin/v2" class="active">Loren V2</a>
+    <a href="/admin/estadisticas" class="active">Estadísticas</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
   <main class="page">
-    <h1>Loren V2 — Centro de inteligencia</h1>
+    <h1>Estadísticas — Centro de inteligencia de Lórren</h1>
     <p class="subtitle">Análisis avanzado de reclutamiento, campañas y calidad de candidatos.</p>
     <div class="hub-grid">
-      <a href="/admin/v2/campaigns" class="hub-card">
+      <a href="/admin/estadisticas/campaigns" class="hub-card">
         <div class="hub-card-icon">📣</div>
         <div class="hub-card-title">Campañas</div>
         <div class="hub-card-desc">Seguimiento de pautas Meta Ads, embudo de conversión y costo por etapa.</div>
       </a>
-      <a href="/admin/v2/referrals" class="hub-card">
-        <div class="hub-card-icon">🔗</div>
-        <div class="hub-card-title">Referidos</div>
-        <div class="hub-card-desc">Candidatos que llegaron por recomendación de otros candidatos.</div>
-      </a>
-      <a href="/admin/v2/reports" class="hub-card">
+      <a href="/admin/estadisticas/reports" class="hub-card">
         <div class="hub-card-icon">📊</div>
         <div class="hub-card-title">Reportes</div>
         <div class="hub-card-desc">Exportar datos de candidatos y métricas en Excel.</div>
       </a>
-      <a href="/admin/v2/cv-analysis" class="hub-card">
+      <a href="/admin/estadisticas/cv-analysis" class="hub-card">
         <div class="hub-card-icon">🧠</div>
         <div class="hub-card-title">Análisis de HV</div>
         <div class="hub-card-desc">Revisión de hojas de vida procesadas por IA.</div>
       </a>
-      <a href="/admin/v2/daily-summary" class="hub-card">
+      <a href="/admin/estadisticas/daily-summary" class="hub-card">
         <div class="hub-card-icon">📋</div>
         <div class="hub-card-title">Resumen diario</div>
         <div class="hub-card-desc">Resumen de actividad del día y candidatos nuevos.</div>
       </a>
-      <a href="/admin/v2/data-consents" class="hub-card">
+      <a href="/admin/estadisticas/data-consents" class="hub-card">
         <div class="hub-card-icon">🔒</div>
         <div class="hub-card-title">Consentimientos</div>
         <div class="hub-card-desc">Gestión de consentimientos de datos personales.</div>
@@ -917,6 +927,15 @@ export function lorenV2Router(prisma) {
     res.send(html);
   });
 
+
+  router.post('/meta/sync', requireLorenV2, async (req, res) => {
+    if (!isDevRequest(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const since = normalizeDateInput(req.body?.since || req.query?.since);
+    const until = normalizeDateInput(req.body?.until || req.query?.until);
+    const result = await syncMetaAdsInsights(prisma, { since, until });
+    return res.status(result.ok ? 200 : 502).json(result);
+  });
+
   // ── Campañas ───────────────────────────────────────────────────────────────
 
   router.get('/campaigns', requireLorenV2, async (req, res) => {
@@ -926,12 +945,13 @@ export function lorenV2Router(prisma) {
       const body = `
         <div class="page-header"><h1>Campañas Meta Ads</h1><p>Seguimiento de efectividad por pauta publicitaria — ${CAMPAIGN_SOURCE_LABEL}</p></div>
         ${successMsg ? `<div class="alert alert-success">${escapeHtml(successMsg)}</div>` : ''}
+        ${renderMetaAdsStatus(data.metaConfig)}
         ${renderCampaignFilters({ filters: data.filters, cities: data.cities, vacancies: data.vacancies })}
         ${data.campaigns.length ? renderCampaignFunnel(data.campaigns) : ''}
         ${renderCampaignTable(data.campaigns)}
         ${renderUnmatchedMetaCandidates(data.unmatchedMetaCandidates, data.campaigns)}
         ${renderCreateForm({ cities: data.cities, vacancies: data.vacancies })}`;
-      res.send(renderLayout({ title: 'Campañas — Loren V2', body }));
+      res.send(renderLayout({ title: 'Campañas — Estadísticas', body }));
     } catch (err) {
       console.error('[lorenV2 campaigns GET]', err);
       res.status(500).send(renderLayout({ title: 'Error', body: '<div class="alert alert-error">Error interno cargando las campañas.</div>' }));
@@ -987,7 +1007,7 @@ export function lorenV2Router(prisma) {
     const reload = async (error) => {
       const data = await loadCampaignDashboardData(prisma, {});
       const body2 = `<div class="page-header"><h1>Campañas Meta Ads</h1><p>${CAMPAIGN_SOURCE_LABEL}</p></div>${renderCampaignFilters({ filters: {}, cities: data.cities, vacancies: data.vacancies })}${data.campaigns.length ? renderCampaignFunnel(data.campaigns) : ''}${renderCampaignTable(data.campaigns)}${renderUnmatchedMetaCandidates(data.unmatchedMetaCandidates, data.campaigns)}${renderCreateForm({ cities: data.cities, vacancies: data.vacancies, error })}`;
-      res.status(400).send(renderLayout({ title: 'Campañas — Loren V2', body: body2 }));
+      res.status(400).send(renderLayout({ title: 'Campañas — Estadísticas', body: body2 }));
     };
 
     if (!code || !isValidCampaignCode(code)) return reload('El código ingresado no es válido.');
@@ -1007,7 +1027,7 @@ export function lorenV2Router(prisma) {
           isActive: true, createdByUsername: req.session?.username || null
         }
       });
-      res.redirect('/admin/v2/campaigns?success=1');
+      res.redirect(`${STATS_BASE_PATH}/campaigns?success=1`);
     } catch (err) {
       console.error('[lorenV2 campaigns POST]', err);
       reload('Error al guardar la campaña. Intenta de nuevo.');
@@ -1029,10 +1049,10 @@ export function lorenV2Router(prisma) {
         where: { id: req.params.id },
         data: { name: name || undefined, city: city || null, vacancyId: vacancyId || null, notes: notes || null, budgetCOP: budgetCOP !== null ? budgetCOP : null, startsAt: startsAt ? new Date(`${startsAt}T05:00:00Z`) : null, endsAt: endsAt ? new Date(`${endsAt}T23:59:59Z`) : null, isActive }
       });
-      res.redirect(`/admin/v2/campaigns/${req.params.id}?success=1`);
+      res.redirect(`${STATS_BASE_PATH}/campaigns/${req.params.id}?success=1`);
     } catch (err) {
       console.error('[lorenV2 campaign edit]', err);
-      res.redirect(`/admin/v2/campaigns/${req.params.id}?error=1`);
+      res.redirect(`${STATS_BASE_PATH}/campaigns/${req.params.id}?error=1`);
     }
   });
 
@@ -1040,13 +1060,13 @@ export function lorenV2Router(prisma) {
     const { body } = req;
     const candidateId = normalizeString(body.candidateId);
     const campaignId = normalizeString(body.campaignId);
-    if (!candidateId || !campaignId) return res.redirect('/admin/v2/campaigns?error=missing');
+    if (!candidateId || !campaignId) return res.redirect(`${STATS_BASE_PATH}/campaigns?error=missing`);
     try {
       await prisma.candidate.update({ where: { id: candidateId }, data: { campaignId, sourceType: CAMPAIGN_SOURCE_TYPE } });
-      res.redirect('/admin/v2/campaigns?success=asociado');
+      res.redirect(`${STATS_BASE_PATH}/campaigns?success=asociado`);
     } catch (err) {
       console.error('[lorenV2 associate]', err);
-      res.redirect('/admin/v2/campaigns?error=1');
+      res.redirect(`${STATS_BASE_PATH}/campaigns?error=1`);
     }
   });
 

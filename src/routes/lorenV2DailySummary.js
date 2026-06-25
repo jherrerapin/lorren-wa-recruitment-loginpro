@@ -70,10 +70,9 @@ function renderLayout({ title, body }) {
 <body>
   <nav class="navbar">
     <a href="/admin">Panel</a>
-    <a href="/admin/v2">Loren V2</a>
-    <a href="/admin/v2/campaigns">Campañas</a>
-    <a href="/admin/v2/referrals">Referidos</a>
-    <a href="/admin/v2/daily-summary">Resumen diario</a>
+    <a href="/admin/estadisticas">Estadísticas</a>
+    <a href="/admin/estadisticas/campaigns">Campañas</a>
+    <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
@@ -209,7 +208,7 @@ export function lorenV2DailySummaryRouter(prisma) {
     ${renderCandidateTable('Candidatos nuevos de hoy', summary.todayCandidates)}
     ${renderCandidateTable('Pendientes de hoja de vida', summary.pendingCvCandidates)}
     ${renderCandidateTable('Revisión humana', summary.humanReviewCandidates)}`;
-    res.send(renderLayout({ title: 'Resumen diario Loren V2', body }));
+    res.send(renderLayout({ title: 'Resumen diario — Estadísticas', body }));
   });
 
   router.get('/json', async (req, res) => {

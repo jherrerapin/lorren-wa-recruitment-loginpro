@@ -239,7 +239,7 @@ async function loadWorkbookData(prisma, query = {}) {
 export async function buildLorenV2ReportsWorkbook(prisma, query = {}) {
   const data = await loadWorkbookData(prisma, query);
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Loren V2';
+  workbook.creator = 'Estadísticas';
   workbook.created = new Date();
   workbook.modified = new Date();
   workbook.properties.date1904 = false;
@@ -247,7 +247,7 @@ export async function buildLorenV2ReportsWorkbook(prisma, query = {}) {
   const subtitle = `${data.period === 'month' ? 'Reporte mensual' : 'Reporte semanal'} · ${data.startDay} a ${data.endDay} · Bogotá`;
   const summary = workbook.addWorksheet('Resumen ejecutivo', { properties: { tabColor: { argb: BRAND.green } } });
   summary.columns = [{ width: 28 }, { width: 20 }, { width: 28 }, { width: 20 }];
-  addTitle(summary, 'Loren V2 - Reporte de reclutamiento', subtitle, 4);
+  addTitle(summary, 'Estadísticas - Reporte de reclutamiento', subtitle, 4);
   addMetricCards(summary, data.metrics);
   applySheetBase(summary);
 

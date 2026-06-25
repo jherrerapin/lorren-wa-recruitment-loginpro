@@ -68,12 +68,11 @@ function renderLayout({ title, body }) {
 <body>
   <nav class="navbar">
     <a href="/admin">Panel</a>
-    <a href="/admin/v2">Loren V2</a>
-    <a href="/admin/v2/campaigns">Campañas</a>
-    <a href="/admin/v2/referrals">Referidos</a>
-    <a href="/admin/v2/daily-summary">Resumen diario</a>
-    <a href="/admin/v2/reports">Reportes</a>
-    <a href="/admin/v2/data-consents">Datos personales</a>
+    <a href="/admin/estadisticas">Estadísticas</a>
+    <a href="/admin/estadisticas/campaigns">Campañas</a>
+    <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
+    <a href="/admin/estadisticas/reports">Reportes</a>
+    <a href="/admin/estadisticas/data-consents">Datos personales</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
@@ -113,10 +112,10 @@ function renderCandidateRows(candidates = []) {
     <td><span class="muted">${escapeHtml(candidate.dataConsentRecordedBy || '')}</span></td>
     <td>
       <div class="actions">
-        <form method="post" action="/admin/v2/data-consents/${candidate.id}/accept">
+        <form method="post" action="/admin/estadisticas/data-consents/${candidate.id}/accept">
           <button class="btn" type="submit">Registrar aceptación</button>
         </form>
-        <form method="post" action="/admin/v2/data-consents/${candidate.id}/revoke">
+        <form method="post" action="/admin/estadisticas/data-consents/${candidate.id}/revoke">
           <button class="btn btn-danger" type="submit">Revocar</button>
         </form>
       </div>
@@ -198,7 +197,7 @@ export function lorenV2DataConsentsRouter(prisma) {
           </table>
         </div>
       </section>`;
-    res.send(renderLayout({ title: 'Datos personales Loren V2', body }));
+    res.send(renderLayout({ title: 'Datos personales — Estadísticas', body }));
   });
 
   router.get('/json', async (_req, res) => {
@@ -208,12 +207,12 @@ export function lorenV2DataConsentsRouter(prisma) {
 
   router.post('/:candidateId/accept', async (req, res) => {
     await recordConsent(prisma, req, req.params.candidateId, 'ACCEPTED');
-    res.redirect('/admin/v2/data-consents?message=Autorización registrada.');
+    res.redirect('/admin/estadisticas/data-consents?message=Autorización registrada.');
   });
 
   router.post('/:candidateId/revoke', async (req, res) => {
     await recordConsent(prisma, req, req.params.candidateId, 'REVOKED');
-    res.redirect('/admin/v2/data-consents?message=Revocatoria registrada.');
+    res.redirect('/admin/estadisticas/data-consents?message=Revocatoria registrada.');
   });
 
   return router;

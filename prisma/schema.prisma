@@ -645,3 +645,66 @@ model DispatchIncident {
   @@index([workerId])
   @@index([status])
 }
+
+model MetaAdAccount {
+  id           String   @id @default(cuid())
+  accountId    String   @unique
+  name         String?
+  currency     String?
+  timezoneName String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model MetaCampaignSnapshot {
+  id               String   @id @default(cuid())
+  date             DateTime
+  metaCampaignId   String
+  metaCampaignName String?
+  spend            Decimal  @default(0) @db.Decimal(14, 4)
+  impressions      Int      @default(0)
+  reach            Int      @default(0)
+  clicks           Int      @default(0)
+  inlineLinkClicks Int      @default(0)
+  ctr              Decimal  @default(0) @db.Decimal(10, 4)
+  cpc              Decimal  @default(0) @db.Decimal(14, 4)
+  cpm              Decimal  @default(0) @db.Decimal(14, 4)
+  rawActions       Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([date, metaCampaignId])
+  @@index([date])
+  @@index([metaCampaignId])
+  @@index([date, metaCampaignId])
+}
+
+model MetaAdSnapshot {
+  id               String   @id @default(cuid())
+  date             DateTime
+  metaCampaignId   String?
+  metaCampaignName String?
+  metaAdsetId      String?
+  metaAdsetName    String?
+  metaAdId         String
+  metaAdName       String?
+  spend            Decimal  @default(0) @db.Decimal(14, 4)
+  impressions      Int      @default(0)
+  reach            Int      @default(0)
+  clicks           Int      @default(0)
+  inlineLinkClicks Int      @default(0)
+  ctr              Decimal  @default(0) @db.Decimal(10, 4)
+  cpc              Decimal  @default(0) @db.Decimal(14, 4)
+  cpm              Decimal  @default(0) @db.Decimal(14, 4)
+  rawActions       Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([date, metaAdId])
+  @@index([date])
+  @@index([metaCampaignId])
+  @@index([metaAdId])
+  @@index([date, metaCampaignId])
+  @@index([date, metaAdId])
+}

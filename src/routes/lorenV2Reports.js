@@ -104,11 +104,11 @@ function isDevRequest(req) {
 }
 
 function buildMailHref(report = {}) {
-  const subject = `Reporte Loren V2 ${report.period === 'month' ? 'mensual' : 'semanal'} ${report.startDay} a ${report.endDay}`;
+  const subject = `Reporte Estadísticas ${report.period === 'month' ? 'mensual' : 'semanal'} ${report.startDay} a ${report.endDay}`;
   const body = [
     'Hola,',
     '',
-    `Adjunto reporte ${report.period === 'month' ? 'mensual' : 'semanal'} de Loren V2 correspondiente al rango ${report.startDay} a ${report.endDay}.`,
+    `Adjunto reporte ${report.period === 'month' ? 'mensual' : 'semanal'} del Centro de Estadísticas de Lórren correspondiente al rango ${report.startDay} a ${report.endDay}.`,
     '',
     'Resumen ejecutivo:',
     `- Candidatos: ${report.metrics?.newCandidates || 0}`,
@@ -117,7 +117,7 @@ function buildMailHref(report = {}) {
     `- Asistieron: ${report.metrics?.attended || 0}`,
     `- No show: ${report.metrics?.noShow || 0}`,
     '',
-    'Nota: adjuntar manualmente el archivo Excel descargado desde Loren V2.',
+    'Nota: adjuntar manualmente el archivo Excel descargado desdel Centro de Estadísticas de Lórren.',
     '',
     'Saludos.'
   ].join('\n');
@@ -208,11 +208,10 @@ function renderLayout({ title, body }) {
 <body>
   <nav class="navbar">
     <a href="/admin">Panel</a>
-    <a href="/admin/v2">Loren V2</a>
-    <a href="/admin/v2/campaigns">Campañas</a>
-    <a href="/admin/v2/referrals">Referidos</a>
-    <a href="/admin/v2/daily-summary">Resumen diario</a>
-    <a href="/admin/v2/reports">Reportes</a>
+    <a href="/admin/estadisticas">Estadísticas</a>
+    <a href="/admin/estadisticas/campaigns">Campañas</a>
+    <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
+    <a href="/admin/estadisticas/reports">Reportes</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
@@ -228,7 +227,7 @@ function renderDevActions(report = {}, canGenerate = false) {
 
   const downloadQuery = new URLSearchParams({ period: report.period, date: report.baseDay }).toString();
   return `<div class="grid">
-    <a class="btn" href="/admin/v2/reports/xlsx?${escapeHtml(downloadQuery)}">Generar y descargar Excel</a>
+    <a class="btn" href="/admin/estadisticas/reports/xlsx?${escapeHtml(downloadQuery)}">Generar y descargar Excel</a>
     <a class="btn btn-secondary" href="${escapeHtml(buildMailHref(report))}">Preparar correo para adjuntar</a>
   </div>
   <p class="muted">El sistema no envía el correo automáticamente. Descarga el Excel y luego usa el botón para abrir un correo con asunto y cuerpo sugerido; el archivo se adjunta manualmente.</p>`;
@@ -238,7 +237,7 @@ function renderFilters(report = {}, canGenerate = false) {
   return `<section class="card">
     <h1>Reportes semanales y mensuales</h1>
     <p>Rango: <strong>${escapeHtml(report.startDay)}</strong> a <strong>${escapeHtml(report.endDay)}</strong>. Los cálculos usan horario de Bogotá.</p>
-    <form method="get" action="/admin/v2/reports" class="grid">
+    <form method="get" action="/admin/estadisticas/reports" class="grid">
       <label>Periodo
         <select name="period">
           <option value="week" ${report.period === 'week' ? 'selected' : ''}>Semanal</option>
@@ -346,7 +345,7 @@ export function lorenV2ReportsRouter(prisma) {
 
   router.get('/', async (req, res) => {
     const report = await loadReport(prisma, req.query);
-    res.send(renderLayout({ title: 'Reportes Loren V2', body: renderReport(report, isDevRequest(req)) }));
+    res.send(renderLayout({ title: 'Reportes — Estadísticas', body: renderReport(report, isDevRequest(req)) }));
   });
 
   router.get('/json', async (req, res) => {
