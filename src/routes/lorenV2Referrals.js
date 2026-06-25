@@ -1,5 +1,5 @@
 import express from 'express';
-import { canSeeLorenV2, requireLorenV2 } from '../services/lorenV2Gate.js';
+import { requireLorenV2 } from '../services/lorenV2Gate.js';
 
 // ─── Utilidades ────────────────────────────────────────────────────────────────
 
@@ -473,7 +473,7 @@ export function lorenV2ReferralsRouter(prisma) {
   });
 
   // ── GET /admin/v2/referrals ──────────────────────────────────────────────────
-  router.get('/', canSeeLorenV2, async (req, res) => {
+  router.get('/', requireLorenV2, async (req, res) => {
     try {
       const { candidates, vacancies, filters } = await loadReferralData(prisma, req.query);
       const metrics = buildReferralMetrics(candidates);
@@ -507,7 +507,7 @@ export function lorenV2ReferralsRouter(prisma) {
   });
 
   // ── GET /admin/v2/referrals/json ──────────────────────────────────────────────
-  router.get('/json', canSeeLorenV2, async (req, res) => {
+  router.get('/json', requireLorenV2, async (req, res) => {
     try {
       const { candidates } = await loadReferralData(prisma, req.query);
       const metrics = buildReferralMetrics(candidates);

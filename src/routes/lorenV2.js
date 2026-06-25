@@ -1,5 +1,5 @@
 import express from 'express';
-import { canSeeLorenV2, requireLorenV2 } from '../services/lorenV2Gate.js';
+import { requireLorenV2 } from '../services/lorenV2Gate.js';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 
@@ -842,7 +842,7 @@ export function lorenV2Router(prisma) {
   });
 
   // ── Hub: /admin/v2 ─────────────────────────────────────────────────────────
-  router.get('/', canSeeLorenV2, (_req, res) => {
+  router.get('/', requireLorenV2, (_req, res) => {
     const html = `<!doctype html>
 <html lang="es">
 <head>
@@ -919,7 +919,7 @@ export function lorenV2Router(prisma) {
 
   // ── Campañas ───────────────────────────────────────────────────────────────
 
-  router.get('/campaigns', canSeeLorenV2, async (req, res) => {
+  router.get('/campaigns', requireLorenV2, async (req, res) => {
     try {
       const data = await loadCampaignDashboardData(prisma, req.query);
       const successMsg = req.query.success ? (req.query.success === 'asociado' ? 'Candidato asociado correctamente.' : 'Campaña creada correctamente.') : null;
@@ -938,7 +938,7 @@ export function lorenV2Router(prisma) {
     }
   });
 
-  router.get('/campaigns.json', canSeeLorenV2, async (req, res) => {
+  router.get('/campaigns.json', requireLorenV2, async (req, res) => {
     try {
       const data = await loadCampaignDashboardData(prisma, req.query);
       const result = data.campaigns.map((campaign) => ({
@@ -954,7 +954,7 @@ export function lorenV2Router(prisma) {
     }
   });
 
-  router.get('/campaigns/:id', canSeeLorenV2, async (req, res) => {
+  router.get('/campaigns/:id', requireLorenV2, async (req, res) => {
     try {
       const campaign = await prisma.campaign.findUnique({
         where: { id: req.params.id },
