@@ -70,39 +70,78 @@ async function recalculateRequest(prismaClient, serviceRequestId) {
   return status;
 }
 
-async function cancelAssignments(prismaClient, workerId, reasonLabel) {
-  const activeAssignments = await prismaClient.dispatchAssignment.findMany({ where: { workerId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } }, select: { id: true, serviceRequestId: true, status: true } });
-  if (!activeAssignments.length) return [];
-  const affectedRequestIds = [...new Set(activeAssignments.map((assignment) => assignment.serviceRequestId))];
-  await prismaClient.$transaction(activeAssignments.map((assignment) => prismaClient.dispatchAssignment.update({
-    where: { id: assignment.id },
-    data: { status: assignment.status === CONFIRMED_ASSIGNMENT_STATUS ? 'NO_CONFIRMO' : 'CANCELLED', notes: `Auxiliar retirado del flujo. Causal: ${reasonLabel}.` }
-  })));
-  await Promise.all(affectedRequestIds.map((id) => recalculateRequest(prismaClient, id)));
-  return affectedRequestIds;
-}
-
-async function saveExitReason(prismaClient, worker, req) {
+function resolveExitReason(req) {
   const reason = reasonByCode(text(req.body?.exitReasonCode));
   if (!reason) {
     const error = new Error('Debes seleccionar una causal de retiro para desactivar el auxiliar.');
     error.statusCode = 400;
     throw error;
   }
-  const note = text(req.body?.exitReasonNote);
+  return reason;
+}
+
+async function loadActiveAssignments(prismaClient, workerId) {
+  return prismaClient.dispatchAssignment.findMany({
+    where: { workerId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } },
+    select: { id: true, serviceRequestId: true, status: true }
+  });
+}
+
+function buildCancelAssignmentOperations(prismaClient, activeAssignments, reasonLabel) {
+  return activeAssignments.map((assignment) => prismaClient.dispatchAssignment.updateMany({
+    where: { id: assignment.id },
+    data: {
+      status: assignment.status === CONFIRMED_ASSIGNMENT_STATUS ? 'NO_CONFIRMO' : 'CANCELLED',
+      notes: `Auxiliar retirado del flujo. Causal: ${reasonLabel}.`
+    }
+  }));
+}
+
+async function writeExitReasonAudit(prismaClient, worker, req, reason) {
   const actor = text(req.session?.username || req.username) || 'sistema';
-  await prismaClient.$transaction([
-    prismaClient.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'DISABLED' } }),
-    prismaClient.devAuditEvent.create({
+  const note = text(req.body?.exitReasonNote);
+  try {
+    await prismaClient.devAuditEvent.create({
       data: {
         username: actor,
         action: AUDIT_ACTION,
         target: worker.id,
         detail: { reasonCode: reason.code, reasonLabel: reason.label, category: reason.category, note, previousStatus: worker.operationalStatus || null, newStatus: 'DISABLED', workerName: worker.fullName || null }
       }
-    })
+    });
+  } catch (error) {
+    console.warn('[DISPATCH_WORKER_EXIT_REASON_AUDIT_FAILED]', {
+      workerId: worker.id,
+      username: actor,
+      reasonCode: reason.code,
+      message: error?.message || String(error)
+    });
+  }
+}
+
+async function deactivateWorkerWithAssignments(prismaClient, worker, req) {
+  const reason = resolveExitReason(req);
+  const activeAssignments = await loadActiveAssignments(prismaClient, worker.id);
+  const affectedRequestIds = [...new Set(activeAssignments.map((assignment) => assignment.serviceRequestId))];
+
+  await prismaClient.$transaction([
+    prismaClient.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'DISABLED' } }),
+    ...buildCancelAssignmentOperations(prismaClient, activeAssignments, reason.label)
   ]);
-  return reason;
+
+  await writeExitReasonAudit(prismaClient, worker, req, reason);
+
+  const recalculations = await Promise.allSettled(affectedRequestIds.map((id) => recalculateRequest(prismaClient, id)));
+  const recalculationFailures = recalculations.filter((result) => result.status === 'rejected').length;
+  if (recalculationFailures) {
+    console.warn('[DISPATCH_WORKER_DEACTIVATION_RECALCULATE_FAILED]', {
+      workerId: worker.id,
+      affectedRequestIds,
+      recalculationFailures
+    });
+  }
+
+  return { reason, affectedRequestIds, recalculationFailures };
 }
 
 async function handleToggle(req, res, next, workerId) {
@@ -112,16 +151,23 @@ async function handleToggle(req, res, next, workerId) {
   if (!worker) return res.redirect(addMessage(safeBack(req), 'No se encontró el auxiliar. Recarga la lista e intenta nuevamente.'));
   try {
     if (worker.operationalStatus === 'CONTRATADO') {
-      const reason = await saveExitReason(prismaClient, worker, req);
-      const affected = await cancelAssignments(prismaClient, worker.id, reason.label);
-      const extra = affected.length ? ` Se cancelaron sus asignaciones activas en ${affected.length} solicitud${affected.length !== 1 ? 'es' : ''}.` : '';
-      return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent(`Auxiliar desactivado. Causal: ${reason.label}.${extra}`)}`);
+      const { reason, affectedRequestIds, recalculationFailures } = await deactivateWorkerWithAssignments(prismaClient, worker, req);
+      const extra = affectedRequestIds.length ? ` Se cancelaron sus asignaciones activas en ${affectedRequestIds.length} solicitud${affectedRequestIds.length !== 1 ? 'es' : ''}.` : '';
+      const warning = recalculationFailures ? ' Algunas solicitudes requieren refrescar el tablero para ver el estado actualizado.' : '';
+      return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent(`Auxiliar desactivado. Causal: ${reason.label}.${extra}${warning}`)}`);
     }
     await prismaClient.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'CONTRATADO' } });
     return res.redirect(addMessage(safeBack(req), 'Auxiliar reactivado. Ya aparece disponible para asignaciones.'));
   } catch (error) {
     if (error.statusCode === 400) return res.redirect(addMessage(safeBack(req), error.message));
-    return next(error);
+    console.error('[DISPATCH_WORKER_TOGGLE_ERROR]', {
+      workerId,
+      path: requestPath(req),
+      username: text(req.session?.username || req.username),
+      message: error?.message || String(error),
+      stack: error?.stack || null
+    });
+    return res.redirect(addMessage(safeBack(req), 'No fue posible actualizar el estado del auxiliar. Recarga el listado e intenta nuevamente.'));
   }
 }
 
