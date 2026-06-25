@@ -6,6 +6,7 @@ const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
 const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
 const SYNC_BUTTON_MARKER = 'data-meta-ads-sync-button="true"';
+const READ_ONLY_MARKER = 'data-meta-ads-read-only="true"';
 
 function normalizeAdAccountId(value) {
   const raw = String(value || '').trim();
@@ -35,7 +36,7 @@ function currentPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0];
 }
 
-function canInjectSyncButton(req = {}) {
+function canInjectDashboardUi(req = {}) {
   return req.method === 'GET' && currentPath(req) === `${STATS_BASE_PATH}/campaigns` && isDevRequest(req);
 }
 
@@ -43,35 +44,63 @@ function renderSyncButtonPanel() {
   return [
     '<section class="card" ' + SYNC_BUTTON_MARKER + '>',
     '  <div class="card-title">Sincronización Meta Ads</div>',
-    '  <div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">Este botón trae campañas reales de Meta Ads y actualiza las métricas guardadas en Estadísticas.</div>',
+    '  <div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">Este panel es informativo. Lórren sincroniza anuncios reales de Meta Ads y no permite crear ni editar campañas manualmente.</div>',
     '  <form method="post" action="' + STATS_BASE_PATH + '/meta/sync-form" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">',
     '    <button type="submit" class="btn btn-primary">Sincronizar Meta Ads</button>',
-    '    <span class="muted text-xs">Después de sincronizar, el panel volverá a cargar las campañas.</span>',
+    '    <span class="muted text-xs">Después de sincronizar, el panel volverá a cargar los anuncios.</span>',
     '  </form>',
     '</section>'
   ].join('\n');
 }
 
-function injectSyncButton(html, req) {
+function renderReadOnlyScript() {
+  return [
+    '<script ' + READ_ONLY_MARKER + '>',
+    '(function(){',
+    'function clean(){',
+    'document.querySelectorAll(".page-header h1").forEach(function(el){el.textContent="Anuncios Meta Ads";});',
+    'document.querySelectorAll(".page-header p").forEach(function(el){el.textContent="Seguimiento informativo por anuncio publicitario — Meta / Facebook Ads";});',
+    'document.querySelectorAll(".card-title").forEach(function(el){var t=(el.textContent||"").trim(); if(t.indexOf("Campañas registradas")===0){el.textContent=t.replace("Campañas registradas","Anuncios Meta sincronizados");} if(t==="Nueva campaña"){var s=el.closest("section"); if(s){s.remove();}}});',
+    'document.querySelectorAll("a.btn").forEach(function(el){if((el.textContent||"").trim().indexOf("Ver")===0 && el.href.indexOf("/admin/estadisticas/campaigns/")>-1){el.remove();}});',
+    'document.querySelectorAll("th").forEach(function(el){if((el.textContent||"").trim()==="Campaña"){el.textContent="Anuncio";} if((el.textContent||"").trim()==="Estado"){el.textContent="Estado Meta";}});',
+    'document.querySelectorAll(".empty-state p").forEach(function(el){el.textContent=el.textContent.replace("Aún no hay campañas. Crea la primera usando el formulario de abajo.","Aún no hay anuncios sincronizados desde Meta Ads.");});',
+    '}',
+    'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",clean);}else{clean();}',
+    '})();',
+    '</script>'
+  ].join('\n');
+}
+
+function injectDashboardUi(html, req) {
   if (typeof html !== 'string') return html;
-  if (!canInjectSyncButton(req)) return html;
-  if (html.includes(SYNC_BUTTON_MARKER)) return html;
-  const filtersSectionStart = '<section class="card">\n    <div class="card-title">Filtros de análisis</div>';
-  if (!html.includes(filtersSectionStart)) return html;
-  return html.replace(filtersSectionStart, renderSyncButtonPanel() + '\n' + filtersSectionStart);
+  if (!canInjectDashboardUi(req)) return html;
+
+  let output = html;
+  if (!output.includes(SYNC_BUTTON_MARKER)) {
+    const filtersSectionStart = '<section class="card">\n    <div class="card-title">Filtros de análisis</div>';
+    if (output.includes(filtersSectionStart)) {
+      output = output.replace(filtersSectionStart, renderSyncButtonPanel() + '\n' + filtersSectionStart);
+    }
+  }
+
+  if (!output.includes(READ_ONLY_MARKER) && output.includes('</body>')) {
+    output = output.replace('</body>', renderReadOnlyScript() + '\n</body>');
+  }
+
+  return output;
 }
 
-function installSyncButtonInjector() {
+function installDashboardUiInjector() {
   const responsePrototype = express.response;
-  if (responsePrototype.__metaAdsSyncButtonInjectorInstalled) return;
+  if (responsePrototype.__metaAdsDashboardUiInjectorInstalled) return;
   const originalSend = responsePrototype.send;
-  responsePrototype.send = function sendWithMetaAdsSyncButton(body) {
-    return originalSend.call(this, injectSyncButton(body, this.req));
+  responsePrototype.send = function sendWithMetaAdsDashboardUi(body) {
+    return originalSend.call(this, injectDashboardUi(body, this.req));
   };
-  responsePrototype.__metaAdsSyncButtonInjectorInstalled = true;
+  responsePrototype.__metaAdsDashboardUiInjectorInstalled = true;
 }
 
-installSyncButtonInjector();
+installDashboardUiInjector();
 
 export function getMetaAdsConfig(env = process.env) {
   const credential = String(readEnv(env, ['META', 'ADS', 'ACCESS', 'TOKEN']) || readEnv(env, ['META', 'ACCESS', 'TOKEN']) || '').trim() || null;
