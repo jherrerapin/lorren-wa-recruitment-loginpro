@@ -1,3 +1,5 @@
+import './dispatchWorkerExitReasonSafePatch.js';
+
 export class TransportNormalizationService {
   normalize(value) {
     return normalizeTransportMode(value);
