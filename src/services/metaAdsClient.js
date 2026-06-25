@@ -5,8 +5,7 @@ const DEFAULT_META_API_VERSION = 'v23.0';
 const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
 const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
-const SYNC_BUTTON_MARKER = 'data-meta-ads-sync-button="true"';
-const READ_ONLY_MARKER = 'data-meta-ads-read-only="true"';
+const FAVICON_MARKER = 'data-lorren-stats-favicon="true"';
 
 function normalizeAdAccountId(value) {
   const raw = String(value || '').trim();
@@ -28,79 +27,56 @@ function readEnv(env, parts) {
   return env[parts.join('_')];
 }
 
-function isDevRequest(req = {}) {
-  return req.userRole === 'dev' || req.session?.userRole === 'dev';
-}
-
 function currentPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0];
 }
 
-function canInjectDashboardUi(req = {}) {
-  return req.method === 'GET' && currentPath(req) === `${STATS_BASE_PATH}/campaigns` && isDevRequest(req);
+function isStatsPath(req = {}) {
+  return req.method === 'GET' && currentPath(req).startsWith(STATS_BASE_PATH);
 }
 
-function renderSyncButtonPanel() {
-  return [
-    '<section class="card" ' + SYNC_BUTTON_MARKER + '>',
-    '  <div class="card-title">Sincronización Meta Ads</div>',
-    '  <div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">Este panel es informativo. Lórren sincroniza anuncios reales de Meta Ads y no permite crear ni editar campañas manualmente.</div>',
-    '  <form method="post" action="' + STATS_BASE_PATH + '/meta/sync-form" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">',
-    '    <button type="submit" class="btn btn-primary">Sincronizar Meta Ads</button>',
-    '    <span class="muted text-xs">Después de sincronizar, el panel volverá a cargar los anuncios.</span>',
-    '  </form>',
-    '</section>'
-  ].join('\n');
+function removeSectionByTitle(html, title) {
+  const titleIndex = html.toLowerCase().indexOf(`<div class="card-title">${title.toLowerCase()}`);
+  if (titleIndex < 0) return html;
+  const sectionStart = html.lastIndexOf('<section class="card">', titleIndex);
+  const sectionEnd = html.indexOf('</section>', titleIndex);
+  if (sectionStart < 0 || sectionEnd < 0) return html;
+  return html.slice(0, sectionStart) + html.slice(sectionEnd + '</section>'.length);
 }
 
-function renderReadOnlyScript() {
-  return [
-    '<script ' + READ_ONLY_MARKER + '>',
-    '(function(){',
-    'function clean(){',
-    'document.querySelectorAll(".page-header h1").forEach(function(el){el.textContent="Anuncios Meta Ads";});',
-    'document.querySelectorAll(".page-header p").forEach(function(el){el.textContent="Seguimiento informativo por anuncio publicitario — Meta / Facebook Ads";});',
-    'document.querySelectorAll(".card-title").forEach(function(el){var raw=(el.textContent||"").trim(); var t=raw.toLowerCase(); if(raw.indexOf("Campañas registradas")===0){el.textContent=raw.replace("Campañas registradas","Anuncios Meta sincronizados");} if(t==="nueva campaña" || t.indexOf("metadata meta sin campaña asociada")===0){var s=el.closest("section"); if(s){s.remove();}}});',
-    'document.querySelectorAll("a.btn").forEach(function(el){if((el.textContent||"").trim().indexOf("Ver")===0 && el.href.indexOf("/admin/estadisticas/campaigns/")>-1){el.remove();}});',
-    'document.querySelectorAll("th").forEach(function(el){if((el.textContent||"").trim()==="Campaña"){el.textContent="Anuncio";} if((el.textContent||"").trim()==="Estado"){el.textContent="Estado Meta";}});',
-    'document.querySelectorAll(".empty-state p").forEach(function(el){el.textContent=el.textContent.replace("Aún no hay campañas. Crea la primera usando el formulario de abajo.","Aún no hay anuncios sincronizados desde Meta Ads.");});',
-    '}',
-    'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",clean);}else{clean();}',
-    '})();',
-    '</script>'
-  ].join('\n');
-}
-
-function injectDashboardUi(html, req) {
-  if (typeof html !== 'string') return html;
-  if (!canInjectDashboardUi(req)) return html;
-
+function cleanStatsHtml(html, req) {
+  if (typeof html !== 'string' || !isStatsPath(req)) return html;
   let output = html;
-  if (!output.includes(SYNC_BUTTON_MARKER)) {
-    const filtersSectionStart = '<section class="card">\n    <div class="card-title">Filtros de análisis</div>';
-    if (output.includes(filtersSectionStart)) {
-      output = output.replace(filtersSectionStart, renderSyncButtonPanel() + '\n' + filtersSectionStart);
-    }
+  if (!output.includes(FAVICON_MARKER) && output.includes('<head>')) {
+    output = output.replace('<head>', `<head>\n  <link ${FAVICON_MARKER} rel="icon" href="/favicon.ico">`);
   }
+  if (currentPath(req) !== `${STATS_BASE_PATH}/campaigns`) return output;
 
-  if (!output.includes(READ_ONLY_MARKER) && output.includes('</body>')) {
-    output = output.replace('</body>', renderReadOnlyScript() + '\n</body>');
-  }
-
+  output = output.replace('<div class="alert alert-success">Meta Ads configurado para sincronización. El dashboard usa snapshots guardados para evitar llamadas a Meta en cada carga.</div>', '');
+  output = output.replace('<div class="alert alert-info">Meta Ads no configurado. Las métricas internas de Lórren siguen disponibles.</div>', '');
+  output = output.replace(/Campañas Meta Ads/g, 'Anuncios Meta Ads');
+  output = output.replace(/Campañas registradas/g, 'Anuncios Meta sincronizados');
+  output = output.replace(/<th>Campaña<\/th>/g, '<th>Anuncio</th>');
+  output = output.replace(/<th>Estado<\/th>/g, '<th>Estado Meta</th>');
+  output = output.replace(/Aún no hay campañas\. Crea la primera usando el formulario de abajo\./g, 'Aún no hay anuncios sincronizados desde Meta Ads.');
+  output = output.replace(/<div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px"><strong>Quality Score<\/strong>:[\s\S]*?<\/div>/, '<div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">Semáforo de rendimiento: compara calidad interna del anuncio según registros completos, HV, aptos y contratados. Se muestra solo cuando hay datos suficientes.</div>');
+  output = removeSectionByTitle(output, 'Nueva campaña');
+  output = removeSectionByTitle(output, 'Metadata Meta sin campaña asociada');
+  output = removeSectionByTitle(output, 'Sincronización Meta Ads');
   return output;
 }
 
-function installDashboardUiInjector() {
+function installStatsHtmlCleaner() {
   const responsePrototype = express.response;
-  if (responsePrototype.__metaAdsDashboardUiInjectorInstalled) return;
+  if (responsePrototype.__metaAdsStatsHtmlCleanerInstalled) return;
   const originalSend = responsePrototype.send;
-  responsePrototype.send = function sendWithMetaAdsDashboardUi(body) {
-    return originalSend.call(this, injectDashboardUi(body, this.req));
+  responsePrototype.send = function sendWithStatsHtmlCleaner(body) {
+    return originalSend.call(this, cleanStatsHtml(body, this.req));
   };
-  responsePrototype.__metaAdsDashboardUiInjectorInstalled = true;
+  responsePrototype.__metaAdsStatsHtmlCleanerInstalled = true;
 }
 
-installDashboardUiInjector();
+installStatsHtmlCleaner();
 
 export function getMetaAdsConfig(env = process.env) {
   const credential = String(readEnv(env, ['META', 'ADS', 'ACCESS', 'TOKEN']) || readEnv(env, ['META', 'ACCESS', 'TOKEN']) || '').trim() || null;
