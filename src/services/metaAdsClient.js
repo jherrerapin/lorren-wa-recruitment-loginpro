@@ -1,5 +1,3 @@
-import bizSdk from 'facebook-nodejs-business-sdk';
-
 const DEFAULT_META_API_VERSION = 'v23.0';
 
 function normalizeAdAccountId(value) {
@@ -20,13 +18,16 @@ export function getMetaAdsConfig(env = process.env) {
 
 export function createMetaAdsClient(env = process.env) {
   const config = getMetaAdsConfig(env);
-  if (!config.enabled) return { ...config, sdk: bizSdk, api: null, adAccount: null };
+  const sdkMissing = 'facebook-nodejs-business-sdk not installed; run npm install facebook-nodejs-business-sdk and commit package-lock.json';
 
-  const FacebookAdsApi = bizSdk.FacebookAdsApi;
-  FacebookAdsApi.setDefaultApiVersion(config.apiVersion);
-  const api = FacebookAdsApi.init(config.accessToken);
-  const adAccount = new bizSdk.AdAccount(config.adAccountId);
-  return { ...config, sdk: bizSdk, api, adAccount };
+  return {
+    ...config,
+    enabled: false,
+    missing: [...config.missing, sdkMissing],
+    sdk: null,
+    api: null,
+    adAccount: null
+  };
 }
 
 export default { createMetaAdsClient, getMetaAdsConfig };
