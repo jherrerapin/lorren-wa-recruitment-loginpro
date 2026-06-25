@@ -179,7 +179,8 @@ model Vacancy {
   campaigns              Campaign[]
   interviewSlots         InterviewSlot[]
   interviewBookings      InterviewBooking[]
-  accessUsers            AppUser[]
+  accessUsers            AppUser[]              @relation("AppUserVacancies")
+  scopedAccessUsers      AppUser[]              @relation("AppUserScopeVacancy")
   dispatchWorkers        DispatchWorkerVacancy[]
 }
 
@@ -390,7 +391,7 @@ model AppUser {
   accessScope         UserAccessScope @default(ALL)
   scopeCity           String?
   scopeVacancyId      String?
-  scopeVacancy        Vacancy?        @relation(fields: [scopeVacancyId], references: [id], onDelete: SetNull)
+  scopeVacancy        Vacancy?        @relation("AppUserScopeVacancy", fields: [scopeVacancyId], references: [id], onDelete: SetNull)
   recoveryPhone       String?
   recoveryEmail       String?
   createdByUsername   String?
@@ -399,7 +400,7 @@ model AppUser {
   isActive            Boolean         @default(true)
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
-  vacancies           Vacancy[]
+  vacancies           Vacancy[]       @relation("AppUserVacancies")
 
   @@index([role])
   @@index([isActive])
