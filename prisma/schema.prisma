@@ -179,7 +179,8 @@ model Vacancy {
   campaigns              Campaign[]
   interviewSlots         InterviewSlot[]
   interviewBookings      InterviewBooking[]
-  accessUsers            AppUser[]
+  accessUsers            AppUser[]              @relation("AppUserVacancies")
+  scopedAccessUsers      AppUser[]              @relation("AppUserScopeVacancy")
   dispatchWorkers        DispatchWorkerVacancy[]
 }
 
@@ -382,18 +383,30 @@ model AttachmentAnalysis {
 }
 
 model AppUser {
-  id          String          @id @default(cuid())
-  username    String          @unique
-  password    String
-  role        AppUserRole     @default(ADMIN)
-  accessScope UserAccessScope @default(ALL)
-  isActive    Boolean         @default(true)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  vacancies   Vacancy[]
+  id                  String          @id @default(cuid())
+  username            String          @unique
+  passwordHash        String
+  recoveryCodeHash    String?
+  role                AppUserRole     @default(ADMIN)
+  accessScope         UserAccessScope @default(ALL)
+  scopeCity           String?
+  scopeVacancyId      String?
+  scopeVacancy        Vacancy?        @relation("AppUserScopeVacancy", fields: [scopeVacancyId], references: [id], onDelete: SetNull)
+  recoveryPhone       String?
+  recoveryEmail       String?
+  createdByUsername   String?
+  lastPasswordResetAt DateTime?
+  canAccessDispatch   Boolean         @default(false)
+  isActive            Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  vacancies           Vacancy[]       @relation("AppUserVacancies")
 
   @@index([role])
   @@index([isActive])
+  @@index([accessScope, scopeCity])
+  @@index([scopeVacancyId])
+  @@index([canAccessDispatch])
 }
 
 model BotKnowledge {
