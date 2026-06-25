@@ -143,16 +143,17 @@ function mapDbRoleToSessionRole(role) {
   return role === 'DEV' ? 'dev' : 'admin';
 }
 
+// AppUser schema fields: id, username, password, role, accessScope, isActive, createdAt, updatedAt, vacancies
 function buildUserSessionPayload(user) {
   return {
     userId: user.id,
     userRole: mapDbRoleToSessionRole(user.role),
     username: user.username,
     userAccessScope: user.accessScope || 'ALL',
-    userAccessCity: user.scopeCity || null,
-    userAccessVacancyId: user.scopeVacancyId || null,
+    userAccessCity: null,
+    userAccessVacancyId: null,
     userSource: 'db',
-    canAccessDispatch: Boolean(user.canAccessDispatch)
+    canAccessDispatch: user.role === 'DEV'
   };
 }
 
@@ -267,9 +268,6 @@ async function authenticateDatabaseUser(username, password) {
       password: true,
       role: true,
       accessScope: true,
-      scopeCity: true,
-      scopeVacancyId: true,
-      canAccessDispatch: true,
       isActive: true
     }
   });
@@ -354,23 +352,24 @@ app.post('/recover', async (req, res) => {
     });
   }
 
-  const user = await prisma.appUser.findUnique({
-    where: { username },
-    select: { id: true, isActive: true, recoveryCodeHash: true }
-  });
-
-  if (!user || !user.isActive || !user.recoveryCodeHash) {
-    return res.status(400).render('recover', {
-      error: 'No fue posible validar ese usuario para recuperacion. Si es un usuario antiguo por variables de entorno, recupera el acceso desde dev.',
+  // Recovery via env var code — DB users without recoveryCodeHash use env-based recovery
+  const envRecoveryCode = process.env.RECOVERY_CODE;
+  if (!envRecoveryCode || recoveryCode !== envRecoveryCode) {
+    return res.status(401).render('recover', {
+      error: 'El codigo de recuperacion no es valido.',
       username,
       success: null
     });
   }
 
-  const matchesRecoveryCode = await bcrypt.compare(recoveryCode, user.recoveryCodeHash);
-  if (!matchesRecoveryCode) {
-    return res.status(401).render('recover', {
-      error: 'El codigo de recuperacion no es valido.',
+  const user = await prisma.appUser.findUnique({
+    where: { username },
+    select: { id: true, isActive: true }
+  });
+
+  if (!user || !user.isActive) {
+    return res.status(400).render('recover', {
+      error: 'No fue posible validar ese usuario para recuperacion.',
       username,
       success: null
     });
@@ -379,10 +378,7 @@ app.post('/recover', async (req, res) => {
   const passwordHash = await bcrypt.hash(newPassword, 10);
   await prisma.appUser.update({
     where: { id: user.id },
-    data: {
-      password: passwordHash,
-      lastPasswordResetAt: new Date()
-    }
+    data: { password: passwordHash }
   });
 
   const params = new URLSearchParams();
