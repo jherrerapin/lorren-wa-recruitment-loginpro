@@ -6,6 +6,14 @@ const INSIGHT_FIELDS = [
   'actions', 'date_start', 'date_stop'
 ];
 
+const CAMPAIGN_FIELDS = [
+  'id', 'name', 'status', 'effective_status', 'objective', 'start_time', 'stop_time'
+];
+
+const AD_FIELDS = [
+  'id', 'name', 'status', 'effective_status', 'campaign_id', 'adset_id', 'created_time', 'updated_time'
+];
+
 function asDateOnly(value) {
   const text = String(value || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
@@ -32,7 +40,7 @@ function dateOnlyFromDate(date) {
 function defaultDateRange() {
   const until = new Date();
   const since = new Date(until);
-  since.setUTCDate(since.getUTCDate() - 30);
+  since.setUTCDate(since.getUTCDate() - 90);
   return { since: dateOnlyFromDate(since), until: dateOnlyFromDate(until) };
 }
 
@@ -58,6 +66,20 @@ async function readAllPages(client, path, params = {}) {
   }
 
   return rows;
+}
+
+async function fetchCampaignInventory(client) {
+  return readAllPages(client, `${client.adAccountId}/campaigns`, {
+    fields: CAMPAIGN_FIELDS.join(','),
+    limit: 100
+  });
+}
+
+async function fetchAdInventory(client) {
+  return readAllPages(client, `${client.adAccountId}/ads`, {
+    fields: AD_FIELDS.join(','),
+    limit: 100
+  });
 }
 
 async function fetchInsights(client, { since, until, level }) {
@@ -91,6 +113,37 @@ async function syncAdAccount(prisma, client) {
       isActive: true
     }
   });
+}
+
+async function upsertCampaignsFromInventory(prisma, campaigns = []) {
+  let count = 0;
+  for (const campaign of campaigns) {
+    const code = String(campaign.id || '').trim();
+    if (!code) continue;
+    await prisma.campaign.upsert({
+      where: { code },
+      update: {
+        name: campaign.name || `Meta Ads ${code}`,
+        sourceType: 'META_ADS',
+        isActive: !['DELETED', 'ARCHIVED'].includes(String(campaign.effective_status || campaign.status || '').toUpperCase()),
+        startsAt: campaign.start_time ? new Date(campaign.start_time) : undefined,
+        endsAt: campaign.stop_time ? new Date(campaign.stop_time) : undefined,
+        notes: 'Inventario sincronizado desde Meta Ads.'
+      },
+      create: {
+        code,
+        name: campaign.name || `Meta Ads ${code}`,
+        sourceType: 'META_ADS',
+        isActive: !['DELETED', 'ARCHIVED'].includes(String(campaign.effective_status || campaign.status || '').toUpperCase()),
+        startsAt: campaign.start_time ? new Date(campaign.start_time) : null,
+        endsAt: campaign.stop_time ? new Date(campaign.stop_time) : null,
+        notes: 'Inventario sincronizado desde Meta Ads.',
+        createdByUsername: 'meta-ads-sync'
+      }
+    });
+    count += 1;
+  }
+  return count;
 }
 
 async function upsertInternalCampaignsFromMeta(prisma, rows = []) {
@@ -186,17 +239,20 @@ export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
   console.info('[metaAdsInsightsSync] inicio', { since: range.since, until: range.until, adAccountId: client.adAccountId });
   try {
     await syncAdAccount(prisma, client);
-    const [campaignRows, adRows] = await Promise.all([
+    const [campaignInventory, adInventory, campaignRows, adRows] = await Promise.all([
+      fetchCampaignInventory(client),
+      fetchAdInventory(client),
       fetchInsights(client, { ...range, level: 'campaign' }),
       fetchInsights(client, { ...range, level: 'ad' })
     ]);
-    const [autoCampaigns, campaignSnapshots, adSnapshots] = await Promise.all([
+    const [inventoryCampaigns, autoCampaigns, campaignSnapshots, adSnapshots] = await Promise.all([
+      upsertCampaignsFromInventory(prisma, campaignInventory),
       upsertInternalCampaignsFromMeta(prisma, campaignRows),
       syncCampaignRows(prisma, campaignRows),
       syncAdRows(prisma, adRows)
     ]);
-    console.info('[metaAdsInsightsSync] fin', { autoCampaigns, campaignSnapshots, adSnapshots });
-    return { ok: true, enabled: true, since: range.since, until: range.until, autoCampaigns, campaignSnapshots, adSnapshots };
+    console.info('[metaAdsInsightsSync] fin', { inventoryCampaigns, inventoryAds: adInventory.length, autoCampaigns, campaignSnapshots, adSnapshots });
+    return { ok: true, enabled: true, since: range.since, until: range.until, inventoryCampaigns, inventoryAds: adInventory.length, autoCampaigns, campaignSnapshots, adSnapshots };
   } catch (error) {
     const safe = safeError(error);
     console.warn('[metaAdsInsightsSync] error', safe);
