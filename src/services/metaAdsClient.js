@@ -8,19 +8,11 @@ const GRAPH_AUTH_PARAM = ['access', 'token'].join('_');
 const STATS_BASE_PATH = '/admin/estadisticas';
 const FAVICON_HREF = '/public/favicon-loginpro.svg?v=stats';
 
-const MARKERS = {
-  favicon: 'data-lorren-stats-favicon="true"',
-  style: 'data-meta-responsive-style="true"',
-  summary: 'data-meta-summary-panel="true"',
-  summaryScript: 'data-meta-summary-script="true"',
-  classificationScript: 'data-meta-classification-script="true"'
-};
+let patchPrisma = null;
 
-let classificationPrisma = null;
-
-function getClassificationPrisma() {
-  if (!classificationPrisma) classificationPrisma = new PrismaClient();
-  return classificationPrisma;
+function getPatchPrisma() {
+  if (!patchPrisma) patchPrisma = new PrismaClient();
+  return patchPrisma;
 }
 
 function normalizeAdAccountId(value) {
@@ -46,7 +38,7 @@ function readEnv(env, parts) {
 function normalizeText(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  return trimmed.length ? trimmed : null;
+  return trimmed ? trimmed : null;
 }
 
 function normalizeCompare(value) {
@@ -57,16 +49,13 @@ function currentPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0];
 }
 
-function isStatsPath(req = {}) {
-  return req.method === 'GET' && currentPath(req).startsWith(STATS_BASE_PATH);
-}
-
-function isCampaignsPath(req = {}) {
-  return currentPath(req) === `${STATS_BASE_PATH}/campaigns`;
-}
-
-function isCampaignDetailPath(req = {}) {
-  return new RegExp(`^${STATS_BASE_PATH}/campaigns/[^/]+$`).test(currentPath(req));
+function html(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function isStatsUser(req = {}) {
@@ -74,286 +63,156 @@ function isStatsUser(req = {}) {
   return role === 'dev' || role === 'admin';
 }
 
-function removeSectionByTitle(html, title) {
-  const titleIndex = html.toLowerCase().indexOf(`<div class="card-title">${title.toLowerCase()}`);
-  if (titleIndex < 0) return html;
-  const sectionStart = html.lastIndexOf('<section class="card">', titleIndex);
-  const sectionEnd = html.indexOf('</section>', titleIndex);
-  if (sectionStart < 0 || sectionEnd < 0) return html;
-  return html.slice(0, sectionStart) + html.slice(sectionEnd + '</section>'.length);
+function matchCampaignDetail(req = {}) {
+  const match = currentPath(req).match(/^\/admin\/estadisticas\/campaigns\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
-function injectFavicon(html) {
-  if (typeof html !== 'string' || !html.includes('<head>')) return html;
-  let output = html.replace(/<link[^>]+rel=["']icon["'][^>]*>/gi, '');
-  output = output.replace(/<link[^>]+href=["'][^"']*favicon[^"']*["'][^>]*>/gi, '');
-  return output.replace('<head>', `<head>\n  <link ${MARKERS.favicon} rel="icon" type="image/svg+xml" href="${FAVICON_HREF}">`);
+function matchCampaignEdit(req = {}) {
+  const match = currentPath(req).match(/^\/admin\/estadisticas\/campaigns\/([^/]+)\/edit$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
-function renderResponsiveStyle() {
-  return `<style ${MARKERS.style}>
-    .classification-save-status { margin-top: 10px; font-size: 12px; font-weight: 700; color: #0d7a6b; }
-    .classification-save-status.error { color: #dc2626; }
-    .classification-only-card form { display: grid; gap: 12px; }
-    .classification-only-card button { width: 100%; justify-content: center; }
-    .meta-action-cell { white-space: nowrap; text-align: right; }
-    @media (max-width: 1100px) {
-      .page { padding: 16px 10px 40px !important; max-width: 100% !important; }
-      .navbar { padding: 0 10px !important; overflow-x: auto !important; }
-      .navbar a { white-space: nowrap !important; }
-      .card { padding: 14px !important; border-radius: 9px !important; }
-      .grid-2, .grid-3, .grid-form { grid-template-columns: 1fr !important; }
-      .grid-auto { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)) !important; gap: 8px !important; }
-      .kpi { padding: 10px 11px !important; }
-      .kpi-value { font-size: 21px !important; line-height: 1.1 !important; word-break: break-word !important; }
-      .kpi-label, .kpi-rate { font-size: 10px !important; }
-      .btn { width: 100% !important; justify-content: center !important; min-height: 38px !important; }
-      .btn-sm { width: auto !important; min-height: 30px !important; }
-      .table-wrap { width: 100% !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; }
-      table { min-width: 760px !important; font-size: 12px !important; }
-      th, td { padding: 8px 7px !important; }
-      .funnel { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important; gap: 8px !important; overflow: visible !important; }
-      .funnel-step { border: 1px solid #e2e8f0 !important; border-radius: 8px !important; min-width: 0 !important; }
-      .funnel-arrow { display: none !important; }
-      .funnel-step-value { font-size: 20px !important; }
-      input, select, textarea { min-height: 38px !important; }
-    }
-  </style>`;
+async function resolveVacancy(city, requestedVacancyId) {
+  if (!requestedVacancyId) return null;
+  const vacancy = await getPatchPrisma().vacancy.findUnique({
+    where: { id: requestedVacancyId },
+    select: { id: true, city: true }
+  });
+  if (!vacancy) return null;
+  if (city && normalizeCompare(vacancy.city) !== normalizeCompare(city)) return null;
+  return vacancy.id;
 }
 
-function renderSummaryPanel() {
-  return `<section class="card" ${MARKERS.summary}>
-    <div class="card-title">Indicadores clave de pauta</div>
-    <div id="metaSummaryCards" class="grid-auto"><div class="kpi"><div class="kpi-value">Cargando...</div><div class="kpi-label">Resumen Meta Ads</div></div></div>
-  </section>`;
+async function saveClassification(campaignId, body = {}) {
+  const city = normalizeText(body.city);
+  const requestedVacancyId = normalizeText(body.vacancyId);
+  const vacancyId = await resolveVacancy(city, requestedVacancyId);
+  await getPatchPrisma().campaign.update({
+    where: { id: campaignId },
+    data: { city: city || null, vacancyId }
+  });
 }
 
-function sharedClientHelpers() {
-  return `
-  function norm(value){ return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''); }
-  function optionCity(option){ var text = String(option && option.textContent || '').trim(); var index = text.lastIndexOf('—'); return index >= 0 ? text.slice(index + 1).replace('✓ entrevista','').trim() : ''; }
-  function wireCityVacancySync(){
-    document.querySelectorAll('select[name="city"]').forEach(function(citySelect){
-      var form = citySelect.closest('form') || document;
-      var vacancySelect = form.querySelector('select[name="vacancyId"]');
-      if (!vacancySelect || vacancySelect.dataset.citySynced === 'true') return;
-      vacancySelect.dataset.citySynced = 'true';
-      function sync(){
-        var selectedCity = norm(citySelect.value);
-        Array.prototype.forEach.call(vacancySelect.options, function(option){
-          if (!option.value) { option.hidden = false; option.disabled = false; return; }
-          var matches = !selectedCity || norm(optionCity(option)) === selectedCity;
-          option.hidden = !matches; option.disabled = !matches;
-          if (!matches && option.selected) vacancySelect.value = '';
-        });
-      }
-      citySelect.addEventListener('change', sync); sync();
-    });
-  }
-  function forceZeroes(){ document.querySelectorAll('.funnel-step-value').forEach(function(el){ if(!el.textContent.trim()) el.textContent='0'; }); }
-  `;
+async function renderClassificationPage(req, res, campaignId) {
+  if (!isStatsUser(req)) return res.status(403).send('No autorizado.');
+
+  const [campaign, cities, vacancies] = await Promise.all([
+    getPatchPrisma().campaign.findUnique({
+      where: { id: campaignId },
+      select: { id: true, code: true, name: true, city: true, vacancyId: true, isActive: true }
+    }),
+    getPatchPrisma().city.findMany({
+      where: { usedForRecruitment: true },
+      orderBy: { name: 'asc' },
+      select: { name: true }
+    }),
+    getPatchPrisma().vacancy.findMany({
+      where: { isActive: true },
+      orderBy: [{ city: 'asc' }, { title: 'asc' }],
+      select: { id: true, title: true, city: true, schedulingEnabled: true }
+    })
+  ]);
+
+  if (!campaign) return res.status(404).send('Anuncio no encontrado.');
+
+  const cityOptions = cities.map((city) => {
+    const selected = campaign.city === city.name ? 'selected' : '';
+    return `<option value="${html(city.name)}" ${selected}>${html(city.name)}</option>`;
+  }).join('');
+
+  const vacancyOptions = vacancies.map((vacancy) => {
+    const selected = campaign.vacancyId === vacancy.id ? 'selected' : '';
+    const interview = vacancy.schedulingEnabled ? ' ✓ entrevista' : '';
+    return `<option value="${html(vacancy.id)}" ${selected}>${html(vacancy.title)} — ${html(vacancy.city)}${interview}</option>`;
+  }).join('');
+
+  const status = campaign.isActive ? 'Activa' : 'Inactiva';
+  const statusClass = campaign.isActive ? 'badge-green' : 'badge-gray';
+
+  return res.send(`<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_HREF}">
+  <title>Clasificar anuncio</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#1a1d23;font-size:14px;line-height:1.5}
+    .navbar{background:#1e2d3d;padding:0 24px;display:flex;align-items:center;gap:8px;height:52px;border-bottom:1px solid #0f1a26}
+    .navbar a{color:#94a3b8;text-decoration:none;font-size:13px;font-weight:500;padding:6px 10px;border-radius:6px}.navbar a:hover,.navbar a.active{color:#fff;background:rgba(255,255,255,.08)}.sep{color:#334155}.spacer{flex:1}
+    .page{max-width:860px;margin:0 auto;padding:24px 20px 60px}.page-header{margin-bottom:20px}.page-header h1{font-size:20px;font-weight:700;color:#1e2d3d}.page-header p{font-family:monospace;color:#64748b;font-size:12px;margin-top:4px}
+    .card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:16px}.card-title{font-size:13px;font-weight:700;color:#1e2d3d;margin-bottom:14px;text-transform:uppercase;letter-spacing:.04em}
+    label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:#475569}select{border:1px solid #cbd5e1;border-radius:7px;padding:8px 10px;font-size:13px;color:#1a1d23;background:#fff;width:100%;min-height:38px}
+    form{display:grid;gap:12px}.btn{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:7px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}.btn-primary{background:#0d7a6b;color:#fff}.btn-secondary{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}.alert{padding:10px 14px;border-radius:8px;margin-bottom:16px;font-weight:600;font-size:13px}.alert-info{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}.alert-error{background:#fee2e2;color:#dc2626;border:1px solid #fca5a5}.badge{display:inline-flex;border-radius:999px;padding:3px 10px;font-weight:800;font-size:12px}.badge-green{background:#dcfce7;color:#15803d}.badge-gray{background:#f1f5f9;color:#475569}.muted{color:#64748b;font-size:12px}.save-status{font-size:12px;font-weight:700;color:#0d7a6b}.save-status.error{color:#dc2626}
+    @media(max-width:768px){.page{padding:16px 10px 40px}.navbar{padding:0 10px;overflow-x:auto}.navbar a{white-space:nowrap}.card{padding:14px}.btn{width:100%}}
+  </style>
+</head>
+<body>
+  <nav class="navbar"><a href="/admin">Panel</a><span class="sep">›</span><a href="/admin/estadisticas">Estadísticas</a><span class="sep">›</span><a href="/admin/estadisticas/campaigns" class="active">Anuncios</a><span class="spacer"></span><a href="/logout">Cerrar sesión</a></nav>
+  <main class="page">
+    <div class="page-header"><a href="/admin/estadisticas/campaigns" class="btn btn-secondary" style="margin-bottom:10px">← Anuncios</a><h1>${html(campaign.name)}</h1><p>${html(campaign.code || campaign.id)}</p><div style="margin-top:8px"><span class="badge ${statusClass}">${status}</span></div></div>
+    ${req.query?.error ? '<div class="alert alert-error">No fue posible guardar la clasificación.</div>' : ''}
+    <section class="card">
+      <div class="card-title">Clasificación interna del anuncio</div>
+      <div class="alert alert-info">Este módulo es informativo. Aquí solo se asigna ciudad y vacante interna; no se modifica el anuncio real ni la campaña publicitaria en Meta Ads.</div>
+      <form id="classificationForm" method="post" action="/admin/estadisticas/campaigns/${html(campaign.id)}/edit">
+        <label>Ciudad<select name="city"><option value="">Sin ciudad específica</option>${cityOptions}</select></label>
+        <label>Vacante<select name="vacancyId"><option value="">Sin vacante específica</option>${vacancyOptions}</select></label>
+        <button type="submit" class="btn btn-primary">Guardar clasificación interna</button>
+        <div class="save-status" id="saveStatus"></div>
+      </form>
+    </section>
+  </main>
+  <script>
+    function norm(value){return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')}
+    function optionCity(option){var text=String(option&&option.textContent||'').trim();var index=text.lastIndexOf('—');return index>=0?text.slice(index+1).replace('✓ entrevista','').trim():''}
+    var city=document.querySelector('select[name="city"]');var vacancy=document.querySelector('select[name="vacancyId"]');
+    function sync(){var selected=norm(city.value);Array.prototype.forEach.call(vacancy.options,function(option){if(!option.value){option.hidden=false;option.disabled=false;return}var ok=!selected||norm(optionCity(option))===selected;option.hidden=!ok;option.disabled=!ok;if(!ok&&option.selected)vacancy.value=''})}
+    city.addEventListener('change',sync);sync();
+    document.getElementById('classificationForm').addEventListener('submit',function(){document.getElementById('saveStatus').textContent='Guardando clasificación...'})
+  </script>
+</body>
+</html>`);
 }
 
-function renderStatsUiScript() {
-  return `<script ${MARKERS.summaryScript}>
-(function(){
-  ${sharedClientHelpers()}
-  function money(v){ if(!v){return '—';} return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(v); }
-  function num(v){return new Intl.NumberFormat('es-CO').format(v||0);}
-  function card(label,value,sub){return '<div class="kpi"><div class="kpi-value">'+value+'</div><div class="kpi-label">'+label+'</div><div class="kpi-rate">'+(sub||'')+'</div></div>';}
-  function paint(data){ var box=document.getElementById('metaSummaryCards'); if(!box||!data||!data.ok){return;} var t=data.totals||{}; box.innerHTML=card('Inversión Meta',money(t.spend),data.since+' a '+data.until)+card('Clics a WhatsApp/enlace',num(t.inlineLinkClicks||t.clicks),'Costo: '+money(t.costPerLinkClick))+card('Registros completos',num(t.completedRegistrations),'Costo: '+money(t.costPerCompletedRegistration))+card('HV recibidas',num(t.cvReceived),'Costo: '+money(t.costPerCv))+card('Aptos',num(t.apt),'Costo: '+money(t.costPerApt))+card('Contratados',num(t.hired),'Costo: '+money(t.costPerHired)); }
-  function quickFilter(){
-    var form=document.querySelector('form[action="/admin/estadisticas/campaigns"]');
-    if(!form||document.getElementById('metaQuickFilter')){return;}
-    var wrap=document.createElement('label');
-    wrap.innerHTML='Buscar anuncio, ciudad, vacante o estado <input id="metaQuickFilter" type="search" placeholder="Ej: Ibagué, auxiliar, líder...">';
-    form.insertBefore(wrap,form.firstChild);
-    wrap.querySelector('input').addEventListener('input',function(){
-      var q=this.value.trim().toLowerCase();
-      document.querySelectorAll('table tbody tr').forEach(function(row){ row.style.display=!q||row.textContent.toLowerCase().indexOf(q)>-1?'':'none'; });
-    });
-  }
-  function simplifyAdTable(){
-    document.querySelectorAll('table').forEach(function(table){
-      var headers = Array.prototype.map.call(table.querySelectorAll('thead th'), function(th){ return (th.textContent || '').trim().toLowerCase(); });
-      var removeLabels = ['agendados','confirmados','asistieron'];
-      var removeIndexes = headers.map(function(text, index){ return removeLabels.includes(text) ? index : -1; }).filter(function(index){ return index >= 0; }).sort(function(a,b){ return b-a; });
-      if (!removeIndexes.length) return;
-      table.querySelectorAll('tr').forEach(function(row){
-        removeIndexes.forEach(function(index){ if (row.cells[index]) row.cells[index].remove(); });
-        var last = row.cells[row.cells.length - 1];
-        if (last) last.classList.add('meta-action-cell');
-      });
-    });
-  }
-  wireCityVacancySync(); quickFilter(); forceZeroes(); simplifyAdTable();
-  fetch('/admin/estadisticas/meta/summary'+window.location.search,{credentials:'include'}).then(function(r){return r.json();}).then(paint).catch(function(){var box=document.getElementById('metaSummaryCards');if(box){box.innerHTML=card('Resumen Meta Ads','No disponible','Revisa logs si persiste');}});
-})();
-</script>`;
-}
-
-function renderClassificationScript() {
-  return `<script ${MARKERS.classificationScript}>
-(function(){
-  ${sharedClientHelpers()}
-  forceZeroes();
-  var form = document.querySelector('[data-classification-only-form="true"]');
-  if (form) {
-    var button = form.querySelector('button[type="submit"]');
-    var status = document.createElement('div');
-    status.className = 'classification-save-status';
-    form.appendChild(status);
-    form.addEventListener('submit', async function(event){
-      event.preventDefault();
-      if (button) { button.disabled = true; button.textContent = 'Guardando clasificación...'; }
-      status.className = 'classification-save-status';
-      status.textContent = 'Guardando ciudad y vacante asociada...';
-      try {
-        var response = await fetch('/admin/estadisticas/meta/classify', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            campaignId: form.querySelector('[name="campaignId"]').value,
-            city: form.querySelector('[name="city"]').value || '',
-            vacancyId: form.querySelector('[name="vacancyId"]').value || ''
-          })
-        });
-        var result = await response.json().catch(function(){ return {}; });
-        if (!response.ok || result.ok === false) throw new Error(result.message || 'save_failed');
-        status.textContent = 'Clasificación guardada. Volviendo al listado...';
-        window.location.href = '/admin/estadisticas/campaigns?classification=1';
-      } catch (error) {
-        status.className = 'classification-save-status error';
-        status.textContent = 'No fue posible guardar. Revisa logs de Railway o intenta de nuevo.';
-        if (button) { button.disabled = false; button.textContent = 'Guardar clasificación interna'; }
-      }
-    });
-  }
-  wireCityVacancySync();
-})();
-</script>`;
-}
-
-function extractFirstSelectLabel(html, name) {
-  const pattern = new RegExp(`<label>[^<]*<select name="${name}">[\\s\\S]*?<\\/select><\\/label>`);
-  const match = html.match(pattern);
-  return match ? match[0] : '';
-}
-
-function replaceEditSectionWithClassification(html, req) {
-  const sectionTitle = '<div class="card-title">Editar campaña</div>';
-  const titleIndex = html.indexOf(sectionTitle);
-  if (titleIndex < 0) return html;
-  const sectionStart = html.lastIndexOf('<section class="card">', titleIndex);
-  const sectionEnd = html.indexOf('</section>', titleIndex);
-  if (sectionStart < 0 || sectionEnd < 0) return html;
-
-  const cityLabel = extractFirstSelectLabel(html.slice(sectionStart, sectionEnd), 'city');
-  const vacancyLabel = extractFirstSelectLabel(html.slice(sectionStart, sectionEnd), 'vacancyId');
-  const idMatch = currentPath(req).match(/\/campaigns\/([^/]+)$/);
-  const campaignId = idMatch ? decodeURIComponent(idMatch[1]) : '';
-
-  const replacement = `<section class="card classification-only-card">
-    <div class="card-title">Clasificación interna del anuncio</div>
-    <div class="alert alert-info" style="margin-bottom:12px">Este módulo es informativo. Aquí solo se asigna ciudad y vacante interna; no se modifica el anuncio real ni la campaña publicitaria en Meta Ads.</div>
-    <form data-classification-only-form="true">
-      <input type="hidden" name="campaignId" value="${campaignId.replace(/"/g, '&quot;')}">
-      ${cityLabel || '<label>Ciudad <select name="city"><option value="">Sin ciudad específica</option></select></label>'}
-      ${vacancyLabel || '<label>Vacante <select name="vacancyId"><option value="">Sin vacante específica</option></select></label>'}
-      <button type="submit" class="btn btn-primary">Guardar clasificación interna</button>
-    </form>
-  </section>`;
-
-  return html.slice(0, sectionStart) + replacement + html.slice(sectionEnd + '</section>'.length);
-}
-
-function cleanStatsHtml(html, req) {
-  if (typeof html !== 'string' || !isStatsPath(req)) return html;
-  let output = injectFavicon(html);
-  if (!output.includes(MARKERS.style) && output.includes('</head>')) output = output.replace('</head>', renderResponsiveStyle() + '\n</head>');
-
-  if (isCampaignDetailPath(req)) {
-    output = output.replace(/Campaña:/g, 'Anuncio:');
-    output = output.replace(/← Campañas/g, '← Anuncios');
-    output = output.replace(/Embudo de esta campaña/g, 'Embudo de este anuncio');
-    output = replaceEditSectionWithClassification(output, req);
-    if (!output.includes(MARKERS.classificationScript) && output.includes('</body>')) output = output.replace('</body>', renderClassificationScript() + '\n</body>');
-    return output;
-  }
-
-  if (!isCampaignsPath(req)) return output;
-
-  output = output.replace('<div class="alert alert-success">Meta Ads configurado para sincronización. El dashboard usa snapshots guardados para evitar llamadas a Meta en cada carga.</div>', '');
-  output = output.replace('<div class="alert alert-info">Meta Ads no configurado. Las métricas internas de Lórren siguen disponibles.</div>', '');
-  output = output.replace(/Campañas Meta Ads/g, 'Anuncios Meta Ads');
-  output = output.replace(/Campañas registradas/g, 'Anuncios Meta sincronizados');
-  output = output.replace(/Embudo de conversión — todas las campañas/g, 'Embudo de conversión — anuncios sincronizados');
-  output = output.replace(/<th>Campaña<\/th>/g, '<th>Anuncio</th>');
-  output = output.replace(/<th>Estado<\/th>/g, '<th>Estado Meta</th>');
-  output = output.replace(/>Ver →<\/a>/g, '>Clasificar</a>');
-  output = output.replace(/Aún no hay campañas\. Crea la primera usando el formulario de abajo\./g, 'Aún no hay anuncios sincronizados desde Meta Ads.');
-  output = output.replace(/<div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px"><strong>Quality Score<\/strong>:[\s\S]*?<\/div>/, '<div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">Semáforo de rendimiento: compara calidad interna del anuncio según registros completos, HV, aptos y contratados. Se muestra solo cuando hay datos suficientes.</div>');
-  output = removeSectionByTitle(output, 'Nueva campaña');
-  output = removeSectionByTitle(output, 'Metadata Meta sin campaña asociada');
-  output = removeSectionByTitle(output, 'Sincronización Meta Ads');
-  if (!output.includes(MARKERS.summary)) {
-    const filtersSectionStart = '<section class="card">\n    <div class="card-title">Filtros de análisis</div>';
-    if (output.includes(filtersSectionStart)) output = output.replace(filtersSectionStart, renderSummaryPanel() + '\n' + filtersSectionStart);
-  }
-  if (!output.includes(MARKERS.summaryScript) && output.includes('</body>')) output = output.replace('</body>', renderStatsUiScript() + '\n</body>');
-  return output;
-}
-
-function installStatsHtmlCleaner() {
-  const responsePrototype = express.response;
-  if (responsePrototype.__metaAdsStatsHtmlCleanerInstalled) return;
-  const originalSend = responsePrototype.send;
-  responsePrototype.send = function sendWithStatsHtmlCleaner(body) {
-    return originalSend.call(this, cleanStatsHtml(body, this.req));
-  };
-  responsePrototype.__metaAdsStatsHtmlCleanerInstalled = true;
-}
-
-function installClassificationEndpoint() {
-  const appPrototype = express.application;
-  if (appPrototype.__metaAdsClassificationEndpointPatchInstalled) return;
-  const originalUse = appPrototype.use;
-  appPrototype.use = function useWithMetaAdsClassificationEndpoint(...args) {
-    const result = originalUse.apply(this, args);
-    const justInstalledSession = args.some((arg) => typeof arg === 'function' && arg.name === 'session');
-    if (justInstalledSession && !this.__metaAdsClassificationEndpointInstalled) {
-      originalUse.call(this, `${STATS_BASE_PATH}/meta/classify`, express.json({ limit: '20kb' }), async (req, res) => {
-        if (!isStatsUser(req)) return res.status(403).json({ ok: false, message: 'No autorizado.' });
-        const campaignId = normalizeText(req.body?.campaignId);
-        const city = normalizeText(req.body?.city);
-        const requestedVacancyId = normalizeText(req.body?.vacancyId);
-        if (!campaignId) return res.status(400).json({ ok: false, message: 'Falta anuncio.' });
+function installDirectClassificationRouter() {
+  if (express.__directMetaAdsClassificationInstalled) return;
+  const originalRouter = express.Router;
+  express.Router = function patchedRouter(...args) {
+    const router = originalRouter.apply(express, args);
+    router.use(async (req, res, next) => {
+      const campaignIdForEdit = matchCampaignEdit(req);
+      if (campaignIdForEdit && req.method === 'POST') {
+        if (!isStatsUser(req)) return res.status(403).send('No autorizado.');
         try {
-          let vacancyId = null;
-          if (requestedVacancyId) {
-            const vacancy = await getClassificationPrisma().vacancy.findUnique({
-              where: { id: requestedVacancyId },
-              select: { id: true, city: true }
-            });
-            if (vacancy && (!city || normalizeCompare(vacancy.city) === normalizeCompare(city))) vacancyId = vacancy.id;
-          }
-          await getClassificationPrisma().campaign.update({ where: { id: campaignId }, data: { city: city || null, vacancyId } });
-          return res.json({ ok: true });
+          await saveClassification(campaignIdForEdit, req.body || {});
+          return res.redirect(`${STATS_BASE_PATH}/campaigns?classification=1`);
         } catch (error) {
-          console.error('[metaAdsClassificationEndpoint]', error);
-          return res.status(500).json({ ok: false, message: 'No fue posible guardar clasificación.' });
+          console.error('[metaAds classification save]', error);
+          return res.redirect(`${STATS_BASE_PATH}/campaigns/${encodeURIComponent(campaignIdForEdit)}?error=1`);
         }
-      });
-      this.__metaAdsClassificationEndpointInstalled = true;
-    }
-    return result;
+      }
+
+      const campaignIdForDetail = matchCampaignDetail(req);
+      if (campaignIdForDetail && req.method === 'GET') {
+        try {
+          return await renderClassificationPage(req, res, campaignIdForDetail);
+        } catch (error) {
+          console.error('[metaAds classification page]', error);
+          return next();
+        }
+      }
+      return next();
+    });
+    return router;
   };
-  appPrototype.__metaAdsClassificationEndpointPatchInstalled = true;
+  Object.assign(express.Router, originalRouter);
+  express.__directMetaAdsClassificationInstalled = true;
 }
 
-installClassificationEndpoint();
-installStatsHtmlCleaner();
+installDirectClassificationRouter();
 
 export function getMetaAdsConfig(env = process.env) {
   const credential = String(readEnv(env, ['META', 'ADS', 'ACCESS', 'TOKEN']) || readEnv(env, ['META', 'ACCESS', 'TOKEN']) || '').trim() || null;
@@ -375,12 +234,10 @@ export function createMetaAdsClient(env = process.env, httpClient = axios) {
       error.missing = config.missing;
       throw error;
     }
-
     const response = await httpClient.get(buildGraphUrl(config.apiVersion, path), {
       timeout: 30000,
       params: { ...params, [GRAPH_AUTH_PARAM]: config.credential }
     });
-
     return response.data;
   }
 
@@ -391,7 +248,6 @@ export function createMetaAdsClient(env = process.env, httpClient = axios) {
       error.missing = config.missing;
       throw error;
     }
-
     const response = await httpClient.get(url, { timeout: 30000 });
     return response.data;
   }
