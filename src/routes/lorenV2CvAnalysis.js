@@ -63,13 +63,12 @@ function renderLayout({ title, body }) {
 <body>
   <nav class="navbar">
     <a href="/admin">Panel</a>
-    <a href="/admin/v2">Loren V2</a>
-    <a href="/admin/v2/campaigns">Campañas</a>
-    <a href="/admin/v2/referrals">Referidos</a>
-    <a href="/admin/v2/daily-summary">Resumen diario</a>
-    <a href="/admin/v2/reports">Reportes</a>
-    <a href="/admin/v2/data-consents">Datos personales</a>
-    <a href="/admin/v2/cv-analysis">Análisis HV</a>
+    <a href="/admin/estadisticas">Estadísticas</a>
+    <a href="/admin/estadisticas/campaigns">Campañas</a>
+    <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
+    <a href="/admin/estadisticas/reports">Reportes</a>
+    <a href="/admin/estadisticas/data-consents">Datos personales</a>
+    <a href="/admin/estadisticas/cv-analysis">Análisis HV</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
@@ -118,7 +117,7 @@ function renderRows(candidates = []) {
     <td>${statusBadge(candidate)}</td>
     <td>${renderAnalysisSummary(candidate)}</td>
     <td>
-      <form method="post" action="/admin/v2/cv-analysis/${candidate.id}/analyze">
+      <form method="post" action="/admin/estadisticas/cv-analysis/${candidate.id}/analyze">
         <button class="btn" type="submit">Analizar HV</button>
       </form>
     </td>
@@ -164,7 +163,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
           </table>
         </div>
       </section>`;
-    res.send(renderLayout({ title: 'Análisis HV Loren V2', body }));
+    res.send(renderLayout({ title: 'Análisis HV — Estadísticas', body }));
   });
 
   router.get('/json', async (_req, res) => {
@@ -175,7 +174,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
   router.post('/:candidateId/analyze', async (req, res) => {
     const result = await analyzeCandidateCv(prisma, req.params.candidateId);
     const message = result.ok ? 'Análisis de HV generado.' : `No fue posible analizar la HV: ${result.reason}`;
-    res.redirect(`/admin/v2/cv-analysis?message=${encodeURIComponent(message)}`);
+    res.redirect(`/admin/estadisticas/cv-analysis?message=${encodeURIComponent(message)}`);
   });
 
   return router;

@@ -109,7 +109,7 @@ function addKpiCard(sheet, cell, label, value, fill = COLORS.tealSoft) {
 
 function createSummarySheet(workbook, report) {
   const sheet = workbook.addWorksheet('Resumen', { views: [{ state: 'frozen', ySplit: 3 }] });
-  sheetTitle(sheet, 'Loren V2 - Reporte ejecutivo', `${report.period === 'month' ? 'Reporte mensual' : 'Reporte semanal'} · ${report.startDay} a ${report.endDay}`);
+  sheetTitle(sheet, 'Estadísticas - Reporte ejecutivo', `${report.period === 'month' ? 'Reporte mensual' : 'Reporte semanal'} · ${report.startDay} a ${report.endDay}`);
   sheet.columns = Array.from({ length: 8 }).map(() => ({ width: 18 }));
 
   addKpiCard(sheet, 'A4', 'Candidatos', report.metrics.newCandidates);
@@ -137,7 +137,7 @@ function createSummarySheet(workbook, report) {
 }
 
 function workbookProperties(workbook) {
-  workbook.creator = 'Loren V2';
+  workbook.creator = 'Estadísticas';
   workbook.created = new Date();
   workbook.modified = new Date();
   workbook.calcProperties.fullCalcOnLoad = true;

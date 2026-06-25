@@ -21,7 +21,6 @@ import { dispatchProgrammingNotificationsRouter } from './routes/dispatchProgram
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { lorenV2Router } from './routes/lorenV2.js';
-import { lorenV2ReferralsRouter } from './routes/lorenV2Referrals.js';
 import { lorenV2DailySummaryRouter } from './routes/lorenV2DailySummary.js';
 import { lorenV2ReportsRouter } from './routes/lorenV2Reports.js';
 import { lorenV2DataConsentsRouter } from './routes/lorenV2DataConsents.js';
@@ -39,7 +38,9 @@ const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 const sessionCookieName = process.env.SESSION_COOKIE_NAME || 'loginpro.sid';
 const sessionSecret = process.env.SESSION_SECRET || 'dev-session-secret-change-me';
-const LOREN_V2_UI_LABEL = 'Estadísticas';
+const LOREN_STATS_UI_LABEL = 'Estadísticas';
+const LOREN_STATS_BASE_PATH = '/admin/estadisticas';
+const LOREN_STATS_LEGACY_BASE_PATH = '/admin/v2';
 
 if (!process.env.SESSION_SECRET) {
   console.warn('SESSION_SECRET no esta configurada. Usa un valor robusto en produccion.');
@@ -130,7 +131,7 @@ function dispatchErrorHandler(fallbackPath = '/admin/operaciones') {
 
 function replaceLorenV2UiLabel(html) {
   if (typeof html !== 'string') return html;
-  return html.replace(/Loren V2/g, LOREN_V2_UI_LABEL);
+  return html.replace(/Loren V2/g, LOREN_STATS_UI_LABEL);
 }
 
 function shouldReplaceLorenV2UiLabel(body, res) {
@@ -142,12 +143,12 @@ function shouldReplaceLorenV2UiLabel(body, res) {
 function injectLorenV2NavbarLink(html, req) {
   if (typeof html !== 'string') return html;
   if (!canSeeLorenV2(req)) return html;
-  if (html.includes('href="/admin/v2"')) return html;
+  if (html.includes(`href="${LOREN_STATS_BASE_PATH}"`)) return html;
   if (!html.includes('<span class="spacer"></span>')) return html;
 
   return html.replace(
     '<span class="spacer"></span>',
-    `  <a href="/admin/v2">${LOREN_V2_UI_LABEL}</a>\n  <span class="spacer"></span>`
+    `  <a href="${LOREN_STATS_BASE_PATH}">${LOREN_STATS_UI_LABEL}</a>\n  <span class="spacer"></span>`
   );
 }
 
@@ -433,12 +434,22 @@ app.use('/admin/operaciones', wrapAsyncRouter(dispatchProgrammingNotificationsRo
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchBridgeRouter()));
 app.use('/admin/operaciones/whatsapp', wrapAsyncRouter(dispatchWhatsappNotificationsRouter(prisma)));
 app.use('/admin/operaciones', dispatchErrorHandler('/admin/operaciones'));
-app.use('/admin/v2/referrals', wrapAsyncRouter(lorenV2ReferralsRouter(prisma)));
-app.use('/admin/v2/daily-summary', wrapAsyncRouter(lorenV2DailySummaryRouter(prisma)));
-app.use('/admin/v2/reports', wrapAsyncRouter(lorenV2ReportsRouter(prisma)));
-app.use('/admin/v2/data-consents', wrapAsyncRouter(lorenV2DataConsentsRouter(prisma)));
-app.use('/admin/v2/cv-analysis', wrapAsyncRouter(lorenV2CvAnalysisRouter(prisma)));
-app.use('/admin/v2', wrapAsyncRouter(lorenV2Router(prisma)));
+app.get(LOREN_STATS_LEGACY_BASE_PATH, (_req, res) => res.redirect(301, LOREN_STATS_BASE_PATH));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/campaigns`));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns/:id`, (req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/campaigns/${encodeURIComponent(req.params.id)}`));
+app.post(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns`, (req, res) => res.redirect(308, `${LOREN_STATS_BASE_PATH}/campaigns`));
+app.post(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns/associate`, (req, res) => res.redirect(308, `${LOREN_STATS_BASE_PATH}/campaigns/associate`));
+app.post(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns/:id/edit`, (req, res) => res.redirect(308, `${LOREN_STATS_BASE_PATH}/campaigns/${encodeURIComponent(req.params.id)}/edit`));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/reports`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/reports`));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/daily-summary`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/daily-summary`));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/data-consents`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/data-consents`));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/cv-analysis`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/cv-analysis`));
+
+app.use(`${LOREN_STATS_BASE_PATH}/daily-summary`, wrapAsyncRouter(lorenV2DailySummaryRouter(prisma)));
+app.use(`${LOREN_STATS_BASE_PATH}/reports`, wrapAsyncRouter(lorenV2ReportsRouter(prisma)));
+app.use(`${LOREN_STATS_BASE_PATH}/data-consents`, wrapAsyncRouter(lorenV2DataConsentsRouter(prisma)));
+app.use(`${LOREN_STATS_BASE_PATH}/cv-analysis`, wrapAsyncRouter(lorenV2CvAnalysisRouter(prisma)));
+app.use(LOREN_STATS_BASE_PATH, wrapAsyncRouter(lorenV2Router(prisma)));
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
     if (req.method === 'GET' && (req.path === '/' || req.path === '')) return res.redirect('/admin/operaciones');
