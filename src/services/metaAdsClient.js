@@ -60,7 +60,7 @@ function renderReadOnlyScript() {
     'function clean(){',
     'document.querySelectorAll(".page-header h1").forEach(function(el){el.textContent="Anuncios Meta Ads";});',
     'document.querySelectorAll(".page-header p").forEach(function(el){el.textContent="Seguimiento informativo por anuncio publicitario — Meta / Facebook Ads";});',
-    'document.querySelectorAll(".card-title").forEach(function(el){var t=(el.textContent||"").trim(); if(t.indexOf("Campañas registradas")===0){el.textContent=t.replace("Campañas registradas","Anuncios Meta sincronizados");} if(t==="Nueva campaña"){var s=el.closest("section"); if(s){s.remove();}}});',
+    'document.querySelectorAll(".card-title").forEach(function(el){var raw=(el.textContent||"").trim(); var t=raw.toLowerCase(); if(raw.indexOf("Campañas registradas")===0){el.textContent=raw.replace("Campañas registradas","Anuncios Meta sincronizados");} if(t==="nueva campaña" || t.indexOf("metadata meta sin campaña asociada")===0){var s=el.closest("section"); if(s){s.remove();}}});',
     'document.querySelectorAll("a.btn").forEach(function(el){if((el.textContent||"").trim().indexOf("Ver")===0 && el.href.indexOf("/admin/estadisticas/campaigns/")>-1){el.remove();}});',
     'document.querySelectorAll("th").forEach(function(el){if((el.textContent||"").trim()==="Campaña"){el.textContent="Anuncio";} if((el.textContent||"").trim()==="Estado"){el.textContent="Estado Meta";}});',
     'document.querySelectorAll(".empty-state p").forEach(function(el){el.textContent=el.textContent.replace("Aún no hay campañas. Crea la primera usando el formulario de abajo.","Aún no hay anuncios sincronizados desde Meta Ads.");});',
