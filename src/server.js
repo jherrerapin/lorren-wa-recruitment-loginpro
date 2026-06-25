@@ -156,7 +156,6 @@ function buildUserSessionPayload(user) {
   };
 }
 
-// FIX: payload.scopeVacancyId no existe en el payload — debe leerse userAccessVacancyId
 function applySessionPayload(req, payload) {
   req.session.userId = payload.userId || null;
   req.session.userRole = payload.userRole;
@@ -202,7 +201,6 @@ const sessionStore = new PgStore({
   pruneSessionInterval: 60 * 60
 });
 
-// FIX: loggear errores del store de sesión para detectar fallos de BD
 sessionStore.on('error', (err) => {
   console.error('[SESSION_STORE_ERROR]', err);
 });
@@ -266,7 +264,7 @@ async function authenticateDatabaseUser(username, password) {
     select: {
       id: true,
       username: true,
-      passwordHash: true,
+      password: true,
       role: true,
       accessScope: true,
       scopeCity: true,
@@ -276,7 +274,7 @@ async function authenticateDatabaseUser(username, password) {
     }
   });
   if (!user || !user.isActive) return null;
-  const matches = await bcrypt.compare(password, user.passwordHash);
+  const matches = await bcrypt.compare(password, user.password);
   if (!matches) return null;
   return buildUserSessionPayload(user);
 }
@@ -382,7 +380,7 @@ app.post('/recover', async (req, res) => {
   await prisma.appUser.update({
     where: { id: user.id },
     data: {
-      passwordHash,
+      password: passwordHash,
       lastPasswordResetAt: new Date()
     }
   });
