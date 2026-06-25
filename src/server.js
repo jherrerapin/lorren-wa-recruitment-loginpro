@@ -29,6 +29,8 @@ import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
 import { referralAttributionMiddleware } from './services/referralAttribution.js';
 import { canSeeLorenV2 } from './services/lorenV2Gate.js';
+import { getMetaAdsConfig } from './services/metaAdsClient.js';
+import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +43,7 @@ const sessionSecret = process.env.SESSION_SECRET || 'dev-session-secret-change-m
 const LOREN_STATS_UI_LABEL = 'Estadísticas';
 const LOREN_STATS_BASE_PATH = '/admin/estadisticas';
 const LOREN_STATS_LEGACY_BASE_PATH = '/admin/v2';
+const META_ADS_SYNC_BUTTON_MARKER = 'data-meta-ads-sync-button="true"';
 
 if (!process.env.SESSION_SECRET) {
   console.warn('SESSION_SECRET no esta configurada. Usa un valor robusto en produccion.');
@@ -54,6 +57,12 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeDateInput(value) {
+  const text = normalizeString(value);
+  if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  return text;
 }
 
 function isOperationsOnlyUsername(username) {
@@ -152,6 +161,38 @@ function injectLorenV2NavbarLink(html, req) {
   );
 }
 
+function canUseMetaAdsSyncButton(req = {}) {
+  return req.method === 'GET'
+    && req.path === '/admin/estadisticas/campaigns'
+    && (req.userRole === 'dev' || req.session?.userRole === 'dev');
+}
+
+function renderMetaAdsSyncButton(req = {}) {
+  const since = normalizeDateInput(req.query?.from) || '';
+  const until = normalizeDateInput(req.query?.to) || '';
+  return `<section class="card" ${META_ADS_SYNC_BUTTON_MARKER}>
+    <div class="card-title">Sincronización Meta Ads</div>
+    <div class="alert alert-info" style="margin-bottom:12px;font-weight:400;font-size:12px">
+      Este botón trae campañas reales de Meta Ads y actualiza las métricas guardadas en Estadísticas.
+    </div>
+    <form method="post" action="${LOREN_STATS_BASE_PATH}/meta/sync-form" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="hidden" name="since" value="${since}">
+      <input type="hidden" name="until" value="${until}">
+      <button type="submit" class="btn btn-primary">Sincronizar Meta Ads</button>
+      <span class="muted text-xs">Usa el rango de fechas aplicado en los filtros; si no hay rango, sincroniza el día actual.</span>
+    </form>
+  </section>`;
+}
+
+function injectMetaAdsSyncButton(html, req) {
+  if (typeof html !== 'string') return html;
+  if (!canUseMetaAdsSyncButton(req)) return html;
+  if (html.includes(META_ADS_SYNC_BUTTON_MARKER)) return html;
+  const filtersSectionStart = '<section class="card">\n    <div class="card-title">Filtros de análisis</div>';
+  if (!html.includes(filtersSectionStart)) return html;
+  return html.replace(filtersSectionStart, `${renderMetaAdsSyncButton(req)}\n${filtersSectionStart}`);
+}
+
 function mapDbRoleToSessionRole(role) {
   return role === 'DEV' ? 'dev' : 'admin';
 }
@@ -185,7 +226,14 @@ app.set('views', path.join(__dirname, 'views'));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => {
   const originalSend = res.send.bind(res);
-  res.send = (body) => originalSend(shouldReplaceLorenV2UiLabel(body, res) ? replaceLorenV2UiLabel(body) : body);
+  res.send = (body) => {
+    let output = body;
+    if (shouldReplaceLorenV2UiLabel(output, res)) {
+      output = replaceLorenV2UiLabel(output);
+      output = injectMetaAdsSyncButton(output, req);
+    }
+    return originalSend(output);
+  };
   next();
 });
 app.use((req, res, next) => {
@@ -449,6 +497,21 @@ app.use(`${LOREN_STATS_BASE_PATH}/daily-summary`, wrapAsyncRouter(lorenV2DailySu
 app.use(`${LOREN_STATS_BASE_PATH}/reports`, wrapAsyncRouter(lorenV2ReportsRouter(prisma)));
 app.use(`${LOREN_STATS_BASE_PATH}/data-consents`, wrapAsyncRouter(lorenV2DataConsentsRouter(prisma)));
 app.use(`${LOREN_STATS_BASE_PATH}/cv-analysis`, wrapAsyncRouter(lorenV2CvAnalysisRouter(prisma)));
+app.post(`${LOREN_STATS_BASE_PATH}/meta/sync-form`, async (req, res, next) => {
+  if (req.userRole !== 'dev') return res.status(403).send('Solo usuario dev puede sincronizar Meta Ads.');
+  const metaConfig = getMetaAdsConfig();
+  if (!metaConfig.enabled) return res.redirect(`${LOREN_STATS_BASE_PATH}/campaigns`);
+  try {
+    await syncMetaAdsInsights(prisma, {
+      since: normalizeDateInput(req.body.since),
+      until: normalizeDateInput(req.body.until)
+    });
+    return res.redirect(`${LOREN_STATS_BASE_PATH}/campaigns`);
+  } catch (error) {
+    console.error('[META_ADS_SYNC_FORM_ERROR]', error);
+    return next(error);
+  }
+});
 app.use(LOREN_STATS_BASE_PATH, wrapAsyncRouter(lorenV2Router(prisma)));
 app.use('/admin', (req, res, next) => {
   if (isOperationsOnlyUsername(req.session?.username || req.username)) {
