@@ -44,6 +44,14 @@ function defaultDateRange() {
   return { since: dateOnlyFromDate(since), until: dateOnlyFromDate(until) };
 }
 
+function effectiveStatus(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function isMetaActive(status, fallbackStatus) {
+  return effectiveStatus(status || fallbackStatus) === 'ACTIVE';
+}
+
 function safeError(error) {
   const meta = error?.response?.data?.error || error?.metaError || null;
   return {
@@ -115,60 +123,75 @@ async function syncAdAccount(prisma, client) {
   });
 }
 
-async function upsertCampaignsFromInventory(prisma, campaigns = []) {
+async function removeGeneratedCampaignLevelRows(prisma, campaigns = []) {
+  const campaignIds = compactUnique(campaigns.map((campaign) => String(campaign.id || '').trim())).filter(Boolean);
+  if (!campaignIds.length) return 0;
+  const result = await prisma.campaign.deleteMany({
+    where: {
+      code: { in: campaignIds },
+      createdByUsername: 'meta-ads-sync',
+      candidates: { none: {} }
+    }
+  });
+  return result.count || 0;
+}
+
+async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = []) {
   let count = 0;
-  for (const campaign of campaigns) {
-    const code = String(campaign.id || '').trim();
+  const campaignNames = new Map(campaigns.map((campaign) => [String(campaign.id || ''), campaign.name || null]));
+
+  for (const ad of ads) {
+    const code = String(ad.id || '').trim();
     if (!code) continue;
+    const campaignId = String(ad.campaign_id || '').trim();
+    const campaignName = campaignNames.get(campaignId) || campaignId || 'Sin campaña Meta';
+    const metaState = effectiveStatus(ad.effective_status || ad.status) || 'UNKNOWN';
     await prisma.campaign.upsert({
       where: { code },
       update: {
-        name: campaign.name || `Meta Ads ${code}`,
+        name: ad.name || `Meta Ad ${code}`,
         sourceType: 'META_ADS',
-        isActive: !['DELETED', 'ARCHIVED'].includes(String(campaign.effective_status || campaign.status || '').toUpperCase()),
-        startsAt: campaign.start_time ? new Date(campaign.start_time) : undefined,
-        endsAt: campaign.stop_time ? new Date(campaign.stop_time) : undefined,
-        notes: 'Inventario sincronizado desde Meta Ads.'
+        isActive: isMetaActive(ad.effective_status, ad.status),
+        notes: `Anuncio sincronizado desde Meta Ads. Campaña: ${campaignName}. campaign_id: ${campaignId || '—'}. adset_id: ${ad.adset_id || '—'}. estado_meta: ${metaState}.`
       },
       create: {
         code,
-        name: campaign.name || `Meta Ads ${code}`,
+        name: ad.name || `Meta Ad ${code}`,
         sourceType: 'META_ADS',
-        isActive: !['DELETED', 'ARCHIVED'].includes(String(campaign.effective_status || campaign.status || '').toUpperCase()),
-        startsAt: campaign.start_time ? new Date(campaign.start_time) : null,
-        endsAt: campaign.stop_time ? new Date(campaign.stop_time) : null,
-        notes: 'Inventario sincronizado desde Meta Ads.',
+        isActive: isMetaActive(ad.effective_status, ad.status),
+        notes: `Anuncio sincronizado desde Meta Ads. Campaña: ${campaignName}. campaign_id: ${campaignId || '—'}. adset_id: ${ad.adset_id || '—'}. estado_meta: ${metaState}.`,
         createdByUsername: 'meta-ads-sync'
       }
     });
     count += 1;
   }
+
   return count;
 }
 
 async function upsertInternalCampaignsFromMeta(prisma, rows = []) {
   let count = 0;
-  const campaigns = compactUnique(rows.map((row) => row.campaign_id))
-    .map((campaignId) => rows.find((row) => row.campaign_id === campaignId))
+  const ads = compactUnique(rows.map((row) => row.ad_id))
+    .map((adId) => rows.find((row) => row.ad_id === adId))
     .filter(Boolean);
 
-  for (const row of campaigns) {
-    const code = String(row.campaign_id || '').trim();
+  for (const row of ads) {
+    const code = String(row.ad_id || '').trim();
     if (!code) continue;
     await prisma.campaign.upsert({
       where: { code },
       update: {
-        name: row.campaign_name || `Meta Ads ${code}`,
+        name: row.ad_name || `Meta Ad ${code}`,
         sourceType: 'META_ADS',
         isActive: true,
-        notes: 'Sincronizada automáticamente desde Meta Ads.'
+        notes: `Anuncio con métricas sincronizadas desde Meta Ads. Campaña: ${row.campaign_name || row.campaign_id || '—'}. campaign_id: ${row.campaign_id || '—'}. adset_id: ${row.adset_id || '—'}.`
       },
       create: {
         code,
-        name: row.campaign_name || `Meta Ads ${code}`,
+        name: row.ad_name || `Meta Ad ${code}`,
         sourceType: 'META_ADS',
         isActive: true,
-        notes: 'Sincronizada automáticamente desde Meta Ads.',
+        notes: `Anuncio con métricas sincronizadas desde Meta Ads. Campaña: ${row.campaign_name || row.campaign_id || '—'}. campaign_id: ${row.campaign_id || '—'}. adset_id: ${row.adset_id || '—'}.`,
         createdByUsername: 'meta-ads-sync'
       }
     });
@@ -245,14 +268,15 @@ export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
       fetchInsights(client, { ...range, level: 'campaign' }),
       fetchInsights(client, { ...range, level: 'ad' })
     ]);
-    const [inventoryCampaigns, autoCampaigns, campaignSnapshots, adSnapshots] = await Promise.all([
-      upsertCampaignsFromInventory(prisma, campaignInventory),
-      upsertInternalCampaignsFromMeta(prisma, campaignRows),
+    const [removedCampaignRows, inventoryAds, autoAds, campaignSnapshots, adSnapshots] = await Promise.all([
+      removeGeneratedCampaignLevelRows(prisma, campaignInventory),
+      upsertAdsAsDashboardRows(prisma, adInventory, campaignInventory),
+      upsertInternalCampaignsFromMeta(prisma, adRows),
       syncCampaignRows(prisma, campaignRows),
       syncAdRows(prisma, adRows)
     ]);
-    console.info('[metaAdsInsightsSync] fin', { inventoryCampaigns, inventoryAds: adInventory.length, autoCampaigns, campaignSnapshots, adSnapshots });
-    return { ok: true, enabled: true, since: range.since, until: range.until, inventoryCampaigns, inventoryAds: adInventory.length, autoCampaigns, campaignSnapshots, adSnapshots };
+    console.info('[metaAdsInsightsSync] fin', { removedCampaignRows, inventoryCampaigns: campaignInventory.length, inventoryAds, autoAds, campaignSnapshots, adSnapshots });
+    return { ok: true, enabled: true, since: range.since, until: range.until, removedCampaignRows, inventoryCampaigns: campaignInventory.length, inventoryAds, autoAds, campaignSnapshots, adSnapshots };
   } catch (error) {
     const safe = safeError(error);
     console.warn('[metaAdsInsightsSync] error', safe);
