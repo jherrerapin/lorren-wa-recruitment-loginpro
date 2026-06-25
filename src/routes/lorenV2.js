@@ -396,9 +396,9 @@ async function loadCampaignDashboardData(prisma, query = {}) {
   ]);
 
   const enriched = enrichCampaignsWithAttribution(campaigns, candidates);
-  const unmatched = buildUnmatchedMetaCandidates(candidates, campaigns);
+  const unmatchedMetaCandidates = buildUnmatchedMetaCandidates(candidates, campaigns);
 
-  return { filters, cities, vacancies, campaigns: enriched, unmatched };
+  return { filters, cities, vacancies, campaigns: enriched, unmatchedMetaCandidates };
 }
 
 // ─── Render: Layout ────────────────────────────────────────────────────────────
@@ -520,7 +520,7 @@ function renderLayout({ title, body }) {
 </html>`;
 }
 
-function renderFilters({ filters = {}, cities = [], vacancies = [] }) {
+function renderCampaignFilters({ filters = {}, cities = [], vacancies = [] }) {
   const cityOptions = cities
     .map((c) => `<option value="${escapeHtml(c.name)}" ${filters.city === c.name ? 'selected' : ''}>${escapeHtml(c.name)}</option>`)
     .join('');
@@ -549,7 +549,7 @@ function renderFilters({ filters = {}, cities = [], vacancies = [] }) {
   </section>`;
 }
 
-function renderFunnel(campaigns = []) {
+function renderCampaignFunnel(campaigns = []) {
   const metric = buildAggregateCampaignMetric(campaigns);
   const hasScheduling = campaigns.some((c) => c.vacancy?.schedulingEnabled);
   const total = metric.conversationsStarted || 0;
@@ -719,9 +719,9 @@ function renderCreateForm({ cities = [], vacancies = [], error = null, success =
   </section>`;
 }
 
-function renderUnmatched(candidates = [], campaigns = []) {
+function renderUnmatchedMetaCandidates(candidates = [], campaigns = []) {
   if (!candidates.length) {
-    return `<section class="card"><div class="card-title">Candidatos Meta sin campaña asociada</div><div class="empty-state"><p>No hay candidatos Meta pendientes de asociación. ✅</p></div></section>`;
+    return `<section class="card"><div class="card-title">Metadata Meta sin campaña asociada</div><div class="empty-state"><p>No hay candidatos Meta pendientes de asociación. ✅</p></div></section>`;
   }
   const campaignOptions = campaigns.filter((c) => c.isActive).map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)} (${escapeHtml(c.code)})</option>`).join('');
   const rows = candidates.map((c) => {
@@ -733,7 +733,7 @@ function renderUnmatched(candidates = [], campaigns = []) {
       <td><form method="post" action="/admin/v2/campaigns/associate" style="display:flex;gap:6px;align-items:center"><input type="hidden" name="candidateId" value="${escapeHtml(c.id)}"><select name="campaignId" style="min-width:160px;font-size:12px;padding:5px 8px"><option value="">Seleccionar campaña…</option>${campaignOptions}</select><button type="submit" class="btn btn-secondary btn-sm">Asociar</button></form></td>
     </tr>`;
   }).join('');
-  return `<section class="card"><div class="card-title">Candidatos Meta sin campaña asociada (${candidates.length})</div><div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Vacante</th><th>Metadata Meta</th><th>Asociar</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  return `<section class="card"><div class="card-title">Metadata Meta sin campaña asociada (${candidates.length})</div><div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Vacante</th><th>Metadata Meta</th><th>Asociar</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
 
 function renderCampaignDetail({ campaign, candidates = [], cities = [], vacancies = [], error = null, success = null }) {
@@ -926,10 +926,10 @@ export function lorenV2Router(prisma) {
       const body = `
         <div class="page-header"><h1>Campañas Meta Ads</h1><p>Seguimiento de efectividad por pauta publicitaria — ${CAMPAIGN_SOURCE_LABEL}</p></div>
         ${successMsg ? `<div class="alert alert-success">${escapeHtml(successMsg)}</div>` : ''}
-        ${renderFilters({ filters: data.filters, cities: data.cities, vacancies: data.vacancies })}
-        ${data.campaigns.length ? renderFunnel(data.campaigns) : ''}
+        ${renderCampaignFilters({ filters: data.filters, cities: data.cities, vacancies: data.vacancies })}
+        ${data.campaigns.length ? renderCampaignFunnel(data.campaigns) : ''}
         ${renderCampaignTable(data.campaigns)}
-        ${renderUnmatched(data.unmatched, data.campaigns)}
+        ${renderUnmatchedMetaCandidates(data.unmatchedMetaCandidates, data.campaigns)}
         ${renderCreateForm({ cities: data.cities, vacancies: data.vacancies })}`;
       res.send(renderLayout({ title: 'Campañas — Loren V2', body }));
     } catch (err) {
@@ -986,7 +986,7 @@ export function lorenV2Router(prisma) {
 
     const reload = async (error) => {
       const data = await loadCampaignDashboardData(prisma, {});
-      const body2 = `<div class="page-header"><h1>Campañas Meta Ads</h1><p>${CAMPAIGN_SOURCE_LABEL}</p></div>${renderFilters({ filters: {}, cities: data.cities, vacancies: data.vacancies })}${data.campaigns.length ? renderFunnel(data.campaigns) : ''}${renderCampaignTable(data.campaigns)}${renderUnmatched(data.unmatched, data.campaigns)}${renderCreateForm({ cities: data.cities, vacancies: data.vacancies, error })}`;
+      const body2 = `<div class="page-header"><h1>Campañas Meta Ads</h1><p>${CAMPAIGN_SOURCE_LABEL}</p></div>${renderCampaignFilters({ filters: {}, cities: data.cities, vacancies: data.vacancies })}${data.campaigns.length ? renderCampaignFunnel(data.campaigns) : ''}${renderCampaignTable(data.campaigns)}${renderUnmatchedMetaCandidates(data.unmatchedMetaCandidates, data.campaigns)}${renderCreateForm({ cities: data.cities, vacancies: data.vacancies, error })}`;
       res.status(400).send(renderLayout({ title: 'Campañas — Loren V2', body: body2 }));
     };
 
