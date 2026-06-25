@@ -35,10 +35,10 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY prisma ./prisma
-RUN npx prisma generate
+RUN npm run prisma:generate
 
 # cache-bust: 2026-06-24T20:37
 COPY src ./src
