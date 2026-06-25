@@ -2,12 +2,18 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import QRCode from 'qrcode';
+import { prisma } from '../lib/prisma.js';
 
 const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
+const CONFIRMATION_MEMORY_TTL_MS = Number(process.env.DISPATCH_WA_CONFIRMATION_MEMORY_TTL_MS || 36 * 60 * 60 * 1000);
 const CHROMIUM_LOCK_FILES = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket']);
+const PENDING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
+const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
+const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
+const AUTOMATIC_CONFIRMATION_REPLY = 'Gracias.';
 
 let Client = null;
 let LocalAuth = null;
@@ -22,6 +28,7 @@ let lastReadyAt = null;
 let lastAuthenticatedAt = null;
 let reconnectTimer = null;
 const recentSendLocks = new Map();
+const pendingConfirmationByPhone = new Map();
 
 function buildError(message, statusCode = 400) {
   const error = new Error(message);
@@ -41,6 +48,24 @@ function normalizeMessage(message) {
   return String(message || '').trim().slice(0, MAX_MESSAGE_LENGTH);
 }
 
+function normalizeConfirmationText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function isAutomaticConfirmationReply(value) {
+  return normalizeConfirmationText(value) === 'confirmado';
+}
+
+function normalizeWhatsappSenderId(senderId) {
+  const raw = String(senderId || '').split('@')[0];
+  return normalizePhone(raw);
+}
+
 function buildSendLockKey({ channelType, phone, payload }) {
   return [channelType, phone, payload].join('|');
 }
@@ -48,6 +73,12 @@ function buildSendLockKey({ channelType, phone, payload }) {
 function cleanupExpiredSendLocks(now = Date.now()) {
   for (const [key, value] of recentSendLocks.entries()) {
     if (value.expiresAt <= now) recentSendLocks.delete(key);
+  }
+}
+
+function cleanupExpiredPendingConfirmations(now = Date.now()) {
+  for (const [phone, value] of pendingConfirmationByPhone.entries()) {
+    if (value.expiresAt <= now) pendingConfirmationByPhone.delete(phone);
   }
 }
 
@@ -67,6 +98,17 @@ function reserveSendLock({ channelType, phone, payload }) {
 
 function releaseSendLock(key) {
   if (key) recentSendLocks.delete(key);
+}
+
+function rememberPendingConfirmation(phone, context = {}) {
+  const normalizedPhone = normalizePhone(phone);
+  const assignmentId = String(context?.assignmentId || '').trim();
+  if (!normalizedPhone || !assignmentId) return;
+  pendingConfirmationByPhone.set(normalizedPhone, {
+    assignmentId,
+    serviceRequestId: String(context?.serviceRequestId || '').trim() || null,
+    expiresAt: Date.now() + CONFIRMATION_MEMORY_TTL_MS
+  });
 }
 
 async function loadWhatsappWebModule() {
@@ -121,7 +163,7 @@ function ensureAuthDataPath() {
 }
 
 function shellQuote(value) {
-  return `'${String(value || '').replace(/'/g, `'\\''`)}'`;
+  return `'${String(value || '').replace(/'/g, `'\''`)}'`;
 }
 
 function killStaleChromiumProcesses(dataPath) {
@@ -282,6 +324,81 @@ async function getRecipientId(activeClient, phone) {
   return { normalizedPhone, serializedId: numberId._serialized };
 }
 
+async function recalculateServiceRequestStatus(serviceRequestId) {
+  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: serviceRequestId },
+    select: { id: true, requiredWorkers: true }
+  });
+  if (!serviceRequest) return null;
+
+  const [activeCount, confirmedCount] = await Promise.all([
+    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }),
+    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: CONFIRMED_ASSIGNMENT_STATUS } })
+  ]);
+
+  let status = 'PENDING_ASSIGNMENT';
+  if (confirmedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
+  else if (activeCount >= serviceRequest.requiredWorkers) status = 'PENDING_CONFIRMATION';
+  else if (activeCount > 0) status = 'ASSIGNMENT_PARTIAL';
+
+  await prisma.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
+  return { status, activeCount, confirmedCount, requiredWorkers: serviceRequest.requiredWorkers };
+}
+
+async function findPendingAssignmentFromMemory(phone) {
+  cleanupExpiredPendingConfirmations();
+  const remembered = pendingConfirmationByPhone.get(phone);
+  if (!remembered?.assignmentId) return null;
+  const assignment = await prisma.dispatchAssignment.findFirst({
+    where: {
+      id: remembered.assignmentId,
+      status: { in: PENDING_ASSIGNMENT_STATUSES }
+    },
+    include: { worker: true }
+  });
+  if (!assignment) return null;
+  if (normalizePhone(assignment.worker?.phone) !== phone) return null;
+  return assignment;
+}
+
+async function findLatestPendingAssignmentByPhone(phone) {
+  const lastTen = phone.slice(-10);
+  if (!lastTen) return null;
+  const candidates = await prisma.dispatchAssignment.findMany({
+    where: {
+      status: { in: PENDING_ASSIGNMENT_STATUSES },
+      worker: { phone: { contains: lastTen } }
+    },
+    include: { worker: true },
+    orderBy: { updatedAt: 'desc' },
+    take: 10
+  });
+  return candidates.find((assignment) => normalizePhone(assignment.worker?.phone) === phone) || null;
+}
+
+async function confirmAssignmentFromInboundMessage(activeClient, message) {
+  if (message?.fromMe) return false;
+  const sender = String(message?.from || '');
+  if (!sender.endsWith('@c.us')) return false;
+  if (!isAutomaticConfirmationReply(message?.body)) return false;
+
+  const phone = normalizeWhatsappSenderId(sender);
+  if (!phone) return false;
+
+  const assignment = await findPendingAssignmentFromMemory(phone) || await findLatestPendingAssignmentByPhone(phone);
+  if (!assignment) return false;
+
+  await prisma.dispatchAssignment.update({
+    where: { id: assignment.id },
+    data: { status: CONFIRMED_ASSIGNMENT_STATUS }
+  });
+  await recalculateServiceRequestStatus(assignment.serviceRequestId);
+  pendingConfirmationByPhone.delete(phone);
+  await activeClient.sendMessage(sender, AUTOMATIC_CONFIRMATION_REPLY);
+  console.log(`[dispatch-wa] Confirmación automática registrada para assignment=${assignment.id} phone=${phone}.`);
+  return true;
+}
+
 export function initDispatchWhatsappClient() {
   if (client || initializing) return client;
 
@@ -323,6 +440,12 @@ export function initDispatchWhatsappClient() {
         lastError = null;
         lastReadyAt = new Date().toISOString();
         console.log('WhatsApp de despacho conectado.');
+      });
+
+      client.on('message', (message) => {
+        confirmAssignmentFromInboundMessage(client, message).catch((error) => {
+          console.error('[dispatch-wa] Error procesando respuesta entrante.', error);
+        });
       });
 
       client.on('disconnected', (reason) => {
@@ -385,7 +508,7 @@ export async function getDispatchWhatsappStatusView(options = {}) {
   return { ready, initializing, reconnecting: Boolean(reconnectTimer), lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
 }
 
-export async function sendDispatchWhatsappMessage({ phone, message }) {
+export async function sendDispatchWhatsappMessage({ phone, message, context }) {
   const normalizedMessage = normalizeMessage(message);
   if (!normalizedMessage) throw buildError('El mensaje de WhatsApp no puede estar vacío.', 400);
   if (/<[^>]+>/.test(normalizedMessage)) throw buildError('El mensaje de WhatsApp no puede contener HTML.', 400);
@@ -395,6 +518,7 @@ export async function sendDispatchWhatsappMessage({ phone, message }) {
   const lockKey = reserveSendLock({ channelType: 'text', phone: recipient.normalizedPhone, payload: normalizedMessage });
   try {
     const sent = await activeClient.sendMessage(recipient.serializedId, normalizedMessage);
+    rememberPendingConfirmation(recipient.normalizedPhone, context);
     return {
       phone: recipient.normalizedPhone,
       providerMessageId: sent?.id?._serialized || sent?.id?.id || null
