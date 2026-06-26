@@ -51,7 +51,7 @@
               <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>&fecha=<%= encodeURIComponent(selectedDate) %>">Asignar / revisar</a>
               <% if (!locked) { %>
                 <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
-                <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio? También se eliminarán asignaciones y novedades asociadas.');"><button class="btn danger-btn" type="submit">Eliminar</button></form>
+                <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar"><button class="btn danger-btn" type="submit">Eliminar</button></form>
               <% } else { %>
                 <span class="locked-note">Consulta: edición y eliminación bloqueadas porque ya pasaron más de 2 horas desde la hora del servicio.</span>
               <% } %>
@@ -61,5 +61,7 @@
       </section>
     <% } %>
   </main>
+  <div class="async-toast" id="asyncToast" role="status" aria-live="polite"></div>
+  <script src="/public/service-request-delete-confirm.js"></script>
 </body>
 </html>

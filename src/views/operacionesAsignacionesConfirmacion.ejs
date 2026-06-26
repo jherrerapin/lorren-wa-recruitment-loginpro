@@ -93,6 +93,7 @@
     </section>
   </main>
   <div class="async-toast" id="asyncToast" role="status" aria-live="polite"></div>
+  <script src="/public/service-request-delete-confirm.js"></script>
   <script>
     const dropZone=document.getElementById('assignmentDropZone'),assignForm=document.getElementById('assignForm'),assignWorkerId=document.getElementById('assignWorkerId'),hasSelectedRequest=Boolean('<%= selectedServiceRequestId %>'),isDropZoneDisabled=dropZone?.dataset.disabled==='true',selectedRequestSummary=document.getElementById('selectedRequestSummary'),selectedRequestCity=selectedRequestSummary?.dataset.requestCity||'',cityAutoFilterText=document.getElementById('cityAutoFilterText'),autoFilterEmpty=document.getElementById('autoFilterEmpty'),asyncToast=document.getElementById('asyncToast');
     const BOARD_POS_KEY='dispatchAssignmentBoardPosition';
