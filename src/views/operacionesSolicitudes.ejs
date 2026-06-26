@@ -14,9 +14,23 @@
     .shift-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--surface-2); }
     .shift-remove { border: 1px solid var(--border); background: #fff; border-radius: 999px; padding: 9px 12px; font-weight: 900; cursor: pointer; }
     .shift-summary { font-size: 12px; color: var(--muted); margin-top: 8px; }
-    .service-list-note { background: #f0fdfa; border: 1px solid rgba(13,122,107,.25); color: var(--navy); border-radius: 16px; padding: 14px 16px; line-height: 1.45; }
-    .service-list-note strong { color: var(--teal); }
-    @media(max-width:720px){.shift-row{grid-template-columns:1fr}}
+    .requests-card { background:#fff; border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow-sm); overflow:hidden; margin-bottom:16px; }
+    .requests-head { padding:16px 18px; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .requests-head h2 { color:var(--navy); font-size:16px; margin:0 0 4px; }
+    .requests-head p { color:var(--muted); font-size:12px; margin:0; }
+    .date-filter { padding:14px 18px; display:flex; gap:10px; align-items:end; flex-wrap:wrap; background:#f8fafc; border-bottom:1px solid #e5e7eb; }
+    .date-filter .field { min-width:210px; }
+    .request-list { display:grid; gap:10px; padding:14px; }
+    .request-row { border:1px solid var(--border); border-radius:12px; padding:12px; background:#fff; display:grid; gap:8px; }
+    .request-row[hidden] { display:none; }
+    .request-top { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .request-top strong { color:var(--navy); }
+    .meta { color:var(--muted); font-size:12px; display:flex; flex-wrap:wrap; gap:6px 12px; }
+    .actions-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .actions-row form { margin:0; }
+    .danger-btn { border-color:#fecaca; background:#fff5f5; color:#b91c1c; }
+    .empty-state { padding:18px; color:var(--muted); text-align:center; }
+    @media(max-width:720px){.shift-row{grid-template-columns:1fr}.date-filter .field,.date-filter .btn{width:100%;}.request-top{display:grid}}
   </style>
 </head>
 <body>
@@ -30,12 +44,18 @@
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
+  <% const fmtTime = (value) => { const match = String(value || '').match(/^([01]?\d|2[0-3]):([0-5]\d)$/); if (!match) return value || '-'; let hour = Number(match[1]); const suffix = hour >= 12 ? 'PM' : 'AM'; hour = hour % 12 || 12; return `${hour}:${match[2]} ${suffix}`; }; %>
+  <% const fmtDate = (value) => value ? new Date(value).toISOString().slice(0,10) : ''; %>
+  <% const schedule = (request) => request.endTime ? `${fmtTime(request.startTime)} - ${fmtTime(request.endTime)}` : fmtTime(request.startTime); %>
+  <% const editLimit = (request) => { const d = fmtDate(request.serviceDate); const time = request.startTime || '23:59'; const start = new Date(`${d}T${String(time).padStart(5,'0')}:00-05:00`); return new Date(start.getTime() + 2 * 60 * 60 * 1000); }; %>
+  <% const now = new Date(); %>
+
   <main class="page">
     <section class="hero">
       <div>
         <div class="eyebrow">Solicitudes operativas</div>
         <h1>Crear solicitud de servicio</h1>
-        <p>Registra solicitudes internas para que luego sean gestionadas desde el inicio del módulo de Operaciones / Despacho.</p>
+        <p>Registra solicitudes internas y consulta las solicitudes vigentes del día.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
@@ -46,8 +66,42 @@
 
     <% if (message) { %><div class="section-note"><%= message %></div><% } %>
 
-    <section class="service-list-note">
-      <strong>Consulta de solicitudes:</strong> el listado por día se revisa desde el inicio de Operaciones / Despacho usando las tarjetas de estadísticas y el filtro de fecha. Esta pantalla queda enfocada solo en crear solicitudes nuevas.
+    <section class="requests-card">
+      <div class="requests-head">
+        <div>
+          <h2>Solicitudes de servicio</h2>
+          <p>Por defecto se muestran las solicitudes del día actual que no han superado 2 horas después de la hora del servicio.</p>
+        </div>
+      </div>
+      <form class="date-filter" id="serviceDateFilter" method="get" action="/admin/operaciones/solicitudes">
+        <div class="field">
+          <label for="fechaSolicitudes">Fecha de solicitudes</label>
+          <input id="fechaSolicitudes" name="fecha" type="date" value="<%= today %>" />
+        </div>
+        <button class="btn btn-primary" type="submit">Aplicar fecha</button>
+        <a class="btn" href="/admin/operaciones/solicitudes">Hoy</a>
+      </form>
+      <div class="request-list" id="serviceRequestsList">
+        <div class="empty-state" id="emptyRequests" hidden>No hay solicitudes visibles para esta fecha.</div>
+        <% (serviceRequests || []).forEach((request) => { const requestDate = fmtDate(request.serviceDate); const active = (request.assignments || []).filter((item) => ['ASSIGNED','CONFIRMATION_PENDING','CONFIRMED'].includes(item.status)).length; const confirmed = (request.assignments || []).filter((item) => item.status === 'CONFIRMED').length; const locked = now > editLimit(request); %>
+          <article class="request-row" data-date="<%= requestDate %>" data-edit-locked="<%= locked ? 'true' : 'false' %>">
+            <div class="request-top">
+              <div><strong><%= request.clientName || 'Sin cliente' %></strong><div class="meta"><span><%= request.operationPointName || 'Sin operación' %></span><span><%= request.cityName || 'Sin ciudad' %></span></div></div>
+              <div class="meta"><span><%= requestDate %></span><span><%= schedule(request) %></span></div>
+            </div>
+            <div class="meta"><span>Servicio: <%= request.serviceName || request.service?.name || 'Sin servicio' %></span><span>Requeridos: <%= request.requiredWorkers || 0 %></span><span>Asignados: <%= active %></span><span>Confirmados: <%= confirmed %></span><span>Estado: <%= request.status || 'PENDING_ASSIGNMENT' %></span></div>
+            <div class="actions-row">
+              <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>&fecha=<%= requestDate %>">Asignar / revisar</a>
+              <% if (!locked) { %>
+                <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
+                <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn danger-btn" type="submit">Eliminar</button></form>
+              <% } else { %>
+                <span class="meta">Consulta: edición bloqueada por superar 2 horas posteriores al servicio.</span>
+              <% } %>
+            </div>
+          </article>
+        <% }) %>
+      </div>
     </section>
 
     <details class="card" open>
@@ -55,42 +109,16 @@
       <div class="card-body">
         <form method="post" action="/admin/operaciones/solicitudes">
           <div class="form-grid">
-            <div class="field">
-              <label for="clientId">Cliente</label>
-              <select id="clientId" name="clientId" required>
-                <option value="">Selecciona un cliente</option>
-                <% clients.forEach((client)=>{ %><option value="<%= client.id %>"><%= client.name %></option><% }) %>
-              </select>
-              <p class="select-hint">Solo aparecen clientes activos registrados en Operaciones.</p>
-            </div>
-            <div class="field">
-              <label for="operationPointId">Operación / punto</label>
-              <select id="operationPointId" name="operationPointId" required disabled>
-                <option value="">Selecciona primero un cliente</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="serviceId">Servicio del cliente</label>
-              <select id="serviceId" name="serviceId" disabled>
-                <option value="">Selecciona primero un cliente</option>
-              </select>
-            </div>
+            <div class="field"><label for="clientId">Cliente</label><select id="clientId" name="clientId" required><option value="">Selecciona un cliente</option><% clients.forEach((client)=>{ %><option value="<%= client.id %>"><%= client.name %></option><% }) %></select><p class="select-hint">Solo aparecen clientes activos registrados en Operaciones.</p></div>
+            <div class="field"><label for="operationPointId">Operación / punto</label><select id="operationPointId" name="operationPointId" required disabled><option value="">Selecciona primero un cliente</option></select></div>
+            <div class="field"><label for="serviceId">Servicio del cliente</label><select id="serviceId" name="serviceId" disabled><option value="">Selecciona primero un cliente</option></select></div>
             <div class="field"><label for="cityNameDisplay">Ciudad</label><input id="cityNameDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <div class="field"><label for="addressDisplay">Dirección de la operación</label><input id="addressDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <input type="hidden" id="address" name="address" />
             <div class="field full">
               <label>Días, horarios y auxiliares requeridos</label>
-              <div class="shift-list" id="shiftList">
-                <div class="shift-row">
-                  <div class="field"><label>Fecha servicio</label><input type="date" name="serviceDateBlock" value="<%= today %>" required /></div>
-                  <div class="field"><label>Auxiliares</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div>
-                  <div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div>
-                  <div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div>
-                  <button class="shift-remove" type="button" hidden>Quitar</button>
-                </div>
-              </div>
-              <p class="shift-summary">Para solicitudes de varios días en la semana, agrega un bloque por cada fecha y horario. Ejemplo: lunes 6:00 con 3 auxiliares y miércoles 14:00 con 2 auxiliares.</p>
-              <button class="btn" type="button" id="addShiftBtn">Agregar otro día / horario</button>
+              <div class="shift-list" id="shiftList"><div class="shift-row"><div class="field"><label>Fecha servicio</label><input type="date" name="serviceDateBlock" value="<%= today %>" required /></div><div class="field"><label>Auxiliares</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div><div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div><div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div><button class="shift-remove" type="button" hidden>Quitar</button></div></div>
+              <p class="shift-summary">Para solicitudes de varios días en la semana, agrega un bloque por cada fecha y horario.</p><button class="btn" type="button" id="addShiftBtn">Agregar otro día / horario</button>
             </div>
             <div class="field full"><label>Notas</label><textarea name="notes" placeholder="Observaciones de la solicitud"></textarea></div>
           </div>
@@ -102,80 +130,25 @@
 
   <script type="application/json" id="clients-data"><%- JSON.stringify(clients.map((client) => ({ id: client.id, name: client.name, cityName: client.cityName, operationPoints: client.operationPoints || [], services: client.services || [] }))) %></script>
   <script>
+    const todayValue = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const params = new URLSearchParams(window.location.search);
+    const selectedDate = /^\d{4}-\d{2}-\d{2}$/.test(params.get('fecha') || '') ? params.get('fecha') : todayValue;
+    const dateInput = document.getElementById('fechaSolicitudes');
+    if (dateInput) dateInput.value = selectedDate;
+    function applyRequestFilter(){let visible=0;document.querySelectorAll('#serviceRequestsList .request-row').forEach((card)=>{const matches=card.dataset.date===selectedDate;const locked=card.dataset.editLocked==='true';card.hidden=!matches||locked;if(!card.hidden)visible+=1;});const empty=document.getElementById('emptyRequests');if(empty)empty.hidden=visible>0;}
+    applyRequestFilter();
     const clientsData = JSON.parse(document.getElementById('clients-data').textContent || '[]');
-    const clientSelect = document.getElementById('clientId');
-    const operationSelect = document.getElementById('operationPointId');
-    const serviceSelect = document.getElementById('serviceId');
-    const cityDisplay = document.getElementById('cityNameDisplay');
-    const addressDisplay = document.getElementById('addressDisplay');
-    const addressInput = document.getElementById('address');
+    const clientSelect = document.getElementById('clientId'); const operationSelect = document.getElementById('operationPointId'); const serviceSelect = document.getElementById('serviceId'); const cityDisplay = document.getElementById('cityNameDisplay'); const addressDisplay = document.getElementById('addressDisplay'); const addressInput = document.getElementById('address');
     function setSelectState(select) { select.classList.toggle('has-selection', Boolean(select.value)); }
-    function fillOperationOptions(client) {
-      operationSelect.innerHTML = '';
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = client ? 'Selecciona un punto de operación' : 'Selecciona primero un cliente';
-      operationSelect.appendChild(placeholder);
-      (client?.operationPoints || []).forEach((operation) => {
-        const option = document.createElement('option');
-        option.value = operation.id;
-        option.textContent = `${operation.name}${operation.cityName ? ' — ' + operation.cityName : ''}`;
-        option.dataset.city = operation.cityName || client.cityName || '';
-        option.dataset.address = operation.address || '';
-        operationSelect.appendChild(option);
-      });
-      operationSelect.disabled = !client || !(client.operationPoints || []).length;
-    }
-    function fillServiceOptions(client) {
-      serviceSelect.innerHTML = '';
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = client ? ((client.services || []).length ? 'Selecciona un servicio' : 'Cliente sin servicios configurados') : 'Selecciona primero un cliente';
-      serviceSelect.appendChild(placeholder);
-      (client?.services || []).forEach((service) => {
-        const option = document.createElement('option');
-        option.value = service.id;
-        option.textContent = service.name;
-        serviceSelect.appendChild(option);
-      });
-      serviceSelect.disabled = !client || !(client.services || []).length;
-      serviceSelect.required = Boolean(client && (client.services || []).length);
-    }
-    clientSelect?.addEventListener('change', () => {
-      const client = clientsData.find((item) => item.id === clientSelect.value) || null;
-      fillOperationOptions(client);
-      fillServiceOptions(client);
-      cityDisplay.value = '';
-      addressDisplay.value = '';
-      addressInput.value = '';
-      [clientSelect, operationSelect, serviceSelect].forEach(setSelectState);
-    });
-    operationSelect?.addEventListener('change', () => {
-      const option = operationSelect.selectedOptions[0];
-      cityDisplay.value = option?.dataset.city || '';
-      addressDisplay.value = option?.dataset.address || '';
-      addressInput.value = option?.dataset.address || '';
-      setSelectState(operationSelect);
-    });
-    serviceSelect?.addEventListener('change', () => setSelectState(serviceSelect));
-    [clientSelect, operationSelect, serviceSelect].forEach((select) => select && setSelectState(select));
-
-    const shiftList = document.getElementById('shiftList');
-    const addShiftBtn = document.getElementById('addShiftBtn');
-    function refreshRemoveButtons(){
-      const rows = Array.from(shiftList?.querySelectorAll('.shift-row') || []);
-      rows.forEach((row) => { const button = row.querySelector('.shift-remove'); if (button) button.hidden = rows.length === 1; });
-    }
-    addShiftBtn?.addEventListener('click', () => {
-      const first = shiftList.querySelector('.shift-row');
-      const clone = first.cloneNode(true);
-      clone.querySelectorAll('input').forEach((input) => { input.value = input.type === 'number' ? '1' : ''; });
-      clone.querySelector('.shift-remove')?.addEventListener('click', () => { clone.remove(); refreshRemoveButtons(); });
-      shiftList.appendChild(clone);
-      refreshRemoveButtons();
-    });
-    shiftList?.querySelector('.shift-remove')?.addEventListener('click', (event) => { event.currentTarget.closest('.shift-row')?.remove(); refreshRemoveButtons(); });
-    refreshRemoveButtons();
+    function fillOperationOptions(client) { operationSelect.innerHTML = ''; const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = client ? 'Selecciona un punto de operación' : 'Selecciona primero un cliente'; operationSelect.appendChild(placeholder); (client?.operationPoints || []).forEach((operation) => { const option = document.createElement('option'); option.value = operation.id; option.textContent = `${operation.name}${operation.cityName ? ' — ' + operation.cityName : ''}`; option.dataset.city = operation.cityName || client.cityName || ''; option.dataset.address = operation.address || ''; operationSelect.appendChild(option); }); operationSelect.disabled = !client || !(client.operationPoints || []).length; }
+    function fillServiceOptions(client) { serviceSelect.innerHTML = ''; const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = client ? ((client.services || []).length ? 'Selecciona un servicio' : 'Cliente sin servicios configurados') : 'Selecciona primero un cliente'; serviceSelect.appendChild(placeholder); (client?.services || []).forEach((service) => { const option = document.createElement('option'); option.value = service.id; option.textContent = service.name; serviceSelect.appendChild(option); }); serviceSelect.disabled = !client || !(client.services || []).length; serviceSelect.required = Boolean(client && (client.services || []).length); }
+    clientSelect?.addEventListener('change', () => { const client = clientsData.find((item) => item.id === clientSelect.value) || null; fillOperationOptions(client); fillServiceOptions(client); cityDisplay.value = ''; addressDisplay.value = ''; addressInput.value = ''; [clientSelect, operationSelect, serviceSelect].forEach(setSelectState); });
+    operationSelect?.addEventListener('change', () => { const option = operationSelect.selectedOptions[0]; cityDisplay.value = option?.dataset.city || ''; addressDisplay.value = option?.dataset.address || ''; addressInput.value = option?.dataset.address || ''; setSelectState(operationSelect); });
+    serviceSelect?.addEventListener('change', () => setSelectState(serviceSelect)); [clientSelect, operationSelect, serviceSelect].forEach((select) => select && setSelectState(select));
+    const shiftList = document.getElementById('shiftList'); const addShiftBtn = document.getElementById('addShiftBtn');
+    function refreshRemoveButtons(){ const rows = Array.from(shiftList?.querySelectorAll('.shift-row') || []); rows.forEach((row) => { const button = row.querySelector('.shift-remove'); if (button) button.hidden = rows.length === 1; }); }
+    addShiftBtn?.addEventListener('click', () => { const first = shiftList.querySelector('.shift-row'); const clone = first.cloneNode(true); clone.querySelectorAll('input').forEach((input) => { input.value = input.type === 'number' ? '1' : ''; }); clone.querySelector('.shift-remove')?.addEventListener('click', () => { clone.remove(); refreshRemoveButtons(); }); shiftList.appendChild(clone); refreshRemoveButtons(); });
+    shiftList?.querySelector('.shift-remove')?.addEventListener('click', (event) => { event.currentTarget.closest('.shift-row')?.remove(); refreshRemoveButtons(); }); refreshRemoveButtons();
   </script>
 </body>
 </html>
