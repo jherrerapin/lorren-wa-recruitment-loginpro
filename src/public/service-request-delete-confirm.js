@@ -1,5 +1,5 @@
 (() => {
-  const CONFIRM_TEXT = 'Esta acción eliminará la solicitud de servicio y no te sacará de esta página.';
+  const CONFIRM_TEXT = '¿Seguro que deseas eliminar esta solicitud de servicio?';
   let activeForm = null;
   let submitting = false;
 
@@ -16,7 +16,6 @@
       .service-delete-icon{width:42px;height:42px;flex:0 0 auto;border-radius:999px;background:#fff1f2;color:#be123c;display:inline-flex;align-items:center;justify-content:center;font-size:22px;font-weight:900}
       .service-delete-title{margin:0;color:#172033;font-size:18px;line-height:1.2;font-weight:900}
       .service-delete-text{margin:7px 0 0;color:#64748b;font-size:13px;line-height:1.45}
-      .service-delete-note{margin-top:11px;border:1px solid #e2e8f0;border-radius:13px;background:#f8fafc;color:#334155;padding:9px 10px;font-size:12px;font-weight:800}
       .service-delete-actions{display:flex;justify-content:flex-end;gap:9px;padding:15px 20px 20px;background:#f8fafc;border-top:1px solid #eef2f7}
       .service-delete-btn{min-height:38px;border-radius:999px;border:1px solid #d8e0ea;background:#fff;color:#172033;padding:8px 15px;font-weight:900;font-size:13px;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.08)}
       .service-delete-btn:hover{border-color:#0d7a6b;color:#0d7a6b}
@@ -47,7 +46,6 @@
           <div>
             <h2 class="service-delete-title" id="serviceDeleteTitle">Eliminar solicitud</h2>
             <p class="service-delete-text" id="serviceDeleteText">${CONFIRM_TEXT}</p>
-            <div class="service-delete-note">Permanecerás en la página actual. Quitaremos la tarjeta cuando la eliminación sea exitosa.</div>
           </div>
         </div>
         <div class="service-delete-actions">
@@ -111,7 +109,7 @@
       if (!response.ok) throw new Error('No fue posible eliminar la solicitud.');
       dialog.classList.remove('is-open');
       card?.remove();
-      showInlineMessage('Solicitud eliminada. Sigues en esta página.');
+      showInlineMessage('Solicitud eliminada.');
     } catch (error) {
       card?.classList.remove('service-request-removing');
       showInlineMessage(error.message || 'No fue posible eliminar la solicitud.');
