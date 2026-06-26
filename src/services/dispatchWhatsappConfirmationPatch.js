@@ -1,7 +1,9 @@
 import express from 'express';
 
-const BASE_PATH = '/admin/operaciones/asignaciones';
+const ASSIGNMENTS_PATH = '/admin/operaciones/asignaciones';
+const WHATSAPP_STATUS_PATH = '/admin/operaciones/whatsapp';
 const MARKER = 'data-dispatch-whatsapp-confirmation-patch="true"';
+const STATUS_MARKER = 'data-dispatch-whatsapp-status-start-patch="true"';
 
 const ASSIGNMENT_MESSAGE_TEMPLATE = [
   'Hola *{{nombre}}*,',
@@ -18,7 +20,7 @@ function requestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0];
 }
 
-function script() {
+function assignmentScript() {
   return `<script ${MARKER}>
 (function(){
   var ASSIGNMENT_MESSAGE_TEMPLATE = ${JSON.stringify(ASSIGNMENT_MESSAGE_TEMPLATE)};
@@ -88,13 +90,37 @@ function script() {
 </script>`;
 }
 
+function statusScript() {
+  return `<script ${STATUS_MARKER}>
+(function(){
+  var originalFetch = window.fetch.bind(window);
+  window.fetch = function(input, init){
+    if (typeof input === 'string' && input === '/admin/operaciones/whatsapp/estado') {
+      input = '/admin/operaciones/whatsapp/estado?start=1';
+    }
+    return originalFetch(input, init);
+  };
+  setTimeout(function(){
+    originalFetch('/admin/operaciones/whatsapp/estado?start=1', { cache: 'no-store' }).then(function(response){ return response.ok ? response.json() : null; }).then(function(data){
+      if (!data) return;
+      if (typeof window.renderStatus === 'function') window.renderStatus(data);
+    }).catch(function(){});
+  }, 500);
+})();
+</script>`;
+}
+
 function installPatch() {
   if (express.response.__dispatchWhatsappConfirmationPatchInstalled) return;
   const originalSend = express.response.send;
   express.response.send = function patchedSend(body) {
     let output = body;
-    if (typeof output === 'string' && this.req?.method === 'GET' && requestPath(this.req) === BASE_PATH && output.includes('</body>') && !output.includes(MARKER)) {
-      output = output.replace('</body>', `${script()}\n</body>`);
+    const pathname = requestPath(this.req);
+    if (typeof output === 'string' && this.req?.method === 'GET' && pathname === ASSIGNMENTS_PATH && output.includes('</body>') && !output.includes(MARKER)) {
+      output = output.replace('</body>', `${assignmentScript()}\n</body>`);
+    }
+    if (typeof output === 'string' && this.req?.method === 'GET' && pathname === WHATSAPP_STATUS_PATH && output.includes('</body>') && !output.includes(STATUS_MARKER)) {
+      output = output.replace('</body>', `${statusScript()}\n</body>`);
     }
     return originalSend.call(this, output);
   };
