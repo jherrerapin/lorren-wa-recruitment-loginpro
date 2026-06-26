@@ -62,7 +62,7 @@
   <% const totalRequests = Number(metrics?.totalRequests ?? 0); %>
   <% const completedRequests = Number(metrics?.completedRequests ?? 0); %>
   <% const programmingComplete = totalRequests > 0 && completedRequests >= totalRequests; %>
-  <% const summaryUrl = (type) => `/admin/operaciones/solicitudes/resumen?fecha=${encodeURIComponent(selectedDate)}&tipo=${encodeURIComponent(type)}`; %>
+  <% const summaryUrl = (type) => `/admin/operaciones/dispatch/operations/summary?date=${encodeURIComponent(selectedDate)}&type=${encodeURIComponent(type)}`; %>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
