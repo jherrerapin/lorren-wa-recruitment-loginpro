@@ -5,6 +5,8 @@ const BASE_PATH = '/admin/operaciones';
 const TOGGLE_RE = /^\/admin\/operaciones\/personal\/([^/]+)\/toggle$/;
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
+const PENDING_REQUEST_STATUSES = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
+const OPEN_INCIDENT_STATUSES = ['OPEN', 'IN_PROGRESS'];
 const MARKER = 'data-dispatch-exit-reason-safe="true"';
 const NOTE_PREFIX = '[CAUSAL_RETIRO]';
 const SUBSTANCE_WORD = 'estupefac' + 'ientes';
@@ -43,6 +45,23 @@ function redirectBack(req, message) {
   const separator = referer.includes('?') ? '&' : '?';
   return `${referer}${separator}message=${encodeURIComponent(message)}`;
 }
+function todayCO() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+function normalizeDateParam(value, fallback = todayCO()) {
+  const raw = clean(value);
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return fallback;
+  return raw;
+}
+function selectedDateFromRequest(req = {}) {
+  return normalizeDateParam(req.query?.fecha || req.query?.date);
+}
+function dayRange(dateText) {
+  const start = new Date(`${dateText}T00:00:00.000Z`);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start, end };
+}
 function html(value) {
   return String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
@@ -55,6 +74,18 @@ function extractReasonFromNotes(notes) {
   if (index < 0) return null;
   const raw = text.slice(index + NOTE_PREFIX.length).split('\n')[0].trim();
   return raw.split('|')[0].trim() || null;
+}
+function buildOperationalCityFilter(operationalCityId) {
+  return operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {};
+}
+function buildWorkerSearchFilter(q) {
+  return q ? { OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] } : {};
+}
+function cleanStrings(rows, field) {
+  return [...new Set(rows.map((row) => clean(row?.[field])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+}
+function scheduleLabel(request) {
+  return request?.endTime ? `${request.startTime || '-'} - ${request.endTime}` : `${request?.startTime || '-'}`;
 }
 async function recalculateServiceRequest(prismaClient, serviceRequestId) {
   const request = await prismaClient.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { requiredWorkers: true } });
@@ -115,6 +146,85 @@ async function stats(workerIds = []) {
   }
   return { stats: [...count.entries()].map(([reasonLabel, total]) => ({ reasonLabel, total })).sort((a, b) => b.total - a.total), workers };
 }
+async function buildDashboardMetrics(prismaClient, selectedDate) {
+  const { start, end } = dayRange(selectedDate);
+  const whereForDate = { serviceDate: { gte: start, lt: end } };
+  const [totalRequests, pendingRequests, completedRequests, openIncidents] = await Promise.all([
+    prismaClient.dispatchServiceRequest.count({ where: whereForDate }),
+    prismaClient.dispatchServiceRequest.count({ where: { ...whereForDate, status: { in: PENDING_REQUEST_STATUSES } } }),
+    prismaClient.dispatchServiceRequest.count({ where: { ...whereForDate, status: 'ASSIGNMENT_COMPLETE' } }),
+    prismaClient.dispatchIncident.count({ where: { status: { in: OPEN_INCIDENT_STATUSES }, serviceRequest: { is: whereForDate } } })
+  ]);
+  return { totalRequests, pendingRequests, completedRequests, openIncidents };
+}
+async function handleOperationsDashboard(req, res, next) {
+  try {
+    if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
+    const selectedDate = selectedDateFromRequest(req);
+    const metrics = await buildDashboardMetrics(db(), selectedDate);
+    return res.render('operacionesDashboard', {
+      pageTitle: 'Operaciones / Despacho',
+      subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.',
+      activeSection: 'dashboard',
+      selectedDate,
+      metrics,
+      role: req.session?.userRole || req.userRole,
+      canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
+    });
+  } catch (error) {
+    console.error('[dispatch-dashboard-date-safe]', error);
+    return next(error);
+  }
+}
+async function handleAssignmentsBoard(req, res, next) {
+  try {
+    if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
+    const prismaClient = db();
+    const selectedDate = selectedDateFromRequest(req);
+    const { start, end } = dayRange(selectedDate);
+    const q = clean(req.query?.q);
+    const operationalCityId = clean(req.query?.operationalCityId);
+    const transportMode = clean(req.query?.transportMode);
+    const locality = clean(req.query?.locality);
+    const serviceRequestId = clean(req.query?.serviceRequestId);
+    const baseWorkerWhere = { operationalStatus: 'CONTRATADO', ...buildWorkerSearchFilter(q), ...buildOperationalCityFilter(operationalCityId) };
+    const workerWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}), ...(locality ? { residenceLocality: locality } : {}) };
+    const localityWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}) };
+    const transportModeWhere = { ...baseWorkerWhere, ...(locality ? { residenceLocality: locality } : {}) };
+    const [workers, cities, transportModeRows, localityRows, serviceRequests, clients] = await Promise.all([
+      prismaClient.dispatchWorker.findMany({ where: workerWhere, include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } }),
+      prismaClient.city.findMany({ where: { usedForDispatch: true, NOT: { id: { startsWith: 'city_' } } }, orderBy: { name: 'asc' } }),
+      prismaClient.dispatchWorker.findMany({ where: transportModeWhere, select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }),
+      prismaClient.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }),
+      prismaClient.dispatchServiceRequest.findMany({ where: { serviceDate: { gte: start, lt: end } }, include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ startTime: 'asc' }, { createdAt: 'desc' }] }),
+      prismaClient.dispatchClient.findMany({ where: { isActive: true }, include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } }, services: { where: { isActive: true }, orderBy: { name: 'asc' } } }, orderBy: { name: 'asc' } })
+    ]);
+    const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
+    const blockedWorkerIds = new Set(selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []);
+    const availableWorkers = workers.filter((worker) => !blockedWorkerIds.has(worker.id));
+    const sameDayAssignments = selectedServiceRequest ? await prismaClient.dispatchAssignment.findMany({ where: { serviceRequestId: { not: selectedServiceRequest.id }, status: { in: ACTIVE_ASSIGNMENT_STATUSES }, serviceRequest: { serviceDate: { gte: start, lt: end } } }, select: { workerId: true } }) : [];
+    return res.render('operacionesAsignacionesConfirmacion', {
+      activeStatuses: ACTIVE_ASSIGNMENT_STATUSES,
+      workers,
+      availableWorkers,
+      assignedWorkerIdsOnSelectedDate: new Set(sameDayAssignments.map((assignment) => assignment.workerId)),
+      cities,
+      serviceRequests,
+      selectedServiceRequest,
+      selectedServiceRequestId: selectedServiceRequest?.id || '',
+      clients,
+      message: clean(req.query?.message),
+      filters: { q: q || '', operationalCityId: operationalCityId || '', transportMode: transportMode || '', locality: locality || '', fecha: selectedDate },
+      transportModes: cleanStrings(transportModeRows, 'transportMode'),
+      localities: cleanStrings(localityRows, 'residenceLocality'),
+      role: req.session?.userRole || req.userRole,
+      canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
+    });
+  } catch (error) {
+    console.error('[dispatch-assignments-date-safe]', error);
+    return next(error);
+  }
+}
 function installRouterPatch() {
   if (express.__dispatchWorkerExitReasonSafePatch) return;
   const originalRouter = express.Router;
@@ -122,6 +232,8 @@ function installRouterPatch() {
     const router = originalRouter.apply(express, args);
     router.use(async (req, res, next) => {
       const pathname = pathOf(req);
+      if (req.method === 'GET' && (pathname === BASE_PATH || pathname === `${BASE_PATH}/` || pathname === `${BASE_PATH}/abrir`)) return handleOperationsDashboard(req, res, next);
+      if (req.method === 'GET' && pathname === `${BASE_PATH}/asignaciones`) return handleAssignmentsBoard(req, res, next);
       const match = pathname.match(TOGGLE_RE);
       if (req.method === 'POST' && match) return handleToggle(req, res, next, decodeURIComponent(match[1]));
       if (req.method === 'GET' && pathname === `${BASE_PATH}/personal/exit-reasons`) {
@@ -168,13 +280,45 @@ function uiScript() {
 })();
 </script>`;
 }
+function assignmentDateScript(req) {
+  const selectedDate = selectedDateFromRequest(req);
+  return `<script data-dispatch-date-filter-safe="true">
+(function(){
+  var selectedDate=${JSON.stringify(selectedDate)};
+  var requestPanel=[].slice.call(document.querySelectorAll('.board-panel-head h2')).find(function(h){return /solicitudes/i.test(h.textContent||'');});
+  if(requestPanel && !document.getElementById('assignmentDateFilter')){
+    var form=document.createElement('form');
+    form.id='assignmentDateFilter'; form.method='get'; form.action='/admin/operaciones/asignaciones'; form.className='filters'; form.style.borderBottom='1px solid #edf2f7';
+    form.innerHTML='<div class="field"><label>Fecha de solicitudes</label><input type="date" name="fecha" value="'+selectedDate+'"></div><button class="btn btn-primary" type="submit">Aplicar fecha</button>';
+    requestPanel.parentElement.insertAdjacentElement('afterend', form);
+  }
+  document.querySelectorAll('a[href^="/admin/operaciones/asignaciones?serviceRequestId="]').forEach(function(link){
+    try{var url=new URL(link.href, window.location.origin); url.searchParams.set('fecha', selectedDate); link.href=url.pathname+'?'+url.searchParams.toString();}catch(e){}
+  });
+  document.querySelectorAll('form[action="/admin/operaciones/asignaciones"]').forEach(function(form){
+    if(!form.querySelector('input[name="fecha"]')){var input=document.createElement('input'); input.type='hidden'; input.name='fecha'; input.value=selectedDate; form.appendChild(input);}
+  });
+})();
+</script>`;
+}
+function patchWhatsappContext(output) {
+  return output.replace(
+    "body:JSON.stringify({phone,message})",
+    "body:JSON.stringify({phone,message,context:{assignmentId:button.closest('.assigned-card')?.dataset.assignmentId||'',serviceRequestId:document.querySelector('input[name=\"serviceRequestId\"]')?.value||new URLSearchParams(window.location.search).get('serviceRequestId')||'',recipientName:button.closest('.assigned-card')?.dataset.workerName||'',messageType:'ASSIGNMENT_CONFIRMATION'}})"
+  );
+}
 function installUiPatch() {
   if (express.response.__dispatchWorkerExitReasonSafeUi) return;
   const originalSend = express.response.send;
   express.response.send = function patchedSend(body) {
     let output = body;
-    if (typeof output === 'string' && this.req?.method === 'GET' && pathOf(this.req) === `${BASE_PATH}/personal` && output.includes('</body>') && !output.includes(MARKER)) {
+    const pathname = pathOf(this.req);
+    if (typeof output === 'string' && this.req?.method === 'GET' && pathname === `${BASE_PATH}/personal` && output.includes('</body>') && !output.includes(MARKER)) {
       output = output.replace('</body>', `${uiScript()}\n</body>`);
+    }
+    if (typeof output === 'string' && this.req?.method === 'GET' && pathname === `${BASE_PATH}/asignaciones` && output.includes('</body>')) {
+      output = patchWhatsappContext(output);
+      if (!output.includes('data-dispatch-date-filter-safe="true"')) output = output.replace('</body>', `${assignmentDateScript(this.req)}\n</body>`);
     }
     return originalSend.call(this, output);
   };
