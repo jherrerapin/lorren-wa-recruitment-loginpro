@@ -19,6 +19,22 @@
     return String(value || '').replace(TIME_RE, (_full, hour, minute) => formatTimeAmPm(`${hour}:${minute}`));
   }
 
+  function normalizePhone(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return `57${digits}`;
+    if (digits.startsWith('57')) return digits;
+    return digits;
+  }
+
+  function phonesMatch(left, right) {
+    const normalizedLeft = normalizePhone(left);
+    const normalizedRight = normalizePhone(right);
+    if (!normalizedLeft || !normalizedRight) return false;
+    if (normalizedLeft === normalizedRight) return true;
+    return normalizedLeft.slice(-10) === normalizedRight.slice(-10);
+  }
+
   function formatVisibleTimes(root = document.body) {
     const skip = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION', 'CODE', 'PRE']);
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -40,11 +56,9 @@
   }
 
   function selectedServiceRequestId() {
+    const input = document.querySelector('input[name="serviceRequestId"]');
+    if (input?.value) return input.value;
     return new URLSearchParams(window.location.search).get('serviceRequestId') || '';
-  }
-
-  function requestDate(card) {
-    return [...card.querySelectorAll('.meta span')].map((span) => span.textContent || '').join(' ').match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
   }
 
   function requestStart(card) {
@@ -141,38 +155,61 @@
     });
   }
 
-  function assignmentContextFromButton(button) {
-    const card = button?.closest?.('.assigned-card');
+  function assignmentContextFromCard(card) {
     if (!card) return null;
     const assignmentId = String(card.dataset.assignmentId || '').trim();
     if (!assignmentId) return null;
     return {
       serviceRequestId: selectedServiceRequestId(),
       assignmentId,
+      workerId: String(card.dataset.workerId || '').trim() || undefined,
       recipientName: String(card.dataset.workerName || '').trim() || undefined,
       messageType: 'ASSIGNMENT_CONFIRMATION'
     };
   }
 
+  function assignmentContextFromButton(button) {
+    return assignmentContextFromCard(button?.closest?.('.assigned-card'));
+  }
+
+  function assignmentContextFromPhone(phone) {
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) return null;
+    const card = [...document.querySelectorAll('.assigned-card[data-assignment-id]')].find((item) => phonesMatch(item.dataset.workerPhone, normalizedPhone));
+    return assignmentContextFromCard(card);
+  }
+
+  function assignmentContextFromActiveElement() {
+    const button = document.activeElement?.closest?.('.dispatch-wa-button, .whatsapp-link, .icon-whatsapp');
+    return assignmentContextFromButton(button);
+  }
+
   function rememberDispatchWhatsappContext(event) {
-    const button = event.target?.closest?.('.dispatch-wa-button');
+    const button = event.target?.closest?.('.dispatch-wa-button, .whatsapp-link, .icon-whatsapp');
     if (!button) return;
     const context = assignmentContextFromButton(button);
     if (!context) return;
     lastAssignmentWhatsappContext = context;
+    window.__dispatchLastAssignmentWhatsappContext = context;
     window.setTimeout(() => {
       if (lastAssignmentWhatsappContext === context) lastAssignmentWhatsappContext = null;
-    }, 10000);
+      if (window.__dispatchLastAssignmentWhatsappContext === context) window.__dispatchLastAssignmentWhatsappContext = null;
+    }, 30000);
+  }
+
+  function contextForWhatsappPayload(body) {
+    return body?.context || lastAssignmentWhatsappContext || window.__dispatchLastAssignmentWhatsappContext || assignmentContextFromActiveElement() || assignmentContextFromPhone(body?.phone);
   }
 
   function enrichWhatsappSendOptions(resource, options = {}) {
     const url = typeof resource === 'string' ? resource : String(resource?.url || '');
     if (!url.includes(WHATSAPP_SEND_PATH)) return options;
-    if (!lastAssignmentWhatsappContext || typeof options.body !== 'string') return options;
+    if (typeof options.body !== 'string') return options;
     try {
       const body = JSON.parse(options.body);
-      if (body && typeof body === 'object' && !body.context) {
-        body.context = lastAssignmentWhatsappContext;
+      const context = contextForWhatsappPayload(body);
+      if (body && typeof body === 'object' && !body.context && context?.assignmentId) {
+        body.context = context;
         return { ...options, body: JSON.stringify(body) };
       }
     } catch (_error) {
