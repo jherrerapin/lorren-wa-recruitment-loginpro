@@ -31,6 +31,7 @@ let lastAuthenticatedAt = null;
 let reconnectTimer = null;
 const recentSendLocks = new Map();
 const pendingConfirmationByPhone = new Map();
+const pendingConfirmationByChatId = new Map();
 const inboundLocks = new Map();
 
 function buildError(message, statusCode = 400) {
@@ -45,6 +46,23 @@ function normalizePhone(phone) {
   if (digits.length === 10) return `57${digits}`;
   if (digits.startsWith('57')) return digits;
   return digits;
+}
+
+function normalizeChatId(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function chatIdsFromSentMessage(recipient, sent) {
+  return [
+    recipient?.serializedId,
+    sent?.id?.remote,
+    sent?.id?.participant,
+    sent?.to,
+    sent?.from,
+    sent?._data?.id?.remote,
+    sent?._data?.to,
+    sent?._data?.from
+  ].map(normalizeChatId).filter(Boolean);
 }
 
 function normalizeMessage(message) {
@@ -106,9 +124,21 @@ function isSupportedSenderId(senderId) {
   return sender.endsWith('@c.us') || sender.endsWith('@lid');
 }
 
-async function resolveInboundPhone(message = {}) {
+async function resolveInboundPhone(message = {}, activeClient = client) {
   const sender = String(message.from || '');
   if (sender.endsWith('@c.us')) return normalizeWhatsappSenderId(sender);
+
+  if (sender.endsWith('@lid') && typeof activeClient?.getContactLidAndPhone === 'function') {
+    try {
+      const lid = sender.split('@')[0];
+      const rows = await activeClient.getContactLidAndPhone([lid, sender]);
+      const row = (Array.isArray(rows) ? rows : []).find((item) => item?.pn || item?.phone);
+      const mappedPhone = normalizePhone(row?.pn || row?.phone);
+      if (mappedPhone) return mappedPhone;
+    } catch (error) {
+      console.warn('[dispatch-wa] No fue posible mapear LID a teléfono.', error?.message || error);
+    }
+  }
 
   let contact = null;
   try {
@@ -163,6 +193,9 @@ function cleanupExpiredPendingConfirmations(now = Date.now()) {
   for (const [phone, value] of pendingConfirmationByPhone.entries()) {
     if (value.expiresAt <= now) pendingConfirmationByPhone.delete(phone);
   }
+  for (const [chatId, value] of pendingConfirmationByChatId.entries()) {
+    if (value.expiresAt <= now) pendingConfirmationByChatId.delete(chatId);
+  }
 }
 
 function reserveSendLock({ channelType, phone, payload }) {
@@ -183,19 +216,22 @@ function releaseSendLock(key) {
   if (key) recentSendLocks.delete(key);
 }
 
-function rememberPendingConfirmation(phone, context = {}) {
+function rememberPendingConfirmation(phone, context = {}, chatIds = []) {
   const normalizedPhone = normalizePhone(phone);
   const assignmentId = String(context?.assignmentId || '').trim();
   if (!normalizedPhone || !assignmentId) {
     console.warn(`[dispatch-wa] Mensaje enviado sin contexto de confirmación. phone=${normalizedPhone || 'unknown'} assignment=${assignmentId || 'missing'}`);
     return;
   }
-  pendingConfirmationByPhone.set(normalizedPhone, {
+  const value = {
     assignmentId,
     serviceRequestId: String(context?.serviceRequestId || '').trim() || null,
     expiresAt: Date.now() + CONFIRMATION_MEMORY_TTL_MS
-  });
-  console.log(`[dispatch-wa] Confirmación pendiente recordada. assignment=${assignmentId} phone=${normalizedPhone}.`);
+  };
+  pendingConfirmationByPhone.set(normalizedPhone, value);
+  const normalizedChatIds = chatIds.map(normalizeChatId).filter(Boolean);
+  normalizedChatIds.forEach((chatId) => pendingConfirmationByChatId.set(chatId, value));
+  console.log(`[dispatch-wa] Confirmación pendiente recordada. assignment=${assignmentId} phone=${normalizedPhone} chatIds=${normalizedChatIds.length}.`);
 }
 
 async function loadWhatsappWebModule() {
@@ -374,6 +410,19 @@ async function findPendingAssignmentFromMemory(phone) {
   return assignment;
 }
 
+async function findPendingAssignmentFromChatId(chatId) {
+  cleanupExpiredPendingConfirmations();
+  const remembered = pendingConfirmationByChatId.get(normalizeChatId(chatId));
+  if (!remembered?.assignmentId) return null;
+  return prisma.dispatchAssignment.findFirst({
+    where: {
+      id: remembered.assignmentId,
+      status: { in: PENDING_ASSIGNMENT_STATUSES }
+    },
+    include: { worker: true }
+  });
+}
+
 async function findLatestPendingAssignmentByPhone(phone) {
   const lastTen = phone.slice(-10);
   if (!lastTen) return null;
@@ -393,12 +442,12 @@ async function confirmAssignmentFromInboundMessage(activeClient, message, eventN
   const replyText = confirmationTextFromMessage(message);
   if (!isAutomaticConfirmationReply(replyText)) return false;
   if (!reserveInbound(message)) return false;
-  const phone = await resolveInboundPhone(message);
+  const phone = await resolveInboundPhone(message, activeClient);
   if (!phone) {
     console.warn(`[dispatch-wa] Se recibió Confirmado, pero no fue posible resolver teléfono. sender=${sender} event=${eventName}`);
     return false;
   }
-  const assignment = await findPendingAssignmentFromMemory(phone) || await findLatestPendingAssignmentByPhone(phone);
+  const assignment = await findPendingAssignmentFromChatId(sender) || await findPendingAssignmentFromMemory(phone) || await findLatestPendingAssignmentByPhone(phone);
   if (!assignment) {
     console.warn(`[dispatch-wa] Se recibió Confirmado desde ${phone}, pero no hay asignación pendiente asociada. sender=${sender} event=${eventName}`);
     return false;
@@ -407,6 +456,7 @@ async function confirmAssignmentFromInboundMessage(activeClient, message, eventN
   if (!updated.count) return false;
   await recalculateServiceRequestStatus(assignment.serviceRequestId);
   pendingConfirmationByPhone.delete(phone);
+  pendingConfirmationByChatId.delete(normalizeChatId(sender));
   await activeClient.sendMessage(sender, AUTOMATIC_CONFIRMATION_REPLY);
   console.log(`[dispatch-wa] Confirmación automática registrada para assignment=${assignment.id} phone=${phone} sender=${sender} event=${eventName}.`);
   return true;
@@ -468,6 +518,7 @@ export async function closeDispatchWhatsappSession() {
   manualLogoutRequested = true;
   clearReconnectTimer();
   pendingConfirmationByPhone.clear();
+  pendingConfirmationByChatId.clear();
   inboundLocks.clear();
   const oldClient = client;
   client = null;
@@ -493,7 +544,7 @@ export async function sendDispatchWhatsappMessage({ phone, message, context }) {
   const lockKey = reserveSendLock({ channelType: 'text', phone: recipient.normalizedPhone, payload: normalizedMessage });
   try {
     const sent = await activeClient.sendMessage(recipient.serializedId, normalizedMessage);
-    rememberPendingConfirmation(recipient.normalizedPhone, context);
+    rememberPendingConfirmation(recipient.normalizedPhone, context, chatIdsFromSentMessage(recipient, sent));
     return { phone: recipient.normalizedPhone, providerMessageId: sent?.id?._serialized || sent?.id?.id || null };
   } catch (error) {
     releaseSendLock(lockKey);
