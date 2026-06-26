@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDispatchWhatsappStatusView, initDispatchWhatsappClient, sendDispatchWhatsappMessage } from '../services/dispatchWhatsappWebServiceV2.js';
+import { closeDispatchWhatsappSession, getDispatchWhatsappStatusView, initDispatchWhatsappClient, sendDispatchWhatsappMessage } from '../services/dispatchWhatsappWebServiceV2.js';
 
 const OPERATIONAL_SESSION_ERROR = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
 
@@ -55,12 +55,18 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
   router.get('/', async (req, res) => {
     initDispatchWhatsappClient();
     const status = viewerStatus(req, await getDispatchWhatsappStatusView({ autoStart: false }));
-    res.render('operacionesWhatsappEstado', { pageTitle: 'WhatsApp de despacho', role: role(req), ...status });
+    res.render('operacionesWhatsappEstado', { pageTitle: 'WhatsApp de despacho', role: role(req), message: normalizeString(req.query?.message), ...status });
   });
 
   router.get('/estado', async (req, res) => {
     const shouldStart = req.query?.start === '1' || req.query?.start === 'true';
     res.json({ ok: true, ...viewerStatus(req, await getDispatchWhatsappStatusView({ autoStart: shouldStart })) });
+  });
+
+  router.post('/cerrar-sesion', async (_req, res) => {
+    await closeDispatchWhatsappSession();
+    const message = encodeURIComponent('Sesión de WhatsApp despacho cerrada. Escanea un nuevo QR para volver a conectar.');
+    return res.redirect(`/admin/operaciones/whatsapp?message=${message}`);
   });
 
   router.post('/enviar', async (req, res) => {
