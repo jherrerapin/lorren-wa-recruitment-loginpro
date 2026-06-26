@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resumen operativo - LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .head{background:#fff;border:1px solid var(--border);border-radius:16px;padding:18px;box-shadow:var(--shadow-sm);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.head h1{margin:0;color:var(--navy)}.head p{margin:5px 0 0;color:var(--muted)}.client{background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:var(--shadow-sm);margin-top:14px}.request{background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:10px}.top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.muted{color:var(--muted);font-size:12px}.pill{display:inline-flex;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:900;background:#e0f2fe;color:#075985}.worker{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px;margin-top:7px}.empty{background:#fff;border:1px dashed var(--border);border-radius:16px;padding:24px;text-align:center;color:var(--muted);margin-top:14px}
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <a href="/admin/operaciones/asignaciones?fecha=<%= encodeURIComponent(selectedDate) %>">Asignación de auxiliares</a>
+    <span class="spacer"></span>
+  </nav>
+  <main class="page">
+    <section class="head">
+      <div>
+        <div class="eyebrow">Resumen operativo</div>
+        <h1><%= meta?.title || 'Solicitudes del día' %></h1>
+        <p>Fecha: <strong><%= selectedDate %></strong> · Registros: <strong><%= serviceRequests.length %></strong></p>
+      </div>
+      <div>
+        <a class="btn" href="/admin/operaciones?fecha=<%= encodeURIComponent(selectedDate) %>">Volver</a>
+        <a class="btn btn-primary" href="/admin/operaciones/asignaciones?fecha=<%= encodeURIComponent(selectedDate) %>">Asignaciones</a>
+      </div>
+    </section>
+    <% if (!serviceRequests.length) { %><section class="empty">No hay solicitudes para este filtro.</section><% } %>
+    <% for (const group of groupedByClient) { const clientName = group[0]; const requests = group[1]; %>
+      <section class="client">
+        <h2><%= clientName %></h2>
+        <% for (const request of requests) { const active = activeAssignments(request); const confirmed = confirmedAssignments(request); %>
+          <article class="request">
+            <div class="top">
+              <div><strong><%= request.operationPointName || 'Sin operación' %></strong><div class="muted"><%= request.serviceName || request.service?.name || 'Sin servicio' %> · <%= buildHorario(request) %></div></div>
+              <div><span class="pill"><%= statusLabel(request.status) %></span><div class="muted"><%= active.length %>/<%= request.requiredWorkers || 0 %> asignados · <%= confirmed.length %>/<%= request.requiredWorkers || 0 %> confirmados</div></div>
+            </div>
+            <% if (!active.length) { %><div class="worker muted">Sin auxiliares asignados.</div><% } %>
+            <% active.forEach((assignment, index) => { const worker = assignment.worker || {}; %>
+              <div class="worker"><strong><%= index + 1 %>. <%= worker.fullName || 'Auxiliar' %></strong><div class="muted"><%= worker.documentType || '' %> <%= worker.documentNumber || 'Sin documento' %> · <%= assignmentStatusLabel(assignment.status) %></div></div>
+            <% }) %>
+          </article>
+        <% } %>
+      </section>
+    <% } %>
+  </main>
+</body>
+</html>
