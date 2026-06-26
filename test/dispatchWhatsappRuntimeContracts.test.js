@@ -15,6 +15,19 @@ test('whatsapp despacho runtime has Railway-compatible Chromium discovery and pe
   assert.match(source, /DISPATCH_BROWSER_EXECUTABLE_PATH/);
 });
 
+test('dispatch WhatsApp V4 remembers confirmations by chat id for LID replies', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
+  assert.match(source, /const pendingConfirmationByChatId = new Map\(\)/);
+  assert.match(source, /function normalizeChatId\(value\)/);
+  assert.match(source, /function chatIdsFromSentMessage\(recipient, sent\)/);
+  assert.match(source, /pendingConfirmationByChatId\.set\(chatId, value\)/);
+  assert.match(source, /async function findPendingAssignmentFromChatId\(chatId\)/);
+  assert.match(source, /await findPendingAssignmentFromChatId\(sender\) \|\| await findPendingAssignmentFromMemory\(phone\)/);
+  assert.match(source, /pendingConfirmationByChatId\.delete\(normalizeChatId\(sender\)\)/);
+  assert.match(source, /pendingConfirmationByChatId\.clear\(\)/);
+  assert.match(source, /getContactLidAndPhone/);
+});
+
 test('service request summary does not render the all requests toolbar button', () => {
   const view = readSource('src/views/operacionesSolicitudesResumen.ejs');
   assert.doesNotMatch(view, /Ver todas las solicitudes/);
