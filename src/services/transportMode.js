@@ -1,4 +1,5 @@
 import './dispatchWorkerExitReasonSafePatch.js';
+import './dispatchWhatsappConfirmationPatch.js';
 
 export class TransportNormalizationService {
   normalize(value) {
