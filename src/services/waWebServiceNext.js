@@ -1,0 +1,1 @@
+export const WA_WEB_SERVICE_NEXT_PLACEHOLDER = true;
