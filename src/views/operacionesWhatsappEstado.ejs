@@ -19,6 +19,7 @@
     .info-box { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
     .technical-box { border: 1px dashed #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 12px 14px; font-size: 12px; line-height: 1.45; word-break: break-word; }
     .muted-strong { color: var(--muted); font-weight: 800; }
+    .inline-action-form { display: inline-flex; margin: 0; }
     @media (max-width: 900px) { .status-layout { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -44,8 +45,13 @@
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
         <a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a>
         <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
+        <form class="inline-action-form" method="post" action="/admin/operaciones/whatsapp/cerrar-sesion" onsubmit="return confirm('¿Cerrar la sesión de WhatsApp despacho? Tendrás que escanear un nuevo QR para reconectar.');">
+          <button class="btn" type="submit">Cerrar sesión de WhatsApp</button>
+        </form>
       </div>
     </section>
+
+    <% if (typeof message === 'string' && message) { %><div class="section-note"><%= message %></div><% } %>
 
     <section class="status-layout">
       <article class="status-card <%= ready ? 'connected' : '' %>" id="statusCard">
