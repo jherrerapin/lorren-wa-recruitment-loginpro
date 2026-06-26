@@ -1,6 +1,10 @@
 (() => {
   const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
   const TIME_RE = /\b([01]?\d|2[0-3]):([0-5]\d)\b(?!\s*(?:AM|PM|am|pm))/g;
+  const WHATSAPP_SEND_PATH = '/admin/operaciones/whatsapp/enviar';
+  const CONFIRMATION_REPLY_TEXT = 'Por favor responde exactamente: Confirmado.';
+  let lastAssignmentWhatsappContext = null;
+  let whatsappFetchWrapped = false;
 
   function formatTimeAmPm(value) {
     const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
@@ -33,6 +37,10 @@
     const params = new URLSearchParams(window.location.search);
     const value = params.get('fecha') || params.get('date') || '';
     return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+  }
+
+  function selectedServiceRequestId() {
+    return new URLSearchParams(window.location.search).get('serviceRequestId') || '';
   }
 
   function requestDate(card) {
@@ -109,16 +117,91 @@
     });
   }
 
+  function withConfirmationInstruction(value) {
+    const text = String(value || '');
+    if (!text.trim()) return text;
+    if (/responde\s+exactamente\s*:\s*confirmado/i.test(text)) return text;
+    if (/por favor confirma recibido\.?/i.test(text)) return text.replace(/por favor confirma recibido\.?/gi, CONFIRMATION_REPLY_TEXT);
+    return `${text.trim()} ${CONFIRMATION_REPLY_TEXT}`;
+  }
+
+  function applyConfirmationInstruction(root = document) {
+    const globalTemplate = root.querySelector?.('#globalTemplate');
+    const fields = [];
+    if (globalTemplate) fields.push(globalTemplate);
+    root.querySelectorAll?.('.assignment-message')?.forEach((item) => fields.push(item));
+    fields.forEach((field) => {
+      if (!field || field.dataset.confirmationInstructionApplied === 'true') return;
+      const next = withConfirmationInstruction(field.value);
+      if (next !== field.value) {
+        field.value = next;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      field.dataset.confirmationInstructionApplied = 'true';
+    });
+  }
+
+  function assignmentContextFromButton(button) {
+    const card = button?.closest?.('.assigned-card');
+    if (!card) return null;
+    const assignmentId = String(card.dataset.assignmentId || '').trim();
+    if (!assignmentId) return null;
+    return {
+      serviceRequestId: selectedServiceRequestId(),
+      assignmentId,
+      recipientName: String(card.dataset.workerName || '').trim() || undefined,
+      messageType: 'ASSIGNMENT_CONFIRMATION'
+    };
+  }
+
+  function rememberDispatchWhatsappContext(event) {
+    const button = event.target?.closest?.('.dispatch-wa-button');
+    if (!button) return;
+    const context = assignmentContextFromButton(button);
+    if (!context) return;
+    lastAssignmentWhatsappContext = context;
+    window.setTimeout(() => {
+      if (lastAssignmentWhatsappContext === context) lastAssignmentWhatsappContext = null;
+    }, 10000);
+  }
+
+  function enrichWhatsappSendOptions(resource, options = {}) {
+    const url = typeof resource === 'string' ? resource : String(resource?.url || '');
+    if (!url.includes(WHATSAPP_SEND_PATH)) return options;
+    if (!lastAssignmentWhatsappContext || typeof options.body !== 'string') return options;
+    try {
+      const body = JSON.parse(options.body);
+      if (body && typeof body === 'object' && !body.context) {
+        body.context = lastAssignmentWhatsappContext;
+        return { ...options, body: JSON.stringify(body) };
+      }
+    } catch (_error) {
+      return options;
+    }
+    return options;
+  }
+
+  function wrapWhatsappFetch() {
+    if (whatsappFetchWrapped) return;
+    whatsappFetchWrapped = true;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (resource, options = {}) => nativeFetch(resource, enrichWhatsappSendOptions(resource, options));
+  }
+
   function boot() {
     formatVisibleTimes();
     preserveDateOnSelectionLinks();
     hideExpiredWithoutDate();
     removeDuplicatedDateFilters();
     addRequestCrudActions();
+    applyConfirmationInstruction();
+    wrapWhatsappFetch();
+    document.addEventListener('click', rememberDispatchWhatsappContext, true);
     const observer = new MutationObserver(() => {
       formatVisibleTimes();
       removeDuplicatedDateFilters();
       addRequestCrudActions();
+      applyConfirmationInstruction();
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
