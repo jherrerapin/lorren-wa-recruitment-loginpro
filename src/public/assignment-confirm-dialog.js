@@ -98,6 +98,93 @@
     container.appendChild(button);
   }
 
+  function encodeForm(form) {
+    const params = new URLSearchParams();
+    new FormData(form).forEach((value, key) => params.append(key, value));
+    return params;
+  }
+
+  function showInlineToast(message) {
+    if (!message) return;
+    if (typeof window.showToast === 'function') {
+      window.showToast(message);
+      return;
+    }
+    const toast = document.getElementById('asyncToast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.add('show');
+    window.clearTimeout(showInlineToast._timer);
+    showInlineToast._timer = window.setTimeout(() => toast.classList.remove('show'), 2600);
+  }
+
+  function stopBoardReloadAfterAction() {
+    window.refreshBoardAfterAction = (message) => showInlineToast(message);
+  }
+
+  function disableActionButtons(container, disabled) {
+    Array.from(container?.querySelectorAll('button,a') || []).forEach((button) => {
+      if (disabled) {
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
+      } else {
+        button.disabled = false;
+        button.removeAttribute('aria-disabled');
+      }
+    });
+  }
+
+  async function submitAssignmentActionWithoutReload(form) {
+    const action = form.dataset.asyncAssignmentAction;
+    const card = form.closest('.assigned-card');
+    if (!action || !card) return false;
+    if (action === 'unassign') {
+      const confirmed = await askRemovalConfirmation();
+      if (!confirmed) return true;
+    }
+    const actions = form.closest('.assigned-actions');
+    card.classList.add('is-updating');
+    disableActionButtons(actions, true);
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body: encodeForm(form),
+        redirect: 'follow',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'X-Requested-With': 'fetch'
+        }
+      });
+      if (!response.ok) throw new Error('No fue posible completar la acción.');
+      const statusLine = card.querySelector('.assignment-status-line');
+      if (action === 'unassign') {
+        card.classList.add('is-removed');
+        window.setTimeout(() => card.remove(), 160);
+        showInlineToast('Auxiliar retirado de la solicitud.');
+        return true;
+      }
+      if (action === 'confirmar') {
+        if (statusLine) statusLine.textContent = 'Estado: Confirmado';
+        actions?.querySelectorAll('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach((item) => item.remove());
+        showInlineToast('Confirmación registrada.');
+        return true;
+      }
+      if (action === 'no-confirmado') {
+        if (statusLine) statusLine.textContent = 'Estado: No confirmó';
+        actions?.querySelectorAll('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach((item) => item.remove());
+        showInlineToast('Auxiliar marcado como no confirmado.');
+        return true;
+      }
+    } catch (error) {
+      console.error(error);
+      showInlineToast(error.message || 'No fue posible completar la acción.');
+      disableActionButtons(actions, false);
+    } finally {
+      card.classList.remove('is-updating');
+    }
+    return true;
+  }
+
   if (restoreDateFilterAfterAssignmentRedirect()) return;
   rememberSelectedDateFilter();
 
@@ -276,24 +363,19 @@
   document.addEventListener('submit', async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    if (form.dataset.asyncAssignmentAction !== 'unassign') return;
-    if (confirmedForms.has(form)) return;
+    if (!form.dataset.asyncAssignmentAction) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const confirmed = await askRemovalConfirmation();
-    if (!confirmed) return;
-    confirmedForms.add(form);
-    allowNextNativeRemovalConfirm = true;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    window.setTimeout(() => confirmedForms.delete(form), 1000);
+    await submitAssignmentActionWithoutReload(form);
   }, true);
 
   document.addEventListener('DOMContentLoaded', () => {
     rememberSelectedDateFilter();
     preserveDateBeforeAssignmentSubmit();
+    stopBoardReloadAfterAction();
     enhanceManagedByField();
     addBulkWhatsappButton();
-    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); addBulkWhatsappButton(); });
+    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); stopBoardReloadAfterAction(); addBulkWhatsappButton(); });
     observer.observe(document.body, { childList: true, subtree: true });
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
