@@ -1,5 +1,6 @@
 (() => {
   const originalConfirm = window.confirm.bind(window);
+  const ASSIGNMENT_DATE_KEY = 'loginpro.assignment.dateFilter';
   let allowNextNativeRemovalConfirm = false;
   const confirmedForms = new WeakSet();
 
@@ -11,6 +12,94 @@
     }
     return originalConfirm(message);
   };
+
+  function selectedDateParam() {
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get('fecha') || params.get('date') || '';
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+  }
+
+  function rememberSelectedDateFilter() {
+    const date = selectedDateParam();
+    if (!date) return;
+    try { sessionStorage.setItem(ASSIGNMENT_DATE_KEY, JSON.stringify({ date, savedAt: Date.now() })); }
+    catch (_error) {}
+  }
+
+  function rememberedDateFilter() {
+    try {
+      const data = JSON.parse(sessionStorage.getItem(ASSIGNMENT_DATE_KEY) || 'null');
+      if (!data?.date || !/^\d{4}-\d{2}-\d{2}$/.test(data.date)) return '';
+      if (Date.now() - Number(data.savedAt || 0) > 10 * 60 * 1000) return '';
+      return data.date;
+    } catch (_error) { return ''; }
+  }
+
+  function restoreDateFilterAfterAssignmentRedirect() {
+    if (window.location.pathname !== '/admin/operaciones/asignaciones') return false;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('fecha') || params.get('date')) return false;
+    const message = String(params.get('message') || '');
+    if (!/auxiliar|asignad|confirmaci|novedad|retirad|cobertura/i.test(message)) return false;
+    const date = rememberedDateFilter();
+    if (!date) return false;
+    params.set('fecha', date);
+    window.location.replace(`${window.location.pathname}?${params.toString()}`);
+    return true;
+  }
+
+  function preserveDateBeforeAssignmentSubmit() {
+    const form = document.getElementById('assignForm');
+    if (!form || form.dataset.dateFilterPreserved === 'true') return;
+    form.dataset.dateFilterPreserved = 'true';
+    const nativeSubmit = form.submit.bind(form);
+    form.submit = () => { rememberSelectedDateFilter(); nativeSubmit(); };
+    form.addEventListener('submit', rememberSelectedDateFilter, true);
+  }
+
+  function sleep(ms) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
+
+  function assignmentWhatsappButtons() {
+    return [...document.querySelectorAll('.assigned-card .dispatch-wa-button, .assigned-card .whatsapp-link, .assigned-card .icon-whatsapp')]
+      .filter((button) => button instanceof HTMLElement && !button.closest('[hidden]'));
+  }
+
+  async function waitForWhatsappButton(button) {
+    const startedAt = Date.now();
+    await sleep(150);
+    while (button.disabled && Date.now() - startedAt < 30000) await sleep(250);
+  }
+
+  function addBulkWhatsappButton() {
+    if (document.getElementById('sendAllAssignmentWhatsapp')) return;
+    const whatsappButtons = assignmentWhatsappButtons();
+    if (!whatsappButtons.length) return;
+    const container = document.querySelector('.template-actions') || document.querySelector('.notify-actions') || document.querySelector('.assignment-body');
+    if (!container) return;
+    const button = document.createElement('button');
+    button.id = 'sendAllAssignmentWhatsapp';
+    button.className = 'btn btn-primary';
+    button.type = 'button';
+    button.textContent = 'Enviar WhatsApp a todos';
+    button.addEventListener('click', async () => {
+      const currentButtons = assignmentWhatsappButtons().filter((item) => !item.disabled);
+      if (!currentButtons.length) return;
+      if (!originalConfirm(`¿Enviar mensaje de confirmación a ${currentButtons.length} auxiliar(es)?`)) return;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Enviando a todos...';
+      for (const item of currentButtons) {
+        item.click();
+        await waitForWhatsappButton(item);
+      }
+      button.disabled = false;
+      button.textContent = originalText;
+    });
+    container.appendChild(button);
+  }
+
+  if (restoreDateFilterAfterAssignmentRedirect()) return;
+  rememberSelectedDateFilter();
 
   function injectSharedDialogStyles() {
     if (document.getElementById('styledDialogSharedStyles')) return;
@@ -149,40 +238,19 @@
     input.type = 'hidden';
     const field = input.closest('.notify-managed-field');
     const managersKey = 'dispatchProgrammingManagers';
-    const getManagers = () => {
-      try { return JSON.parse(localStorage.getItem(managersKey) || '[]'); } catch (_error) { return []; }
-    };
-    const setInputValue = (value) => {
-      input.value = String(value || '').trim() || 'Julián Herrera';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    };
+    const getManagers = () => { try { return JSON.parse(localStorage.getItem(managersKey) || '[]'); } catch (_error) { return []; } };
+    const setInputValue = (value) => { input.value = String(value || '').trim() || 'Julián Herrera'; input.dispatchEvent(new Event('input', { bubbles: true })); };
     const wrapper = document.createElement('div');
     wrapper.className = 'notify-manager-enhanced';
     wrapper.innerHTML = `
-      <div class="notify-manager-controls">
-        <select aria-label="Gestionado por"></select>
-        <button class="notify-manager-add" type="button">+</button>
-      </div>
+      <div class="notify-manager-controls"><select aria-label="Gestionado por"></select><button class="notify-manager-add" type="button">+</button></div>
       <input class="notify-manager-custom" type="text" maxlength="80" placeholder="Agregar otro nombre" hidden />`;
     field?.insertBefore(wrapper, input);
     const select = wrapper.querySelector('select');
     const addButton = wrapper.querySelector('button');
     const custom = wrapper.querySelector('.notify-manager-custom');
-    const renderManagers = (selected = 'Julián Herrera') => {
-      const managers = [...new Set(['Julián Herrera', ...getManagers()])];
-      select.innerHTML = managers.map((name) => `<option value="${String(name).replace(/"/g, '&quot;')}">${String(name)}</option>`).join('');
-      select.value = managers.includes(selected) ? selected : 'Julián Herrera';
-      setInputValue(select.value);
-    };
-    const saveManager = () => {
-      const clean = custom.value.trim();
-      if (!clean) return;
-      const managers = [...new Set([...getManagers(), clean])];
-      localStorage.setItem(managersKey, JSON.stringify(managers));
-      custom.value = '';
-      custom.hidden = true;
-      renderManagers(clean);
-    };
+    const renderManagers = (selected = 'Julián Herrera') => { const managers = [...new Set(['Julián Herrera', ...getManagers()])]; select.innerHTML = managers.map((name) => `<option value="${String(name).replace(/"/g, '&quot;')}">${String(name)}</option>`).join(''); select.value = managers.includes(selected) ? selected : 'Julián Herrera'; setInputValue(select.value); };
+    const saveManager = () => { const clean = custom.value.trim(); if (!clean) return; const managers = [...new Set([...getManagers(), clean])]; localStorage.setItem(managersKey, JSON.stringify(managers)); custom.value = ''; custom.hidden = true; renderManagers(clean); };
     select.addEventListener('change', () => setInputValue(select.value));
     addButton.addEventListener('click', () => { custom.hidden = false; custom.focus(); });
     custom.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); saveManager(); } });
@@ -221,13 +289,19 @@
   }, true);
 
   document.addEventListener('DOMContentLoaded', () => {
+    rememberSelectedDateFilter();
+    preserveDateBeforeAssignmentSubmit();
     enhanceManagedByField();
+    addBulkWhatsappButton();
+    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); addBulkWhatsappButton(); });
+    observer.observe(document.body, { childList: true, subtree: true });
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
       const url = typeof resource === 'string' ? resource : String(resource?.url || '');
       const bodyText = String(options?.body || '');
       const isAssign = url.includes('/admin/operaciones/asignaciones/assign');
       if (isAssign && bodyText.includes('workerId=')) {
+        rememberSelectedDateFilter();
         const params = new URLSearchParams(bodyText);
         const workerId = params.get('workerId');
         const card = workerId ? document.querySelector(`.worker-card[data-worker-id="${CSS.escape(workerId)}"]`) : null;
