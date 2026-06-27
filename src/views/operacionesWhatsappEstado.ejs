@@ -19,7 +19,6 @@
     .info-box { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
     .technical-box { border: 1px dashed #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 12px 14px; font-size: 12px; line-height: 1.45; word-break: break-word; }
     .muted-strong { color: var(--muted); font-weight: 800; }
-    .inline-action-form { display: inline-flex; margin: 0; }
     @media (max-width: 900px) { .status-layout { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -31,7 +30,6 @@
     <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
     <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
     <span class="spacer"></span>
-    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
   <main class="page">
@@ -45,13 +43,8 @@
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
         <a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a>
         <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
-        <form class="inline-action-form" method="post" action="/admin/operaciones/whatsapp/cerrar-sesion" onsubmit="return confirm('¿Cerrar la sesión de WhatsApp despacho? Tendrás que escanear un nuevo QR para reconectar.');">
-          <button class="btn" type="submit">Cerrar sesión de WhatsApp</button>
-        </form>
       </div>
     </section>
-
-    <% if (typeof message === 'string' && message) { %><div class="section-note"><%= message %></div><% } %>
 
     <section class="status-layout">
       <article class="status-card <%= ready ? 'connected' : '' %>" id="statusCard">
@@ -77,11 +70,11 @@
           <img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de WhatsApp despacho" />
           <p class="muted-strong">Escanea este QR desde el celular de despacho para vincular la sesión.</p>
         </div>
-        <div id="waitingQr" <%= !ready && !qrImage && (!lastError || initializing || reconnecting) ? '' : 'hidden' %>>
+        <div id="waitingQr" <%= !ready && !qrImage && !lastError ? '' : 'hidden' %>>
           <h2>Preparando conexión...</h2>
           <p class="muted-strong">La pantalla se actualiza automáticamente cada 3 segundos.</p>
         </div>
-        <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError && !initializing && !reconnecting ? '' : 'hidden' %>>
+        <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError ? '' : 'hidden' %>>
           La conexión aún no está disponible. Actualiza el estado en unos segundos. Si continúa igual, avisa al responsable técnico.
         </div>
       </article>
@@ -105,47 +98,21 @@
     const waitingQr = document.getElementById('waitingQr');
     const unavailableBox = document.getElementById('unavailableBox');
 
-    function formatBogotaDateTime(value) {
-      if (!value) return '';
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return value;
-      return new Intl.DateTimeFormat('es-CO', {
-        timeZone: 'America/Bogota',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      }).format(parsed).replace(/\s*a\.\s*m\./i, ' a. m.').replace(/\s*p\.\s*m\./i, ' p. m.');
-    }
-
-    function renderReadyAt(value) {
-      const formatted = formatBogotaDateTime(value);
-      setHidden(readyAt, !formatted);
-      if (readyAtText) {
-        readyAtText.dataset.rawReadyAt = value || '';
-        readyAtText.textContent = formatted;
-      }
-    }
-
     function setHidden(element, hidden) { if (element) element.hidden = hidden; }
     function renderStatus(data) {
       const hasError = Boolean(data.lastError || data.technicalLastError);
-      const isPreparingConnection = Boolean(data.initializing || data.reconnecting);
       statusLabel.textContent = data.ready ? 'Conectado' : hasError ? 'Requiere revisión' : 'No conectado';
       statusLabel.className = 'status-label ' + (data.ready ? 'connected' : hasError ? 'error' : '');
       statusCard.classList.toggle('connected', Boolean(data.ready));
       statusTitle.textContent = data.ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión';
-      renderReadyAt(data.lastReadyAt);
       setHidden(errorBox, !hasError);
       if (errorBox) errorBox.textContent = hasError ? (data.lastError || fallbackOperationalError) : '';
       setHidden(technicalDetails, !isDev || !data.technicalLastError);
       if (technicalError) technicalError.textContent = data.technicalLastError || '';
       setHidden(connectedMessage, !data.ready);
       setHidden(qrContainer, data.ready || !data.qrImage);
-      setHidden(waitingQr, data.ready || Boolean(data.qrImage) || (hasError && !isPreparingConnection));
-      setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError || isPreparingConnection);
+      setHidden(waitingQr, data.ready || Boolean(data.qrImage) || hasError);
+      setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError);
       if (data.qrImage && qrImage && qrImage.src !== data.qrImage) qrImage.src = data.qrImage;
     }
     async function refreshStatus() {
@@ -154,7 +121,6 @@
       renderStatus(await response.json());
     }
     document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);
-    renderReadyAt(readyAtText?.dataset.rawReadyAt || readyAtText?.textContent || '');
     window.setInterval(refreshStatus, 3000);
   </script>
 </body>
