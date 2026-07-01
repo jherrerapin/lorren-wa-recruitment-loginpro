@@ -24,3 +24,10 @@ test('statistics metrics use explicit booking states for attendance metrics', ()
   assert.equal(source.includes("booking.status === 'NO_SHOW'"), true);
   assert.equal(source.includes('const noShow = candidates.filter(hasNoShowBooking).length'), true);
 });
+
+test('recruitment statistics route has a business-named entry point', () => {
+  const source = readSource('src/routes/recruitmentStats.js');
+
+  assert.equal(source.includes('recruitment statistics'), true);
+  assert.equal(source.includes("export { default } from './lorenV2.js'"), true);
+});
