@@ -195,6 +195,7 @@ model Campaign {
   isActive          Boolean             @default(true)
   startsAt          DateTime?
   endsAt            DateTime?
+  budgetCOP         Decimal?            @db.Decimal(14, 2)
   notes             String?
   createdByUsername String?
   createdAt         DateTime            @default(now())
