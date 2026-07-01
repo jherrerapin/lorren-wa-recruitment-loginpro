@@ -19,9 +19,11 @@ test('Meta Ads client is not responsible for Express or database side effects', 
   assert.equal(source.includes('export function createMetaAdsClient'), true);
 });
 
-test('Campaign budget migration exists for statistics cost metrics', () => {
+test('Campaign budget is aligned between Prisma schema and database migration', () => {
+  const schema = readSource('prisma/schema.prisma');
   const migration = readSource('prisma/migrations/20260630000100_campaign_budget_cop/migration.sql');
 
+  assert.equal(schema.includes('budgetCOP         Decimal?            @db.Decimal(14, 2)'), true);
   assert.equal(migration.includes('ALTER TABLE "Campaign"'), true);
   assert.equal(migration.includes('ADD COLUMN IF NOT EXISTS "budgetCOP" DECIMAL(14, 2)'), true);
 });
