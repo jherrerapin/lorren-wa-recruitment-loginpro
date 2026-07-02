@@ -10,6 +10,12 @@ const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WIND
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
 const CONFIRMATION_MEMORY_TTL_MS = Number(process.env.DISPATCH_WA_CONFIRMATION_MEMORY_TTL_MS || 36 * 60 * 60 * 1000);
 const INBOUND_LOCK_TTL_MS = 30000;
+const AUTO_START_ENABLED = process.env.DISPATCH_WWEB_AUTO_START !== 'false' && process.env.NODE_ENV !== 'test';
+const AUTO_START_DELAY_MS = Number(process.env.DISPATCH_WWEB_AUTO_START_DELAY_MS || 1500);
+const CATCHUP_ENABLED = process.env.DISPATCH_WA_CATCHUP_ENABLED !== 'false';
+const CATCHUP_DELAY_MS = Number(process.env.DISPATCH_WA_CATCHUP_DELAY_MS || 4000);
+const CATCHUP_CHAT_LIMIT = Number(process.env.DISPATCH_WA_CATCHUP_CHAT_LIMIT || 80);
+const CATCHUP_MESSAGES_PER_CHAT = Number(process.env.DISPATCH_WA_CATCHUP_MESSAGES_PER_CHAT || 8);
 const CHROMIUM_LOCK_FILES = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket']);
 const PENDING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
@@ -29,6 +35,9 @@ let lastError = null;
 let lastReadyAt = null;
 let lastAuthenticatedAt = null;
 let reconnectTimer = null;
+let catchupRunning = false;
+let lastCatchupAt = null;
+let lastCatchupProcessed = 0;
 const recentSendLocks = new Map();
 const pendingConfirmationByPhone = new Map();
 const pendingConfirmationByChatId = new Map();
@@ -85,8 +94,15 @@ function isAutomaticConfirmationReply(value) {
     || text === 'confirmo'
     || text === 'si confirmado'
     || text === 'si confirmo'
+    || text === 'si'
+    || text === 'ok'
+    || text === 'okay'
+    || text === 'listo'
+    || text === 'recibido'
+    || text === 'enterado'
     || /^confirmad[oa]\b/.test(text)
-    || /^confirmo\b/.test(text);
+    || /^confirmo\b/.test(text)
+    || /^si\b.*\b(confirmad[oa]|confirmo|asisto|voy|listo|recibido)\b/.test(text);
 }
 
 function firstString(values) {
@@ -470,6 +486,63 @@ function bindInboundMessageListeners(activeClient) {
   activeClient.on('message_create', handler('message_create'));
 }
 
+function chatTimestamp(chat = {}) {
+  return Number(chat.timestamp || chat.lastMessage?.timestamp || chat.lastMessage?._data?.t || 0);
+}
+
+function isSupportedChat(chat = {}) {
+  const serialized = normalizeChatId(chat.id?._serialized || chat.id?.user || chat.id || chat.lastMessage?.from || chat.lastMessage?.to);
+  if (!serialized) return false;
+  if (chat.isGroup) return false;
+  return isSupportedSenderId(serialized);
+}
+
+async function processCatchupChat(activeClient, chat) {
+  if (!chat || typeof chat.fetchMessages !== 'function') return 0;
+  const messages = await chat.fetchMessages({ limit: CATCHUP_MESSAGES_PER_CHAT });
+  let processed = 0;
+  for (const message of (Array.isArray(messages) ? messages : [])) {
+    const ok = await confirmAssignmentFromInboundMessage(activeClient, message, 'catchup');
+    if (ok) processed += 1;
+  }
+  return processed;
+}
+
+async function processRecentInboundConfirmations(activeClient, reason = 'ready') {
+  if (!CATCHUP_ENABLED || catchupRunning || !activeClient) return 0;
+  catchupRunning = true;
+  let processed = 0;
+  try {
+    if (typeof activeClient.getChats !== 'function') return 0;
+    const chats = await activeClient.getChats();
+    const candidates = (Array.isArray(chats) ? chats : [])
+      .filter(isSupportedChat)
+      .sort((a, b) => chatTimestamp(b) - chatTimestamp(a))
+      .slice(0, CATCHUP_CHAT_LIMIT);
+    for (const chat of candidates) {
+      try { processed += await processCatchupChat(activeClient, chat); }
+      catch (error) { console.warn('[dispatch-wa] No fue posible revisar un chat reciente para confirmaciones.', error?.message || error); }
+    }
+    lastCatchupAt = new Date().toISOString();
+    lastCatchupProcessed = processed;
+    console.log(`[dispatch-wa] Revisión de mensajes recientes finalizada. reason=${reason} chats=${candidates.length} confirmaciones=${processed}.`);
+    return processed;
+  } catch (error) {
+    console.warn('[dispatch-wa] No fue posible revisar mensajes recientes después de reconectar.', error?.message || error);
+    return processed;
+  } finally {
+    catchupRunning = false;
+  }
+}
+
+function scheduleRecentConfirmationCatchup(activeClient, reason = 'ready') {
+  if (!CATCHUP_ENABLED) return;
+  setTimeout(() => {
+    if (!ready || client !== activeClient) return;
+    processRecentInboundConfirmations(activeClient, reason).catch((error) => console.error('[dispatch-wa] Error ejecutando revisión diferida de confirmaciones.', error));
+  }, CATCHUP_DELAY_MS);
+}
+
 export function initDispatchWhatsappClient() {
   if (client || initializing) return client;
   manualLogoutRequested = false;
@@ -488,7 +561,7 @@ export function initDispatchWhatsappClient() {
       });
       client.on('qr', (qr) => { lastQr = qr; ready = false; lastError = null; console.log('QR de WhatsApp despacho pendiente. Escanéalo para vincular la sesión:'); printTerminalQr(qr); });
       client.on('authenticated', () => { lastAuthenticatedAt = new Date().toISOString(); lastError = null; console.log('WhatsApp de despacho autenticado.'); });
-      client.on('ready', () => { ready = true; lastQr = null; lastError = null; lastReadyAt = new Date().toISOString(); console.log('WhatsApp de despacho conectado.'); });
+      client.on('ready', () => { ready = true; lastQr = null; lastError = null; lastReadyAt = new Date().toISOString(); console.log('WhatsApp de despacho conectado.'); scheduleRecentConfirmationCatchup(client, 'ready'); });
       bindInboundMessageListeners(client);
       client.on('disconnected', (reason) => { ready = false; lastQr = null; lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.'; console.warn(lastError); resetClientReference(); scheduleReconnect(reason || 'desconectado'); });
       client.on('auth_failure', (message) => { ready = false; lastQr = null; lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.'; console.warn(lastError); resetClientReference(); scheduleReconnect('fallo de autenticación'); });
@@ -500,7 +573,7 @@ export function initDispatchWhatsappClient() {
 }
 
 export function getDispatchWhatsappStatus() {
-  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
+  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, catchupRunning, lastCatchupAt, lastCatchupProcessed, authDataPath: resolveAuthDataPath() };
 }
 
 export async function getDispatchWhatsappStatusView(options = {}) {
@@ -511,7 +584,7 @@ export async function getDispatchWhatsappStatusView(options = {}) {
     try { qrImage = await QRCode.toDataURL(lastQr); }
     catch (error) { console.error('No fue posible generar imagen QR de WhatsApp despacho.', error); }
   }
-  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, authDataPath: resolveAuthDataPath() };
+  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, catchupRunning, lastCatchupAt, lastCatchupProcessed, authDataPath: resolveAuthDataPath() };
 }
 
 export async function closeDispatchWhatsappSession() {
@@ -569,4 +642,11 @@ export async function sendDispatchWhatsappMediaMessage({ phone, caption, buffer,
     releaseSendLock(lockKey);
     throw error;
   }
+}
+
+if (AUTO_START_ENABLED) {
+  setTimeout(() => {
+    try { initDispatchWhatsappClient(); }
+    catch (error) { console.error('[dispatch-wa] No fue posible iniciar automáticamente WhatsApp despacho.', error); }
+  }, AUTO_START_DELAY_MS);
 }
