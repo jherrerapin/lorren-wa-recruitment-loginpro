@@ -19,8 +19,9 @@
     .incident-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
     .incident-actions form { margin:0; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .resolution-input { min-width:260px; border:1px solid var(--border); border-radius:10px; padding:9px 10px; }
-    .create-note { border:1px solid #bfdbfe; background:#eff6ff; color:#1e40af; border-radius:16px; padding:14px 16px; font-weight:800; line-height:1.45; }
-    @media(max-width:760px){.toolbar-form{display:grid;grid-template-columns:1fr;width:100%}.incident-actions form,.incident-actions .resolution-input{width:100%}}
+    .create-note { border:1px solid #bfdbfe; background:#eff6ff; color:#1e40af; border-radius:16px; padding:14px 16px; font-weight:800; line-height:1.45; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; }
+    .create-note span { max-width:880px; }
+    @media(max-width:760px){.toolbar-form{display:grid;grid-template-columns:1fr;width:100%}.incident-actions form,.incident-actions .resolution-input{width:100%}.create-note .btn{width:100%}}
   </style>
 </head>
 <body>
@@ -43,13 +44,14 @@
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
-        <a class="btn" href="/admin/operaciones/solicitudes/resumen?fecha=<%= selectedDate %>&tipo=total">Solicitudes del día</a>
-        <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Asignaciones</a>
+        <a class="btn" href="/admin/operaciones/dispatch/operations/summary?date=<%= selectedDate %>&type=total">Solicitudes de la fecha</a>
+        <a class="btn btn-primary" href="/admin/operaciones/dispatch/operations/summary?date=<%= selectedDate %>&type=total">Registrar novedad</a>
       </div>
     </section>
 
     <section class="create-note">
-      Para registrar una novedad, entra al listado filtrado de solicitudes por fecha y usa el formulario de la solicitud correspondiente. Así el sistema muestra cliente, fecha, operación y solo los auxiliares asignados a esa solicitud.
+      <span>Para registrar una novedad, entra al resumen de solicitudes de la fecha seleccionada y abre “Reportar novedad” en la solicitud correspondiente. La novedad se puede reportar aunque la solicitud esté en modo consulta o ya haya pasado la hora del servicio.</span>
+      <a class="btn btn-primary" href="/admin/operaciones/dispatch/operations/summary?date=<%= selectedDate %>&type=total">Ir a registrar</a>
     </section>
 
     <section class="toolbar">
@@ -66,7 +68,7 @@
 
     <section class="incident-grid">
       <% if (!incidents.length) { %>
-        <div class="empty"><strong>No hay novedades para este filtro.</strong> Las novedades se reportan desde la solicitud correspondiente en el listado filtrado por fecha.</div>
+        <div class="empty"><strong>No hay novedades para este filtro.</strong> Puedes registrar una novedad desde el resumen de solicitudes de la fecha seleccionada.</div>
       <% } %>
       <% incidents.forEach((incident)=>{ const request = incident.serviceRequest; const worker = incident.worker || incident.assignment?.worker; %>
         <article class="incident-card <%= incident.status === 'RESOLVED' ? 'resolved' : 'open' %>">
