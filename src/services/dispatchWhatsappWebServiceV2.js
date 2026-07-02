@@ -1,8 +1,13 @@
+import { getDispatchWhatsappStatus } from './dispatchWhatsappWebService.js';
+
 export {
-  closeDispatchWhatsappSession,
   getDispatchWhatsappStatus,
   getDispatchWhatsappStatusView,
   initDispatchWhatsappClient,
   sendDispatchWhatsappMessage,
   sendDispatchWhatsappMediaMessage
-} from './dispatchWhatsappWebServiceV4.js';
+} from './dispatchWhatsappWebService.js';
+
+export async function closeDispatchWhatsappSession() {
+  return getDispatchWhatsappStatus();
+}
