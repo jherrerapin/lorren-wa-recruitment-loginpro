@@ -32,9 +32,13 @@
     .incident-context{background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:9px;color:var(--navy);font-size:12px;display:grid;gap:3px}
     .incident-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
     .incident-form-grid .full{grid-column:1 / -1}
-    .incident-worker-field[hidden]{display:none}
+    .incident-worker-field[hidden],.incident-custom-reporter[hidden]{display:none}
+    .reporter-row{display:flex;gap:7px;align-items:center}
+    .reporter-row select{flex:1;min-width:0}
+    .reporter-row .btn{white-space:nowrap;padding:8px 10px}
+    .incident-custom-reporter{margin-top:7px;width:100%}
     .async-toast{position:fixed;right:18px;bottom:18px;max-width:360px;background:#172033;color:#fff;border-radius:14px;padding:11px 13px;box-shadow:var(--shadow);font-size:13px;line-height:1.35;z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s}.async-toast.show{opacity:1;transform:translateY(0)}
-    @media(max-width:640px){.incident-form-grid{grid-template-columns:1fr}.incident-form-grid .full{grid-column:auto}.request-actions .btn,.request-actions button{width:100%}}
+    @media(max-width:640px){.incident-form-grid{grid-template-columns:1fr}.incident-form-grid .full{grid-column:auto}.request-actions .btn,.request-actions button,.reporter-row .btn{width:100%}.reporter-row{display:grid;grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -128,7 +132,16 @@
                     <input type="hidden" name="assignmentId" class="incident-assignment-id" />
                     <input type="hidden" name="workerId" class="incident-worker-id" />
                   </div>
-                  <div class="field"><label>Reportado por</label><input name="reportedBy" placeholder="Nombre de quien reporta" /></div>
+                  <div class="field incident-reporter-field">
+                    <label>Reportado por</label>
+                    <div class="reporter-row">
+                      <select name="reportedBy" class="incident-reported-by-select" required>
+                        <option value="Julián Herrera">Julián Herrera</option>
+                      </select>
+                      <button class="btn" type="button" data-add-incident-reporter>+ Agregar</button>
+                    </div>
+                    <input class="incident-custom-reporter" type="text" maxlength="80" placeholder="Nombre de quien reporta" hidden />
+                  </div>
                   <div class="field full"><label>Descripción</label><textarea name="description" required placeholder="Describe qué ocurrió, impacto y acción esperada"></textarea></div>
                 </div>
                 <div class="request-actions"><button class="btn btn-primary" type="submit">Registrar novedad</button></div>
@@ -143,17 +156,26 @@
   <script src="/public/service-request-delete-confirm.js"></script>
   <script>
     const incidentTypesWithWorker = new Set(['INASISTENCIA', 'RETRASO', 'REEMPLAZO']);
+    const DEFAULT_INCIDENT_REPORTER = 'Julián Herrera';
+    const INCIDENT_REPORTERS_KEY = 'dispatchIncidentReporters';
     const toast = document.getElementById('asyncToast');
     function showToast(message){if(!toast)return;toast.textContent=message;toast.classList.add('show');window.clearTimeout(showToast._t);showToast._t=window.setTimeout(()=>toast.classList.remove('show'),3000);}
     const initialMessage = new URLSearchParams(window.location.search).get('message');
     if (initialMessage) showToast(initialMessage);
     function reloadWithMessage(message){const url=new URL(window.location.href);url.searchParams.set('message',message);window.location.href=url.toString();}
+    function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
+    function loadIncidentReporters(){try{const parsed=JSON.parse(localStorage.getItem(INCIDENT_REPORTERS_KEY)||'[]');return Array.isArray(parsed)?parsed.map((item)=>String(item||'').trim()).filter(Boolean):[];}catch(_error){return[];}}
+    function renderIncidentReporters(selectedName){const reporters=[...new Set([DEFAULT_INCIDENT_REPORTER,...loadIncidentReporters()])];document.querySelectorAll('.incident-reported-by-select').forEach((select)=>{const selected=selectedName||select.value||DEFAULT_INCIDENT_REPORTER;select.innerHTML=reporters.map((name)=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');select.value=reporters.includes(selected)?selected:DEFAULT_INCIDENT_REPORTER;});}
+    function saveIncidentReporter(name){const clean=String(name||'').trim();if(!clean)return;const extras=[...new Set([...loadIncidentReporters(),clean])].filter((item)=>item!==DEFAULT_INCIDENT_REPORTER);localStorage.setItem(INCIDENT_REPORTERS_KEY,JSON.stringify(extras));renderIncidentReporters(clean);}
+    renderIncidentReporters();
     document.querySelectorAll('.incident-create-form').forEach((form) => {
       const typeSelect = form.querySelector('.incident-type');
       const workerField = form.querySelector('.incident-worker-field');
       const workerSelect = form.querySelector('.incident-worker-select');
       const assignmentInput = form.querySelector('.incident-assignment-id');
       const workerInput = form.querySelector('.incident-worker-id');
+      const addReporterButton = form.querySelector('[data-add-incident-reporter]');
+      const customReporterInput = form.querySelector('.incident-custom-reporter');
       function syncWorkerRequirement() {
         const requiresWorker = incidentTypesWithWorker.has(typeSelect.value);
         workerField.hidden = !requiresWorker;
@@ -164,6 +186,26 @@
           workerInput.value = '';
         }
       }
+      function commitCustomReporter() {
+        if (!customReporterInput || customReporterInput.hidden) return;
+        const clean = customReporterInput.value.trim();
+        if (!clean) return;
+        saveIncidentReporter(clean);
+        customReporterInput.value = '';
+        customReporterInput.hidden = true;
+      }
+      addReporterButton?.addEventListener('click', () => {
+        if (!customReporterInput) return;
+        customReporterInput.hidden = false;
+        customReporterInput.focus();
+      });
+      customReporterInput?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commitCustomReporter();
+        }
+      });
+      customReporterInput?.addEventListener('blur', commitCustomReporter);
       workerSelect?.addEventListener('change', () => {
         const [assignmentId = '', workerId = ''] = String(workerSelect.value || '').split('|');
         assignmentInput.value = assignmentId;
@@ -172,6 +214,7 @@
       typeSelect?.addEventListener('change', syncWorkerRequirement);
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
+        commitCustomReporter();
         syncWorkerRequirement();
         if (workerSelect.required && !workerSelect.value) {
           alert('Selecciona el auxiliar asignado relacionado con esta novedad.');
