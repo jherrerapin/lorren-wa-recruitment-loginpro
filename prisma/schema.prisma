@@ -614,11 +614,31 @@ model DispatchAssignment {
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
   incidents         DispatchIncident[]
+  whatsappConfirmations DispatchWhatsappConfirmation[]
 
   @@unique([serviceRequestId, workerId])
   @@index([serviceRequestId])
   @@index([workerId])
   @@index([status])
+}
+
+model DispatchWhatsappConfirmation {
+  id                String             @id @default(cuid())
+  assignmentId      String
+  assignment        DispatchAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  serviceRequestId  String?
+  phone             String?
+  chatId            String?
+  providerMessageId String?
+  status            String             @default("PENDING")
+  expiresAt         DateTime
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([assignmentId])
+  @@index([phone, status, expiresAt])
+  @@index([chatId, status, expiresAt])
+  @@index([providerMessageId])
 }
 
 model DispatchIncident {
