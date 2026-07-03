@@ -5,6 +5,8 @@ import fs from 'node:fs';
 test('dispatch CRUD contracts for clients operations services and every worker source', () => {
   const route = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
+  const opsExtrasRoute = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
+  const deleteRoute = fs.readFileSync('src/routes/dispatchDeleteRouter.js', 'utf8');
   const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
   const clientOpsView = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
@@ -41,8 +43,8 @@ test('dispatch CRUD contracts for clients operations services and every worker s
   assert.doesNotMatch(personalView, /if \(w\.source === 'MANUAL'\)/);
   assert.match(personalView, /\/operaciones\/admin-worker\/<%= w\.id %>\/editar/);
   ['mode ===', 'formAction', 'selectedCityIds', 'selectedVacancyIds', 'operationalStatus', 'Datos del panel del bot', 'medicalRestrictions', 'experienceInfo', 'experienceTime', 'experienceSummary'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
-  assert.match(workerFormView, /Estos campos son opcionales/);
-  assert.match(workerFormView, /<select id="residenceCity" name="residenceCity">/);
+  assert.match(workerFormView, /Hoja de vida, medio de transporte y notas operativas son opcionales/);
+  assert.match(workerFormView, /<select id="residenceCity" name="residenceCity" required>/);
   assert.match(workerFormView, /cities\.forEach\(\(city\) =>/);
   assert.doesNotMatch(workerFormView, /<input id="residenceCity"/);
 
@@ -51,6 +53,9 @@ test('dispatch CRUD contracts for clients operations services and every worker s
   assert.match(publicRoute, /buildCandidateProfileData/);
   assert.match(publicRoute, /prisma\.candidate\.update/);
   assert.doesNotMatch(publicRoute, /where: \{ id: workerId, source: 'MANUAL' \}/);
+  assert.match(opsExtrasRoute, /DISPATCH_OWNED_SOURCES = \['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'\]/);
+  assert.doesNotMatch(opsExtrasRoute, /findManualWorkerOr404|Auxiliar manual no encontrado|Auxiliar manual actualizado/);
+  assert.doesNotMatch(deleteRoute, /source: 'MANUAL'|Auxiliar manual no encontrado|Auxiliar manual eliminado/);
 
   assert.doesNotMatch(route, /DISPATCH_MODULE_URL/);
   assert.doesNotMatch(route, /conversationEngine|webhook|whatsapp/i);
