@@ -32,3 +32,9 @@ test('service request summary does not render the all requests toolbar button', 
   const view = readSource('src/views/operacionesSolicitudesResumen.ejs');
   assert.doesNotMatch(view, /Ver todas las solicitudes/);
 });
+
+test('dispatch WhatsApp router uses latest runtime with persistent confirmations and reconnect support', () => {
+  const source = readSource('src/routes/dispatchWaRouterV2.js');
+  assert.match(source, /dispatchWhatsappWebServiceV5\.js/);
+  assert.doesNotMatch(source, /dispatchWhatsappWebServiceV3\.js/);
+});
