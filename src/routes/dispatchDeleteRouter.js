@@ -103,17 +103,17 @@ export function dispatchDeleteRouter() {
 
   router.post('/personal/:workerId/eliminar', requireOps, async (req, res) => {
     const worker = await prisma.dispatchWorker.findFirst({
-      where: { id: req.params.workerId, source: 'MANUAL' },
+      where: { id: req.params.workerId },
       select: { id: true }
     });
-    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    if (!worker) return res.status(404).send('Auxiliar no encontrado');
 
     return safeDelete(
       res,
       '/admin/operaciones/personal',
       '/admin/operaciones/personal',
       () => prisma.dispatchWorker.delete({ where: { id: worker.id } }),
-      'Auxiliar manual eliminado correctamente.',
+      'Auxiliar eliminado correctamente.',
       'No fue posible eliminar el auxiliar porque tiene dependencias operativas.'
     );
   });

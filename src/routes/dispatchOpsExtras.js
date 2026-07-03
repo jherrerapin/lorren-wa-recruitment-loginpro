@@ -14,7 +14,7 @@ const ALLOWED_CV_MIME_TYPES = new Set(['application/pdf', 'application/msword', 
 const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
 const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
 
-const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT'];
+const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
 
 // TEMPORAL: lista amplia de estados desactivados para rescatar a Juan Jose Garcia.
 // Incluye ELIMINADO y quita restriccion de source.
@@ -183,7 +183,6 @@ async function notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUs
   return '';
 }
 async function findWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId }, include: { cities: true, vacancies: true } }); }
-async function findManualWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId, source: 'MANUAL' }, include: { cities: true, vacancies: true } }); }
 async function replaceWorkerRelations(prisma, workerId, body) {
   const cityIds = normalizeStringList(body.cityIds);
   const vacancyIds = normalizeStringList(body.vacancyIds);
@@ -436,13 +435,13 @@ export function dispatchOpsExtrasRouter(prisma) {
     }
   });
   router.get('/personal/:workerId/editar', requireOps, async (req, res) => {
-    const [worker, cities, vacancies] = await Promise.all([findManualWorkerOr404(prisma, req.params.workerId), loadDispatchCities(prisma), prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })]);
-    if (!worker) return res.status(404).send('Auxiliar manual no encontrado');
+    const [worker, cities, vacancies] = await Promise.all([findWorkerOr404(prisma, req.params.workerId), loadDispatchCities(prisma), prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })]);
+    if (!worker) return res.status(404).send('Auxiliar no encontrado');
     return res.render('operacionesPersonalNuevo', { cities, vacancies, worker, mode: 'edit', formAction: `/admin/operaciones/personal/${worker.id}/editar`, role: req.session?.userRole || req.userRole });
   });
   router.post('/personal/:workerId/editar', requireOps, parseWorkerCvUpload, async (req, res) => {
-    const existing = await findManualWorkerOr404(prisma, req.params.workerId);
-    if (!existing) return res.status(404).send('Auxiliar manual no encontrado');
+    const existing = await findWorkerOr404(prisma, req.params.workerId);
+    if (!existing) return res.status(404).send('Auxiliar no encontrado');
     const workerData = buildWorkerData(req.body);
     const missingFields = validateRequiredWorkerFields(workerData, req.body);
     if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: req.workerCvUploadError });
@@ -450,9 +449,9 @@ export function dispatchOpsExtrasRouter(prisma) {
     try {
       await prisma.dispatchWorker.update({ where: { id: existing.id }, data: applyWorkerCvFile(workerData, req.file) });
       await replaceWorkerRelations(prisma, existing.id, req.body);
-      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual actualizado.')}`);
+      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar actualizado.')}`);
     } catch (error) {
-      console.error('[Manual worker update]', error);
+      console.error('[Worker update]', error);
       return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: 'No fue posible actualizar el auxiliar. Revisa los datos e intenta nuevamente.' });
     }
   });
