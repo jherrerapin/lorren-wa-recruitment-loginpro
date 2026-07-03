@@ -44,11 +44,30 @@ test('dispatch WhatsApp V4 persists confirmation links for restart-safe LID repl
 test('dispatch WhatsApp V4 recovers missed Gracias replies from recent assignment chat history', () => {
   const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
   assert.match(source, /function isDispatchAssignmentNotice/);
+  assert.match(source, /const asksForConfirmation = \/\\b\(\?:confirma\|confirmar\|confirmacion\|confirmado\|recibido\)\\b\//);
+  assert.match(source, /const looksLikeAssignment = \/\\b\(\?:asignacion\|programacion\|servicio\|cliente\|operacion\|direccion\|llegar\|hora\|horario\|fecha\|manana\)\\b\//);
   assert.match(source, /function parseDispatchAssignmentNotice/);
   assert.match(source, /async function recoverMissedAssignmentConfirmationFromChat/);
   assert.match(source, /isAutomaticConfirmationAck/);
   assert.match(source, /eventName: 'catchup_history'/);
   assert.match(source, /await findPendingAssignmentFromAssignmentNotice\(\{ notice, phone \}\)/);
+});
+
+test('dispatch WhatsApp V4 catchup keeps full chat ids when scanning recent LID chats', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
+  assert.match(source, /function chatIdFromChat\(chat = \{\}\)/);
+  assert.match(source, /chat\.id\?\.server && chat\.id\?\.user \? `\$\{chat\.id\.user\}@\$\{chat\.id\.server\}`/);
+  assert.match(source, /const serialized = chatIdFromChat\(chat\)/);
+  assert.match(source, /const chatId = chatIdFromChat\(chat\)/);
+});
+
+test('dispatch WhatsApp V4 actively rescans existing confirmations after send and status checks', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
+  assert.match(source, /const CATCHUP_MIN_INTERVAL_MS = Number\(process\.env\.DISPATCH_WA_CATCHUP_MIN_INTERVAL_MS \|\| 60000\)/);
+  assert.match(source, /function scheduleRecentConfirmationCatchup\(activeClient, reason = 'ready', options = \{\}\)/);
+  assert.match(source, /processRecentInboundConfirmations\(activeClient, reason, options\)/);
+  assert.match(source, /if \(ready && client\) scheduleRecentConfirmationCatchup\(client, autoStart \? 'status_start' : 'status_view'\)/);
+  assert.match(source, /scheduleRecentConfirmationCatchup\(activeClient, 'after_assignment_send', \{ force: true \}\)/);
 });
 
 test('service request summary does not render the all requests toolbar button', () => {
