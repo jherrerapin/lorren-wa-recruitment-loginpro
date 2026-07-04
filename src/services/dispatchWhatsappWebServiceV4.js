@@ -847,7 +847,6 @@ export async function sendDispatchWhatsappMessage({ phone, message, context }) {
       chatIds: chatIdsFromSentMessage(recipient, sent),
       providerMessageId
     });
-    scheduleRecentConfirmationCatchup(activeClient, 'after_assignment_send', { force: true });
     return { phone: recipient.normalizedPhone, providerMessageId };
   } catch (error) {
     releaseSendLock(lockKey);
