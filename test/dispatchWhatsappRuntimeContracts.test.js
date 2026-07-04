@@ -61,13 +61,13 @@ test('dispatch WhatsApp V4 catchup keeps full chat ids when scanning recent LID 
   assert.match(source, /const chatId = chatIdFromChat\(chat\)/);
 });
 
-test('dispatch WhatsApp V4 actively rescans existing confirmations after send and status checks', () => {
+test('dispatch WhatsApp V4 does not auto-ack immediately after outbound assignment sends', () => {
   const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
   assert.match(source, /const CATCHUP_MIN_INTERVAL_MS = Number\(process\.env\.DISPATCH_WA_CATCHUP_MIN_INTERVAL_MS \|\| 60000\)/);
   assert.match(source, /function scheduleRecentConfirmationCatchup\(activeClient, reason = 'ready', options = \{\}\)/);
   assert.match(source, /processRecentInboundConfirmations\(activeClient, reason, options\)/);
   assert.match(source, /if \(ready && client\) scheduleRecentConfirmationCatchup\(client, autoStart \? 'status_start' : 'status_view'\)/);
-  assert.match(source, /scheduleRecentConfirmationCatchup\(activeClient, 'after_assignment_send', \{ force: true \}\)/);
+  assert.doesNotMatch(source, /scheduleRecentConfirmationCatchup\(activeClient, 'after_assignment_send'/);
 });
 
 test('service request summary does not render the all requests toolbar button', () => {
