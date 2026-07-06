@@ -291,6 +291,7 @@ function buildPendingConfirmationValue(phone, context = {}) {
   return {
     assignmentId,
     serviceRequestId: String(context?.serviceRequestId || '').trim() || null,
+    createdAtMs: Date.now(),
     expiresAt: Date.now() + CONFIRMATION_MEMORY_TTL_MS
   };
 }
@@ -494,20 +495,26 @@ async function recalculateServiceRequestStatus(serviceRequestId) {
   return { status, activeCount, confirmedCount, requiredWorkers: serviceRequest.requiredWorkers };
 }
 
-async function findPendingAssignmentFromMemory(phone) {
+function isMessageAfterPendingContext(message = {}, pending = {}) {
+  const inboundTimestamp = messageTimestamp(message);
+  if (!inboundTimestamp || !pending?.createdAtMs) return true;
+  return inboundTimestamp * 1000 >= pending.createdAtMs - 5000;
+}
+
+async function findPendingAssignmentFromMemory(phone, message = {}) {
   cleanupExpiredPendingConfirmations();
   const remembered = pendingConfirmationByPhone.get(phone);
-  if (!remembered?.assignmentId) return null;
+  if (!remembered?.assignmentId || !isMessageAfterPendingContext(message, remembered)) return null;
   const assignment = await prisma.dispatchAssignment.findFirst({ where: { id: remembered.assignmentId, status: { in: PENDING_ASSIGNMENT_STATUSES } }, include: { worker: true } });
   if (!assignment) return null;
   if (normalizePhone(assignment.worker?.phone) !== phone) return null;
   return assignment;
 }
 
-async function findPendingAssignmentFromChatId(chatId) {
+async function findPendingAssignmentFromChatId(chatId, message = {}) {
   cleanupExpiredPendingConfirmations();
   const remembered = pendingConfirmationByChatId.get(normalizeChatId(chatId));
-  if (!remembered?.assignmentId) return null;
+  if (!remembered?.assignmentId || !isMessageAfterPendingContext(message, remembered)) return null;
   return prisma.dispatchAssignment.findFirst({
     where: {
       id: remembered.assignmentId,
@@ -517,13 +524,15 @@ async function findPendingAssignmentFromChatId(chatId) {
   });
 }
 
-async function findPersistedPendingAssignmentByLink({ phone = '', chatId = '' } = {}) {
+async function findPersistedPendingAssignmentByLink({ phone = '', chatId = '', message = {} } = {}) {
   const now = new Date();
+  const inboundTimestamp = messageTimestamp(message);
+  const sentBeforeInbound = inboundTimestamp ? { createdAt: { lte: new Date((inboundTimestamp * 1000) + 5000) } } : {};
   const normalizedPhone = normalizePhone(phone);
   const normalizedChatId = normalizeChatId(chatId);
   if (!normalizedPhone && !normalizedChatId) return null;
   const findLinks = (where) => prisma.dispatchWhatsappConfirmation.findMany({
-    where: { status: 'PENDING', expiresAt: { gt: now }, ...where },
+    where: { status: 'PENDING', expiresAt: { gt: now }, ...sentBeforeInbound, ...where },
     orderBy: { createdAt: 'desc' },
     take: 10
   });
@@ -564,11 +573,13 @@ async function markPersistedConfirmationLinksCompleted({ assignmentId, phone = '
   }
 }
 
-async function findLatestPendingAssignmentByPhone(phone) {
+async function findLatestPendingAssignmentByPhone(phone, message = {}) {
   const lastTen = phone.slice(-10);
   if (!lastTen) return null;
+  const inboundTimestamp = messageTimestamp(message);
+  const updatedBeforeInbound = inboundTimestamp ? { updatedAt: { lte: new Date((inboundTimestamp * 1000) + 5000) } } : {};
   const candidates = await prisma.dispatchAssignment.findMany({
-    where: { status: { in: PENDING_ASSIGNMENT_STATUSES }, worker: { phone: { contains: lastTen } } },
+    where: { status: { in: PENDING_ASSIGNMENT_STATUSES }, ...updatedBeforeInbound, worker: { phone: { contains: lastTen } } },
     include: { worker: true },
     orderBy: { updatedAt: 'desc' },
     take: 10
@@ -640,10 +651,10 @@ async function confirmAssignmentFromInboundMessage(activeClient, message, eventN
     console.warn(`[dispatch-wa] Se recibió Confirmado, pero no fue posible resolver teléfono ni chat. sender=${sender} event=${eventName}`);
     return false;
   }
-  const assignment = await findPendingAssignmentFromChatId(sender)
-    || await findPersistedPendingAssignmentByLink({ phone, chatId: sender })
-    || (phone ? await findPendingAssignmentFromMemory(phone) : null)
-    || (phone ? await findLatestPendingAssignmentByPhone(phone) : null);
+  const assignment = await findPendingAssignmentFromChatId(sender, message)
+    || await findPersistedPendingAssignmentByLink({ phone, chatId: sender, message })
+    || (phone ? await findPendingAssignmentFromMemory(phone, message) : null)
+    || (phone ? await findLatestPendingAssignmentByPhone(phone, message) : null);
   if (!assignment) {
     console.warn(`[dispatch-wa] Se recibió Confirmado desde ${phone}, pero no hay asignación pendiente asociada. sender=${sender} event=${eventName}`);
     return false;
@@ -703,10 +714,10 @@ async function recoverMissedAssignmentConfirmationFromChat(activeClient, chat, m
     const contact = await getInboundContact(confirmation);
     const phone = await resolveInboundPhone(confirmation, activeClient, contact);
     const notice = parseDispatchAssignmentNotice(textFromMessage(noticeMessage));
-    const assignment = await findPendingAssignmentFromChatId(chatId)
-      || await findPersistedPendingAssignmentByLink({ phone, chatId })
-      || (phone ? await findPendingAssignmentFromMemory(phone) : null)
-      || (phone ? await findLatestPendingAssignmentByPhone(phone) : null)
+    const assignment = await findPendingAssignmentFromChatId(chatId, confirmation)
+      || await findPersistedPendingAssignmentByLink({ phone, chatId, message: confirmation })
+      || (phone ? await findPendingAssignmentFromMemory(phone, confirmation) : null)
+      || (phone ? await findLatestPendingAssignmentByPhone(phone, confirmation) : null)
       || await findPendingAssignmentFromAssignmentNotice({ notice, phone });
     if (!assignment) return false;
     return applyAssignmentConfirmation({ activeClient, assignment, phone, chatId, eventName: 'catchup_history' });
