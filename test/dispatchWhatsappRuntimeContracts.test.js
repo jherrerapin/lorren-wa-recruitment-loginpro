@@ -21,8 +21,8 @@ test('dispatch WhatsApp V4 remembers confirmations by chat id for LID replies', 
   assert.match(source, /function normalizeChatId\(value\)/);
   assert.match(source, /function chatIdsFromSentMessage\(recipient, sent\)/);
   assert.match(source, /pendingConfirmationByChatId\.set\(chatId, value\)/);
-  assert.match(source, /async function findPendingAssignmentFromChatId\(chatId\)/);
-  assert.match(source, /await findPendingAssignmentFromChatId\(sender\)[\s\S]*findPendingAssignmentFromMemory\(phone\)/);
+  assert.match(source, /async function findPendingAssignmentFromChatId\(chatId, message = \{\}\)/);
+  assert.match(source, /await findPendingAssignmentFromChatId\(sender, message\)[\s\S]*findPendingAssignmentFromMemory\(phone, message\)/);
   assert.match(source, /pendingConfirmationByChatId\.delete\(normalizeChatId\(chatId\)\)/);
   assert.match(source, /pendingConfirmationByChatId\.clear\(\)/);
   assert.match(source, /getContactLidAndPhone/);
@@ -36,7 +36,7 @@ test('dispatch WhatsApp V4 persists confirmation links for restart-safe LID repl
   assert.match(source, /async function persistPendingConfirmationLink/);
   assert.match(source, /prisma\.dispatchWhatsappConfirmation\.createMany/);
   assert.match(source, /async function findPersistedPendingAssignmentByLink/);
-  assert.match(source, /await findPersistedPendingAssignmentByLink\(\{ phone, chatId: sender \}\)/);
+  assert.match(source, /await findPersistedPendingAssignmentByLink\(\{ phone, chatId: sender, message \}\)/);
   assert.match(source, /async function markPersistedConfirmationLinksCompleted/);
   assert.doesNotMatch(source, /findLatestPendingAssignmentByContactName/);
 });
@@ -68,6 +68,19 @@ test('dispatch WhatsApp V4 does not auto-ack immediately after outbound assignme
   assert.match(source, /processRecentInboundConfirmations\(activeClient, reason, options\)/);
   assert.match(source, /if \(ready && client\) scheduleRecentConfirmationCatchup\(client, autoStart \? 'status_start' : 'status_view'\)/);
   assert.doesNotMatch(source, /scheduleRecentConfirmationCatchup\(activeClient, 'after_assignment_send'/);
+});
+
+
+test('dispatch WhatsApp V4 ignores old inbound confirmations before the new assignment message', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
+  assert.match(source, /createdAtMs: Date\.now\(\)/);
+  assert.match(source, /function isMessageAfterPendingContext\(message = \{\}, pending = \{\}\)/);
+  assert.match(source, /inboundTimestamp \* 1000 >= pending\.createdAtMs - 5000/);
+  assert.match(source, /findPendingAssignmentFromChatId\(sender, message\)/);
+  assert.match(source, /findPersistedPendingAssignmentByLink\(\{ phone, chatId: sender, message \}\)/);
+  assert.match(source, /createdAt: \{ lte: new Date\(\(inboundTimestamp \* 1000\) \+ 5000\) \}/);
+  assert.match(source, /updatedAt: \{ lte: new Date\(\(inboundTimestamp \* 1000\) \+ 5000\) \}/);
+  assert.match(source, /findLatestPendingAssignmentByPhone\(phone, message\)/);
 });
 
 test('service request summary does not render the all requests toolbar button', () => {
