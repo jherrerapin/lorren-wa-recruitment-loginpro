@@ -1,5 +1,5 @@
 import { extractMessages } from './whatsapp.js';
-import { dataConsentGateMiddleware } from './dataConsentGate.js';
+import { CAMPAIGN_VACANCY_CONFIRMATION_MODE, dataConsentGateMiddleware } from './dataConsentGate.js';
 
 function normalizeCampaignCode(value) {
   return String(value || '')
@@ -85,6 +85,30 @@ function findCampaignForReferral(campaigns = [], message = {}) {
   }) || null;
 }
 
+function buildAttributionUpdate(candidate = {}, matchedCampaign = null, campaignCodeRaw = '') {
+  if (!matchedCampaign) {
+    return {
+      sourceType: 'META_ADS',
+      campaignCodeRaw: candidate.campaignCodeRaw || campaignCodeRaw
+    };
+  }
+
+  const update = {
+    campaignId: matchedCampaign.id,
+    sourceType: matchedCampaign.sourceType || 'META_ADS',
+    campaignCodeRaw
+  };
+
+  // La vacante solo se asigna cuando la campaña activa tiene una vacante configurada
+  // de forma explícita. No se infiere por texto ni por similitud en esta capa.
+  if (matchedCampaign.vacancyId && !candidate.vacancyId) {
+    update.vacancyId = matchedCampaign.vacancyId;
+    update.botResumeMode = CAMPAIGN_VACANCY_CONFIRMATION_MODE;
+  }
+
+  return update;
+}
+
 export async function attributeCandidateCampaignFromMessage(prisma, candidateId, message = {}) {
   if (!prisma?.campaign?.findMany || !prisma?.candidate?.update || !candidateId) {
     return { attributed: false, reason: 'prisma_not_ready' };
@@ -97,7 +121,14 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
 
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
-    select: { id: true, campaignId: true, sourceType: true, campaignCodeRaw: true }
+    select: {
+      id: true,
+      campaignId: true,
+      vacancyId: true,
+      sourceType: true,
+      campaignCodeRaw: true,
+      botResumeMode: true
+    }
   });
 
   if (!candidate) return { attributed: false, reason: 'candidate_not_found' };
@@ -105,7 +136,14 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
 
   const activeCampaigns = await prisma.campaign.findMany({
     where: { isActive: true },
-    select: { id: true, code: true, name: true, notes: true, sourceType: true }
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      notes: true,
+      sourceType: true,
+      vacancyId: true
+    }
   });
 
   const matchedCampaign = findCampaignForReferral(activeCampaigns, message);
@@ -114,67 +152,67 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
   if (!matchedCampaign) {
     await prisma.candidate.update({
       where: { id: candidateId },
-      data: {
-        sourceType: 'META_ADS',
-        campaignCodeRaw: candidate.campaignCodeRaw || campaignCodeRaw
-      }
+      data: buildAttributionUpdate(candidate, null, campaignCodeRaw)
     });
 
     return { attributed: false, reason: 'metadata_saved_without_campaign_match', campaignCodeRaw };
   }
 
+  const updateData = buildAttributionUpdate(candidate, matchedCampaign, campaignCodeRaw);
   await prisma.candidate.update({
     where: { id: candidateId },
-    data: {
-      campaignId: matchedCampaign.id,
-      sourceType: matchedCampaign.sourceType || 'META_ADS',
-      campaignCodeRaw
-    }
+    data: updateData
   });
 
   return {
     attributed: true,
-    reason: 'matched_referral_metadata',
+    reason: matchedCampaign.vacancyId ? 'matched_referral_campaign_and_vacancy' : 'matched_referral_campaign_without_vacancy',
     campaignId: matchedCampaign.id,
+    vacancyId: matchedCampaign.vacancyId || null,
     campaignCodeRaw
   };
 }
 
-async function runCampaignAttribution(prisma, req, next) {
-  try {
-    const messages = extractMessages(req.body);
-    if (!messages.length) return next();
+async function runCampaignAttribution(prisma, req) {
+  const messages = extractMessages(req.body);
+  if (!messages.length) return;
 
-    for (const message of messages) {
-      const from = message?.from;
-      if (!from || !collectReferralAttributionValues(message).length) continue;
+  for (const message of messages) {
+    const from = message?.from;
+    if (!from || !collectReferralAttributionValues(message).length) continue;
 
-      const candidate = await prisma.candidate.upsert({
-        where: { phone: from },
-        update: {},
-        create: { phone: from }
-      });
+    const candidate = await prisma.candidate.upsert({
+      where: { phone: from },
+      update: {},
+      create: { phone: from }
+    });
 
-      const result = await attributeCandidateCampaignFromMessage(prisma, candidate.id, message);
-      if (result.attributed || result.reason === 'metadata_saved_without_campaign_match') {
-        console.info('[CAMPAIGN_ATTRIBUTION]', JSON.stringify({
-          phone: from,
-          candidateId: candidate.id,
-          attributed: result.attributed,
-          reason: result.reason,
-          campaignId: result.campaignId || null
-        }));
-      }
+    const result = await attributeCandidateCampaignFromMessage(prisma, candidate.id, message);
+    if (result.attributed || result.reason === 'metadata_saved_without_campaign_match') {
+      console.info('[CAMPAIGN_ATTRIBUTION]', JSON.stringify({
+        phone: from,
+        candidateId: candidate.id,
+        attributed: result.attributed,
+        reason: result.reason,
+        campaignId: result.campaignId || null,
+        vacancyId: result.vacancyId || null
+      }));
     }
-
-    return next();
-  } catch (error) {
-    console.warn('[CAMPAIGN_ATTRIBUTION_ERROR]', error?.message || error);
-    return next();
   }
 }
 
 export function campaignAttributionMiddleware(prisma) {
   const consentGate = dataConsentGateMiddleware(prisma);
-  return (req, res, next) => consentGate(req, res, () => runCampaignAttribution(prisma, req, next));
+  return async (req, res, next) => {
+    try {
+      // Primero se guarda la señal objetiva de Meta Ads. Luego se aplica el gate
+      // conversacional. Así el bot confirma la vacante de campaña antes de pedir
+      // autorización o datos personales.
+      await runCampaignAttribution(prisma, req);
+      return consentGate(req, res, next);
+    } catch (error) {
+      console.warn('[CAMPAIGN_ATTRIBUTION_ERROR]', error?.message || error);
+      return consentGate(req, res, next);
+    }
+  };
 }
