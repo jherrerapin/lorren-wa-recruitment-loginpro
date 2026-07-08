@@ -10,6 +10,7 @@ export const CAMPAIGN_VACANCY_CONFIRMATION_MODE = 'campaign_vacancy_pending_conf
 export const DATA_CONSENT_PENDING_MODE = 'awaiting_data_consent';
 
 const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de pedirte datos personales, necesito tu autorización para tratar tus datos y hoja de vida con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nSi autorizas, responde “Acepto”. Si no deseas continuar, responde “No autorizo”.`;
+const CONSENT_CLARIFIER_REPLY = 'Te entiendo. Para poder pedirte datos personales necesito una respuesta clara sobre la autorización. Puedes responder “sí autorizo” o “no autorizo”.';
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
 const VACANCY_NOT_CONFIRMED_REPLY = 'Entendido. Para ubicar bien tu proceso, cuéntame la ciudad y el cargo o vacante que te interesa.';
 
@@ -269,7 +270,8 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
   }
 
   await prisma.candidate.update({ where: { id: candidate.id }, data: { botResumeMode: DATA_CONSENT_PENDING_MODE } });
-  await sendAndStore(prisma, candidate.id, from, CONSENT_PROMPT, 'data_consent_prompt');
+  const reply = candidate.botResumeMode === DATA_CONSENT_PENDING_MODE ? CONSENT_CLARIFIER_REPLY : CONSENT_PROMPT;
+  await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_prompt');
   return true;
 }
 
