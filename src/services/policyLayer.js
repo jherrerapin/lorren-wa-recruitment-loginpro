@@ -1,3 +1,4 @@
+import { hasStrongGenderEvidence } from './genderEvidencePolicy.js';
 const CRITICAL_DISCARD_FIELDS = new Set(['age', 'documentType', 'documentNumber', 'gender']);
 const GREETING_REGEX = /^(hola|buenas|buenos\s+dias|buenas\s+tardes|buenas\s+noches|mucho\s+gusto|si\s+claro|por\s+pdf|gracias|ok|listo|como estas)/i;
 const ADDRESS_AGE_REGEX = /\b(calle|cra|carrera|avenida|av\.?|mz|manzana|torre|apto|barrio|localidad)\s*\d+/i;
@@ -20,12 +21,12 @@ function appearsLikeName(value) {
 
 function hasReliableGenderEvidence(value, evidence = {}) {
   const source = String(evidence.source || '').toLowerCase();
-  const snippet = String(evidence.snippet || '').toLowerCase();
+  const snippet = String(evidence.snippet || '');
   const confidence = Number(evidence.confidence || 0);
-  if (!['FEMALE', 'MALE', 'OTHER'].includes(String(value || '').toUpperCase())) return false;
-
-  const hasExplicitCandidateGender = /\b(soy mujer|soy hombre|me considero mujer|me considero hombre|me identifico como mujer|me identifico como hombre|sexo femenino|sexo masculino|genero femenino|género femenino|genero masculino|género masculino|soy candidata|soy candidato|estoy interesada|estoy interesado|interesada en la vacante|interesado en la vacante|quedo atenta|quedo atento|postulada|postulado|inscrita|inscrito|registrada|registrado|me postulo como candidata|me postulo como candidato|femenin|masculin)\b/.test(snippet);
-  if (!hasExplicitCandidateGender) return false;
+  const normalizedValue = String(value || '').toUpperCase();
+  if (!['FEMALE', 'MALE', 'OTHER'].includes(normalizedValue)) return false;
+  if (normalizedValue === 'OTHER') return hasStrongEvidence(evidence);
+  if (!hasStrongGenderEvidence(normalizedValue, snippet)) return false;
   if (confidence >= 0.9) return true;
   if (!source.includes('responses') && !source.includes('model') && !source.includes('openai') && !source.includes('local')) return false;
   return confidence >= 0.75;

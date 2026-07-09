@@ -318,3 +318,88 @@ test('acepta valores legítimos después de la validación semántica', () => {
   assert.equal(result.fields.transportMode, 'Bus');
   assert.equal(result.fields.medicalRestrictions, 'Sin restricciones medicas');
 });
+
+import { applyFieldPolicy } from '../src/services/policyLayer.js';
+import { buildGenderEvidencePromptText, hasStrongGenderEvidence } from '../src/services/genderEvidencePolicy.js';
+
+const genderCases = {
+  FEMALE: ['soy mujer', 'soy candidata', 'estoy interesada en la vacante', 'quedo atenta', 'me postulo como candidata'],
+  MALE: ['soy hombre', 'soy candidato', 'estoy interesado en la vacante', 'quedo atento'],
+  ambiguous: [
+    'sí señora',
+    'gracias señorita',
+    'la señorita me dijo',
+    'mi esposa está interesada',
+    'es para mi hermana',
+    'quedo atento a la respuesta de la señora',
+    'candidata es la vacante que vi'
+  ]
+};
+
+function sanitizeGenderCase(value, text, source = 'responses_extractor') {
+  return sanitize({
+    text,
+    fields: { gender: value },
+    evidence: { gender: { snippet: text, confidence: 0.95, source } }
+  });
+}
+
+function applyGenderPolicyCase(value, text, source = 'responses_extractor') {
+  return applyFieldPolicy({
+    fields: { gender: value },
+    fieldEvidence: { gender: { snippet: text, confidence: 0.95, source } }
+  });
+}
+
+test('caracterización género: positivos FEMALE usan evidencia fuerte compartida', () => {
+  for (const text of genderCases.FEMALE) {
+    assert.equal(hasStrongGenderEvidence('FEMALE', text), true, text);
+    assert.equal(sanitizeGenderCase('FEMALE', text).fields.gender, 'FEMALE', text);
+    assert.equal(applyGenderPolicyCase('FEMALE', text).persistedFields.gender, 'FEMALE', text);
+  }
+});
+
+test('caracterización género: positivos MALE usan evidencia fuerte compartida', () => {
+  for (const text of genderCases.MALE) {
+    assert.equal(hasStrongGenderEvidence('MALE', text), true, text);
+    assert.equal(sanitizeGenderCase('MALE', text).fields.gender, 'MALE', text);
+    assert.equal(applyGenderPolicyCase('MALE', text).persistedFields.gender, 'MALE', text);
+  }
+});
+
+test('caracterización género: negativos y ambiguos no se aceptan como género del candidato', () => {
+  for (const text of genderCases.ambiguous) {
+    assert.equal(hasStrongGenderEvidence('FEMALE', text), false, text);
+    assert.equal(hasStrongGenderEvidence('MALE', text), false, text);
+    assert.equal(sanitizeGenderCase('FEMALE', text).fields.gender, undefined, text);
+    assert.equal(applyGenderPolicyCase('FEMALE', text).persistedFields.gender, undefined, text);
+  }
+});
+
+test('caracterización género: no se infiere por nombre', () => {
+  const sanitizerResult = sanitizeGenderCase('FEMALE', 'María Fernanda Pérez', 'name_inference');
+  const policyResult = applyGenderPolicyCase('FEMALE', 'María Fernanda Pérez', 'name_inference');
+
+  assert.equal(sanitizerResult.fields.gender, undefined);
+  assert.equal(sanitizerResult.rejectedFields.find((item) => item.field === 'gender')?.reason, 'gender_inferred_from_name');
+  assert.equal(policyResult.persistedFields.gender, undefined);
+  assert.equal(policyResult.reviewQueue[0]?.reason, 'weak_gender_inference');
+});
+
+test('caracterización género: prompt, sanitizador y policy conservan la misma evidencia base', () => {
+  const promptText = buildGenderEvidencePromptText();
+
+  for (const [value, cases] of Object.entries({ FEMALE: genderCases.FEMALE, MALE: genderCases.MALE })) {
+    for (const text of cases) {
+      assert.match(promptText, new RegExp(text.normalize('NFD').replace(/[\u0300-\u036f]/g, ''), 'i'), text);
+      assert.equal(sanitizeGenderCase(value, text).fields.gender, value, text);
+      assert.equal(applyGenderPolicyCase(value, text).persistedFields.gender, value, text);
+    }
+  }
+
+  for (const text of genderCases.ambiguous) {
+    assert.match(promptText, new RegExp(text.normalize('NFD').replace(/[\u0300-\u036f]/g, ''), 'i'), text);
+    assert.equal(sanitizeGenderCase('FEMALE', text).fields.gender, undefined, text);
+    assert.equal(applyGenderPolicyCase('FEMALE', text).persistedFields.gender, undefined, text);
+  }
+});
