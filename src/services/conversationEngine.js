@@ -28,6 +28,7 @@ import {
   normalizeReplySignature
 } from './replySimilarityPolicy.js';
 import { applyCommuteAdvisoryToReply } from './commuteAdvisoryPolicy.js';
+import { applyRejectionMemoryPolicy, buildRequirementRejectionDecision } from './rejectionPolicy.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
@@ -811,7 +812,7 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
       };
     }
 
-    const decision = applyLoopGuardToDecision({
+    const decisionBeforeLoopGuard = applyRejectionMemoryPolicy({
       reply: applyCommuteAdvisoryToReply(raw.reply.trim(), { candidate, vacancy, recentMessages }),
       nextStep: raw.nextStep || currentStep,
       actions: Array.isArray(raw.actions) ? raw.actions : [],
@@ -820,6 +821,12 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
       fallback: false,
       fallbackReason: null
     }, {
+      candidate,
+      recentMessages,
+      isQuestionAnswer: shouldBypassLoopGuardForQuestion(raw)
+    });
+
+    const decision = applyLoopGuardToDecision(decisionBeforeLoopGuard, {
       candidate,
       currentStep,
       recentMessages
@@ -991,9 +998,17 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
           break;
 
         case 'mark_rejected':
-          pendingUpdate.status = CandidateStatus.RECHAZADO;
-          pendingUpdate.rejectionReason = action.data?.reason || 'No cumple requisitos';
-          pendingUpdate.rejectionDetails = action.data?.details || null;
+          {
+            const rejectionDecision = buildRequirementRejectionDecision({ candidate: candidateAfterMerge, vacancy });
+            if (!rejectionDecision.allowed) {
+              blockedActions.push({ action: action.type, reason: rejectionDecision.reason });
+              ignoreModelNextStep = true;
+              break;
+            }
+            pendingUpdate.status = CandidateStatus.RECHAZADO;
+            pendingUpdate.rejectionReason = rejectionDecision.reason;
+            pendingUpdate.rejectionDetails = rejectionDecision.details;
+          }
           pendingUpdate.reminderScheduledFor = null;
           pendingUpdate.reminderState = 'SKIPPED';
           setStep(ConversationStep.DONE, { terminal: true });
@@ -1115,7 +1130,12 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     }
   }
 
-  if (finalStep === ConversationStep.DONE && !readinessAfterMerge.readyForDone && candidateAfterMerge.status !== CandidateStatus.RECHAZADO) {
+  if (
+    finalStep === ConversationStep.DONE
+    && !readinessAfterMerge.readyForDone
+    && candidateAfterMerge.status !== CandidateStatus.RECHAZADO
+    && pendingUpdate.status !== CandidateStatus.RECHAZADO
+  ) {
     blockedActions.push({ action: 'model_next_step', reason: `done_blocked:${readinessAfterMerge.missingForDone.join(',')}` });
     finalStep = readinessAfterMerge.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA;
   }
