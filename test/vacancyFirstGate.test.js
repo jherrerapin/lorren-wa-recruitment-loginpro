@@ -46,7 +46,7 @@ function candidate(overrides = {}) {
   };
 }
 
-async function decide({ text, candidatePatch = {}, vacancies = [], activeVacancies = null, currentVacancy = null, recentMessages = [], attachmentContext = null }) {
+async function decide({ text, candidatePatch = {}, vacancies = [], activeVacancies = null, currentVacancy = null, recentMessages = [], attachmentContext = null, vacancyHints = {} }) {
   return resolveVacancyFirstGate({
     prisma: null,
     candidate: candidate(candidatePatch),
@@ -57,7 +57,8 @@ async function decide({ text, candidatePatch = {}, vacancies = [], activeVacanci
     attachmentContext,
     vacancyHints: {
       allVacancies: vacancies,
-      activeVacancies: activeVacancies ?? vacancies.filter((item) => item.isActive && item.acceptingApplications)
+      activeVacancies: activeVacancies ?? vacancies.filter((item) => item.isActive && item.acceptingApplications),
+      ...vacancyHints
     }
   });
 }
@@ -69,6 +70,78 @@ function assertNoPersonalDataRequest(reply = '') {
 function assertNoPublicityOrPhoto(reply = '') {
   assert.doesNotMatch(reply, /publicidad|foto|imagen/i);
 }
+
+test('metadata confiable gana sobre texto ambiguo y queda trazada como fuente primaria', async () => {
+  const trusted = vacancy({ id: 'vac-meta-ibague' });
+  const bogotaTextMatch = vacancy({
+    id: 'vac-text-bogota',
+    title: 'Auxiliar de Bodega Bogota',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: bogotaOperation
+  });
+
+  const decision = await decide({
+    text: 'Hola, vi algo de bodega en Bogotá pero no sé bien cuál era',
+    vacancies: [trusted, bogotaTextMatch],
+    vacancyHints: { trustedVacancyId: 'vac-meta-ibague' }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, 'vac-meta-ibague');
+  assert.equal(decision.resolution.reason, 'matched_trusted_active_vacancy');
+  assert.equal(decision.resolution.source, 'metadata_config');
+  assert.equal(decision.resolution.fallback, false);
+});
+
+test('sin metadata confiable usa inferencia textual existente marcada como fallback', async () => {
+  const active = vacancy({ id: 'vac-text-fallback' });
+  const decision = await decide({
+    text: 'Buenas noches, te escribo desde Ibagué para la vacante de cargue y descargue',
+    vacancies: [active]
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, 'vac-text-fallback');
+  assert.equal(decision.resolution.reason, 'matched_active_vacancy');
+  assert.equal(decision.resolution.source, 'text_inference_fallback');
+  assert.equal(decision.resolution.fallback, true);
+});
+
+test('metadata confiable inactiva responde seguro y no persiste vacancyId', async () => {
+  const paused = vacancy({ id: 'vac-meta-paused', acceptingApplications: false });
+  const textMatch = vacancy({ id: 'vac-text-active' });
+
+  const decision = await decide({
+    text: 'Estoy en Ibagué para cargue y descargue',
+    vacancies: [paused, textMatch],
+    vacancyHints: { trustedVacancyId: 'vac-meta-paused' }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.INACTIVE_VACANCY_REPLY);
+  assert.equal(decision.vacancyId, undefined);
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+  assert.equal(decision.resolution.reason, 'matched_trusted_inactive_vacancy');
+  assert.equal(decision.resolution.source, 'metadata_config');
+});
+
+test('metadata confiable inexistente responde de forma segura sin fallback textual', async () => {
+  const active = vacancy({ id: 'vac-text-active-not-used' });
+
+  const decision = await decide({
+    text: 'Estoy en Ibagué para cargue y descargue',
+    vacancies: [active],
+    vacancyHints: { trustedVacancyId: 'vac-meta-missing' }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'TRUSTED_VACANCY_NOT_AVAILABLE');
+  assert.equal(decision.vacancyId, undefined);
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+  assert.equal(decision.resolution.reason, 'trusted_vacancy_not_found');
+  assert.equal(decision.resolution.source, 'metadata_config');
+  assert.equal(decision.resolution.fallback, false);
+});
 
 test('A: MENU + Ibagué + cargo claro resuelve y asigna vacante activa sin bloquear por MENU', async () => {
   const active = vacancy({ id: 'vac-post' });
