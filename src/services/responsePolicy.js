@@ -1,3 +1,5 @@
+import { ReplySimilarityThreshold, isSubstantiallySimilarReply, normalizeReplySignature } from './replySimilarityPolicy.js';
+
 const INTENT_VARIANTS = {
   request_cv_pdf_word: [
     'Gracias por enviarlo. Para continuar necesito tu hoja de vida en PDF o DOCX.',
@@ -42,28 +44,15 @@ const INTENT_VARIANTS = {
 };
 
 function normalize(text = '') {
-  return String(text).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function tokenSet(text = '') {
-  return new Set(normalize(text).split(' ').filter(Boolean));
-}
-
-function semanticSimilarity(a = '', b = '') {
-  const aSet = tokenSet(a);
-  const bSet = tokenSet(b);
-  if (!aSet.size || !bSet.size) return 0;
-  let overlap = 0;
-  for (const token of aSet) {
-    if (bSet.has(token)) overlap += 1;
-  }
-  return overlap / Math.max(aSet.size, bSet.size);
+  return normalizeReplySignature(text);
 }
 
 function isStrongRepeat(candidateReply, recentOutbound = []) {
   const norm = normalize(candidateReply);
   if (!norm) return false;
-  return recentOutbound.some((msg) => semanticSimilarity(norm, msg?.body || '') >= 0.8);
+  return recentOutbound.some((msg) => isSubstantiallySimilarReply(candidateReply, msg?.body || '', {
+    threshold: ReplySimilarityThreshold.RESPONSE_POLICY
+  }));
 }
 
 function buildContextSuffix(contextSummary = '') {
