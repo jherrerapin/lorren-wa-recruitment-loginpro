@@ -196,6 +196,49 @@ test('bloquea agenda con vacante inactiva', async () => {
   assert.equal(prisma.updates.some((u) => u.data.currentStep === ConversationStep.SCHEDULING), false);
 });
 
+test('mark_rejected solo rechaza con evidencia real de incumplimiento de requisito y deja trazabilidad', async () => {
+  const prisma = prismaMock();
+  const candidate = completeCandidate({ age: 17, cvStorageKey: null, cvOriginalName: null, cvMimeType: null });
+  const result = await act({
+    prisma,
+    candidate,
+    vacancy: schedulableVacancy({ minAge: 18, maxAge: 45, schedulingEnabled: false }),
+    actions: [{ type: 'mark_rejected', data: { reason: 'No cumple requisitos' } }]
+  });
+
+  const update = prisma.updates.at(-1).data;
+  assert.equal(update.status, 'RECHAZADO');
+  assert.match(update.rejectionReason, /edad/i);
+  assert.match(update.rejectionDetails, /age_below_min/);
+  assert.match(update.rejectionDetails, /Edad detectada: 17/);
+  assert.equal(result.finalStep, ConversationStep.DONE);
+});
+
+test('mark_rejected sin evidencia suficiente queda bloqueado y no cambia estado', async () => {
+  const prisma = prismaMock();
+  const result = await act({
+    prisma,
+    candidate: completeCandidate({ age: 25 }),
+    vacancy: schedulableVacancy({ minAge: 18, maxAge: 45 }),
+    actions: [{ type: 'mark_rejected', data: { reason: 'No cumple requisitos' } }]
+  });
+
+  assert.equal(prisma.updates.some((update) => update.data.status === 'RECHAZADO'), false);
+  assert.deepEqual(result.blockedActions, [{ action: 'mark_rejected', reason: 'missing_requirement_evidence' }]);
+});
+
+test('mark_rejected no convierte faltantes o advertencias geograficas en rechazo', async () => {
+  const prisma = prismaMock();
+  await act({
+    prisma,
+    candidate: completeCandidate({ locality: null, neighborhood: null, age: 25 }),
+    vacancy: schedulableVacancy({ city: 'Bogotá' }),
+    actions: [{ type: 'mark_rejected', data: { reason: 'Vive fuera de zona' } }]
+  });
+
+  assert.equal(prisma.updates.some((update) => update.data.status === 'RECHAZADO'), false);
+});
+
 test('Soacha se trata como ciudad valida y no como localidad bogotana', () => {
   const vacancy = schedulableVacancy({ city: 'Soacha', schedulingEnabled: false });
   const aligned = alignCandidateLocationFields({ locality: 'Soacha', neighborhood: null }, vacancy);
@@ -339,6 +382,54 @@ test('loop guard permite repetir respuesta logística cuando responde una pregun
 
   assert.equal(decision.reply, reply);
   assert.equal(decision.loopGuardApplied, false);
+});
+
+test('despues de rechazo emitido no repite automaticamente el mismo rechazo', async () => {
+  const reply = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque la edad registrada no cumple el rango definido para esta vacante.';
+  const decision = await thinkWithModelReply({
+    inboundText: 'ok',
+    reply,
+    raw: { actions: [{ type: 'mark_rejected', data: { reason: 'No cumple requisitos' } }] },
+    candidate: completeCandidate({
+      status: 'RECHAZADO',
+      rejectionReason: 'edad fuera del rango requerido para la vacante',
+      rejectionDetails: 'age_below_min: Edad detectada: 17. Rango requerido: mínimo 18 años.'
+    }),
+    recentMessages: [
+      { direction: 'OUTBOUND', body: reply, rawPayload: { source: 'conversation_engine', actions: [{ type: 'mark_rejected' }] } },
+      { direction: 'INBOUND', body: 'ok' }
+    ]
+  });
+
+  assert.equal(decision.rejectionMemoryApplied, true);
+  assert.notEqual(decision.reply, reply);
+  assert.deepEqual(decision.actions, []);
+});
+
+test('si candidato pregunta despues del rechazo responde con contexto sin repetir solo el rechazo', async () => {
+  const reply = 'Gracias por tu interés. En este caso no es posible continuar con tu postulación porque la edad registrada no cumple el rango definido para esta vacante.';
+  const decision = await thinkWithModelReply({
+    inboundText: '¿Entonces puedo aplicar más adelante?',
+    reply,
+    raw: {
+      responsePurpose: 'answer_question',
+      actions: [{ type: 'mark_rejected', data: { reason: 'No cumple requisitos' } }]
+    },
+    candidate: completeCandidate({
+      status: 'RECHAZADO',
+      rejectionReason: 'edad fuera del rango requerido para la vacante',
+      rejectionDetails: 'age_below_min: Edad detectada: 17. Rango requerido: mínimo 18 años.'
+    }),
+    recentMessages: [
+      { direction: 'OUTBOUND', body: reply, rawPayload: { source: 'conversation_engine', actions: [{ type: 'mark_rejected' }] } },
+      { direction: 'INBOUND', body: '¿Entonces puedo aplicar más adelante?' }
+    ]
+  });
+
+  assert.equal(decision.rejectionMemoryApplied, true);
+  assert.notEqual(decision.reply, reply);
+  assert.match(decision.reply, /registrada|requisito/i);
+  assert.match(decision.reply, /duda|pregunta|vacante/i);
 });
 
 test('loop guard activa fallback ante tres pedidos del mismo dato faltante sin progreso', async () => {
