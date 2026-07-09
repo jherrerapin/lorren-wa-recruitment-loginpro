@@ -61,7 +61,7 @@ const NON_DATA_LOCATION_TEXT = new Set([
   'quiero aplicar'
 ]);
 
-function normalizeComparableText(value = '') {
+export function normalizeComparableText(value = '') {
   return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
