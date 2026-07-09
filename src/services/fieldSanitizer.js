@@ -11,6 +11,8 @@
  *   tipo de turno, campo pendiente, evidencia, confianza y estructura del dato.
  */
 
+import { hasAmbiguousGenderEvidence, hasStrongGenderEvidence } from './genderEvidencePolicy.js';
+
 const DEFAULT_MIN_CONFIDENCE = 0.72;
 const CORE_IDENTITY_FIELDS = new Set(['fullName', 'documentType', 'documentNumber', 'age']);
 const RESIDENCE_FIELDS = new Set(['locality', 'neighborhood']);
@@ -220,16 +222,12 @@ function hasResidenceEvidenceCue(text = '') {
   return /\b(vivo|resido|residencia|barrio|localidad|comuna|zona|sector|municipio|vereda|ciudadela|me encuentro en|estoy en|desde)\b/.test(normalized);
 }
 
-function hasGenderEvidenceCue(text = '') {
-  const normalized = normalizeText(text);
-  return /\b(soy mujer|soy hombre|me considero mujer|me considero hombre|me identifico como mujer|me identifico como hombre|sexo femenino|sexo masculino|genero femenino|genero masculino|candidata|candidato|interesada|interesado|atenta|atento|postulada|postulado|inscrita|inscrito|registrada|registrado|dispuesta|dispuesto|apta|apto|femenino|femenina|masculino|masculina)\b/.test(normalized)
-    || /\b(me postulo|me presento|aplico|me inscribo) como (mujer|hombre|candidata|candidato)\b/.test(normalized);
+function hasGenderEvidenceCue(value, text = '') {
+  return hasStrongGenderEvidence(value, text);
 }
 
 function hasOnlyCourtesyTreatmentAsGenderCue(text = '') {
-  const normalized = normalizeText(text);
-  if (!/\b(senora|senorita|senor)\b/.test(normalized)) return false;
-  return !/\b(soy|me considero|sexo|genero)\b.{0,24}\b(senora|senorita|senor|femenino|masculino|mujer|hombre)\b/.test(normalized);
+  return hasAmbiguousGenderEvidence(text);
 }
 
 function looksLikePersonalName(value = '') {
@@ -332,7 +330,7 @@ function sanitizeGender(value, evidence, text, context, turnType) {
   if (hasOnlyCourtesyTreatmentAsGenderCue(text)) {
     return { ok: false, reason: 'courtesy_treatment_is_not_candidate_gender' };
   }
-  const genderCue = hasGenderEvidenceCue(text);
+  const genderCue = hasGenderEvidenceCue(value, text);
   const usableEvidence = evidenceIsUsable('gender', evidence, { allowLocalParser: true });
 
   if (evidenceSourceLooksInferential('gender', evidence)) {
