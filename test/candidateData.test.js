@@ -306,13 +306,13 @@ test('normaliza menciones de Soacha como residencia canonica interna', () => {
   assert.equal(normalized.fullName, undefined);
 });
 
-test('no alinea Soacha como localidad valida para vacantes Bogota', () => {
+test('Soacha en vacantes Bogota queda como municipio, no como localidad bogotana', () => {
   const normalized = normalizeCandidateFields({ neighborhood: 'Soacha Compartir' });
   const aligned = alignCandidateLocationFields(normalized, { city: 'Bogota' }, { clearAlternate: true });
 
   assert.equal(aligned.locality, null);
-  assert.equal(aligned.neighborhood, null);
-  assert.equal(getCandidateResidenceValue({ locality: 'Soacha Cundinamarca' }, { city: 'Bogota' }), null);
+  assert.equal(aligned.neighborhood, 'Soacha Cundinamarca');
+  assert.equal(getCandidateResidenceValue({ neighborhood: 'Soacha Cundinamarca' }, { city: 'Bogota' }), 'Soacha Cundinamarca');
 });
 
 test('usa localidad como residencia principal para vacantes de Bogota', () => {

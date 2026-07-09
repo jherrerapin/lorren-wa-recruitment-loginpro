@@ -64,7 +64,13 @@ const IMPLICIT_NO_MEDICAL_RESTRICTION_PATTERNS = [
 ];
 const RIDE_HAIL_VARIANTS = ['uber', 'indriver', 'in driver', 'taxi'];
 const TRANSPORT_PRIORITY = ['Moto', 'Carro', 'Bicicleta', 'Bus', 'Independiente'];
-const SOACHA_RESIDENCE_VALUE = 'Soacha Cundinamarca';
+const MUNICIPALITY_RESIDENCE_VALUES = Object.freeze({
+  soacha: 'Soacha Cundinamarca',
+  funza: 'Funza Cundinamarca',
+  mosquera: 'Mosquera Cundinamarca',
+  madrid: 'Madrid Cundinamarca'
+});
+const SOACHA_RESIDENCE_VALUE = MUNICIPALITY_RESIDENCE_VALUES.soacha;
 
 function looksLikeJobRoleChunk(value = '') {
   const normalized = normalizeLooseText(value);
@@ -85,9 +91,16 @@ function mentionsSoacha(value = '') {
   return /\bsoacha\b/.test(normalizeLooseText(value));
 }
 
+function normalizeMunicipalityResidence(value = '') {
+  const normalized = normalizeLooseText(value);
+  for (const [municipality, residence] of Object.entries(MUNICIPALITY_RESIDENCE_VALUES)) {
+    if (new RegExp(`\\b${municipality}\\b`).test(normalized)) return residence;
+  }
+  return null;
+}
+
 function normalizeResidenceValue(value = '') {
-  if (mentionsSoacha(value)) return SOACHA_RESIDENCE_VALUE;
-  return capitalizeWords(value);
+  return normalizeMunicipalityResidence(value) || capitalizeWords(value);
 }
 
 export function looksLikeNoMedicalRestrictionsText(text = '', options = {}) {
@@ -144,7 +157,8 @@ export function getResidenceFieldConfig(vacancyOrCity = null) {
 export function getCandidateResidenceValue(candidate = {}, vacancyOrCity = null) {
   const config = getResidenceFieldConfig(vacancyOrCity || candidate?.vacancy || candidate);
   if (config.field === 'locality') {
-    return normalizeBogotaLocalidad(candidate?.locality || candidate?.neighborhood || candidate?.zone || '');
+    return normalizeBogotaLocalidad(candidate?.locality || candidate?.neighborhood || candidate?.zone || '')
+      || normalizeMunicipalityResidence(candidate?.neighborhood || candidate?.zone || candidate?.locality || '');
   }
   return candidate?.neighborhood || candidate?.locality || candidate?.zone || null;
 }
@@ -159,9 +173,14 @@ export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, 
     const residenceSource = explicitLocality || normalized.neighborhood || null;
     const bogotaLocalidad = normalizeBogotaLocalidad(residenceSource);
 
+    const municipalityResidence = normalizeMunicipalityResidence(residenceSource);
+
     if (bogotaLocalidad) {
       normalized.locality = bogotaLocalidad;
       if (clearAlternate) normalized.neighborhood = null;
+    } else if (municipalityResidence) {
+      normalized.locality = null;
+      normalized.neighborhood = municipalityResidence;
     } else {
       normalized.locality = null;
       if (clearAlternate) normalized.neighborhood = null;

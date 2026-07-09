@@ -218,8 +218,8 @@ test('act no alinea Soacha como localidad para Bogota', async () => {
   });
 
   assert.equal(prisma.updates.some((update) => update.data.locality === 'Soacha Cundinamarca'), false);
-  assert.equal(prisma.updates.some((update) => update.data.neighborhood === 'Soacha Compartir'), false);
-  assert.equal(result.finalStep, ConversationStep.COLLECTING_DATA);
+  assert.equal(prisma.updates.some((update) => update.data.neighborhood === 'Soacha Cundinamarca'), true);
+  assert.equal(result.finalStep, ConversationStep.ASK_CV);
 });
 
 test('act produce el mismo cierre, update y bloqueos con acciones equivalentes en distinto orden', async () => {
@@ -492,4 +492,112 @@ test('loop guard variants incluyen microcontexto seguro sin inventar datos', asy
   assert.equal(decision.loopGuardApplied, true);
   assert.match(decision.reply, /documento|edad/i);
   assert.doesNotMatch(decision.reply, /entrevista|agendada|Bogotá|Loginpro/i);
+});
+
+test('Bogotá como residencia sin localidad válida mantiene pendiente pedir localidad', () => {
+  const vacancy = schedulableVacancy({ city: 'Bogotá' });
+  const aligned = alignCandidateLocationFields({ locality: 'Bogotá' }, vacancy);
+
+  assert.equal(aligned.locality, null);
+  assert.equal(aligned.neighborhood, null);
+});
+
+test('Soacha en vacante Bogotá se guarda como municipio y no queda pendiente localidad bogotana', async () => {
+  const vacancy = schedulableVacancy({ city: 'Bogotá', schedulingEnabled: false });
+  const prisma = prismaMock();
+  const candidate = completeCandidate({ locality: null, neighborhood: null, cvStorageKey: null, cvOriginalName: null, cvMimeType: null });
+
+  const result = await act({
+    actions: [{ type: 'save_fields', data: { neighborhood: 'Vivo en Soacha' } }],
+    candidate,
+    vacancy,
+    extractedFields: {},
+    nextStep: ConversationStep.COLLECTING_DATA,
+    prisma
+  });
+
+  assert.ok(prisma.updates.some((update) => update.data.neighborhood === 'Soacha Cundinamarca'));
+  assert.equal(result.readiness.missingFields.includes('locality'), false);
+});
+
+test('vacante Montevideo Bogotá no rechaza ni bloquea residencia en Soacha', async () => {
+  const vacancy = schedulableVacancy({
+    city: 'Bogotá',
+    title: 'Auxiliar Cargue y Descargue Montevideo',
+    operation: { name: 'Montevideo', city: { name: 'Bogotá' } },
+    schedulingEnabled: false
+  });
+  const prisma = prismaMock();
+  const candidate = completeCandidate({ locality: null, neighborhood: null, cvStorageKey: null, cvOriginalName: null, cvMimeType: null });
+
+  const result = await act({
+    actions: [{ type: 'save_fields', data: { neighborhood: 'Soacha' } }, { type: 'request_cv' }],
+    candidate,
+    vacancy,
+    extractedFields: {},
+    nextStep: ConversationStep.ASK_CV,
+    prisma
+  });
+
+  assert.equal(result.blockedActions.some((item) => String(item.reason || '').includes('rejected')), false);
+  assert.equal(prisma.updates.some((update) => update.data.status === 'RECHAZADO'), false);
+  assert.equal(result.finalStep, ConversationStep.ASK_CV);
+});
+
+test('vacante Siberia advierte por residencia lejana sin rechazar automáticamente', async () => {
+  const originalKey = process.env.OPENAI_API_KEY;
+  const originalPost = axios.post;
+  process.env.OPENAI_API_KEY = 'test-key';
+  axios.post = async () => ({
+    data: { choices: [{ message: { content: JSON.stringify({ reply: 'Compárteme tu hoja de vida en PDF o Word/DOCX.', nextStep: ConversationStep.ASK_CV, actions: [{ type: 'request_cv' }], extractedFields: {} }) } }] }
+  });
+
+  try {
+    const decision = await think({
+      inboundText: 'listo',
+      candidate: completeCandidate({ locality: null, neighborhood: 'Soacha Cundinamarca' }),
+      vacancy: schedulableVacancy({ title: 'Auxiliar de Bodega Siberia', operationAddress: 'Parque industrial Siberia' }),
+      recentMessages: [],
+      currentStep: ConversationStep.COLLECTING_DATA
+    });
+
+    assert.match(decision.reply, /traslado hacia Siberia puede ser exigente/i);
+    assert.match(decision.reply, /No te descarto/i);
+    assert.equal(decision.actions.some((action) => action.type === 'mark_rejected'), false);
+  } finally {
+    axios.post = originalPost;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalKey;
+  }
+});
+
+test('vacante Siberia no advierte para Funza o Mosquera y no repite advertencia ya enviada', async () => {
+  const baseReply = 'Seguimos con el proceso.';
+  const originalKey = process.env.OPENAI_API_KEY;
+  const originalPost = axios.post;
+  process.env.OPENAI_API_KEY = 'test-key';
+  axios.post = async () => ({
+    data: { choices: [{ message: { content: JSON.stringify({ reply: baseReply, nextStep: ConversationStep.COLLECTING_DATA, actions: [{ type: 'nothing' }], extractedFields: {} }) } }] }
+  });
+
+  try {
+    const vacancy = schedulableVacancy({ title: 'Auxiliar de Bodega Siberia', operationAddress: 'Siberia' });
+    const funza = await think({ inboundText: 'ok', candidate: completeCandidate({ locality: null, neighborhood: 'Funza Cundinamarca' }), vacancy, recentMessages: [], currentStep: ConversationStep.COLLECTING_DATA });
+    const mosquera = await think({ inboundText: 'ok', candidate: completeCandidate({ locality: null, neighborhood: 'Mosquera Cundinamarca' }), vacancy, recentMessages: [], currentStep: ConversationStep.COLLECTING_DATA });
+    const repeated = await think({
+      inboundText: 'sí quiero seguir',
+      candidate: completeCandidate({ locality: null, neighborhood: 'Soacha Cundinamarca' }),
+      vacancy,
+      recentMessages: [{ direction: 'OUTBOUND', body: 'Te aviso con cuidado: el traslado hacia Siberia puede ser exigente desde tu zona. No te descarto por eso; si para ti es viable continuar, seguimos con el proceso.' }],
+      currentStep: ConversationStep.COLLECTING_DATA
+    });
+
+    assert.equal(funza.reply, baseReply);
+    assert.equal(mosquera.reply, baseReply);
+    assert.equal(repeated.reply, baseReply);
+  } finally {
+    axios.post = originalPost;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalKey;
+  }
 });

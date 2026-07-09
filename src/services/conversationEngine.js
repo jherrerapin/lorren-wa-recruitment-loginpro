@@ -27,6 +27,7 @@ import {
   isSubstantiallySimilarReply,
   normalizeReplySignature
 } from './replySimilarityPolicy.js';
+import { applyCommuteAdvisoryToReply } from './commuteAdvisoryPolicy.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
@@ -385,7 +386,7 @@ FALLOS RECURRENTES QUE DEBES EVITAR:
 - No pierdas datos enviados en varios fragmentos.
 - No ignores transportes como carro, automovil, bici, bicicleta, cicla, bus o independiente.
 - Si la vacante es en Bogota, pide y usa la localidad como zona de residencia; no sigas pidiendo barrio.
-- Para vacantes en Bogota, solo acepta una localidad bogotana reconocida. Si el candidato menciona Soacha u otro municipio, pide la localidad de Bogota de forma puntual.
+- Para vacantes en Bogota, si el candidato vive en Bogota pide una localidad bogotana reconocida. Si vive en Soacha u otro municipio, guarda ese municipio como residencia y no pidas localidad bogotana.
 - Si el candidato da una localidad o la menciona como barrio para Bogota, guardala como localidad.
 - No uses la frase "barrio o localidad": pide un solo dato segun la ciudad (Bogota = localidad; otras ciudades = barrio).
 - Si la vacante exige experiencia (experienceRequired = YES), debes pedir y capturar experiencia (si/no) y tiempo de experiencia.
@@ -811,7 +812,7 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
     }
 
     const decision = applyLoopGuardToDecision({
-      reply: raw.reply.trim(),
+      reply: applyCommuteAdvisoryToReply(raw.reply.trim(), { candidate, vacancy, recentMessages }),
       nextStep: raw.nextStep || currentStep,
       actions: Array.isArray(raw.actions) ? raw.actions : [],
       extractedFields: raw.extractedFields || {},
