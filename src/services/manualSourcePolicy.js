@@ -1,5 +1,6 @@
 const MANUAL_SOURCE_PREFIXES = ['admin_', 'manual_'];
 const MANUAL_SOURCE_VALUES = new Set(['MANUAL_AUTHORIZED', 'manual_authorized', 'admin_outbound']);
+const HUMAN_OUTBOUND_ACTORS = new Set(['RECRUITER', 'ADMIN']);
 
 function normalizeSource(source = '') {
   return String(source || '').trim();
@@ -34,7 +35,7 @@ export function classifyOutboundActor(rawPayload = {}) {
   const source = getOutboundSource(rawPayload);
   const explicitActor = normalizeActor(rawPayload?.actor || rawPayload?.actorRole);
   const actor = explicitActor || inferOutboundActorFromSource(source);
-  const isManual = actor === 'RECRUITER' || actor === 'ADMIN' || isManualOutboundSource(source);
+  const isManual = HUMAN_OUTBOUND_ACTORS.has(actor) || isManualOutboundSource(source);
 
   return {
     actor,
