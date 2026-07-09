@@ -3,6 +3,11 @@ import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import {
+  buildDispatchServiceDateWhere,
+  filterDispatchServiceRequestsByDate,
+  normalizeDispatchDateParam
+} from './dispatchDate.js';
 
 const execFileAsync = promisify(execFile);
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
@@ -23,24 +28,8 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function todayIsoDate() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota' })).toISOString().slice(0, 10);
-}
-
 export function normalizeProgrammingDate(value) {
-  const rawValue = normalizeString(value);
-  if (!rawValue) return todayIsoDate();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) return todayIsoDate();
-  const parsed = new Date(`${rawValue}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) return todayIsoDate();
-  return rawValue;
-}
-
-function buildUtcDayRange(dateText) {
-  const start = new Date(`${dateText}T00:00:00.000Z`);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
+  return normalizeDispatchDateParam(value);
 }
 
 function formatBogotaDateTime(value = new Date()) {
@@ -102,10 +91,9 @@ function resolveBrowserExecutablePath() {
 
 export async function loadProgrammingRequests(prisma, selectedDate, options = {}) {
   const normalizedDate = normalizeProgrammingDate(selectedDate);
-  const { start, end } = buildUtcDayRange(normalizedDate);
   const requestId = normalizeString(options.requestId);
   const requests = await prisma.dispatchServiceRequest.findMany({
-    where: requestId ? { id: requestId } : { serviceDate: { gte: start, lt: end } },
+    where: requestId ? { id: requestId } : buildDispatchServiceDateWhere(normalizedDate),
     include: {
       service: true,
       assignments: {
@@ -115,7 +103,10 @@ export async function loadProgrammingRequests(prisma, selectedDate, options = {}
     },
     orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
   });
-  return { selectedDate: normalizedDate, requests };
+  return {
+    selectedDate: normalizedDate,
+    requests: requestId ? requests : filterDispatchServiceRequestsByDate(requests, normalizedDate)
+  };
 }
 
 export function buildProgrammingCompletionSummary(requests) {
