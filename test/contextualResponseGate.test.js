@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import {
   ContextualAllowedAction,
   evaluateContextualResponseGate,
+  getLastOutboundContext,
   inferContextualSemanticIntent,
   isManualOutboundSource
 } from '../src/services/contextualResponseGate.js';
+import { hasRecentHumanIntervention } from '../src/services/conversationEngine.js';
 
 function completeCandidate(overrides = {}) {
   return {
@@ -54,6 +56,45 @@ function manualOutbound(overrides = {}) {
     ...overrides
   };
 }
+
+
+function outboundWithRaw(rawPayload = {}, overrides = {}) {
+  return {
+    direction: 'OUTBOUND',
+    body: 'Outbound',
+    rawPayload,
+    createdAt: new Date('2026-05-16T13:00:00.000Z'),
+    ...overrides
+  };
+}
+
+const manualSourceCases = [
+  ['sin source por compatibilidad', {}, true, 'RECRUITER'],
+  ['admin_*', { source: 'admin_manual_vacancy_info' }, true, 'RECRUITER'],
+  ['manual_*', { source: 'manual_followup' }, true, 'RECRUITER'],
+  ['MANUAL_AUTHORIZED', { source: 'MANUAL_AUTHORIZED' }, true, 'RECRUITER'],
+  ['reminder*', { source: 'reminder_interview' }, false, 'REMINDER'],
+  ['system*', { source: 'system_notification' }, false, 'SYSTEM'],
+  ['source bot normal', { source: 'bot_flow' }, false, 'BOT'],
+  ['actor RECRUITER gana sobre source ambiguo', { source: 'bot_flow', actor: 'RECRUITER' }, true, 'RECRUITER']
+];
+
+test('política manual source clasifica fuentes humanas y automáticas de forma compatible', () => {
+  for (const [label, rawPayload, expectedManual, expectedActor] of manualSourceCases) {
+    const context = getLastOutboundContext([outboundWithRaw(rawPayload)]);
+
+    assert.equal(context.isManual, expectedManual, label);
+    assert.equal(context.actor, expectedActor, label);
+  }
+});
+
+test('hasRecentHumanIntervention y getLastOutboundContext clasifican igual manual source', () => {
+  for (const [label, rawPayload, expectedManual] of manualSourceCases) {
+    const recentMessages = [outboundWithRaw(rawPayload)];
+    assert.equal(hasRecentHumanIntervention(recentMessages), expectedManual, label);
+    assert.equal(getLastOutboundContext(recentMessages).isManual, expectedManual, label);
+  }
+});
 
 test('candidato citado + último outbound manual + cierre contextual no reabre flujo', () => {
   const result = evaluateContextualResponseGate({
