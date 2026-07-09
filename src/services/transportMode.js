@@ -1,5 +1,4 @@
-import './dispatchWorkerExitReasonSafePatch.js';
-import './dispatchWhatsappConfirmationPatch.js';
+import { normalizeComparableText } from './geographyNormalization.js';
 
 export class TransportNormalizationService {
   normalize(value) {
@@ -11,23 +10,6 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
-}
-
-function normalizeComparableText(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-function titleCase(value) {
-  return String(value || '')
-    .split(' ')
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
 }
 
 export function normalizeTransportMode(value) {
