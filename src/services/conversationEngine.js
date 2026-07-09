@@ -516,17 +516,58 @@ function repairLooseJsonObject(candidate = '') {
     .replace(/:\s*'([^']*)'/g, (_match, value) => `: ${JSON.stringify(value)}`);
 }
 
+function attachParseStrategy(parsed, parseStrategy) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
+  return Object.defineProperty(parsed, '__parseStrategy', {
+    value: parseStrategy,
+    enumerable: true,
+    configurable: true
+  });
+}
+
+function hasMinimumEngineSchema(parsed) {
+  return Boolean(
+    parsed
+    && typeof parsed === 'object'
+    && !Array.isArray(parsed)
+    && typeof parsed.reply === 'string'
+    && Array.isArray(parsed.actions)
+    && parsed.extractedFields
+    && typeof parsed.extractedFields === 'object'
+    && !Array.isArray(parsed.extractedFields)
+  );
+}
+
+function parseJsonCandidate(candidate, parseStrategy, { requireMinimumSchema = false } = {}) {
+  try {
+    const parsed = JSON.parse(candidate);
+    if (requireMinimumSchema && !hasMinimumEngineSchema(parsed)) return null;
+    return attachParseStrategy(parsed, parseStrategy);
+  } catch {
+    return null;
+  }
+}
+
 export function parseEngineJson(rawText = '{}') {
   const text = String(rawText || '').trim();
-  const candidates = [
-    text,
-    text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim(),
-    findBalancedJsonObject(text)
-  ].filter(Boolean);
+  const markdown = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const balanced = findBalancedJsonObject(text);
+  const strictCandidates = [
+    { value: text, strategy: 'strict' },
+    { value: markdown, strategy: 'markdown' },
+    { value: balanced, strategy: 'balanced' }
+  ].filter((candidate) => candidate.value);
 
-  for (const candidate of candidates) {
-    try { return JSON.parse(candidate); } catch {}
-    try { return JSON.parse(repairLooseJsonObject(candidate)); } catch {}
+  for (const candidate of strictCandidates) {
+    const parsed = parseJsonCandidate(candidate.value, candidate.strategy);
+    if (parsed) return parsed;
+  }
+
+  for (const candidate of strictCandidates) {
+    const repaired = repairLooseJsonObject(candidate.value);
+    if (repaired === candidate.value) continue;
+    const parsed = parseJsonCandidate(repaired, 'repaired', { requireMinimumSchema: true });
+    if (parsed) return parsed;
   }
 
   return null;
@@ -686,7 +727,10 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
 
     const raw = parseEngineJson(response.data?.choices?.[0]?.message?.content || '{}');
     if (!raw || typeof raw.reply !== 'string') {
-      console.warn('[ENGINE_PARSE_FAIL]', { phone: candidate?.phone });
+      console.warn('[ENGINE_PARSE_FAIL]', {
+        phone: candidate?.phone,
+        parseStrategy: raw?.__parseStrategy || 'none'
+      });
       return {
         reply: fallbackReply,
         nextStep: currentStep,
