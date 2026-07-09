@@ -116,7 +116,7 @@ test('listOfferableSlots permite dias futuros dentro de la semana en curso cuand
 });
 
 
-test('getInterviewReminderAt calcula recordatorio 40 minutos antes de entrevista de 10:00 a.m. Colombia', () => {
+test('getInterviewReminderAt calcula recordatorio 1 hora antes de entrevista de 10:00 a.m. Colombia', () => {
   const interviewDate = new Date('2026-04-08T15:00:00.000Z'); // 10:00 a.m. Colombia
-  assert.equal(getInterviewReminderAt(interviewDate).toISOString(), '2026-04-08T14:20:00.000Z'); // 9:20 a.m. Colombia
+  assert.equal(getInterviewReminderAt(interviewDate).toISOString(), '2026-04-08T14:00:00.000Z'); // 9:00 a.m. Colombia
 });

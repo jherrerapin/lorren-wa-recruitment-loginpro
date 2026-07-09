@@ -20,11 +20,12 @@ export const CANDIDATE_PROCESS_REMINDER_DELAY_MS = Number.parseInt(
   10
 ) || (2 * 60 * 60 * 1000);
 const INTERVIEW_REMINDER_LEAD_MS = Number.parseInt(
-  process.env.INTERVIEW_REMINDER_LEAD_MS || String(40 * 60 * 1000), 10
-) || (40 * 60 * 1000);
+  process.env.INTERVIEW_REMINDER_LEAD_MS || String(60 * 60 * 1000), 10
+) || (60 * 60 * 1000);
 const INTERVIEW_REMINDER_EARLY_TOLERANCE_MS = 5 * 60 * 1000;
 const INTERVIEW_REMINDER_LATE_TOLERANCE_MS = 10 * 60 * 1000;
 const ACTIVE_INTERVIEW_STATUSES = ['SCHEDULED', 'CONFIRMED'];
+const NO_RESPONSE_ELIGIBLE_INTERVIEW_STATUSES = ['SCHEDULED'];
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 const INTERVIEW_BOOKING_REMINDER_SOURCE = 'interview_booking_reminder';
 
@@ -191,7 +192,8 @@ export async function scheduleReminderForCandidate(prisma, candidateId, now = ne
   const alreadyScheduled = candidate.reminderState === 'SCHEDULED' && candidate.reminderScheduledFor;
   if (alreadyScheduled) return;
 
-  const reminderAt = new Date(now.getTime() + CANDIDATE_PROCESS_REMINDER_DELAY_MS);
+  const reminderAnchor = candidate.lastOutboundAt ? new Date(candidate.lastOutboundAt) : now;
+  const reminderAt = new Date(reminderAnchor.getTime() + CANDIDATE_PROCESS_REMINDER_DELAY_MS);
   await prisma.candidate.update({
     where: { id: candidateId },
     data: {
@@ -371,7 +373,7 @@ async function claimInterviewNoResponse(prisma, booking, now, windowEnd) {
     where: {
       id: booking.id,
       candidateId: booking.candidateId,
-      status: { in: ACTIVE_INTERVIEW_STATUSES },
+      status: { in: NO_RESPONSE_ELIGIBLE_INTERVIEW_STATUSES },
       reminderSentAt: { not: null },
       scheduledAt: {
         gte: now,
@@ -413,7 +415,7 @@ async function runInterviewNoResponseDispatcher(prisma, now = new Date(), candid
   const bookings = await prisma.interviewBooking.findMany({
     where: {
       ...(candidateId ? { candidateId } : {}),
-      status: { in: ACTIVE_INTERVIEW_STATUSES },
+      status: { in: NO_RESPONSE_ELIGIBLE_INTERVIEW_STATUSES },
       reminderSentAt: { not: null },
       scheduledAt: {
         gte: now,
@@ -640,14 +642,22 @@ export async function handleInterviewReminderResponse(prisma, candidateId, respo
   const nextStatus = statusByIntent[intent];
   if (!nextStatus) return { status: 'UNCHANGED', intent };
 
-  const updatedBooking = await prisma.interviewBooking.update({
-    where: { id: booking.id },
+  const transition = await prisma.interviewBooking.updateMany({
+    where: {
+      id: booking.id,
+      status: { in: ACTIVE_INTERVIEW_STATUSES }
+    },
     data: {
       status: nextStatus,
       reminderResponse: responseText,
       reminderWindowClosed: true
     }
   });
+  if (transition.count !== 1) return { status: 'UNCHANGED', intent };
+
+  const updatedBooking = typeof prisma.interviewBooking.findUnique === 'function'
+    ? await prisma.interviewBooking.findUnique({ where: { id: booking.id } })
+    : { ...booking, status: nextStatus, reminderResponse: responseText, reminderWindowClosed: true };
 
   return { status: nextStatus, intent, booking: updatedBooking };
 }

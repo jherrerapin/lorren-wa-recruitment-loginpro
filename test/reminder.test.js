@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canScheduleReminderPolicy, isWithinWhatsappWindow } from '../src/services/reminderPolicy.js';
-import { buildReminderText, handleInterviewReminderResponse, runReminderDispatcher } from '../src/services/reminder.js';
+import { buildReminderText, handleInterviewReminderResponse, runInterviewReminderDispatcher, runReminderDispatcher } from '../src/services/reminder.js';
 import { createMockPrisma } from './helpers/mockPrisma.js';
 import { createWhatsappMock } from './helpers/mockWhatsapp.js';
 import { installOpenAIMock } from './helpers/mockOpenAI.js';
 
 const INTERVIEW_10_AM_CO = '2026-04-08T15:00:00.000Z';
-const REMINDER_9_20_AM_CO = '2026-04-08T14:20:00.000Z';
+const REMINDER_9_00_AM_CO = '2026-04-08T14:00:00.000Z';
 
 function setupWhatsappEnv() {
   process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
@@ -158,9 +158,9 @@ test('runReminderDispatcher envía recordatorio contextualizado según lo que fa
     restoreAxios();
   }
 });
-test('recordatorio de entrevista se envía 40 minutos antes de entrevista de 10:00 a.m. Colombia y marca reminderSentAt', async () => {
+test('recordatorio de entrevista se envía 1 hora antes de entrevista de 10:00 a.m. Colombia y marca reminderSentAt', async () => {
   setupWhatsappEnv();
-  const now = new Date(REMINDER_9_20_AM_CO);
+  const now = new Date(REMINDER_9_00_AM_CO);
   const prisma = createMockPrisma({
     candidates: [{
       id: 'cand-interview-reminder',
@@ -184,6 +184,8 @@ test('recordatorio de entrevista se envía 40 minutos antes de entrevista de 10:
     }],
     vacancies: [{
       id: 'vac',
+      isActive: true,
+      schedulingEnabled: true,
       title: 'Auxiliar de bodega Fontibon',
       role: 'Auxiliar de bodega',
       interviewAddress: 'Calle 80 # 12-34'
@@ -192,7 +194,7 @@ test('recordatorio de entrevista se envía 40 minutos antes de entrevista de 10:
   const whatsappMock = createWhatsappMock();
   const restoreAxios = installOpenAIMock({ whatsappMock });
   try {
-    await runReminderDispatcher(prisma, { now });
+    await runInterviewReminderDispatcher(prisma, { now, candidateId: 'cand-interview-reminder' });
     assert.equal(whatsappMock.sentMessages.length, 1);
     assert.match(whatsappMock.sentMessages[0].body, /te recuerdo que tienes entrevista|confirmas tu asistencia/i);
     assert.match(whatsappMock.sentMessages[0].body, /Auxiliar de bodega/);
@@ -204,9 +206,9 @@ test('recordatorio de entrevista se envía 40 minutos antes de entrevista de 10:
     restoreAxios();
   }
 });
-test('recordatorio de entrevista no se duplica si ya fue enviado 40 minutos antes', async () => {
+test('recordatorio de entrevista no se duplica si ya fue enviado 1 hora antes', async () => {
   setupWhatsappEnv();
-  const now = new Date('2026-04-08T14:21:00.000Z'); // 9:21 a.m. Colombia
+  const now = new Date('2026-04-08T14:01:00.000Z'); // 9:01 a.m. Colombia
   const prisma = createMockPrisma({
     candidates: [{
       id: 'cand-interview-reminder-forty-before',
@@ -224,7 +226,7 @@ test('recordatorio de entrevista no se duplica si ya fue enviado 40 minutos ante
       slotId: 'slot',
       scheduledAt: new Date(INTERVIEW_10_AM_CO),
       status: 'SCHEDULED',
-      reminderSentAt: new Date(REMINDER_9_20_AM_CO),
+      reminderSentAt: new Date(REMINDER_9_00_AM_CO),
       reminderWindowClosed: true
     }]
   });
@@ -233,7 +235,7 @@ test('recordatorio de entrevista no se duplica si ya fue enviado 40 minutos ante
   try {
     await runReminderDispatcher(prisma, { now });
     assert.equal(whatsappMock.sentMessages.length, 0);
-    assert.equal(prisma.state.interviewBookings[0].reminderSentAt.toISOString(), REMINDER_9_20_AM_CO);
+    assert.equal(prisma.state.interviewBookings[0].reminderSentAt.toISOString(), REMINDER_9_00_AM_CO);
   } finally {
     restoreAxios();
   }
@@ -259,22 +261,23 @@ test('booking pasa a NO_RESPONSE faltando 5 minutos si no hubo respuesta al remi
       slotId: 'slot',
       scheduledAt: new Date(INTERVIEW_10_AM_CO),
       status: 'SCHEDULED',
-      reminderSentAt: new Date(REMINDER_9_20_AM_CO),
+      reminderSentAt: new Date(REMINDER_9_00_AM_CO),
       reminderWindowClosed: true
     }],
+    vacancies: [{ id: 'vac', isActive: true, schedulingEnabled: true }],
     messages: [{
       id: 'msg-reminder',
       candidateId: 'cand-no-response',
       direction: 'OUTBOUND',
       body: 'recordatorio entrevista',
-      createdAt: new Date(REMINDER_9_20_AM_CO),
+      createdAt: new Date(REMINDER_9_00_AM_CO),
       rawPayload: { source: 'interview_booking_reminder' }
     }]
   });
   const whatsappMock = createWhatsappMock();
   const restoreAxios = installOpenAIMock({ whatsappMock });
   try {
-    await runReminderDispatcher(prisma, { now });
+    await runInterviewReminderDispatcher(prisma, { now, candidateId: 'cand-no-response' });
     assert.equal(prisma.state.interviewBookings[0].status, 'NO_RESPONSE');
     assert.equal(whatsappMock.sentMessages.length, 1);
     assert.match(whatsappMock.sentMessages[0].body, /tu entrevista es en 5 minutos/i);
@@ -313,7 +316,7 @@ async function assertReminderTransition({ candidateText, expectedStatus }) {
       slotId: 'slot-test',
       scheduledAt: new Date(INTERVIEW_10_AM_CO),
       status: 'SCHEDULED',
-      reminderSentAt: new Date(REMINDER_9_20_AM_CO),
+      reminderSentAt: new Date(REMINDER_9_00_AM_CO),
       reminderWindowClosed: true
     }]
   });
@@ -351,4 +354,49 @@ test('respuesta de reprogramación al recordatorio cambia entrevista a RESCHEDUL
     candidateText: 'Necesito reprogramar la entrevista',
     expectedStatus: 'RESCHEDULED'
   });
+});
+
+test('scheduleReminderForCandidate agenda recordatorio 2 horas después del último outbound relevante', async () => {
+  const { scheduleReminderForCandidate, CANDIDATE_PROCESS_REMINDER_DELAY_MS } = await import('../src/services/reminder.js');
+  const lastOutboundAt = new Date('2026-04-07T18:10:00.000Z');
+  const prisma = createMockPrisma({
+    candidates: [{
+      id: 'cand-process-anchor',
+      phone: '570000000010',
+      status: 'NUEVO',
+      currentStep: 'ASK_CV',
+      reminderState: 'NONE',
+      reminderScheduledFor: null,
+      lastInboundAt: new Date('2026-04-07T18:00:00.000Z'),
+      lastOutboundAt,
+      fullName: 'Persona Ejemplo'
+    }]
+  });
+
+  await scheduleReminderForCandidate(prisma, 'cand-process-anchor', new Date('2026-04-07T18:30:00.000Z'));
+
+  assert.equal(
+    prisma.state.candidates[0].reminderScheduledFor.toISOString(),
+    new Date(lastOutboundAt.getTime() + CANDIDATE_PROCESS_REMINDER_DELAY_MS).toISOString()
+  );
+});
+
+test('booking CONFIRMED no es pisado por NO_RESPONSE faltando 5 minutos', async () => {
+  setupWhatsappEnv();
+  const now = new Date('2026-04-08T14:55:00.000Z');
+  const prisma = createMockPrisma({
+    candidates: [{ id: 'cand-confirmed-safe', phone: '570000000011', status: 'REGISTRADO', currentStep: 'SCHEDULED', lastInboundAt: new Date('2026-04-08T13:30:00.000Z'), botPaused: false }],
+    interviewBookings: [{
+      id: 'booking-confirmed-safe', candidateId: 'cand-confirmed-safe', vacancyId: 'vac', slotId: 'slot',
+      scheduledAt: new Date(INTERVIEW_10_AM_CO), status: 'CONFIRMED', reminderSentAt: new Date(REMINDER_9_00_AM_CO), reminderWindowClosed: true
+    }],
+    vacancies: [{ id: 'vac', isActive: true, schedulingEnabled: true }]
+  });
+  const whatsappMock = createWhatsappMock();
+  const restoreAxios = installOpenAIMock({ whatsappMock });
+  try {
+    await runInterviewReminderDispatcher(prisma, { now, candidateId: 'cand-confirmed-safe' });
+    assert.equal(prisma.state.interviewBookings[0].status, 'CONFIRMED');
+    assert.equal(whatsappMock.sentMessages.length, 0);
+  } finally { restoreAxios(); }
 });
