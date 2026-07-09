@@ -484,7 +484,9 @@ export async function resolveVacancyFirstGate({
     cityHint: vacancyHints?.city || null,
     roleHint: vacancyHints?.roleHint || null,
     allVacancies: vacancyHints?.allVacancies,
-    activeVacancies: vacancyHints?.activeVacancies
+    activeVacancies: vacancyHints?.activeVacancies,
+    trustedVacancyId: vacancyHints?.trustedVacancyId || vacancyHints?.metadataVacancyId || null,
+    trustedVacancy: vacancyHints?.trustedVacancy || vacancyHints?.metadataVacancy || null
   });
 
   if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
@@ -499,6 +501,17 @@ export async function resolveVacancyFirstGate({
       vacancy: resolution.vacancy,
       candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
       reply: buildInactiveVacancyReply(resolution.vacancy, resolution.city),
+      resolution
+    }, { recentMessages, inboundText, city: resolution.city });
+  }
+
+  if (['trusted_vacancy_not_found'].includes(resolution.reason)) {
+    return preventRepeatDecision({
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'TRUSTED_VACANCY_NOT_AVAILABLE',
+      replyKind: 'TRUSTED_VACANCY_NOT_AVAILABLE',
+      candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: FUTURE_PROFILE_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
+      reply: buildNoActiveVacanciesReply(resolution.city),
       resolution
     }, { recentMessages, inboundText, city: resolution.city });
   }
