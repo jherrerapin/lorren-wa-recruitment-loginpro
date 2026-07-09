@@ -19,6 +19,13 @@ import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js'
 import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 import { formatBotKnowledgeForPrompt, loadBotKnowledgeForContext } from './botKnowledge.js';
 import { classifyOutboundActor, isHumanOutboundMessage } from './manualSourcePolicy.js';
+import {
+  ReplySimilarityThreshold,
+  getReplyPurpose,
+  isRepeatedPurposeOrAction,
+  isSubstantiallySimilarReply,
+  normalizeReplySignature
+} from './replySimilarityPolicy.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
@@ -525,45 +532,6 @@ export function parseEngineJson(rawText = '{}') {
   return null;
 }
 
-function normalizeReplySignature(text = '') {
-  return String(text || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function tokenOverlapRatio(a = '', b = '') {
-  const aTokens = new Set(normalizeReplySignature(a).split(' ').filter(Boolean));
-  const bTokens = new Set(normalizeReplySignature(b).split(' ').filter(Boolean));
-  if (!aTokens.size || !bTokens.size) return 0;
-
-  let intersection = 0;
-  for (const token of aTokens) {
-    if (bTokens.has(token)) intersection += 1;
-  }
-
-  return intersection / Math.max(aTokens.size, bTokens.size);
-}
-
-function replyTokenCount(reply = '') {
-  return normalizeReplySignature(reply).split(' ').filter(Boolean).length;
-}
-
-function isSubstantiallySimilarReply(nextReply = '', previousReply = '') {
-  const next = normalizeReplySignature(nextReply);
-  const previous = normalizeReplySignature(previousReply);
-  if (!next || !previous) return false;
-  if (next === previous) return true;
-  if (replyTokenCount(next) < 5 || replyTokenCount(previous) < 5) return false;
-  if (next.length > 24 && previous.length > 24 && (next.includes(previous) || previous.includes(next))) {
-    return true;
-  }
-  return tokenOverlapRatio(nextReply, previousReply) >= 0.78;
-}
-
 function hasMeaningfulEngineProgress(decision = {}, currentStep = '') {
   if (!decision || typeof decision !== 'object') return false;
   if (decision.nextStep && decision.nextStep !== currentStep) return true;
@@ -578,20 +546,7 @@ function hasMeaningfulEngineProgress(decision = {}, currentStep = '') {
 }
 
 function getDecisionPurpose(decision = {}) {
-  return String(
-    decision?.raw?.responsePurpose
-    || decision?.raw?.detectedIntent
-    || decision?.responsePurpose
-    || decision?.detectedIntent
-    || ''
-  ).trim().toLowerCase();
-}
-
-function getActionTypes(source = {}) {
-  const actions = Array.isArray(source?.actions)
-    ? source.actions
-    : (Array.isArray(source?.raw?.actions) ? source.raw.actions : []);
-  return actions.map((action) => action?.type).filter(Boolean);
+  return getReplyPurpose(decision);
 }
 
 function isQuestionAnswerPurpose(purpose = '') {
@@ -600,17 +555,6 @@ function isQuestionAnswerPurpose(purpose = '') {
 
 function shouldBypassLoopGuardForQuestion(decision = {}) {
   return isQuestionAnswerPurpose(getDecisionPurpose(decision));
-}
-
-function isRepeatedPurposeOrAction(decision = {}, previousMessage = {}) {
-  const purpose = getDecisionPurpose(decision);
-  const previousPayload = previousMessage?.rawPayload || {};
-  const previousPurpose = String(previousPayload.responsePurpose || previousPayload.detectedIntent || '').trim().toLowerCase();
-  if (purpose && previousPurpose && purpose === previousPurpose) return true;
-
-  const actionTypes = new Set(getActionTypes(decision));
-  if (!actionTypes.size) return false;
-  return getActionTypes(previousPayload).some((type) => actionTypes.has(type));
 }
 
 function buildLoopGuardReply({ candidate = {}, currentStep = '', recentMessages = [] } = {}) {
@@ -658,7 +602,9 @@ function applyLoopGuardToDecision(decision, context = {}) {
   }
 
   const exactRepeat = recentOutbound.some((message) => normalizeReplySignature(decision.reply) === normalizeReplySignature(message.body || ''));
-  const similarRepeatCount = recentOutbound.filter((message) => isSubstantiallySimilarReply(decision.reply, message.body || '')).length;
+  const similarRepeatCount = recentOutbound.filter((message) => isSubstantiallySimilarReply(decision.reply, message.body || '', {
+    threshold: ReplySimilarityThreshold.LOOP_GUARD
+  })).length;
   const semanticRepeatCount = recentOutbound.filter((message) => isRepeatedPurposeOrAction(decision, message)).length;
   const isLooping = exactRepeat || similarRepeatCount >= 2 || semanticRepeatCount >= 2;
   if (!isLooping) {

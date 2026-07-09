@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { buildPolicyReply } from './responsePolicy.js';
 import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
+import { ReplySimilarityThreshold, isSubstantiallySimilarReply } from './replySimilarityPolicy.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export const CONTEXTUAL_REPLY_MODEL = 'gpt-5.4-mini-2026-03-17';
@@ -15,21 +16,6 @@ const FALLBACK_INTENT_BY_SITUATION = {
   continue_flow: 'continue_flow',
   process_human_review_required: 'continue_flow'
 };
-
-function normalize(text = '') {
-  return String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function similarity(a = '', b = '') {
-  const aTokens = new Set(normalize(a).split(' ').filter(Boolean));
-  const bTokens = new Set(normalize(b).split(' ').filter(Boolean));
-  if (!aTokens.size || !bTokens.size) return 0;
-  let overlap = 0;
-  for (const token of aTokens) {
-    if (bTokens.has(token)) overlap += 1;
-  }
-  return overlap / Math.max(aTokens.size, bTokens.size);
-}
 
 function parseStructuredOutput(data = {}) {
   const output = data?.output || [];
@@ -183,7 +169,9 @@ export async function buildContextualReply(context = {}) {
     if (!text) return buildFallback(context, 'empty_reply');
 
     const recentOutbound = Array.isArray(context.recentMessages) ? context.recentMessages : [];
-    if (recentOutbound.some((item) => similarity(text, item?.body || '') >= 0.85)) {
+    if (recentOutbound.some((item) => isSubstantiallySimilarReply(text, item?.body || '', {
+      threshold: ReplySimilarityThreshold.CONTEXTUAL_REPLY
+    }))) {
       return buildFallback(context, 'repeat_guard');
     }
 
