@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runReminderDispatcher } from '../src/services/reminder.js';
+import { runInterviewReminderDispatcher } from '../src/services/reminder.js';
 import { createMockPrisma } from './helpers/mockPrisma.js';
 import { createWhatsappMock } from './helpers/mockWhatsapp.js';
 import { installOpenAIMock } from './helpers/mockOpenAI.js';
@@ -13,7 +13,7 @@ function setupWhatsappEnv() {
 test('recordatorio de entrevista es idempotente para entrevista de 10:00 a.m. Colombia con bookings activos duplicados', async () => {
   setupWhatsappEnv();
 
-  const now = new Date('2026-04-08T14:20:00.000Z'); // 9:20 a.m. Colombia
+  const now = new Date('2026-04-08T14:00:00.000Z'); // 9:00 a.m. Colombia
   const prisma = createMockPrisma({
     candidates: [{
       id: 'cand-duplicate-bookings',
@@ -29,6 +29,8 @@ test('recordatorio de entrevista es idempotente para entrevista de 10:00 a.m. Co
     }],
     vacancies: [{
       id: 'vac-duplicate-bookings',
+      isActive: true,
+      schedulingEnabled: true,
       title: 'Auxiliar logistico Montevideo',
       role: 'Auxiliar logistico',
       interviewAddress: 'Bodega Montevideo'
@@ -57,7 +59,7 @@ test('recordatorio de entrevista es idempotente para entrevista de 10:00 a.m. Co
   const restoreAxios = installOpenAIMock({ whatsappMock });
 
   try {
-    await runReminderDispatcher(prisma, { now });
+    await runInterviewReminderDispatcher(prisma, { now, candidateId: 'cand-duplicate-bookings' });
 
     assert.equal(whatsappMock.sentMessages.length, 1);
     assert.match(whatsappMock.sentMessages[0].body, /te recuerdo que tienes entrevista|confirmas tu asistencia/i);
@@ -70,7 +72,7 @@ test('recordatorio de entrevista es idempotente para entrevista de 10:00 a.m. Co
     assert.equal(second.reminderSentAt, null);
     assert.equal(second.reminderWindowClosed, true);
 
-    await runReminderDispatcher(prisma, { now });
+    await runInterviewReminderDispatcher(prisma, { now, candidateId: 'cand-duplicate-bookings' });
     assert.equal(whatsappMock.sentMessages.length, 1);
   } finally {
     restoreAxios();
