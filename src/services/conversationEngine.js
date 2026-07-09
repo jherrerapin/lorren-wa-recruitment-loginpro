@@ -598,24 +598,80 @@ function shouldBypassLoopGuardForQuestion(decision = {}) {
   return isQuestionAnswerPurpose(getDecisionPurpose(decision));
 }
 
+const LOOP_GUARD_FIELD_LABELS = {
+  fullName: 'nombre completo',
+  documentType: 'tipo de documento',
+  documentNumber: 'número de documento',
+  age: 'edad',
+  medicalRestrictions: 'restricciones médicas',
+  transportMode: 'medio de transporte',
+  locality: 'localidad',
+  neighborhood: 'barrio o zona'
+};
+
+function getLoopGuardGapLabel(candidate = {}) {
+  const [firstGap] = getCoreFieldGaps(candidate);
+  return LOOP_GUARD_FIELD_LABELS[firstGap] || 'dato faltante';
+}
+
+function chooseLoopGuardVariant(variants = [], recentMessages = []) {
+  const recentOutboundBodies = (recentMessages || [])
+    .filter((message) => message?.direction === 'OUTBOUND')
+    .map((message) => message.body || '')
+    .filter(Boolean)
+    .reverse();
+
+  return variants.find((variant) => !recentOutboundBodies.some((body) => (
+    normalizeReplySignature(variant) === normalizeReplySignature(body)
+    || isSubstantiallySimilarReply(variant, body, { threshold: ReplySimilarityThreshold.LOOP_GUARD })
+  ))) || variants[0];
+}
+
 function buildLoopGuardReply({ candidate = {}, currentStep = '', recentMessages = [] } = {}) {
+  const coreFieldGaps = getCoreFieldGaps(candidate);
+  const gapLabel = getLoopGuardGapLabel(candidate);
+  let variants;
+
   if (currentStep === 'ASK_CV') {
-    return 'Recibí lo que enviaste. Para registrarlo bien, adjunta la hoja de vida en PDF o Word/DOCX.';
+    variants = [
+      'Recibí lo que enviaste. Para registrarlo bien, adjunta la hoja de vida en PDF o Word/DOCX.',
+      'Para guardar tu hoja de vida correctamente, envíala como archivo PDF o DOCX; así evitamos repetir el mismo pedido.',
+      'Seguimos en la parte de hoja de vida: compártela en PDF o Word/DOCX para poder registrarla.'
+    ];
+    return chooseLoopGuardVariant(variants, recentMessages);
   }
 
-  if (currentStep === 'CONFIRMING_DATA' && !getCoreFieldGaps(candidate).length) {
-    return 'Corrección recibida. Si hay otro ajuste puntual, escríbemelo; si no, seguimos con lo que falta.';
+  if (currentStep === 'CONFIRMING_DATA' && !coreFieldGaps.length) {
+    variants = [
+      'Corrección recibida. Si hay otro ajuste puntual, escríbemelo; si no, seguimos con lo que falta.',
+      'Ya tengo tus datos principales. Envíame solo el ajuste puntual que falte revisar.',
+      'Gracias, no necesitas repetir todo: dime únicamente qué dato quieres ajustar.'
+    ];
+    return chooseLoopGuardVariant(variants, recentMessages);
   }
 
   if (!candidate?.vacancyId) {
-    if (!getCoreFieldGaps(candidate).length) {
-      return 'Tus datos principales están registrados. Si necesitas cambiar vacante o ciudad, dime el ajuste puntual sin volver a enviarlo todo.';
-    }
-    return 'Para ubicar bien tu proceso, cuentame desde que ciudad nos escribes y para que vacante o cargo aplicas.';
+    variants = !coreFieldGaps.length
+      ? [
+        'Tus datos principales están registrados. Si necesitas cambiar vacante o ciudad, dime el ajuste puntual sin volver a enviarlo todo.',
+        'Ya tengo tus datos base; para ubicar el proceso solo dime la ciudad o la vacante/cargo que quieres revisar.',
+        'Para continuar sin repetir datos, indícame la ciudad o la vacante/cargo de tu interés.'
+      ]
+      : [
+        'Para ubicar bien tu proceso, cuéntame desde qué ciudad nos escribes y para qué vacante o cargo aplicas.',
+        'Antes de pedir más datos, necesito ubicar la postulación: dime la ciudad o la vacante/cargo que buscas.',
+        'Sigamos por la vacante: compárteme la ciudad o el cargo al que estás aplicando.'
+      ];
+    return chooseLoopGuardVariant(variants, recentMessages);
   }
 
-  if (getCoreFieldGaps(candidate).length) {
-    return 'Te leo. Compárteme solo el dato faltante o el ajuste puntual para avanzar.';
+  if (coreFieldGaps.length) {
+    variants = [
+      `Te leo. Compárteme solo el dato faltante: ${gapLabel}.`,
+      `Para avanzar sin repetir todo, envíame únicamente ${gapLabel}.`,
+      `Seguimos con tu perfil; falta ${gapLabel}. Escríbeme solo ese dato o el ajuste puntual.`
+    ];
+    return chooseLoopGuardVariant(variants, recentMessages);
   }
 
   const lastOutbound = [...recentMessages]
@@ -623,10 +679,20 @@ function buildLoopGuardReply({ candidate = {}, currentStep = '', recentMessages 
     .find((message) => message.direction === 'OUTBOUND')?.body || '';
 
   if (/para continuar necesito|confirma tus datos|si todo esta correcto/.test(normalizeReplySignature(lastOutbound))) {
-    return 'Ya vi tu mensaje. No hace falta repetir lo mismo: sigo con el ajuste o con la siguiente parte del proceso.';
+    variants = [
+      'Ya vi tu mensaje. No hace falta repetir lo mismo: sigo con el ajuste o con la siguiente parte del proceso.',
+      'Recibido. Mantengo el proceso en curso sin volver a pedirte lo mismo.',
+      'Gracias, continúo con el siguiente paso sin repetir el mensaje anterior.'
+    ];
+    return chooseLoopGuardVariant(variants, recentMessages);
   }
 
-  return 'Ya revise lo que enviaste. Continuo contigo sin repetir el mismo mensaje.';
+  variants = [
+    'Ya revise lo que enviaste. Continuo contigo sin repetir el mismo mensaje.',
+    'Recibido; sigo atento a tu proceso sin reenviar la misma respuesta.',
+    'Gracias, tomo tu mensaje y continúo sin repetir la respuesta anterior.'
+  ];
+  return chooseLoopGuardVariant(variants, recentMessages);
 }
 
 function applyLoopGuardToDecision(decision, context = {}) {

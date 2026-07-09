@@ -396,3 +396,100 @@ test('loopGuardApplied permanece false cuando hay extractedFields nuevos', async
 
   assert.equal(decision.loopGuardApplied, false);
 });
+
+test('loop guard alterna variante determinística en activaciones consecutivas cuando hay alternativa', async () => {
+  const repeatedReply = 'Para avanzar necesito que me compartas tu número de documento.';
+  const first = await thinkWithModelReply({
+    reply: repeatedReply,
+    recentMessages: [
+      { direction: 'OUTBOUND', body: repeatedReply, rawPayload: { source: 'conversation_engine' } },
+      { direction: 'OUTBOUND', body: 'Compárteme tu número de documento para continuar.', rawPayload: { source: 'conversation_engine' } }
+    ],
+    candidate: completeCandidate({ documentNumber: null }),
+    currentStep: ConversationStep.COLLECTING_DATA
+  });
+
+  const second = await thinkWithModelReply({
+    reply: repeatedReply,
+    recentMessages: [
+      { direction: 'OUTBOUND', body: repeatedReply, rawPayload: { source: 'conversation_engine' } },
+      { direction: 'OUTBOUND', body: 'Compárteme tu número de documento para continuar.', rawPayload: { source: 'conversation_engine' } },
+      { direction: 'OUTBOUND', body: first.reply, rawPayload: { source: 'conversation_engine' } }
+    ],
+    candidate: completeCandidate({ documentNumber: null }),
+    currentStep: ConversationStep.COLLECTING_DATA
+  });
+
+  assert.equal(first.loopGuardApplied, true);
+  assert.equal(second.loopGuardApplied, true);
+  assert.notEqual(second.reply, first.reply);
+});
+
+test('loop guard en ASK_CV siempre pide PDF/DOCX y nunca foto o imagen', async () => {
+  const decision = await thinkWithModelReply({
+    reply: 'Envíame tu HV en PDF o DOCX para seguir con el proceso.',
+    raw: { responsePurpose: 'request_cv', actions: [{ type: 'request_cv' }] },
+    recentMessages: [
+      { direction: 'OUTBOUND', body: 'Envíame tu HV en PDF o DOCX para seguir con el proceso.', rawPayload: { source: 'conversation_engine', responsePurpose: 'request_cv', actions: [{ type: 'request_cv' }] } },
+      { direction: 'OUTBOUND', body: 'Necesito adjuntar tu currículum en archivo PDF o Word antes de continuar.', rawPayload: { source: 'conversation_engine', responsePurpose: 'request_cv', actions: [{ type: 'request_cv' }] } }
+    ],
+    currentStep: ConversationStep.ASK_CV
+  });
+
+  assert.equal(decision.loopGuardApplied, true);
+  assert.match(decision.reply, /PDF/i);
+  assert.match(decision.reply, /DOCX|Word/i);
+  assert.doesNotMatch(decision.reply, /foto|imagen/i);
+});
+
+test('loop guard sin vacante pide ciudad o vacante sin solicitar datos no permitidos', async () => {
+  const decision = await thinkWithModelReply({
+    reply: 'Para avanzar necesito que me compartas tus datos completos.',
+    recentMessages: [
+      { direction: 'OUTBOUND', body: 'Para avanzar necesito que me compartas tus datos completos.', rawPayload: { source: 'conversation_engine' } },
+      { direction: 'OUTBOUND', body: 'Compárteme tus datos completos para continuar.', rawPayload: { source: 'conversation_engine' } }
+    ],
+    candidate: completeCandidate({ vacancyId: null }),
+    currentStep: ConversationStep.COLLECTING_DATA
+  });
+
+  assert.equal(decision.loopGuardApplied, true);
+  assert.match(decision.reply, /ciudad|vacante|cargo/i);
+  assert.doesNotMatch(decision.reply, /documento|edad|restricciones|transporte|hoja de vida|HV/i);
+});
+
+test('loop guard variants son determinísticas y no hacen llamadas adicionales a OpenAI', async () => {
+  const repeatedReply = 'Para avanzar necesito que me compartas tu número de documento.';
+  const args = {
+    reply: repeatedReply,
+    recentMessages: [
+      { direction: 'OUTBOUND', body: repeatedReply, rawPayload: { source: 'conversation_engine' } },
+      { direction: 'OUTBOUND', body: 'Compárteme tu número de documento para continuar.', rawPayload: { source: 'conversation_engine' } }
+    ],
+    candidate: completeCandidate({ documentNumber: null }),
+    currentStep: ConversationStep.COLLECTING_DATA
+  };
+
+  const first = await thinkWithModelReply(args);
+  const second = await thinkWithModelReply(args);
+
+  assert.equal(first.loopGuardApplied, true);
+  assert.equal(second.loopGuardApplied, true);
+  assert.equal(second.reply, first.reply);
+});
+
+test('loop guard variants incluyen microcontexto seguro sin inventar datos', async () => {
+  const decision = await thinkWithModelReply({
+    reply: 'Para avanzar necesito que me compartas tu número de documento.',
+    recentMessages: [
+      { direction: 'OUTBOUND', body: 'Para avanzar necesito que me compartas tu número de documento.', rawPayload: { source: 'conversation_engine' } },
+      { direction: 'OUTBOUND', body: 'Compárteme tu número de documento para continuar.', rawPayload: { source: 'conversation_engine' } }
+    ],
+    candidate: completeCandidate({ documentNumber: null, age: null, vacancyId: 10 }),
+    currentStep: ConversationStep.COLLECTING_DATA
+  });
+
+  assert.equal(decision.loopGuardApplied, true);
+  assert.match(decision.reply, /documento|edad/i);
+  assert.doesNotMatch(decision.reply, /entrevista|agendada|Bogotá|Loginpro/i);
+});
