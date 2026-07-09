@@ -18,6 +18,7 @@ import { evaluateSchedulingGuard } from './schedulingGuard.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from './replySafety.js';
 import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 import { formatBotKnowledgeForPrompt, loadBotKnowledgeForContext } from './botKnowledge.js';
+import { classifyOutboundActor, isHumanOutboundMessage } from './manualSourcePolicy.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
@@ -73,23 +74,20 @@ function normalizeMedicalRestrictionsLabel(value) {
   return value;
 }
 
-function isSystemControlledOutbound(message = {}) {
-  const source = message?.rawPayload?.source;
-  return typeof source === 'string' && source.trim() !== '';
-}
-
 export function hasRecentHumanIntervention(recentMessages = []) {
   const lastOutbound = [...(recentMessages || [])]
     .reverse()
     .find((message) => message?.direction === 'OUTBOUND');
 
-  return Boolean(lastOutbound) && !isSystemControlledOutbound(lastOutbound);
+  return Boolean(lastOutbound) && isHumanOutboundMessage(lastOutbound);
 }
 
 function buildMessageActor(message = {}) {
   if (message.direction === 'INBOUND') return 'Candidato';
-  if (!isSystemControlledOutbound(message)) return 'Humano';
-  if (String(message?.rawPayload?.source || '').startsWith('admin_')) return 'Equipo';
+  const classification = classifyOutboundActor(message?.rawPayload || {});
+  if (classification.isManual) return 'Humano';
+  if (classification.actor === 'REMINDER') return 'Recordatorio';
+  if (classification.actor === 'SYSTEM') return 'Sistema';
   return 'Bot';
 }
 

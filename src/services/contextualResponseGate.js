@@ -1,6 +1,7 @@
 import { getCandidateReadiness } from './readinessGuard.js';
 import { formatInterviewDate } from './interviewScheduler.js';
 import { buildInterviewDocumentsSentence, sanitizeRequiredDocumentsForBot } from './naturalReply.js';
+import { classifyOutboundActor, inferOutboundActorFromSource, isManualOutboundSource } from './manualSourcePolicy.js';
 
 export const ContextualAllowedAction = Object.freeze({
   CONTINUE_FLOW: 'CONTINUE_FLOW',
@@ -20,8 +21,6 @@ export const ContextualResponsePurpose = Object.freeze({
   FLOW: 'FLOW'
 });
 
-const MANUAL_SOURCE_PREFIXES = ['admin_', 'manual_'];
-const MANUAL_SOURCE_VALUES = new Set(['MANUAL_AUTHORIZED', 'manual_authorized', 'admin_outbound']);
 const CLOSING_INTENTS = new Set(['ACKNOWLEDGEMENT', 'SOFT_CONFIRMATION', 'POST_COMPLETION_ACK', 'THANKS', 'FAREWELL']);
 const ACTIVE_BOOKING_STATUSES = new Set(['SCHEDULED', 'CONFIRMED']);
 const LOGISTIC_INTENTS = new Set([
@@ -82,32 +81,17 @@ export function getLastOutboundContext(recentMessages = []) {
     return { actor: null, source: null, purpose: null, message: null, isManual: false };
   }
   const rawPayload = lastOutbound.rawPayload || {};
-  const source = rawPayload.source || rawPayload.sourceCategory || null;
-  const actor = rawPayload.actor || rawPayload.actorRole || inferActorFromSource(source);
+  const classification = classifyOutboundActor(rawPayload);
   return {
-    actor,
-    source,
+    actor: classification.actor,
+    source: classification.source,
     purpose: rawPayload.responsePurpose || rawPayload.purpose || rawPayload.situation || null,
     message: lastOutbound,
-    isManual: actor === 'RECRUITER' || isManualOutboundSource(source)
+    isManual: classification.isManual
   };
 }
 
-export function isManualOutboundSource(source = '') {
-  const normalizedSource = String(source || '').trim();
-  if (!normalizedSource) return true;
-  if (MANUAL_SOURCE_VALUES.has(normalizedSource)) return true;
-  return MANUAL_SOURCE_PREFIXES.some((prefix) => normalizedSource.toLowerCase().startsWith(prefix));
-}
-
-function inferActorFromSource(source = '') {
-  const normalizedSource = String(source || '').trim();
-  if (!normalizedSource) return 'RECRUITER';
-  if (isManualOutboundSource(normalizedSource)) return 'RECRUITER';
-  if (normalizedSource.startsWith('reminder')) return 'REMINDER';
-  if (normalizedSource.startsWith('system')) return 'SYSTEM';
-  return 'BOT';
-}
+export { inferOutboundActorFromSource as inferActorFromSource, isManualOutboundSource };
 
 function hasActiveBooking(booking = null) {
   return Boolean(booking && ACTIVE_BOOKING_STATUSES.has(booking.status));
