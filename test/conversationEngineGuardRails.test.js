@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import axios from 'axios';
 import { ConversationStep, Gender } from '@prisma/client';
 import { alignCandidateLocationFields } from '../src/services/candidateData.js';
-import { act, buildCandidateStateForModel, think } from '../src/services/conversationEngine.js';
+import { act, buildCandidateStateForModel, parseEngineJson, think } from '../src/services/conversationEngine.js';
 
 function completeCandidate(overrides = {}) {
   return {
@@ -87,6 +87,80 @@ async function thinkWithModelReply({ reply, raw = {}, recentMessages = [], inbou
     }
   }
 }
+
+
+test('parseEngineJson acepta JSON valido estricto y expone estrategia strict', () => {
+  const parsed = parseEngineJson('{"reply":"Hola","nextStep":"COLLECTING_DATA","actions":[],"extractedFields":{}}');
+
+  assert.equal(parsed.reply, 'Hola');
+  assert.equal(parsed.__parseStrategy, 'strict');
+});
+
+test('parseEngineJson acepta JSON dentro de markdown y expone estrategia markdown', () => {
+  const parsed = parseEngineJson('```json\n{"reply":"Hola desde markdown","actions":[],"extractedFields":{}}\n```');
+
+  assert.equal(parsed.reply, 'Hola desde markdown');
+  assert.equal(parsed.__parseStrategy, 'markdown');
+});
+
+test('parseEngineJson acepta objeto JSON balanceado rodeado de texto', () => {
+  const parsed = parseEngineJson('Claro, devuelvo esto: {"reply":"Hola rodeado","actions":[],"extractedFields":{}} gracias.');
+
+  assert.equal(parsed.reply, 'Hola rodeado');
+  assert.equal(parsed.__parseStrategy, 'balanced');
+});
+
+test('parseEngineJson repara keys sin comillas y strings simples solo con schema minimo valido', () => {
+  const parsed = parseEngineJson("{reply: 'Hola reparado', actions: [], extractedFields: {}}");
+
+  assert.equal(parsed.reply, 'Hola reparado');
+  assert.equal(parsed.__parseStrategy, 'repaired');
+});
+
+test('parseEngineJson no corrompe reply con comillas y dos puntos invalidos; usa fallback seguro', async () => {
+  const originalKey = process.env.OPENAI_API_KEY;
+  const originalPost = axios.post;
+  const originalWarn = console.warn;
+  const warnings = [];
+  process.env.OPENAI_API_KEY = 'test-key';
+  axios.post = async () => ({
+    data: {
+      choices: [{
+        message: {
+          content: '{reply: "Me dijo "sí: acepto"", actions: [], extractedFields: {}}'
+        }
+      }]
+    }
+  });
+  console.warn = (...args) => warnings.push(args);
+
+  try {
+    const decision = await think({
+      inboundText: 'ok',
+      candidate: completeCandidate(),
+      vacancy: schedulableVacancy(),
+      recentMessages: [],
+      currentStep: ConversationStep.COLLECTING_DATA
+    });
+
+    assert.equal(decision.fallback, true);
+    assert.equal(decision.fallbackReason, 'invalid_engine_json');
+    assert.equal(decision.raw, null);
+    assert.equal(warnings[0][0], '[ENGINE_PARSE_FAIL]');
+    assert.equal(warnings[0][1].parseStrategy, 'none');
+  } finally {
+    axios.post = originalPost;
+    console.warn = originalWarn;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalKey;
+  }
+});
+
+test('parseEngineJson rechaza JSON reparado sin schema minimo para no persistir basura', () => {
+  const parsed = parseEngineJson("{reply: 'Hola sin acciones', extractedFields: {documentNumber: '123'}}");
+
+  assert.equal(parsed, null);
+});
 
 test('bloquea offer_interview para candidata FEMALE', async () => {
   const prisma = prismaMock();
