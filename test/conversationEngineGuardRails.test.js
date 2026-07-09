@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
 import { ConversationStep, Gender } from '@prisma/client';
+import { alignCandidateLocationFields } from '../src/services/candidateData.js';
 import { act, buildCandidateStateForModel, think } from '../src/services/conversationEngine.js';
 
 function completeCandidate(overrides = {}) {
@@ -34,10 +35,17 @@ function nextSlot() {
 
 function prismaMock() {
   const updates = [];
+  const bookings = [];
   return {
     updates,
+    bookings,
     candidate: {
       update: async (args) => { updates.push(args); return { id: args.where.id, ...args.data }; }
+    },
+    interviewBooking: {
+      findFirst: async () => null,
+      updateMany: async () => ({ count: 0 }),
+      create: async (args) => { bookings.push(args); return { id: bookings.length, ...args.data }; }
     }
   };
 }
@@ -114,18 +122,13 @@ test('bloquea agenda con vacante inactiva', async () => {
   assert.equal(prisma.updates.some((u) => u.data.currentStep === ConversationStep.SCHEDULING), false);
 });
 
-test('estado del motor mantiene localidad pendiente si la residencia reportada es Soacha', () => {
-  const state = buildCandidateStateForModel(
-    completeCandidate({ locality: 'Soacha Cundinamarca', neighborhood: null, cvStorageKey: null }),
-    schedulableVacancy({ schedulingEnabled: false }),
-    []
-  );
+test('Soacha se trata como ciudad valida y no como localidad bogotana', () => {
+  const vacancy = schedulableVacancy({ city: 'Soacha', schedulingEnabled: false });
+  const aligned = alignCandidateLocationFields({ locality: 'Soacha', neighborhood: null }, vacancy);
 
-  assert.equal(state.profile.residenceArea.field, 'locality');
-  assert.equal(state.profile.residenceArea.state.captured, false);
-  assert.equal(state.profile.locality.captured, false);
-  assert.equal(state.profile.locality.value, null);
-  assert.equal(state.progress.missingFields.includes('locality'), true);
+  assert.equal(vacancy.city, 'Soacha');
+  assert.equal(aligned.neighborhood, 'Soacha Cundinamarca');
+  assert.equal(aligned.locality, null);
 });
 
 test('act no alinea Soacha como localidad para Bogota', async () => {
@@ -133,16 +136,118 @@ test('act no alinea Soacha como localidad para Bogota', async () => {
   const candidate = completeCandidate({ locality: null, neighborhood: null, cvStorageKey: null });
 
   const result = await act({
-  prisma,
-  candidate,
-  vacancy: schedulableVacancy({ schedulingEnabled: false }),
-  actions: [{ type: 'save_fields', data: { neighborhood: 'Soacha Compartir' } }, { type: 'request_cv' }],
-  extractedFields: { neighborhood: 'Soacha Compartir' }
+    prisma,
+    candidate,
+    vacancy: schedulableVacancy({ schedulingEnabled: false }),
+    actions: [{ type: 'save_fields', data: { neighborhood: 'Soacha Compartir' } }, { type: 'request_cv' }],
+    extractedFields: { neighborhood: 'Soacha Compartir' }
+  });
+
+  assert.equal(prisma.updates.some((update) => update.data.locality === 'Soacha Cundinamarca'), false);
+  assert.equal(prisma.updates.some((update) => update.data.neighborhood === 'Soacha Compartir'), false);
+  assert.equal(result.finalStep, ConversationStep.COLLECTING_DATA);
 });
 
-assert.equal(prisma.updates.some((update) => update.data.locality === 'Soacha Cundinamarca'), false);
-assert.equal(prisma.updates.some((update) => update.data.neighborhood === 'Soacha Compartir'), false);
-assert.equal(result.finalStep, ConversationStep.COLLECTING_DATA);
+test('act produce el mismo cierre, update y bloqueos con acciones equivalentes en distinto orden', async () => {
+  const first = prismaMock();
+  const second = prismaMock();
+  const actionA = { type: 'mark_no_interest' };
+  const actionB = { type: 'confirm_booking' };
+
+  const resultA = await act({
+    prisma: first,
+    candidate: completeCandidate(),
+    vacancy: schedulableVacancy(),
+    nextSlot: nextSlot(),
+    actions: [actionA, actionB]
+  });
+  const resultB = await act({
+    prisma: second,
+    candidate: completeCandidate(),
+    vacancy: schedulableVacancy(),
+    nextSlot: nextSlot(),
+    actions: [actionB, actionA]
+  });
+
+  assert.equal(resultA.finalStep, resultB.finalStep);
+  assert.deepEqual(first.updates.at(-1).data, second.updates.at(-1).data);
+  assert.deepEqual(resultA.blockedActions, resultB.blockedActions);
+});
+
+test('mark_no_interest + confirm_booking nunca crea booking', async () => {
+  for (const actions of [
+    [{ type: 'mark_no_interest' }, { type: 'confirm_booking' }],
+    [{ type: 'confirm_booking' }, { type: 'mark_no_interest' }]
+  ]) {
+    const prisma = prismaMock();
+    const result = await act({
+      prisma,
+      candidate: completeCandidate(),
+      vacancy: schedulableVacancy(),
+      nextSlot: nextSlot(),
+      actions
+    });
+
+    assert.equal(prisma.bookings.length, 0);
+    assert.equal(result.finalStep, ConversationStep.DONE);
+    assert.equal(prisma.updates.at(-1).data.currentStep, ConversationStep.DONE);
+  }
+});
+
+test('pause_bot + offer_interview conserva la razon explicita de pausa como prioridad deterministica', async () => {
+  for (const actions of [
+    [{ type: 'pause_bot', data: { reason: 'Validacion manual de agenda' } }, { type: 'offer_interview' }],
+    [{ type: 'offer_interview' }, { type: 'pause_bot', data: { reason: 'Validacion manual de agenda' } }]
+  ]) {
+    const prisma = prismaMock();
+    await act({
+      prisma,
+      candidate: completeCandidate(),
+      vacancy: schedulableVacancy(),
+      nextSlot: null,
+      actions
+    });
+
+    assert.equal(prisma.updates.at(-1).data.botPaused, true);
+    assert.equal(prisma.updates.at(-1).data.botPauseReason, 'Validacion manual de agenda');
+  }
+});
+
+test('save_fields se persiste independientemente del orden junto a cierre por no interes', async () => {
+  for (const actions of [
+    [{ type: 'save_fields', data: { medicalRestrictions: 'Ninguna' } }, { type: 'mark_no_interest' }],
+    [{ type: 'mark_no_interest' }, { type: 'save_fields', data: { medicalRestrictions: 'Ninguna' } }]
+  ]) {
+    const prisma = prismaMock();
+    await act({
+      prisma,
+      candidate: completeCandidate({ medicalRestrictions: null }),
+      vacancy: schedulableVacancy(),
+      actions
+    });
+
+    assert.equal(prisma.updates[0].data.medicalRestrictions, 'Sin restricciones médicas');
+    assert.equal(prisma.updates.at(-1).data.currentStep, ConversationStep.DONE);
+  }
+});
+
+test('candidata femenina nunca llega a SCHEDULING ni SCHEDULED aunque el modelo lo solicite', async () => {
+  for (const requestedStep of [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED]) {
+    const prisma = prismaMock();
+    const result = await act({
+      prisma,
+      candidate: completeCandidate({ gender: Gender.FEMALE }),
+      vacancy: schedulableVacancy(),
+      nextSlot: nextSlot(),
+      actions: [{ type: requestedStep === ConversationStep.SCHEDULED ? 'confirm_booking' : 'offer_interview' }],
+      nextStep: requestedStep
+    });
+
+    assert.notEqual(result.finalStep, requestedStep);
+    assert.equal(prisma.updates.some((update) => update.data.currentStep === requestedStep), false);
+    assert.equal(prisma.bookings.length, 0);
+    assert.equal(prisma.updates.at(-1).data.botPaused, true);
+  }
 });
 
 test('loop guard permite repetir respuesta logística cuando responde una pregunta real', async () => {

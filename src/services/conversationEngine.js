@@ -826,11 +826,16 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   const hasNewCoreData = Object.keys(persistedFields).some((field) => CORE_PROFILE_FIELDS.includes(field));
   const hasCvAfterMerge = readinessAfterMerge.hasValidCv;
   const blockedActions = [];
-  const blockScheduling = (actionType, reason) => {
+  const hasExclusiveTerminalAction = normalizedActions.some((action) => ['mark_no_interest', 'mark_rejected'].includes(action?.type));
+  const explicitPauseAction = normalizedActions.find((action) => action?.type === 'pause_bot');
+  const explicitPauseReason = explicitPauseAction?.data?.reason || null;
+  const blockScheduling = (actionType, reason, options = {}) => {
     blockedActions.push({ action: actionType, reason });
     console.warn('[ACT_SCHEDULING_BLOCKED]', { action: actionType, reason, candidateId: candidate.id });
-    pendingUpdate.reminderScheduledFor = null;
-    pendingUpdate.reminderState = 'CANCELLED';
+    if (!options.skipStateUpdate) {
+      pendingUpdate.reminderScheduledFor = null;
+      pendingUpdate.reminderState = 'CANCELLED';
+    }
     if (reason === 'female_candidate') {
       pendingUpdate.botPaused = true;
       pendingUpdate.botPausedAt = new Date();
@@ -941,6 +946,10 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
 
         case 'confirm_booking':
           {
+            if (hasExclusiveTerminalAction) {
+              blockScheduling(action.type, 'blocked_by_terminal_action', { skipStateUpdate: true });
+              break;
+            }
             const blockReason = getSchedulingBlockReason(action.type);
             if (blockReason) {
               blockScheduling(action.type, blockReason);
@@ -982,14 +991,18 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
         case 'offer_interview':
         case 'reschedule':
           {
+            if (hasExclusiveTerminalAction) {
+              blockScheduling(action.type, 'blocked_by_terminal_action', { skipStateUpdate: true });
+              break;
+            }
             const blockReason = getSchedulingBlockReason(action.type);
             if (blockReason) {
               if (blockReason === 'missing_valid_slot') {
                 pendingUpdate.botPaused = true;
                 pendingUpdate.botPausedAt = new Date();
-                pendingUpdate.botPauseReason = action.type === 'reschedule'
+                pendingUpdate.botPauseReason = explicitPauseReason || (action.type === 'reschedule'
                   ? 'No hay un siguiente slot valido para reagendar'
-                  : 'Vacante con agenda habilitada sin slots validos disponibles';
+                  : 'Vacante con agenda habilitada sin slots validos disponibles');
               }
               blockScheduling(action.type, blockReason);
               break;
