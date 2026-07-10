@@ -3,6 +3,7 @@
   const TIME_RE = /\b([01]?\d|2[0-3]):([0-5]\d)\b(?!\s*(?:AM|PM|am|pm))/g;
   const WHATSAPP_SEND_PATH = '/admin/operaciones/whatsapp/enviar';
   const CONFIRMATION_REPLY_TEXT = 'Por favor responde exactamente: Confirmado.';
+  const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
   let lastAssignmentWhatsappContext = null;
   let whatsappFetchWrapped = false;
 
@@ -56,6 +57,8 @@
   }
 
   function selectedServiceRequestId() {
+    const selectedSummary = document.querySelector('#selectedRequestSummary');
+    if (selectedSummary?.dataset.serviceRequestId) return selectedSummary.dataset.serviceRequestId;
     const input = document.querySelector('input[name="serviceRequestId"]');
     if (input?.value) return input.value;
     return new URLSearchParams(window.location.search).get('serviceRequestId') || '';
@@ -158,13 +161,14 @@
   function assignmentContextFromCard(card) {
     if (!card) return null;
     const assignmentId = String(card.dataset.assignmentId || '').trim();
-    if (!assignmentId) return null;
+    const serviceRequestId = String(card.dataset.serviceRequestId || selectedServiceRequestId() || '').trim();
+    if (!assignmentId || !serviceRequestId) return null;
     return {
-      serviceRequestId: selectedServiceRequestId(),
+      serviceRequestId,
       assignmentId,
       workerId: String(card.dataset.workerId || '').trim() || undefined,
       recipientName: String(card.dataset.workerName || '').trim() || undefined,
-      messageType: 'ASSIGNMENT_CONFIRMATION'
+      messageType: ASSIGNMENT_MESSAGE_TYPE
     };
   }
 
@@ -175,8 +179,9 @@
   function assignmentContextFromPhone(phone) {
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) return null;
-    const card = [...document.querySelectorAll('.assigned-card[data-assignment-id]')].find((item) => phonesMatch(item.dataset.workerPhone, normalizedPhone));
-    return assignmentContextFromCard(card);
+    const matches = [...document.querySelectorAll('.assigned-card[data-assignment-id]')].filter((item) => phonesMatch(item.dataset.workerPhone, normalizedPhone));
+    if (matches.length !== 1) return null;
+    return assignmentContextFromCard(matches[0]);
   }
 
   function assignmentContextFromActiveElement() {
@@ -197,8 +202,21 @@
     }, 30000);
   }
 
+  function contextMatchesPhone(context, phone) {
+    if (!context?.assignmentId) return false;
+    const card = [...document.querySelectorAll('.assigned-card[data-assignment-id]')].find((item) => item.dataset.assignmentId === context.assignmentId);
+    return card ? phonesMatch(card.dataset.workerPhone, phone) : true;
+  }
+
   function contextForWhatsappPayload(body) {
-    return body?.context || lastAssignmentWhatsappContext || window.__dispatchLastAssignmentWhatsappContext || assignmentContextFromActiveElement() || assignmentContextFromPhone(body?.phone);
+    if (body?.context?.assignmentId && body?.context?.serviceRequestId) return body.context;
+    const byPhone = assignmentContextFromPhone(body?.phone);
+    if (byPhone) return byPhone;
+    const active = assignmentContextFromActiveElement();
+    if (contextMatchesPhone(active, body?.phone)) return active;
+    const remembered = lastAssignmentWhatsappContext || window.__dispatchLastAssignmentWhatsappContext;
+    if (contextMatchesPhone(remembered, body?.phone)) return remembered;
+    return null;
   }
 
   function enrichWhatsappSendOptions(resource, options = {}) {
@@ -208,7 +226,7 @@
     try {
       const body = JSON.parse(options.body);
       const context = contextForWhatsappPayload(body);
-      if (body && typeof body === 'object' && !body.context && context?.assignmentId) {
+      if (body && typeof body === 'object' && !body.context && context?.assignmentId && context?.serviceRequestId) {
         body.context = context;
         return { ...options, body: JSON.stringify(body) };
       }
