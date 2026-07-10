@@ -1,4 +1,4 @@
-import { sendDispatchWhatsappMessage as baseSendText } from './dispatchWhatsappWebServiceV4.js';
+import { sendDispatchWhatsappMessage as baseSendText } from './dispatchWhatsappWebServiceV6.js';
 
 export {
   closeDispatchWhatsappSession,
@@ -6,7 +6,7 @@ export {
   getDispatchWhatsappStatusView,
   initDispatchWhatsappClient,
   sendDispatchWhatsappMediaMessage
-} from './dispatchWhatsappWebServiceV4.js';
+} from './dispatchWhatsappWebServiceV6.js';
 
 function hourLabel(value) {
   const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
