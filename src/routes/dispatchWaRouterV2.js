@@ -2,6 +2,7 @@ import express from 'express';
 import { closeDispatchWhatsappSession, getDispatchWhatsappStatusView, initDispatchWhatsappClient, sendDispatchWhatsappMessage } from '../services/dispatchWhatsappWebServiceV5.js';
 
 const OPERATIONAL_SESSION_ERROR = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
+const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -33,8 +34,17 @@ function normalizeContext(context) {
     assignmentId: normalizeString(context.assignmentId),
     workerId: normalizeString(context.workerId),
     recipientName: normalizeString(context.recipientName),
-    messageType: normalizeString(context.messageType)
+    messageType: normalizeString(context.messageType) || ASSIGNMENT_MESSAGE_TYPE
   };
+}
+
+function validateAssignmentContext(context) {
+  if (!context?.assignmentId || !context?.serviceRequestId) {
+    const error = new Error('No se envió WhatsApp porque falta contexto de asignación. Recarga la pantalla e intenta nuevamente.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return context;
 }
 
 function viewerStatus(req, status) {
@@ -71,7 +81,8 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
 
   router.post('/enviar', async (req, res) => {
     try {
-      const result = await sendDispatchWhatsappMessage({ phone: req.body?.phone, message: req.body?.message, context: normalizeContext(req.body?.context) });
+      const context = validateAssignmentContext(normalizeContext(req.body?.context));
+      const result = await sendDispatchWhatsappMessage({ phone: req.body?.phone, message: req.body?.message, context });
       return res.json({ ok: true, providerMessageId: result.providerMessageId, phone: result.phone });
     } catch (error) {
       const statusCode = error?.statusCode === 503 ? 503 : 400;
