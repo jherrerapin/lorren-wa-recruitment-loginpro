@@ -1,8 +1,6 @@
 (() => {
   const originalConfirm = window.confirm.bind(window);
   const ASSIGNMENT_DATE_KEY = 'loginpro.assignment.dateFilter';
-  const DISPATCH_UI_STYLE_ID = 'dispatchAssignmentActiveUiFixes';
-  const WHATSAPP_ICON_SVG = '<svg viewBox="0 0 448 512" aria-hidden="true" focusable="false"><path fill="currentColor" d="M380.9 97.1C339 55.1 283.2 32 223.9 32 101 32 1 132 1 255c0 39.2 10.2 77.4 29.6 111L0 480l116.7-30.6c32.4 17.7 68.9 27 106.1 27h.1c122.9 0 222.9-100 222.9-223 0-59.3-23.1-115.1-65-157.3zM223 438.7h-.1c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.2 18.2 18.5-67.5-4.4-6.9c-18.5-29.4-28.3-63.3-28.3-98.1 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 54 81.2 53.9 130.5 0 101.8-82.8 184.6-184.7 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.5-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.5-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>';
   let allowNextNativeRemovalConfirm = false;
 
   window.confirm = function styledConfirmProxy(message) {
@@ -58,65 +56,20 @@
     form.addEventListener('submit', rememberSelectedDateFilter, true);
   }
 
-  function installDispatchUiStyles() {
-    if (document.getElementById(DISPATCH_UI_STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = DISPATCH_UI_STYLE_ID;
-    style.textContent = `
-      .assigned-card .dispatch-wa-button.dispatch-official-whatsapp-icon,
-      .assigned-card .whatsapp-link.dispatch-official-whatsapp-icon,
-      .assigned-card .icon-whatsapp.dispatch-official-whatsapp-icon{
-        width:30px!important;height:30px!important;min-width:30px!important;min-height:30px!important;
-        padding:0!important;border-radius:999px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;
-        font-size:0!important;line-height:1!important;overflow:hidden!important;background:#25D366!important;border-color:#25D366!important;color:#fff!important;
-      }
-      .assigned-card .dispatch-official-whatsapp-icon svg{width:18px!important;height:18px!important;display:block!important;flex:0 0 18px!important;color:#fff!important;}
-      .assigned-card.assignment-final-card{
-        display:grid!important;grid-template-columns:minmax(0,1fr) 30px!important;align-items:center!important;gap:6px!important;
-        padding:6px 8px!important;min-height:0!important;width:100%!important;
-      }
-      .assigned-card.assignment-final-card .assigned-main{grid-column:1!important;grid-row:1!important;min-width:0!important;width:100%!important;}
-      .assigned-card.assignment-final-card .assigned-actions{grid-column:2!important;grid-row:1!important;display:flex!important;align-items:center!important;justify-content:center!important;margin:0!important;width:30px!important;min-width:30px!important;align-self:center!important;}
-      .assigned-card.assignment-final-card strong{font-size:12px!important;line-height:1.08!important;margin:0 0 1px!important;}
-      .assigned-card.assignment-final-card .meta{font-size:10px!important;line-height:1.08!important;gap:0!important;margin:0!important;}
-      .assigned-card.assignment-final-card .assignment-message,
-      .assigned-card.assignment-final-card .whatsapp-link,
-      .assigned-card.assignment-final-card details.incident-card,
-      .assigned-card.assignment-final-card .assigned-actions form:not([data-async-assignment-action="unassign"]){display:none!important;}
-      .assigned-card.assignment-final-card form[data-async-assignment-action="unassign"]{display:flex!important;margin:0!important;width:30px!important;height:30px!important;}
-      .assigned-card.assignment-final-card .icon-remove-btn{width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important;padding:0!important;font-size:18px!important;}
-    `;
-    document.head.appendChild(style);
+  function markFinalAssignmentCard(card) {
+    if (!card) return;
+    const statusText = String(card.querySelector('.assignment-status-line')?.textContent || '').toLowerCase();
+    const hasDecisionButtons = Boolean(card.querySelector('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]'));
+    const isFinal = !hasDecisionButtons && (
+      statusText.includes('estado: confirmado')
+      || statusText.includes('estado: no confirmó')
+      || statusText.includes('estado: no confirmado')
+    );
+    card.classList.toggle('assignment-final-card', isFinal);
   }
 
-  function applyWhatsappOfficialIcons(root = document) {
-    installDispatchUiStyles();
-    root.querySelectorAll?.('.assigned-card .dispatch-wa-button, .assigned-card .whatsapp-link, .assigned-card .icon-whatsapp').forEach((button) => {
-      if (!(button instanceof HTMLElement)) return;
-      button.classList.add('dispatch-official-whatsapp-icon');
-      button.innerHTML = WHATSAPP_ICON_SVG;
-      button.title = 'Enviar WhatsApp';
-      button.setAttribute('aria-label', 'Enviar WhatsApp');
-    });
-  }
-
-  function assignmentStatusText(card) {
-    return String(card.querySelector('.assignment-status-line')?.textContent || '').toLowerCase();
-  }
-
-  function applyFinalCardLayout(root = document) {
-    installDispatchUiStyles();
-    root.querySelectorAll?.('.assigned-card').forEach((card) => {
-      const text = assignmentStatusText(card);
-      const hasDecisionButtons = Boolean(card.querySelector('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]'));
-      const isFinal = !hasDecisionButtons && (text.includes('estado: confirmado') || text.includes('estado: no confirmó') || text.includes('estado: no confirmado'));
-      card.classList.toggle('assignment-final-card', isFinal);
-    });
-  }
-
-  function applyDispatchUi(root = document) {
-    applyWhatsappOfficialIcons(root);
-    applyFinalCardLayout(root);
+  function markInitialFinalAssignmentCards() {
+    document.querySelectorAll('.assigned-card').forEach(markFinalAssignmentCard);
   }
 
   function encodeForm(form) {
@@ -187,15 +140,15 @@
       if (action === 'confirmar') {
         if (statusLine) statusLine.textContent = 'Estado: Confirmado';
         actions?.querySelectorAll('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach((item) => item.remove());
+        markFinalAssignmentCard(card);
         showInlineToast('Confirmación registrada.');
-        applyDispatchUi(document);
         return true;
       }
       if (action === 'no-confirmado') {
         if (statusLine) statusLine.textContent = 'Estado: No confirmó';
         actions?.querySelectorAll('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach((item) => item.remove());
+        markFinalAssignmentCard(card);
         showInlineToast('Auxiliar marcado como no confirmado.');
-        applyDispatchUi(document);
         return true;
       }
     } catch (error) {
@@ -397,9 +350,7 @@
     preserveDateBeforeAssignmentSubmit();
     stopBoardReloadAfterAction();
     enhanceManagedByField();
-    applyDispatchUi(document);
-    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); stopBoardReloadAfterAction(); applyDispatchUi(document); });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    markInitialFinalAssignmentCards();
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
       const url = typeof resource === 'string' ? resource : String(resource?.url || '');
