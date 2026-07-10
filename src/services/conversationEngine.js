@@ -884,6 +884,11 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
 
   const candidateAfterMerge = { ...candidate, ...persistedFields };
   const readinessAfterMerge = getCandidateReadiness(candidateAfterMerge, vacancy);
+  const preserveCompletedRegistration = Boolean(
+    readinessAfterMerge.readyForDone
+    && candidate.currentStep === ConversationStep.DONE
+    && ['REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO'].includes(String(candidate.status || ''))
+  );
   const coreFieldGapsAfterMerge = readinessAfterMerge.missingFields;
   const hasNewCoreData = Object.keys(persistedFields).some((field) => CORE_PROFILE_FIELDS.includes(field));
   const hasCvAfterMerge = readinessAfterMerge.hasValidCv;
@@ -1106,7 +1111,9 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     || null;
 
   if (!finalStep && !ignoreModelNextStep && nextStep && Object.values(ConversationStep).includes(nextStep)) {
-    if (candidateAfterMerge.gender === Gender.FEMALE && [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(nextStep)) {
+    if (preserveCompletedRegistration && nextStep !== ConversationStep.DONE) {
+      finalStep = ConversationStep.DONE;
+    } else if (candidateAfterMerge.gender === Gender.FEMALE && [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(nextStep)) {
       blockScheduling('model_next_step', 'female_candidate');
     } else {
       finalStep = nextStep;
