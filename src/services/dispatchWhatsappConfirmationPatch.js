@@ -7,18 +7,14 @@ const STATUS_MARKER = 'data-dispatch-whatsapp-status-start-patch="true"';
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
 
 const ASSIGNMENT_MESSAGE_TEMPLATE = [
-  'Hola *{{nombre}}*.',
+  'Hola *{{nombre}}*,',
   '',
-  'Te confirmamos la asignación del servicio:',
+  'Mañana: *{{fecha}}*',
+  'Llegar a: *{{operacion}}  - {{direccion}}*',
+  'Hora : *{{horaInicio}} por favor.*',
   '',
-  'Cliente: *{{cliente}}*',
-  'Operación: *{{operacion}}*',
-  'Dirección: *{{direccion}}*',
-  'Fecha: *{{fecha}}*',
-  'Hora de inicio: *{{horaInicio}}*',
-  'Servicio: *{{servicio}}*',
   '',
-  'Por favor responde exactamente: Confirmado.'
+  '*Confirmado?*'
 ].join('\n');
 
 function requestPath(req = {}) {
@@ -29,26 +25,40 @@ function assignmentScript() {
   return `<script ${MARKER}>
 (function(){
   var ASSIGNMENT_MESSAGE_TEMPLATE = ${JSON.stringify(ASSIGNMENT_MESSAGE_TEMPLATE)};
+  var ASSIGNMENT_MESSAGE_TYPE = ${JSON.stringify(ASSIGNMENT_MESSAGE_TYPE)};
 
-  function isLegacyAssignmentTemplate(value){
+  function isCanonicalAssignmentTemplate(value){
+    var text = String(value || '');
+    return /hola\s+\*?\{\{\s*nombre\s*\}\}\*?,/i.test(text)
+      && /\bma[nñ]ana\s*:\s*\*?\{\{\s*fecha\s*\}\}\*?/i.test(text)
+      && /llegar\s+a\s*:\s*\*?\{\{\s*operacion\s*\}\}/i.test(text)
+      && /hora\s*:\s*\*?\{\{\s*horaInicio\s*\}\}\s+por\s+favor/i.test(text)
+      && /\*?confirmado\?\*?/i.test(text);
+  }
+
+  function shouldApplyTemplate(value){
     var text = String(value || '');
     if (!text.trim()) return true;
-    return /te confirmamos asignaci[oó]n para/i.test(text)
-      || /por favor confirma recibido/i.test(text)
-      || /\bma[nñ]ana\s*:/i.test(text)
-      || /\bhora\s*:\s*\*?\{\{\s*horaInicio\s*\}\}/i.test(text)
-      || /\*?confirmado\?\*?/i.test(text);
+    if (isCanonicalAssignmentTemplate(text)) return false;
+    return /te confirmamos la asignaci[oó]n del servicio/i.test(text)
+      || /cliente\s*:\s*\*?\{\{\s*cliente\s*\}\}/i.test(text)
+      || /hora de inicio\s*:\s*\*?\{\{\s*horaInicio\s*\}\}/i.test(text)
+      || /por favor responde exactamente\s*:\s*confirmado/i.test(text)
+      || /te confirmamos asignaci[oó]n para/i.test(text)
+      || /por favor confirma recibido/i.test(text);
   }
 
   function setTemplate(){
     var globalTemplate = document.getElementById('globalTemplate');
-    if (globalTemplate && isLegacyAssignmentTemplate(globalTemplate.value)) {
+    if (globalTemplate && shouldApplyTemplate(globalTemplate.value)) {
       globalTemplate.value = ASSIGNMENT_MESSAGE_TEMPLATE;
+      globalTemplate.dataset.confirmationInstructionApplied = 'true';
       globalTemplate.dispatchEvent(new Event('input', { bubbles: true }));
     }
     document.querySelectorAll('.assigned-card .assignment-message').forEach(function(textarea){
-      if (isLegacyAssignmentTemplate(textarea.value)) {
+      if (shouldApplyTemplate(textarea.value)) {
         textarea.value = ASSIGNMENT_MESSAGE_TEMPLATE;
+        textarea.dataset.confirmationInstructionApplied = 'true';
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
@@ -70,7 +80,7 @@ function assignmentScript() {
       serviceRequestId: card.dataset.serviceRequestId || selectedServiceRequestId(),
       workerId: card.dataset.workerId || '',
       recipientName: card.dataset.workerName || '',
-      messageType: ${JSON.stringify(ASSIGNMENT_MESSAGE_TYPE)}
+      messageType: ASSIGNMENT_MESSAGE_TYPE
     };
   }
 
