@@ -1,6 +1,8 @@
 (() => {
   const originalConfirm = window.confirm.bind(window);
   const ASSIGNMENT_DATE_KEY = 'loginpro.assignment.dateFilter';
+  const WHATSAPP_ICON_STYLE_ID = 'dispatchOfficialWhatsappIconStyle';
+  const WHATSAPP_ICON_SVG = '<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path fill="#25D366" d="M16.01 3.2c-7.07 0-12.8 5.73-12.8 12.8 0 2.25.59 4.45 1.7 6.39L3.2 28.8l6.58-1.68a12.74 12.74 0 0 0 6.22 1.61h.01c7.06 0 12.79-5.73 12.79-12.8 0-3.43-1.34-6.65-3.76-9.08A12.7 12.7 0 0 0 16.01 3.2z"/><path fill="#fff" d="M16.01 5.38c2.83 0 5.49 1.1 7.49 3.1a10.52 10.52 0 0 1 3.1 7.49c0 5.85-4.76 10.61-10.59 10.61h-.01a10.6 10.6 0 0 1-5.4-1.48l-.39-.23-3.9 1 1.04-3.8-.25-.39A10.6 10.6 0 0 1 16.01 5.38z"/><path fill="#25D366" d="M19.11 17.23c-.28-.14-1.65-.81-1.91-.9-.25-.09-.44-.14-.62.14-.18.28-.71.9-.87 1.08-.16.18-.32.21-.6.07-.28-.14-1.16-.43-2.2-1.38-.81-.72-1.35-1.61-1.51-1.88-.16-.28-.02-.42.12-.56.13-.13.28-.32.42-.48.14-.16.18-.28.28-.46.09-.18.05-.35-.02-.49-.07-.14-.62-1.5-.85-2.05-.22-.53-.45-.46-.62-.46h-.53c-.18 0-.46.07-.69.32-.23.25-.9.88-.9 2.15 0 1.27.92 2.49 1.04 2.67.12.18 1.8 2.75 4.36 3.86.61.26 1.08.42 1.45.54.61.2 1.16.17 1.59.1.49-.07 1.51-.62 1.72-1.22.21-.6.21-1.11.14-1.22-.07-.11-.25-.18-.53-.32z"/></svg>';
   let allowNextNativeRemovalConfirm = false;
 
   window.confirm = function styledConfirmProxy(message) {
@@ -54,6 +56,53 @@
     const nativeSubmit = form.submit.bind(form);
     form.submit = () => { rememberSelectedDateFilter(); nativeSubmit(); };
     form.addEventListener('submit', rememberSelectedDateFilter, true);
+  }
+
+  function installWhatsappIconStyle() {
+    if (document.getElementById(WHATSAPP_ICON_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = WHATSAPP_ICON_STYLE_ID;
+    style.textContent = `
+      .assigned-card .dispatch-wa-button.dispatch-official-whatsapp-icon,
+      .assigned-card .whatsapp-link.dispatch-official-whatsapp-icon,
+      .assigned-card .icon-whatsapp.dispatch-official-whatsapp-icon {
+        width: 28px !important;
+        height: 28px !important;
+        min-width: 28px !important;
+        min-height: 28px !important;
+        padding: 0 !important;
+        border-radius: 999px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 0 !important;
+        line-height: 1 !important;
+        overflow: hidden !important;
+        background: #25D366 !important;
+        border-color: #25D366 !important;
+        color: #fff !important;
+      }
+      .assigned-card .dispatch-official-whatsapp-icon svg {
+        width: 20px !important;
+        height: 20px !important;
+        display: block !important;
+        flex: 0 0 20px !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function applyWhatsappOfficialIcons(root = document) {
+    installWhatsappIconStyle();
+    root.querySelectorAll?.('.assigned-card .dispatch-wa-button, .assigned-card .whatsapp-link, .assigned-card .icon-whatsapp').forEach((button) => {
+      if (!(button instanceof HTMLElement)) return;
+      if (button.dataset.officialWhatsappIconApplied === 'true') return;
+      button.classList.add('dispatch-official-whatsapp-icon');
+      button.innerHTML = WHATSAPP_ICON_SVG;
+      button.title = 'Enviar WhatsApp';
+      button.setAttribute('aria-label', 'Enviar WhatsApp');
+      button.dataset.officialWhatsappIconApplied = 'true';
+    });
   }
 
   function encodeForm(form) {
@@ -125,12 +174,14 @@
         if (statusLine) statusLine.textContent = 'Estado: Confirmado';
         actions?.querySelectorAll('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach((item) => item.remove());
         showInlineToast('Confirmación registrada.');
+        applyWhatsappOfficialIcons(document);
         return true;
       }
       if (action === 'no-confirmado') {
         if (statusLine) statusLine.textContent = 'Estado: No confirmó';
         actions?.querySelectorAll('form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach((item) => item.remove());
         showInlineToast('Auxiliar marcado como no confirmado.');
+        applyWhatsappOfficialIcons(document);
         return true;
       }
     } catch (error) {
@@ -332,7 +383,8 @@
     preserveDateBeforeAssignmentSubmit();
     stopBoardReloadAfterAction();
     enhanceManagedByField();
-    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); stopBoardReloadAfterAction(); });
+    applyWhatsappOfficialIcons(document);
+    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); stopBoardReloadAfterAction(); applyWhatsappOfficialIcons(document); });
     observer.observe(document.body, { childList: true, subtree: true });
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
