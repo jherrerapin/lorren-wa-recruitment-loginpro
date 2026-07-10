@@ -150,3 +150,29 @@ test('si hay baja confianza real, se marca escalamiento humano', () => {
   });
   assert.equal(escalate, true);
 });
+
+test('contextual reply prompt identifica a Lórren como reclutadora de LoginPro Service y limita datos de vacante', async () => {
+  process.env.OPENAI_API_KEY = 'test-key';
+
+  await withAxiosMock(async (_url, payload) => {
+    const systemText = payload?.input?.[0]?.content?.[0]?.text || '';
+    assert.match(systemText, /Lórren, reclutadora de LoginPro Service/i);
+    assert.match(systemText, /usa exclusivamente la vacante asignada/i);
+    assert.match(systemText, /Si el dato no esta en esa vacante, di que no lo tienes registrado/i);
+    return {
+      data: {
+        output: [{ content: [{ parsed: { reply: 'No tengo ese dato registrado en la vacante.', escalateHuman: false, reason: 'ok' } }] }]
+      }
+    };
+  }, async () => {
+    const result = await buildContextualReply({
+      situation: 'continue_flow',
+      inboundText: '¿qué beneficios tiene?',
+      vacancy: { title: 'Auxiliar logístico' },
+      recentMessages: []
+    });
+    assert.equal(result.usedModel, true);
+  });
+
+  delete process.env.OPENAI_API_KEY;
+});
