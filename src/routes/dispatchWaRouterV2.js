@@ -3,6 +3,10 @@ import { closeDispatchWhatsappSession, getDispatchWhatsappStatusView, initDispat
 
 const OPERATIONAL_SESSION_ERROR = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
+const STALLED_INITIALIZATION_TIMEOUT_MS = Number(process.env.DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS || 60000);
+
+let initializingSeenAtMs = null;
+let recoveryInProgress = false;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -58,19 +62,59 @@ function viewerStatus(req, status) {
   };
 }
 
+function clearInitializationWatch(status = {}) {
+  if (status.ready || status.qrImage || status.lastError || !status.initializing) {
+    initializingSeenAtMs = null;
+  }
+}
+
+function shouldRecoverStalledInitialization(status = {}) {
+  if (!status.initializing || status.ready || status.qrImage || status.lastError) return false;
+  const now = Date.now();
+  if (!initializingSeenAtMs) {
+    initializingSeenAtMs = now;
+    return false;
+  }
+  return now - initializingSeenAtMs > STALLED_INITIALIZATION_TIMEOUT_MS;
+}
+
+function recoverStalledInitialization() {
+  if (recoveryInProgress) return;
+  recoveryInProgress = true;
+  initializingSeenAtMs = null;
+  console.warn('[dispatch-wa] Inicialización de WhatsApp despacho atascada. Se reinicia el cliente para volver a generar QR/conexión.');
+  closeDispatchWhatsappSession()
+    .catch((error) => console.warn('[dispatch-wa] No fue posible cerrar completamente el cliente atascado.', error?.message || error))
+    .finally(() => {
+      recoveryInProgress = false;
+      initDispatchWhatsappClient();
+    });
+}
+
+async function getStatusForViewer(req, { autoStart = true } = {}) {
+  let status = await getDispatchWhatsappStatusView({ autoStart });
+  if (shouldRecoverStalledInitialization(status)) {
+    recoverStalledInitialization();
+    status = { ...status, initializing: false, reconnecting: true, lastError: null };
+  } else {
+    clearInitializationWatch(status);
+  }
+  return viewerStatus(req, status);
+}
+
 export function dispatchWhatsappNotificationsRouter(_prisma) {
   const router = express.Router();
   router.use(requireOps);
 
   router.get('/', async (req, res) => {
     initDispatchWhatsappClient();
-    const status = viewerStatus(req, await getDispatchWhatsappStatusView({ autoStart: false }));
+    const status = await getStatusForViewer(req, { autoStart: false });
     res.render('operacionesWhatsappEstado', { pageTitle: 'WhatsApp de despacho', role: role(req), message: normalizeString(req.query?.message), ...status });
   });
 
   router.get('/estado', async (req, res) => {
-    const shouldStart = req.query?.start === '1' || req.query?.start === 'true';
-    res.json({ ok: true, ...viewerStatus(req, await getDispatchWhatsappStatusView({ autoStart: shouldStart })) });
+    const shouldStart = req.query?.start === '0' || req.query?.start === 'false' ? false : true;
+    res.json({ ok: true, ...await getStatusForViewer(req, { autoStart: shouldStart }) });
   });
 
   router.post('/cerrar-sesion', async (_req, res) => {
