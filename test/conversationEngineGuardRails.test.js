@@ -692,3 +692,101 @@ test('vacante Siberia no advierte para Funza o Mosquera y no repite advertencia 
     else process.env.OPENAI_API_KEY = originalKey;
   }
 });
+
+test('flujo flexible: si la HV ya llegó al inicio, act guarda datos fuera de orden y pide solo faltantes antes de cerrar', async () => {
+  const prisma = prismaMock();
+  const candidate = completeCandidate({
+    currentStep: ConversationStep.GREETING_SENT,
+    fullName: null,
+    documentType: null,
+    documentNumber: null,
+    age: null,
+    locality: null,
+    medicalRestrictions: null,
+    transportMode: null,
+    cvStorageKey: 'cv/temprana.pdf',
+    cvOriginalName: 'hv.pdf',
+    cvMimeType: 'application/pdf'
+  });
+
+  const result = await act({
+    prisma,
+    candidate,
+    vacancy: schedulableVacancy({ schedulingEnabled: false }),
+    actions: [{ type: 'save_fields', data: { fullName: 'Laura Medina', age: 28, transportMode: 'Moto' } }],
+    nextStep: ConversationStep.DONE
+  });
+
+  assert.equal(prisma.updates[0].data.fullName, 'Laura Medina');
+  assert.equal(prisma.updates[0].data.age, 28);
+  assert.equal(prisma.updates[0].data.transportMode, 'Moto');
+  assert.equal(result.finalStep, ConversationStep.COLLECTING_DATA);
+  assert.deepEqual(result.blockedActions, [{ action: 'model_next_step', reason: 'done_blocked:documentType,documentNumber,locality,medicalRestrictions' }]);
+});
+
+test('flujo flexible: con solo uno o dos datos faltantes no reinicia formulario ni pide HV ya existente', async () => {
+  const prisma = prismaMock();
+  const candidate = completeCandidate({
+    currentStep: ConversationStep.COLLECTING_DATA,
+    documentNumber: null,
+    medicalRestrictions: null,
+    cvStorageKey: 'cv/temprana.pdf',
+    cvOriginalName: 'hv.pdf',
+    cvMimeType: 'application/pdf'
+  });
+
+  const result = await act({
+    prisma,
+    candidate,
+    vacancy: schedulableVacancy({ schedulingEnabled: false }),
+    actions: [{ type: 'request_cv' }],
+    nextStep: ConversationStep.ASK_CV
+  });
+
+  assert.equal(result.finalStep, ConversationStep.COLLECTING_DATA);
+  assert.deepEqual(result.readiness.missingFields, ['documentNumber', 'medicalRestrictions']);
+  assert.equal(prisma.updates.at(-1)?.data.currentStep, undefined);
+});
+
+test('flujo flexible: una pregunta de vacante en medio del flujo puede responderse y retomar faltantes sin activar loop guard', async () => {
+  const reply = 'El salario registrado para esta vacante es $1.500.000. Para seguir, confírmame por favor tu número de documento.';
+  const decision = await thinkWithModelReply({
+    inboundText: '¿cuánto pagan? y mi transporte es moto',
+    reply,
+    raw: {
+      responsePurpose: 'answer_vacancy_question_and_collect_missing_data',
+      detectedIntent: 'vacancy_question_with_data',
+      actions: [{ type: 'save_fields', data: { transportMode: 'Moto' } }],
+      extractedFields: { transportMode: 'Moto' }
+    },
+    recentMessages: [
+      { direction: 'OUTBOUND', body: reply, rawPayload: { source: 'conversation_engine' } },
+      { direction: 'INBOUND', body: '¿cuánto pagan? y mi transporte es moto' }
+    ],
+    candidate: completeCandidate({ documentNumber: null, transportMode: null }),
+    currentStep: ConversationStep.COLLECTING_DATA
+  });
+
+  assert.equal(decision.reply, reply);
+  assert.equal(decision.loopGuardApplied, false);
+  assert.equal(decision.extractedFields.transportMode, 'Moto');
+});
+
+test('flujo flexible: candidato registrado y completo no vuelve a COLLECTING_DATA por nextStep del modelo', async () => {
+  const prisma = prismaMock();
+  const candidate = completeCandidate({
+    currentStep: ConversationStep.DONE,
+    status: 'REGISTRADO'
+  });
+
+  const result = await act({
+    prisma,
+    candidate,
+    vacancy: schedulableVacancy({ schedulingEnabled: false }),
+    actions: [{ type: 'nothing' }],
+    nextStep: ConversationStep.COLLECTING_DATA
+  });
+
+  assert.equal(result.finalStep, ConversationStep.DONE);
+  assert.equal(prisma.updates.some((update) => update.data.currentStep === ConversationStep.COLLECTING_DATA), false);
+});
