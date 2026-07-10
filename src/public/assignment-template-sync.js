@@ -2,19 +2,15 @@
   const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
   const TIME_RE = /\b([01]?\d|2[0-3]):([0-5]\d)\b(?!\s*(?:AM|PM|am|pm))/g;
   const WHATSAPP_SEND_PATH = '/admin/operaciones/whatsapp/enviar';
-  const CONFIRMATION_REPLY_TEXT = 'Por favor responde exactamente: Confirmado.';
+  const CONFIRMATION_REPLY_TEXT = '*Confirmado?*';
   const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
   const ASSIGNMENT_MESSAGE_TEMPLATE = [
-    'Hola *{{nombre}}*.',
+    'Hola *{{nombre}}*,',
     '',
-    'Te confirmamos la asignación del servicio:',
+    'Mañana: *{{fecha}}*',
+    'Llegar a: *{{operacion}}  - {{direccion}}*',
+    'Hora : *{{horaInicio}} por favor.*',
     '',
-    'Cliente: *{{cliente}}*',
-    'Operación: *{{operacion}}*',
-    'Dirección: *{{direccion}}*',
-    'Fecha: *{{fecha}}*',
-    'Hora de inicio: *{{horaInicio}}*',
-    'Servicio: *{{servicio}}*',
     '',
     CONFIRMATION_REPLY_TEXT
   ].join('\n');
@@ -148,14 +144,25 @@
     });
   }
 
-  function isLegacyAssignmentTemplate(value) {
+  function isCanonicalAssignmentTemplate(value) {
+    const text = String(value || '');
+    return /hola\s+\*?\{\{\s*nombre\s*\}\}\*?,/i.test(text)
+      && /\bma[nñ]ana\s*:\s*\*?\{\{\s*fecha\s*\}\}\*?/i.test(text)
+      && /llegar\s+a\s*:\s*\*?\{\{\s*operacion\s*\}\}/i.test(text)
+      && /hora\s*:\s*\*?\{\{\s*horaInicio\s*\}\}\s+por\s+favor/i.test(text)
+      && /\*?confirmado\?\*?/i.test(text);
+  }
+
+  function shouldApplyAssignmentTemplate(value) {
     const text = String(value || '');
     if (!text.trim()) return true;
-    return /te confirmamos asignaci[oó]n para/i.test(text)
-      || /por favor confirma recibido/i.test(text)
-      || /\bma[nñ]ana\s*:/i.test(text)
-      || /\bhora\s*:\s*\*?\{\{\s*horaInicio\s*\}\}/i.test(text)
-      || /\*?confirmado\?\*?/i.test(text);
+    if (isCanonicalAssignmentTemplate(text)) return false;
+    return /te confirmamos la asignaci[oó]n del servicio/i.test(text)
+      || /cliente\s*:\s*\*?\{\{\s*cliente\s*\}\}/i.test(text)
+      || /hora de inicio\s*:\s*\*?\{\{\s*horaInicio\s*\}\}/i.test(text)
+      || /por favor responde exactamente\s*:\s*confirmado/i.test(text)
+      || /te confirmamos asignaci[oó]n para/i.test(text)
+      || /por favor confirma recibido/i.test(text);
   }
 
   function applyCanonicalAssignmentTemplate(root = document) {
@@ -164,9 +171,10 @@
     if (globalTemplate) fields.push(globalTemplate);
     root.querySelectorAll?.('.assignment-message')?.forEach((item) => fields.push(item));
     fields.forEach((field) => {
-      if (!field || !isLegacyAssignmentTemplate(field.value)) return;
+      if (!field || !shouldApplyAssignmentTemplate(field.value)) return;
       field.value = ASSIGNMENT_MESSAGE_TEMPLATE;
       field.dataset.canonicalAssignmentTemplateApplied = 'true';
+      field.dataset.confirmationInstructionApplied = 'true';
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
@@ -174,9 +182,11 @@
   function withConfirmationInstruction(value) {
     const text = String(value || '');
     if (!text.trim()) return text;
+    if (isCanonicalAssignmentTemplate(text)) return text;
+    if (/\*?confirmado\?\*?/i.test(text)) return text;
     if (/responde\s+exactamente\s*:\s*\*?confirmado\*?/i.test(text)) return text;
     if (/por favor confirma recibido\.?/i.test(text)) return text.replace(/por favor confirma recibido\.?/gi, CONFIRMATION_REPLY_TEXT);
-    return `${text.trim()} ${CONFIRMATION_REPLY_TEXT}`;
+    return `${text.trim()}\n\n${CONFIRMATION_REPLY_TEXT}`;
   }
 
   function applyConfirmationInstruction(root = document) {
