@@ -4,16 +4,21 @@ const ASSIGNMENTS_PATH = '/admin/operaciones/asignaciones';
 const WHATSAPP_STATUS_PATH = '/admin/operaciones/whatsapp';
 const MARKER = 'data-dispatch-whatsapp-confirmation-patch="true"';
 const STATUS_MARKER = 'data-dispatch-whatsapp-status-start-patch="true"';
+const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
 
 const ASSIGNMENT_MESSAGE_TEMPLATE = [
-  'Hola *{{nombre}}*,',
+  'Hola *{{nombre}}*.',
   '',
-  'Mañana: *{{fecha}}*',
-  'Llegar a: *{{operacion}}  - {{direccion}}*',
-  'Hora : *{{horaInicio}} por favor.*',
+  'Te confirmamos la asignación del servicio:',
   '',
+  'Cliente: *{{cliente}}*',
+  'Operación: *{{operacion}}*',
+  'Dirección: *{{direccion}}*',
+  'Fecha: *{{fecha}}*',
+  'Hora de inicio: *{{horaInicio}}*',
+  'Servicio: *{{servicio}}*',
   '',
-  '*Confirmado?*'
+  'Por favor responde exactamente: Confirmado.'
 ].join('\n');
 
 function requestPath(req = {}) {
@@ -25,14 +30,24 @@ function assignmentScript() {
 (function(){
   var ASSIGNMENT_MESSAGE_TEMPLATE = ${JSON.stringify(ASSIGNMENT_MESSAGE_TEMPLATE)};
 
+  function isLegacyAssignmentTemplate(value){
+    var text = String(value || '');
+    if (!text.trim()) return true;
+    return /te confirmamos asignaci[oó]n para/i.test(text)
+      || /por favor confirma recibido/i.test(text)
+      || /\bma[nñ]ana\s*:/i.test(text)
+      || /\bhora\s*:\s*\*?\{\{\s*horaInicio\s*\}\}/i.test(text)
+      || /\*?confirmado\?\*?/i.test(text);
+  }
+
   function setTemplate(){
     var globalTemplate = document.getElementById('globalTemplate');
-    if (globalTemplate && globalTemplate.value !== ASSIGNMENT_MESSAGE_TEMPLATE) {
+    if (globalTemplate && isLegacyAssignmentTemplate(globalTemplate.value)) {
       globalTemplate.value = ASSIGNMENT_MESSAGE_TEMPLATE;
       globalTemplate.dispatchEvent(new Event('input', { bubbles: true }));
     }
     document.querySelectorAll('.assigned-card .assignment-message').forEach(function(textarea){
-      if (!textarea.value || /Por favor confirma recibido/i.test(textarea.value) || /te confirmamos asignaci[oó]n/i.test(textarea.value)) {
+      if (isLegacyAssignmentTemplate(textarea.value)) {
         textarea.value = ASSIGNMENT_MESSAGE_TEMPLATE;
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
       }
@@ -40,6 +55,8 @@ function assignmentScript() {
   }
 
   function selectedServiceRequestId(){
+    var selectedSummary = document.querySelector('#selectedRequestSummary');
+    if (selectedSummary && selectedSummary.dataset.serviceRequestId) return selectedSummary.dataset.serviceRequestId;
     var input = document.querySelector('input[name="serviceRequestId"]');
     if (input && input.value) return input.value;
     return new URLSearchParams(window.location.search).get('serviceRequestId') || '';
@@ -50,10 +67,10 @@ function assignmentScript() {
     if (!card) return null;
     return {
       assignmentId: card.dataset.assignmentId || '',
-      serviceRequestId: selectedServiceRequestId(),
+      serviceRequestId: card.dataset.serviceRequestId || selectedServiceRequestId(),
       workerId: card.dataset.workerId || '',
       recipientName: card.dataset.workerName || '',
-      messageType: 'ASSIGNMENT_CONFIRMATION'
+      messageType: ${JSON.stringify(ASSIGNMENT_MESSAGE_TYPE)}
     };
   }
 
@@ -72,7 +89,7 @@ function assignmentScript() {
           var payload = JSON.parse(init.body);
           if (payload && payload.phone && payload.message && !payload.context) {
             var ctx = window.__dispatchLastAssignmentWhatsappContext || null;
-            if (ctx && ctx.assignmentId) {
+            if (ctx && ctx.assignmentId && ctx.serviceRequestId) {
               payload.context = ctx;
               init = Object.assign({}, init, { body: JSON.stringify(payload) });
             }
