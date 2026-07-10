@@ -4,6 +4,20 @@
   const WHATSAPP_SEND_PATH = '/admin/operaciones/whatsapp/enviar';
   const CONFIRMATION_REPLY_TEXT = 'Por favor responde exactamente: Confirmado.';
   const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
+  const ASSIGNMENT_MESSAGE_TEMPLATE = [
+    'Hola *{{nombre}}*.',
+    '',
+    'Te confirmamos la asignación del servicio:',
+    '',
+    'Cliente: *{{cliente}}*',
+    'Operación: *{{operacion}}*',
+    'Dirección: *{{direccion}}*',
+    'Fecha: *{{fecha}}*',
+    'Hora de inicio: *{{horaInicio}}*',
+    'Servicio: *{{servicio}}*',
+    '',
+    CONFIRMATION_REPLY_TEXT
+  ].join('\n');
   let lastAssignmentWhatsappContext = null;
   let whatsappFetchWrapped = false;
 
@@ -134,10 +148,33 @@
     });
   }
 
+  function isLegacyAssignmentTemplate(value) {
+    const text = String(value || '');
+    if (!text.trim()) return true;
+    return /te confirmamos asignaci[oó]n para/i.test(text)
+      || /por favor confirma recibido/i.test(text)
+      || /\bma[nñ]ana\s*:/i.test(text)
+      || /\bhora\s*:\s*\*?\{\{\s*horaInicio\s*\}\}/i.test(text)
+      || /\*?confirmado\?\*?/i.test(text);
+  }
+
+  function applyCanonicalAssignmentTemplate(root = document) {
+    const fields = [];
+    const globalTemplate = root.querySelector?.('#globalTemplate');
+    if (globalTemplate) fields.push(globalTemplate);
+    root.querySelectorAll?.('.assignment-message')?.forEach((item) => fields.push(item));
+    fields.forEach((field) => {
+      if (!field || !isLegacyAssignmentTemplate(field.value)) return;
+      field.value = ASSIGNMENT_MESSAGE_TEMPLATE;
+      field.dataset.canonicalAssignmentTemplateApplied = 'true';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
   function withConfirmationInstruction(value) {
     const text = String(value || '');
     if (!text.trim()) return text;
-    if (/responde\s+exactamente\s*:\s*confirmado/i.test(text)) return text;
+    if (/responde\s+exactamente\s*:\s*\*?confirmado\*?/i.test(text)) return text;
     if (/por favor confirma recibido\.?/i.test(text)) return text.replace(/por favor confirma recibido\.?/gi, CONFIRMATION_REPLY_TEXT);
     return `${text.trim()} ${CONFIRMATION_REPLY_TEXT}`;
   }
@@ -249,6 +286,7 @@
     hideExpiredWithoutDate();
     removeDuplicatedDateFilters();
     addRequestCrudActions();
+    applyCanonicalAssignmentTemplate();
     applyConfirmationInstruction();
     wrapWhatsappFetch();
     document.addEventListener('click', rememberDispatchWhatsappContext, true);
@@ -256,6 +294,7 @@
       formatVisibleTimes();
       removeDuplicatedDateFilters();
       addRequestCrudActions();
+      applyCanonicalAssignmentTemplate();
       applyConfirmationInstruction();
     });
     observer.observe(document.body, { childList: true, subtree: true });
