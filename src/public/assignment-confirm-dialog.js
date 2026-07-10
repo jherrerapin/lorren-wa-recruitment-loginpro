@@ -2,7 +2,6 @@
   const originalConfirm = window.confirm.bind(window);
   const ASSIGNMENT_DATE_KEY = 'loginpro.assignment.dateFilter';
   let allowNextNativeRemovalConfirm = false;
-  const confirmedForms = new WeakSet();
 
   window.confirm = function styledConfirmProxy(message) {
     const text = String(message || '');
@@ -55,47 +54,6 @@
     const nativeSubmit = form.submit.bind(form);
     form.submit = () => { rememberSelectedDateFilter(); nativeSubmit(); };
     form.addEventListener('submit', rememberSelectedDateFilter, true);
-  }
-
-  function sleep(ms) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
-
-  function assignmentWhatsappButtons() {
-    return [...document.querySelectorAll('.assigned-card .dispatch-wa-button, .assigned-card .whatsapp-link, .assigned-card .icon-whatsapp')]
-      .filter((button) => button instanceof HTMLElement && !button.closest('[hidden]'));
-  }
-
-  async function waitForWhatsappButton(button) {
-    const startedAt = Date.now();
-    await sleep(150);
-    while (button.disabled && Date.now() - startedAt < 30000) await sleep(250);
-  }
-
-  function addBulkWhatsappButton() {
-    if (document.getElementById('sendAllAssignmentWhatsapp')) return;
-    const whatsappButtons = assignmentWhatsappButtons();
-    if (!whatsappButtons.length) return;
-    const container = document.querySelector('.template-actions') || document.querySelector('.notify-actions') || document.querySelector('.assignment-body');
-    if (!container) return;
-    const button = document.createElement('button');
-    button.id = 'sendAllAssignmentWhatsapp';
-    button.className = 'btn btn-primary';
-    button.type = 'button';
-    button.textContent = 'Enviar WhatsApp a todos';
-    button.addEventListener('click', async () => {
-      const currentButtons = assignmentWhatsappButtons().filter((item) => !item.disabled);
-      if (!currentButtons.length) return;
-      if (!originalConfirm(`¿Enviar mensaje de confirmación a ${currentButtons.length} auxiliar(es)?`)) return;
-      const originalText = button.textContent;
-      button.disabled = true;
-      button.textContent = 'Enviando a todos...';
-      for (const item of currentButtons) {
-        item.click();
-        await waitForWhatsappButton(item);
-      }
-      button.disabled = false;
-      button.textContent = originalText;
-    });
-    container.appendChild(button);
   }
 
   function encodeForm(form) {
@@ -374,8 +332,7 @@
     preserveDateBeforeAssignmentSubmit();
     stopBoardReloadAfterAction();
     enhanceManagedByField();
-    addBulkWhatsappButton();
-    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); stopBoardReloadAfterAction(); addBulkWhatsappButton(); });
+    const observer = new MutationObserver(() => { preserveDateBeforeAssignmentSubmit(); stopBoardReloadAfterAction(); });
     observer.observe(document.body, { childList: true, subtree: true });
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (resource, options = {}) => {
