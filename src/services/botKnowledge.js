@@ -1,3 +1,6 @@
+export const LOGINPRO_SERVICE_NAME = 'LoginPro Service';
+export const LORREN_ROLE_LABEL = `Lórren, reclutadora de ${LOGINPRO_SERVICE_NAME}`;
+
 export function normalizeKnowledgeScope(value = 'GLOBAL') {
   const normalized = String(value || 'GLOBAL').trim().toUpperCase();
   return ['GLOBAL', 'VACANCY', 'CANDIDATE'].includes(normalized) ? normalized : 'GLOBAL';

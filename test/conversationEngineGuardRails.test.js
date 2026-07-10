@@ -790,3 +790,45 @@ test('flujo flexible: candidato registrado y completo no vuelve a COLLECTING_DAT
   assert.equal(result.finalStep, ConversationStep.DONE);
   assert.equal(prisma.updates.some((update) => update.data.currentStep === ConversationStep.COLLECTING_DATA), false);
 });
+
+test('prompt del engine define a Lorren como reclutadora de LoginPro Service y no permite inventar datos sensibles', async () => {
+  const originalKey = process.env.OPENAI_API_KEY;
+  const originalPost = axios.post;
+  process.env.OPENAI_API_KEY = 'test-key';
+  let systemPrompt = '';
+  axios.post = async (_url, payload) => {
+    systemPrompt = payload?.messages?.[0]?.content || '';
+    return {
+      data: {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              reply: 'No tengo ese dato registrado en la vacante.',
+              nextStep: ConversationStep.COLLECTING_DATA,
+              actions: [{ type: 'nothing' }],
+              extractedFields: {}
+            })
+          }
+        }]
+      }
+    };
+  };
+
+  try {
+    await think({
+      inboundText: '¿Quién eres y qué salario tiene?',
+      candidate: completeCandidate(),
+      vacancy: schedulableVacancy({ title: 'Auxiliar logístico', conditions: 'Turnos rotativos registrados' }),
+      recentMessages: [],
+      currentStep: ConversationStep.COLLECTING_DATA
+    });
+  } finally {
+    axios.post = originalPost;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalKey;
+  }
+
+  assert.match(systemPrompt, /Sos Lórren, reclutadora de LoginPro Service/i);
+  assert.match(systemPrompt, /cargo, salario, horarios, beneficios, requisitos, direccion, condiciones y documentacion de entrevista/i);
+  assert.match(systemPrompt, /Si el dato no esta registrado en la vacante asignada, dilo claramente y no lo inventes/i);
+});
