@@ -1,5 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
+import { buildDispatchServiceDateWhere, dispatchServiceDateKey, normalizeDispatchDateParam } from '../services/dispatchDate.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const WHATSAPP_ICON_SVG = '<svg class="official-whatsapp-icon" viewBox="0 0 448 512" aria-hidden="true" focusable="false"><path fill="currentColor" d="M380.9 97.1C339 55.1 283.2 32 223.9 32 101 32 1 132 1 255c0 39.2 10.2 77.4 29.6 111L0 480l116.7-30.6c32.4 17.7 68.9 27 106.1 27h.1c122.9 0 222.9-100 222.9-223 0-59.3-23.1-115.1-65-157.3zM223 438.7h-.1c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.2 18.2 18.5-67.5-4.4-6.9c-18.5-29.4-28.3-63.3-28.3-98.1 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 54 81.2 53.9 130.5 0 101.8-82.8 184.6-184.7 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.5-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.5-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>';
@@ -48,6 +49,30 @@ function requireOps(req, res, next) {
   if (!role) return res.redirect('/login');
   if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
   return next();
+}
+
+function shouldShowAllAssignmentDates(query = {}) {
+  return query.allDates === '1' || query.allDates === 'true';
+}
+
+function selectedAssignmentDate(query = {}) {
+  if (shouldShowAllAssignmentDates(query)) return null;
+  return normalizeDispatchDateParam(query.fecha || query.date);
+}
+
+function buildServiceRequestWhere(selectedDate, selectedServiceRequestId) {
+  const or = [];
+  if (selectedDate) or.push(buildDispatchServiceDateWhere(selectedDate));
+  if (selectedServiceRequestId) or.push({ id: selectedServiceRequestId });
+  if (!or.length) return {};
+  if (or.length === 1) return or[0];
+  return { OR: or };
+}
+
+function keepServiceRequestForBoard(request, selectedDate, selectedServiceRequestId) {
+  if (selectedServiceRequestId && request.id === selectedServiceRequestId) return true;
+  if (!selectedDate) return true;
+  return dispatchServiceDateKey(request.serviceDate) === selectedDate;
 }
 
 async function resolveCompatibleOperationalCityIds(operationalCityId) {
@@ -114,6 +139,8 @@ export function dispatchAssignmentConfirmationsRouter() {
       const locality = normalizeString(req.query.locality);
       const status = normalizeString(req.query.status);
       const serviceRequestId = normalizeString(req.query.serviceRequestId);
+      const selectedDate = selectedAssignmentDate(req.query);
+      const serviceRequestWhere = buildServiceRequestWhere(selectedDate, serviceRequestId);
 
       const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds(operationalCityId);
       const operationalCityFilter = buildOperationalCityFilter(compatibleOperationalCityIds);
@@ -133,16 +160,17 @@ export function dispatchAssignmentConfirmationsRouter() {
         ...(status ? { operationalStatus: status } : {})
       };
 
-      const [workers, cities, vacancies, transportModeRows, localityRows, serviceRequests, clients] = await Promise.all([
+      const [workers, cities, vacancies, transportModeRows, localityRows, serviceRequestsRaw, clients] = await Promise.all([
         prisma.dispatchWorker.findMany({ where: baseWorkerWhere, include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } }),
         loadDispatchCities(),
         prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }),
         prisma.dispatchWorker.findMany({ select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }),
         prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }),
-        prisma.dispatchServiceRequest.findMany({ include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }),
+        prisma.dispatchServiceRequest.findMany({ where: serviceRequestWhere, include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }),
         prisma.dispatchClient.findMany({ where: { isActive: true }, include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } }, services: { where: { isActive: true }, orderBy: { name: 'asc' } } }, orderBy: { name: 'asc' } })
       ]);
 
+      const serviceRequests = serviceRequestsRaw.filter((request) => keepServiceRequestForBoard(request, selectedDate, serviceRequestId));
       const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
       const blockedWorkerIds = new Set(selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []);
       const availableWorkers = workers.filter((worker) => !blockedWorkerIds.has(worker.id));
