@@ -76,10 +76,26 @@ jobs:
           npm test > test-output.log 2>&1
           status=$?
 
+          if [ "$status" -eq 0 ]; then
+            tail -n 20 test-output.log > test-summary.log
+          else
+            {
+              echo "Failing TAP blocks:"
+              awk '
+                /^not ok [0-9]+ - / { capture = 1 }
+                capture { print }
+                capture && /^  \.\.\.$/ { capture = 0 }
+              ' test-output.log
+              echo
+              echo "Final test summary:"
+              grep -E '^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)' test-output.log | tail -n 20
+            } > test-summary.log
+          fi
+
           echo "status=$status" >> "$GITHUB_OUTPUT"
           {
             echo "summary<<LORREN_TEST_SUMMARY"
-            tail -n 200 test-output.log
+            cat test-summary.log
             echo "LORREN_TEST_SUMMARY"
           } >> "$GITHUB_OUTPUT"
 
