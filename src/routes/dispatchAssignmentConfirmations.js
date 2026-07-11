@@ -4,7 +4,7 @@ import { buildDispatchServiceDateWhere, dispatchServiceDateKey, normalizeDispatc
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const WHATSAPP_ICON_SVG = '<svg class="official-whatsapp-icon" viewBox="0 0 448 512" aria-hidden="true" focusable="false"><path fill="currentColor" d="M380.9 97.1C339 55.1 283.2 32 223.9 32 101 32 1 132 1 255c0 39.2 10.2 77.4 29.6 111L0 480l116.7-30.6c32.4 17.7 68.9 27 106.1 27h.1c122.9 0 222.9-100 222.9-223 0-59.3-23.1-115.1-65-157.3zM223 438.7h-.1c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.2 18.2 18.5-67.5-4.4-6.9c-18.5-29.4-28.3-63.3-28.3-98.1 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 54 81.2 53.9 130.5 0 101.8-82.8 184.6-184.7 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.5-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.5-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>';
-const FINAL_ASSIGNMENT_CARD_SELECTOR = '.assignment-page .assigned-card.assignment-final-card, .assignment-page .assigned-card:not(:has(form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"])):has(.assignment-status-line)';
+const FINAL_ASSIGNMENT_CARD_SELECTOR = '.assignment-page .assigned-card.assignment-final-card';
 const ASSIGNMENT_UI_STYLE = `<style id="dispatch-assignment-source-ui-fix">
 .assignment-page .icon-whatsapp.whatsapp-link{font-size:0!important;line-height:1!important;padding:0!important;width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;border-radius:999px!important;overflow:hidden!important;background:#25D366!important;border-color:#25D366!important;color:#fff!important}.assignment-page .official-whatsapp-icon{width:19px!important;height:19px!important;display:block!important;flex:0 0 19px!important;color:#fff!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR}{display:grid!important;grid-template-columns:minmax(0,1fr) 30px!important;align-items:center!important;gap:6px!important;padding:6px 8px!important;min-height:0!important}
@@ -17,6 +17,24 @@ ${FINAL_ASSIGNMENT_CARD_SELECTOR} form[data-async-assignment-action="unassign"]{
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} .icon-remove-btn{width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important;padding:0!important;font-size:18px!important}
 @media(max-width:760px){${FINAL_ASSIGNMENT_CARD_SELECTOR}{grid-template-columns:minmax(0,1fr) 30px!important}${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-actions{justify-content:center!important}}
 </style>`;
+const ASSIGNMENT_FINAL_CARD_SCRIPT = `<script id="dispatch-confirmed-assignment-ui-fix">
+(function(){
+  function isConfirmedAssignmentCard(card){
+    var statusLine = card && card.querySelector ? card.querySelector('.assignment-status-line') : null;
+    return /Estado:\s*Confirmado/i.test(String(statusLine && statusLine.textContent || ''));
+  }
+  function compactConfirmedCard(card){
+    if (!isConfirmedAssignmentCard(card)) return;
+    card.classList.add('assignment-final-card');
+    card.querySelectorAll('.whatsapp-link,.dispatch-wa-button,.assignment-message,form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach(function(el){ el.remove(); });
+  }
+  window.__compactConfirmedAssignments = function(root){
+    (root || document).querySelectorAll('.assigned-card').forEach(compactConfirmedCard);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ window.__compactConfirmedAssignments(document); });
+  else window.__compactConfirmedAssignments(document);
+})();
+</script>`;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -95,12 +113,12 @@ async function loadDispatchCities() {
 }
 
 function compactFinalizedAssignmentCard(cardHtml) {
-  const isFinalized = /Estado:\s*(Confirmado|No confirm[óo])/i.test(cardHtml);
+  const isFinalized = /Estado:\s*Confirmado/i.test(cardHtml);
   if (!isFinalized) return cardHtml;
 
   return cardHtml
     .replace('<article class="assigned-card"', '<article class="assigned-card assignment-final-card"')
-    .replace(/<button[^>]*class="[^"]*whatsapp-link[^"]*"[\s\S]*?<\/button>/g, '')
+    .replace(/<button[^>]*class="[^"]*(?:whatsapp-link|dispatch-wa-button)[^"]*"[\s\S]*?<\/button>/g, '')
     .replace(/<textarea\s+class="assignment-message"[\s\S]*?<\/textarea>/g, '')
     .replace(/<form[^>]*data-async-assignment-action="(?:confirmar|no-confirmado)"[\s\S]*?<\/form>/g, '');
 }
@@ -116,7 +134,9 @@ function normalizeAssignmentBoardHtml(html) {
   output = output.replace("qs('#sendAllWhatsapp')", "qs('#sendAllAssignmentWhatsapp')");
   output = output.replace(/(<button[^>]*class="[^"]*icon-whatsapp[^"]*"[^>]*>)(?:\s*WA\s*)<\/button>/g, `$1${WHATSAPP_ICON_SVG}</button>`);
   output = compactFinalizedAssignmentCards(output);
+  output = output.replace('bindBoard();restoreBoardPosition();', 'bindBoard();window.__compactConfirmedAssignments?.(document);restoreBoardPosition();');
   if (!output.includes('dispatch-assignment-source-ui-fix')) output = output.replace('</head>', `${ASSIGNMENT_UI_STYLE}\n</head>`);
+  if (!output.includes('dispatch-confirmed-assignment-ui-fix')) output = output.replace('</body>', `${ASSIGNMENT_FINAL_CARD_SCRIPT}\n</body>`);
   return output;
 }
 
