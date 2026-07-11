@@ -87,7 +87,7 @@ async function resolveCompatibleOperationalCityIds(operationalCityId) {
 
 function buildOperationalCityFilter(compatibleOperationalCityIds) {
   if (!compatibleOperationalCityIds.length) return {};
-  return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } };
+  return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } };
 }
 
 async function loadDispatchCities() {
