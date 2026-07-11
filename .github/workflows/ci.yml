@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate application
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    outputs:
+      test-exit: ${{ steps.tests.outputs.test-exit }}
+      fail-count: ${{ steps.tests.outputs.fail-count }}
+      test-summary: ${{ steps.tests.outputs.summary }}
+
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      # Temporary legacy baseline from issue #386. This value may only decrease.
+      KNOWN_TEST_FAILURE_BUDGET: "40"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find src test -type f -name '*.js' -print0)
+
+      - name: Run and capture automated tests
+        id: tests
+        shell: bash
+        run: |
+          set +e
+          npm test > test-output.log 2>&1
+          test_exit=$?
+          fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' test-output.log)
+
+          if [ "$test_exit" -eq 0 ]; then
+            fail_count="${fail_count:-0}"
+            tail -n 20 test-output.log > test-summary.log
+          else
+            fail_count="${fail_count:--1}"
+            {
+              echo "Failing tests:"
+              grep -E '^not ok [0-9]+ - ' test-output.log || true
+              echo
+              echo "Final test summary:"
+              grep -E '^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)' test-output.log | tail -n 20
+            } > test-summary.log
+          fi
+
+          echo "test-exit=$test_exit" >> "$GITHUB_OUTPUT"
+          echo "fail-count=$fail_count" >> "$GITHUB_OUTPUT"
+          {
+            echo "summary<<LORREN_TEST_SUMMARY"
+            cat test-summary.log
+            echo "LORREN_TEST_SUMMARY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Enforce non-increasing test failure budget
+        env:
+          TEST_EXIT: ${{ steps.tests.outputs.test-exit }}
+          FAIL_COUNT: ${{ steps.tests.outputs.fail-count }}
+        shell: bash
+        run: |
+          if [ "$TEST_EXIT" = "0" ] && [ "$FAIL_COUNT" = "0" ]; then
+            echo "All automated tests passed."
+            exit 0
+          fi
+
+          if ! [[ "$FAIL_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "::error::Tests failed, but the failure count could not be parsed."
+            exit 1
+          fi
+
+          if [ "$FAIL_COUNT" -gt "$KNOWN_TEST_FAILURE_BUDGET" ]; then
+            echo "::error::Test failures increased from the allowed baseline of $KNOWN_TEST_FAILURE_BUDGET to $FAIL_COUNT."
+            exit 1
+          fi
+
+          if [ "$FAIL_COUNT" -lt "$KNOWN_TEST_FAILURE_BUDGET" ]; then
+            echo "::notice::Test debt improved to $FAIL_COUNT failures. Lower KNOWN_TEST_FAILURE_BUDGET in the same change."
+          else
+            echo "::warning::Known legacy test debt remains at $FAIL_COUNT failures. Tracked in issue #386."
+          fi
+
+  test-diagnostics:
+    name: Known test debt report
+    needs: validate
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      KNOWN_TEST_FAILURE_BUDGET: "40"
+
+    steps:
+      - name: Display concise test result
+        env:
+          TEST_EXIT: ${{ needs.validate.outputs.test-exit }}
+          FAIL_COUNT: ${{ needs.validate.outputs.fail-count }}
+          TEST_SUMMARY: ${{ needs.validate.outputs.test-summary }}
+        shell: bash
+        run: |
+          if [ -z "$TEST_EXIT" ] || [ -z "$FAIL_COUNT" ]; then
+            echo "The test step was not reached. Review the failed step in Validate application."
+            exit 1
+          fi
+
+          echo "Automated test process exit code: $TEST_EXIT"
+          echo "Observed failures: $FAIL_COUNT"
+          printf '%s\n' "$TEST_SUMMARY"
+
+          if ! [[ "$FAIL_COUNT" =~ ^[0-9]+$ ]] || [ "$FAIL_COUNT" -gt "$KNOWN_TEST_FAILURE_BUDGET" ]; then
+            exit 1
+          fi
+
+          if [ "$FAIL_COUNT" -gt 0 ]; then
+            echo "::warning::$FAIL_COUNT known failures remain and are tracked in issue #386."
+          fi
