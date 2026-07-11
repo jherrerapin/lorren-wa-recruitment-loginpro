@@ -80,12 +80,8 @@ jobs:
             tail -n 20 test-output.log > test-summary.log
           else
             {
-              echo "Failing TAP blocks:"
-              awk '
-                /^not ok [0-9]+ - / { capture = 1 }
-                capture { print }
-                capture && /^  \.\.\.$/ { capture = 0 }
-              ' test-output.log
+              echo "Failing tests:"
+              grep -E '^not ok [0-9]+ - ' test-output.log || true
               echo
               echo "Final test summary:"
               grep -E '^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)' test-output.log | tail -n 20
