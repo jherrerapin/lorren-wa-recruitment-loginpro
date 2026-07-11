@@ -36,10 +36,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: npm
@@ -62,4 +64,14 @@ jobs:
           done < <(find src test -type f -name '*.js' -print0)
 
       - name: Run automated tests
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          if npm test > test-output.log 2>&1; then
+            echo "Automated tests passed. Final summary:"
+            tail -n 40 test-output.log
+          else
+            echo "::error::Automated tests failed. Showing the final 250 lines."
+            tail -n 250 test-output.log
+            exit 1
+          fi
