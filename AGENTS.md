@@ -34,12 +34,12 @@ En texto nuevo se debe escribir **Lórren**. No renombrar automáticamente archi
 - Cloudflare R2 o almacenamiento compatible con S3 para archivos cuando está configurado.
 - Railway como infraestructura de despliegue actual.
 
-### Herramientas que NO están configuradas todavía
+### Herramientas y controles actuales
 
 - No existe un script `npm run lint`.
 - ESLint no aparece actualmente como dependencia del proyecto.
 - Jest no es el runner de pruebas del repositorio.
-- No asumir que existe CI de GitHub Actions hasta verificar `.github/workflows/`.
+- El repositorio cuenta con CI en `.github/workflows/ci.yml`; verificar su contenido vigente antes de asumir controles adicionales.
 
 No documentar ni afirmar que una herramienta está disponible solo porque sería deseable incorporarla después.
 
@@ -49,6 +49,7 @@ No documentar ni afirmar que una herramienta está disponible solo porque sería
 npm ci
 npm run dev
 npm test
+npm start
 npm run build
 npm run prisma:generate
 npm run prisma:migrate
