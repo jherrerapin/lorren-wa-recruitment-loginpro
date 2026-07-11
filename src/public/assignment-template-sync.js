@@ -16,6 +16,7 @@
   ].join('\n');
   let lastAssignmentWhatsappContext = null;
   let whatsappFetchWrapped = false;
+  let mutationCleanupTimer = null;
 
   function formatTimeAmPm(value) {
     const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
@@ -290,24 +291,33 @@
     window.fetch = (resource, options = {}) => nativeFetch(resource, enrichWhatsappSendOptions(resource, options));
   }
 
+  function runLightCleanup(root = document) {
+    removeDuplicatedDateFilters();
+    addRequestCrudActions();
+    applyCanonicalAssignmentTemplate(root);
+    applyConfirmationInstruction(root);
+  }
+
+  function scheduleLightCleanup() {
+    window.clearTimeout(mutationCleanupTimer);
+    mutationCleanupTimer = window.setTimeout(() => runLightCleanup(document), 150);
+  }
+
+  function observeBoardChanges() {
+    const target = document.querySelector('.board-layout');
+    if (!target || typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(scheduleLightCleanup);
+    observer.observe(target, { childList: true, subtree: true });
+  }
+
   function boot() {
     formatVisibleTimes();
     preserveDateOnSelectionLinks();
     hideExpiredWithoutDate();
-    removeDuplicatedDateFilters();
-    addRequestCrudActions();
-    applyCanonicalAssignmentTemplate();
-    applyConfirmationInstruction();
+    runLightCleanup(document);
     wrapWhatsappFetch();
     document.addEventListener('click', rememberDispatchWhatsappContext, true);
-    const observer = new MutationObserver(() => {
-      formatVisibleTimes();
-      removeDuplicatedDateFilters();
-      addRequestCrudActions();
-      applyCanonicalAssignmentTemplate();
-      applyConfirmationInstruction();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observeBoardChanges();
   }
 
   window.LoginProTimeFormat = { ...(window.LoginProTimeFormat || {}), formatTimeAmPm, formatVisibleTimes };
