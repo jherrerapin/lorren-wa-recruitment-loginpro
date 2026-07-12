@@ -17,10 +17,11 @@ const LEGACY_SERVICE_PATHS = [
 test('dispatch WhatsApp exposes one canonical facade for text, media and runtime status', () => {
   const source = readSource('src/services/dispatchWhatsappWebService.js');
   assert.match(source, /from '\.\/dispatchWhatsappWebServiceV6\.js'/);
+  assert.match(source, /initDispatchWhatsappClient as initRuntimeClient/);
   assert.match(source, /sendDispatchWhatsappMessage as sendRuntimeTextMessage/);
-  assert.match(source, /sendDispatchWhatsappMediaMessage/);
+  assert.match(source, /export function initDispatchWhatsappClient/);
   assert.match(source, /export async function sendDispatchWhatsappMessage/);
-  assert.match(source, /export \{ initDispatchWhatsappClient, sendDispatchWhatsappMediaMessage \}/);
+  assert.match(source, /export \{ sendDispatchWhatsappMediaMessage \}/);
 });
 
 test('dispatch WhatsApp watchdog is server-owned and does not depend on the status browser tab', () => {
@@ -32,12 +33,38 @@ test('dispatch WhatsApp watchdog is server-owned and does not depend on the stat
   assert.match(source, /status\.manualLogoutRequested/);
 });
 
+test('existing auto-start kill switch also disables the server watchdog', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /const AUTO_START_ENABLED = process\.env\.DISPATCH_WWEB_AUTO_START !== 'false'/);
+  assert.match(source, /const WATCHDOG_ENABLED = AUTO_START_ENABLED/);
+});
+
+test('watchdog recovers a stalled Chromium initialization without logging out the WhatsApp account', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /let initializingSeenAtMs = null/);
+  assert.match(source, /DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS/);
+  assert.match(source, /status\.initializing && !status\.ready && !status\.lastQr && !status\.lastError/);
+  assert.match(source, /killStaleChromiumProcesses\(status\.authDataPath \|\| resolveAuthDataPath\(\)\)/);
+  assert.match(source, /scheduleStalledRecoveryProbe\(\)/);
+  assert.doesNotMatch(source, /closeRuntimeSession\(\)\.catch/);
+});
+
 test('manual WhatsApp logout is respected by the server watchdog', () => {
   const source = readSource('src/services/dispatchWhatsappWebService.js');
-  const statusCheck = source.indexOf('if (status.manualLogoutRequested) return;');
+  const statusCheck = source.indexOf('if (status.manualLogoutRequested) {');
   const initialize = source.indexOf('initDispatchWhatsappClient();', statusCheck);
   assert.ok(statusCheck >= 0);
   assert.ok(initialize > statusCheck);
+});
+
+test('canonical facade restores Railway Nix Chromium discovery and stale-process cleanup', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /import \{ execFileSync \} from 'node:child_process'/);
+  assert.match(source, /function findNixChromiumExecutable\(\)/);
+  assert.match(source, /find \/nix\/store -path/);
+  assert.match(source, /function killStaleChromiumProcesses\(dataPath\)/);
+  assert.match(source, /pkill -f/);
+  assert.match(source, /prepareRuntimeEnvironment\(\{ cleanupStaleProcesses: true \}\)/);
 });
 
 test('assignment and programming routes share the canonical WhatsApp service', () => {
@@ -72,8 +99,8 @@ test('active WhatsApp engine supports reconnect and recent-message catchup', () 
   assert.match(source, /function scheduleReconnect\(reason\)/);
   assert.match(source, /async function processRecentInboundConfirmations/);
   assert.match(source, /scheduleRecentConfirmationCatchup\(client, 'ready'\)/);
-  assert.match(source, /client\.on\('message'/);
-  assert.match(source, /client\.on\('message_create'/);
+  assert.match(source, /activeClient\.on\('message'/);
+  assert.match(source, /activeClient\.on\('message_create'/);
 });
 
 test('current confirmation variants remain accepted', () => {
