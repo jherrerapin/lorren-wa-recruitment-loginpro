@@ -76,6 +76,27 @@ test('active WhatsApp engine supports reconnect and recent-message catchup', () 
   assert.match(source, /client\.on\('message_create'/);
 });
 
+test('current confirmation variants remain accepted', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  assert.match(source, /text === 'confirmado'/);
+  assert.match(source, /text === 'si'/);
+  assert.match(source, /text === 'ok'/);
+  assert.match(source, /text === 'listo'/);
+  assert.match(source, /text === 'recibido'/);
+});
+
+test('confirmation contexts from past service dates are excluded without changing assignment history', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /dispatchServiceDateKey, todayIsoDateCO/);
+  assert.match(source, /async function validateOutgoingAssignmentContext/);
+  assert.match(source, /serviceDate < today/);
+  assert.match(source, /async function expirePastConfirmationLinks/);
+  assert.match(source, /data: \{ status: 'EXPIRED' \}/);
+  assert.doesNotMatch(source, /dispatchAssignment\.updateMany/);
+  assert.match(source, /await validateOutgoingAssignmentContext\(args\.context\)/);
+  assert.match(source, /expirePastConfirmationLinks\('startup'\)/);
+});
+
 test('canonical text sender preserves the existing AM and PM message formatting', () => {
   const source = readSource('src/services/dispatchWhatsappWebService.js');
   assert.match(source, /function hourLabel\(value\)/);
