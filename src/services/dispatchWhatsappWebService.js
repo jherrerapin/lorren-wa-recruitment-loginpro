@@ -1,3 +1,5 @@
+import { prisma } from '../lib/prisma.js';
+import { dispatchServiceDateKey, todayIsoDateCO } from './dispatchDate.js';
 import {
   closeDispatchWhatsappSession as closeRuntimeSession,
   getDispatchWhatsappStatus as getRuntimeStatus,
@@ -10,10 +12,18 @@ import {
 const WATCHDOG_ENABLED = process.env.DISPATCH_WWEB_WATCHDOG_ENABLED !== 'false' && process.env.NODE_ENV !== 'test';
 const WATCHDOG_INTERVAL_MS = Math.max(30000, Number(process.env.DISPATCH_WWEB_WATCHDOG_INTERVAL_MS || 60000));
 const WATCHDOG_START_DELAY_MS = Math.max(0, Number(process.env.DISPATCH_WWEB_WATCHDOG_START_DELAY_MS || 5000));
+const STALE_LINK_CLEANUP_LIMIT = Math.max(50, Number(process.env.DISPATCH_WA_STALE_LINK_CLEANUP_LIMIT || 1000));
+const SENDABLE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
 
 let watchdogTimer = null;
 let watchdogStartTimer = null;
 let watchdogInFlight = false;
+
+function buildOperationalError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
 
 function hourLabel(value) {
   const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
@@ -28,10 +38,74 @@ function labelHours(value) {
   return String(value || '').replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b(?!\s*(?:AM|PM|am|pm))/g, (_text, hour, minute) => hourLabel(`${hour}:${minute}`));
 }
 
+async function validateOutgoingAssignmentContext(context = {}) {
+  const assignmentId = String(context?.assignmentId || '').trim();
+  const serviceRequestId = String(context?.serviceRequestId || '').trim();
+  if (!assignmentId && !serviceRequestId) return;
+  if (!assignmentId || !serviceRequestId) {
+    throw buildOperationalError('No se puede registrar la confirmación porque falta el contexto completo de la asignación.', 400);
+  }
+
+  const assignment = await prisma.dispatchAssignment.findFirst({
+    where: {
+      id: assignmentId,
+      serviceRequestId,
+      status: { in: SENDABLE_ASSIGNMENT_STATUSES }
+    },
+    select: {
+      id: true,
+      serviceRequest: { select: { serviceDate: true } }
+    }
+  });
+
+  if (!assignment) {
+    throw buildOperationalError('La asignación ya no está pendiente o no corresponde a la solicitud indicada.', 409);
+  }
+
+  const serviceDate = dispatchServiceDateKey(assignment.serviceRequest?.serviceDate);
+  const today = todayIsoDateCO();
+  if (!serviceDate || serviceDate < today) {
+    throw buildOperationalError('No se puede solicitar confirmación para una asignación de una fecha anterior.', 409);
+  }
+}
+
+async function expirePastConfirmationLinks(reason = 'watchdog') {
+  const today = todayIsoDateCO();
+  const links = await prisma.dispatchWhatsappConfirmation.findMany({
+    where: { status: 'PENDING' },
+    select: {
+      id: true,
+      assignment: {
+        select: {
+          serviceRequest: { select: { serviceDate: true } }
+        }
+      }
+    },
+    orderBy: { createdAt: 'asc' },
+    take: STALE_LINK_CLEANUP_LIMIT
+  });
+
+  const staleIds = links
+    .filter((link) => {
+      const serviceDate = dispatchServiceDateKey(link.assignment?.serviceRequest?.serviceDate);
+      return serviceDate && serviceDate < today;
+    })
+    .map((link) => link.id);
+
+  if (!staleIds.length) return 0;
+  const result = await prisma.dispatchWhatsappConfirmation.updateMany({
+    where: { id: { in: staleIds }, status: 'PENDING' },
+    data: { status: 'EXPIRED' }
+  });
+  console.log(`[dispatch-wa] Contextos antiguos de confirmación expirados=${result.count} reason=${reason} fechaCorte=${today}.`);
+  return result.count;
+}
+
 async function runDispatchWhatsappWatchdog(reason = 'interval') {
   if (watchdogInFlight) return;
   watchdogInFlight = true;
   try {
+    await expirePastConfirmationLinks(reason);
     const status = getRuntimeStatus();
     if (status.manualLogoutRequested) return;
     initDispatchWhatsappClient();
@@ -45,6 +119,9 @@ async function runDispatchWhatsappWatchdog(reason = 'interval') {
 
 export function startDispatchWhatsappWatchdog() {
   if (!WATCHDOG_ENABLED || watchdogTimer || watchdogStartTimer) return;
+  expirePastConfirmationLinks('startup').catch((error) => {
+    console.warn('[dispatch-wa] No fue posible expirar contextos antiguos al iniciar.', error?.message || error);
+  });
   watchdogStartTimer = setTimeout(() => {
     watchdogStartTimer = null;
     runDispatchWhatsappWatchdog('startup').catch(() => {});
@@ -76,6 +153,7 @@ export async function closeDispatchWhatsappSession() {
 }
 
 export async function sendDispatchWhatsappMessage(args = {}) {
+  await validateOutgoingAssignmentContext(args.context);
   return sendRuntimeTextMessage({ ...args, message: labelHours(args.message) });
 }
 
