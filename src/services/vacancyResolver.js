@@ -15,9 +15,55 @@ const ROLE_STOPWORDS = new Set([
   'vivo', 'vive', 'vives', 'vivir', 'ciudad', 'numero', 'dieron', 'este'
 ]);
 
+// Catálogo de ciudades reconocibles aunque todavía no exista una vacante para ellas.
+// Evita que una ciudad sin operación se pierda y que el cargo se compare contra
+// vacantes activas de otras ciudades.
 const CITY_ALIASES = [
   { value: 'Bogota', aliases: ['bogota'] },
-  { value: 'Ibague', aliases: ['ibague'] }
+  { value: 'Ibague', aliases: ['ibague'] },
+  { value: 'Medellin', aliases: ['medellin'] },
+  { value: 'Cali', aliases: ['cali', 'santiago de cali'] },
+  { value: 'Barranquilla', aliases: ['barranquilla'] },
+  { value: 'Cartagena', aliases: ['cartagena', 'cartagena de indias'] },
+  { value: 'Bucaramanga', aliases: ['bucaramanga'] },
+  { value: 'Cucuta', aliases: ['cucuta', 'san jose de cucuta'] },
+  { value: 'Santa Marta', aliases: ['santa marta'] },
+  { value: 'Pereira', aliases: ['pereira'] },
+  { value: 'Manizales', aliases: ['manizales'] },
+  { value: 'Armenia', aliases: ['armenia'] },
+  { value: 'Neiva', aliases: ['neiva'] },
+  { value: 'Villavicencio', aliases: ['villavicencio'] },
+  { value: 'Pasto', aliases: ['pasto', 'san juan de pasto'] },
+  { value: 'Monteria', aliases: ['monteria'] },
+  { value: 'Sincelejo', aliases: ['sincelejo'] },
+  { value: 'Valledupar', aliases: ['valledupar'] },
+  { value: 'Tunja', aliases: ['tunja'] },
+  { value: 'Popayan', aliases: ['popayan'] },
+  { value: 'Florencia', aliases: ['florencia'] },
+  { value: 'Riohacha', aliases: ['riohacha'] },
+  { value: 'Quibdo', aliases: ['quibdo'] },
+  { value: 'Yopal', aliases: ['yopal'] },
+  { value: 'Arauca', aliases: ['arauca'] },
+  { value: 'Leticia', aliases: ['leticia'] },
+  { value: 'Mocoa', aliases: ['mocoa'] },
+  { value: 'San Andres', aliases: ['san andres'] },
+  { value: 'Puerto Carreno', aliases: ['puerto carreno'] },
+  { value: 'Inirida', aliases: ['inirida'] },
+  { value: 'San Jose del Guaviare', aliases: ['san jose del guaviare'] },
+  { value: 'Buenaventura', aliases: ['buenaventura'] },
+  { value: 'Palmira', aliases: ['palmira'] },
+  { value: 'Soacha', aliases: ['soacha'] },
+  { value: 'Bello', aliases: ['bello'] },
+  { value: 'Envigado', aliases: ['envigado'] },
+  { value: 'Itagui', aliases: ['itagui'] },
+  { value: 'Rionegro', aliases: ['rionegro', 'rio negro'] },
+  { value: 'Apartado', aliases: ['apartado'] },
+  { value: 'Duitama', aliases: ['duitama'] },
+  { value: 'Sogamoso', aliases: ['sogamoso'] },
+  { value: 'Girardot', aliases: ['girardot'] },
+  { value: 'Fusagasuga', aliases: ['fusagasuga'] },
+  { value: 'Facatativa', aliases: ['facatativa'] },
+  { value: 'Zipaquira', aliases: ['zipaquira'] }
 ];
 
 const OPERATION_ZONE_ALIASES = [
