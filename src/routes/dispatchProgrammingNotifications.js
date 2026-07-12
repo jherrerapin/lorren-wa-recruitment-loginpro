@@ -6,7 +6,7 @@ import {
   loadProgrammingRequests,
   normalizeProgrammingDate
 } from '../services/dispatchProgrammingPdfService.js';
-import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebServiceV2.js';
+import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebService.js';
 
 const DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS = [
   { name: 'Milton Rodríguez', phone: '3057680685' },
