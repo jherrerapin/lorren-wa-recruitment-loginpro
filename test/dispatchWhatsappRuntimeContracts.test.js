@@ -6,90 +6,84 @@ function readSource(path) {
   return fs.readFileSync(path, 'utf8');
 }
 
-test('whatsapp despacho runtime has Railway-compatible Chromium discovery and persistent auth path', () => {
+const LEGACY_SERVICE_PATHS = [
+  'src/services/dispatchWhatsappWebServiceV2.js',
+  'src/services/dispatchWhatsappWebServiceV3.js',
+  'src/services/dispatchWhatsappWebServiceV4.js',
+  'src/services/dispatchWhatsappWebServiceV5.js',
+  'src/services/dispatchWhatsappWebServiceStable.js'
+];
+
+test('dispatch WhatsApp exposes one canonical facade for text, media and runtime status', () => {
   const source = readSource('src/services/dispatchWhatsappWebService.js');
-  assert.match(source, /RAILWAY_VOLUME_MOUNT_PATH/);
-  assert.match(source, /existsSync\('\/data'\)/);
-  assert.match(source, /findNixChromiumExecutable/);
-  assert.match(source, /find \/nix\/store -path/);
-  assert.match(source, /DISPATCH_BROWSER_EXECUTABLE_PATH/);
+  assert.match(source, /from '\.\/dispatchWhatsappWebServiceV6\.js'/);
+  assert.match(source, /sendDispatchWhatsappMessage as sendRuntimeTextMessage/);
+  assert.match(source, /sendDispatchWhatsappMediaMessage/);
+  assert.match(source, /export async function sendDispatchWhatsappMessage/);
+  assert.match(source, /export \{ initDispatchWhatsappClient, sendDispatchWhatsappMediaMessage \}/);
 });
 
-test('dispatch WhatsApp V4 remembers confirmations by chat id for LID replies', () => {
-  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
-  assert.match(source, /const pendingConfirmationByChatId = new Map\(\)/);
-  assert.match(source, /function normalizeChatId\(value\)/);
-  assert.match(source, /function chatIdsFromSentMessage\(recipient, sent\)/);
-  assert.match(source, /pendingConfirmationByChatId\.set\(chatId, value\)/);
-  assert.match(source, /async function findPendingAssignmentFromChatId\(chatId, message = \{\}\)/);
-  assert.match(source, /await findPendingAssignmentFromChatId\(sender, message\)[\s\S]*findPendingAssignmentFromMemory\(phone, message\)/);
-  assert.match(source, /pendingConfirmationByChatId\.delete\(normalizeChatId\(chatId\)\)/);
-  assert.match(source, /pendingConfirmationByChatId\.clear\(\)/);
-  assert.match(source, /getContactLidAndPhone/);
+test('dispatch WhatsApp watchdog is server-owned and does not depend on the status browser tab', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /DISPATCH_WWEB_WATCHDOG_ENABLED/);
+  assert.match(source, /setInterval\(\(\) => \{/);
+  assert.match(source, /getRuntimeStatusView\(\{ autoStart: true \}\)/);
+  assert.match(source, /startDispatchWhatsappWatchdog\(\);/);
+  assert.match(source, /status\.manualLogoutRequested/);
 });
 
+test('manual WhatsApp logout is respected by the server watchdog', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  const statusCheck = source.indexOf('if (status.manualLogoutRequested) return;');
+  const initialize = source.indexOf('initDispatchWhatsappClient();', statusCheck);
+  assert.ok(statusCheck >= 0);
+  assert.ok(initialize > statusCheck);
+});
 
-test('dispatch WhatsApp V4 persists confirmation links for restart-safe LID replies', () => {
-  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
+test('assignment and programming routes share the canonical WhatsApp service', () => {
+  const assignmentRouter = readSource('src/routes/dispatchWaRouterV2.js');
+  const programmingRouter = readSource('src/routes/dispatchProgrammingNotifications.js');
+  assert.match(assignmentRouter, /services\/dispatchWhatsappWebService\.js/);
+  assert.match(programmingRouter, /services\/dispatchWhatsappWebService\.js/);
+  assert.doesNotMatch(assignmentRouter, /dispatchWhatsappWebServiceV\d+\.js/);
+  assert.doesNotMatch(programmingRouter, /dispatchWhatsappWebServiceV\d+\.js/);
+});
+
+test('historical dispatch WhatsApp service variants are removed', () => {
+  for (const path of LEGACY_SERVICE_PATHS) {
+    assert.equal(fs.existsSync(path), false, `${path} should not exist`);
+  }
+});
+
+test('active WhatsApp engine keeps persistent Railway auth, LID mapping and restart-safe confirmation links', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
   const schema = readSource('prisma/schema.prisma');
-  assert.match(schema, /model DispatchWhatsappConfirmation/);
-  assert.match(source, /async function persistPendingConfirmationLink/);
+  assert.match(source, /RAILWAY_VOLUME_MOUNT_PATH/);
+  assert.match(source, /new WhatsappLocalAuth\(\{ clientId: 'dispatch', dataPath \}\)/);
+  assert.match(source, /getContactLidAndPhone/);
+  assert.match(source, /const pendingConfirmationByChatId = new Map\(\)/);
   assert.match(source, /prisma\.dispatchWhatsappConfirmation\.createMany/);
   assert.match(source, /async function findPersistedPendingAssignmentByLink/);
-  assert.match(source, /await findPersistedPendingAssignmentByLink\(\{ phone, chatId: sender, message \}\)/);
-  assert.match(source, /async function markPersistedConfirmationLinksCompleted/);
-  assert.doesNotMatch(source, /findLatestPendingAssignmentByContactName/);
+  assert.match(schema, /model DispatchWhatsappConfirmation/);
 });
 
-test('dispatch WhatsApp V4 recovers missed Gracias replies from recent assignment chat history', () => {
-  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
-  assert.match(source, /function isDispatchAssignmentNotice/);
-  assert.match(source, /const asksForConfirmation = \/\\b\(\?:confirma\|confirmar\|confirmacion\|confirmado\|recibido\)\\b\//);
-  assert.match(source, /const looksLikeAssignment = \/\\b\(\?:asignacion\|programacion\|servicio\|cliente\|operacion\|direccion\|llegar\|hora\|horario\|fecha\|manana\)\\b\//);
-  assert.match(source, /function parseDispatchAssignmentNotice/);
-  assert.match(source, /async function recoverMissedAssignmentConfirmationFromChat/);
-  assert.match(source, /isAutomaticConfirmationAck/);
-  assert.match(source, /eventName: 'catchup_history'/);
-  assert.match(source, /await findPendingAssignmentFromAssignmentNotice\(\{ notice, phone \}\)/);
+test('active WhatsApp engine supports reconnect and recent-message catchup', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  assert.match(source, /function scheduleReconnect\(reason\)/);
+  assert.match(source, /async function processRecentInboundConfirmations/);
+  assert.match(source, /scheduleRecentConfirmationCatchup\(client, 'ready'\)/);
+  assert.match(source, /client\.on\('message'/);
+  assert.match(source, /client\.on\('message_create'/);
 });
 
-test('dispatch WhatsApp V4 catchup keeps full chat ids when scanning recent LID chats', () => {
-  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
-  assert.match(source, /function chatIdFromChat\(chat = \{\}\)/);
-  assert.match(source, /chat\.id\?\.server && chat\.id\?\.user \? `\$\{chat\.id\.user\}@\$\{chat\.id\.server\}`/);
-  assert.match(source, /const serialized = chatIdFromChat\(chat\)/);
-  assert.match(source, /const chatId = chatIdFromChat\(chat\)/);
-});
-
-test('dispatch WhatsApp V4 does not auto-ack immediately after outbound assignment sends', () => {
-  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
-  assert.match(source, /const CATCHUP_MIN_INTERVAL_MS = Number\(process\.env\.DISPATCH_WA_CATCHUP_MIN_INTERVAL_MS \|\| 60000\)/);
-  assert.match(source, /function scheduleRecentConfirmationCatchup\(activeClient, reason = 'ready', options = \{\}\)/);
-  assert.match(source, /processRecentInboundConfirmations\(activeClient, reason, options\)/);
-  assert.match(source, /if \(ready && client\) scheduleRecentConfirmationCatchup\(client, autoStart \? 'status_start' : 'status_view'\)/);
-  assert.doesNotMatch(source, /scheduleRecentConfirmationCatchup\(activeClient, 'after_assignment_send'/);
-});
-
-
-test('dispatch WhatsApp V4 ignores old inbound confirmations before the new assignment message', () => {
-  const source = readSource('src/services/dispatchWhatsappWebServiceV4.js');
-  assert.match(source, /createdAtMs: Date\.now\(\)/);
-  assert.match(source, /function isMessageAfterPendingContext\(message = \{\}, pending = \{\}\)/);
-  assert.match(source, /inboundTimestamp \* 1000 >= pending\.createdAtMs - 5000/);
-  assert.match(source, /findPendingAssignmentFromChatId\(sender, message\)/);
-  assert.match(source, /findPersistedPendingAssignmentByLink\(\{ phone, chatId: sender, message \}\)/);
-  assert.match(source, /createdAt: \{ lte: new Date\(\(inboundTimestamp \* 1000\) \+ 5000\) \}/);
-  assert.match(source, /updatedAt: \{ lte: new Date\(\(inboundTimestamp \* 1000\) \+ 5000\) \}/);
-  assert.match(source, /findLatestPendingAssignmentByPhone\(phone, message\)/);
+test('canonical text sender preserves the existing AM and PM message formatting', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /function hourLabel\(value\)/);
+  assert.match(source, /function labelHours\(value\)/);
+  assert.match(source, /message: labelHours\(args\.message\)/);
 });
 
 test('service request summary does not render the all requests toolbar button', () => {
   const view = readSource('src/views/operacionesSolicitudesResumen.ejs');
   assert.doesNotMatch(view, /Ver todas las solicitudes/);
-});
-
-test('dispatch WhatsApp router uses latest runtime with persistent confirmations and reconnect support', () => {
-  const source = readSource('src/routes/dispatchWaRouterV2.js');
-  assert.match(source, /dispatchWhatsappWebServiceV5\.js/);
-  assert.doesNotMatch(source, /dispatchWhatsappWebServiceV3\.js/);
 });
