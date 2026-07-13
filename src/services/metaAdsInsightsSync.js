@@ -207,12 +207,9 @@ async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = [], synced
 }
 
 export async function associateCandidatesByExactAdId(prisma, campaignRows = []) {
-  let associated = 0;
-  let vacancyFilled = 0;
-
-  for (const campaign of campaignRows) {
+  const results = await Promise.all(campaignRows.map(async (campaign) => {
     const metaAdId = String(campaign.code || '').trim();
-    if (!metaAdId) continue;
+    if (!metaAdId) return { associated: 0, vacancyFilled: 0 };
 
     const campaignResult = await prisma.candidate.updateMany({
       where: {
@@ -222,8 +219,8 @@ export async function associateCandidatesByExactAdId(prisma, campaignRows = []) 
       },
       data: { campaignId: campaign.id }
     });
-    associated += campaignResult.count || 0;
 
+    let vacancyFilled = 0;
     if (campaign.vacancyId) {
       const vacancyResult = await prisma.candidate.updateMany({
         where: {
@@ -233,11 +230,19 @@ export async function associateCandidatesByExactAdId(prisma, campaignRows = []) 
         },
         data: { vacancyId: campaign.vacancyId }
       });
-      vacancyFilled += vacancyResult.count || 0;
+      vacancyFilled = vacancyResult.count || 0;
     }
-  }
 
-  return { associated, vacancyFilled };
+    return {
+      associated: campaignResult.count || 0,
+      vacancyFilled
+    };
+  }));
+
+  return results.reduce((total, result) => ({
+    associated: total.associated + result.associated,
+    vacancyFilled: total.vacancyFilled + result.vacancyFilled
+  }), { associated: 0, vacancyFilled: 0 });
 }
 
 async function syncCampaignRows(prisma, rows = []) {
