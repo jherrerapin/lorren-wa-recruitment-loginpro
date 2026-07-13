@@ -92,6 +92,7 @@ const CV_PATTERNS = [/\bhoja de vida\b/, /\bhv\b/, /\bcv\b/, /\bcurriculum\b/, /
 
 const YES_CONFIRMATION_PATTERNS = [
   /^(si|sii|sí|correcto|correcta|de acuerdo|confirmo|listo|perfecto)$/,
+  /^(dale|hagale|de una|continuar|continuemos|sigamos|quiero continuar|deseo continuar|me interesa|estoy interesado|estoy interesada)$/,
   /\b(esta bien|todo correcto|todo bien|todo esta correcto)\b/
 ];
 
