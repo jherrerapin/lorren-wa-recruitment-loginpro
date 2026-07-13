@@ -83,9 +83,29 @@ function referralTokens(message = {}) {
   );
 }
 
+function referralIdentityTokens(message = {}) {
+  const referral = extractReferralFromInboundMessage(message) || {};
+  return compactUnique([
+    referral.campaign_id,
+    referral.ad_id,
+    referral.source_id,
+    referral.adgroup_id
+  ].map(normalizeCampaignCode)).filter((token) => token.length >= 3);
+}
+
+function referralDescriptiveTokens(message = {}) {
+  const referral = extractReferralFromInboundMessage(message) || {};
+  return compactUnique([
+    referral.campaign_name,
+    referral.ad_name,
+    referral.headline,
+    referral.source_url
+  ].map(normalizeAttributionToken)).filter((token) => token.length >= 3);
+}
+
 function tokenMatchScore(referralToken, campaignToken) {
   if (!referralToken || !campaignToken) return 0;
-  if (referralToken === campaignToken) return 1000 + Math.min(referralToken.length, 100);
+  if (referralToken === campaignToken) return 2000 + Math.min(referralToken.length, 100);
   if (referralToken.length < 8 || campaignToken.length < 8) return 0;
   if (referralToken.includes(campaignToken) || campaignToken.includes(referralToken)) {
     return 100 + Math.min(referralToken.length, campaignToken.length);
@@ -94,20 +114,46 @@ function tokenMatchScore(referralToken, campaignToken) {
 }
 
 function scoreCampaignForReferral(campaign = {}, message = {}) {
+  const campaignCode = normalizeCampaignCode(campaign.code);
+  const campaignCodeToken = normalizeAttributionToken(campaign.code);
+  const campaignName = normalizeAttributionToken(campaign.name);
+  const campaignNotes = normalizeAttributionToken(campaign.notes);
+  const identityTokens = referralIdentityTokens(message);
+  const descriptiveTokens = referralDescriptiveTokens(message);
+
+  if (campaignCode && identityTokens.includes(campaignCode)) {
+    return { campaign, score: 10000, mode: 'objective_id_exact' };
+  }
+  if (campaignCodeToken && identityTokens.includes(campaignCodeToken)) {
+    return { campaign, score: 9900, mode: 'objective_id_exact' };
+  }
+  if (campaignCode && descriptiveTokens.includes(campaignCode)) {
+    return { campaign, score: 8000, mode: 'campaign_code_exact' };
+  }
+  if (campaignCodeToken && descriptiveTokens.includes(campaignCodeToken)) {
+    return { campaign, score: 7900, mode: 'campaign_code_exact' };
+  }
+  if (campaignName && descriptiveTokens.includes(campaignName)) {
+    return { campaign, score: 7000, mode: 'campaign_name_exact' };
+  }
+  if (campaignNotes && descriptiveTokens.includes(campaignNotes)) {
+    return { campaign, score: 6000, mode: 'campaign_notes_exact' };
+  }
+
   const tokensFromReferral = referralTokens(message);
   const tokensFromCampaign = campaignTokens(campaign);
   let score = 0;
-  let exactMatches = 0;
-
   for (const referralToken of tokensFromReferral) {
     for (const campaignToken of tokensFromCampaign) {
-      const matchScore = tokenMatchScore(referralToken, campaignToken);
-      if (matchScore > score) score = matchScore;
-      if (matchScore >= 1000) exactMatches += 1;
+      score = Math.max(score, tokenMatchScore(referralToken, campaignToken));
     }
   }
 
-  return { campaign, score, exactMatches };
+  return {
+    campaign,
+    score,
+    mode: score >= 2000 ? 'generic_exact' : (score > 0 ? 'unique_partial' : null)
+  };
 }
 
 export function resolveCampaignForReferral(campaigns = [], message = {}) {
@@ -116,24 +162,25 @@ export function resolveCampaignForReferral(campaigns = [], message = {}) {
   const matches = campaigns
     .map((campaign) => scoreCampaignForReferral(campaign, message))
     .filter((match) => match.score > 0)
-    .sort((a, b) => b.score - a.score || b.exactMatches - a.exactMatches || String(a.campaign.id).localeCompare(String(b.campaign.id)));
+    .sort((a, b) => b.score - a.score || String(a.campaign.id).localeCompare(String(b.campaign.id)));
 
   if (!matches.length) return { campaign: null, reason: 'no_campaign_match', matches: [] };
 
   const best = matches[0];
-  const tied = matches.filter((match) => match.score === best.score && match.exactMatches === best.exactMatches);
+  const tied = matches.filter((match) => match.score === best.score);
   if (tied.length > 1) {
     return {
       campaign: null,
       reason: 'ambiguous_campaign_match',
-      matches: tied.map((match) => ({ campaignId: match.campaign.id, score: match.score }))
+      matches: tied.map((match) => ({ campaignId: match.campaign.id, score: match.score, mode: match.mode }))
     };
   }
 
   return {
     campaign: best.campaign,
-    reason: best.exactMatches > 0 ? 'exact_campaign_match' : 'unique_partial_campaign_match',
-    matches: [{ campaignId: best.campaign.id, score: best.score }]
+    reason: best.mode === 'unique_partial' ? 'unique_partial_campaign_match' : 'exact_campaign_match',
+    matchMode: best.mode,
+    matches: [{ campaignId: best.campaign.id, score: best.score, mode: best.mode }]
   };
 }
 
@@ -247,7 +294,7 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
   return {
     attributed: true,
     reason: matchedCampaign.vacancyId ? 'matched_referral_campaign_and_vacancy' : 'matched_referral_campaign_without_vacancy',
-    matchMode: resolution.reason,
+    matchMode: resolution.matchMode || resolution.reason,
     campaignId: matchedCampaign.id,
     vacancyId: matchedCampaign.vacancyId || null,
     campaignCodeRaw,
