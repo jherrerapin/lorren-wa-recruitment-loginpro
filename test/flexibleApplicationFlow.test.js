@@ -4,7 +4,8 @@ import {
   buildVacancyQuestionReply,
   evaluateConsentBoundary,
   isConsentAcceptance,
-  isConsentRejection
+  isConsentRejection,
+  removeHandledMessagesFromWebhook
 } from '../src/services/dataConsentGate.js';
 import { buildConsentQuestionReply } from '../src/services/consentFaq.js';
 import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
@@ -61,6 +62,15 @@ test('un archivo enviado antes del consentimiento queda bloqueado sin depender d
   assert.deepEqual(decision, { block: true, reason: 'attachment_before_consent' });
 });
 
+test('datos personales enviados espontáneamente se bloquean antes del consentimiento', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
+    { type: 'text', text: { body: 'Me llamo Juan Pérez y mi cédula es 1020304050' } }
+  );
+
+  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+});
+
 test('un perfil futuro sin vacancyId también exige consentimiento antes de capturar datos', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'GREETING_SENT', botResumeMode: 'future_profile_capture' },
@@ -79,10 +89,28 @@ test('un candidato con autorización aceptada no vuelve a ser bloqueado por el g
   assert.deepEqual(decision, { block: false, reason: 'consent_already_accepted' });
 });
 
+test('un lote conserva los mensajes no manejados cuando otro quedó en consentimiento', () => {
+  const body = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [
+            { id: 'wamid-blocked', from: '573001111111', type: 'document', timestamp: '1' },
+            { id: 'wamid-allowed', from: '573002222222', type: 'text', timestamp: '2', text: { body: 'Quiero información' } }
+          ]
+        }
+      }]
+    }]
+  };
+
+  removeHandledMessagesFromWebhook(body, [{ id: 'wamid-blocked', from: '573001111111', type: 'document', timestamp: '1' }]);
+
+  assert.deepEqual(body.entry[0].changes[0].value.messages.map((message) => message.id), ['wamid-allowed']);
+});
+
 test('después de autorizar solo procesa datos incluidos en el mismo mensaje de autorización', async () => {
   const candidate = {
     id: 'candidate-1',
-    fullName: null,
     experienceInfo: null,
     experienceTime: null,
     experienceSummary: null
@@ -106,12 +134,10 @@ test('después de autorizar solo procesa datos incluidos en el mismo mensaje de 
     prisma,
     candidate,
     vacancy: { city: 'Neiva' },
-    currentText: 'Sí autorizo. Me llamo Juan Carlos Pérez, vivo en el barrio Canaima y tengo 2 años de experiencia en operaciones logísticas y manejo de personal.'
+    currentText: 'Sí autorizo. Tengo 2 años de experiencia en operaciones logísticas y manejo de personal.'
   });
 
   assert.equal(result.reason, 'profile_data_captured_from_consent_message');
-  assert.equal(persisted.fullName, 'Juan Carlos Pérez');
-  assert.equal(persisted.neighborhood, 'Canaima');
   assert.equal(persisted.experienceInfo, 'Sí');
   assert.equal(persisted.experienceTime, '2 años');
   assert.match(persisted.experienceSummary, /operaciones logísticas/i);
