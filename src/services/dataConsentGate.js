@@ -2,6 +2,7 @@ import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 import { buildCandidateDataCollectionMessage } from './readinessGuard.js';
 import { captureGatedCvDocument, isSupportedGatedCvDocument } from './gatedCvCapture.js';
+import { captureConsentedProfileData } from './consentProfileCapture.js';
 
 export const DATA_CONSENT_VERSION = 'lorren-v2-2026-07-v2';
 
@@ -42,9 +43,18 @@ function isQuestionLike(text = '') {
   ]);
 }
 
+function startsWithExplicitConsent(text = '') {
+  return /^(si|sii|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(text);
+}
+
+function startsWithExplicitVacancyConfirmation(text = '') {
+  return /^(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
+}
+
 export function isConsentAcceptance(text = '') {
   const n = normalize(text);
   if (!n) return false;
+  if (isQuestionLike(text) && !startsWithExplicitConsent(n)) return false;
   return hasAny(n, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
     /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
@@ -58,6 +68,7 @@ export function isConsentAcceptance(text = '') {
 export function isConsentRejection(text = '') {
   const n = normalize(text);
   if (!n) return false;
+  if (isQuestionLike(text) && !/^(no|negativo|no autorizo|no acepto|no doy)\b/.test(n)) return false;
   return hasAny(n, [
     /\b(no autorizo|no acepto|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
     /\b(no|negativo|paso|no gracias)\b$/
@@ -67,6 +78,7 @@ export function isConsentRejection(text = '') {
 function isAffirmativeVacancyConfirmation(text = '') {
   const n = normalize(text);
   if (!n) return false;
+  if (isQuestionLike(text) && !startsWithExplicitVacancyConfirmation(n)) return false;
   return hasAny(n, [
     /\b(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|dale|ok|listo)\b/,
     /\b(confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/
@@ -364,9 +376,10 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   if (isConsentAcceptance(body)) {
     await recordConsent(prisma, req, candidate, 'ACCEPTED');
-    const acceptedCandidate = { ...candidate, dataConsentStatus: 'ACCEPTED', currentStep: ConversationStep.COLLECTING_DATA, botResumeMode: null };
+    const captured = await captureConsentedProfileData({ prisma, candidate, vacancy, currentText: body });
+    const acceptedCandidate = captured.candidate || { ...candidate, dataConsentStatus: 'ACCEPTED', currentStep: ConversationStep.COLLECTING_DATA, botResumeMode: null };
     const reply = [questionReply, buildConsentAcceptedReply(acceptedCandidate, vacancy)].filter(Boolean).join('\n\n');
-    await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_accepted');
+    await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_accepted', { capturedFields: captured.capturedFields || [] });
     return true;
   }
 
