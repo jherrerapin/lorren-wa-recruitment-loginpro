@@ -5,6 +5,7 @@ import {
   campaignMetaStatus,
   missingVacancyCount
 } from '../services/metaRecruitmentStats.js';
+import { getMetaAdsConfig } from '../services/metaAdsClient.js';
 import { syncMetaAdsInsights } from '../services/metaAdsInsightsSync.js';
 
 const BASE_PATH = '/admin/estadisticas';
@@ -60,9 +61,7 @@ function dateRange(query = {}) {
 }
 
 function metaConfigured() {
-  const token = String(process.env.META_ADS_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || '').trim();
-  const account = String(process.env.META_AD_ACCOUNT_ID || process.env.META_ADS_ACCOUNT_ID || '').trim();
-  return Boolean(token && account);
+  return getMetaAdsConfig().enabled;
 }
 
 function formatMoney(value, currency = 'COP') {
@@ -192,9 +191,18 @@ function syncFeedback(query = {}) {
     return `<div class="alert warn">El inventario actual se actualizó correctamente, pero Meta no entregó las métricas históricas. Los anuncios visibles sí quedaron conciliados.</div>`;
   }
   if (state === 'error') {
-    const stage = normalizeText(query.stage) || 'inventory_fetch';
+    const stage = normalizeText(query.stage) || 'unknown';
     const code = normalizeText(query.code);
-    return `<div class="alert bad">No fue posible consultar un inventario válido de Meta Ads. Se conservó el último inventario para evitar borrar información por un fallo de acceso.${code ? ` Código: ${escapeHtml(code)}.` : ''} Etapa: ${escapeHtml(stage)}.</div>`;
+    const subcode = normalizeText(query.subcode);
+    const endpoint = normalizeText(query.endpoint);
+    const message = normalizeText(query.message);
+    const details = [
+      code ? `Código: ${escapeHtml(code)}` : null,
+      subcode ? `Subcódigo: ${escapeHtml(subcode)}` : null,
+      endpoint ? `Consulta: ${escapeHtml(endpoint)}` : null,
+      `Etapa: ${escapeHtml(stage)}`
+    ].filter(Boolean).join(' · ');
+    return `<div class="alert bad">No fue posible consultar un inventario válido de Meta Ads. Se conservó el último inventario para evitar borrar información por un fallo de acceso.${message ? ` Motivo: ${escapeHtml(message)}.` : ''} ${details}.</div>`;
   }
   return '';
 }
@@ -202,8 +210,8 @@ function syncFeedback(query = {}) {
 function syncPanel(data = {}) {
   const configured = metaConfigured();
   const status = configured
-    ? `<div class="alert good">Meta Ads está configurado. El listado se construye únicamente con el inventario actual validado de campañas, conjuntos y anuncios.</div>`
-    : `<div class="alert info">Meta Ads no está configurado. Configura la cuenta para consultar el inventario actual de anuncios.</div>`;
+    ? `<div class="alert good">Meta Ads está configurado con una credencial independiente de Marketing API. El listado se construye únicamente con el inventario actual validado.</div>`
+    : `<div class="alert warn">Meta Ads no está configurado correctamente. Debes definir META_ADS_ACCESS_TOKEN y META_AD_ACCOUNT_ID. El token META_ACCESS_TOKEN pertenece a WhatsApp y no se reutiliza para anuncios.</div>`;
   const form = configured
     ? `<form method="post" action="${BASE_PATH}/campaigns/sync" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Actualizando…'"><input type="hidden" name="since" value="${escapeHtml(data.range.since)}"><input type="hidden" name="until" value="${escapeHtml(data.range.until)}"><button class="btn primary" type="submit">↻ Actualizar desde Meta</button></form>`
     : '';
@@ -338,6 +346,14 @@ async function jsonList(prisma, req, res) {
   });
 }
 
+function publicErrorText(value, maxLength = 300) {
+  return String(value || '')
+    .replace(/([?&])access_token=[^&\s]+/gi, '$1access_token=[REDACTED]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
 function syncRedirect(result = {}) {
   const params = new URLSearchParams();
   if (result.ok) {
@@ -348,6 +364,9 @@ function syncRedirect(result = {}) {
     params.set('sync', 'error');
     params.set('stage', result.stage || 'unknown');
     if (result.error?.code) params.set('code', String(result.error.code));
+    if (result.error?.subcode) params.set('subcode', String(result.error.subcode));
+    if (result.error?.endpoint) params.set('endpoint', publicErrorText(result.error.endpoint, 160));
+    if (result.error?.message) params.set('message', publicErrorText(result.error.message));
   }
   return `${BASE_PATH}/campaigns?${params.toString()}`;
 }
@@ -361,11 +380,18 @@ async function runSync(prisma, syncMetaAds, req, res) {
       until: normalizeDate(req.body?.until)
     });
   } catch (error) {
-    console.error('[META_ADS_SYNC_UNEXPECTED_ERROR]', error);
+    console.error('[META_ADS_SYNC_UNEXPECTED_ERROR]', {
+      name: error?.name,
+      code: error?.code,
+      message: publicErrorText(error?.message)
+    });
     result = {
       ok: false,
       stage: 'unexpected',
-      error: { code: error?.code || 'META_ADS_SYNC_UNEXPECTED' }
+      error: {
+        code: error?.code || 'META_ADS_SYNC_UNEXPECTED',
+        message: 'La sincronización produjo un error inesperado.'
+      }
     };
   }
   return res.redirect(syncRedirect(result));
