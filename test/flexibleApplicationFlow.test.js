@@ -111,9 +111,8 @@ test('un lote conserva los mensajes no manejados cuando otro quedó en consentim
 test('después de autorizar solo procesa datos incluidos en el mismo mensaje de autorización', async () => {
   const candidate = {
     id: 'candidate-1',
-    experienceInfo: null,
-    experienceTime: null,
-    experienceSummary: null
+    documentType: null,
+    documentNumber: null
   };
   let persisted = null;
   const prisma = {
@@ -134,13 +133,12 @@ test('después de autorizar solo procesa datos incluidos en el mismo mensaje de 
     prisma,
     candidate,
     vacancy: { city: 'Neiva' },
-    currentText: 'Sí autorizo. Tengo 2 años de experiencia en operaciones logísticas y manejo de personal.'
+    currentText: 'Sí autorizo. CC 1020304050'
   });
 
   assert.equal(result.reason, 'profile_data_captured_from_consent_message');
-  assert.equal(persisted.experienceInfo, 'Sí');
-  assert.equal(persisted.experienceTime, '2 años');
-  assert.match(persisted.experienceSummary, /operaciones logísticas/i);
+  assert.equal(persisted.documentType, 'CC');
+  assert.equal(persisted.documentNumber, '1020304050');
 });
 
 test('los mensajes anteriores al consentimiento no se recuperan después de una aceptación sin datos', async () => {
