@@ -6,19 +6,14 @@ const INSIGHT_FIELDS = [
   'actions', 'date_start', 'date_stop'
 ];
 
-const CAMPAIGN_FIELDS = [
-  'id', 'name', 'status', 'effective_status', 'objective', 'start_time', 'stop_time'
-];
-
-const ADSET_FIELDS = [
-  'id', 'name', 'status', 'effective_status', 'campaign_id', 'start_time', 'end_time'
-];
-
+const CAMPAIGN_FIELDS = ['id', 'name', 'status', 'effective_status'];
+const ADSET_FIELDS = ['id', 'name', 'status', 'effective_status', 'campaign_id'];
 const AD_FIELDS = [
   'id', 'name', 'status', 'effective_status', 'campaign_id', 'adset_id', 'created_time', 'updated_time'
 ];
 
 const NON_CURRENT_META_STATUSES = new Set(['ARCHIVED', 'DELETED']);
+const MAX_GRAPH_PAGES = 100;
 
 function asDateOnly(value) {
   const text = String(value || '').slice(0, 10);
@@ -42,7 +37,7 @@ function asInt(value) {
 }
 
 function compactUnique(values = []) {
-  return [...new Set(values.filter(Boolean))];
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
 }
 
 function dateOnlyFromDate(date) {
@@ -78,16 +73,20 @@ export function filterCurrentMetaAds(ads = []) {
 
 export function buildCurrentMetaInventory({ campaigns = [], adsets = [], ads = [] } = {}) {
   const currentCampaigns = (Array.isArray(campaigns) ? campaigns : []).filter(isCurrentMetaEntity);
-  const currentCampaignIds = new Set(currentCampaigns.map((campaign) => String(campaign.id || '').trim()).filter(Boolean));
+  const currentCampaignIds = new Set(
+    currentCampaigns.map((campaign) => String(campaign?.id || '').trim()).filter(Boolean)
+  );
 
   const currentAdsets = (Array.isArray(adsets) ? adsets : [])
     .filter(isCurrentMetaEntity)
-    .filter((adset) => currentCampaignIds.has(String(adset.campaign_id || '').trim()));
-  const currentAdsetIds = new Set(currentAdsets.map((adset) => String(adset.id || '').trim()).filter(Boolean));
+    .filter((adset) => currentCampaignIds.has(String(adset?.campaign_id || '').trim()));
+  const currentAdsetIds = new Set(
+    currentAdsets.map((adset) => String(adset?.id || '').trim()).filter(Boolean)
+  );
 
   const currentAds = filterCurrentMetaAds(ads).filter((ad) => {
-    const campaignId = String(ad.campaign_id || '').trim();
-    const adsetId = String(ad.adset_id || '').trim();
+    const campaignId = String(ad?.campaign_id || '').trim();
+    const adsetId = String(ad?.adset_id || '').trim();
     return currentCampaignIds.has(campaignId) && currentAdsetIds.has(adsetId);
   });
 
@@ -110,13 +109,41 @@ function safeError(error) {
   };
 }
 
+function failureResult({ stage, error, range, enabled = true }) {
+  return {
+    ok: false,
+    partial: false,
+    enabled,
+    stage,
+    since: range?.since || null,
+    until: range?.until || null,
+    error: safeError(error)
+  };
+}
+
 async function readAllPages(client, path, params = {}) {
   const rows = [];
+  const visited = new Set();
   let payload = await client.graphGet(path, params);
+  let page = 0;
 
   while (payload) {
     rows.push(...(Array.isArray(payload.data) ? payload.data : []));
-    payload = payload?.paging?.next ? await client.graphGetUrl(payload.paging.next) : null;
+    const nextUrl = payload?.paging?.next || null;
+    if (!nextUrl) break;
+    if (visited.has(nextUrl)) {
+      const error = new Error('Meta devolvió una paginación repetida.');
+      error.code = 'META_ADS_PAGINATION_LOOP';
+      throw error;
+    }
+    visited.add(nextUrl);
+    page += 1;
+    if (page >= MAX_GRAPH_PAGES) {
+      const error = new Error('La paginación de Meta superó el límite de seguridad.');
+      error.code = 'META_ADS_PAGINATION_LIMIT';
+      throw error;
+    }
+    payload = await client.graphGetUrl(nextUrl);
   }
 
   return rows;
@@ -153,11 +180,13 @@ async function fetchInsights(client, { since, until, level }) {
   });
 }
 
-async function syncAdAccount(prisma, client) {
-  const account = await client.graphGet(client.adAccountId, {
+async function fetchAdAccount(client) {
+  return client.graphGet(client.adAccountId, {
     fields: ['id', 'name', 'currency', 'timezone_name'].join(',')
   });
+}
 
+async function persistAdAccount(prisma, client, account = {}) {
   await prisma.metaAdAccount.upsert({
     where: { accountId: String(account.id || client.adAccountId).replace(/^act_/, '') },
     update: {
@@ -177,7 +206,10 @@ async function syncAdAccount(prisma, client) {
 }
 
 async function removeGeneratedCampaignLevelRows(prisma, campaigns = []) {
-  const campaignIds = compactUnique(campaigns.map((campaign) => String(campaign.id || '').trim())).filter(Boolean);
+  const campaignIds = compactUnique(
+    (Array.isArray(campaigns) ? campaigns : [])
+      .map((campaign) => String(campaign?.id || '').trim())
+  );
   if (!campaignIds.length) return 0;
   const result = await prisma.campaign.deleteMany({
     where: {
@@ -193,7 +225,7 @@ export async function markAdsMissingFromMeta(prisma, ads = [], syncedAt = new Da
   const currentAdIds = compactUnique(
     (Array.isArray(ads) ? ads : [])
       .map((ad) => String(ad?.id || '').trim())
-  ).filter(Boolean);
+  );
   const where = {
     sourceType: 'META_ADS',
     endsAt: null
@@ -243,7 +275,8 @@ async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = [], adsets
         startsAt: asDateTime(ad.created_time),
         endsAt: null,
         notes: adInventoryNotes(ad, campaignNames.get(campaignId), adsetNames.get(adsetId)),
-        createdByUsername: 'meta-ads-sync'
+        createdByUsername: 'meta-ads-sync',
+        updatedAt: syncedAt
       },
       create: {
         code,
@@ -264,7 +297,11 @@ async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = [], adsets
 }
 
 export async function associateCandidatesByExactAdId(prisma, campaignRows = []) {
-  const results = await Promise.all(campaignRows.map(async (campaign) => {
+  const safeRows = Array.isArray(campaignRows) ? campaignRows : [];
+  const results = await Promise.all(safeRows.map(async (campaign) => {
+    if (!campaign || typeof campaign !== 'object' || Array.isArray(campaign)) {
+      return { associated: 0, vacancyFilled: 0 };
+    }
     const metaAdId = String(campaign.code || '').trim();
     if (!metaAdId) return { associated: 0, vacancyFilled: 0 };
 
@@ -293,7 +330,8 @@ export async function associateCandidatesByExactAdId(prisma, campaignRows = []) 
 
 async function syncCampaignRows(prisma, rows = []) {
   let count = 0;
-  for (const row of rows) {
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
     const date = asDateOnly(row.date_start);
     if (!date || !row.campaign_id) continue;
     await prisma.metaCampaignSnapshot.upsert({
@@ -318,7 +356,8 @@ async function syncCampaignRows(prisma, rows = []) {
 
 async function syncAdRows(prisma, rows = []) {
   let count = 0;
-  for (const row of rows) {
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
     const date = asDateOnly(row.date_start);
     if (!date || !row.ad_id) continue;
     await prisma.metaAdSnapshot.upsert({
@@ -344,81 +383,121 @@ async function syncAdRows(prisma, rows = []) {
   return count;
 }
 
-export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
-  const client = createMetaAdsClient();
+export async function syncMetaAdsInsights(prisma, { since, until } = {}, dependencies = {}) {
+  const client = dependencies.client || createMetaAdsClient();
+  const fallbackRange = defaultDateRange();
+  const range = { since: since || fallbackRange.since, until: until || fallbackRange.until };
+
   if (!client.enabled) {
     const error = new Error('Meta Ads no está configurado.');
     error.name = 'MetaAdsNotConfigured';
     error.code = 'META_ADS_NOT_CONFIGURED';
     error.missing = client.missing;
-    throw error;
+    return failureResult({ stage: 'configuration', error, range, enabled: false });
   }
 
-  const fallbackRange = defaultDateRange();
-  const range = { since: since || fallbackRange.since, until: until || fallbackRange.until };
-  console.info('[metaAdsInsightsSync] inicio', { since: range.since, until: range.until, adAccountId: client.adAccountId });
+  console.info('[metaAdsInsightsSync] inicio', {
+    since: range.since,
+    until: range.until,
+    adAccountId: client.adAccountId
+  });
 
+  let account;
+  let rawCampaigns;
+  let rawAdsets;
+  let rawAds;
   try {
-    await syncAdAccount(prisma, client);
-    const [rawCampaigns, rawAdsets, rawAds, campaignRows, adRows] = await Promise.all([
+    [account, rawCampaigns, rawAdsets, rawAds] = await Promise.all([
+      fetchAdAccount(client),
       fetchCampaignInventory(client),
       fetchAdsetInventory(client),
-      fetchAdInventory(client),
-      fetchInsights(client, { ...range, level: 'campaign' }),
-      fetchInsights(client, { ...range, level: 'ad' })
+      fetchAdInventory(client)
     ]);
+  } catch (error) {
+    const failure = failureResult({ stage: 'inventory_fetch', error, range });
+    console.warn('[metaAdsInsightsSync] inventario no disponible', failure.error);
+    return failure;
+  }
 
-    const inventory = buildCurrentMetaInventory({
-      campaigns: rawCampaigns,
-      adsets: rawAdsets,
-      ads: rawAds
-    });
-    const syncedAt = new Date();
-    const removedCampaignRows = await removeGeneratedCampaignLevelRows(prisma, rawCampaigns);
-    const missingAds = await markAdsMissingFromMeta(prisma, inventory.currentAds, syncedAt);
-    const dashboardInventory = await upsertAdsAsDashboardRows(
+  const inventory = buildCurrentMetaInventory({
+    campaigns: rawCampaigns,
+    adsets: rawAdsets,
+    ads: rawAds
+  });
+  const syncedAt = new Date();
+
+  let removedCampaignRows;
+  let missingAds;
+  let dashboardInventory;
+  let exactAssociations;
+  try {
+    await persistAdAccount(prisma, client, account);
+    removedCampaignRows = await removeGeneratedCampaignLevelRows(prisma, rawCampaigns);
+    missingAds = await markAdsMissingFromMeta(prisma, inventory.currentAds, syncedAt);
+    dashboardInventory = await upsertAdsAsDashboardRows(
       prisma,
       inventory.currentAds,
       inventory.currentCampaigns,
       inventory.currentAdsets,
       syncedAt
     );
-    const exactAssociations = await associateCandidatesByExactAdId(prisma, dashboardInventory.rows);
-    const [campaignSnapshots, adSnapshots] = await Promise.all([
+    exactAssociations = await associateCandidatesByExactAdId(prisma, dashboardInventory.rows);
+  } catch (error) {
+    const failure = failureResult({ stage: 'inventory_persistence', error, range });
+    console.warn('[metaAdsInsightsSync] inventario no persistido', failure.error);
+    return failure;
+  }
+
+  let campaignSnapshots = 0;
+  let adSnapshots = 0;
+  let insights = { ok: true, error: null };
+  try {
+    const [campaignRows, adRows] = await Promise.all([
+      fetchInsights(client, { ...range, level: 'campaign' }),
+      fetchInsights(client, { ...range, level: 'ad' })
+    ]);
+    [campaignSnapshots, adSnapshots] = await Promise.all([
       syncCampaignRows(prisma, campaignRows),
       syncAdRows(prisma, adRows)
     ]);
-
-    const result = {
-      ok: true,
-      enabled: true,
-      since: range.since,
-      until: range.until,
-      syncedAt,
-      removedCampaignRows,
-      rawInventoryCampaigns: rawCampaigns.length,
-      currentCampaigns: inventory.currentCampaigns.length,
-      rawInventoryAdsets: rawAdsets.length,
-      currentAdsets: inventory.currentAdsets.length,
-      rawInventoryAds: rawAds.length,
-      currentAds: dashboardInventory.count,
-      ignoredNonCurrentAds: rawAds.length - inventory.currentAds.length,
-      missingAds,
-      exactAssociations,
-      campaignSnapshots,
-      adSnapshots
-    };
-    console.info('[metaAdsInsightsSync] fin', result);
-    return result;
   } catch (error) {
-    const safe = safeError(error);
-    console.warn('[metaAdsInsightsSync] error', safe);
-    const syncError = new Error(safe.message);
-    syncError.name = safe.name;
-    syncError.code = safe.code || 'META_ADS_SYNC_FAILED';
-    syncError.metaError = safe;
-    throw syncError;
+    insights = { ok: false, error: safeError(error) };
+    console.warn('[metaAdsInsightsSync] métricas no disponibles; inventario conservado', insights.error);
   }
+
+  const result = {
+    ok: true,
+    partial: !insights.ok,
+    enabled: true,
+    stage: insights.ok ? 'complete' : 'inventory_complete',
+    since: range.since,
+    until: range.until,
+    syncedAt,
+    removedCampaignRows,
+    rawInventoryCampaigns: rawCampaigns.length,
+    currentCampaigns: inventory.currentCampaigns.length,
+    rawInventoryAdsets: rawAdsets.length,
+    currentAdsets: inventory.currentAdsets.length,
+    rawInventoryAds: rawAds.length,
+    currentAds: dashboardInventory.count,
+    ignoredNonCurrentAds: rawAds.length - inventory.currentAds.length,
+    missingAds,
+    exactAssociations,
+    campaignSnapshots,
+    adSnapshots,
+    insights
+  };
+
+  console.info('[metaAdsInsightsSync] fin', {
+    ok: result.ok,
+    partial: result.partial,
+    currentCampaigns: result.currentCampaigns,
+    currentAdsets: result.currentAdsets,
+    currentAds: result.currentAds,
+    missingAds: result.missingAds,
+    insightsOk: result.insights.ok
+  });
+  return result;
 }
 
 export default { syncMetaAdsInsights };
