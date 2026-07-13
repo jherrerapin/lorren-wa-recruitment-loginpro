@@ -1,5 +1,3 @@
-import { dispatchMetaAdsStatsIfApplicable } from './metaAdsStatsGateDispatch.js';
-
 const DEFAULT_RELEASE_DATE = '2026-07-09';
 
 function getReleaseDate() {
@@ -28,5 +26,5 @@ export function requireLorenV2(req, res, next) {
   if (!canSeeLorenV2(req)) {
     return res.status(403).send('Modulo no disponible para este perfil.');
   }
-  return dispatchMetaAdsStatsIfApplicable(req, res, next);
+  return next();
 }

@@ -5,6 +5,7 @@ import {
   campaignMetaStatus,
   missingVacancyCount
 } from '../services/metaRecruitmentStats.js';
+import { syncMetaAdsInsights } from '../services/metaAdsInsightsSync.js';
 
 const BASE_PATH = '/admin/estadisticas';
 const DEFAULT_LOOKBACK_DAYS = 90;
@@ -182,13 +183,29 @@ async function loadDashboard(prisma, query = {}) {
   };
 }
 
+function syncFeedback(query = {}) {
+  const state = normalizeText(query.sync);
+  if (state === 'success') {
+    return `<div class="alert good">Sincronización completada. Anuncios actuales: ${formatInteger(query.currentAds)}. Registros anteriores finalizados: ${formatInteger(query.missingAds)}.</div>`;
+  }
+  if (state === 'partial') {
+    return `<div class="alert warn">El inventario actual se actualizó correctamente, pero Meta no entregó las métricas históricas. Los anuncios visibles sí quedaron conciliados.</div>`;
+  }
+  if (state === 'error') {
+    const stage = normalizeText(query.stage) || 'inventory_fetch';
+    const code = normalizeText(query.code);
+    return `<div class="alert bad">No fue posible consultar un inventario válido de Meta Ads. Se conservó el último inventario para evitar borrar información por un fallo de acceso.${code ? ` Código: ${escapeHtml(code)}.` : ''} Etapa: ${escapeHtml(stage)}.</div>`;
+  }
+  return '';
+}
+
 function syncPanel(data = {}) {
   const configured = metaConfigured();
   const status = configured
-    ? `<div class="alert good">Meta Ads está configurado. Solo se muestran anuncios que existen actualmente en la cuenta publicitaria. Si no hay anuncios creados, esta sección permanecerá vacía.</div>`
+    ? `<div class="alert good">Meta Ads está configurado. El listado se construye únicamente con el inventario actual validado de campañas, conjuntos y anuncios.</div>`
     : `<div class="alert info">Meta Ads no está configurado. Configura la cuenta para consultar el inventario actual de anuncios.</div>`;
   const form = configured
-    ? `<form method="post" action="${BASE_PATH}/meta/sync-form" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Actualizando…'"><input type="hidden" name="since" value="${escapeHtml(data.range.since)}"><input type="hidden" name="until" value="${escapeHtml(data.range.until)}"><button class="btn primary" type="submit">↻ Actualizar desde Meta</button></form>`
+    ? `<form method="post" action="${BASE_PATH}/campaigns/sync" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Actualizando…'"><input type="hidden" name="since" value="${escapeHtml(data.range.since)}"><input type="hidden" name="until" value="${escapeHtml(data.range.until)}"><button class="btn primary" type="submit">↻ Actualizar desde Meta</button></form>`
     : '';
   return `${status}<section class="card"><div class="header" style="margin:0"><div><div class="card-title" style="margin-bottom:4px">Sincronización</div><div class="muted-text">Cuenta: ${escapeHtml(data.account?.name || data.account?.accountId || 'No identificada')} · Moneda: ${escapeHtml(data.account?.currency || 'COP')} · Zona horaria: ${escapeHtml(data.account?.timezoneName || 'America/Bogota')}</div><div class="muted-text">Última actualización guardada: ${escapeHtml(formatDateTime(data.lastSyncedAt, data.account?.timezoneName))}</div></div><div class="actions">${form}</div></div></section>`;
 }
@@ -235,7 +252,7 @@ async function renderList(prisma, req, res) {
   const warning = missingVacancies
     ? `<div class="alert warn">Hay ${missingVacancies} anuncio(s) actual(es) sin vacante asociada. Mientras no se clasifiquen, Lórren no puede confirmar automáticamente la vacante usando el ad_id.</div>`
     : '';
-  const body = `<div class="header"><div><h1>Anuncios Meta Ads</h1><p>Inventario actual de la cuenta, gasto real y avance del candidato dentro de Lórren.</p></div><div class="actions"><a class="btn secondary" href="${BASE_PATH}">← Centro de estadísticas</a></div></div>${warning}${syncPanel(data)}${filters(data)}${topMetrics(data)}${funnel(data.totals)}${adsTable(data)}`;
+  const body = `<div class="header"><div><h1>Anuncios Meta Ads</h1><p>Inventario actual de la cuenta, gasto real y avance del candidato dentro de Lórren.</p></div><div class="actions"><a class="btn secondary" href="${BASE_PATH}">← Centro de estadísticas</a></div></div>${syncFeedback(req.query)}${warning}${syncPanel(data)}${filters(data)}${topMetrics(data)}${funnel(data.totals)}${adsTable(data)}`;
   return res.send(layout('Anuncios Meta Ads — Estadísticas', body));
 }
 
@@ -249,7 +266,8 @@ function candidateRows(metric, currency) {
 
 async function renderDetail(prisma, req, res) {
   if (!canAccess(req)) return res.status(403).send('No autorizado.');
-  const data = await loadDashboard(prisma, req.query || {});
+  const detailQuery = { ...req.query, city: null, vacancyId: null };
+  const data = await loadDashboard(prisma, detailQuery);
   const metric = data.metrics.find((item) => item.campaign.id === req.params.id);
   if (!metric) return res.status(404).send(layout('Anuncio no encontrado', '<div class="alert bad">El anuncio ya no existe en el inventario actual de Meta Ads.</div>'));
   const campaign = metric.campaign;
@@ -320,10 +338,46 @@ async function jsonList(prisma, req, res) {
   });
 }
 
-export function metaAdsStatsRouter(prisma) {
+function syncRedirect(result = {}) {
+  const params = new URLSearchParams();
+  if (result.ok) {
+    params.set('sync', result.partial ? 'partial' : 'success');
+    params.set('currentAds', String(result.currentAds || 0));
+    params.set('missingAds', String(result.missingAds || 0));
+  } else {
+    params.set('sync', 'error');
+    params.set('stage', result.stage || 'unknown');
+    if (result.error?.code) params.set('code', String(result.error.code));
+  }
+  return `${BASE_PATH}/campaigns?${params.toString()}`;
+}
+
+async function runSync(prisma, syncMetaAds, req, res) {
+  if (!canAccess(req)) return res.status(403).send('No autorizado.');
+  let result;
+  try {
+    result = await syncMetaAds(prisma, {
+      since: normalizeDate(req.body?.since),
+      until: normalizeDate(req.body?.until)
+    });
+  } catch (error) {
+    console.error('[META_ADS_SYNC_UNEXPECTED_ERROR]', error);
+    result = {
+      ok: false,
+      stage: 'unexpected',
+      error: { code: error?.code || 'META_ADS_SYNC_UNEXPECTED' }
+    };
+  }
+  return res.redirect(syncRedirect(result));
+}
+
+export function metaAdsStatsRouter(prisma, dependencies = {}) {
   const router = express.Router();
+  const syncMetaAds = dependencies.syncMetaAds || syncMetaAdsInsights;
+
   router.get('/campaigns', (req, res) => renderList(prisma, req, res));
   router.get('/campaigns.json', (req, res) => jsonList(prisma, req, res));
+  router.post('/campaigns/sync', (req, res) => runSync(prisma, syncMetaAds, req, res));
   router.post('/campaigns', (_req, res) => res.redirect(`${BASE_PATH}/campaigns`));
   router.get('/campaigns/:id', (req, res) => renderDetail(prisma, req, res));
   router.post('/campaigns/:id/edit', (req, res) => saveClassification(prisma, req, res));
