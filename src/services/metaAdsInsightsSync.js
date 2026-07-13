@@ -211,16 +211,25 @@ export async function markAdsMissingFromMeta(prisma, ads = [], syncedAt = new Da
 }
 
 function adInventoryNotes(ad = {}, campaignName = '', adsetName = '') {
-  const metaState = effectiveStatus(ad.effective_status || ad.status) || 'UNKNOWN';
-  return `Anuncio sincronizado desde Meta Ads. Campaña: ${campaignName || ad.campaign_id || '—'}. Conjunto: ${adsetName || ad.adset_id || '—'}. campaign_id: ${ad.campaign_id || '—'}. adset_id: ${ad.adset_id || '—'}. estado_meta: ${metaState}.`;
+  const safeAd = ad && typeof ad === 'object' && !Array.isArray(ad) ? ad : {};
+  const metaState = effectiveStatus(safeAd.effective_status || safeAd.status) || 'UNKNOWN';
+  return `Anuncio sincronizado desde Meta Ads. Campaña: ${campaignName || safeAd.campaign_id || '—'}. Conjunto: ${adsetName || safeAd.adset_id || '—'}. campaign_id: ${safeAd.campaign_id || '—'}. adset_id: ${safeAd.adset_id || '—'}. estado_meta: ${metaState}.`;
 }
 
 async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = [], adsets = [], syncedAt = new Date()) {
   const rows = [];
-  const campaignNames = new Map(campaigns.map((campaign) => [String(campaign.id || ''), campaign.name || null]));
-  const adsetNames = new Map(adsets.map((adset) => [String(adset.id || ''), adset.name || null]));
+  const safeCampaigns = Array.isArray(campaigns) ? campaigns : [];
+  const safeAdsets = Array.isArray(adsets) ? adsets : [];
+  const safeAds = Array.isArray(ads) ? ads : [];
+  const campaignNames = new Map(
+    safeCampaigns.map((campaign) => [String(campaign?.id || ''), campaign?.name || null])
+  );
+  const adsetNames = new Map(
+    safeAdsets.map((adset) => [String(adset?.id || ''), adset?.name || null])
+  );
 
-  for (const ad of ads) {
+  for (const ad of safeAds) {
+    if (!ad || typeof ad !== 'object' || Array.isArray(ad)) continue;
     const code = String(ad.id || '').trim();
     if (!code) continue;
     const campaignId = String(ad.campaign_id || '').trim();
