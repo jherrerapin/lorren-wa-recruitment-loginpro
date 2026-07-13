@@ -11,6 +11,7 @@ import {
   inferContextualSemanticIntent
 } from '../src/services/contextualResponseGate.js';
 import {
+  ALTERNATIVE_VACANCY_OFFER_MODE,
   PAUSED_VACANCY_OFFER_MODE,
   VacancyFirstGateAction,
   resolveVacancyFirstGate
@@ -23,6 +24,7 @@ test('detecta intención apply y faq', () => {
 
 test('detecta confirmaciones y correcciones en contexto', () => {
   assert.equal(detectConversationIntent('si, todo está correcto', { currentStep: 'CONFIRMING_DATA' }), 'confirmation_yes');
+  assert.equal(detectConversationIntent('sí confirmo', { currentStep: 'CONFIRMING_DATA' }), 'confirmation_yes');
   assert.equal(detectConversationIntent('no, corrijo el barrio', { currentStep: 'CONFIRMING_DATA' }), 'confirmation_no_or_correction');
 });
 
@@ -63,7 +65,7 @@ test('analiza una pregunta e interés como actos simultáneos y accionables', ()
 });
 
 test('una aceptación natural sigue siendo confirmación accionable', () => {
-  for (const text of ['dale', 'de una', 'quiero continuar', 'me interesa']) {
+  for (const text of ['dale', 'de una', 'quiero continuar', 'me interesa', 'sí confirmo']) {
     const turn = analyzeConversationTurn(text, { currentStep: 'GREETING_SENT' });
     assert.equal(turn.confirmation, true, text);
     assert.equal(turn.actionable, true, text);
@@ -90,7 +92,7 @@ test('confirmación o corrección en paso crítico se reserva para la transició
   );
 });
 
-test('distingue una pregunta ordinaria de vacante de una consulta de estado', () => {
+test('distingue preguntas de vacante, estado y logística abreviada', () => {
   assert.equal(inferContextualSemanticIntent({
     text: '¿Me puedes contar los requisitos de la vacante?',
     resolvedIntent: 'info_request',
@@ -102,6 +104,24 @@ test('distingue una pregunta ordinaria de vacante de una consulta de estado', ()
     resolvedIntent: 'faq',
     isQuestion: true
   }), 'ASK_APPLICATION_STATUS');
+
+  assert.equal(inferContextualSemanticIntent({
+    text: '¿Dónde queda?',
+    resolvedIntent: 'faq',
+    isQuestion: true
+  }), 'ASK_INTERVIEW_ADDRESS');
+
+  assert.equal(inferContextualSemanticIntent({
+    text: '¿Qué documentos debo llevar?',
+    resolvedIntent: 'faq',
+    isQuestion: true
+  }), 'ASK_REQUIRED_DOCUMENTS');
+
+  assert.equal(inferContextualSemanticIntent({
+    text: '¿Solo hay entrevistas a las 10 o hay más después de las 10?',
+    resolvedIntent: 'faq',
+    isQuestion: true
+  }), 'ASK_INTERVIEW_AVAILABILITY');
 });
 
 const completedReadiness = {
@@ -159,7 +179,7 @@ test('pregunta ordinaria de vacante continúa al respondedor del contexto sin tr
   assert.equal(result.requiresHumanReview, false);
 });
 
-test('dato logístico no configurado produce respuesta segura sin transferencia automática', () => {
+test('dato logístico faltante responde con cautela y crea revisión interna', () => {
   const result = evaluateContextualResponseGate({
     candidate: scheduledCandidate,
     vacancy: scheduledVacancy,
@@ -170,9 +190,24 @@ test('dato logístico no configurado produce respuesta segura sin transferencia 
   });
 
   assert.equal(result.shouldReply, true);
-  assert.equal(result.allowedAction, ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT);
-  assert.equal(result.requiresHumanReview, false);
+  assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
+  assert.equal(result.requiresHumanReview, true);
   assert.match(result.reply, /no tengo confirmado el nombre/i);
+});
+
+test('pregunta por horarios adicionales conserva revisión humana', () => {
+  const result = evaluateContextualResponseGate({
+    candidate: scheduledCandidate,
+    vacancy: scheduledVacancy,
+    activeInterviewBooking: activeBooking,
+    semanticIntent: 'ASK_INTERVIEW_AVAILABILITY',
+    readiness: completedReadiness,
+    hasPendingAction: false
+  });
+
+  assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
+  assert.equal(result.requiresHumanReview, true);
+  assert.match(result.reply, /horarios adicionales/i);
 });
 
 test('problema operativo de llegada conserva la revisión humana', () => {
@@ -188,6 +223,25 @@ test('problema operativo de llegada conserva la revisión humana', () => {
   assert.equal(result.shouldReply, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
   assert.equal(result.requiresHumanReview, true);
+});
+
+test('el bot no pisa una conversación manual con una pregunta de vacante', () => {
+  const result = evaluateContextualResponseGate({
+    candidate: scheduledCandidate,
+    vacancy: scheduledVacancy,
+    activeInterviewBooking: activeBooking,
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      body: 'Te confirmo la información directamente.',
+      rawPayload: { source: 'admin_outbound' }
+    }],
+    semanticIntent: 'ASK_VACANCY_INFORMATION',
+    readiness: completedReadiness,
+    hasPendingAction: false
+  });
+
+  assert.equal(result.shouldReply, false);
+  assert.equal(result.allowedAction, ContextualAllowedAction.NO_REPLY);
 });
 
 function inactiveVacancyFixture() {
@@ -248,22 +302,59 @@ test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de 
 
 test('aceptación natural sin pregunta conserva el registro futuro contextual', async () => {
   const inactiveVacancy = inactiveVacancyFixture();
+  for (const inboundText of ['dale', 'sí confirmo']) {
+    const decision = await resolveVacancyFirstGate({
+      prisma: null,
+      candidate: {
+        id: 'candidate-inactive',
+        status: 'NUEVO',
+        currentStep: 'GREETING_SENT',
+        vacancyId: inactiveVacancy.id,
+        botResumeMode: PAUSED_VACANCY_OFFER_MODE
+      },
+      currentVacancy: inactiveVacancy,
+      inboundText,
+      currentStep: 'GREETING_SENT',
+      recentMessages: [futureOfferMessage()],
+      vacancyHints: { allVacancies: [inactiveVacancy], activeVacancies: [] }
+    });
+
+    assert.equal(decision.action, VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT, inboundText);
+    assert.equal(decision.reason, 'PAUSED_VACANCY_FUTURE_PROFILE_ACCEPTED', inboundText);
+  }
+});
+
+test('pregunta contextual sobre una alternativa recibe la información y no queda en silencio', async () => {
+  const alternativeVacancy = {
+    id: 'vacancy-alternative',
+    title: 'Auxiliar Logístico',
+    role: 'Auxiliar logístico',
+    city: 'Bogota',
+    operation: { id: 'operation-bogota', name: 'Operación Bogotá', city: { id: 'city-bogota', name: 'Bogota' } },
+    roleDescription: 'apoyar la operación logística',
+    requirements: 'ser mayor de edad',
+    conditions: 'turnos rotativos',
+    isActive: true,
+    acceptingApplications: true
+  };
+
   const decision = await resolveVacancyFirstGate({
     prisma: null,
     candidate: {
-      id: 'candidate-inactive',
+      id: 'candidate-alternative',
       status: 'NUEVO',
       currentStep: 'GREETING_SENT',
-      vacancyId: inactiveVacancy.id,
-      botResumeMode: PAUSED_VACANCY_OFFER_MODE
+      vacancyId: null,
+      botResumeMode: `${ALTERNATIVE_VACANCY_OFFER_MODE}:${alternativeVacancy.id}`
     },
-    currentVacancy: inactiveVacancy,
-    inboundText: 'dale',
+    currentVacancy: null,
+    inboundText: '¿Cuál es esa opción?',
     currentStep: 'GREETING_SENT',
-    recentMessages: [futureOfferMessage()],
-    vacancyHints: { allVacancies: [inactiveVacancy], activeVacancies: [] }
+    recentMessages: [],
+    vacancyHints: { allVacancies: [alternativeVacancy], activeVacancies: [alternativeVacancy] }
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT);
-  assert.equal(decision.reason, 'PAUSED_VACANCY_FUTURE_PROFILE_ACCEPTED');
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ALTERNATIVE_VACANCY_INFO_REQUEST');
+  assert.match(decision.reply, /Auxiliar Logístico/i);
 });
