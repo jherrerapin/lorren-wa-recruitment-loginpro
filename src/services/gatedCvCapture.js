@@ -36,6 +36,9 @@ export async function captureGatedCvDocument({
   const metadata = await fetchMetadata(document.id);
   if (!metadata?.url) return { captured: false, reason: 'media_url_missing' };
   const buffer = await download(metadata.url);
+  if (!buffer || buffer.length === 0) {
+    return { captured: false, reason: 'download_failed' };
+  }
 
   await storeCv(prisma, candidateId, buffer, {
     mimeType,
@@ -48,6 +51,6 @@ export async function captureGatedCvDocument({
     reason: 'cv_saved_during_gate',
     filename,
     mimeType,
-    sizeBytes: buffer?.length || 0
+    sizeBytes: buffer.length
   };
 }
