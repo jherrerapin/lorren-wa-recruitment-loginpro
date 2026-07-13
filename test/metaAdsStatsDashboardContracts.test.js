@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { currentMetaAdsCampaignWhere } from '../src/routes/metaAdsStats.js';
 
 const dashboard = readFileSync(new URL('../src/routes/metaAdsStats.js', import.meta.url), 'utf8');
-const dispatcher = readFileSync(new URL('../src/services/metaAdsStatsGateDispatch.js', import.meta.url), 'utf8');
 const metrics = readFileSync(new URL('../src/services/metaRecruitmentStats.js', import.meta.url), 'utf8');
 const sync = readFileSync(new URL('../src/services/metaAdsInsightsSync.js', import.meta.url), 'utf8');
+const client = readFileSync(new URL('../src/services/metaAdsClient.js', import.meta.url), 'utf8');
 
 test('panel expone actualización manual y costos estimados sin historial', () => {
   assert.match(dashboard, /Actualizar desde Meta/);
@@ -34,9 +34,14 @@ test('consulta de anuncios exige inventario actual sincronizado', () => {
 
 test('panel usa un router explícito y no modifica Express globalmente', () => {
   assert.match(dashboard, /export function metaAdsStatsRouter/);
-  assert.match(dispatcher, /metaAdsStatsRouter\(prisma\)/);
   assert.doesNotMatch(dashboard, /express\.Router\s*=/);
-  assert.doesNotMatch(dispatcher, /express\.Router\s*=/);
+});
+
+test('Marketing API exige una credencial dedicada distinta a WhatsApp', () => {
+  assert.match(client, /META', 'ADS', 'ACCESS', 'TOKEN/);
+  assert.doesNotMatch(client, /META', 'ACCESS', 'TOKEN'\]\)/);
+  assert.match(dashboard, /getMetaAdsConfig/);
+  assert.match(dashboard, /META_ADS_ACCESS_TOKEN/);
 });
 
 test('panel no depende del presupuesto manual inexistente', () => {
@@ -51,8 +56,11 @@ test('atribución estadística no compara nombres ni tokens', () => {
   assert.doesNotMatch(metrics, /campaignCodeRaw/);
 });
 
-test('anuncios ausentes se retiran del inventario vigente', () => {
-  assert.doesNotMatch(sync, /upsertInternalCampaignsFromMeta/);
+test('inventario usa una sola fuente de anuncios y retira ausentes', () => {
+  assert.match(sync, /campaign\{id,name,status,effective_status\}/);
+  assert.match(sync, /adset\{id,name,status,effective_status,campaign_id\}/);
+  assert.doesNotMatch(sync, /\/campaigns`/);
+  assert.doesNotMatch(sync, /\/adsets`/);
   assert.match(sync, /markAdsMissingFromMeta/);
   assert.match(sync, /endsAt: syncedAt/);
   assert.match(sync, /endsAt: null/);
