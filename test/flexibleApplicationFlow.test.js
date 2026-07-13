@@ -5,6 +5,7 @@ import {
   isConsentAcceptance,
   isConsentRejection
 } from '../src/services/dataConsentGate.js';
+import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
 import {
   captureGatedCvDocument,
   isSupportedGatedCvDocument
@@ -21,6 +22,13 @@ test('consentimiento reconoce intención natural sin frase quemada', () => {
   assert.equal(isConsentRejection('No doy permiso para usar mis datos'), true);
 });
 
+test('una pregunta hipotética sobre datos no se registra como autorización', () => {
+  assert.equal(isConsentAcceptance('¿Pueden usar mis datos para otra vacante?'), false);
+  assert.equal(isConsentAcceptance('¿Qué pasa si autorizo?'), false);
+  assert.equal(isConsentRejection('¿Qué pasa si no autorizo?'), false);
+  assert.equal(isConsentAcceptance('Sí autorizo, ¿qué sigue?'), true);
+});
+
 test('durante el consentimiento responde con datos de la vacante sin inventar', () => {
   const vacancy = {
     title: 'Líder de Operación',
@@ -33,6 +41,45 @@ test('durante el consentimiento responde con datos de la vacante sin inventar', 
   assert.match(buildVacancyQuestionReply(vacancy, '¿Cuánto pagan?'), /Salario a convenir/i);
   assert.match(buildVacancyQuestionReply(vacancy, '¿Dónde queda?'), /Sector Las Brisas/i);
   assert.match(buildVacancyQuestionReply(vacancy, '¿Qué requisitos piden?'), /Técnico o tecnólogo/i);
+});
+
+test('después de autorizar conserva datos enviados antes y junto con la autorización', async () => {
+  const candidate = {
+    id: 'candidate-1',
+    fullName: null,
+    experienceInfo: null,
+    experienceTime: null,
+    experienceSummary: null
+  };
+  let persisted = null;
+  const prisma = {
+    message: {
+      findMany: async () => [
+        { body: 'Me llamo Juan Carlos Pérez' },
+        { body: 'Vivo en el barrio Canaima' }
+      ]
+    },
+    candidate: {
+      update: async ({ data }) => {
+        persisted = data;
+        return { ...candidate, ...data, dataConsentStatus: 'ACCEPTED' };
+      }
+    }
+  };
+
+  const result = await captureConsentedProfileData({
+    prisma,
+    candidate,
+    vacancy: { city: 'Neiva' },
+    currentText: 'Sí autorizo. Tengo 2 años de experiencia en operaciones logísticas y manejo de personal.'
+  });
+
+  assert.equal(result.reason, 'profile_data_captured_after_consent');
+  assert.equal(persisted.fullName, 'Juan Carlos Pérez');
+  assert.equal(persisted.neighborhood, 'Canaima');
+  assert.equal(persisted.experienceInfo, 'Sí');
+  assert.equal(persisted.experienceTime, '2 años');
+  assert.match(persisted.experienceSummary, /operaciones logísticas/i);
 });
 
 test('solo considera HV anticipada un documento con formato permitido', () => {
