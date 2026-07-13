@@ -11,7 +11,11 @@ const DEFAULT_LOOKBACK_DAYS = 90;
 
 function canAccess(req = {}) {
   const role = req.userRole || req.session?.userRole;
-  return role === 'dev' || role === 'admin';
+  const username = req.username || req.session?.username;
+  const scope = req.userAccessScope || req.session?.userAccessScope;
+  return role === 'dev'
+    || role === 'admin'
+    || (username === 'reclutador-general' && scope === 'ALL');
 }
 
 function escapeHtml(value = '') {
