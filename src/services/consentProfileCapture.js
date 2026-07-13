@@ -1,4 +1,3 @@
-import { MessageDirection, MessageType } from '@prisma/client';
 import {
   alignCandidateLocationFields,
   isHighConfidenceLocalField,
@@ -25,56 +24,40 @@ function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== '';
 }
 
-function mergeHighConfidenceFields(target, text, vacancy) {
-  const parsed = parseNaturalData(text || '');
+function extractHighConfidenceFields(text = '', vacancy = null) {
+  const parsed = parseNaturalData(text);
   let normalized = normalizeCandidateFields(parsed);
   normalized = alignCandidateLocationFields(normalized, vacancy, { clearAlternate: false });
 
+  const fields = {};
   for (const [field, value] of Object.entries(normalized)) {
     if (!CAPTURABLE_FIELDS.has(field) || !hasValue(value)) continue;
     if (!isHighConfidenceLocalField(field, value)) continue;
-    target[field] = value;
+    fields[field] = value;
   }
+  return fields;
 }
 
 export async function captureConsentedProfileData({
   prisma,
   candidate,
   vacancy = null,
-  currentText = '',
-  maxMessages = 12
+  currentText = ''
 } = {}) {
   if (!prisma?.candidate?.update || !candidate?.id) {
     return { candidate, capturedFields: [], reason: 'candidate_not_ready' };
   }
 
-  const recentMessages = prisma?.message?.findMany
-    ? await prisma.message.findMany({
-      where: {
-        candidateId: candidate.id,
-        direction: MessageDirection.INBOUND,
-        messageType: MessageType.TEXT
-      },
-      orderBy: { createdAt: 'desc' },
-      take: maxMessages,
-      select: { body: true }
-    })
-    : [];
+  const consentMessageText = String(currentText || '').trim();
+  if (!consentMessageText) {
+    return { candidate, capturedFields: [], reason: 'no_consented_message_data' };
+  }
 
-  const texts = [...recentMessages]
-    .reverse()
-    .map((message) => message?.body || '')
-    .filter(Boolean);
-  const normalizedCurrent = String(currentText || '').trim();
-  if (normalizedCurrent && texts.at(-1) !== normalizedCurrent) texts.push(normalizedCurrent);
-
-  const merged = {};
-  for (const text of texts) mergeHighConfidenceFields(merged, text, vacancy);
-
-  const normalizedMerged = normalizeCandidateFields(merged);
+  // Solo se procesa el mismo mensaje en el que quedó registrada la autorización.
+  // El historial anterior no se relee porque fue recibido antes del consentimiento.
+  const extracted = extractHighConfidenceFields(consentMessageText, vacancy);
   const update = {};
-  for (const [field, value] of Object.entries(normalizedMerged)) {
-    if (!CAPTURABLE_FIELDS.has(field) || !hasValue(value)) continue;
+  for (const [field, value] of Object.entries(extracted)) {
     if (!hasValue(candidate[field])) update[field] = value;
   }
 
@@ -90,6 +73,6 @@ export async function captureConsentedProfileData({
   return {
     candidate: updatedCandidate,
     capturedFields: Object.keys(update),
-    reason: 'profile_data_captured_after_consent'
+    reason: 'profile_data_captured_from_consent_message'
   };
 }
