@@ -7,14 +7,16 @@ import {
   markAdsMissingFromMeta
 } from '../src/services/metaAdsInsightsSync.js';
 
-test('descarta anuncios eliminados o archivados y conserva estados vigentes', () => {
+test('descarta anuncios eliminados, archivados o corruptos y conserva estados vigentes', () => {
   const inventory = [
     { id: 'ad-active', status: 'ACTIVE', effective_status: 'ACTIVE' },
     { id: 'ad-paused', status: 'PAUSED', effective_status: 'PAUSED' },
     { id: 'ad-review', status: 'ACTIVE', effective_status: 'PENDING_REVIEW' },
     { id: 'ad-deleted', status: 'DELETED', effective_status: 'DELETED' },
     { id: 'ad-archived', status: 'ARCHIVED', effective_status: 'ARCHIVED' },
-    { id: 'ad-inherited-deleted', status: 'PAUSED', effective_status: 'DELETED' }
+    { id: 'ad-inherited-deleted', status: 'PAUSED', effective_status: 'DELETED' },
+    null,
+    'fila-corrupta'
   ];
 
   assert.equal(isCurrentMetaAd(inventory[0]), true);
@@ -23,6 +25,8 @@ test('descarta anuncios eliminados o archivados y conserva estados vigentes', ()
   assert.equal(isCurrentMetaAd(inventory[3]), false);
   assert.equal(isCurrentMetaAd(inventory[4]), false);
   assert.equal(isCurrentMetaAd(inventory[5]), false);
+  assert.equal(isCurrentMetaAd(inventory[6]), false);
+  assert.equal(isCurrentMetaAd(inventory[7]), false);
   assert.deepEqual(filterCurrentMetaAds(inventory).map((ad) => ad.id), [
     'ad-active',
     'ad-paused',
