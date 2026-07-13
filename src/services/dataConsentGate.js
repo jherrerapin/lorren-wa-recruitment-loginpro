@@ -1,6 +1,7 @@
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 import { buildCandidateDataCollectionMessage } from './readinessGuard.js';
+import { parseNaturalData } from './candidateData.js';
 import { captureConsentedProfileData } from './consentProfileCapture.js';
 import { buildConsentQuestionReply } from './consentFaq.js';
 
@@ -25,11 +26,27 @@ const PROTECTED_STEPS = new Set([
   ConversationStep.SCHEDULED
 ]);
 
+const PROFILE_DATA_FIELDS = new Set([
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'gender',
+  'neighborhood',
+  'locality',
+  'medicalRestrictions',
+  'transportMode',
+  'experienceInfo',
+  'experienceTime',
+  'experienceSummary'
+]);
+
 const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de recibir o guardar datos personales, hojas de vida o documentos, necesito tu autorización para tratarlos con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nPuedes responder de forma natural si autorizas o si no autorizas.`;
 const CONSENT_CLARIFIER_REPLY = 'Para continuar necesito saber si autorizas a LoginPro a tratar tus datos y hoja de vida para este proceso. Puedes responder de forma natural si autorizas o si no autorizas.';
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
 const VACANCY_NOT_CONFIRMED_REPLY = 'Entendido. Para ubicar bien tu proceso, cuéntame la ciudad y el cargo o vacante que te interesa.';
 const PRE_CONSENT_ATTACHMENT_REPLY = 'Recibí que intentaste enviar un archivo, pero todavía no lo descargué ni lo guardé. Antes de recibir datos, hojas de vida o documentos necesito tu autorización para el tratamiento de datos.';
+const PRE_CONSENT_DATA_REPLY = 'Veo que compartiste información personal, pero todavía no la registré en tu perfil. Antes de recibir o guardar tus datos necesito tu autorización para el tratamiento de datos.';
 const CONSENT_GATE_ERROR_REPLY = 'No pude validar tu autorización en este momento. Por seguridad no voy a recibir ni guardar datos o documentos. Intenta nuevamente más tarde.';
 
 function normalize(value = '') {
@@ -45,6 +62,10 @@ function normalize(value = '') {
 
 function hasAny(text = '', patterns = []) {
   return patterns.some((pattern) => pattern.test(text));
+}
+
+function hasValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '';
 }
 
 function isQuestionLike(text = '') {
@@ -142,6 +163,12 @@ function inboundText(message = {}) {
   return '';
 }
 
+function containsProfileData(text = '') {
+  if (!String(text || '').trim()) return false;
+  const parsed = parseNaturalData(text);
+  return Object.entries(parsed || {}).some(([field, value]) => PROFILE_DATA_FIELDS.has(field) && hasValue(value));
+}
+
 export function evaluateConsentBoundary(candidate = {}, message = {}) {
   if (isConsentAlreadyAccepted(candidate)) return { block: false, reason: 'consent_already_accepted' };
   if (candidate?.dataConsentStatus === 'REVOKED') return { block: true, reason: 'consent_revoked' };
@@ -149,10 +176,49 @@ export function evaluateConsentBoundary(candidate = {}, message = {}) {
   if (PRE_CONSENT_CAPTURE_MODES.has(String(candidate?.botResumeMode || ''))) return { block: true, reason: 'capture_mode_without_consent' };
   if (isProtectedAttachment(message)) return { block: true, reason: 'attachment_before_consent' };
   if (PROTECTED_STEPS.has(candidate?.currentStep)) return { block: true, reason: 'protected_step_without_consent' };
+  if (containsProfileData(inboundText(message))) return { block: true, reason: 'profile_data_before_consent' };
   if (candidate?.currentStep === ConversationStep.GREETING_SENT && isInterestToContinue(inboundText(message))) {
     return { block: true, reason: 'candidate_wants_to_continue' };
   }
   return { block: false, reason: 'consent_not_required_for_this_turn' };
+}
+
+function messageIdentity(message = {}) {
+  const id = String(message?.id || '').trim();
+  if (id) return `id:${id}`;
+  return [message?.from, message?.timestamp, message?.type]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(':');
+}
+
+export function removeHandledMessagesFromWebhook(payload = {}, handledMessages = []) {
+  const handled = new Set(handledMessages.map(messageIdentity).filter(Boolean));
+  if (!handled.size) return payload;
+
+  for (const entry of payload?.entry || []) {
+    for (const change of entry?.changes || []) {
+      const messages = change?.value?.messages;
+      if (!Array.isArray(messages)) continue;
+      change.value.messages = messages.filter((message) => !handled.has(messageIdentity(message)));
+    }
+  }
+  return payload;
+}
+
+function redactSensitiveText(value = '') {
+  return String(value || '')
+    .replace(/(access_token=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
+    .slice(0, 700);
+}
+
+function safeErrorDetails(error) {
+  return {
+    message: redactSensitiveText(error?.message || 'unknown_error'),
+    code: String(error?.code || error?.response?.data?.error?.code || '').slice(0, 80) || null,
+    stack: error?.stack ? redactSensitiveText(error.stack) : null
+  };
 }
 
 function inboundMessageType(message = {}) {
@@ -379,7 +445,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     try {
       captured = await captureConsentedProfileData({ prisma, candidate, vacancy, currentText: body });
     } catch (error) {
-      console.warn('[CONSENTED_PROFILE_CAPTURE_ERROR]', error?.message || error);
+      console.warn('[CONSENTED_PROFILE_CAPTURE_ERROR]', safeErrorDetails(error));
     }
     const acceptedCandidate = captured.candidate || { ...candidate, dataConsentStatus: 'ACCEPTED', currentStep: ConversationStep.COLLECTING_DATA, botResumeMode: null };
     const reply = [questionReply, buildConsentAcceptedReply(acceptedCandidate, vacancy)].filter(Boolean).join('\n\n');
@@ -389,7 +455,8 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   await prisma.candidate.update({ where: { id: candidate.id }, data: { botResumeMode: DATA_CONSENT_PENDING_MODE } });
   const consentReply = candidate.botResumeMode === DATA_CONSENT_PENDING_MODE ? CONSENT_CLARIFIER_REPLY : CONSENT_PROMPT;
-  const reply = [questionReply, consentReply].filter(Boolean).join('\n\n');
+  const preface = boundaryReason === 'profile_data_before_consent' ? PRE_CONSENT_DATA_REPLY : null;
+  const reply = [questionReply, preface, consentReply].filter(Boolean).join('\n\n');
   await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_prompt', { reason: boundaryReason });
   return true;
 }
@@ -405,7 +472,7 @@ export function dataConsentGateMiddleware(prisma) {
     if (!messages.length) return next();
 
     try {
-      let blockedByGate = false;
+      const handledMessages = [];
 
       for (const message of messages) {
         const from = message?.from;
@@ -419,20 +486,21 @@ export function dataConsentGateMiddleware(prisma) {
         const body = inboundText(message);
 
         if (isAwaitingCampaignVacancyConfirmation(candidate)) {
-          blockedByGate = await handleCampaignVacancyConfirmation(prisma, candidate, message, from, body);
+          if (await handleCampaignVacancyConfirmation(prisma, candidate, message, from, body)) handledMessages.push(message);
           continue;
         }
 
         const boundary = evaluateConsentBoundary(candidate, message);
-        if (boundary.block) {
-          blockedByGate = await handleConsentDecision(prisma, req, candidate, message, from, body, boundary.reason);
+        if (boundary.block && await handleConsentDecision(prisma, req, candidate, message, from, body, boundary.reason)) {
+          handledMessages.push(message);
         }
       }
 
-      if (blockedByGate) return res.sendStatus(200);
-      return next();
+      removeHandledMessagesFromWebhook(req.body, handledMessages);
+      if (extractMessages(req.body).length) return next();
+      return res.sendStatus(200);
     } catch (error) {
-      console.warn('[DATA_CONSENT_GATE_ERROR]', error?.message || error);
+      console.warn('[DATA_CONSENT_GATE_ERROR]', safeErrorDetails(error));
       await notifyConsentGateFailure(messages);
       return res.sendStatus(200);
     }
