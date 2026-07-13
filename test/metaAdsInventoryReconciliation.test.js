@@ -188,13 +188,14 @@ test('cliente convierte el 400 de Axios en un error Meta útil', async () => {
   );
 });
 
-test('descarta anuncios eliminados, archivados o corruptos y conserva estados vigentes', () => {
+test('descarta anuncios eliminados, archivados, sin estado o corruptos y conserva estados vigentes', () => {
   const inventory = [
     currentAd({ id: 'ad-active' }),
     currentAd({ id: 'ad-paused', status: 'PAUSED', effective_status: 'PAUSED' }),
     currentAd({ id: 'ad-review', effective_status: 'PENDING_REVIEW' }),
     currentAd({ id: 'ad-deleted', status: 'DELETED', effective_status: 'DELETED' }),
     currentAd({ id: 'ad-archived', status: 'ARCHIVED', effective_status: 'ARCHIVED' }),
+    currentAd({ id: 'ad-without-status', status: null, effective_status: null }),
     null,
     'fila-corrupta'
   ];
@@ -206,6 +207,7 @@ test('descarta anuncios eliminados, archivados o corruptos y conserva estados vi
   assert.equal(isCurrentMetaAd(inventory[4]), false);
   assert.equal(isCurrentMetaAd(inventory[5]), false);
   assert.equal(isCurrentMetaAd(inventory[6]), false);
+  assert.equal(isCurrentMetaAd(inventory[7]), false);
   assert.deepEqual(filterCurrentMetaAds(inventory).map((ad) => ad.id), [
     'ad-active',
     'ad-paused',
@@ -240,6 +242,31 @@ test('inventario se construye desde anuncios y sus relaciones campaña y conjunt
   assert.deepEqual(inventory.currentCampaigns.map((row) => row.id), ['campaign-current']);
   assert.deepEqual(inventory.currentAdsets.map((row) => row.id), ['adset-current']);
   assert.deepEqual(inventory.currentAds.map((row) => row.id), ['ad-current']);
+});
+
+test('inventario falla cerrado si Meta omite campaña, conjunto o estados expandidos', () => {
+  const inventory = buildCurrentMetaInventory({
+    ads: [
+      currentAd({ id: 'without-campaign', campaign: undefined }),
+      currentAd({ id: 'without-adset', adset: undefined }),
+      currentAd({
+        id: 'campaign-without-status',
+        campaign: { id: 'campaign-current', name: 'Campaña sin estado' }
+      }),
+      currentAd({
+        id: 'adset-without-status',
+        adset: {
+          id: 'adset-current',
+          name: 'Conjunto sin estado',
+          campaign_id: 'campaign-current'
+        }
+      })
+    ]
+  });
+
+  assert.deepEqual(inventory.currentCampaigns, []);
+  assert.deepEqual(inventory.currentAdsets, []);
+  assert.deepEqual(inventory.currentAds, []);
 });
 
 test('inventario vacío finaliza todos los anuncios Meta abiertos', async () => {
