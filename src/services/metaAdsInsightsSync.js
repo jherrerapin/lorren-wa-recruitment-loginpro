@@ -338,15 +338,11 @@ async function syncAdRows(prisma, rows = []) {
 export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
   const client = createMetaAdsClient();
   if (!client.enabled) {
-    return {
-      ok: false,
-      enabled: false,
-      error: {
-        name: 'MetaAdsNotConfigured',
-        message: 'Meta Ads no está configurado.',
-        missing: client.missing
-      }
-    };
+    const error = new Error('Meta Ads no está configurado.');
+    error.name = 'MetaAdsNotConfigured';
+    error.code = 'META_ADS_NOT_CONFIGURED';
+    error.missing = client.missing;
+    throw error;
   }
 
   const fallbackRange = defaultDateRange();
@@ -408,7 +404,11 @@ export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
   } catch (error) {
     const safe = safeError(error);
     console.warn('[metaAdsInsightsSync] error', safe);
-    return { ok: false, enabled: true, since: range.since, until: range.until, error: safe };
+    const syncError = new Error(safe.message);
+    syncError.name = safe.name;
+    syncError.code = safe.code || 'META_ADS_SYNC_FAILED';
+    syncError.metaError = safe;
+    throw syncError;
   }
 }
 
