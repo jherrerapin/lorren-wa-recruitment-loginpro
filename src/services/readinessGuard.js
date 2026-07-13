@@ -67,7 +67,7 @@ export function getFieldLabel(field, vacancy = null) {
   if (field === 'experienceTime' && vacancy?.experienceTimeText) {
     return `tiempo de experiencia (${vacancy.experienceTimeText})`;
   }
-  if (field === 'experienceInfo') return 'si tiene experiencia';
+  if (field === 'experienceInfo') return 'experiencia (si o no)';
   return FIELD_LABELS[field] || field;
 }
 
