@@ -3,6 +3,7 @@ import { extractMessages, sendTextMessage } from './whatsapp.js';
 import { buildCandidateDataCollectionMessage } from './readinessGuard.js';
 import { captureGatedCvDocument, isSupportedGatedCvDocument } from './gatedCvCapture.js';
 import { captureConsentedProfileData } from './consentProfileCapture.js';
+import { buildConsentQuestionReply } from './consentFaq.js';
 
 export const DATA_CONSENT_VERSION = 'lorren-v2-2026-07-v2';
 
@@ -215,7 +216,7 @@ export function buildVacancyQuestionReply(vacancy = {}, text = '') {
       ? `${lead}, las condiciones registradas son: ${vacancy.conditions}.`
       : 'No tengo esas condiciones registradas para esta vacante.';
   }
-  if (/\b(requisito|perfil|edad|experiencia|estudio|formacion|documento)\b/.test(n)) {
+  if (/\b(requisito|perfil|edad|experiencia|estudio|formacion|documento|moto|carro|transporte|vehiculo)\b/.test(n)) {
     const parts = [];
     if (vacancy.requirements) parts.push(vacancy.requirements);
     if (vacancy.requiredDocuments && /\bdocumento\b/.test(n)) parts.push(`Documentos: ${vacancy.requiredDocuments}`);
@@ -223,7 +224,7 @@ export function buildVacancyQuestionReply(vacancy = {}, text = '') {
       ? `${lead}, los requisitos registrados son: ${parts.join('. ')}.`
       : 'No tengo ese requisito registrado para esta vacante.';
   }
-  if (/\b(funcion|funciones|labor|hacer|cargo|rol)\b/.test(n)) {
+  if (/\b(funcion|funciones|labor|hacer|cargo|rol|consiste|tarea|tareas|responsabilidad|responsabilidades)\b/.test(n)) {
     return vacancy.roleDescription
       ? `${lead}, el cargo consiste en ${vacancy.roleDescription}.`
       : `El cargo registrado es ${vacancyTitle(vacancy)}, pero no tengo una descripción adicional.`;
@@ -366,7 +367,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
   }
 
   await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
-  const questionReply = buildVacancyQuestionReply(vacancy, body);
+  const questionReply = buildConsentQuestionReply(body) || buildVacancyQuestionReply(vacancy, body);
 
   if (isConsentRejection(body)) {
     await recordConsent(prisma, req, candidate, 'REVOKED');
@@ -376,7 +377,12 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   if (isConsentAcceptance(body)) {
     await recordConsent(prisma, req, candidate, 'ACCEPTED');
-    const captured = await captureConsentedProfileData({ prisma, candidate, vacancy, currentText: body });
+    let captured = { candidate: null, capturedFields: [] };
+    try {
+      captured = await captureConsentedProfileData({ prisma, candidate, vacancy, currentText: body });
+    } catch (error) {
+      console.warn('[CONSENTED_PROFILE_CAPTURE_ERROR]', error?.message || error);
+    }
     const acceptedCandidate = captured.candidate || { ...candidate, dataConsentStatus: 'ACCEPTED', currentStep: ConversationStep.COLLECTING_DATA, botResumeMode: null };
     const reply = [questionReply, buildConsentAcceptedReply(acceptedCandidate, vacancy)].filter(Boolean).join('\n\n');
     await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_accepted', { capturedFields: captured.capturedFields || [] });
