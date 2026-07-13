@@ -1,6 +1,7 @@
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 import { buildCandidateDataCollectionMessage } from './readinessGuard.js';
+import { captureGatedCvDocument, isSupportedGatedCvDocument } from './gatedCvCapture.js';
 
 export const DATA_CONSENT_VERSION = 'lorren-v2-2026-07-v2';
 
@@ -9,10 +10,12 @@ export const DATA_CONSENT_TEXT = process.env.DATA_CONSENT_TEXT || 'Autorizo a Lo
 export const CAMPAIGN_VACANCY_CONFIRMATION_MODE = 'campaign_vacancy_pending_confirmation';
 export const DATA_CONSENT_PENDING_MODE = 'awaiting_data_consent';
 
-const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de pedirte datos personales, necesito tu autorización para tratar tus datos y hoja de vida con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nSi autorizas, responde “Acepto”. Si no deseas continuar, responde “No autorizo”.`;
-const CONSENT_CLARIFIER_REPLY = 'Te entiendo. Para poder pedirte datos personales necesito una respuesta clara sobre la autorización. Puedes responder “sí autorizo” o “no autorizo”.';
+const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de pedirte datos personales, necesito tu autorización para tratar tus datos y hoja de vida con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nPuedes responder de forma natural si estás de acuerdo o si no autorizas.`;
+const CONSENT_CLARIFIER_REPLY = 'Para continuar con la postulación necesito saber si autorizas a LoginPro a tratar tus datos y hoja de vida para este proceso. Puedes responder de forma natural si estás de acuerdo o si no autorizas.';
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
 const VACANCY_NOT_CONFIRMED_REPLY = 'Entendido. Para ubicar bien tu proceso, cuéntame la ciudad y el cargo o vacante que te interesa.';
+const EARLY_CV_SAVED_REPLY = 'Recibí y guardé tu hoja de vida para asociarla a esta postulación.';
+const EARLY_CV_RETRY_REPLY = 'Recibí el archivo, pero no pude guardarlo correctamente. Por favor envíalo nuevamente en PDF, DOC o DOCX.';
 
 function normalize(value = '') {
   return String(value || '')
@@ -29,22 +32,34 @@ function hasAny(text = '', patterns = []) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+function isQuestionLike(text = '') {
+  const raw = String(text || '').trim();
+  const n = normalize(raw);
+  if (!n) return false;
+  return raw.includes('?') || hasAny(n, [
+    /\b(cual|cuanto|cuando|donde|como|que|quien)\b/,
+    /\b(salario|sueldo|pago|horario|turno|requisito|funcion|ubicacion|direccion|contrato|beneficio)\b/
+  ]);
+}
+
 export function isConsentAcceptance(text = '') {
   const n = normalize(text);
   if (!n) return false;
-  if (hasAny(n, [
-    /\b(acepto|autorizo|autorizado|autorisado)\b/,
-    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo)\b/,
-    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)\b$/
-  ])) return true;
-  return false;
+  return hasAny(n, [
+    /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
+    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
+    /\b(estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso|tienen mi permiso|autorizacion concedida)\b/,
+    /\b(pueden|puede)\s+(usar|tratar|manejar|procesar|guardar)\s+(mis|los)\s+datos\b/,
+    /\b(pueden|puede)\s+continuar\s+con\s+(mis|los)\s+datos\b/,
+    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo|continuemos|sigamos)\b$/
+  ]);
 }
 
 export function isConsentRejection(text = '') {
   const n = normalize(text);
   if (!n) return false;
   return hasAny(n, [
-    /\b(no autorizo|no acepto|no doy autorizacion|no deseo autorizar|no quiero autorizar)\b/,
+    /\b(no autorizo|no acepto|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
     /\b(no|negativo|paso|no gracias)\b$/
   ]);
 }
@@ -103,7 +118,7 @@ function shouldBlockUntilConsent(candidate = {}, message = {}) {
 
 async function saveInboundConsentGateMessage(prisma, candidateId, message, body, type) {
   const waMessageId = message?.id || null;
-  await prisma.message.createMany({
+  const result = await prisma.message.createMany({
     data: [{
       candidateId,
       waMessageId,
@@ -114,6 +129,7 @@ async function saveInboundConsentGateMessage(prisma, candidateId, message, body,
     }],
     skipDuplicates: true
   });
+  return result.count > 0;
 }
 
 async function saveOutboundConsentGateMessage(prisma, candidateId, body, source, extraPayload = {}) {
@@ -150,21 +166,63 @@ function vacancyTitle(vacancy = {}) {
   return vacancy?.title || vacancy?.role || 'esta vacante';
 }
 
+function vacancyLocation(vacancy = {}) {
+  return vacancy?.operationAddress || vacancy?.operation?.name || vacancyCity(vacancy) || '';
+}
+
 function buildVacancyConfirmationPrompt(vacancy = {}) {
   const city = vacancyCity(vacancy);
   const place = city ? ` en ${city}` : '';
-  return `Hola, soy Lórren, asistente de selección de LoginPro. ¿Escribes por la vacante de ${vacancyTitle(vacancy)}${place}? Responde sí para confirmarlo o dime el cargo correcto.`;
+  return `Hola, soy Lórren, asistente de selección de LoginPro. ¿Escribes por la vacante de ${vacancyTitle(vacancy)}${place}? Puedes confirmarme de forma natural o decirme el cargo correcto.`;
 }
 
 function buildVacancyInfoReply(vacancy = {}) {
   const city = vacancyCity(vacancy);
   const parts = [`Perfecto, te comparto la información registrada de ${vacancyTitle(vacancy)}${city ? ` en ${city}` : ''}.`];
   if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
+  if (vacancy.operationAddress) parts.push(`Zona de operación: ${vacancy.operationAddress}.`);
   if (vacancy.requirements) parts.push(`Requisitos: ${vacancy.requirements}.`);
   if (vacancy.conditions) parts.push(`Condiciones: ${vacancy.conditions}.`);
   if (vacancy.requiredDocuments) parts.push(`Documentos para el proceso: ${vacancy.requiredDocuments}.`);
   parts.push('¿Te interesa continuar con esta postulación?');
   return parts.join('\n\n');
+}
+
+export function buildVacancyQuestionReply(vacancy = {}, text = '') {
+  if (!vacancy || !isQuestionLike(text)) return '';
+  const n = normalize(text);
+  const lead = `Sobre la vacante de ${vacancyTitle(vacancy)}`;
+
+  if (/\b(salario|sueldo|pago|cuanto pagan|cuanto es)\b/.test(n)) {
+    return vacancy.conditions
+      ? `${lead}, las condiciones registradas son: ${vacancy.conditions}.`
+      : 'No tengo un salario registrado para esta vacante.';
+  }
+  if (/\b(horario|turno|jornada|contrato|prestacion|beneficio|condicion)\b/.test(n)) {
+    return vacancy.conditions
+      ? `${lead}, las condiciones registradas son: ${vacancy.conditions}.`
+      : 'No tengo esas condiciones registradas para esta vacante.';
+  }
+  if (/\b(requisito|perfil|edad|experiencia|estudio|formacion|documento)\b/.test(n)) {
+    const parts = [];
+    if (vacancy.requirements) parts.push(vacancy.requirements);
+    if (vacancy.requiredDocuments && /\bdocumento\b/.test(n)) parts.push(`Documentos: ${vacancy.requiredDocuments}`);
+    return parts.length
+      ? `${lead}, los requisitos registrados son: ${parts.join('. ')}.`
+      : 'No tengo ese requisito registrado para esta vacante.';
+  }
+  if (/\b(funcion|funciones|labor|hacer|cargo|rol)\b/.test(n)) {
+    return vacancy.roleDescription
+      ? `${lead}, el cargo consiste en ${vacancy.roleDescription}.`
+      : `El cargo registrado es ${vacancyTitle(vacancy)}, pero no tengo una descripción adicional.`;
+  }
+  if (/\b(donde|direccion|ubicacion|zona|sector|queda)\b/.test(n)) {
+    const location = vacancyLocation(vacancy);
+    return location
+      ? `${lead}, la ubicación registrada es ${location}.`
+      : 'No tengo una ubicación específica registrada para esta vacante.';
+  }
+  return 'No tengo ese dato registrado en la vacante. Puedo continuar con la información disponible.';
 }
 
 function buildConsentAcceptedReply(candidate = {}, vacancy = null) {
@@ -225,6 +283,36 @@ function inboundBody(message = {}) {
   return `[${message.type || 'mensaje'} recibido antes de autorización]`;
 }
 
+async function captureEarlyCvAndReply(prisma, candidate, message, from, vacancy, mode) {
+  const type = inboundMessageType(message);
+  const body = inboundBody(message);
+  const isNew = await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
+  if (!isNew) return true;
+
+  try {
+    const result = await captureGatedCvDocument({ prisma, candidateId: candidate.id, message });
+    if (!result.captured) {
+      await sendAndStore(prisma, candidate.id, from, EARLY_CV_RETRY_REPLY, 'gated_cv_not_saved', { reason: result.reason });
+      return true;
+    }
+
+    if (mode === CAMPAIGN_VACANCY_CONFIRMATION_MODE) {
+      const reply = `${EARLY_CV_SAVED_REPLY}\n\n${buildVacancyConfirmationPrompt(vacancy)}`;
+      await sendAndStore(prisma, candidate.id, from, reply, 'gated_cv_saved_vacancy_pending', { vacancyId: vacancy?.id || null, filename: result.filename });
+      return true;
+    }
+
+    await prisma.candidate.update({ where: { id: candidate.id }, data: { botResumeMode: DATA_CONSENT_PENDING_MODE } });
+    const reply = `${EARLY_CV_SAVED_REPLY}\n\n${CONSENT_PROMPT}`;
+    await sendAndStore(prisma, candidate.id, from, reply, 'gated_cv_saved_consent_pending', { vacancyId: vacancy?.id || null, filename: result.filename });
+    return true;
+  } catch (error) {
+    console.warn('[GATED_CV_CAPTURE_ERROR]', error?.message || error);
+    await sendAndStore(prisma, candidate.id, from, EARLY_CV_RETRY_REPLY, 'gated_cv_capture_error');
+    return true;
+  }
+}
+
 async function handleCampaignVacancyConfirmation(prisma, req, candidate, message, from, body, type) {
   const vacancy = await loadVacancy(prisma, candidate.vacancyId);
   if (!vacancy) {
@@ -234,11 +322,17 @@ async function handleCampaignVacancyConfirmation(prisma, req, candidate, message
     return true;
   }
 
+  if (candidate.dataConsentStatus !== 'REVOKED' && isSupportedGatedCvDocument(message)) {
+    return captureEarlyCvAndReply(prisma, candidate, message, from, vacancy, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
+  }
+
   await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
+  const questionReply = buildVacancyQuestionReply(vacancy, body);
 
   if (isAffirmativeVacancyConfirmation(body)) {
     await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT, botResumeMode: null } });
-    await sendAndStore(prisma, candidate.id, from, buildVacancyInfoReply(vacancy), 'campaign_vacancy_confirmed', { vacancyId: vacancy.id });
+    const reply = [questionReply, buildVacancyInfoReply(vacancy)].filter(Boolean).join('\n\n');
+    await sendAndStore(prisma, candidate.id, from, reply, 'campaign_vacancy_confirmed', { vacancyId: vacancy.id });
     return true;
   }
 
@@ -248,12 +342,19 @@ async function handleCampaignVacancyConfirmation(prisma, req, candidate, message
     return true;
   }
 
-  await sendAndStore(prisma, candidate.id, from, buildVacancyConfirmationPrompt(vacancy), 'campaign_vacancy_confirmation_prompt', { vacancyId: vacancy.id });
+  const reply = [questionReply, buildVacancyConfirmationPrompt(vacancy)].filter(Boolean).join('\n\n');
+  await sendAndStore(prisma, candidate.id, from, reply, 'campaign_vacancy_confirmation_prompt', { vacancyId: vacancy.id });
   return true;
 }
 
 async function handleConsentDecision(prisma, req, candidate, message, from, body, type) {
+  const vacancy = await loadVacancy(prisma, candidate.vacancyId);
+  if (candidate.dataConsentStatus !== 'REVOKED' && isSupportedGatedCvDocument(message)) {
+    return captureEarlyCvAndReply(prisma, candidate, message, from, vacancy, DATA_CONSENT_PENDING_MODE);
+  }
+
   await saveInboundConsentGateMessage(prisma, candidate.id, message, body, type);
+  const questionReply = buildVacancyQuestionReply(vacancy, body);
 
   if (isConsentRejection(body)) {
     await recordConsent(prisma, req, candidate, 'REVOKED');
@@ -263,14 +364,15 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   if (isConsentAcceptance(body)) {
     await recordConsent(prisma, req, candidate, 'ACCEPTED');
-    const vacancy = await loadVacancy(prisma, candidate.vacancyId);
     const acceptedCandidate = { ...candidate, dataConsentStatus: 'ACCEPTED', currentStep: ConversationStep.COLLECTING_DATA, botResumeMode: null };
-    await sendAndStore(prisma, candidate.id, from, buildConsentAcceptedReply(acceptedCandidate, vacancy), 'data_consent_accepted');
+    const reply = [questionReply, buildConsentAcceptedReply(acceptedCandidate, vacancy)].filter(Boolean).join('\n\n');
+    await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_accepted');
     return true;
   }
 
   await prisma.candidate.update({ where: { id: candidate.id }, data: { botResumeMode: DATA_CONSENT_PENDING_MODE } });
-  const reply = candidate.botResumeMode === DATA_CONSENT_PENDING_MODE ? CONSENT_CLARIFIER_REPLY : CONSENT_PROMPT;
+  const consentReply = candidate.botResumeMode === DATA_CONSENT_PENDING_MODE ? CONSENT_CLARIFIER_REPLY : CONSENT_PROMPT;
+  const reply = [questionReply, consentReply].filter(Boolean).join('\n\n');
   await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_prompt');
   return true;
 }
