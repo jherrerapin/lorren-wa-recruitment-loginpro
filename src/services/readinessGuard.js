@@ -220,6 +220,9 @@ export function getCandidateReadiness(candidate = {}, vacancy = null, options = 
       if (!hasValue(getCandidateResidenceValue(candidate, vacancyContext))) missingFields.push(field);
       continue;
     }
+    if (['experienceInfo', 'experienceTime'].includes(field) && hasValue(experienceState[field])) {
+      continue;
+    }
     if (field === 'experienceSummary' && experienceState.experienceInfo === 'No') {
       continue;
     }
@@ -284,7 +287,7 @@ export function buildCandidateDataCollectionMessage(candidate = {}, vacancy = nu
   if (eligibilityReply) return eligibilityReply;
   const pendingText = formatNaturalFieldList(readiness.missingFieldLabels || []);
   if (!pendingText) return '';
-  return `Perfecto, seguimos con tu postulación. Para dejar tu registro completo, compárteme en un solo mensaje ${pendingText}.`;
+  return `Perfecto, seguimos con tu postulación. Para dejar tu registro completo, compárteme ${pendingText}; puedes enviarlo todo junto o por partes.`;
 }
 
 export function getFirstMissingFieldLabel(readiness = {}) {
