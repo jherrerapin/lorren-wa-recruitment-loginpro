@@ -250,12 +250,27 @@ function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMes
   const lastWasFutureOffer = FUTURE_PROFILE_OFFER_REPLY_KINDS.has(lastReplyKind);
   const inOfferMode = isFutureProfileOfferMode(botResumeMode);
   const intent = detectAffirmationIntent(text);
+  const turn = analyzeConversationTurn(text);
   const normalized = normalizeResolverText(text);
   const explicitProfileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
     && /\b(perfil|hoja de vida|hv|datos|registro|registrada|registrado)\b/.test(normalized);
-  if (inOfferMode && lastWasFutureOffer && intent.affirmative) return { accepted: true, passiveAck: false, reason: 'contextual_affirmation_after_future_profile_offer', lastReplyKind };
-  if (inOfferMode && lastWasFutureOffer && intent.passiveAck) return { accepted: false, passiveAck: true, reason: 'passive_ack_after_future_profile_offer', lastReplyKind };
-  if (intent.affirmative && explicitProfileIntent) return { accepted: true, passiveAck: false, reason: 'explicit_future_profile_acceptance', lastReplyKind };
+
+  // Una pregunta o una solicitud de información tiene prioridad conversacional.
+  // "Me interesa" expresa interés en la vacante, no autoriza por sí solo guardar el perfil.
+  if (turn.question || turn.vacancyInformationRequest) {
+    return { accepted: false, passiveAck: false, reason: 'information_request_before_future_profile_decision', lastReplyKind };
+  }
+
+  const explicitContextualAcceptance = turn.confirmation || explicitProfileIntent;
+  if (inOfferMode && lastWasFutureOffer && explicitContextualAcceptance && intent.affirmative) {
+    return { accepted: true, passiveAck: false, reason: 'contextual_affirmation_after_future_profile_offer', lastReplyKind };
+  }
+  if (inOfferMode && lastWasFutureOffer && intent.passiveAck) {
+    return { accepted: false, passiveAck: true, reason: 'passive_ack_after_future_profile_offer', lastReplyKind };
+  }
+  if (intent.affirmative && explicitProfileIntent) {
+    return { accepted: true, passiveAck: false, reason: 'explicit_future_profile_acceptance', lastReplyKind };
+  }
   return { accepted: false, passiveAck: intent.passiveAck, reason: intent.passiveAck ? 'passive_ack' : 'no_acceptance_evidence', lastReplyKind };
 }
 
