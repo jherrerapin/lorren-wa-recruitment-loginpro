@@ -1,4 +1,5 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
+import { analyzeConversationTurn } from './conversationIntent.js';
 import { detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 
@@ -89,21 +90,79 @@ function buildNoActiveVacanciesReply(city = null) {
 }
 
 function buildNeedRoleForCityReply(city = null, roleHint = null) {
-  const place = city ? `en ${city}` : 'en tu ciudad';
   const hasRoleHint = Boolean(String(roleHint || '').trim());
   if (hasRoleHint) {
-    if (isBogotaCity(city)) return `Gracias, ya tengo la ciudad y el cargo de interés. ¿En qué localidad vives?`;
-    return `Gracias, ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?`;
+    if (isBogotaCity(city)) return 'Gracias, ya tengo la ciudad y el cargo de interés. ¿En qué localidad vives?';
+    return 'Gracias, ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?';
   }
   const localityPart = isBogotaCity(city) ? ' y en qué localidad estás' : '';
   return `Gracias por contarme desde dónde escribes. ¿Para qué vacante o cargo estás interesado${localityPart}?`;
 }
 
-function buildInactiveVacancyReply(vacancy = null, city = null) {
+function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
+  if (!vacancy) return '';
+  const turn = analyzeConversationTurn(inboundText);
+  if (!turn.vacancyInformationRequest && !turn.question) return '';
+
+  const normalized = normalizeResolverText(inboundText);
+  const title = vacancyTitle(vacancy);
+  const city = vacancyCity(vacancy);
+  const location = city ? ` en ${city}` : '';
+  const roleDescription = String(vacancy?.roleDescription || '').trim();
+  const requirements = String(vacancy?.requirements || '').trim();
+  const conditions = String(vacancy?.conditions || '').trim();
+  const address = String(vacancy?.operationAddress || '').trim();
+  const documents = String(vacancy?.requiredDocuments || '').trim();
+
+  if (/\b(funcion|funciones|labor|labores|hace|hacer|haria|toca|consiste|responsabilidad|responsabilidades)\b/.test(normalized)) {
+    return roleDescription
+      ? `La función registrada para ${title}${location} es ${roleDescription}.`
+      : `Tengo identificado el cargo de ${title}${location}, pero no hay una descripción adicional registrada.`;
+  }
+
+  if (/\b(requisito|requisitos|perfil|experiencia|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+    return requirements
+      ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
+      : `No tengo requisitos adicionales registrados para ${title}${location}.`;
+  }
+
+  if (/\b(documento|documentos|papeles)\b/.test(normalized)) {
+    return documents
+      ? `Los documentos registrados para el proceso de ${title}${location} son: ${documents}.`
+      : `No tengo documentos adicionales registrados para ${title}${location}.`;
+  }
+
+  if (/\b(salario|sueldo|pago|horario|turno|beneficio|beneficios|condiciones|contrato|prestaciones)\b/.test(normalized)) {
+    return conditions
+      ? `Las condiciones registradas para ${title}${location} son: ${conditions}.`
+      : `Ese dato no está registrado para ${title}${location}.`;
+  }
+
+  if (/\b(ubicacion|direccion|zona|sector|donde|queda)\b/.test(normalized)) {
+    return address
+      ? `La zona registrada para ${title}${location} es ${address}.`
+      : `No tengo una zona más detallada registrada para ${title}${location}.`;
+  }
+
+  const facts = [];
+  if (roleDescription) facts.push(`El cargo consiste en ${roleDescription}.`);
+  if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);
+  if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);
+  if (address) facts.push(`La zona de operación registrada es ${address}.`);
+  if (documents) facts.push(`Los documentos registrados para el proceso son: ${documents}.`);
+
+  return facts.length
+    ? `Claro. Sobre ${title}${location}: ${facts.join(' ')}`
+    : `Tengo identificada la convocatoria de ${title}${location}, pero no hay información adicional cargada.`;
+}
+
+function buildInactiveVacancyReply(vacancy = null, city = null, inboundText = '') {
   const role = vacancyTitle(vacancy) || 'esa convocatoria';
   const place = vacancyCity(vacancy) || city;
   const location = place ? ` en ${place}` : '';
-  return `Tengo identificada la convocatoria de ${role}${location}, pero en este momento no está activa para recibir postulaciones. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo con tus datos si me confirmas que deseas ese registro.`;
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText);
+  const availability = `En este momento la convocatoria de ${role}${location} no está activa para recibir postulaciones. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo con tus datos si me confirmas que deseas ese registro.`;
+  return [answer, availability].filter(Boolean).join('\n\n');
 }
 
 function buildRegisteredWithoutVacancyReply(candidate = {}) {
@@ -177,46 +236,11 @@ function detectNegativeAlternativeIntent(text = '') {
 }
 
 function isAlternativeVacancyQuestion(text = '') {
-  const normalized = normalizeResolverText(text);
-  if (!normalized) return false;
-  return /[?¿]/.test(String(text || ''))
-    || /\b(cual|que|funcion|funciones|labor|labores|hace|hacer|haria|toca|salario|pago|horario|turno|requisito|requisitos|ubicacion|direccion|zona|documentos|beneficio|beneficios|condiciones|contrato)\b/.test(normalized);
+  return analyzeConversationTurn(text).vacancyInformationRequest;
 }
 
 function buildAlternativeVacancyInfoReply(vacancy = {}, inboundText = '') {
-  const normalized = normalizeResolverText(inboundText);
-  const title = vacancyTitle(vacancy);
-  const city = vacancyCity(vacancy);
-  const location = city ? ` en ${city}` : '';
-  const roleDescription = String(vacancy?.roleDescription || '').trim();
-  const requirements = String(vacancy?.requirements || '').trim();
-  const conditions = String(vacancy?.conditions || '').trim();
-  const address = String(vacancy?.operationAddress || '').trim();
-  let answer = '';
-
-  if (/\b(funcion|funciones|labor|labores|hace|hacer|haria|toca)\b/.test(normalized)) {
-    answer = roleDescription
-      ? `La función registrada para ${title}${location} es ${roleDescription}.`
-      : `La opción disponible es ${title}${location}; no tengo una descripción más detallada registrada.`;
-  } else if (/\b(requisito|requisitos|documentos)\b/.test(normalized)) {
-    answer = requirements
-      ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
-      : `No tengo requisitos adicionales registrados para ${title}${location}.`;
-  } else if (/\b(salario|pago|horario|turno|beneficio|beneficios|condiciones|contrato)\b/.test(normalized)) {
-    answer = conditions
-      ? `Las condiciones registradas para ${title}${location} son: ${conditions}.`
-      : `Ese dato no lo tengo registrado para ${title}${location}.`;
-  } else if (/\b(ubicacion|direccion|zona)\b/.test(normalized)) {
-    answer = address
-      ? `La zona registrada para ${title}${location} es ${address}.`
-      : `No tengo una dirección o zona más detallada registrada para ${title}${location}.`;
-  } else {
-    const summary = roleDescription || conditions || requirements;
-    answer = summary
-      ? `Sobre ${title}${location}, tengo registrado: ${summary}.`
-      : `Tengo registrada la opción de ${title}${location}, pero no tengo más detalle operativo cargado.`;
-  }
-
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText);
   return `${answer} Si esta opción te interesa, respóndeme que deseas continuar y te pido los datos necesarios.`;
 }
 
@@ -263,10 +287,11 @@ function hasMaterialVacancyEvidence(text = '', city = null) {
   return Boolean(detectRoleHintFromText(text, { city }) || detectOperationZoneEvidence(text).length);
 }
 
-function preventRepeatDecision(decision, { recentMessages = [], inboundText = '', city = null } = {}) {
+function preventRepeatDecision(decision, { recentMessages = [], inboundText = '', city = null, currentStep = null } = {}) {
   if (!decision?.replyKind || !decision?.reason) return decision;
   const repeated = hasRecentSameBotDecision({ recentMessages, replyKind: decision.replyKind, reason: decision.reason, windowMinutes: 10 });
-  if (!repeated || hasMaterialVacancyEvidence(inboundText, city)) return decision;
+  const turn = analyzeConversationTurn(inboundText, { currentStep });
+  if (!repeated || turn.actionable || hasMaterialVacancyEvidence(inboundText, city)) return decision;
   return {
     action: VacancyFirstGateAction.SUPPRESS_REPLY,
     reason: 'REPEAT_PREVENTED',
@@ -392,7 +417,7 @@ async function buildAlternativeDecision({ prisma, resolution = {}, vacancyHints 
     reply: alternative.reply,
     resolution: { ...resolution, suggestedVacancyId: alternative.suggestedVacancyId, alternativeReason: alternative.reason }
   };
-  return preventRepeatDecision(decision, { recentMessages, inboundText, city });
+  return preventRepeatDecision(decision, { recentMessages, inboundText, city, currentStep: GREETING_SENT });
 }
 
 export async function resolveVacancyFirstGate({
@@ -447,8 +472,8 @@ export async function resolveVacancyFirstGate({
         reason: 'VACANCY_NOT_ACTIVE',
         replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
         candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
-        reply: buildInactiveVacancyReply(currentVacancy)
-      }, { recentMessages, inboundText, city: vacancyCity(currentVacancy) });
+        reply: buildInactiveVacancyReply(currentVacancy, null, inboundText)
+      }, { recentMessages, inboundText, city: vacancyCity(currentVacancy), currentStep });
     }
 
     const intent = detectAffirmationIntent(inboundText);
@@ -500,9 +525,9 @@ export async function resolveVacancyFirstGate({
       replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
       vacancy: resolution.vacancy,
       candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
-      reply: buildInactiveVacancyReply(resolution.vacancy, resolution.city),
+      reply: buildInactiveVacancyReply(resolution.vacancy, resolution.city, inboundText),
       resolution
-    }, { recentMessages, inboundText, city: resolution.city });
+    }, { recentMessages, inboundText, city: resolution.city, currentStep });
   }
 
   if (['trusted_vacancy_not_found'].includes(resolution.reason)) {
@@ -513,7 +538,7 @@ export async function resolveVacancyFirstGate({
       candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: FUTURE_PROFILE_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
       reply: buildNoActiveVacanciesReply(resolution.city),
       resolution
-    }, { recentMessages, inboundText, city: resolution.city });
+    }, { recentMessages, inboundText, city: resolution.city, currentStep });
   }
 
   if (['city_without_active_vacancies', 'no_active_vacancies'].includes(resolution.reason)) {
@@ -524,7 +549,7 @@ export async function resolveVacancyFirstGate({
       candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: FUTURE_PROFILE_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
       reply: buildNoActiveVacanciesReply(resolution.city),
       resolution
-    }, { recentMessages, inboundText, city: resolution.city });
+    }, { recentMessages, inboundText, city: resolution.city, currentStep });
   }
 
   if (['city_with_active_vacancies', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
@@ -537,7 +562,7 @@ export async function resolveVacancyFirstGate({
       candidateUpdates: { currentStep: GREETING_SENT },
       reply: buildNeedRoleForCityReply(resolution.city, resolution.roleHint),
       resolution
-    }, { recentMessages, inboundText, city: resolution.city });
+    }, { recentMessages, inboundText, city: resolution.city, currentStep });
   }
 
   return preventRepeatDecision({
@@ -547,5 +572,5 @@ export async function resolveVacancyFirstGate({
     candidateUpdates: { currentStep: GREETING_SENT },
     reply: 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?',
     resolution
-  }, { recentMessages, inboundText, city: resolution?.city });
+  }, { recentMessages, inboundText, city: resolution?.city, currentStep });
 }
