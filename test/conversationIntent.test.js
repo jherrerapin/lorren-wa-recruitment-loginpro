@@ -10,6 +10,11 @@ import {
   evaluateContextualResponseGate,
   inferContextualSemanticIntent
 } from '../src/services/contextualResponseGate.js';
+import {
+  PAUSED_VACANCY_OFFER_MODE,
+  VacancyFirstGateAction,
+  resolveVacancyFirstGate
+} from '../src/services/vacancyFirstGate.js';
 
 test('detecta intención apply y faq', () => {
   assert.equal(detectConversationIntent('me interesa continuar con la vacante'), 'apply_intent');
@@ -130,6 +135,21 @@ test('consulta normal de estado se responde con la cita conocida sin transferir 
   assert.match(result.reply, /entrevista sigue registrada/i);
 });
 
+test('pregunta ordinaria de vacante continúa al respondedor del contexto sin transferencia', () => {
+  const result = evaluateContextualResponseGate({
+    candidate: scheduledCandidate,
+    vacancy: scheduledVacancy,
+    activeInterviewBooking: activeBooking,
+    semanticIntent: 'ASK_VACANCY_INFORMATION',
+    readiness: completedReadiness,
+    hasPendingAction: false
+  });
+
+  assert.equal(result.shouldReply, true);
+  assert.equal(result.allowedAction, ContextualAllowedAction.CONTINUE_FLOW);
+  assert.equal(result.requiresHumanReview, false);
+});
+
 test('dato logístico no configurado produce respuesta segura sin transferencia automática', () => {
   const result = evaluateContextualResponseGate({
     candidate: scheduledCandidate,
@@ -159,4 +179,54 @@ test('problema operativo de llegada conserva la revisión humana', () => {
   assert.equal(result.shouldReply, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
   assert.equal(result.requiresHumanReview, true);
+});
+
+test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de registro futuro', async () => {
+  const inactiveVacancy = {
+    id: 'vacancy-inactive',
+    title: 'Auxiliar de Cargue y Descargue',
+    role: 'Auxiliar de cargue y descargue',
+    city: 'Bogota',
+    operation: { id: 'operation-bogota', name: 'Operación Bogotá', city: { id: 'city-bogota', name: 'Bogota' } },
+    roleDescription: 'apoyar el cargue, descargue y organización de mercancía',
+    requirements: 'ser mayor de edad y contar con disponibilidad para labores operativas',
+    conditions: 'turnos según programación de la operación',
+    operationAddress: 'Bogotá',
+    isActive: false,
+    acceptingApplications: false
+  };
+  const recentMessages = [{
+    direction: 'OUTBOUND',
+    body: 'La vacante no está activa. Puedo dejar tu perfil registrado si lo deseas.',
+    createdAt: new Date(),
+    rawPayload: {
+      source: 'vacancy_first_gate',
+      replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
+      reason: 'VACANCY_NOT_ACTIVE'
+    }
+  }];
+
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: {
+      id: 'candidate-inactive',
+      status: 'NUEVO',
+      currentStep: 'GREETING_SENT',
+      vacancyId: inactiveVacancy.id,
+      botResumeMode: PAUSED_VACANCY_OFFER_MODE
+    },
+    currentVacancy: inactiveVacancy,
+    inboundText: 'Pero me podrías regalar información sobre esa vacante porque estoy interesado',
+    currentStep: 'GREETING_SENT',
+    recentMessages,
+    vacancyHints: { allVacancies: [inactiveVacancy], activeVacancies: [] }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'VACANCY_NOT_ACTIVE');
+  assert.match(decision.reply, /apoyar el cargue, descargue y organización de mercancía/i);
+  assert.match(decision.reply, /requisitos registrados/i);
+  assert.match(decision.reply, /no está activa para recibir postulaciones/i);
+  assert.match(decision.reply, /futuras aperturas/i);
+  assert.equal(decision.candidateUpdates.botResumeMode, PAUSED_VACANCY_OFFER_MODE);
 });
