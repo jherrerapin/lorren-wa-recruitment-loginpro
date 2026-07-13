@@ -56,7 +56,8 @@ function effectiveStatus(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-export function isCurrentMetaAd(ad = {}) {
+export function isCurrentMetaAd(ad) {
+  if (!ad || typeof ad !== 'object') return false;
   const configuredStatus = effectiveStatus(ad.status);
   const inheritedStatus = effectiveStatus(ad.effective_status);
   return !NON_CURRENT_AD_STATUSES.has(configuredStatus)
