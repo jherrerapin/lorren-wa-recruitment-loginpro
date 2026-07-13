@@ -417,15 +417,28 @@ model BotKnowledge {
 }
 
 model DevAuditEvent {
-  id        String   @id @default(cuid())
-  username  String
-  action    String
-  target    String?
-  detail    Json?
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  entityType    String
+  entityId      String?
+  entityLabel   String?
+  action        String
+  actorUserId   String?
+  actorUsername String?
+  actorRole     String?
+  actorSource   String?
+  ipAddress     String?
+  forwardedFor String?
+  userAgent     String?
+  method        String?
+  path          String?
+  fromValue     Json?
+  toValue       Json?
+  metadata      Json?
+  createdAt     DateTime @default(now())
 
-  @@index([username, createdAt])
-  @@index([action])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUsername, createdAt])
+  @@index([action, createdAt])
 }
 
 model JobQueueItem {
