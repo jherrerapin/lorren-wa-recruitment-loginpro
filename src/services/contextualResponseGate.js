@@ -30,13 +30,27 @@ const LOGISTIC_INTENTS = new Set([
   'ASK_REQUIRED_DOCUMENTS'
 ]);
 const APPOINTMENT_MANUAL_REVIEW_INTENTS = new Set([
-  'REPORT_ARRIVAL_PROBLEM'
+  'REPORT_ARRIVAL_PROBLEM',
+  'UNCLASSIFIED_APPOINTMENT_QUESTION'
 ]);
 const APPOINTMENT_ACTION_INTENTS = new Set([
   'CONFIRM_ATTENDANCE',
   'CANCEL_ATTENDANCE',
   'REQUEST_RESCHEDULE',
   'SEND_CV'
+]);
+const MANUAL_CONTEXT_INFORMATION_INTENTS = new Set([
+  'ASK_APPLICATION_STATUS',
+  'ASK_VACANCY_INFORMATION',
+  'ASK_INTERVIEW_AVAILABILITY',
+  'ASK_INTERVIEW_ADDRESS',
+  'ASK_INTERVIEW_TIME',
+  'ASK_INTERVIEW_CONTACT_PERSON',
+  'ASK_REQUIRED_DOCUMENTS',
+  'UNCLASSIFIED_APPOINTMENT_QUESTION',
+  'PROVIDE_EXTRA_DATA',
+  'UNCLEAR',
+  'SOFT_CONFIRMATION'
 ]);
 
 function normalize(text = '') {
@@ -177,7 +191,7 @@ function buildApplicationStatusReply({ candidate = {}, vacancy = null, activeInt
 
 export function buildSafeInformationGapReply(semanticIntent = 'UNCLEAR') {
   if (semanticIntent === 'ASK_INTERVIEW_CONTACT_PERSON') {
-    return 'Gracias por preguntar. Tengo registrada tu entrevista, pero no tengo confirmado el nombre de la persona que te recibirá. Conserva la hora y dirección que ya tienes registradas.';
+    return 'Gracias por preguntar. Tengo registrada tu entrevista, pero no tengo confirmado el nombre de la persona que te recibirá. Conserva la información de la cita que ya recibiste.';
   }
   if (semanticIntent === 'ASK_INTERVIEW_ADDRESS') {
     return 'Gracias por preguntar. Tengo registrada tu entrevista, pero la dirección exacta no está confirmada en la información disponible.';
@@ -187,6 +201,9 @@ export function buildSafeInformationGapReply(semanticIntent = 'UNCLEAR') {
   }
   if (semanticIntent === 'ASK_INTERVIEW_AVAILABILITY') {
     return 'Gracias por preguntar. Tengo registrada tu entrevista, pero no tengo confirmados horarios adicionales en la información disponible.';
+  }
+  if (semanticIntent === 'UNCLASSIFIED_APPOINTMENT_QUESTION') {
+    return 'Gracias por preguntar. Tengo registrada tu cita, pero no cuento con información suficiente para responder ese punto con seguridad.';
   }
   return 'Gracias por escribir. Ya tengo el contexto de tu proceso registrado y no veo un dato adicional confirmado para responderte con precisión.';
 }
@@ -210,13 +227,24 @@ export function inferContextualSemanticIntent({
   if (hasDataIntent) return 'PROVIDE_EXTRA_DATA';
 
   if (isQuestion || resolvedIntent === 'faq' || resolvedIntent === 'info_request') {
+    const asksVacancyInformation = /\b(vacante|oferta|convocatoria|cargo|funcion|funciones|labor|requisit|salario|sueldo|pago|contrato|beneficio|condiciones|experiencia|zona|sector)\b/.test(normalized);
+    if (asksVacancyInformation) return 'ASK_VACANCY_INFORMATION';
+
     const hasInterviewTopic = /\b(entrevist\w*|cita|presentar|llegar|asistir|ir)\b/.test(normalized);
-    if (/\b(direccion|ubicacion|donde|queda|lugar|sede)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_ADDRESS';
-    if (/\b(hora|horario|cuando|fecha|dia)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_TIME';
+    const asksAvailability = /\b(solo\s+hay|hay\s+mas|otro\s+horario|otros\s+horarios|horarios?\s+disponibles?|disponibilidad|despues\s+de|antes\s+de)\b/.test(normalized)
+      && /\b(entrevist\w*|cita|hora|horario)\b/.test(normalized);
+    if (asksAvailability) return 'ASK_INTERVIEW_AVAILABILITY';
+
+    if (/\b(document\w*|papeles|llevar)\b/.test(normalized)) return 'ASK_REQUIRED_DOCUMENTS';
+    if (/\b(direccion|ubicacion|donde|queda|lugar|sede)\b/.test(normalized)) return 'ASK_INTERVIEW_ADDRESS';
     if (/\b(quien|persona|contacto|preguntar|recibe|recepcion)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_CONTACT_PERSON';
-    if (/\b(document|llevar)\b/.test(normalized) && hasInterviewTopic) return 'ASK_REQUIRED_DOCUMENTS';
-    if (/\b(vacante|oferta|convocatoria|cargo|funcion|funciones|labor|requisit|salario|sueldo|pago|contrato|beneficio|condiciones|experiencia|zona|sector)\b/.test(normalized)) return 'ASK_VACANCY_INFORMATION';
-    return 'ASK_APPLICATION_STATUS';
+    if (/\b(hora|horario|cuando|fecha|dia)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_TIME';
+
+    if (/\b(como\s+va|estado\s+de|alguna\s+novedad|hay\s+novedad|mi\s+proceso|mi\s+postulacion|cuando\s+me\s+llaman|me\s+van\s+a\s+llamar|sigue\s+registrad[oa])\b/.test(normalized)) {
+      return 'ASK_APPLICATION_STATUS';
+    }
+
+    return 'UNCLASSIFIED_APPOINTMENT_QUESTION';
   }
 
   if (resolvedIntent === 'greeting') return 'SOFT_CONFIRMATION';
@@ -254,7 +282,7 @@ export function evaluateContextualResponseGate({
     });
   }
 
-  if (lastOutbound.isManual && !realPendingAction && ['ASK_APPLICATION_STATUS', 'PROVIDE_EXTRA_DATA', 'UNCLEAR', 'SOFT_CONFIRMATION'].includes(semanticIntent)) {
+  if (lastOutbound.isManual && !realPendingAction && MANUAL_CONTEXT_INFORMATION_INTENTS.has(semanticIntent)) {
     return decision({
       shouldReply: false,
       allowedAction: ContextualAllowedAction.NO_REPLY,
@@ -302,7 +330,9 @@ export function evaluateContextualResponseGate({
 
     if (APPOINTMENT_MANUAL_REVIEW_INTENTS.has(semanticIntent)) {
       return safeReviewDecision(
-        'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
+        semanticIntent === 'REPORT_ARRIVAL_PROBLEM'
+          ? 'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.'
+          : 'Candidate asked an appointment question that could not be resolved from the assigned vacancy or booking context; this requires human validation before replying.',
         semanticIntent
       );
     }
@@ -318,14 +348,10 @@ export function evaluateContextualResponseGate({
           reply
         });
       }
-      return decision({
-        shouldReply: true,
-        allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,
-        reason: 'Candidate asked for a non-critical logistics fact that is not configured; answer the information gap safely without automatic handoff.',
-        responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
-        requiresHumanReview: false,
-        reply: buildSafeInformationGapReply(semanticIntent)
-      });
+      return safeReviewDecision(
+        'Candidate asked for an appointment logistics detail that is missing from the assigned vacancy or booking; a recruiter must complete or confirm it.',
+        semanticIntent
+      );
     }
 
     if (APPOINTMENT_ACTION_INTENTS.has(semanticIntent)) {
@@ -356,7 +382,7 @@ export function evaluateContextualResponseGate({
         responsePurpose: ContextualResponsePurpose.NONE
       });
     }
-    if (['ASK_APPLICATION_STATUS', 'ASK_VACANCY_INFORMATION', 'PROVIDE_EXTRA_DATA', 'UNCLEAR'].includes(semanticIntent)) {
+    if (['ASK_APPLICATION_STATUS', 'ASK_VACANCY_INFORMATION', 'PROVIDE_EXTRA_DATA', 'UNCLEAR', 'UNCLASSIFIED_APPOINTMENT_QUESTION'].includes(semanticIntent)) {
       return decision({
         shouldReply: true,
         allowedAction: ContextualAllowedAction.CONTINUE_FLOW,
