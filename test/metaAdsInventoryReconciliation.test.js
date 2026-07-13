@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   associateCandidatesByExactAdId,
+  buildCurrentMetaInventory,
   filterCurrentMetaAds,
   isCurrentMetaAd,
-  markAdsMissingFromMeta
+  markAdsMissingFromMeta,
+  syncMetaAdsInsights
 } from '../src/services/metaAdsInsightsSync.js';
 
 test('descarta anuncios eliminados, archivados o corruptos y conserva estados vigentes', () => {
@@ -34,7 +36,42 @@ test('descarta anuncios eliminados, archivados o corruptos y conserva estados vi
   ]);
 });
 
-test('marca como histórico el anuncio sincronizado que ya no aparece en Meta', async () => {
+test('un anuncio solo es actual cuando también existen su campaña y conjunto actuales', () => {
+  const inventory = buildCurrentMetaInventory({
+    campaigns: [
+      { id: 'campaign-current', status: 'PAUSED', effective_status: 'PAUSED' },
+      { id: 'campaign-deleted', status: 'DELETED', effective_status: 'DELETED' }
+    ],
+    adsets: [
+      { id: 'adset-current', campaign_id: 'campaign-current', status: 'PAUSED', effective_status: 'PAUSED' },
+      { id: 'adset-deleted-parent', campaign_id: 'campaign-deleted', status: 'ACTIVE', effective_status: 'CAMPAIGN_PAUSED' },
+      { id: 'adset-deleted', campaign_id: 'campaign-current', status: 'DELETED', effective_status: 'DELETED' }
+    ],
+    ads: [
+      { id: 'ad-current', campaign_id: 'campaign-current', adset_id: 'adset-current', status: 'PAUSED', effective_status: 'PAUSED' },
+      { id: 'ad-orphan-campaign', campaign_id: 'campaign-deleted', adset_id: 'adset-deleted-parent', status: 'ACTIVE', effective_status: 'CAMPAIGN_PAUSED' },
+      { id: 'ad-orphan-adset', campaign_id: 'campaign-current', adset_id: 'adset-deleted', status: 'ACTIVE', effective_status: 'ADSET_PAUSED' }
+    ]
+  });
+
+  assert.deepEqual(inventory.currentCampaigns.map((row) => row.id), ['campaign-current']);
+  assert.deepEqual(inventory.currentAdsets.map((row) => row.id), ['adset-current']);
+  assert.deepEqual(inventory.currentAds.map((row) => row.id), ['ad-current']);
+});
+
+test('si no existen campañas o conjuntos actuales no conserva anuncios hijos devueltos por Meta', () => {
+  const inventory = buildCurrentMetaInventory({
+    campaigns: [{ id: 'campaign-deleted', status: 'DELETED', effective_status: 'DELETED' }],
+    adsets: [{ id: 'adset-old', campaign_id: 'campaign-deleted', status: 'ACTIVE', effective_status: 'CAMPAIGN_PAUSED' }],
+    ads: [{ id: 'ad-old', campaign_id: 'campaign-deleted', adset_id: 'adset-old', status: 'ACTIVE', effective_status: 'CAMPAIGN_PAUSED' }]
+  });
+
+  assert.equal(inventory.currentCampaigns.length, 0);
+  assert.equal(inventory.currentAdsets.length, 0);
+  assert.equal(inventory.currentAds.length, 0);
+});
+
+test('marca como finalizado cualquier registro local Meta que ya no está en el inventario', async () => {
   let received = null;
   const prisma = {
     campaign: {
@@ -50,7 +87,6 @@ test('marca como histórico el anuncio sincronizado que ya no aparece en Meta', 
   assert.equal(count, 2);
   assert.deepEqual(received.where, {
     sourceType: 'META_ADS',
-    createdByUsername: 'meta-ads-sync',
     endsAt: null,
     code: { notIn: ['ad-current'] }
   });
@@ -58,34 +94,7 @@ test('marca como histórico el anuncio sincronizado que ya no aparece en Meta', 
   assert.equal(received.data.endsAt, syncedAt);
 });
 
-test('anuncios eliminados no protegen registros antiguos durante la conciliación', async () => {
-  let received = null;
-  const prisma = {
-    campaign: {
-      updateMany: async (args) => {
-        received = args;
-        return { count: 3 };
-      }
-    }
-  };
-  const rawInventory = [
-    { id: 'ad-deleted', status: 'DELETED', effective_status: 'DELETED' },
-    { id: 'ad-archived', status: 'ARCHIVED', effective_status: 'ARCHIVED' }
-  ];
-
-  const currentInventory = filterCurrentMetaAds(rawInventory);
-  const count = await markAdsMissingFromMeta(
-    prisma,
-    currentInventory,
-    new Date('2026-07-13T12:00:00.000Z')
-  );
-
-  assert.equal(currentInventory.length, 0);
-  assert.equal(count, 3);
-  assert.equal(Object.hasOwn(received.where, 'code'), false);
-});
-
-test('inventario vacío concilia todos los anuncios sincronizados vigentes', async () => {
+test('inventario vacío concilia todos los anuncios Meta vigentes sin depender de su creador', async () => {
   let received = null;
   const prisma = {
     campaign: {
@@ -97,7 +106,33 @@ test('inventario vacío concilia todos los anuncios sincronizados vigentes', asy
   };
 
   await markAdsMissingFromMeta(prisma, [], new Date('2026-07-13T12:00:00.000Z'));
-  assert.equal(Object.hasOwn(received.where, 'code'), false);
+  assert.deepEqual(received.where, {
+    sourceType: 'META_ADS',
+    endsAt: null
+  });
+});
+
+test('una sincronización sin configuración rechaza la operación y no aparenta éxito', async () => {
+  const keys = [
+    'META_ADS_ACCESS_TOKEN',
+    'META_ACCESS_TOKEN',
+    'META_AD_ACCOUNT_ID',
+    'META_ADS_ACCOUNT_ID'
+  ];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+
+  try {
+    await assert.rejects(
+      () => syncMetaAdsInsights({}),
+      (error) => error?.code === 'META_ADS_NOT_CONFIGURED'
+    );
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
 });
 
 test('asocia candidato únicamente por ad_id exacto y completa vacante solo si falta', async () => {

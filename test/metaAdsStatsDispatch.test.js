@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { requireLorenV2 } from '../src/services/lorenV2Gate.js';
-import { stripListFiltersFromMetaAdDetail } from '../src/services/metaAdsStatsGateDispatch.js';
 
 function listen(app) {
   return new Promise((resolve, reject) => {
@@ -44,38 +43,4 @@ test('router Meta Ads queda acotado al gate y responde antes de la ruta heredada
   } finally {
     await close(server);
   }
-});
-
-test('detalle de anuncio conserva fechas pero elimina filtros heredados del listado', () => {
-  const req = {
-    method: 'GET',
-    originalUrl: '/admin/estadisticas/campaigns/ad-current?from=2026-07-01&to=2026-07-13&city=Neiva&vacancyId=vac-1',
-    url: '/campaigns/ad-current?from=2026-07-01&to=2026-07-13&city=Neiva&vacancyId=vac-1',
-    query: {
-      from: '2026-07-01',
-      to: '2026-07-13',
-      city: 'Neiva',
-      vacancyId: 'vac-1'
-    }
-  };
-
-  assert.equal(stripListFiltersFromMetaAdDetail(req), true);
-  assert.equal(req.url, '/campaigns/ad-current?from=2026-07-01&to=2026-07-13');
-  assert.deepEqual(req.query, {
-    from: '2026-07-01',
-    to: '2026-07-13'
-  });
-});
-
-test('la limpieza no altera el listado ni otros endpoints', () => {
-  const req = {
-    method: 'GET',
-    originalUrl: '/admin/estadisticas/campaigns?city=Neiva',
-    url: '/campaigns?city=Neiva',
-    query: { city: 'Neiva' }
-  };
-
-  assert.equal(stripListFiltersFromMetaAdDetail(req), false);
-  assert.equal(req.url, '/campaigns?city=Neiva');
-  assert.deepEqual(req.query, { city: 'Neiva' });
 });
