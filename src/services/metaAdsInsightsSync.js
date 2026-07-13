@@ -76,6 +76,12 @@ export function isCurrentMetaEntity(entity) {
   if (!safeObject(entity)) return false;
   const configuredStatus = effectiveStatus(entity.status);
   const inheritedStatus = effectiveStatus(entity.effective_status);
+
+  // La ausencia total de estado no demuestra que la entidad exista actualmente.
+  // Si Meta omite la expansión de campaign/adset, el inventario falla cerrado
+  // para no mantener visibles anuncios huérfanos o históricos.
+  if (!configuredStatus && !inheritedStatus) return false;
+
   return !NON_CURRENT_META_STATUSES.has(configuredStatus)
     && !NON_CURRENT_META_STATUSES.has(inheritedStatus);
 }
