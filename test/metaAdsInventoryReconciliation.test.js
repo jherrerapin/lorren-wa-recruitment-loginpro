@@ -5,7 +5,8 @@ import {
   buildCurrentMetaInventory,
   filterCurrentMetaAds,
   isCurrentMetaAd,
-  markAdsMissingFromMeta
+  markAdsMissingFromMeta,
+  syncMetaAdsInsights
 } from '../src/services/metaAdsInsightsSync.js';
 
 test('descarta anuncios eliminados, archivados o corruptos y conserva estados vigentes', () => {
@@ -109,6 +110,29 @@ test('inventario vacío concilia todos los anuncios Meta vigentes sin depender d
     sourceType: 'META_ADS',
     endsAt: null
   });
+});
+
+test('una sincronización sin configuración rechaza la operación y no aparenta éxito', async () => {
+  const keys = [
+    'META_ADS_ACCESS_TOKEN',
+    'META_ACCESS_TOKEN',
+    'META_AD_ACCOUNT_ID',
+    'META_ADS_ACCOUNT_ID'
+  ];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+
+  try {
+    await assert.rejects(
+      () => syncMetaAdsInsights({}),
+      (error) => error?.code === 'META_ADS_NOT_CONFIGURED'
+    );
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
 });
 
 test('asocia candidato únicamente por ad_id exacto y completa vacante solo si falta', async () => {
