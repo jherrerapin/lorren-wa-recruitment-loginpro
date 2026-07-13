@@ -108,7 +108,7 @@ function tokenMatchScore(referralToken, campaignToken) {
   if (referralToken === campaignToken) return 2000 + Math.min(referralToken.length, 100);
   if (referralToken.length < 8 || campaignToken.length < 8) return 0;
   if (referralToken.includes(campaignToken) || campaignToken.includes(referralToken)) {
-    return 100 + Math.min(referralToken.length, campaignToken.length);
+    return 100 + Math.min(referralToken.length, campaignToken.length, 100);
   }
   return 0;
 }
