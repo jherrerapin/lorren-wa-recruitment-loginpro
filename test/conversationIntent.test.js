@@ -62,6 +62,15 @@ test('analiza una pregunta e interés como actos simultáneos y accionables', ()
   assert.equal(turn.maySuppress, false);
 });
 
+test('una aceptación natural sigue siendo confirmación accionable', () => {
+  for (const text of ['dale', 'de una', 'quiero continuar', 'me interesa']) {
+    const turn = analyzeConversationTurn(text, { currentStep: 'GREETING_SENT' });
+    assert.equal(turn.confirmation, true, text);
+    assert.equal(turn.actionable, true, text);
+    assert.equal(turn.maySuppress, false, text);
+  }
+});
+
 test('un acuse puramente pasivo puede silenciarse cuando no añade una acción', () => {
   const turn = analyzeConversationTurn('ok gracias', { currentStep: 'GREETING_SENT' });
 
@@ -181,8 +190,8 @@ test('problema operativo de llegada conserva la revisión humana', () => {
   assert.equal(result.requiresHumanReview, true);
 });
 
-test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de registro futuro', async () => {
-  const inactiveVacancy = {
+function inactiveVacancyFixture() {
+  return {
     id: 'vacancy-inactive',
     title: 'Auxiliar de Cargue y Descargue',
     role: 'Auxiliar de cargue y descargue',
@@ -195,7 +204,10 @@ test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de 
     isActive: false,
     acceptingApplications: false
   };
-  const recentMessages = [{
+}
+
+function futureOfferMessage() {
+  return {
     direction: 'OUTBOUND',
     body: 'La vacante no está activa. Puedo dejar tu perfil registrado si lo deseas.',
     createdAt: new Date(),
@@ -204,8 +216,11 @@ test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de 
       replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
       reason: 'VACANCY_NOT_ACTIVE'
     }
-  }];
+  };
+}
 
+test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de registro futuro', async () => {
+  const inactiveVacancy = inactiveVacancyFixture();
   const decision = await resolveVacancyFirstGate({
     prisma: null,
     candidate: {
@@ -218,7 +233,7 @@ test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de 
     currentVacancy: inactiveVacancy,
     inboundText: 'Pero me podrías regalar información sobre esa vacante porque estoy interesado',
     currentStep: 'GREETING_SENT',
-    recentMessages,
+    recentMessages: [futureOfferMessage()],
     vacancyHints: { allVacancies: [inactiveVacancy], activeVacancies: [] }
   });
 
@@ -229,4 +244,26 @@ test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de 
   assert.match(decision.reply, /no está activa para recibir postulaciones/i);
   assert.match(decision.reply, /futuras aperturas/i);
   assert.equal(decision.candidateUpdates.botResumeMode, PAUSED_VACANCY_OFFER_MODE);
+});
+
+test('aceptación natural sin pregunta conserva el registro futuro contextual', async () => {
+  const inactiveVacancy = inactiveVacancyFixture();
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: {
+      id: 'candidate-inactive',
+      status: 'NUEVO',
+      currentStep: 'GREETING_SENT',
+      vacancyId: inactiveVacancy.id,
+      botResumeMode: PAUSED_VACANCY_OFFER_MODE
+    },
+    currentVacancy: inactiveVacancy,
+    inboundText: 'dale',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [futureOfferMessage()],
+    vacancyHints: { allVacancies: [inactiveVacancy], activeVacancies: [] }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT);
+  assert.equal(decision.reason, 'PAUSED_VACANCY_FUTURE_PROFILE_ACCEPTED');
 });
