@@ -162,9 +162,22 @@ function buildLogisticsReply({ semanticIntent, vacancy = null, activeInterviewBo
   return null;
 }
 
+function buildApplicationStatusReply({ candidate = {}, vacancy = null, activeInterviewBooking = null } = {}) {
+  if (activeInterviewBooking?.scheduledAt) {
+    return `Tu entrevista sigue registrada para ${formatInterviewDate(new Date(activeInterviewBooking.scheduledAt))}. Si hay algún cambio, te lo informaremos por este medio.`;
+  }
+  if (candidate.currentStep === 'DONE' || ['REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO', 'CONTRATADO'].includes(String(candidate.status || ''))) {
+    return 'Tu postulación continúa registrada. El equipo de selección revisará el proceso y te contactará por este medio si hay una novedad.';
+  }
+  if (vacancy?.title || vacancy?.role) {
+    return `Tu proceso sigue asociado a la vacante de ${vacancy.title || vacancy.role}. Continuaremos desde el punto pendiente de tu registro.`;
+  }
+  return 'Tu proceso sigue registrado. Continuaremos desde el punto pendiente y te contactaremos por este medio si hay una novedad.';
+}
+
 export function buildSafeInformationGapReply(semanticIntent = 'UNCLEAR') {
   if (semanticIntent === 'ASK_INTERVIEW_CONTACT_PERSON') {
-    return 'Gracias por preguntar. Tengo registrada tu entrevista, pero no tengo confirmado ese dato en la información de la vacante. Conserva la hora y dirección que ya tienes registradas.';
+    return 'Gracias por preguntar. Tengo registrada tu entrevista, pero no tengo confirmado el nombre de la persona que te recibirá. Conserva la hora y dirección que ya tienes registradas.';
   }
   if (semanticIntent === 'ASK_INTERVIEW_ADDRESS') {
     return 'Gracias por preguntar. Tengo registrada tu entrevista, pero la dirección exacta no está confirmada en la información disponible.';
@@ -194,15 +207,15 @@ export function inferContextualSemanticIntent({
   const normalized = normalize(text);
   if (/\b(me\s+perdi|estoy\s+perdid[oa]|me\s+desubique|no\s+conozco|transbord|inconveniente|me\s+demor[eo]|voy\s+tarde|llego\s+tarde|retrasad[oa]|no\s+alcanzo|se\s+me\s+hizo\s+tarde)\b/.test(normalized)) return 'REPORT_ARRIVAL_PROBLEM';
   if (resolvedIntent === 'confirmation_yes') return 'SOFT_CONFIRMATION';
-  if (resolvedIntent === 'faq') return 'ASK_APPLICATION_STATUS';
   if (hasDataIntent) return 'PROVIDE_EXTRA_DATA';
 
-  if (isQuestion) {
+  if (isQuestion || resolvedIntent === 'faq' || resolvedIntent === 'info_request') {
     const hasInterviewTopic = /\b(entrevist\w*|cita|presentar|llegar|asistir|ir)\b/.test(normalized);
-    if (/\b(direccion|ubicacion|donde|queda|lugar|sede)\b/.test(normalized)) return 'ASK_INTERVIEW_ADDRESS';
+    if (/\b(direccion|ubicacion|donde|queda|lugar|sede)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_ADDRESS';
     if (/\b(hora|horario|cuando|fecha|dia)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_TIME';
     if (/\b(quien|persona|contacto|preguntar|recibe|recepcion)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_CONTACT_PERSON';
-    if (/\b(document|llevar|requisit)\b/.test(normalized)) return 'ASK_REQUIRED_DOCUMENTS';
+    if (/\b(document|llevar)\b/.test(normalized) && hasInterviewTopic) return 'ASK_REQUIRED_DOCUMENTS';
+    if (/\b(vacante|oferta|convocatoria|cargo|funcion|funciones|labor|requisit|salario|sueldo|pago|contrato|beneficio|condiciones|experiencia|zona|sector)\b/.test(normalized)) return 'ASK_VACANCY_INFORMATION';
     return 'ASK_APPLICATION_STATUS';
   }
 
@@ -268,10 +281,23 @@ export function evaluateContextualResponseGate({
     }
 
     if (semanticIntent === 'ASK_APPLICATION_STATUS') {
-      return safeReviewDecision(
-        'Candidate has an active appointment and asked a question that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',
-        semanticIntent
-      );
+      return decision({
+        shouldReply: true,
+        allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,
+        reason: 'Candidate asked for process status and the active appointment provides an authoritative answer.',
+        responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,
+        requiresHumanReview: false,
+        reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking })
+      });
+    }
+
+    if (semanticIntent === 'ASK_VACANCY_INFORMATION') {
+      return decision({
+        shouldReply: true,
+        allowedAction: ContextualAllowedAction.CONTINUE_FLOW,
+        reason: 'Candidate asked an ordinary vacancy question; continue to the vacancy context responder before considering human review.',
+        responsePurpose: ContextualResponsePurpose.FLOW
+      });
     }
 
     if (APPOINTMENT_MANUAL_REVIEW_INTENTS.has(semanticIntent)) {
@@ -294,10 +320,10 @@ export function evaluateContextualResponseGate({
       }
       return decision({
         shouldReply: true,
-        allowedAction: ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY,
-        reason: 'Candidate has an active appointment and asked a permitted logistics question, but the assigned vacancy/appointment does not contain the required internal data.',
+        allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,
+        reason: 'Candidate asked for a non-critical logistics fact that is not configured; answer the information gap safely without automatic handoff.',
         responsePurpose: ContextualResponsePurpose.SAFE_INFORMATION_GAP,
-        requiresHumanReview: true,
+        requiresHumanReview: false,
         reply: buildSafeInformationGapReply(semanticIntent)
       });
     }
@@ -330,7 +356,7 @@ export function evaluateContextualResponseGate({
         responsePurpose: ContextualResponsePurpose.NONE
       });
     }
-    if (['ASK_APPLICATION_STATUS', 'PROVIDE_EXTRA_DATA', 'UNCLEAR'].includes(semanticIntent)) {
+    if (['ASK_APPLICATION_STATUS', 'ASK_VACANCY_INFORMATION', 'PROVIDE_EXTRA_DATA', 'UNCLEAR'].includes(semanticIntent)) {
       return decision({
         shouldReply: true,
         allowedAction: ContextualAllowedAction.CONTINUE_FLOW,
