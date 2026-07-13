@@ -11,6 +11,10 @@ import {
   isSupportedGatedCvDocument
 } from '../src/services/gatedCvCapture.js';
 import {
+  buildCandidateDataCollectionMessage,
+  getCandidateReadiness
+} from '../src/services/readinessGuard.js';
+import {
   extractMetaAttributionFields,
   resolveCampaignForReferral
 } from '../src/services/campaignAttribution.js';
@@ -55,8 +59,9 @@ test('después de autorizar conserva datos enviados antes y junto con la autoriz
   const prisma = {
     message: {
       findMany: async () => [
-        { body: 'Me llamo Juan Carlos Pérez' },
-        { body: 'Vivo en el barrio Canaima' }
+        { body: 'Sí autorizo. Tengo 2 años de experiencia en operaciones logísticas y manejo de personal.' },
+        { body: 'Vivo en el barrio Canaima' },
+        { body: 'Me llamo Juan Carlos Pérez' }
       ]
     },
     candidate: {
@@ -80,6 +85,35 @@ test('después de autorizar conserva datos enviados antes y junto con la autoriz
   assert.equal(persisted.experienceInfo, 'Sí');
   assert.equal(persisted.experienceTime, '2 años');
   assert.match(persisted.experienceSummary, /operaciones logísticas/i);
+});
+
+test('la recolección permite enviar datos juntos o por partes', () => {
+  const message = buildCandidateDataCollectionMessage(
+    { fullName: 'Juan Pérez' },
+    { id: 'vacancy-1', city: 'Neiva', experienceRequired: 'NO' }
+  );
+
+  assert.match(message, /todo junto o por partes/i);
+});
+
+test('si declara no tener experiencia no exige tiempo ni descripción', () => {
+  const candidate = {
+    fullName: 'Juan Pérez',
+    documentType: 'CC',
+    documentNumber: '123456789',
+    age: 30,
+    neighborhood: 'Canaima',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    experienceInfo: 'No'
+  };
+  const readiness = getCandidateReadiness(candidate, {
+    id: 'vacancy-1',
+    city: 'Neiva',
+    experienceRequired: 'YES'
+  }, { requireCv: false });
+
+  assert.deepEqual(readiness.missingFields, []);
 });
 
 test('solo considera HV anticipada un documento con formato permitido', () => {
@@ -150,12 +184,30 @@ test('atribución prioriza coincidencia exacta y conserva identificadores Meta',
   const resolution = resolveCampaignForReferral(campaigns, message);
   assert.equal(resolution.campaign.id, 'campaign-1');
   assert.equal(resolution.reason, 'exact_campaign_match');
+  assert.equal(resolution.matchMode, 'objective_id_exact');
   assert.deepEqual(extractMetaAttributionFields(message), {
     metaCtwaClid: 'clid-99',
     metaAdId: 'ad-55',
     metaCampaignId: '120000001',
     metaCampaignName: 'Campaña Neiva'
   });
+});
+
+test('un identificador objetivo gana sobre una coincidencia textual más larga', () => {
+  const campaigns = [
+    { id: 'campaign-objective', code: '120000001', name: 'Campaña correcta', notes: null },
+    { id: 'campaign-text', code: 'LIDER-OPERACION-NEIVA-JULIO-2026', name: 'Líder Operación Neiva Julio 2026', notes: null }
+  ];
+  const message = {
+    referral: {
+      campaign_id: '120000001',
+      ad_name: 'LIDER-OPERACION-NEIVA-JULIO-2026'
+    }
+  };
+
+  const resolution = resolveCampaignForReferral(campaigns, message);
+  assert.equal(resolution.campaign.id, 'campaign-objective');
+  assert.equal(resolution.matchMode, 'objective_id_exact');
 });
 
 test('atribución no elige arbitrariamente cuando dos campañas empatan', () => {
