@@ -41,6 +41,10 @@ function actorUsername(req) {
   return normalizeString(req.session?.username || req.username) || (publicClient ? 'cliente-publico' : 'system');
 }
 
+function actorSource(req) {
+  return (req.path || '').startsWith('/operaciones/cliente/') ? 'public-client' : 'dashboard';
+}
+
 function targetFor(req) {
   return normalizeString(req.body?.context?.assignmentId)
     || normalizeString(req.body?.assignmentId)
@@ -51,6 +55,29 @@ function targetFor(req) {
     || 'dispatch';
 }
 
+export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
+  return {
+    entityType: 'DISPATCH',
+    entityId: targetFor(req),
+    entityLabel: normalizeString(req.path),
+    action: inferAction(req),
+    actorUsername: actorUsername(req),
+    actorRole: normalizeString(req.session?.userRole || req.userRole),
+    actorSource: actorSource(req),
+    userAgent: normalizeString(req.get('user-agent')),
+    method: req.method || null,
+    path: req.originalUrl || req.path || null,
+    metadata: {
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+      body: safeJson(req.body),
+      params: safeJson(req.params),
+      query: safeJson(req.query),
+      referer: normalizeString(req.get('referer'))
+    }
+  };
+}
+
 export function dispatchAuditMiddleware(prisma) {
   return (req, res, next) => {
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
@@ -58,22 +85,7 @@ export function dispatchAuditMiddleware(prisma) {
     res.on('finish', () => {
       if (res.statusCode >= 400) return;
       prisma.devAuditEvent.create({
-        data: {
-          username: actorUsername(req),
-          action: inferAction(req),
-          target: targetFor(req),
-          detail: {
-            statusCode: res.statusCode,
-            durationMs: Date.now() - startedAt,
-            method: req.method,
-            path: req.originalUrl || req.path,
-            body: safeJson(req.body),
-            params: safeJson(req.params),
-            query: safeJson(req.query),
-            referer: normalizeString(req.get('referer')),
-            userAgent: normalizeString(req.get('user-agent'))
-          }
-        }
+        data: buildDispatchAuditEventData(req, res, startedAt)
       }).catch((error) => console.warn('No fue posible registrar auditoria de despacho.', error));
     });
     return next();

@@ -103,10 +103,18 @@ async function writeExitReasonAudit(prismaClient, worker, req, reason) {
   try {
     await prismaClient.devAuditEvent.create({
       data: {
-        username: actor,
+        entityType: 'DISPATCH_WORKER',
+        entityId: worker.id,
+        entityLabel: worker.fullName || null,
         action: AUDIT_ACTION,
-        target: worker.id,
-        detail: { reasonCode: reason.code, reasonLabel: reason.label, category: reason.category, note, previousStatus: worker.operationalStatus || null, newStatus: 'DISABLED', workerName: worker.fullName || null }
+        actorUsername: actor,
+        actorRole: text(req.session?.userRole || req.userRole),
+        actorSource: 'dashboard',
+        method: req.method || null,
+        path: requestPath(req) || null,
+        fromValue: { operationalStatus: worker.operationalStatus || null },
+        toValue: { operationalStatus: 'DISABLED' },
+        metadata: { reasonCode: reason.code, reasonLabel: reason.label, category: reason.category, note }
       }
     });
   } catch (error) {
@@ -172,14 +180,19 @@ async function handleToggle(req, res, next, workerId) {
 }
 
 async function statsPayload(workerIds = []) {
-  const rows = await db().devAuditEvent.findMany({ where: { action: AUDIT_ACTION }, select: { target: true, detail: true, createdAt: true, username: true }, orderBy: { createdAt: 'desc' }, take: 1000 });
+  const rows = await db().devAuditEvent.findMany({
+    where: { entityType: 'DISPATCH_WORKER', action: AUDIT_ACTION },
+    select: { entityId: true, metadata: true, createdAt: true, actorUsername: true },
+    orderBy: { createdAt: 'desc' },
+    take: 1000
+  });
   const countMap = new Map();
   const workers = {};
   for (const row of rows) {
-    const detail = row.detail && typeof row.detail === 'object' ? row.detail : {};
+    const detail = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
     const label = detail.reasonLabel || 'Sin causal';
     countMap.set(label, (countMap.get(label) || 0) + 1);
-    if (workerIds.includes(row.target) && !workers[row.target]) workers[row.target] = { label, note: detail.note || null, createdAt: row.createdAt, by: row.username || null };
+    if (workerIds.includes(row.entityId) && !workers[row.entityId]) workers[row.entityId] = { label, note: detail.note || null, createdAt: row.createdAt, by: row.actorUsername || null };
   }
   const stats = [...countMap.entries()].map(([label, count]) => ({ reasonLabel: label, count })).sort((a, b) => b.count - a.count || a.reasonLabel.localeCompare(b.reasonLabel, 'es'));
   return { reasons: EXIT_REASONS, stats, workers };

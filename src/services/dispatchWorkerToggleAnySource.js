@@ -72,7 +72,22 @@ async function deactivateWorker(prismaClient, worker, req) {
   const note = text(req.body?.exitReasonNote);
   await prismaClient.$transaction([
     prismaClient.dispatchWorker.update({ where: { id: worker.id }, data: { operationalStatus: 'DISABLED' } }),
-    prismaClient.devAuditEvent.create({ data: { username: actor, action: AUDIT_ACTION, target: worker.id, detail: { reasonCode: reason.code, reasonLabel: reason.label, category: reason.category, note, previousStatus: worker.operationalStatus || null, newStatus: 'DISABLED', workerName: worker.fullName || null } } })
+    prismaClient.devAuditEvent.create({
+      data: {
+        entityType: 'DISPATCH_WORKER',
+        entityId: worker.id,
+        entityLabel: worker.fullName || null,
+        action: AUDIT_ACTION,
+        actorUsername: actor,
+        actorRole: text(req.session?.userRole || req.userRole),
+        actorSource: 'dashboard',
+        method: req.method || null,
+        path: pathOnly(req) || null,
+        fromValue: { operationalStatus: worker.operationalStatus || null },
+        toValue: { operationalStatus: 'DISABLED' },
+        metadata: { reasonCode: reason.code, reasonLabel: reason.label, category: reason.category, note }
+      }
+    })
   ]);
   return reason;
 }
