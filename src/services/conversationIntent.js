@@ -54,7 +54,9 @@ const INFO_FIRST_PATTERNS = [
   /\bprimero quiero saber\b/,
   /\bmas informacion\b/,
   /\binfo\b/,
-  /\bcuentame primero\b/
+  /\bcuentame primero\b/,
+  /\b(?:me puedes|me podrias|puedes|podrias)\s+(?:dar|regalar|brindar|compartir)\s+informacion\b/,
+  /\binformacion\s+(?:de|sobre|acerca de)\s+(?:esa|esta|la)\s+(?:vacante|oferta|convocatoria|cargo)\b/
 ];
 
 const OBJECTION_PATTERNS = [
@@ -99,12 +101,22 @@ const CORRECTION_PATTERNS = [
   /\b(correccion|corrijo|me equivoque|equivocado|no es|cambiar|cambio|eso esta mal|quise decir|en realidad|mas bien)\b/
 ];
 
-const APPLY_PATTERNS = [/\b(aplicar|postular|continuar|me interesa|quiero seguir|deseo continuar)\b/];
+const APPLY_PATTERNS = [
+  /\b(aplicar|postular|continuar|me interesa|quiero seguir|deseo continuar)\b/,
+  /\b(estoy|sigo|me encuentro)\s+interesad[oa]\b/,
+  /\bquiero\s+(?:aplicar|postularme|continuar|seguir)\b/
+];
 const FAQ_PATTERNS = [/\b(que hacen|como funciona|cuando|cuanto|donde|requisito|salario|pago|horario|entrevista|ubicacion|condiciones)\b/];
 const DATA_PATTERNS = [
   /\b(edad|cc|cedula|cedula de ciudadania|ti|ce|ppt|barrio|experiencia|restricciones|moto|bicicleta|transporte|nombre|localidad)\b/,
   /\b\d{5,}\b/
 ];
+const QUESTION_PATTERNS = [
+  /\b(cual|cuales|cuanto|cuantos|cuando|donde|como|quien|por que)\b/,
+  /\b(?:me puedes|me podrias|puedes|podrias|quisiera|quiero)\s+(?:saber|conocer|preguntar|consultar|entender)\b/,
+  /\b(?:me puedes|me podrias|puedes|podrias)\s+(?:dar|regalar|brindar|compartir|explicar)\b/
+];
+const VACANCY_INFORMATION_TOPICS = /\b(vacante|oferta|convocatoria|cargo|trabajo|funcion|funciones|labor|labores|requisito|requisitos|salario|sueldo|pago|horario|turno|ubicacion|direccion|zona|condiciones|contrato|beneficio|beneficios|documentos|experiencia)\b/;
 
 function matchesAny(patterns = [], normalized = '') {
   return patterns.some((pattern) => pattern.test(normalized));
@@ -133,6 +145,12 @@ function hasNonGreetingContent(normalized = '') {
   if (!GREETING_PREFIX_PATTERN.test(normalized)) return Boolean(normalized);
   const withoutGreeting = normalized.replace(GREETING_PREFIX_PATTERN, '').trim();
   return Boolean(withoutGreeting);
+}
+
+function hasQuestionSignal(text = '', normalized = '') {
+  if (/[?¿]/.test(String(text || ''))) return true;
+  if (matchesAny(QUESTION_PATTERNS, normalized)) return true;
+  return matchesAny(INFO_FIRST_PATTERNS, normalized);
 }
 
 export function detectConversationIntent(text = '', options = {}) {
@@ -186,6 +204,61 @@ export function detectConversationIntent(text = '', options = {}) {
   if (doneStep && matchesAny(ACK_ONLY_PATTERNS, normalized)) return 'post_completion_ack';
 
   return 'provide_data';
+}
+
+export function analyzeConversationTurn(text = '', options = {}) {
+  const normalized = normalizeText(text);
+  const primaryIntent = detectConversationIntent(text, options);
+  const question = hasQuestionSignal(text, normalized);
+  const vacancyInformationRequest = Boolean(
+    matchesAny(INFO_FIRST_PATTERNS, normalized)
+    || (question && VACANCY_INFORMATION_TOPICS.test(normalized))
+    || primaryIntent === 'faq'
+    || primaryIntent === 'info_request'
+  );
+  const interest = matchesAny(APPLY_PATTERNS, normalized);
+  const correction = matchesAny(CORRECTION_PATTERNS, normalized)
+    || primaryIntent === 'provide_correction'
+    || primaryIntent === 'confirmation_no_or_correction';
+  const confirmation = matchesAny(YES_CONFIRMATION_PATTERNS, normalized)
+    || primaryIntent === 'confirmation_yes';
+  const data = hasDataSignal(normalized) || primaryIntent === 'provide_data';
+  const explicitFlowAction = [
+    'no_interest',
+    'defer_intent',
+    'objection',
+    'already_sent',
+    'change_intent',
+    'cv_intent'
+  ].includes(primaryIntent);
+  const passiveAcknowledgement = Boolean(
+    matchesAny(ACK_ONLY_PATTERNS, normalized)
+    || matchesAny(THANKS_PATTERNS, normalized)
+    || matchesAny(FAREWELL_PATTERNS, normalized)
+  ) && !question && !interest && !correction && !confirmation && !hasDataSignal(normalized);
+  const actionable = Boolean(
+    question
+    || vacancyInformationRequest
+    || interest
+    || correction
+    || confirmation
+    || data
+    || explicitFlowAction
+  );
+
+  return {
+    primaryIntent,
+    question,
+    vacancyInformationRequest,
+    interest,
+    correction,
+    confirmation,
+    data,
+    actionable,
+    passiveAcknowledgement,
+    maySuppress: passiveAcknowledgement && !actionable,
+    reserveForDeterministicState: isConfirmationContext(options) && (confirmation || correction)
+  };
 }
 
 export function isPostCompletionAck(text = '') {
