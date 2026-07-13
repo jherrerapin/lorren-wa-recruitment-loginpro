@@ -68,8 +68,28 @@ test('atribución estadística solo acepta relación directa o ad_id exacto', ()
   const campaign = { id: 'campaign-ad-1', code: 'ad-1' };
   assert.equal(candidateMatchesAdExactly({ campaignId: 'campaign-ad-1', metaAdId: 'otro' }, campaign), true);
   assert.equal(candidateMatchesAdExactly({ campaignId: null, metaAdId: 'ad-1' }, campaign), true);
+  assert.equal(candidateMatchesAdExactly({ campaignId: 'legacy-manual', metaAdId: 'ad-1' }, campaign), true);
+  assert.equal(candidateMatchesAdExactly({ campaignId: 'legacy-manual', metaAdId: 'ad-10' }, campaign), false);
   assert.equal(candidateMatchesAdExactly({ campaignId: null, metaAdId: 'ad-10' }, campaign), false);
   assert.equal(candidateMatchesAdExactly({ campaignId: null, metaAdId: null, campaignCodeRaw: 'ad-1 texto' }, campaign), false);
+});
+
+test('candidato ligado a una fila heredada se conserva en el anuncio actual por ad_id exacto', () => {
+  const campaign = {
+    id: 'campaign-ad-1',
+    code: 'ad-1',
+    name: 'Líder Neiva actual',
+    vacancyId: vacancy.id,
+    vacancy
+  };
+  const [metric] = buildMetaAdStatistics({
+    campaigns: [campaign],
+    candidates: [completeCandidate({ campaignId: 'legacy-manual', metaAdId: 'ad-1' })],
+    snapshots: []
+  });
+
+  assert.equal(metric.candidatesCount, 1);
+  assert.equal(metric.candidates[0].id, 'candidate-1');
 });
 
 test('un candidato no se duplica por nombres o tokens parecidos', () => {

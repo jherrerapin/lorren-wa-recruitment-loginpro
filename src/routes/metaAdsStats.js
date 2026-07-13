@@ -103,8 +103,7 @@ function metaStatusBadge(campaign = {}) {
     ADSET_PAUSED: ['Conjunto pausado', 'warn'],
     PENDING_REVIEW: ['En revisión', 'info'],
     DISAPPROVED: ['Rechazado por Meta', 'bad'],
-    WITH_ISSUES: ['Con problemas', 'bad'],
-    NO_DISPONIBLE: ['Histórico / no disponible', 'muted']
+    WITH_ISSUES: ['Con problemas', 'bad']
   };
   const [label, cls] = map[status] || [status || 'Desconocido', 'muted'];
   return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
@@ -120,26 +119,27 @@ function layout(title, body) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><link rel="icon" type="image/svg+xml" href="/public/favicon-loginpro.svg?v=meta-stats">${styles()}</head><body><nav class="nav"><a href="/admin">Panel</a><a href="${BASE_PATH}">Estadísticas</a><a href="${BASE_PATH}/campaigns" class="active">Anuncios</a><span class="spacer"></span><a href="/logout">Cerrar sesión</a></nav><main class="page">${body}</main></body></html>`;
 }
 
+export function currentMetaAdsCampaignWhere({ city = null, vacancyId = null } = {}) {
+  const where = {
+    sourceType: 'META_ADS',
+    createdByUsername: 'meta-ads-sync',
+    endsAt: null
+  };
+  if (city) where.city = { contains: city, mode: 'insensitive' };
+  if (vacancyId) where.vacancyId = vacancyId;
+  return where;
+}
+
 async function loadDashboard(prisma, query = {}) {
   const range = dateRange(query);
-  const showHistorical = String(query.historical || '') === '1';
   const city = normalizeText(query.city);
   const vacancyId = normalizeText(query.vacancyId);
-  const campaignWhere = { sourceType: 'META_ADS' };
-  if (city) campaignWhere.city = { contains: city, mode: 'insensitive' };
-  if (vacancyId) campaignWhere.vacancyId = vacancyId;
-  if (!showHistorical) {
-    campaignWhere.OR = [
-      { createdByUsername: 'meta-ads-sync', endsAt: null },
-      { createdByUsername: null },
-      { createdByUsername: { not: 'meta-ads-sync' } }
-    ];
-  }
+  const campaignWhere = currentMetaAdsCampaignWhere({ city, vacancyId });
 
   const [campaigns, candidates, cities, vacancies, account, lastSnapshot] = await Promise.all([
     prisma.campaign.findMany({
       where: campaignWhere,
-      orderBy: [{ endsAt: 'asc' }, { updatedAt: 'desc' }],
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
       include: { vacancy: true }
     }),
     prisma.candidate.findMany({
@@ -172,10 +172,10 @@ async function loadDashboard(prisma, query = {}) {
     candidates,
     snapshots,
     timeZone: account?.timezoneName || 'America/Bogota'
-  }).sort((a, b) => Number(Boolean(a.campaign.endsAt)) - Number(Boolean(b.campaign.endsAt)) || b.spend - a.spend || b.candidatesCount - a.candidatesCount);
+  }).sort((a, b) => b.spend - a.spend || b.candidatesCount - a.candidatesCount);
 
   return {
-    range, showHistorical, city, vacancyId, metrics,
+    range, city, vacancyId, metrics,
     totals: aggregateMetaAdStatistics(metrics),
     cities, vacancies, account,
     lastSyncedAt: lastSnapshot?.updatedAt || account?.updatedAt || null
@@ -185,8 +185,8 @@ async function loadDashboard(prisma, query = {}) {
 function syncPanel(data = {}) {
   const configured = metaConfigured();
   const status = configured
-    ? `<div class="alert good">Meta Ads está configurado. La página también sincroniza automáticamente en segundo plano y conserva snapshots para no consultar Meta en cada render.</div>`
-    : `<div class="alert info">Meta Ads no está configurado. Se mostrarán únicamente los datos ya almacenados y las métricas internas de Lórren.</div>`;
+    ? `<div class="alert good">Meta Ads está configurado. Solo se muestran anuncios que existen actualmente en la cuenta publicitaria. Si no hay anuncios creados, esta sección permanecerá vacía.</div>`
+    : `<div class="alert info">Meta Ads no está configurado. Configura la cuenta para consultar el inventario actual de anuncios.</div>`;
   const form = configured
     ? `<form method="post" action="${BASE_PATH}/meta/sync-form" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Actualizando…'"><input type="hidden" name="since" value="${escapeHtml(data.range.since)}"><input type="hidden" name="until" value="${escapeHtml(data.range.until)}"><button class="btn primary" type="submit">↻ Actualizar desde Meta</button></form>`
     : '';
@@ -196,7 +196,7 @@ function syncPanel(data = {}) {
 function filters(data = {}) {
   const cityOptions = data.cities.map((item) => `<option value="${escapeHtml(item.name)}" ${data.city === item.name ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
   const vacancyOptions = data.vacancies.map((item) => `<option value="${escapeHtml(item.id)}" ${data.vacancyId === item.id ? 'selected' : ''}>${escapeHtml(item.title)} — ${escapeHtml(item.city)}${item.isActive ? '' : ' (inactiva)'}</option>`).join('');
-  return `<section class="card"><div class="card-title">Filtros</div><form class="filters" method="get" action="${BASE_PATH}/campaigns"><label>Desde<input type="date" name="from" value="${escapeHtml(data.range.since)}"></label><label>Hasta<input type="date" name="to" value="${escapeHtml(data.range.until)}"></label><label>Ciudad<select name="city"><option value="">Todas</option>${cityOptions}</select></label><label>Vacante<select name="vacancyId"><option value="">Todas</option>${vacancyOptions}</select></label><label style="flex-direction:row;align-items:center;gap:7px;min-height:39px"><input style="width:auto;min-height:auto" type="checkbox" name="historical" value="1" ${data.showHistorical ? 'checked' : ''}> Mostrar históricos/no disponibles</label><button class="btn secondary" type="submit">Aplicar filtros</button></form></section>`;
+  return `<section class="card"><div class="card-title">Filtros</div><form class="filters" method="get" action="${BASE_PATH}/campaigns"><label>Desde<input type="date" name="from" value="${escapeHtml(data.range.since)}"></label><label>Hasta<input type="date" name="to" value="${escapeHtml(data.range.until)}"></label><label>Ciudad<select name="city"><option value="">Todas</option>${cityOptions}</select></label><label>Vacante<select name="vacancyId"><option value="">Todas</option>${vacancyOptions}</select></label><button class="btn secondary" type="submit">Aplicar filtros</button></form></section>`;
 }
 
 function topMetrics(data = {}) {
@@ -219,13 +219,13 @@ function funnel(total = {}) {
 }
 
 function adsTable(data = {}) {
-  if (!data.metrics.length) return `<section class="card"><div class="card-title">Anuncios</div><div class="empty">No hay anuncios para los filtros seleccionados. Pulsa “Actualizar desde Meta” o activa la vista histórica.</div></section>`;
+  if (!data.metrics.length) return `<section class="card"><div class="card-title">Anuncios actuales</div><div class="empty">Actualmente no existen anuncios en Meta Ads. Cuando se cree uno nuevo y se sincronice, aparecerá aquí automáticamente.</div></section>`;
   const rows = data.metrics.map((metric) => {
     const campaign = metric.campaign;
     const vacancy = campaign.vacancy;
     return `<tr><td><div class="name">${escapeHtml(metric.metaAdName || campaign.name)}</div><div class="muted-text">${escapeHtml(metric.metaCampaignName || 'Campaña Meta sin nombre')}</div><div class="mono muted-text">ad_id: ${escapeHtml(metric.metaAdId)}</div></td><td>${vacancy?`<div class="name">${escapeHtml(vacancy.title)}</div><div class="muted-text">${escapeHtml(campaign.city || vacancy.city)}</div>`:`<span class="badge bad">Sin vacante asociada</span>`}</td><td>${metaStatusBadge(campaign)}</td><td><div class="name">${formatMoney(metric.spend,data.account?.currency)}</div><div class="muted-text">${formatInteger(metric.impressions)} impresiones · ${formatInteger(metric.reach)} alcance</div></td><td><div class="name">${formatInteger(metric.inlineLinkClicks || metric.clicks)}</div><div class="muted-text">${formatMoney(metric.costPerLinkClick,data.account?.currency)} por clic</div></td><td><div class="name">${formatInteger(metric.candidatesCount)}</div><div class="muted-text">${formatMoney(metric.costPerCandidate,data.account?.currency)} por candidato</div></td><td><div class="name">${formatInteger(metric.completedRegistrations)} / ${formatInteger(metric.incompleteRegistrations)}</div><div class="muted-text">${metric.completionRate??'—'}% completos</div></td><td><div class="name">${formatMoney(metric.costPerCompletedRegistration,data.account?.currency)}</div><div class="muted-text">Completo</div><div class="cost-note">${formatMoney(metric.costPerIncompleteRegistration,data.account?.currency)} por incompleto</div></td><td><div class="name">${metric.cvReceived} HV · ${metric.apt} aptos</div><div class="muted-text">${metric.hired} contratados</div></td><td><a class="btn secondary small" href="${BASE_PATH}/campaigns/${encodeURIComponent(campaign.id)}?from=${encodeURIComponent(data.range.since)}&to=${encodeURIComponent(data.range.until)}">Ver y asociar</a></td></tr>`;
   }).join('');
-  return `<section class="card"><div class="card-title">Anuncios sincronizados (${data.metrics.length})</div><div class="alert info">Los costos individuales e inversión en registros incompletos son estimaciones: se distribuye el gasto diario del anuncio entre los candidatos atribuidos ese mismo día. Los costos agregados por etapa usan el gasto real guardado desde Meta.</div><div class="table-wrap"><table><thead><tr><th>Anuncio</th><th>Vacante</th><th>Estado Meta</th><th>Gasto</th><th>Clics</th><th>Candidatos</th><th>Completos / incompletos</th><th>Costos por resultado</th><th>Calidad final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  return `<section class="card"><div class="card-title">Anuncios actuales (${data.metrics.length})</div><div class="alert info">Los costos individuales e inversión en registros incompletos son estimaciones: se distribuye el gasto diario del anuncio entre los candidatos atribuidos ese mismo día. Los costos agregados por etapa usan el gasto real guardado desde Meta.</div><div class="table-wrap"><table><thead><tr><th>Anuncio</th><th>Vacante</th><th>Estado Meta</th><th>Gasto</th><th>Clics</th><th>Candidatos</th><th>Completos / incompletos</th><th>Costos por resultado</th><th>Calidad final</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
 
 async function renderList(prisma, req, res) {
@@ -233,9 +233,9 @@ async function renderList(prisma, req, res) {
   const data = await loadDashboard(prisma, req.query || {});
   const missingVacancies = missingVacancyCount(data.metrics);
   const warning = missingVacancies
-    ? `<div class="alert warn">Hay ${missingVacancies} anuncio(s) sin vacante asociada. Mientras no se clasifiquen, Lórren no puede confirmar automáticamente la vacante usando el ad_id.</div>`
+    ? `<div class="alert warn">Hay ${missingVacancies} anuncio(s) actual(es) sin vacante asociada. Mientras no se clasifiquen, Lórren no puede confirmar automáticamente la vacante usando el ad_id.</div>`
     : '';
-  const body = `<div class="header"><div><h1>Anuncios Meta Ads</h1><p>Gasto real, atribución exacta por ad_id y avance del candidato dentro de Lórren.</p></div><div class="actions"><a class="btn secondary" href="${BASE_PATH}">← Centro de estadísticas</a></div></div>${warning}${syncPanel(data)}${filters(data)}${topMetrics(data)}${funnel(data.totals)}${adsTable(data)}`;
+  const body = `<div class="header"><div><h1>Anuncios Meta Ads</h1><p>Inventario actual de la cuenta, gasto real y avance del candidato dentro de Lórren.</p></div><div class="actions"><a class="btn secondary" href="${BASE_PATH}">← Centro de estadísticas</a></div></div>${warning}${syncPanel(data)}${filters(data)}${topMetrics(data)}${funnel(data.totals)}${adsTable(data)}`;
   return res.send(layout('Anuncios Meta Ads — Estadísticas', body));
 }
 
@@ -249,9 +249,9 @@ function candidateRows(metric, currency) {
 
 async function renderDetail(prisma, req, res) {
   if (!canAccess(req)) return res.status(403).send('No autorizado.');
-  const data = await loadDashboard(prisma, { ...req.query, historical: '1' });
+  const data = await loadDashboard(prisma, req.query || {});
   const metric = data.metrics.find((item) => item.campaign.id === req.params.id);
-  if (!metric) return res.status(404).send(layout('Anuncio no encontrado', '<div class="alert bad">El anuncio no existe o no está disponible.</div>'));
+  if (!metric) return res.status(404).send(layout('Anuncio no encontrado', '<div class="alert bad">El anuncio ya no existe en el inventario actual de Meta Ads.</div>'));
   const campaign = metric.campaign;
   const cityOptions = data.cities.map((item)=>`<option value="${escapeHtml(item.name)}" ${campaign.city===item.name?'selected':''}>${escapeHtml(item.name)}</option>`).join('');
   const vacancyOptions = data.vacancies.map((item)=>`<option value="${escapeHtml(item.id)}" ${campaign.vacancyId===item.id?'selected':''}>${escapeHtml(item.title)} — ${escapeHtml(item.city)}${item.isActive?'':' (inactiva)'}</option>`).join('');
@@ -263,8 +263,11 @@ async function saveClassification(prisma, req, res) {
   if (!canAccess(req)) return res.status(403).send('No autorizado.');
   const requestedVacancyId = normalizeText(req.body?.vacancyId);
   const requestedCity = normalizeText(req.body?.city);
-  const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id }, select: { id: true, code: true } });
-  if (!campaign) return res.status(404).send('Anuncio no encontrado.');
+  const campaign = await prisma.campaign.findFirst({
+    where: { id: req.params.id, ...currentMetaAdsCampaignWhere() },
+    select: { id: true, code: true }
+  });
+  if (!campaign) return res.status(404).send('El anuncio ya no existe en el inventario actual de Meta Ads.');
 
   let vacancy = null;
   if (requestedVacancyId) {
