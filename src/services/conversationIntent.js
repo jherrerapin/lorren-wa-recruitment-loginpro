@@ -222,7 +222,7 @@ export function analyzeConversationTurn(text = '', options = {}) {
     || primaryIntent === 'confirmation_no_or_correction';
   const confirmation = matchesAny(YES_CONFIRMATION_PATTERNS, normalized)
     || primaryIntent === 'confirmation_yes';
-  const data = hasDataSignal(normalized) || primaryIntent === 'provide_data';
+  const data = hasDataSignal(normalized);
   const explicitFlowAction = [
     'no_interest',
     'defer_intent',
@@ -235,7 +235,7 @@ export function analyzeConversationTurn(text = '', options = {}) {
     matchesAny(ACK_ONLY_PATTERNS, normalized)
     || matchesAny(THANKS_PATTERNS, normalized)
     || matchesAny(FAREWELL_PATTERNS, normalized)
-  ) && !question && !interest && !correction && !confirmation && !hasDataSignal(normalized);
+  ) && !question && !interest && !correction && !confirmation && !data;
   const actionable = Boolean(
     question
     || vacancyInformationRequest
