@@ -14,6 +14,8 @@ const AD_FIELDS = [
   'id', 'name', 'status', 'effective_status', 'campaign_id', 'adset_id', 'created_time', 'updated_time'
 ];
 
+const NON_CURRENT_AD_STATUSES = new Set(['ARCHIVED', 'DELETED']);
+
 function asDateOnly(value) {
   const text = String(value || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
@@ -52,6 +54,18 @@ function defaultDateRange() {
 
 function effectiveStatus(value) {
   return String(value || '').trim().toUpperCase();
+}
+
+export function isCurrentMetaAd(ad) {
+  if (!ad || typeof ad !== 'object') return false;
+  const configuredStatus = effectiveStatus(ad.status);
+  const inheritedStatus = effectiveStatus(ad.effective_status);
+  return !NON_CURRENT_AD_STATUSES.has(configuredStatus)
+    && !NON_CURRENT_AD_STATUSES.has(inheritedStatus);
+}
+
+export function filterCurrentMetaAds(ads = []) {
+  return (Array.isArray(ads) ? ads : []).filter(isCurrentMetaAd);
 }
 
 function isMetaActive(status, fallbackStatus) {
@@ -306,13 +320,14 @@ export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
   console.info('[metaAdsInsightsSync] inicio', { since: range.since, until: range.until, adAccountId: client.adAccountId });
   try {
     await syncAdAccount(prisma, client);
-    const [campaignInventory, adInventory, campaignRows, adRows] = await Promise.all([
+    const [campaignInventory, rawAdInventory, campaignRows, adRows] = await Promise.all([
       fetchCampaignInventory(client),
       fetchAdInventory(client),
       fetchInsights(client, { ...range, level: 'campaign' }),
       fetchInsights(client, { ...range, level: 'ad' })
     ]);
 
+    const adInventory = filterCurrentMetaAds(rawAdInventory);
     const syncedAt = new Date();
     const removedCampaignRows = await removeGeneratedCampaignLevelRows(prisma, campaignInventory);
     const missingAds = await markAdsMissingFromMeta(prisma, adInventory, syncedAt);
@@ -329,6 +344,8 @@ export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
       since: range.since,
       until: range.until,
       removedCampaignRows,
+      rawInventoryAds: rawAdInventory.length,
+      ignoredDeletedOrArchivedAds: rawAdInventory.length - adInventory.length,
       inventoryCampaigns: campaignInventory.length,
       inventoryAds: inventory.count,
       missingAds,
