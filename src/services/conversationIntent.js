@@ -91,7 +91,7 @@ const CHANGE_INTENT_PATTERNS = [
 const CV_PATTERNS = [/\bhoja de vida\b/, /\bhv\b/, /\bcv\b/, /\bcurriculum\b/, /\bcurriculo\b/];
 
 const YES_CONFIRMATION_PATTERNS = [
-  /^(si|sii|sí|correcto|correcta|de acuerdo|confirmo|listo|perfecto)$/,
+  /^(si|sii|sí|si confirmo|claro que si|acepto|confirmado|correcto|correcta|de acuerdo|confirmo|listo|perfecto)$/,
   /^(dale|hagale|de una|continuar|continuemos|sigamos|quiero continuar|deseo continuar|me interesa|estoy interesado|estoy interesada)$/,
   /\b(esta bien|todo correcto|todo bien|todo esta correcto)\b/
 ];
@@ -117,7 +117,7 @@ const QUESTION_PATTERNS = [
   /\b(?:me puedes|me podrias|puedes|podrias|quisiera|quiero)\s+(?:saber|conocer|preguntar|consultar|entender)\b/,
   /\b(?:me puedes|me podrias|puedes|podrias)\s+(?:dar|regalar|brindar|compartir|explicar)\b/
 ];
-const VACANCY_INFORMATION_TOPICS = /\b(vacante|oferta|convocatoria|cargo|trabajo|funcion|funciones|labor|labores|requisito|requisitos|salario|sueldo|pago|horario|turno|ubicacion|direccion|zona|condiciones|contrato|beneficio|beneficios|documentos|experiencia)\b/;
+const VACANCY_INFORMATION_TOPICS = /\b(vacante|oferta|convocatoria|cargo|trabajo|opcion|alternativa|funcion|funciones|labor|labores|requisito|requisitos|salario|sueldo|pago|horario|turno|ubicacion|direccion|zona|condiciones|contrato|beneficio|beneficios|documentos|experiencia)\b/;
 
 function matchesAny(patterns = [], normalized = '') {
   return patterns.some((pattern) => pattern.test(normalized));
