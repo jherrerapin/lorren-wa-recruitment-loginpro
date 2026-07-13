@@ -383,7 +383,8 @@ async function runSync(prisma, syncMetaAds, req, res) {
     console.error('[META_ADS_SYNC_UNEXPECTED_ERROR]', {
       name: error?.name,
       code: error?.code,
-      message: publicErrorText(error?.message)
+      message: publicErrorText(error?.message),
+      stack: publicErrorText(error?.stack, 2000)
     });
     result = {
       ok: false,
