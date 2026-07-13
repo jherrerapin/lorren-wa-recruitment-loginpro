@@ -83,7 +83,7 @@ export function extractMessagingConversations(rawActions = []) {
 
 export function candidateMatchesAdExactly(candidate = {}, campaign = {}) {
   if (!candidate || !campaign) return false;
-  if (candidate.campaignId && campaign.id) return candidate.campaignId === campaign.id;
+  if (candidate.campaignId && campaign.id && candidate.campaignId === campaign.id) return true;
   const candidateAdId = String(candidate.metaAdId || '').trim();
   const campaignAdId = String(campaign.code || '').trim();
   return Boolean(candidateAdId && campaignAdId && candidateAdId === campaignAdId);
