@@ -5,6 +5,7 @@ import {
   isConsentAcceptance,
   isConsentRejection
 } from '../src/services/dataConsentGate.js';
+import { buildConsentQuestionReply } from '../src/services/consentFaq.js';
 import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
 import {
   captureGatedCvDocument,
@@ -33,6 +34,12 @@ test('una pregunta hipotética sobre datos no se registra como autorización', (
   assert.equal(isConsentAcceptance('Sí autorizo, ¿qué sigue?'), true);
 });
 
+test('las dudas sobre autorización se responden antes de retomar el consentimiento', () => {
+  assert.match(buildConsentQuestionReply('¿Para qué van a usar mis datos?'), /gestionar la postulación/i);
+  assert.match(buildConsentQuestionReply('¿Puedo revocar después?'), /revocatoria/i);
+  assert.match(buildConsentQuestionReply('¿Qué pasa si no autorizo?'), /no continuaremos/i);
+});
+
 test('durante el consentimiento responde con datos de la vacante sin inventar', () => {
   const vacancy = {
     title: 'Líder de Operación',
@@ -45,6 +52,7 @@ test('durante el consentimiento responde con datos de la vacante sin inventar', 
   assert.match(buildVacancyQuestionReply(vacancy, '¿Cuánto pagan?'), /Salario a convenir/i);
   assert.match(buildVacancyQuestionReply(vacancy, '¿Dónde queda?'), /Sector Las Brisas/i);
   assert.match(buildVacancyQuestionReply(vacancy, '¿Qué requisitos piden?'), /Técnico o tecnólogo/i);
+  assert.match(buildVacancyQuestionReply(vacancy, '¿Y si no tengo moto?'), /Técnico o tecnólogo/i);
 });
 
 test('después de autorizar conserva datos enviados antes y junto con la autorización', async () => {
