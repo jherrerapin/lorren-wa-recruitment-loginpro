@@ -20,6 +20,12 @@ function asDateOnly(value) {
   return new Date(`${text}T00:00:00.000Z`);
 }
 
+function asDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function asNumber(value) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -136,8 +142,33 @@ async function removeGeneratedCampaignLevelRows(prisma, campaigns = []) {
   return result.count || 0;
 }
 
-async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = []) {
+export async function markAdsMissingFromMeta(prisma, ads = [], syncedAt = new Date()) {
+  const currentAdIds = compactUnique(ads.map((ad) => String(ad.id || '').trim())).filter(Boolean);
+  const where = {
+    sourceType: 'META_ADS',
+    createdByUsername: 'meta-ads-sync',
+    endsAt: null
+  };
+  if (currentAdIds.length) where.code = { notIn: currentAdIds };
+
+  const result = await prisma.campaign.updateMany({
+    where,
+    data: {
+      isActive: false,
+      endsAt: syncedAt
+    }
+  });
+  return result.count || 0;
+}
+
+function adInventoryNotes(ad = {}, campaignName = '') {
+  const metaState = effectiveStatus(ad.effective_status || ad.status) || 'UNKNOWN';
+  return `Anuncio sincronizado desde Meta Ads. Campaña: ${campaignName || ad.campaign_id || '—'}. campaign_id: ${ad.campaign_id || '—'}. adset_id: ${ad.adset_id || '—'}. estado_meta: ${metaState}.`;
+}
+
+async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = [], syncedAt = new Date()) {
   let count = 0;
+  const rows = [];
   const campaignNames = new Map(campaigns.map((campaign) => [String(campaign.id || ''), campaign.name || null]));
 
   for (const ad of ads) {
@@ -145,60 +176,73 @@ async function upsertAdsAsDashboardRows(prisma, ads = [], campaigns = []) {
     if (!code) continue;
     const campaignId = String(ad.campaign_id || '').trim();
     const campaignName = campaignNames.get(campaignId) || campaignId || 'Sin campaña Meta';
-    const metaState = effectiveStatus(ad.effective_status || ad.status) || 'UNKNOWN';
-    await prisma.campaign.upsert({
+    const row = await prisma.campaign.upsert({
       where: { code },
       update: {
         name: ad.name || `Meta Ad ${code}`,
         sourceType: 'META_ADS',
         isActive: isMetaActive(ad.effective_status, ad.status),
-        notes: `Anuncio sincronizado desde Meta Ads. Campaña: ${campaignName}. campaign_id: ${campaignId || '—'}. adset_id: ${ad.adset_id || '—'}. estado_meta: ${metaState}.`
+        startsAt: asDateTime(ad.created_time),
+        endsAt: null,
+        notes: adInventoryNotes(ad, campaignName),
+        createdByUsername: 'meta-ads-sync'
       },
       create: {
         code,
         name: ad.name || `Meta Ad ${code}`,
         sourceType: 'META_ADS',
         isActive: isMetaActive(ad.effective_status, ad.status),
-        notes: `Anuncio sincronizado desde Meta Ads. Campaña: ${campaignName}. campaign_id: ${campaignId || '—'}. adset_id: ${ad.adset_id || '—'}. estado_meta: ${metaState}.`,
-        createdByUsername: 'meta-ads-sync'
+        startsAt: asDateTime(ad.created_time),
+        endsAt: null,
+        notes: adInventoryNotes(ad, campaignName),
+        createdByUsername: 'meta-ads-sync',
+        updatedAt: syncedAt
       }
     });
+    rows.push(row);
     count += 1;
   }
 
-  return count;
+  return { count, rows };
 }
 
-async function upsertInternalCampaignsFromMeta(prisma, rows = []) {
-  let count = 0;
-  const ads = compactUnique(rows.map((row) => row.ad_id))
-    .map((adId) => rows.find((row) => row.ad_id === adId))
-    .filter(Boolean);
+export async function associateCandidatesByExactAdId(prisma, campaignRows = []) {
+  const results = await Promise.all(campaignRows.map(async (campaign) => {
+    const metaAdId = String(campaign.code || '').trim();
+    if (!metaAdId) return { associated: 0, vacancyFilled: 0 };
 
-  for (const row of ads) {
-    const code = String(row.ad_id || '').trim();
-    if (!code) continue;
-    await prisma.campaign.upsert({
-      where: { code },
-      update: {
-        name: row.ad_name || `Meta Ad ${code}`,
+    const campaignResult = await prisma.candidate.updateMany({
+      where: {
         sourceType: 'META_ADS',
-        isActive: true,
-        notes: `Anuncio con métricas sincronizadas desde Meta Ads. Campaña: ${row.campaign_name || row.campaign_id || '—'}. campaign_id: ${row.campaign_id || '—'}. adset_id: ${row.adset_id || '—'}.`
+        metaAdId,
+        campaignId: null
       },
-      create: {
-        code,
-        name: row.ad_name || `Meta Ad ${code}`,
-        sourceType: 'META_ADS',
-        isActive: true,
-        notes: `Anuncio con métricas sincronizadas desde Meta Ads. Campaña: ${row.campaign_name || row.campaign_id || '—'}. campaign_id: ${row.campaign_id || '—'}. adset_id: ${row.adset_id || '—'}.`,
-        createdByUsername: 'meta-ads-sync'
-      }
+      data: { campaignId: campaign.id }
     });
-    count += 1;
-  }
 
-  return count;
+    let vacancyFilled = 0;
+    if (campaign.vacancyId) {
+      const vacancyResult = await prisma.candidate.updateMany({
+        where: {
+          sourceType: 'META_ADS',
+          metaAdId,
+          vacancyId: null
+        },
+        data: { vacancyId: campaign.vacancyId }
+      });
+      vacancyFilled = vacancyResult.count || 0;
+    }
+
+    return {
+      associated: campaignResult.count || 0,
+      vacancyFilled
+    };
+  }));
+
+  return results.reduce((total, result) => ({
+    associated: total.associated + result.associated,
+    vacancyFilled: total.vacancyFilled + result.vacancyFilled
+  }), { associated: 0, vacancyFilled: 0 });
 }
 
 async function syncCampaignRows(prisma, rows = []) {
@@ -268,15 +312,32 @@ export async function syncMetaAdsInsights(prisma, { since, until } = {}) {
       fetchInsights(client, { ...range, level: 'campaign' }),
       fetchInsights(client, { ...range, level: 'ad' })
     ]);
-    const [removedCampaignRows, inventoryAds, autoAds, campaignSnapshots, adSnapshots] = await Promise.all([
-      removeGeneratedCampaignLevelRows(prisma, campaignInventory),
-      upsertAdsAsDashboardRows(prisma, adInventory, campaignInventory),
-      upsertInternalCampaignsFromMeta(prisma, adRows),
+
+    const syncedAt = new Date();
+    const removedCampaignRows = await removeGeneratedCampaignLevelRows(prisma, campaignInventory);
+    const missingAds = await markAdsMissingFromMeta(prisma, adInventory, syncedAt);
+    const inventory = await upsertAdsAsDashboardRows(prisma, adInventory, campaignInventory, syncedAt);
+    const exactAssociations = await associateCandidatesByExactAdId(prisma, inventory.rows);
+    const [campaignSnapshots, adSnapshots] = await Promise.all([
       syncCampaignRows(prisma, campaignRows),
       syncAdRows(prisma, adRows)
     ]);
-    console.info('[metaAdsInsightsSync] fin', { removedCampaignRows, inventoryCampaigns: campaignInventory.length, inventoryAds, autoAds, campaignSnapshots, adSnapshots });
-    return { ok: true, enabled: true, since: range.since, until: range.until, removedCampaignRows, inventoryCampaigns: campaignInventory.length, inventoryAds, autoAds, campaignSnapshots, adSnapshots };
+
+    const result = {
+      ok: true,
+      enabled: true,
+      since: range.since,
+      until: range.until,
+      removedCampaignRows,
+      inventoryCampaigns: campaignInventory.length,
+      inventoryAds: inventory.count,
+      missingAds,
+      exactAssociations,
+      campaignSnapshots,
+      adSnapshots
+    };
+    console.info('[metaAdsInsightsSync] fin', result);
+    return result;
   } catch (error) {
     const safe = safeError(error);
     console.warn('[metaAdsInsightsSync] error', safe);
