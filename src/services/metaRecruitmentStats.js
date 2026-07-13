@@ -3,7 +3,9 @@ import { getCandidateReadiness } from './readinessGuard.js';
 const DEFAULT_TIME_ZONE = 'America/Bogota';
 
 function asNumber(value) {
-  const parsed = Number(value || 0);
+  const parsed = value && typeof value.toNumber === 'function'
+    ? value.toNumber()
+    : Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
