@@ -36,7 +36,7 @@ test('un tiempo positivo de experiencia implica experiencia afirmativa en cualqu
   assert.equal(normalized.experienceTime, '3 años');
 });
 
-test('readiness no vuelve a pedir experiencia si ya existe tiempo positivo', () => {
+test('readiness infiere experiencia por el tiempo y pide únicamente en qué tiene experiencia', () => {
   const candidate = {
     fullName: 'Mauricio Alejandro Cruz Barbosa',
     documentType: 'CC',
@@ -46,6 +46,42 @@ test('readiness no vuelve a pedir experiencia si ya existe tiempo positivo', () 
     medicalRestrictions: 'Sin restricciones médicas',
     transportMode: 'Moto',
     experienceTime: '3 años'
+  };
+  const vacancy = { id: 'lider-ops', city: 'Ibague', experienceRequired: 'YES' };
+  const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
+
+  assert.deepEqual(readiness.missingFields, ['experienceSummary']);
+  assert.deepEqual(readiness.missingFieldLabels, ['en qué tiene experiencia']);
+});
+
+test('readiness queda completo cuando existen tiempo y tipo de experiencia', () => {
+  const candidate = {
+    fullName: 'Mauricio Alejandro Cruz Barbosa',
+    documentType: 'CC',
+    documentNumber: '1110466290',
+    age: 38,
+    neighborhood: 'Palermo',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    experienceTime: '3 años',
+    experienceSummary: 'Manejo de personal y operaciones logísticas'
+  };
+  const vacancy = { id: 'lider-ops', city: 'Ibague', experienceRequired: 'YES' };
+
+  assert.deepEqual(getCandidateReadiness(candidate, vacancy, { requireCv: false }).missingFields, []);
+});
+
+test('readiness no exige descripción de experiencia cuando el candidato declara que no tiene', () => {
+  const candidate = {
+    fullName: 'Mauricio Alejandro Cruz Barbosa',
+    documentType: 'CC',
+    documentNumber: '1110466290',
+    age: 38,
+    neighborhood: 'Palermo',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    experienceInfo: 'No',
+    experienceTime: '0'
   };
   const vacancy = { id: 'lider-ops', city: 'Ibague', experienceRequired: 'YES' };
 

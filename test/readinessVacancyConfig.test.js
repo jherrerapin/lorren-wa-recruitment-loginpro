@@ -17,8 +17,14 @@ test('readiness pide experiencia solo cuando la vacante la exige', () => {
   const withoutExperience = { id: 'vac-2', city: 'Ibague', experienceRequired: 'NO' };
 
   assert.deepEqual(getCandidateReadiness(baseCandidate, withoutExperience, { requireCv: false }).missingFields, []);
-  assert.deepEqual(getCandidateReadiness(baseCandidate, withExperience, { requireCv: false }).missingFields, ['experienceInfo', 'experienceTime']);
-  assert.deepEqual(getMissingFieldLabels(baseCandidate, withExperience), ['experiencia (si o no)', 'tiempo de experiencia (mínimo 6 meses)']);
+  assert.deepEqual(
+    getCandidateReadiness(baseCandidate, withExperience, { requireCv: false }).missingFields,
+    ['experienceInfo', 'experienceTime', 'experienceSummary']
+  );
+  assert.deepEqual(
+    getMissingFieldLabels(baseCandidate, withExperience),
+    ['experiencia (si o no)', 'tiempo de experiencia (mínimo 6 meses)', 'en qué tiene experiencia']
+  );
 });
 
 test('readiness usa localidad para vacantes de Bogota y barrio para otras ciudades', () => {

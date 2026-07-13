@@ -21,6 +21,7 @@ const FIELD_LABELS = {
   transportMode: 'medio de transporte',
   experienceInfo: 'experiencia',
   experienceTime: 'tiempo de experiencia',
+  experienceSummary: 'en qué tiene experiencia',
   cv: 'hoja de vida en PDF o Word/DOCX',
   vacancyId: 'vacante asignada',
   eligibility: 'requisitos de la vacante'
@@ -53,7 +54,7 @@ export function getRequiredCandidateFieldKeys(vacancy = null) {
   ];
 
   if (vacancy?.experienceRequired === 'YES') {
-    fields.push('experienceInfo', 'experienceTime');
+    fields.push('experienceInfo', 'experienceTime', 'experienceSummary');
   }
 
   return fields;
@@ -194,20 +195,35 @@ function isClosedOrRegistered(candidate = {}) {
 }
 
 function removePostRegistrationDynamicFields(missingFields = []) {
-  for (const field of ['experienceInfo', 'experienceTime']) {
+  for (const field of ['experienceInfo', 'experienceTime', 'experienceSummary']) {
     const index = missingFields.indexOf(field);
     if (index >= 0) missingFields.splice(index, 1);
   }
+}
+
+function normalizedExperienceState(candidate = {}) {
+  return normalizeCandidateFields({
+    experienceInfo: candidate.experienceInfo,
+    experienceTime: candidate.experienceTime,
+    experienceSummary: candidate.experienceSummary
+  });
 }
 
 export function getCandidateReadiness(candidate = {}, vacancy = null, options = {}) {
   const missingFields = [];
   const vacancyContext = vacancy || candidate?.vacancy || candidate;
   const residenceConfig = getResidenceFieldConfig(vacancyContext);
+  const experienceState = normalizedExperienceState(candidate);
 
   for (const field of getRequiredCandidateFieldKeys(vacancyContext)) {
     if (field === residenceConfig.field) {
       if (!hasValue(getCandidateResidenceValue(candidate, vacancyContext))) missingFields.push(field);
+      continue;
+    }
+    if (['experienceInfo', 'experienceTime'].includes(field) && hasValue(experienceState[field])) {
+      continue;
+    }
+    if (field === 'experienceSummary' && experienceState.experienceInfo === 'No') {
       continue;
     }
     if (!hasCandidateFieldValue(candidate, field)) missingFields.push(field);
@@ -271,7 +287,7 @@ export function buildCandidateDataCollectionMessage(candidate = {}, vacancy = nu
   if (eligibilityReply) return eligibilityReply;
   const pendingText = formatNaturalFieldList(readiness.missingFieldLabels || []);
   if (!pendingText) return '';
-  return `Perfecto, seguimos con tu postulación. Para dejar tu registro completo, compárteme en un solo mensaje ${pendingText}.`;
+  return `Perfecto, seguimos con tu postulación. Para dejar tu registro completo, compárteme ${pendingText}; puedes enviarlo todo junto o por partes.`;
 }
 
 export function getFirstMissingFieldLabel(readiness = {}) {
