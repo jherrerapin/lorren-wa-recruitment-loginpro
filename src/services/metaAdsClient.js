@@ -1,5 +1,4 @@
 import axios from 'axios';
-import './metaAdsStatsRouterPatch.js';
 
 const DEFAULT_META_API_VERSION = 'v23.0';
 const GRAPH_API_BASE_URL = 'https://graph.facebook.com';
