@@ -55,13 +55,16 @@ export async function captureConsentedProfileData({
         direction: MessageDirection.INBOUND,
         messageType: MessageType.TEXT
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
       take: maxMessages,
       select: { body: true }
     })
     : [];
 
-  const texts = recentMessages.map((message) => message?.body || '').filter(Boolean);
+  const texts = [...recentMessages]
+    .reverse()
+    .map((message) => message?.body || '')
+    .filter(Boolean);
   const normalizedCurrent = String(currentText || '').trim();
   if (normalizedCurrent && texts.at(-1) !== normalizedCurrent) texts.push(normalizedCurrent);
 
