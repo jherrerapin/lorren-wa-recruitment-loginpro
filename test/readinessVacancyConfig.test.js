@@ -23,7 +23,7 @@ test('readiness pide experiencia solo cuando la vacante la exige', () => {
   );
   assert.deepEqual(
     getMissingFieldLabels(baseCandidate, withExperience),
-    ['si tiene experiencia', 'tiempo de experiencia (mínimo 6 meses)', 'en qué tiene experiencia']
+    ['experiencia (si o no)', 'tiempo de experiencia (mínimo 6 meses)', 'en qué tiene experiencia']
   );
 });
 
