@@ -9,13 +9,23 @@ import {
   canAccessVacancy,
   describeUserScope,
   getAccessContext,
-  normalizeUserAccessScope
+  normalizeUserAccessScope,
+  normalizeUserScopeCities,
+  serializeUserScopeCities
 } from '../src/services/appUsers.js';
 
 test('normalizeUserAccessScope cae a ALL cuando recibe un valor invalido', () => {
   assert.equal(normalizeUserAccessScope('city'), 'CITY');
   assert.equal(normalizeUserAccessScope('vacancy'), 'VACANCY');
   assert.equal(normalizeUserAccessScope('cualquier-cosa'), 'ALL');
+});
+
+test('normaliza ciudades antiguas y múltiples sin duplicados', () => {
+  assert.deepEqual(normalizeUserScopeCities('Bogota'), ['Bogota']);
+  assert.deepEqual(normalizeUserScopeCities('["Bogota","Neiva","Bogota"]'), ['Bogota', 'Neiva']);
+  assert.deepEqual(normalizeUserScopeCities(['Ibague', ' Neiva ', '']), ['Ibague', 'Neiva']);
+  assert.equal(serializeUserScopeCities(['Bogota']), 'Bogota');
+  assert.equal(serializeUserScopeCities(['Bogota', 'Neiva']), '["Bogota","Neiva"]');
 });
 
 test('buildRecruiterUsernameBase crea usernames segun el alcance', () => {
@@ -69,9 +79,30 @@ test('helpers de acceso limitan ciudad y vacante correctamente', () => {
   assert.equal(canAccessCandidate(vacancyContext, { vacancyId: 'vac-2', vacancy: { id: 'vac-2', city: 'Bogota' } }), false);
 });
 
+test('helpers de acceso aceptan varias ciudades en el mismo usuario', () => {
+  const context = getAccessContext({
+    userRole: 'admin',
+    userAccessScope: 'CITY',
+    userAccessCity: '["Ibague","Neiva"]'
+  });
+
+  assert.deepEqual(context.cities, ['Ibague', 'Neiva']);
+  assert.deepEqual(buildVacancyAccessWhere(context), { city: { in: ['Ibague', 'Neiva'] } });
+  assert.deepEqual(buildCandidateAccessWhere(context), {
+    vacancy: { city: { in: ['Ibague', 'Neiva'] } }
+  });
+  assert.equal(canAccessVacancy(context, { id: 'vac-1', city: 'Ibague' }), true);
+  assert.equal(canAccessVacancy(context, { id: 'vac-2', city: 'Neiva' }), true);
+  assert.equal(canAccessVacancy(context, { id: 'vac-3', city: 'Bogota' }), false);
+});
+
 test('describeUserScope resume el alcance visible del usuario', () => {
   assert.equal(describeUserScope({ accessScope: 'ALL' }), 'Todas las vacantes');
   assert.equal(describeUserScope({ accessScope: 'CITY', scopeCity: 'Bogota' }), 'Ciudad: Bogota');
+  assert.equal(
+    describeUserScope({ accessScope: 'CITY', scopeCity: '["Bogota","Neiva"]' }),
+    'Ciudades: Bogota, Neiva'
+  );
   assert.equal(
     describeUserScope({
       accessScope: 'VACANCY',
