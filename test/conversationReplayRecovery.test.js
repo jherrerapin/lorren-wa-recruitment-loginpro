@@ -94,3 +94,45 @@ test('una caída después del outbox se recupera sin reinterpretar ni repetir ca
     });
   }
 });
+
+test('el puerto de entrega exige el candidato y cuerpo comprometidos en el outbox', () => {
+  const [{ fixture }] = loadConversationFixtures();
+  const adapters = createInMemoryReplayAdapters(fixture);
+  const candidateId = fixture.initialState.candidate.candidateId;
+  const idempotencyKey = 'test-outbound-contract:reply:v1';
+  const body = 'Respuesta persistida de prueba';
+
+  assert.equal(adapters.persistOutbound({
+    tenantContext: fixture.tenantContext,
+    policyContext: fixture.policyContext,
+    requestedCandidateId: candidateId,
+    idempotencyKey,
+    body
+  }), true);
+
+  assert.throws(
+    () => adapters.deliverOutbound({
+      tenantContext: fixture.tenantContext,
+      requestedCandidateId: 'candidate-test-foreign',
+      idempotencyKey,
+      body
+    }),
+    /outbound_candidate_mismatch:/
+  );
+
+  assert.throws(
+    () => adapters.deliverOutbound({
+      tenantContext: fixture.tenantContext,
+      requestedCandidateId: candidateId,
+      idempotencyKey,
+      body: 'Respuesta diferente'
+    }),
+    /outbound_body_mismatch:/
+  );
+
+  const snapshot = adapters.snapshot();
+  assert.equal(snapshot.deliveryAttempts.length, 0);
+  assert.equal(snapshot.deliveries.length, 0);
+  assert.equal(countAudit(snapshot, 'OUTBOUND_DELIVERY_FAILED'), 0);
+  assert.equal(countAudit(snapshot, 'OUTBOUND_DELIVERED'), 0);
+});
