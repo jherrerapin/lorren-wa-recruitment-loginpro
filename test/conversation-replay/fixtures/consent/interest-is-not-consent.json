@@ -80,7 +80,9 @@
     },
     "response": {
       "requiredFacts": ["Debe solicitar autorización para el tratamiento de datos antes de recolectar información personal"],
-      "forbiddenClaims": ["La autorización quedó registrada", "Ya guardé tus datos"]
+      "forbiddenClaims": ["La autorización quedó registrada", "Ya guardé tus datos"],
+      "requiredText": ["autorización", "datos personales"],
+      "forbiddenText": ["autorización quedó registrada", "guardé tus datos"]
     },
     "finalState": {
       "dataConsentStatus": "PENDING",
