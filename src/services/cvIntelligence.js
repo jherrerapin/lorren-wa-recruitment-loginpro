@@ -75,19 +75,22 @@ function failureSummary(reason = '') {
 }
 
 async function persistAttachmentAnalysis(prisma, candidate, data = {}) {
-  return prisma.attachmentAnalysis.create({
-    data: {
-      candidateId: candidate.id,
-      originalName: candidate.cvOriginalName || null,
-      mimeType: candidate.cvMimeType || null,
-      classification: data.classification || AttachmentClassification.OTHER,
-      extractedText: data.extractedText || null,
-      summary: data.summary || null,
-      confidence: Number.isFinite(Number(data.confidence)) ? Number(data.confidence) : null,
-      modelUsed: data.modelUsed || null,
-      rawResponse: data.rawResponse || null
-    }
-  });
+  const analysisData = {
+    candidateId: candidate.id,
+    originalName: candidate.cvOriginalName || null,
+    mimeType: candidate.cvMimeType || null,
+    classification: data.classification || AttachmentClassification.OTHER,
+    extractedText: data.extractedText || null,
+    summary: data.summary || null,
+    confidence: Number.isFinite(Number(data.confidence)) ? Number(data.confidence) : null,
+    modelUsed: data.modelUsed || null
+  };
+
+  if (data.rawResponse !== undefined && data.rawResponse !== null) {
+    analysisData.rawResponse = data.rawResponse;
+  }
+
+  return prisma.attachmentAnalysis.create({ data: analysisData });
 }
 
 async function extractCvWithAi(text = '') {
