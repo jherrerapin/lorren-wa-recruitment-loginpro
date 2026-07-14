@@ -102,6 +102,9 @@ jobs:
       - name: Run supervisor coordination regressions
         run: node --test test/adminSupervisor.test.js
 
+      - name: Run reminder regressions
+        run: node --test test/reminder.test.js
+
       - name: Validate conversation replay fixtures
         run: node --test test/conversationReplayFixtures.test.js
 
