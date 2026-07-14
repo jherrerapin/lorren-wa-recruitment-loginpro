@@ -96,7 +96,9 @@
       "forbiddenClaims": [
         "La localidad quedó registrada",
         "La postulación quedó completa"
-      ]
+      ],
+      "requiredText": ["Turnos rotativos", "localidad"],
+      "forbiddenText": ["localidad quedó registrada", "postulación quedó completa"]
     },
     "finalState": {
       "currentStep": "COLLECTING_DATA",
