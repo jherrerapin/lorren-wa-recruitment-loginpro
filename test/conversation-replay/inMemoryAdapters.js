@@ -28,6 +28,15 @@ function cloneMapValues(map) {
   return [...map.values()].map((value) => structuredClone(value));
 }
 
+function cloneMapEntries(map) {
+  return [...map.entries()].map(([key, value]) => [key, structuredClone(value)]);
+}
+
+function restoreMap(map, entries) {
+  map.clear();
+  for (const [key, value] of entries) map.set(key, structuredClone(value));
+}
+
 function normalizeFailureCount(value) {
   const parsed = Number(value || 0);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
@@ -37,6 +46,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
   const expectedTenantContext = structuredClone(fixture.tenantContext);
   const candidateId = fixture.initialState.candidate.candidateId;
   const now = options.now || '2026-07-14T15:00:00.000Z';
+  let remainingOutboundPersistenceFailures = normalizeFailureCount(options.failures?.persistOutbound);
   let remainingDeliveryFailures = normalizeFailureCount(options.failures?.deliverOutbound);
   const candidates = new Map([
     [tenantCandidateKey(expectedTenantContext, candidateId), structuredClone(fixture.initialState.candidate)]
@@ -116,6 +126,11 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     const key = outboundKey(tenantContext, idempotencyKey);
     if (outboundMessages.has(key)) return false;
 
+    if (remainingOutboundPersistenceFailures > 0) {
+      remainingOutboundPersistenceFailures -= 1;
+      throw new Error(`simulated_outbound_persistence_failure:${idempotencyKey}`);
+    }
+
     outboundMessages.set(key, {
       key,
       tenantId: tenantContext.tenantId,
@@ -150,6 +165,24 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     validateContext(tenantContext);
     assertNonEmptyString(idempotencyKey, 'idempotencyKey');
     return deliveries.has(outboundKey(tenantContext, idempotencyKey));
+  }
+
+  function runInTransaction(callback) {
+    if (typeof callback !== 'function') throw new Error('transaction_callback_required');
+    const candidateSnapshot = cloneMapEntries(candidates);
+    const conversationSnapshot = structuredClone(conversationState);
+    const outboundSnapshot = cloneMapEntries(outboundMessages);
+    const auditSnapshot = structuredClone(auditEvents);
+
+    try {
+      return callback();
+    } catch (error) {
+      restoreMap(candidates, candidateSnapshot);
+      conversationState.pendingFields = [...conversationSnapshot.pendingFields];
+      restoreMap(outboundMessages, outboundSnapshot);
+      auditEvents.splice(0, auditEvents.length, ...auditSnapshot);
+      throw error;
+    }
   }
 
   function deliverOutbound({ tenantContext, requestedCandidateId, idempotencyKey, body }) {
@@ -234,6 +267,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     persistOutbound,
     readOutbound,
     hasDelivery,
+    runInTransaction,
     deliverOutbound,
     snapshot
   };
