@@ -1,4 +1,4 @@
-import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
+import { CandidateStatus, ConversationStep, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 import { buildCandidateDataCollectionMessage } from './readinessGuard.js';
 import {
