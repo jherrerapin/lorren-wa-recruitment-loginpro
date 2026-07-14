@@ -5,6 +5,8 @@ import {
   buildConsentPendingMode,
   deriveConsentResumeUpdate,
   evaluateConsentBoundary,
+  isConsentAcceptance,
+  isConsentRejection,
   parseConsentPendingMode,
   resolveConsentResumeContext,
   shouldRecordConsentAcceptance,
@@ -43,6 +45,15 @@ test('los datos personales explícitos continúan protegidos antes del consentim
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: 'PENDING', currentStep: 'MENU', botResumeMode: null },
     { type: 'text', text: { body: 'Mi nombre es Laura Pérez y mi cédula es 1020304050' } }
+  );
+
+  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+});
+
+test('un nombre completo enviado solo queda protegido antes del consentimiento', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: 'PENDING', currentStep: 'GREETING_SENT', botResumeMode: null, vacancyId: 'vacancy-1' },
+    { type: 'text', text: { body: 'Laura Pérez' } }
   );
 
   assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
@@ -102,6 +113,20 @@ test('aceptar una vacante no equivale a aceptar el tratamiento de datos', () => 
   assert.equal(shouldRecordConsentAcceptance('Estoy de acuerdo con el tratamiento de datos', { consentPromptPending: false }), true);
 });
 
+test('las negativas explícitas nunca se interpretan como aceptación', () => {
+  for (const text of [
+    'No consiento',
+    'No doy consentimiento',
+    'No autorizo el tratamiento de mis datos',
+    'No estoy de acuerdo con el tratamiento de datos'
+  ]) {
+    assert.equal(isConsentAcceptance(text), false, text);
+    assert.equal(isConsentRejection(text), true, text);
+    assert.equal(shouldRecordConsentAcceptance(text, { consentPromptPending: true }), false, text);
+    assert.equal(shouldRecordConsentRejection(text, { consentPromptPending: false }), true, text);
+  }
+});
+
 test('un no a una oferta no se registra como revocatoria sin aviso de consentimiento pendiente', () => {
   assert.equal(shouldRecordConsentRejection('No', { consentPromptPending: false }), false);
   assert.equal(shouldRecordConsentRejection('No autorizo el tratamiento de mis datos', { consentPromptPending: false }), true);
@@ -120,6 +145,17 @@ test('al autorizar se recupera la vacante alternativa aceptada', () => {
     vacancyId: 'vacancy-77',
     currentStep: 'COLLECTING_DATA',
     botResumeMode: null
+  });
+});
+
+test('al autorizar un perfil futuro se restaura el modo de captura correspondiente', () => {
+  assert.deepEqual(deriveConsentResumeUpdate('future_profile_offer'), {
+    currentStep: 'COLLECTING_DATA',
+    botResumeMode: 'future_profile_capture'
+  });
+  assert.deepEqual(deriveConsentResumeUpdate('paused_vacancy'), {
+    currentStep: 'COLLECTING_DATA',
+    botResumeMode: 'paused_vacancy_capture'
   });
 });
 
