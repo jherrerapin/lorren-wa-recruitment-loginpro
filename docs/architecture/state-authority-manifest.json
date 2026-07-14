@@ -57,7 +57,7 @@
       "risk": "high",
       "writers": [
         { "path": "src/routes/admin.js", "role": "admin", "reason": "La mensajería manual delega en el repositorio; conserva eliminación transaccional al borrar candidatos" },
-        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Persistencia principal de mensajes entrantes y salientes" },
+        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "El inbox y otras mutaciones siguen directos; la salida común y el silencio interno ya delegan en el repositorio" },
         { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Persistencia compartida de entradas idempotentes, salidas y actualización restringida de payload" }
       ]
     },

@@ -37,6 +37,7 @@ import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/reply
 import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
+import { persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';
 import { ContextualAllowedAction, evaluateContextualResponseGate, inferContextualSemanticIntent } from '../services/contextualResponseGate.js';
 import { FUTURE_PROFILE_CAPTURE_MODE, PAUSED_VACANCY_CAPTURE_MODE, resolveVacancyFirstGate, VacancyFirstGateAction } from '../services/vacancyFirstGate.js';
 import {
@@ -1085,7 +1086,7 @@ async function hasRecentResumePhotoReply(prisma, candidateId, minutes = 15) {
 }
 
 
-async function recordIntentionalSilence(prisma, candidate = {}, inboundText = '', details = {}) {
+export async function recordIntentionalSilence(prisma, candidate = {}, inboundText = '', details = {}) {
   const payload = {
     source: 'bot_silence_trace',
     visibility: 'internal',
@@ -1102,14 +1103,11 @@ async function recordIntentionalSilence(prisma, candidate = {}, inboundText = ''
     createdAt: new Date().toISOString()
   };
   try {
-    await prisma.message.create({
-      data: {
-        candidateId: candidate.id,
-        direction: MessageDirection.OUTBOUND,
-        messageType: MessageType.TEXT,
-        body: `[silencio intencional] ${payload.reason}`,
-        rawPayload: payload
-      }
+    await persistOutboundConversationMessage(prisma, {
+      candidateId: candidate.id,
+      messageType: MessageType.TEXT,
+      body: `[silencio intencional] ${payload.reason}`,
+      rawPayload: payload
     });
   } catch (error) {
     console.warn('[BOT_SILENCE_TRACE_ERROR]', JSON.stringify({ candidateId: candidate?.id || null, reason: payload.reason, error: error?.message?.slice(0, 160) }));
@@ -1419,9 +1417,14 @@ export async function guardReplyWithConversationState(prisma, candidateId, reply
   };
 }
 
-async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
+export async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
   const payload = { body, source: 'bot_flow', ...(rawPayload || {}) };
-  await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload: payload } });
+  await persistOutboundConversationMessage(prisma, {
+    candidateId,
+    messageType: MessageType.TEXT,
+    body,
+    rawPayload: payload
+  });
   await prisma.candidate.update({ where: { id: candidateId }, data: { lastOutboundAt: new Date() } });
 }
 async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload = { body, source: 'bot_flow' }) {

@@ -70,7 +70,16 @@ La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboun
 
 `admin.js` permanece declarado como escritor de `Message` porque la eliminación de un candidato borra sus mensajes dentro de la misma transacción mediante `tx.message.deleteMany()`. Esa operación no forma parte de la mensajería saliente y no se modifica en esta etapa.
 
-Los escritores directos de `Message` bajan a tres: webhook, administración por eliminación transaccional y el repositorio compartido.
+En `webhook.js` se migraron dos fronteras salientes acotadas:
+
+- `saveOutboundMessage()` delega la persistencia común de respuestas `TEXT` y conserva la actualización posterior de `Candidate.lastOutboundAt`;
+- `recordIntentionalSilence()` delega la traza interna de silencio, preservando `visibility=internal`, `neverSendToCandidate=true` y su manejo tolerante de errores.
+
+El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y la programación del recordatorio permanece después. No se modifican interpretación, payload de seguridad, candidatos, agenda ni el inbox.
+
+`webhook.js` permanece declarado como escritor de `Message` porque todavía controla el ingreso idempotente y otras mutaciones directas pendientes de inventario y migración.
+
+Los escritores directos de `Message` permanecen en tres: webhook, administración por eliminación transaccional y el repositorio compartido.
 
 El repositorio distingue actualmente tres contratos:
 
