@@ -46,3 +46,14 @@ test('el replay determinístico reproduce la interpretación protegida del corpu
     });
   }
 });
+
+test('el adaptador no devuelve propiedades heredadas del prototipo como intención', async () => {
+  const [{ fixture }] = loadConversationFixtures();
+  const syntheticFixture = structuredClone(fixture);
+  syntheticFixture.providerStubs.aiResult.intent = 'constructor';
+
+  const replay = await replayFixtureInterpretation(syntheticFixture);
+
+  assert.equal(typeof replay.interpretation.intent, 'string');
+  assert.equal(replay.interpretation.intent, 'CONSTRUCTOR');
+});
