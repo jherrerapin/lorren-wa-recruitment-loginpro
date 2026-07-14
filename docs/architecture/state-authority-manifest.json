@@ -29,7 +29,7 @@
         { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Mutación atómica compartida de campos y evento de consentimiento" },
         { "path": "src/services/conversationEngine.js", "role": "legacy", "reason": "Motor conversacional heredado" },
         { "path": "src/services/cvStorage.js", "role": "boundary", "reason": "Persistencia de metadatos y contenido de CV" },
-        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento, mensajes y reanudación; delega la decisión versionada en ConsentStateService" },
+        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento y reanudación; delega consentimiento y mensajes en autoridades compartidas" },
         { "path": "src/services/metaAdsInsightsSync.js", "role": "integration", "reason": "Sincronización de datos Meta" },
         { "path": "src/services/originRuntime.js", "role": "integration", "reason": "Origen y procedencia del candidato" },
         { "path": "src/services/reminder.js", "role": "operational", "reason": "Estados y tiempos de recordatorios" }
@@ -52,14 +52,14 @@
     "message": {
       "tableName": "Message",
       "domain": "conversation",
-      "migrationStage": "fragmented",
+      "migrationStage": "consolidating",
       "targetAuthority": "ConversationMessageRepository",
       "risk": "high",
       "writers": [
         { "path": "src/routes/admin.js", "role": "admin", "reason": "Mensajes manuales del administrador" },
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Persistencia principal de mensajes entrantes y salientes" },
         { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Mensajería del supervisor" },
-        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Evidencia y respuestas de consentimiento" },
+        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Persistencia compartida de mensajes entrantes idempotentes y salientes" },
         { "path": "src/services/reminder.js", "role": "operational", "reason": "Mensajes de seguimiento y recordatorio" }
       ]
     },

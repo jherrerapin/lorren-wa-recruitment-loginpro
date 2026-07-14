@@ -1,4 +1,4 @@
-import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
+import { CandidateStatus, ConversationStep, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 import { buildCandidateDataCollectionMessage } from './readinessGuard.js';
 import {
@@ -10,6 +10,10 @@ import { captureConsentedProfileData } from './consentProfileCapture.js';
 import { buildConsentQuestionReply } from './consentFaq.js';
 import { isSupervisorPhone } from './adminSupervisor.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
+import {
+  persistInboundConversationMessage,
+  persistOutboundConversationMessage
+} from './conversationMessageRepository.js';
 
 export const DATA_CONSENT_VERSION = 'lorren-v2-2026-07-v3';
 
@@ -374,34 +378,27 @@ function inboundMessageType(message = {}) {
 
 async function saveInboundConsentEvidence(prisma, candidateId, message, body, decision) {
   const waMessageId = message?.id || null;
-  const result = await prisma.message.createMany({
-    data: [{
-      candidateId,
-      waMessageId,
-      direction: MessageDirection.INBOUND,
-      messageType: inboundMessageType(message),
-      body,
-      rawPayload: {
-        source: 'data_consent_gate',
-        consentVersion: DATA_CONSENT_VERSION,
-        consentDecision: decision,
-        waMessageId
-      }
-    }],
-    skipDuplicates: true
+  const result = await persistInboundConversationMessage(prisma, {
+    candidateId,
+    waMessageId,
+    messageType: inboundMessageType(message),
+    body,
+    rawPayload: {
+      source: 'data_consent_gate',
+      consentVersion: DATA_CONSENT_VERSION,
+      consentDecision: decision,
+      waMessageId
+    }
   });
-  return result.count > 0;
+  return result.created;
 }
 
 async function saveOutboundConsentGateMessage(prisma, candidateId, body, source, extraPayload = {}) {
-  await prisma.message.create({
-    data: {
-      candidateId,
-      direction: MessageDirection.OUTBOUND,
-      messageType: MessageType.TEXT,
-      body,
-      rawPayload: { source, body, consentVersion: DATA_CONSENT_VERSION, ...extraPayload }
-    }
+  await persistOutboundConversationMessage(prisma, {
+    candidateId,
+    messageType: MessageType.TEXT,
+    body,
+    rawPayload: { source, body, consentVersion: DATA_CONSENT_VERSION, ...extraPayload }
   });
   await prisma.candidate.update({ where: { id: candidateId }, data: { lastOutboundAt: new Date() } });
 }
