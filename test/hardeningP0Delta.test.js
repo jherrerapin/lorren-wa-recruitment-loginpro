@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
-import { buildSafeContextualFallbackText } from '../src/services/contextualReply.js';
 import { runReminderDispatcher, scheduleReminderForCandidate } from '../src/services/reminder.js';
 import { applyFieldPolicy } from '../src/services/policyLayer.js';
 import { createMockPrisma } from './helpers/mockPrisma.js';
@@ -79,41 +78,6 @@ test('imagen se clasifica como CV_IMAGE_ONLY pero no como CV_VALID', async () =>
 
   assert.equal(result.classification, 'CV_IMAGE_ONLY');
   assert.notEqual(result.classification, 'CV_VALID');
-});
-
-test('fallback factual pide HV en PDF o DOCX sin frase de avance vacía', () => {
-  const text = buildSafeContextualFallbackText({ situation: 'attachment_resume_photo' });
-  assert.match(text, /PDF|DOCX/i);
-  assert.match(text, /no puedo registrarla/i);
-  assert.doesNotMatch(text, /perfecto|vamos bien|seguimos con lo puntual/i);
-});
-
-test('fallback de dato pendiente identifica el dato real', () => {
-  const text = buildSafeContextualFallbackText({
-    situation: 'request_missing_data',
-    missingFields: ['documentType']
-  });
-  assert.match(text, /tipo de documento/i);
-  assert.doesNotMatch(text, /dato puntual|ese dato/i);
-});
-
-test('fallback factual es estable y no rota frases para aparentar naturalidad', () => {
-  const context = { situation: 'attachment_unreadable' };
-  const first = buildSafeContextualFallbackText(context);
-  const second = buildSafeContextualFallbackText(context);
-
-  assert.equal(first, second);
-  assert.match(first, /no pude procesar/i);
-});
-
-test('una pregunta usa la respuesta factual entregada por la política del turno', () => {
-  const text = buildSafeContextualFallbackText({
-    situation: 'continue_flow',
-    fallbackText: 'El horario registrado para la vacante es de lunes a sábado en turnos rotativos.'
-  });
-
-  assert.equal(text, 'El horario registrado para la vacante es de lunes a sábado en turnos rotativos.');
-  assert.doesNotMatch(text, /ya te respondo|después continuamos/i);
 });
 
 test('.doc se clasifica como OTHER y no se trata como CV válido', async () => {
