@@ -35,6 +35,9 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
   const candidates = new Map([
     [tenantCandidateKey(expectedTenantContext, candidateId), structuredClone(fixture.initialState.candidate)]
   ]);
+  const conversationState = {
+    pendingFields: [...(fixture.initialState.pendingFields || [])]
+  };
   const inboundMessages = new Map();
   const outboundMessages = new Map();
   const deliveries = new Map();
@@ -159,6 +162,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     return {
       now,
       candidates: cloneMapValues(candidates),
+      conversationState: structuredClone(conversationState),
       inboundMessages: cloneMapValues(inboundMessages),
       outboundMessages: cloneMapValues(outboundMessages),
       deliveries: cloneMapValues(deliveries),
