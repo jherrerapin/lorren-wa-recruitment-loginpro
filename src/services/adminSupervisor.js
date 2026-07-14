@@ -497,12 +497,12 @@ export async function handleSupervisorInbound(prisma, message = {}) {
   const supervisor = await getOrCreateSupervisorCandidate(prisma);
 
   await persistInboundConversationMessage(prisma, {
-  candidateId: supervisor.id,
-  waMessageId: message?.id || null,
-  messageType: MessageType.TEXT,
-  body,
-  rawPayload: message
-});
+    candidateId: supervisor.id,
+    waMessageId: message?.id || null,
+    messageType: MessageType.TEXT,
+    body,
+    rawPayload: message
+  });
   await prisma.candidate.update({ where: { id: supervisor.id }, data: { lastInboundAt: new Date() } });
 
   if (!body || body === '.') return { handled: true, action: 'keepalive' };
@@ -549,15 +549,15 @@ export async function handleSupervisorInbound(prisma, message = {}) {
 
   if (supervisorDecision.action === 'INTERNAL_ACK') {
     await updateConversationMessagePayload(prisma, {
-    messageId: request.id,
-    rawPayload: {
-      ...payload,
-      resolved: Boolean(manualOutboundAfterRequest),
-      resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
-      resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
-      supervisorDecision
-    }
-  });
+      messageId: request.id,
+      rawPayload: {
+        ...payload,
+        resolved: Boolean(manualOutboundAfterRequest),
+        resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
+        resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
+        supervisorDecision
+      }
+    });
     return {
       handled: true,
       action: manualOutboundAfterRequest ? 'internal_ack_resolved_after_manual_outbound' : 'internal_ack_kept_pending',
@@ -581,20 +581,20 @@ export async function handleSupervisorInbound(prisma, message = {}) {
 
   await sendTextMessage(candidate.phone, candidateReply);
   await persistOutboundConversationMessage(prisma, {
-  candidateId: candidate.id,
-  messageType: MessageType.TEXT,
-  body: candidateReply,
-  rawPayload: {
-    source: 'admin_supervisor_answer',
-    supervisorPhone,
-    originalSupervisorInstruction: body,
-    aiModel: candidateReplyResult?.model || null,
-    aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
-    aiReason: candidateReplyResult?.reason || null,
-    requestMessageId: request.id,
-    supervisorDecision
-  }
-});
+    candidateId: candidate.id,
+    messageType: MessageType.TEXT,
+    body: candidateReply,
+    rawPayload: {
+      source: 'admin_supervisor_answer',
+      supervisorPhone,
+      originalSupervisorInstruction: body,
+      aiModel: candidateReplyResult?.model || null,
+      aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
+      aiReason: candidateReplyResult?.reason || null,
+      requestMessageId: request.id,
+      supervisorDecision
+    }
+  });
   await prisma.candidate.update({
     where: { id: candidate.id },
     data: {
@@ -607,13 +607,13 @@ export async function handleSupervisorInbound(prisma, message = {}) {
     }
   });
   await updateConversationMessagePayload(prisma, {
-  messageId: request.id,
-  rawPayload: {
-    ...payload,
-    resolved: true,
-    resolvedAt: new Date().toISOString()
-  }
-});
+    messageId: request.id,
+    rawPayload: {
+      ...payload,
+      resolved: true,
+      resolvedAt: new Date().toISOString()
+    }
+  });
   await addSupervisorKnowledge(
     prisma,
     candidate,
