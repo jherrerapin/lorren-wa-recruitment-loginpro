@@ -45,9 +45,9 @@ Tampoco autoriza:
 ## 4. Estado actual de la línea base
 
 - #419 ya fue fusionado en `main` y retiró la matriz de frases prefabricadas.
-- #420 permanece en borrador, está un commit detrás de `main` y tiene regresiones de consentimiento pendientes. No está listo para merge.
-- #422 permanece en borrador hasta resolver todas las contradicciones documentales.
-- #423 inició el corpus y replay determinístico mediante #425.
+- #425 ya fue fusionado en `main` y estableció el contrato inicial del corpus conversacional.
+- #420 permanece en borrador, desactualizado respecto a `main` y con regresiones de consentimiento pendientes. No está listo para merge.
+- Este PR consolida la hoja de ruta y su validación técnica.
 - #424 reserva la creación posterior del GPT interno de arquitectura y QA.
 
 ## 5. Capacidades que deben preservarse o alcanzar
@@ -65,10 +65,10 @@ Tampoco autoriza:
 - Responder preguntas de la vacante en cualquier momento con información registrada.
 - Solicitar consentimiento después de que el candidato manifieste interés.
 - Distinguir interés, aceptación de una oferta y autorización de tratamiento de datos.
-- No descargar, procesar ni almacenar datos personales o archivos antes de la autorización.
+- Antes de la autorización, limitar el tratamiento a los identificadores técnicos mínimos necesarios para recibir el mensaje, resolver tenant/canal, conservar la atribución y solicitar el consentimiento; no extraer ni persistir campos de perfil, descargar archivos ni procesar una HV.
 - Si una HV llegó antes de autorizar, pedir que se reenvíe después de la aceptación.
 
-El último punto es el nuevo invariante de seguridad de #420. Debe caracterizarse frente al comportamiento legado, pero no implica borrar retroactivamente archivos existentes sin una política y migración separadas.
+Este límite es el nuevo invariante de seguridad de #420. Debe caracterizarse frente al comportamiento legado y documentar propósito, acceso y retención de los metadatos técnicos mínimos. No implica borrar retroactivamente archivos existentes sin una política y migración separadas.
 
 ### 5.3 Recolección dinámica por vacante
 
@@ -282,15 +282,15 @@ Los logs deben evitar contenido sensible y conservar razones, estados, versiones
 
 ### Fase 0 — Seguridad y línea base
 
-- Actualizar #420 contra el `main` que ya contiene #419.
+- Actualizar #420 contra el `main` que ya contiene #419 y #425.
 - Resolver sus cuatro bloqueadores y devolver CI a verde.
 - Corregir la persistencia de `AttachmentAnalysis` contra Prisma.
-- Unificar el contrato de HV en PDF/DOCX.
+- Unificar el contrato de HV en PDF/DOCX y rechazar `.doc`.
 - Inventariar deuda y añadir correlación mínima.
 
 ### Fase 1 — Caracterización y gates
 
-- Construir el corpus sanitizado.
+- Ampliar el corpus sanitizado ya iniciado.
 - Implementar replay determinístico.
 - Cubrir consentimiento, vacantes, datos, preguntas fuera de orden, agenda, recordatorios y errores.
 - Convertir los escenarios en gates obligatorios.
@@ -351,12 +351,15 @@ Los logs deben evitar contenido sensible y conservar razones, estados, versiones
 
 ## 13. GPT interno de arquitectura y QA
 
-El GPT de #424 se creará cuando estén estables y fusionados:
+La activación del GPT de #424 se rige por `gpt-auditor-readiness.md`. Antes de crearlo deben estar estables, fusionados y versionados, como mínimo:
 
-- esta hoja de ruta;
+- esta hoja de ruta y la validación técnica;
 - corpus y replay;
-- contratos iniciales;
-- ADR y convenciones de revisión.
+- contratos iniciales de `TenantContext`, `TurnUnderstanding` y `TurnPlan`;
+- convenciones de código y revisión;
+- ADR principales;
+- política de actualización y versionado del conocimiento;
+- propietario, acceso privado y pruebas de aceptación.
 
 Será una herramienta privada de mantenimiento y supervisión. No modificará producción, no fusionará código y no reemplazará a GitHub como fuente de verdad.
 
