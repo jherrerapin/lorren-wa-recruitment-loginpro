@@ -6,12 +6,13 @@ import { replayFixtureInterpretation } from './conversation-replay/interpretatio
 import { replayFixturePlanning } from './conversation-replay/planningReplay.js';
 
 function collectCandidateChanges(initialCandidate, finalState) {
-  const keys = new Set([...Object.keys(initialCandidate || {}), ...Object.keys(finalState || {})]);
+  const keys = new Set([...Object.keys(initialCandidate), ...Object.keys(finalState)]);
   const changed = [];
 
   for (const key of keys) {
     if (key === 'pendingFields' || !Object.hasOwn(finalState, key)) continue;
-    if (!isDeepStrictEqual(finalState[key], initialCandidate?.[key])) changed.push(`candidate.${key}`);
+    const initialValue = Object.hasOwn(initialCandidate, key) ? initialCandidate[key] : undefined;
+    if (!isDeepStrictEqual(finalState[key], initialValue)) changed.push(`candidate.${key}`);
   }
 
   return changed;
@@ -20,15 +21,18 @@ function collectCandidateChanges(initialCandidate, finalState) {
 function assertForbiddenWriteWasNotApplied(forbiddenWrite, fixture, finalState, label) {
   if (!forbiddenWrite.startsWith('candidate.')) return;
   const field = forbiddenWrite.slice('candidate.'.length);
+  const actual = Object.hasOwn(finalState, field) ? finalState[field] : undefined;
+  const initialCandidate = fixture.initialState.candidate;
+  const expected = Object.hasOwn(initialCandidate, field) ? initialCandidate[field] : undefined;
   assert.deepEqual(
-    finalState[field],
-    fixture.initialState.candidate[field],
+    actual,
+    expected,
     `${label}: una escritura prohibida modificó candidate.${field}`
   );
 }
 
 function assertExpectedFinalState(expected, actual, label) {
-  for (const [field, value] of Object.entries(expected || {})) {
+  for (const [field, value] of Object.entries(expected)) {
     assert.deepEqual(actual[field], value, `${label}: estado final inesperado en ${field}`);
   }
 }
