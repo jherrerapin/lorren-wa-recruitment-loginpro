@@ -34,6 +34,11 @@ const FIELD_LABELS = Object.freeze({
   experienceSummary: 'en qué tienes experiencia'
 });
 
+function asContextObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value;
+}
+
 function parseStructuredOutput(data = {}) {
   const output = data?.output || [];
   for (const item of output) {
@@ -59,7 +64,8 @@ function humanizeFieldName(field = '') {
 }
 
 function formatMissingFields(fields = []) {
-  const labels = [...new Set((fields || []).map(humanizeFieldName).filter(Boolean))];
+  const safeFields = Array.isArray(fields) ? fields : [];
+  const labels = [...new Set(safeFields.map(humanizeFieldName).filter(Boolean))];
   if (!labels.length) return '';
   if (labels.length === 1) return labels[0];
   if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
@@ -73,12 +79,13 @@ function formatMissingFields(fields = []) {
  * proceso. La política conversacional debe entregar `situation`,
  * `missingFields`, `fallbackText` y `requiresHumanReview` ya validados.
  */
-export function buildSafeContextualFallbackText(context = {}) {
-  const explicitFallback = String(context.fallbackText || '').trim();
+export function buildSafeContextualFallbackText(context) {
+  const safeContext = asContextObject(context);
+  const explicitFallback = String(safeContext.fallbackText || '').trim();
   if (explicitFallback) return explicitFallback;
 
-  const missing = formatMissingFields(context.missingFields);
-  const situation = context.situation || 'continue_flow';
+  const missing = formatMissingFields(safeContext.missingFields);
+  const situation = safeContext.situation || 'continue_flow';
 
   if (situation === 'attachment_resume_photo') {
     return 'Recibí la imagen, pero no puedo registrarla como hoja de vida. Envíala como archivo PDF o DOCX.';
@@ -114,7 +121,7 @@ export function buildSafeContextualFallbackText(context = {}) {
       : 'La corrección quedó registrada.';
   }
 
-  if (situation === 'process_human_review_required' || context.requiresHumanReview) {
+  if (situation === 'process_human_review_required' || safeContext.requiresHumanReview) {
     return 'No tengo información suficiente para resolver este punto con seguridad. El equipo de selección revisará tu caso y te contactará por este medio.';
   }
 
@@ -123,66 +130,75 @@ export function buildSafeContextualFallbackText(context = {}) {
   return 'Recibí tu mensaje y conservaré el punto pendiente del proceso sin reiniciar tu registro.';
 }
 
-function buildContextPayload(context = {}) {
+function buildContextPayload(context) {
+  const safeContext = asContextObject(context);
   return {
-    situation: context.situation || 'continue_flow',
-    decision: context.decision || null,
-    inboundText: String(context.inboundText || ''),
-    currentStep: context.currentStep || null,
-    missingFields: Array.isArray(context.missingFields) ? context.missingFields : [],
-    requiresHumanReview: Boolean(context.requiresHumanReview),
+    situation: safeContext.situation || 'continue_flow',
+    decision: safeContext.decision || null,
+    inboundText: String(safeContext.inboundText || ''),
+    currentStep: safeContext.currentStep || null,
+    missingFields: Array.isArray(safeContext.missingFields) ? safeContext.missingFields : [],
+    requiresHumanReview: Boolean(safeContext.requiresHumanReview),
     candidate: {
-      id: context.candidate?.id || null,
-      fullName: context.candidate?.fullName || null,
-      status: context.candidate?.status || null
+      id: safeContext.candidate?.id || null,
+      fullName: safeContext.candidate?.fullName || null,
+      status: safeContext.candidate?.status || null
     },
     vacancy: {
-      id: context.vacancy?.id || null,
-      title: context.vacancy?.title || context.vacancy?.role || null,
-      role: context.vacancy?.role || context.vacancy?.title || null,
-      city: context.vacancy?.city || context.vacancy?.operation?.city?.name || null,
-      operationAddress: context.vacancy?.operationAddress || null,
-      interviewAddress: context.vacancy?.interviewAddress || null,
-      requirements: context.vacancy?.requirements || null,
-      conditions: context.vacancy?.conditions || null,
-      requiredDocuments: sanitizeRequiredDocumentsForBot(context.vacancy?.requiredDocuments) || null,
-      interviewDocumentation: sanitizeRequiredDocumentsForBot(context.vacancy?.requiredDocuments) || null,
-      roleDescription: context.vacancy?.roleDescription || null
+      id: safeContext.vacancy?.id || null,
+      title: safeContext.vacancy?.title || safeContext.vacancy?.role || null,
+      role: safeContext.vacancy?.role || safeContext.vacancy?.title || null,
+      city: safeContext.vacancy?.city || safeContext.vacancy?.operation?.city?.name || null,
+      operationAddress: safeContext.vacancy?.operationAddress || null,
+      interviewAddress: safeContext.vacancy?.interviewAddress || null,
+      requirements: safeContext.vacancy?.requirements || null,
+      conditions: safeContext.vacancy?.conditions || null,
+      requiredDocuments: sanitizeRequiredDocumentsForBot(safeContext.vacancy?.requiredDocuments) || null,
+      interviewDocumentation: sanitizeRequiredDocumentsForBot(safeContext.vacancy?.requiredDocuments) || null,
+      roleDescription: safeContext.vacancy?.roleDescription || null
     },
-    activeInterviewBooking: context.activeInterviewBooking
+    activeInterviewBooking: safeContext.activeInterviewBooking
       ? {
-        scheduledAt: context.activeInterviewBooking.scheduledAt || null,
-        status: context.activeInterviewBooking.status || null
+        scheduledAt: safeContext.activeInterviewBooking.scheduledAt || null,
+        status: safeContext.activeInterviewBooking.status || null
       }
       : null,
-    attachmentAnalysis: context.attachmentAnalysis
+    attachmentAnalysis: safeContext.attachmentAnalysis
       ? {
-        classification: context.attachmentAnalysis.classification || null,
-        confidence: Number(context.attachmentAnalysis.confidence || 0),
-        rationale: context.attachmentAnalysis.rationale || null,
-        evidence: context.attachmentAnalysis.evidence || []
+        classification: safeContext.attachmentAnalysis.classification || null,
+        confidence: Number(safeContext.attachmentAnalysis.confidence || 0),
+        rationale: safeContext.attachmentAnalysis.rationale || null,
+        evidence: safeContext.attachmentAnalysis.evidence || []
       }
       : null,
-    recentOutbound: Array.isArray(context.recentMessages)
-      ? context.recentMessages.map((item) => String(item?.body || '')).filter(Boolean).slice(0, 6)
+    recentOutbound: Array.isArray(safeContext.recentMessages)
+      ? safeContext.recentMessages.map((item) => String(item?.body || '')).filter(Boolean).slice(0, 6)
       : []
   };
 }
 
-function buildFallback(context = {}, reason = 'fallback') {
+function buildFallback(context, reason = 'fallback') {
+  const safeContext = asContextObject(context);
   return {
-    text: buildSafeContextualFallbackText(context),
-    situation: context.situation || 'continue_flow',
+    text: buildSafeContextualFallbackText(safeContext),
+    situation: safeContext.situation || 'continue_flow',
     usedModel: false,
     fallbackUsed: true,
     reason,
-    intent: context.fallbackIntent || FALLBACK_INTENT_BY_SITUATION[context.situation] || 'continue_flow',
-    escalateHuman: Boolean(context.requiresHumanReview),
+    intent: safeContext.fallbackIntent || FALLBACK_INTENT_BY_SITUATION[safeContext.situation] || 'continue_flow',
+    escalateHuman: Boolean(safeContext.requiresHumanReview),
     model: null
   };
 }
 
-export function shouldEscalateHumanReview({ attachmentAnalysis = null, contradictionDetected = false, unresolvedQuestion = false } = {}) {
+export function shouldEscalateHumanReview(options) {
+  const safeOptions = asContextObject(options);
+  const {
+    attachmentAnalysis = null,
+    contradictionDetected = false,
+    unresolvedQuestion = false
+  } = safeOptions;
+
   if (contradictionDetected || unresolvedQuestion) return true;
   const classification = attachmentAnalysis?.classification || null;
   const confidence = Number(attachmentAnalysis?.confidence || 0);
@@ -190,22 +206,24 @@ export function shouldEscalateHumanReview({ attachmentAnalysis = null, contradic
   return confidence < 0.2 && ['UNREADABLE', 'OTHER'].includes(classification);
 }
 
-export async function buildContextualReply(context = {}) {
-  if (context.situation === 'attachment_resume_photo') {
+export async function buildContextualReply(context) {
+  const safeContext = asContextObject(context);
+
+  if (safeContext.situation === 'attachment_resume_photo') {
     return {
-      text: buildSafeContextualFallbackText(context),
+      text: buildSafeContextualFallbackText(safeContext),
       situation: 'attachment_resume_photo',
       usedModel: false,
       fallbackUsed: true,
       reason: 'deterministic_attachment_resume_photo',
       intent: 'request_cv_pdf_word',
-      escalateHuman: Boolean(context.requiresHumanReview),
+      escalateHuman: Boolean(safeContext.requiresHumanReview),
       model: null
     };
   }
 
-  const payloadContext = buildContextPayload(context);
-  if (!process.env.OPENAI_API_KEY) return buildFallback(context, 'openai_disabled');
+  const payloadContext = buildContextPayload(safeContext);
+  if (!process.env.OPENAI_API_KEY) return buildFallback(safeContext, 'openai_disabled');
 
   const payload = {
     model: CONTEXTUAL_REPLY_MODEL,
@@ -252,27 +270,27 @@ export async function buildContextualReply(context = {}) {
 
     const parsed = parseStructuredOutput(response.data);
     const text = String(parsed?.reply || '').trim();
-    if (!text) return buildFallback(context, 'empty_reply');
+    if (!text) return buildFallback(safeContext, 'empty_reply');
 
-    const recentOutbound = Array.isArray(context.recentMessages) ? context.recentMessages : [];
+    const recentOutbound = Array.isArray(safeContext.recentMessages) ? safeContext.recentMessages : [];
     if (recentOutbound.some((item) => isSubstantiallySimilarReply(text, item?.body || '', {
       threshold: ReplySimilarityThreshold.CONTEXTUAL_REPLY
     }))) {
-      return buildFallback(context, 'repeat_guard');
+      return buildFallback(safeContext, 'repeat_guard');
     }
 
     return {
       text,
-      situation: context.situation || 'continue_flow',
+      situation: safeContext.situation || 'continue_flow',
       usedModel: true,
       fallbackUsed: false,
       reason: parsed?.reason || 'ok',
       intent: null,
       model: CONTEXTUAL_REPLY_MODEL,
-      escalateHuman: Boolean(parsed?.escalateHuman || context.requiresHumanReview)
+      escalateHuman: Boolean(parsed?.escalateHuman || safeContext.requiresHumanReview)
     };
   } catch {
-    return buildFallback(context, 'responses_error');
+    return buildFallback(safeContext, 'responses_error');
   }
 }
 
