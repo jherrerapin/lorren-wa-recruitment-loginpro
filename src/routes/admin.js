@@ -26,6 +26,7 @@ import {
   normalizeCandidateStatusForUI
 } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
+import { persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
@@ -1044,14 +1045,11 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
     sourceCategory: 'MANUAL_AUTHORIZED',
     manualIntervention: true
   };
-  await prisma.message.create({
-    data: {
-      candidateId: candidate.id,
-      direction: MessageDirection.OUTBOUND,
-      messageType: MessageType.TEXT,
-      body: finalBody,
-      rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
-    }
+  await persistOutboundConversationMessage(prisma, {
+    candidateId: candidate.id,
+    messageType: MessageType.TEXT,
+    body: finalBody,
+    rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
   });
 }
 
