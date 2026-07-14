@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 5 | Alto | Fragmentado | `ConversationMessageRepository` |
+| `Message` | 5 | Alto | En consolidación | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -44,7 +44,20 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `CandidateDataConsentEvent` tiene ahora un único escritor: `ConsentStateService`. El scanner de CI impide que una ruta, gate o integración vuelva a crear eventos directamente.
 
-`dataConsentGate.js` continúa listado como escritor de `Candidate` y `Message` porque conserva otras responsabilidades de frontera: mensajes, contexto pendiente, campañas y reanudación. Eso no le permite escribir directamente el evento de consentimiento.
+### Primera migración de mensajes
+
+`dataConsentGate.js` ya no escribe `Message` directamente. La evidencia entrante y las respuestas salientes del gate pasan por `ConversationMessageRepository`.
+
+El repositorio distingue dos contratos:
+
+- entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
+- salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie.
+
+El gate conserva la decisión sobre qué mensaje producir, su payload de consentimiento y la actualización de `Candidate.lastOutboundAt`. El repositorio controla únicamente la forma de persistir `Message`.
+
+Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, el gate continúa enviando la respuesta al proveedor antes de persistirla. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
+
+`Message` continúa con cinco escritores porque el gate fue sustituido por la nueva autoridad compartida. Los escritores pendientes de migración son webhook, administración, supervisor y recordatorios.
 
 ## Hallazgos
 
@@ -74,7 +87,7 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 
 ### 3. Los mensajes todavía se persisten desde fronteras distintas
 
-La persistencia de `Message` está repartida entre webhook, consentimiento, supervisor, recordatorios y administración. La autoridad objetivo debe distinguir:
+La persistencia de `Message` sigue repartida entre webhook, supervisor, recordatorios, administración y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
 
 - mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
@@ -84,11 +97,11 @@ La persistencia de `Message` está repartida entre webhook, consentimiento, supe
 
 ### 4. Consentimiento demuestra el patrón de migración
 
-La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Este patrón debe repetirse en mensajes y reservas.
+La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Ese mismo patrón comenzó a aplicarse en mensajes.
 
 ## Clasificación de escritores
 
-- `canonical`: única autoridad permitida para escribir el agregado cuando la etapa es canónica.
+- `canonical`: autoridad objetivo que ya recibe al menos un consumidor migrado; solo será exclusiva cuando la etapa pase a `canonical`.
 - `boundary`: frontera especializada que todavía escribe directamente otro estado del modelo.
 - `legacy`: ruta heredada que debe migrarse y retirarse.
 - `admin`: operación humana explícita que debe pasar por un caso de uso auditado.
@@ -104,11 +117,11 @@ La consolidación se completó sin mover las políticas de negocio del panel ni 
 5. Las rutas, webhooks y adaptadores no deben convertirse en autoridades canónicas.
 6. Las integraciones pueden aportar hechos, pero no decidir por sí solas transiciones de candidato o reserva.
 7. Los cambios de consentimiento deben producir evento versionado y actualización del candidato dentro de la misma unidad atómica.
-8. La persistencia de salida debe preceder a la entrega y conservar una clave de idempotencia.
+8. La persistencia de salida debe preceder a la entrega cuando exista un contrato productivo de outbox e idempotencia.
 
 ## Orden recomendado de consolidación
 
-1. `Message`, inbox y outbox.
+1. Completar `Message`, inbox y outbox.
 2. `InterviewBooking` y sus transiciones.
 3. Campos conversacionales de `Candidate`.
 4. Atribución, CV, recordatorios y operaciones administrativas del candidato.
