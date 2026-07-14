@@ -12,30 +12,68 @@ function uniqueNormalizedStrings(values = []) {
   return [...new Set(values.map(normalizeString).filter(Boolean))];
 }
 
-/**
- * Convierte el valor histórico de scopeCity en una lista de ciudades.
- *
- * Compatibilidad:
- * - Usuarios antiguos: "Bogotá"
- * - Usuarios con acceso múltiple: '["Bogotá","Ibagué"]'
- * - Sesiones ya normalizadas: ["Bogotá", "Ibagué"]
- */
-export function normalizeUserAccessCities(value) {
-  if (Array.isArray(value)) return uniqueNormalizedStrings(value);
+function parseUserAccessMetadata(value) {
+  if (Array.isArray(value)) {
+    return {
+      cities: uniqueNormalizedStrings(value),
+      vacancyIds: []
+    };
+  }
 
   const normalized = normalizeString(value);
-  if (!normalized) return [];
+  if (!normalized) return { cities: [], vacancyIds: [] };
 
-  if (normalized.startsWith('[')) {
+  if (normalized.startsWith('{')) {
     try {
       const parsed = JSON.parse(normalized);
-      if (Array.isArray(parsed)) return uniqueNormalizedStrings(parsed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return {
+          cities: uniqueNormalizedStrings(Array.isArray(parsed.cities) ? parsed.cities : []),
+          vacancyIds: uniqueNormalizedStrings(Array.isArray(parsed.vacancyIds) ? parsed.vacancyIds : [])
+        };
+      }
     } catch (_error) {
       // Conserva compatibilidad con valores históricos que no sean JSON válido.
     }
   }
 
-  return [normalized];
+  if (normalized.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(normalized);
+      if (Array.isArray(parsed)) {
+        return {
+          cities: uniqueNormalizedStrings(parsed),
+          vacancyIds: []
+        };
+      }
+    } catch (_error) {
+      // Conserva compatibilidad con valores históricos que no sean JSON válido.
+    }
+  }
+
+  return {
+    cities: [normalized],
+    vacancyIds: []
+  };
+}
+
+/**
+ * Convierte el valor histórico de scopeCity en una lista de ciudades.
+ *
+ * Compatibilidad:
+ * - Usuarios antiguos: "Bogotá"
+ * - Usuarios con acceso territorial anterior: '["Bogotá","Ibagué"]'
+ * - Usuarios con vacantes seleccionadas: '{"cities":["Bogotá"],"vacancyIds":["vac-1"]}'
+ */
+export function normalizeUserAccessCities(value) {
+  return parseUserAccessMetadata(value).cities;
+}
+
+export function normalizeUserAccessVacancyIds(value, fallbackVacancyId = null) {
+  return uniqueNormalizedStrings([
+    ...parseUserAccessMetadata(value).vacancyIds,
+    fallbackVacancyId
+  ]);
 }
 
 export function encodeUserAccessCities(cities = []) {
@@ -43,6 +81,16 @@ export function encodeUserAccessCities(cities = []) {
   if (!normalized.length) return null;
   if (normalized.length === 1) return normalized[0];
   return JSON.stringify(normalized);
+}
+
+export function encodeUserAccessSelection({ cities = [], vacancyIds = [] } = {}) {
+  const normalizedCities = uniqueNormalizedStrings(cities);
+  const normalizedVacancyIds = uniqueNormalizedStrings(vacancyIds);
+  if (!normalizedCities.length && !normalizedVacancyIds.length) return null;
+  return JSON.stringify({
+    cities: normalizedCities,
+    vacancyIds: normalizedVacancyIds
+  });
 }
 
 export function toSlug(value) {
@@ -101,7 +149,11 @@ export function getAccessContext(source = {}) {
   const scope = role === 'dev'
     ? 'ALL'
     : normalizeUserAccessScope(source.userAccessScope || 'ALL');
-  const cities = normalizeUserAccessCities(source.userAccessCities ?? source.userAccessCity);
+  const rawAccessSelection = source.userAccessSelection
+    ?? source.userAccessCities
+    ?? source.userAccessCity;
+  const cities = normalizeUserAccessCities(rawAccessSelection);
+  const vacancyIds = normalizeUserAccessVacancyIds(rawAccessSelection, source.userAccessVacancyId);
 
   return {
     role,
@@ -110,7 +162,8 @@ export function getAccessContext(source = {}) {
     scope,
     city: cities[0] || null,
     cities,
-    vacancyId: normalizeString(source.userAccessVacancyId),
+    vacancyId: vacancyIds[0] || null,
+    vacancyIds,
     isDev: role === 'dev',
     isAdmin: role === 'admin'
   };
@@ -120,22 +173,45 @@ export function hasFullAccess(context = {}) {
   return context.isDev || context.scope === 'ALL';
 }
 
+function accessVacancyIds(context = {}) {
+  return uniqueNormalizedStrings([
+    ...(Array.isArray(context.vacancyIds) ? context.vacancyIds : []),
+    context.vacancyId
+  ]);
+}
+
+function vacancyIdFilter(vacancyIds = []) {
+  if (!vacancyIds.length) return '__OUT_OF_SCOPE__';
+  if (vacancyIds.length === 1) return vacancyIds[0];
+  return { in: vacancyIds };
+}
+
 export function buildVacancyAccessWhere(context = {}) {
   if (hasFullAccess(context)) return {};
+
+  const vacancyIds = accessVacancyIds(context);
+  if (vacancyIds.length) {
+    return { id: vacancyIdFilter(vacancyIds) };
+  }
+
   if (context.scope === 'CITY') {
     const cities = normalizeUserAccessCities(context.cities?.length ? context.cities : context.city);
     return cities.length
       ? { city: { in: cities } }
       : { city: '__OUT_OF_SCOPE__' };
   }
-  if (context.scope === 'VACANCY') {
-    return { id: context.vacancyId || '__OUT_OF_SCOPE__' };
-  }
-  return {};
+
+  return { id: '__OUT_OF_SCOPE__' };
 }
 
 export function buildCandidateAccessWhere(context = {}) {
   if (hasFullAccess(context)) return {};
+
+  const vacancyIds = accessVacancyIds(context);
+  if (vacancyIds.length) {
+    return { vacancyId: vacancyIdFilter(vacancyIds) };
+  }
+
   if (context.scope === 'CITY') {
     const cities = normalizeUserAccessCities(context.cities?.length ? context.cities : context.city);
     return cities.length
@@ -150,43 +226,74 @@ export function buildCandidateAccessWhere(context = {}) {
           }
         };
   }
-  if (context.scope === 'VACANCY') {
-    return { vacancyId: context.vacancyId || '__OUT_OF_SCOPE__' };
-  }
-  return {};
+
+  return { vacancyId: '__OUT_OF_SCOPE__' };
 }
 
 export function canAccessVacancy(context = {}, vacancy = {}) {
   if (hasFullAccess(context)) return true;
+
+  const vacancyIds = accessVacancyIds(context);
+  if (vacancyIds.length) return vacancyIds.includes(normalizeString(vacancy?.id));
+
   if (context.scope === 'CITY') {
     const cities = normalizeUserAccessCities(context.cities?.length ? context.cities : context.city);
     return cities.includes(normalizeString(vacancy?.city));
   }
-  if (context.scope === 'VACANCY') {
-    return vacancy?.id === context.vacancyId;
-  }
+
   return false;
 }
 
 export function canAccessCandidate(context = {}, candidate = {}) {
   if (hasFullAccess(context)) return true;
+
+  const vacancyIds = accessVacancyIds(context);
+  if (vacancyIds.length) {
+    const candidateVacancyId = normalizeString(candidate?.vacancyId)
+      || normalizeString(candidate?.vacancy?.id);
+    return vacancyIds.includes(candidateVacancyId);
+  }
+
   if (context.scope === 'CITY') {
     const cities = normalizeUserAccessCities(context.cities?.length ? context.cities : context.city);
     return cities.includes(normalizeString(candidate?.vacancy?.city));
   }
-  if (context.scope === 'VACANCY') {
-    return candidate?.vacancyId === context.vacancyId || candidate?.vacancy?.id === context.vacancyId;
-  }
+
   return false;
 }
 
 export function describeUserScope(user = {}) {
   const scope = normalizeUserAccessScope(user.accessScope);
+  const vacancyIds = normalizeUserAccessVacancyIds(user.scopeCity, user.scopeVacancyId);
+
+  if (vacancyIds.length) {
+    const selectedVacancies = Array.isArray(user.selectedVacancies)
+      ? user.selectedVacancies
+      : Array.isArray(user.vacancies)
+        ? user.vacancies
+        : [];
+    if (selectedVacancies.length === 1) {
+      const vacancy = selectedVacancies[0];
+      return `Vacante: ${vacancy.title || vacancy.role || vacancy.id}`;
+    }
+    if (selectedVacancies.length > 1) {
+      return `${selectedVacancies.length} vacantes seleccionadas`;
+    }
+    if (vacancyIds.length === 1 && user.scopeVacancy?.title) {
+      return `Vacante: ${user.scopeVacancy.title}`;
+    }
+    return `${vacancyIds.length} vacante${vacancyIds.length === 1 ? '' : 's'} seleccionada${vacancyIds.length === 1 ? '' : 's'}`;
+  }
+
   if (scope === 'CITY') {
     const cities = normalizeUserAccessCities(user.scopeCity);
     if (!cities.length) return 'Ciudades: Sin ciudad';
     return `${cities.length === 1 ? 'Ciudad' : 'Ciudades'}: ${cities.join(', ')}`;
   }
-  if (scope === 'VACANCY') return `Vacante: ${user.scopeVacancy?.title || user.scopeVacancyId || 'Sin vacante'}`;
+
+  if (scope === 'VACANCY') {
+    return `Vacante: ${user.scopeVacancy?.title || user.scopeVacancyId || 'Sin vacante'}`;
+  }
+
   return 'Todas las vacantes';
 }
