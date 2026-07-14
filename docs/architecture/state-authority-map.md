@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 5 | Alto | En consolidación | `ConversationMessageRepository` |
+| `Message` | 4 | Alto | En consolidación | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -44,20 +44,28 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `CandidateDataConsentEvent` tiene ahora un único escritor: `ConsentStateService`. El scanner de CI impide que una ruta, gate o integración vuelva a crear eventos directamente.
 
-### Primera migración de mensajes
+### Migraciones de mensajes
 
-`dataConsentGate.js` ya no escribe `Message` directamente. La evidencia entrante y las respuestas salientes del gate pasan por `ConversationMessageRepository`.
+`dataConsentGate.js` y `adminSupervisor.js` ya no escriben `Message` directamente. Ambos delegan en `ConversationMessageRepository`.
 
 El repositorio distingue dos contratos:
 
 - entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
 - salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie.
 
-El gate conserva la decisión sobre qué mensaje producir, su payload de consentimiento y la actualización de `Candidate.lastOutboundAt`. El repositorio controla únicamente la forma de persistir `Message`.
+El gate conserva la decisión sobre qué mensaje producir, su payload de consentimiento y la actualización de `Candidate.lastOutboundAt`.
 
-Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, el gate continúa enviando la respuesta al proveedor antes de persistirla. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
+El supervisor conserva:
 
-`Message` continúa con cinco escritores porque el gate fue sustituido por la nueva autoridad compartida. Los escritores pendientes de migración son webhook, administración, supervisor y recordatorios.
+- creación o consulta de su candidato interno;
+- payload `target=admin_supervisor` y visibilidad interna;
+- ventana de 24 horas, keepalive y decisiones de intervención;
+- envío de texto, audio, imagen o documento;
+- retorno del registro de mensaje para los consumidores existentes.
+
+El repositorio controla únicamente la forma de persistir `Message`. Los escritores directos bajaron de cinco a cuatro: webhook, administración, recordatorios y el repositorio compartido.
+
+Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, los consumidores migrados continúan enviando al proveedor antes de persistir. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
 
 ## Hallazgos
 
@@ -87,17 +95,18 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 
 ### 3. Los mensajes todavía se persisten desde fronteras distintas
 
-La persistencia de `Message` sigue repartida entre webhook, supervisor, recordatorios, administración y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
+La persistencia de `Message` sigue repartida entre webhook, recordatorios, administración y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
 
 - mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
 - entrega del proveedor;
 - mensaje manual autorizado;
-- evidencia de consentimiento.
+- evidencia de consentimiento;
+- mensajería interna del supervisor.
 
 ### 4. Consentimiento demuestra el patrón de migración
 
-La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Ese mismo patrón comenzó a aplicarse en mensajes.
+La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Ese mismo patrón continúa aplicándose en mensajes.
 
 ## Clasificación de escritores
 
