@@ -15,6 +15,12 @@ const CANONICAL_INTENT_BY_RUNTIME = Object.freeze({
   send_attachment: 'SEND_ATTACHMENT'
 });
 
+const EXCLUSIVE_PRIMARY_INTENTS = new Set([
+  'ACCEPT_DATA_CONSENT',
+  'REJECT_DATA_CONSENT',
+  'SEND_ATTACHMENT'
+]);
+
 function lastOutboundQuestion(history = []) {
   return [...history]
     .reverse()
@@ -45,6 +51,8 @@ function canonicalIntent(runtimeIntent = '') {
 }
 
 function deriveAdditionalIntents(primaryIntent, turn) {
+  if (EXCLUSIVE_PRIMARY_INTENTS.has(primaryIntent)) return [];
+
   const intents = [];
   if (turn.interest && primaryIntent !== 'CONTINUE_APPLICATION') intents.push('CONTINUE_APPLICATION');
   if (turn.correction && primaryIntent !== 'CORRECT_CANDIDATE_DATA') intents.push('CORRECT_CANDIDATE_DATA');
