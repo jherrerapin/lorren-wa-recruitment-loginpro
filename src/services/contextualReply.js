@@ -39,6 +39,24 @@ function asContextObject(value) {
   return value;
 }
 
+function redactSensitiveText(value, maxLength = 500) {
+  return String(value || '')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer REDACTED')
+    .replace(/(access[_-]?token|api[_-]?key|authorization)\s*[=:]\s*[^\s&,;]+/gi, '$1=REDACTED')
+    .slice(0, maxLength);
+}
+
+function buildSanitizedErrorLog(error) {
+  const safeError = asContextObject(error);
+  const status = Number(safeError.response?.status);
+  return {
+    message: redactSensitiveText(safeError.message, 300),
+    code: redactSensitiveText(safeError.code, 100) || null,
+    status: Number.isFinite(status) ? status : null,
+    stack: redactSensitiveText(safeError.stack, 500)
+  };
+}
+
 function parseStructuredOutput(data = {}) {
   const output = data?.output || [];
   for (const item of output) {
@@ -55,7 +73,8 @@ function parseStructuredOutput(data = {}) {
 function humanizeFieldName(field = '') {
   const raw = String(field || '').trim();
   if (!raw) return '';
-  if (FIELD_LABELS[raw]) return FIELD_LABELS[raw];
+  const configuredLabel = FIELD_LABELS[raw];
+  if (typeof configuredLabel === 'string') return configuredLabel;
   return raw
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
@@ -289,7 +308,8 @@ export async function buildContextualReply(context) {
       model: CONTEXTUAL_REPLY_MODEL,
       escalateHuman: Boolean(parsed?.escalateHuman || safeContext.requiresHumanReview)
     };
-  } catch {
+  } catch (error) {
+    console.error('[CONTEXTUAL_REPLY_ERROR]', buildSanitizedErrorLog(error));
     return buildFallback(safeContext, 'responses_error');
   }
 }
