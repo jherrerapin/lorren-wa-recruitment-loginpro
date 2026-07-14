@@ -1,152 +1,155 @@
-# Hoja de ruta de modernización SaaS de Lórren
+# Hoja de ruta canónica de modernización SaaS de Lórren
 
-Relacionado con: #421 y #415.
+Relacionado con: #421, #415, #420, #422, #423 y #424.
 
 ## 1. Propósito
 
-Evolucionar el repositorio actual hacia una arquitectura modular y multitenant preparada para ofrecer Lórren como SaaS, sin reescritura total y sin detener el funcionamiento actual.
+Evolucionar el repositorio actual hacia un monolito modular, mantenible y multitenant, preparado para ofrecer Lórren como SaaS sin una reescritura total ni una interrupción del servicio.
 
-La modernización debe reducir redundancias, eliminar autoridades de decisión paralelas, aislar las reglas de cada cliente y hacer que la incorporación de un nuevo tenant no requiera copiar rutas ni agregar condiciones dispersas por empresa.
+La modernización debe:
 
-## 2. Premisa funcional innegociable
+- eliminar responsabilidades y autoridades duplicadas;
+- conservar el comportamiento útil mediante pruebas reproducibles;
+- separar negocio, persistencia, canales y proveedores externos;
+- permitir incorporar tenants y vacantes mediante configuración;
+- impedir efectos duplicados, estados incompatibles y accesos cruzados;
+- mantener a GitHub y a la base de datos propia como fuentes canónicas.
 
-Lórren se comporta como una reclutadora humana, sensible y experimentada. No es un formulario ni un bot que sigue un libreto estricto.
+## 2. Premisa funcional
+
+Lórren debe comportarse como una reclutadora humana, sensible y experimentada. No es un formulario ni un bot regido por una secuencia rígida de palabras o respuestas prefabricadas.
 
 Debe:
 
-- comprender el mensaje completo y el contexto acumulado;
-- reconocer preguntas, correcciones, respuestas parciales y múltiples intenciones en el mismo turno;
-- responder las preguntas antes de retomar el punto pendiente;
-- conservar los datos que ya fueron confirmados;
-- solicitar solamente la información necesaria para la vacante;
+- comprender el turno completo y el contexto acumulado;
+- reconocer preguntas, correcciones, respuestas parciales y varias intenciones;
+- responder una interrupción antes de retomar el pendiente;
+- conservar datos ya confirmados y evitar preguntas repetidas;
+- solicitar únicamente lo exigido por la configuración de la vacante;
 - redactar de forma natural a partir de hechos validados;
-- evitar frases prefabricadas que afirmen acciones no ejecutadas;
-- mantener límites determinísticos para consentimiento, seguridad, persistencia, archivos, elegibilidad, agenda y transiciones críticas.
+- mantener controles determinísticos para consentimiento, seguridad, persistencia, archivos, agenda y transiciones críticas.
 
 ## 3. Fuera de alcance
 
-Esta iniciativa no modificará, eliminará ni ampliará la lógica existente relacionada con género.
+Esta iniciativa no modifica, elimina ni amplía la lógica existente relacionada con género.
 
 Tampoco autoriza:
 
 - una reescritura masiva;
-- una migración inmediata a microservicios;
-- cambios simultáneos de esquema, conversación, agenda y UI sin necesidad técnica;
-- despliegues automáticos desde los PR de modernización;
-- eliminación de código sin prueba de reemplazo o falta de consumidores.
+- microservicios prematuros;
+- mover carpetas sin cambiar límites reales de responsabilidad;
+- eliminar código sin pruebas de reemplazo o evidencia de que no tiene consumidores;
+- desplegar automáticamente cambios de modernización;
+- usar un GPT, un proveedor de IA o ChatGPT como fuente de verdad del runtime.
 
-## 4. Capacidades que deben preservarse y consolidarse
+## 4. Estado actual de la línea base
 
-### 4.1 Atribución publicitaria
+- #419 ya fue fusionado en `main` y retiró la matriz de frases prefabricadas.
+- #420 permanece en borrador, está un commit detrás de `main` y tiene regresiones de consentimiento pendientes. No está listo para merge.
+- #422 permanece en borrador hasta resolver todas las contradicciones documentales.
+- #423 inició el corpus y replay determinístico mediante #425.
+- #424 reserva la creación posterior del GPT interno de arquitectura y QA.
 
-- Recibir desde el primer mensaje los metadatos objetivos disponibles de Meta Ads.
-- Conservar identificadores de anuncio, conjunto, campaña y click-to-WhatsApp.
-- Resolver tenant, campaña, operación y vacante por identificadores exactos o correspondencias inequívocas.
-- No asociar por similitud textual cuando exista información objetiva.
-- Saludar y confirmar ciudad y vacante antes de asignarlas definitivamente.
-- Si los metadatos faltan, son ambiguos o no corresponden a una campaña configurada, preguntar ciudad y cargo sin inventar una asociación.
+## 5. Capacidades que deben preservarse o alcanzar
 
-### 4.2 Información, interés y consentimiento
+### 5.1 Atribución y confirmación de vacante
 
-- Presentar información vigente almacenada en la vacante.
-- Responder preguntas sobre cargo, requisitos, condiciones, zona, horario, salario o documentación en cualquier momento.
-- Solicitar consentimiento únicamente después de que el candidato manifieste interés.
-- Comprender aceptación, rechazo o duda usando el contexto, no una lista cerrada de frases.
-- No descargar, procesar ni almacenar datos personales o archivos antes de autorización.
+- Conservar los metadatos originales de Meta Ads de forma inmutable.
+- Resolver tenant, canal, campaña, anuncio, operación y vacante por identificadores objetivos.
+- Clasificar la atribución como `EXACT`, `CONFIRMED` o `UNKNOWN`.
+- Confirmar ciudad y vacante con el candidato antes de asignarlas definitivamente.
+- Preguntar sin inventar cuando los metadatos falten o sean ambiguos.
 
-### 4.3 Recolección configurada por vacante
+### 5.2 Información, interés y consentimiento
 
-Cada vacante define sus campos obligatorios y opcionales.
+- Responder preguntas de la vacante en cualquier momento con información registrada.
+- Solicitar consentimiento después de que el candidato manifieste interés.
+- Distinguir interés, aceptación de una oferta y autorización de tratamiento de datos.
+- No descargar, procesar ni almacenar datos personales o archivos antes de la autorización.
+- Si una HV llegó antes de autorizar, pedir que se reenvíe después de la aceptación.
 
-Reglas actuales del cliente:
+El último punto es el nuevo invariante de seguridad de #420. Debe caracterizarse frente al comportamiento legado, pero no implica borrar retroactivamente archivos existentes sin una política y migración separadas.
 
-- Bogotá: solicitar y guardar localidad como lugar de residencia.
-- Otras ciudades: solicitar y guardar barrio o sector.
-- Soacha: registrar Soacha como residencia conforme a la regla operativa vigente.
-- Cuando se requiere experiencia, guardar de forma separada:
-  - si tiene experiencia;
-  - tiempo de experiencia;
-  - cargo, área o actividad en la que tiene experiencia.
+### 5.3 Recolección dinámica por vacante
 
-Si el candidato entrega varios datos en lenguaje natural, Lórren debe aprovecharlos sin repetir preguntas respondidas.
+Cada vacante define campos requeridos, opcionales, documentos, experiencia y modalidad de cierre.
 
-### 4.4 Viabilidad geográfica
+Reglas iniciales del cliente:
 
-La viabilidad pertenece a la relación entre vacante, operación y residencia; no se deduce únicamente por ciudad.
+- Bogotá: solicitar localidad.
+- Otras ciudades: solicitar barrio o sector.
+- Soacha: registrar la residencia según la regla operativa configurada.
+- Experiencia: guardar si tiene, cuánto tiempo y en qué cargo, área o actividad.
+
+Un mensaje que contiene varios datos debe completar todos los campos válidos sin convertir el proceso en un cuestionario repetitivo.
+
+### 5.4 Viabilidad geográfica
+
+La viabilidad pertenece a la relación entre vacante, operación, residencia y transporte; no se deduce solo por ciudad.
 
 La configuración deberá permitir:
 
-- ciudades y municipios incluidos o excluidos;
-- localidades, barrios y sectores;
+- ciudades, municipios, localidades, barrios y sectores incluidos o excluidos;
+- alias territoriales;
 - corredores logísticos;
-- polígonos o radios cuando se incorporen coordenadas;
+- polígonos, radios o coordenadas;
+- distancia o tiempo aproximado;
 - medio de transporte;
-- límites aproximados de distancia o tiempo;
-- excepciones con vigencia.
+- excepciones versionadas y con vigencia.
 
-Reglas que deben preservarse:
+Se preservarán las excepciones configuradas para vacantes de Bogotá, Soacha y la operación de Siberia. Toda decisión deberá registrar reglas, versión y evidencia.
 
-- determinadas vacantes de Bogotá pueden recibir residentes de Soacha;
-- la operación de Siberia puede admitir zonas occidentales de Bogotá y municipios como Funza, Mosquera o Madrid cuando sean viables;
-- una persona de Soacha no debe considerarse viable automáticamente para Siberia.
-
-Toda decisión geográfica deberá registrar el resultado, las reglas aplicadas y la evidencia utilizada.
-
-### 4.5 Modalidades de cierre
+### 5.5 Modalidades de cierre
 
 `APPLICATION_ONLY`:
 
-- completar datos y documentos configurados;
+- completar los datos y documentos configurados;
 - informar que el registro quedó completo;
-- indicar que un reclutador revisará la información y contactará al candidato si el proceso continúa;
-- no prometer aprobación, llamada, contratación ni entrevista.
+- comunicar que un reclutador revisará la información;
+- no prometer aprobación, contratación ni entrevista.
 
 `AUTO_INTERVIEW`:
 
-- verificar requisitos, datos y documentos;
-- ofrecer el siguiente horario realmente disponible;
-- respetar una anticipación mínima inicial de seis horas, configurable por tenant o vacante;
-- respetar el horizonte permitido: semana actual, semanas siguientes o rango personalizado;
-- si el candidato no puede asistir, ofrecer el siguiente horario válido cuando la vacante permita reprogramación;
-- no marcar la reserva como reprogramada hasta que exista una nueva reserva confirmada.
+- validar requisitos, datos, documentos y disponibilidad;
+- ofrecer horarios reales con anticipación mínima configurable, inicialmente seis horas;
+- respetar el horizonte de agenda configurado;
+- reprogramar únicamente si la vacante lo permite.
 
-### 4.6 Recordatorios
+**Corrección planificada:** el runtime actual puede marcar una reserva como `RESCHEDULED` antes de crear la nueva. El estado objetivo es conservar la reserva anterior en un estado de solicitud o cancelación y marcar `RESCHEDULED` solo cuando la nueva reserva exista.
 
-Seguimiento de postulación incompleta:
+### 5.6 Recordatorios
 
-- programar dos horas después del último mensaje del candidato;
-- enviar únicamente si el proceso sigue incompleto y esperando al candidato;
-- mencionar el pendiente real;
-- cancelar al recibir un nuevo mensaje o cerrar el proceso;
-- evitar envíos duplicados mediante una clave idempotente.
+Postulación incompleta:
 
-Confirmación de entrevista:
+- programar dos horas después del último mensaje saliente que solicitó una acción;
+- enviar solo si no existe un mensaje entrante posterior y el proceso continúa pendiente;
+- mencionar el dato o acción exactos;
+- deduplicar por tenant, candidato, proceso y pendiente.
 
-- enviar una hora antes de la reserva;
-- interpretar confirmación, cancelación o solicitud de reprogramación;
-- actualizar la reserva correspondiente;
-- cuando falten cinco minutos sin respuesta, registrar `NO_RESPONSE`;
-- conservar y procesar una respuesta tardía según la política configurada.
+Entrevista:
 
-## 5. Estrategia arquitectónica
+- requisito objetivo: enviar una hora antes de la reserva;
+- interpretar confirmación, cancelación o solicitud de cambio;
+- registrar `NO_RESPONSE` cuando falten cinco minutos sin respuesta;
+- conservar respuestas tardías y aplicar la política configurada.
 
-### 5.1 Monolito modular primero
+El runtime y documentación heredada todavía usan cuarenta minutos en algunos puntos. Esa diferencia es deuda explícita: deberá migrarse junto con pruebas y configuración, no ocultarse como comportamiento ya vigente.
 
-El sistema continuará como una aplicación desplegable única durante la primera etapa, pero se separará por dominios y contratos internos. Los módulos no deberán importar detalles internos de otros dominios ni acceder directamente a sus tablas sin un servicio o repositorio definido.
+## 6. Estrategia arquitectónica
 
-Los microservicios solo se considerarán cuando exista evidencia de necesidad independiente de escalado, aislamiento, despliegue o propiedad operativa.
+### 6.1 Monolito modular primero
 
-### 5.2 Evolución incremental
+La aplicación continuará desplegándose como una unidad durante la primera etapa. Los límites se crearán por dominio, API pública y contratos internos. Los microservicios solo se considerarán cuando exista una necesidad demostrada de escalado, aislamiento, despliegue o propiedad operativa independiente.
 
-La modernización seguirá un enfoque de sustitución progresiva:
+### 6.2 Sustitución progresiva
 
-1. caracterizar el comportamiento actual;
-2. introducir un contrato o fachada nueva;
-3. dirigir gradualmente casos de uso hacia la implementación nueva;
-4. medir equivalencia y regresiones;
-5. retirar el código anterior únicamente al quedar sin consumidores.
+1. Caracterizar el comportamiento y sus invariantes.
+2. Introducir una fachada o contrato nuevo.
+3. Migrar casos de uso de forma gradual.
+4. Comparar resultados y efectos.
+5. Retirar la implementación anterior cuando quede sin consumidores.
 
-### 5.3 Dominios objetivo
+### 6.3 Dominios objetivo
 
 ```text
 src/
@@ -172,230 +175,209 @@ src/
     time/
 ```
 
-Esta estructura representa límites de responsabilidad, no una orden de mover archivos de forma inmediata.
+Esta estructura representa límites, no una orden inmediata de mover archivos.
 
-Cada módulo podrá evolucionar hacia:
-
-```text
-<module>/
-  domain/
-  application/
-  infrastructure/
-  presentation/
-  index.js
-```
-
-- `domain`: entidades, valores, políticas puras e invariantes.
-- `application`: casos de uso y orquestación.
-- `infrastructure`: Prisma, Meta, WhatsApp, OpenAI, almacenamiento y colas.
-- `presentation`: rutas, controladores y adaptadores de entrada.
-- `index.js`: API pública del módulo.
-
-## 6. Contratos canónicos previstos
+## 7. Contratos canónicos
 
 ### `TenantContext`
 
-Identifica el tenant y los permisos/configuración aplicables al caso de uso. Debe estar disponible antes de consultar datos, archivos, campañas, reservas, colas o métricas.
+Identifica tenant, canal, credenciales autorizadas, permisos y configuración aplicable. Debe resolverse antes de construir claves durables de idempotencia o acceder a datos de negocio.
 
 ### `TurnUnderstanding`
 
-Resultado único de interpretar un mensaje. Debe representar simultáneamente:
+Interpretación estructurada única del turno:
 
-- intención o intenciones;
-- preguntas;
-- datos entregados;
-- correcciones;
-- referencias a mensajes previos;
-- ciudad, cargo y vacante mencionados;
-- decisiones de consentimiento;
-- acciones sobre entrevista;
-- evidencia y nivel de confianza.
+- intenciones y preguntas;
+- datos y correcciones;
+- referencias a contexto previo;
+- ciudad, cargo y vacante;
+- consentimiento;
+- acciones de entrevista;
+- evidencia y confianza.
 
 ### `TurnPlan`
 
-Plan único validado para el turno:
+Plan validado único:
 
-- hechos que deben responderse;
-- datos que pueden persistirse;
-- acciones de dominio autorizadas;
+- hechos a responder;
+- escrituras permitidas y prohibidas;
+- acciones de dominio;
 - transición propuesta;
-- siguiente pendiente;
-- necesidad de revisión humana;
-- respuesta a redactar.
+- pendiente a retomar;
+- revisión humana;
+- requisitos de la respuesta.
 
-### `VacancyPolicy`
+### Políticas de dominio
 
-Configuración efectiva y versionada de la vacante:
+- `VacancyPolicy` versionada.
+- `CandidateReadiness` único.
+- `GeographicEligibility` explicable.
+- `InterviewPolicy` versionada.
 
-- campos requeridos;
-- requisitos de experiencia;
-- documentos;
-- modalidad de cierre;
-- política de agenda;
-- política geográfica;
-- reglas de recordatorios;
-- mensajes o contenido empresarial verificable.
+## 8. Ciclo objetivo de un turno
 
-### `CandidateReadiness`
+1. Resolver `TenantContext` y deduplicar el evento.
+2. Cargar estado canónico y configuración efectiva.
+3. Producir `TurnUnderstanding`.
+4. Validar evidencia, permisos e invariantes.
+5. Producir `TurnPlan`.
+6. Ejecutar cálculos y preparar resultados de dominio sin efectos externos.
+7. Redactar y verificar una respuesta factual segura.
+8. Persistir en una sola transacción el estado, auditoría y mensaje de outbox.
+9. Un worker ejecuta el efecto externo y registra el resultado.
 
-Evaluación única de datos, documentos, elegibilidad y siguiente acción permitida.
+Ningún mensaje, archivo, reserva o notificación externa se ejecuta antes de estar representado de forma idempotente en el outbox.
 
-### `GeographicEligibility`
+## 9. Aislamiento multitenant
 
-Resultado explicable de viabilidad territorial, con reglas y evidencia aplicadas.
+Antes de habilitar un segundo tenant deberán cumplirse simultáneamente:
 
-### `InterviewPolicy`
+### Aplicación
 
-Anticipación mínima, horizonte, disponibilidad, confirmación, cancelación y reprogramación.
+- `TenantContext` obligatorio en casos de uso, repositorios, rutas, jobs, caché y almacenamiento.
+- Prohibición de consultas globales desde módulos de negocio.
+- Validación de pertenencia en referencias y acciones administrativas.
 
-## 7. Aislamiento multitenant
+### Base de datos
 
-La futura plataforma debe asumir que un tenant es una organización cliente y no un usuario individual.
+- `tenantId` en todas las entidades compartidas de negocio.
+- Unicidad compuesta por tenant; por ejemplo, el teléfono de un candidato no puede continuar como identificador global entre clientes.
+- Protección de relaciones cruzadas mediante claves o validaciones compuestas cuando sea viable.
+- RLS como defensa adicional, no como única barrera.
+- Roles de mínimo privilegio para API, workers y administración.
+- Pruebas negativas de lectura, escritura, asociación y procesamiento cruzados.
 
-El aislamiento deberá cubrir:
+## 10. Corpus y evaluación
 
-- datos de candidatos y postulaciones;
-- vacantes, operaciones y zonas;
-- campañas y metadatos de Meta;
-- credenciales de WhatsApp y Meta;
-- archivos y claves de almacenamiento;
-- reservas y horarios;
-- trabajos en cola y claves de deduplicación;
-- usuarios y permisos;
-- conocimiento y configuración del bot;
-- logs, trazas, métricas y costos.
+Cada fixture deberá incluir:
 
-Reglas mínimas:
+- `TenantContext`;
+- versiones de conversación, vacante, consentimiento y políticas relevantes;
+- estado inicial;
+- historial mínimo;
+- mensaje o lote entrante;
+- comprensión y plan esperados;
+- escrituras permitidas y prohibidas;
+- transición y estado final;
+- hechos obligatorios y afirmaciones prohibidas;
+- expectativa de envío, silencio o revisión.
 
-1. ninguna consulta de negocio se ejecuta sin tenant resuelto;
-2. las claves únicas relevantes incluyen tenant cuando corresponda;
-3. las rutas administrativas validan pertenencia al tenant;
-4. los jobs conservan `tenantId` y validan la entidad antes de ejecutarse;
-5. los objetos de almacenamiento se prefijan o separan por tenant;
-6. las pruebas incluyen intentos explícitos de acceso cruzado;
-7. la observabilidad permite filtrar por tenant sin exponer contenido sensible.
+Las regresiones determinísticas serán gates de CI **antes** de retirar una capa heredada. Las evaluaciones con modelo real se utilizarán para comparar prompts o modelos, pero no sustituirán el gate reproducible.
 
-## 8. Autoridades únicas
+## 11. Observabilidad
 
-La arquitectura final debe tener:
+La correlación mínima comienza desde la estabilización y la entrada confiable. Debe relacionar:
 
-- una sola interpretación estructurada del turno;
-- una sola política que prioriza respuesta, persistencia, acción y reanudación;
-- una sola evaluación de readiness;
-- una sola autoridad de transición;
-- una sola política de atribución;
-- una sola política geográfica;
-- una sola política de agenda;
-- una sola vía de envío y persistencia de mensajes salientes.
+- tenant y canal;
+- webhook e inbox;
+- conversación y turno;
+- candidato y postulación;
+- reserva;
+- job y recordatorio;
+- outbox y mensaje saliente.
 
-Los servicios de dominio no deben enviar mensajes directamente. Deben devolver hechos, decisiones o resultados al caso de uso que orquesta el turno.
+Los logs deben evitar contenido sensible y conservar razones, estados, versiones y errores saneados.
 
-## 9. Fases de ejecución
+## 12. Fases canónicas de ejecución
 
-### Fase 0 — Estabilizar
+### Fase 0 — Seguridad y línea base
 
-- Resolver todas las observaciones funcionales abiertas de #420.
-- Fusionar #420 mediante squash solo con CI y revisión limpios.
-- Revalidar y fusionar #419 mediante squash.
-- Mantener visible la deuda de pruebas y evitar nuevas regresiones.
+- Actualizar #420 contra el `main` que ya contiene #419.
+- Resolver sus cuatro bloqueadores y devolver CI a verde.
+- Corregir la persistencia de `AttachmentAnalysis` contra Prisma.
+- Unificar el contrato de HV en PDF/DOCX.
+- Inventariar deuda y añadir correlación mínima.
 
-### Fase 1 — Caracterizar y mapear
+### Fase 1 — Caracterización y gates
 
-- Construir mapa de importaciones y dependencias.
-- Inventariar todos los lugares que modifican `Candidate`, `InterviewBooking`, consentimiento, recordatorios y vacantes.
-- Clasificar módulos en: canónico, duplicado, transitorio, legado activo, legado sin consumidor.
-- Crear pruebas de caracterización de los recorridos críticos.
+- Construir el corpus sanitizado.
+- Implementar replay determinístico.
+- Cubrir consentimiento, vacantes, datos, preguntas fuera de orden, agenda, recordatorios y errores.
+- Convertir los escenarios en gates obligatorios.
 
-### Fase 2 — Contratos internos
+### Fase 2 — Tenant mínimo en la frontera
 
-- Introducir los contratos canónicos sin mover todavía toda la implementación.
+- Resolver tenant y canal antes de cualquier clave durable.
+- Introducir `TenantContext` mínimo sin migrar aún todo el esquema.
+- Probar que eventos de canales distintos no colisionan.
+
+### Fase 3 — Entrada y salida confiables
+
+- Inbox idempotente.
+- Outbox transaccional.
+- Envío centralizado.
+- Jobs reintentables y deduplicados.
+- Correlación de trazas.
+
+### Fase 4 — Contratos y autoridades únicas
+
+- Introducir `TurnUnderstanding`, `TurnPlan` y políticas de dominio.
 - Crear adaptadores desde el flujo actual.
-- Evitar que módulos nuevos importen directamente rutas o servicios heredados.
+- Centralizar readiness y transiciones.
+- Retirar autoridades paralelas solo después de migrar sus escenarios.
 
-### Fase 3 — Tenant en los límites
+### Fase 5 — Multitenencia completa
 
-- Introducir `TenantContext` en canal, autenticación y casos de uso.
-- Preparar migración de esquema y estrategia de aislamiento.
-- Añadir pruebas negativas de acceso cruzado antes de activar múltiples tenants.
+- Migrar `tenantId`, índices y restricciones.
+- Crear repositorios tenant-aware.
+- Añadir RLS y roles mínimos.
+- Aprobar pruebas de aislamiento antes de habilitar un segundo tenant.
 
-### Fase 4 — Configuración de negocio
+### Fase 6 — Configuración de negocio
 
-- Persistir políticas por tenant, operación y vacante.
-- Retirar gradualmente condiciones específicas del cliente del webhook.
-- Versionar la configuración usada en decisiones relevantes.
+- Versionar políticas por tenant, operación y vacante.
+- Retirar condiciones específicas del cliente del webhook.
+- Separar contenido empresarial de lógica de aplicación.
 
-### Fase 5 — Núcleo conversacional
+### Fase 7 — Núcleo conversacional y estados
 
-- Interpretar el turno una sola vez.
-- Ejecutar una sola política de turno.
-- Responder interrupciones y retomar el proceso.
-- Eliminar parsers, gates y redactores redundantes después de migrar sus pruebas.
+- Interpretar una vez y planear una vez.
+- Responder interrupciones y retomar pendientes.
+- Centralizar estados e invariantes.
+- Reducir el webhook a adaptador de entrada.
 
-### Fase 6 — Casos de uso y estados
+### Fase 8 — Geografía, agenda y notificaciones
 
-- Centralizar transiciones e invariantes.
-- Separar persistencia y proveedores externos de las decisiones de dominio.
-- Impedir estados incompatibles o reservas huérfanas.
+- Implementar políticas territoriales explicables.
+- Corregir reprogramación y ventanas de recordatorio.
+- Consolidar workers y recordatorios idempotentes.
 
-### Fase 7 — Geografía, agenda y notificaciones
+### Fase 9 — Operación SaaS y retiro de legado
 
-- Implementar políticas configurables y explicables.
-- Consolidar jobs idempotentes.
-- Separar seguimiento de postulación y confirmación de entrevista.
-
-### Fase 8 — Operación SaaS
-
-- Métricas y trazas por tenant.
-- Límites de uso y costos.
+- Métricas, costos, límites y auditoría por tenant.
 - Gestión segura de credenciales.
-- Estrategia de soporte, auditoría, recuperación y migraciones.
+- Eliminación de adaptadores, flags y código sin consumidores.
+- Mantener como bloqueante toda la suite estable.
 
-### Fase 9 — Retiro de legado
+## 13. GPT interno de arquitectura y QA
 
-- Eliminar adaptadores y feature flags transitorios.
-- Retirar código sin consumidores.
-- Convertir toda la suite estable en gate bloqueante.
+El GPT de #424 se creará cuando estén estables y fusionados:
 
-## 10. Primer bloque de trabajo
+- esta hoja de ruta;
+- corpus y replay;
+- contratos iniciales;
+- ADR y convenciones de revisión.
 
-El orden inmediato es:
+Será una herramienta privada de mantenimiento y supervisión. No modificará producción, no fusionará código y no reemplazará a GitHub como fuente de verdad.
 
-1. corregir las observaciones abiertas de #420;
-2. integrar #420 y después #419;
-3. corregir la persistencia inválida de `AttachmentAnalysis`;
-4. unificar el contrato de formatos válidos de hoja de vida;
-5. crear el mapa de autoridades de estado y efectos externos;
-6. definir el primer contrato canónico sin reescribir el flujo completo.
-
-No se iniciará una extracción grande de carpetas mientras la línea base de consentimiento y respuestas siga pendiente.
-
-## 11. Reglas para cada PR
+## 14. Reglas para cada PR
 
 - Un objetivo técnico coherente.
 - Alcance pequeño y reversible.
-- Pruebas de regresión o caracterización.
-- Sin actualizar expectativas solo para obtener CI verde.
-- Sin eliminar código antes de probar que fue reemplazado o no tiene consumidores.
-- Sin despliegue automático.
+- Pruebas de caracterización o regresión.
+- Estado actual, comportamiento objetivo y deuda claramente diferenciados.
+- Sin cambiar expectativas solo para obtener CI verde.
+- Sin eliminar código antes de demostrar reemplazo o falta de consumidores.
 - Riesgo, aceptación y rollback documentados.
-- Revisión de aislamiento cuando el cambio afecte datos, archivos, colas o cachés.
+- Revisión de tenant, idempotencia y privacidad cuando corresponda.
 
-## 12. Criterios de éxito
+## 15. Criterios de éxito
 
-La iniciativa estará logrando su propósito cuando:
-
-- un nuevo cliente pueda incorporarse mediante configuración y credenciales, sin copiar el flujo;
-- ningún tenant pueda leer o modificar recursos de otro;
-- cada turno tenga una interpretación y un plan únicos;
-- una pregunta fuera de orden sea respondida sin perder el progreso;
-- las reglas de vacante, geografía, agenda y recordatorios provengan de configuración;
-- el webhook sea un adaptador de entrada y no el motor completo;
-- los estados sean válidos, auditables y reproducibles;
-- la eliminación de redundancias reduzca complejidad sin perder comportamiento validado.
-
-## 13. Referencias arquitectónicas
-
-- Microsoft Azure Architecture Center: diseño de soluciones multitenant.
-- Microsoft Azure Architecture Center: patrón Strangler Fig para modernización incremental.
-- AWS Well-Architected SaaS Lens.
-- The Twelve-Factor App: configuración externa, procesos sin estado y logs como flujos de eventos.
+- Un nuevo cliente se incorpora mediante configuración y credenciales.
+- Ningún tenant puede acceder a recursos de otro.
+- Cada turno tiene una interpretación y un plan únicos.
+- Las preguntas fuera de orden se responden sin perder progreso.
+- Los efectos externos son idempotentes y auditables.
+- Las políticas provienen de configuración versionada.
+- El webhook deja de ser el motor completo.
+- La reducción de redundancia disminuye complejidad sin perder comportamiento protegido.
