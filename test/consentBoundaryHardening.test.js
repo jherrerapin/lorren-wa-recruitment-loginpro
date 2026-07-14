@@ -45,6 +45,24 @@ test('los datos personales explícitos continúan protegidos antes del consentim
   assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
 });
 
+test('la presentación natural con soy nombre queda protegida antes del consentimiento', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: 'PENDING', currentStep: 'MENU', botResumeMode: null },
+    { type: 'text', text: { body: 'Soy Laura Pérez, quiero aplicar a auxiliar de bodega' } }
+  );
+
+  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+});
+
+test('una declaración explícita de género queda protegida antes del consentimiento', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: 'PENDING', currentStep: 'MENU', botResumeMode: null },
+    { type: 'text', text: { body: 'Soy mujer, quiero aplicar a auxiliar de bodega' } }
+  );
+
+  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+});
+
 test('el modo pendiente conserva contexto de vacante alternativa y reenvío de HV', () => {
   const encoded = buildConsentPendingMode({
     resumeMode: 'alternative_vacancy_offer:vacancy-77',
