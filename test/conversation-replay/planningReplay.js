@@ -16,6 +16,13 @@ import { applyFieldPolicy } from '../../src/services/policyLayer.js';
 
 const CONSENT_SOURCE = 'WHATSAPP_CANDIDATE';
 const CONSENT_ACTOR = 'candidate_whatsapp';
+const PRE_CONSENT_CV_RESEND_MODE = 'pre_consent_cv_resend';
+const PROTECTED_ATTACHMENT_BOUNDARY_REASONS = new Set([
+  'attachment_before_consent',
+  'capture_mode_without_consent',
+  'consent_pending',
+  'consent_revoked'
+]);
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
 const PRE_CONSENT_ATTACHMENT_REPLY = 'Recibí que intentaste enviar un archivo, pero todavía no lo descargué ni lo guardé. Antes de recibir datos, hojas de vida o documentos necesito tu autorización para el tratamiento de datos.';
 const CONSENT_PROMPT = `Antes de recibir o guardar datos personales, hojas de vida o documentos, necesito tu autorización para tratarlos con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nPuedes responder de forma natural si autorizas o si no autorizas.`;
@@ -25,12 +32,15 @@ function fixtureNow(fixture) {
 }
 
 function buildInboundMessage(fixture) {
+  const interactiveBody = String(fixture.inbound.body || '');
   return {
     id: fixture.inbound.messageId,
     from: 'TEST-PHONE-REPLAY',
     type: fixture.inbound.type,
     text: fixture.inbound.type === 'text' ? { body: fixture.inbound.body } : undefined,
-    interactive: fixture.inbound.type === 'interactive' ? { body: fixture.inbound.body } : undefined,
+    interactive: fixture.inbound.type === 'interactive'
+      ? { button_reply: { id: interactiveBody, title: interactiveBody } }
+      : undefined,
     document: fixture.inbound.type === 'document' ? structuredClone(fixture.inbound.attachment || {}) : undefined,
     image: fixture.inbound.type === 'image' ? structuredClone(fixture.inbound.attachment || {}) : undefined
   };
@@ -157,15 +167,21 @@ function planConsentDecision(fixture, state, interpretation) {
   };
 }
 
+function resolveAttachmentResumeMode(candidate = {}, pendingContext = {}) {
+  if (pendingContext.pending) return pendingContext.resumeMode;
+  const currentMode = String(candidate.botResumeMode || '').trim() || null;
+  return currentMode === PRE_CONSENT_CV_RESEND_MODE ? null : currentMode;
+}
+
 function planPreConsentAttachment(fixture, state) {
   const boundary = evaluateConsentBoundary(state.candidate, buildInboundMessage(fixture));
-  if (!boundary.block || !['attachment_before_consent', 'consent_pending', 'consent_revoked'].includes(boundary.reason)) {
+  if (!boundary.block || !PROTECTED_ATTACHMENT_BOUNDARY_REASONS.has(boundary.reason)) {
     throw new Error(`${fixture.id}: el adjunto no quedó protegido por la frontera de consentimiento`);
   }
 
   const pendingContext = parseConsentPendingMode(state.candidate.botResumeMode);
   const botResumeMode = buildConsentPendingMode({
-    resumeMode: pendingContext.resumeMode,
+    resumeMode: resolveAttachmentResumeMode(state.candidate, pendingContext),
     cvResendRequired: true
   });
   state.candidate.botResumeMode = botResumeMode;
@@ -277,11 +293,11 @@ export function replayFixturePlanning(fixture, interpretationReplay) {
   const state = clonePlanningState(fixture);
   const interpretation = interpretationReplay.interpretation;
 
-  if (interpretation.consentDecision) {
-    return planConsentDecision(fixture, state, interpretation);
-  }
   if (['document', 'image'].includes(fixture.inbound.type) && state.candidate.dataConsentStatus !== 'ACCEPTED') {
     return planPreConsentAttachment(fixture, state);
+  }
+  if (interpretation.consentDecision) {
+    return planConsentDecision(fixture, state, interpretation);
   }
   if (interpretation.intent === 'CONTINUE_APPLICATION' && state.candidate.dataConsentStatus !== 'ACCEPTED') {
     return planConsentRequest(fixture, state);
