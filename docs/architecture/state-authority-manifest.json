@@ -29,7 +29,7 @@
         { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Mutación atómica compartida de campos y evento de consentimiento" },
         { "path": "src/services/conversationEngine.js", "role": "legacy", "reason": "Motor conversacional heredado" },
         { "path": "src/services/cvStorage.js", "role": "boundary", "reason": "Persistencia de metadatos y contenido de CV" },
-        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento y reanudación todavía pendiente de migración" },
+        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento, mensajes y reanudación; delega la decisión versionada en ConsentStateService" },
         { "path": "src/services/metaAdsInsightsSync.js", "role": "integration", "reason": "Sincronización de datos Meta" },
         { "path": "src/services/originRuntime.js", "role": "integration", "reason": "Origen y procedencia del candidato" },
         { "path": "src/services/reminder.js", "role": "operational", "reason": "Estados y tiempos de recordatorios" }
@@ -66,12 +66,11 @@
     "candidateDataConsentEvent": {
       "tableName": "CandidateDataConsentEvent",
       "domain": "consent",
-      "migrationStage": "consolidating",
+      "migrationStage": "canonical",
       "targetAuthority": "ConsentStateService",
       "risk": "critical",
       "writers": [
-        { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Autoridad compartida para actualización del candidato y evento versionado" },
-        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Aceptación o revocatoria desde WhatsApp todavía pendiente de migración" }
+        { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Única autoridad para actualización del candidato y creación del evento versionado" }
       ]
     },
     "attachmentAnalysis": {
