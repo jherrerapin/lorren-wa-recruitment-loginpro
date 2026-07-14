@@ -40,6 +40,7 @@ const PROFILE_DATA_FIELDS = new Set([
   'documentType',
   'documentNumber',
   'age',
+  'gender',
   'neighborhood',
   'locality',
   'medicalRestrictions',
@@ -49,6 +50,8 @@ const PROFILE_DATA_FIELDS = new Set([
   'experienceSummary'
 ]);
 
+const NON_NAME_INTRODUCTION_PATTERN = /\b(mujer|hombre|femenin[ao]|masculin[ao]|candidat[ao]|interesad[ao]|auxiliar|operari[ao]|coordinador[ao]?|lider|bodega|cargue|descargue|servicios?|generales?|vacante|cargo|aplicar|postularme?)\b/;
+
 const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de recibir o guardar datos personales, hojas de vida o documentos, necesito tu autorización para tratarlos con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nPuedes responder de forma natural si autorizas o si no autorizas.`;
 const CONSENT_CLARIFIER_REPLY = 'Para continuar necesito saber si autorizas a LoginPro a tratar tus datos y hoja de vida para este proceso. Puedes responder de forma natural si autorizas o si no autorizas.';
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
@@ -56,7 +59,8 @@ const VACANCY_NOT_CONFIRMED_REPLY = 'Entendido. Para ubicar bien tu proceso, cu�
 const PRE_CONSENT_ATTACHMENT_REPLY = 'Recibí que intentaste enviar un archivo, pero todavía no lo descargué ni lo guardé. Antes de recibir datos, hojas de vida o documentos necesito tu autorización para el tratamiento de datos.';
 const PRE_CONSENT_DATA_REPLY = 'Veo que compartiste información personal, pero todavía no la registré en tu perfil. Antes de recibir o guardar tus datos necesito tu autorización para el tratamiento de datos.';
 const CONSENT_GATE_ERROR_REPLY = 'No pude validar tu autorización en este momento. Por seguridad no voy a recibir ni guardar datos o documentos. Intenta nuevamente más tarde.';
-const RESEND_CV_REPLY = 'Como el archivo anterior llegó antes de la autorización y no fue guardado, vuelve a adjuntar tu hoja de vida en PDF, DOC o DOCX.';
+const RESEND_CV_REPLY = 'Como el archivo anterior llegó antes de la autorización y no fue guardado, vuelve a adjuntar tu hoja de vida en PDF o DOCX.';
+const ALTERNATIVE_VACANCY_UNAVAILABLE_REPLY = 'Gracias, tu autorización quedó registrada. La vacante alternativa que te había mencionado ya no está activa o dejó de recibir postulaciones. Cuéntame la ciudad y el cargo que te interesa para revisar opciones vigentes.';
 
 function normalize(value = '') {
   return String(value || '')
@@ -95,6 +99,26 @@ function startsWithExplicitVacancyConfirmation(text = '') {
   return /^(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
 }
 
+function hasExplicitConsentAcceptance(text = '') {
+  const normalized = normalize(text);
+  if (!normalized) return false;
+  return hasAny(normalized, [
+    /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
+    /\b(estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso|tienen mi permiso|autorizacion concedida)\b/,
+    /\b(pueden|puede)\s+(usar|tratar|manejar|procesar|guardar)\s+(mis|los)\s+datos\b/,
+    /\b(pueden|puede)\s+continuar\s+con\s+(mis|los)\s+datos\b/
+  ]);
+}
+
+function hasExplicitConsentRejection(text = '') {
+  const normalized = normalize(text);
+  if (!normalized) return false;
+  return hasAny(normalized, [
+    /\b(no autorizo|no acepto|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
+    /\b(rechazo|revoco)\b.*\b(autorizacion|consentimiento|tratamiento de datos)\b/
+  ]);
+}
+
 export function isConsentAcceptance(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
@@ -117,6 +141,16 @@ export function isConsentRejection(text = '') {
     /\b(no autorizo|no acepto|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
     /\b(no|negativo|paso|no gracias)\b$/
   ]);
+}
+
+export function shouldRecordConsentAcceptance(text = '', { consentPromptPending = false } = {}) {
+  if (!isConsentAcceptance(text)) return false;
+  return Boolean(consentPromptPending || hasExplicitConsentAcceptance(text));
+}
+
+export function shouldRecordConsentRejection(text = '', { consentPromptPending = false } = {}) {
+  if (!isConsentRejection(text)) return false;
+  return Boolean(consentPromptPending || hasExplicitConsentRejection(text));
 }
 
 function isAffirmativeVacancyConfirmation(text = '') {
@@ -175,8 +209,24 @@ function inboundText(message = {}) {
   return '';
 }
 
-function hasExplicitNameEvidence(text = '') {
-  return /\b(me llamo|mi nombre(?: completo)?(?: es)?|nombre(?: completo)?\s*[:\-])\b/i.test(String(text || ''));
+function hasExplicitNameEvidence(text = '', fullName = '') {
+  const raw = String(text || '');
+  if (/\b(me llamo|mi nombre(?: completo)?(?: es)?|nombre(?: completo)?\s*[:\-])\b/i.test(raw)) return true;
+
+  const normalizedText = normalize(raw);
+  const normalizedName = normalize(fullName);
+  if (!normalizedName || !normalizedText.startsWith(`soy ${normalizedName}`)) return false;
+
+  const tokens = normalizedName.split(' ').filter(Boolean);
+  if (tokens.length < 2 || tokens.length > 6) return false;
+  return !NON_NAME_INTRODUCTION_PATTERN.test(normalizedName);
+}
+
+function hasExplicitGenderEvidence(text = '') {
+  return hasAny(String(text || ''), [
+    /\b(?:soy|me considero|me identifico como)\s+(?:un|una)?\s*(?:mujer|hombre|femenin[ao]|masculin[ao])\b/i,
+    /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:mujer|hombre|femenin[ao]|masculin[ao])\b/i
+  ]);
 }
 
 function containsProfileData(text = '') {
@@ -186,7 +236,8 @@ function containsProfileData(text = '') {
   const normalized = normalizeCandidateFields(parseNaturalData(raw));
   const acceptedFields = Object.entries(normalized).filter(([field, value]) => {
     if (!PROFILE_DATA_FIELDS.has(field) || !hasValue(value)) return false;
-    if (field === 'fullName' && !hasExplicitNameEvidence(raw)) return false;
+    if (field === 'fullName' && !hasExplicitNameEvidence(raw, value)) return false;
+    if (field === 'gender' && !hasExplicitGenderEvidence(raw)) return false;
     return isHighConfidenceLocalField(field, value);
   });
 
@@ -335,6 +386,10 @@ async function loadVacancy(prisma, vacancyId) {
   });
 }
 
+function isVacancyOpenForApplications(vacancy = null) {
+  return Boolean(vacancy?.isActive && vacancy?.acceptingApplications);
+}
+
 function vacancyCity(vacancy = {}) {
   return vacancy?.operation?.city?.name || vacancy?.city || '';
 }
@@ -438,6 +493,39 @@ export function deriveConsentResumeUpdate(resumeMode = null) {
   return {
     currentStep: ConversationStep.COLLECTING_DATA,
     botResumeMode: null
+  };
+}
+
+export async function resolveConsentResumeContext(prisma, resumeMode = null) {
+  const alternative = parseAlternativeMode(resumeMode);
+  if (!alternative.active || !alternative.vacancyId) {
+    return {
+      resumeUpdate: deriveConsentResumeUpdate(resumeMode),
+      vacancy: null,
+      alternativeUnavailable: false,
+      requestedVacancyId: null
+    };
+  }
+
+  const vacancy = await loadVacancy(prisma, alternative.vacancyId);
+  if (!isVacancyOpenForApplications(vacancy)) {
+    return {
+      resumeUpdate: {
+        vacancyId: null,
+        currentStep: ConversationStep.GREETING_SENT,
+        botResumeMode: null
+      },
+      vacancy: null,
+      alternativeUnavailable: true,
+      requestedVacancyId: alternative.vacancyId
+    };
+  }
+
+  return {
+    resumeUpdate: deriveConsentResumeUpdate(resumeMode),
+    vacancy,
+    alternativeUnavailable: false,
+    requestedVacancyId: alternative.vacancyId
   };
 }
 
@@ -550,18 +638,29 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   const questionReply = buildConsentQuestionReply(body) || buildVacancyQuestionReply(vacancy, body);
 
-  if (isConsentRejection(body)) {
+  if (shouldRecordConsentRejection(body, { consentPromptPending: context.pending })) {
     await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
     await recordConsent(prisma, req, candidate, 'REVOKED');
     await sendAndStore(prisma, candidate.id, from, CONSENT_REVOKED_REPLY, 'data_consent_revoked');
     return true;
   }
 
-  if (isConsentAcceptance(body)) {
+  if (shouldRecordConsentAcceptance(body, { consentPromptPending: context.pending })) {
     await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'ACCEPTED');
-    const resumeUpdate = deriveConsentResumeUpdate(context.resumeMode);
-    const consentedCandidate = await recordConsent(prisma, req, candidate, 'ACCEPTED', resumeUpdate);
-    vacancy = await loadVacancy(prisma, consentedCandidate?.vacancyId || candidate.vacancyId);
+    const resumeContext = await resolveConsentResumeContext(prisma, context.resumeMode);
+    const consentedCandidate = await recordConsent(prisma, req, candidate, 'ACCEPTED', resumeContext.resumeUpdate);
+
+    if (resumeContext.alternativeUnavailable) {
+      const reply = [questionReply, ALTERNATIVE_VACANCY_UNAVAILABLE_REPLY].filter(Boolean).join('\n\n');
+      await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_accepted_alternative_unavailable', {
+        resumedMode: context.resumeMode,
+        requestedVacancyId: resumeContext.requestedVacancyId,
+        cvResendRequired: context.cvResendRequired
+      });
+      return true;
+    }
+
+    vacancy = resumeContext.vacancy || await loadVacancy(prisma, consentedCandidate?.vacancyId || candidate.vacancyId);
 
     let captured = { candidate: consentedCandidate, capturedFields: [] };
     try {
