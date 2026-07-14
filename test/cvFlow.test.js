@@ -14,21 +14,22 @@ test('datos completos sin CV pasan a ASK_CV y no a DONE', () => {
   assert.notEqual(step, 'DONE');
 });
 
-test('el contrato de carga permite únicamente PDF y DOCX', () => {
-  assert.deepEqual(ALLOWED_CV_EXTENSIONS, ['.pdf', '.docx']);
+test('el contrato de carga permite PDF, DOC y DOCX con MIME coherente', () => {
+  assert.deepEqual(ALLOWED_CV_EXTENSIONS, ['.pdf', '.doc', '.docx']);
   assert.equal(hasAllowedCvExtension('hv.pdf'), true);
+  assert.equal(hasAllowedCvExtension('hv.doc'), true);
   assert.equal(hasAllowedCvExtension('hv.docx'), true);
-  assert.equal(hasAllowedCvExtension('hv.doc'), false);
 
   assert.equal(isCvMimeTypeAllowed('application/pdf', 'hv.pdf'), true);
+  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), true);
   assert.equal(isCvMimeTypeAllowed('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'hv.docx'), true);
   assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.pdf'), true);
+  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), true);
   assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.docx'), true);
+  assert.equal(isCvMimeTypeAllowed('', 'hv.doc'), true);
 
-  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), false);
-  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), false);
-  assert.equal(isCvMimeTypeAllowed('', 'hv.doc'), false);
   assert.equal(isCvMimeTypeAllowed('application/pdf', 'hv.doc'), false);
+  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.docx'), false);
   assert.equal(isCvMimeTypeAllowed('application/pdf', 'hv.exe'), false);
   assert.equal(isCvMimeTypeAllowed('image/jpeg', 'hv.jpg'), false);
 });
