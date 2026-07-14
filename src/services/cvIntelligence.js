@@ -51,6 +51,45 @@ function compareCandidateWithCv(candidate = {}, extracted = {}) {
   ].filter(Boolean);
 }
 
+function safeErrorMessage(error) {
+  return String(error?.message || error || 'unknown_error')
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
+    .replace(/(access_token=)[^&\s]+/gi, '$1[REDACTED]')
+    .slice(0, 500);
+}
+
+function failureSummary(reason = '') {
+  const summaries = {
+    candidate_without_cv: 'El candidato no tiene una hoja de vida almacenada.',
+    cv_read_failed: 'No fue posible leer el archivo almacenado.',
+    unsupported_file_type: 'Formato no compatible. La hoja de vida debe estar en PDF o DOCX.',
+    missing_buffer: 'No existe contenido de archivo disponible para analizar.',
+    empty_pdf_text: 'El PDF no contiene texto legible.',
+    empty_docx_text: 'El DOCX no contiene texto legible.',
+    text_extraction_failed: 'No fue posible extraer el texto del archivo.',
+    ai_not_configured: 'La extracción inteligente no está configurada.',
+    ai_no_structured_output: 'La extracción inteligente no devolvió un resultado estructurado.',
+    ai_analysis_failed: 'La extracción inteligente no pudo completarse.'
+  };
+  return summaries[reason] || 'No fue posible completar el análisis de la hoja de vida.';
+}
+
+async function persistAttachmentAnalysis(prisma, candidate, data = {}) {
+  return prisma.attachmentAnalysis.create({
+    data: {
+      candidateId: candidate.id,
+      originalName: candidate.cvOriginalName || null,
+      mimeType: candidate.cvMimeType || null,
+      classification: data.classification || AttachmentClassification.OTHER,
+      extractedText: data.extractedText || null,
+      summary: data.summary || null,
+      confidence: Number.isFinite(Number(data.confidence)) ? Number(data.confidence) : null,
+      modelUsed: data.modelUsed || null,
+      rawResponse: data.rawResponse || null
+    }
+  });
+}
+
 async function extractCvWithAi(text = '') {
   if (!process.env.OPENAI_API_KEY) return null;
 
@@ -88,36 +127,104 @@ export async function analyzeCandidateCv(prisma, candidateId, options = {}) {
 
   if (!candidate) return { ok: false, reason: 'candidate_not_found' };
 
-  const buffer = await resolveCandidateCvBuffer(candidate);
+  let buffer;
+  try {
+    buffer = await resolveCandidateCvBuffer(candidate);
+  } catch (error) {
+    const reason = 'cv_read_failed';
+    const analysis = await persistAttachmentAnalysis(prisma, candidate, {
+      classification: AttachmentClassification.OTHER,
+      confidence: 0,
+      summary: failureSummary(reason),
+      rawResponse: {
+        source: 'lorren_v2_cv_analysis',
+        stage: 'storage_read',
+        reason,
+        error: safeErrorMessage(error)
+      }
+    });
+    return { ok: false, reason, analysis };
+  }
+
   if (!buffer) return { ok: false, reason: 'candidate_without_cv' };
 
-  const textResult = await extractCvText(buffer, {
-    mimeType: candidate.cvMimeType,
-    fileName: candidate.cvOriginalName
-  });
+  let textResult;
+  try {
+    textResult = await extractCvText(buffer, {
+      mimeType: candidate.cvMimeType,
+      fileName: candidate.cvOriginalName
+    });
+  } catch (error) {
+    textResult = {
+      ok: false,
+      text: '',
+      reason: 'text_extraction_failed',
+      error: safeErrorMessage(error)
+    };
+  }
 
   if (!textResult.ok) {
-    const analysis = await prisma.attachmentAnalysis.create({
-      data: {
-        candidateId,
-        classification: AttachmentClassification.UNREADABLE,
-        confidence: 0,
-        evidence: JSON.stringify({ reason: textResult.reason, source: 'loren_v2_cv_analysis' }),
-        mimeType: candidate.cvMimeType,
-        fileName: candidate.cvOriginalName
+    const classification = textResult.reason === 'unsupported_file_type'
+      ? AttachmentClassification.OTHER
+      : AttachmentClassification.UNREADABLE;
+    const analysis = await persistAttachmentAnalysis(prisma, candidate, {
+      classification,
+      confidence: 0,
+      extractedText: textResult.text || null,
+      summary: failureSummary(textResult.reason),
+      rawResponse: {
+        source: 'lorren_v2_cv_analysis',
+        stage: 'text_extraction',
+        reason: textResult.reason,
+        error: textResult.error || null
       }
     });
     return { ok: false, reason: textResult.reason, analysis };
   }
 
-  const extracted = await extractCvWithAi(textResult.text);
-  if (!extracted) return { ok: false, reason: 'ai_not_configured_or_failed' };
+  let extracted;
+  try {
+    extracted = await extractCvWithAi(textResult.text);
+  } catch (error) {
+    const reason = 'ai_analysis_failed';
+    const analysis = await persistAttachmentAnalysis(prisma, candidate, {
+      classification: AttachmentClassification.OTHER,
+      confidence: 0,
+      extractedText: textResult.text,
+      summary: failureSummary(reason),
+      modelUsed: MODEL,
+      rawResponse: {
+        source: 'lorren_v2_cv_analysis',
+        stage: 'ai_extraction',
+        reason,
+        error: safeErrorMessage(error)
+      }
+    });
+    return { ok: false, reason, analysis };
+  }
+
+  if (!extracted) {
+    const reason = process.env.OPENAI_API_KEY ? 'ai_no_structured_output' : 'ai_not_configured';
+    const analysis = await persistAttachmentAnalysis(prisma, candidate, {
+      classification: AttachmentClassification.OTHER,
+      confidence: 0,
+      extractedText: textResult.text,
+      summary: failureSummary(reason),
+      modelUsed: process.env.OPENAI_API_KEY ? MODEL : null,
+      rawResponse: {
+        source: 'lorren_v2_cv_analysis',
+        stage: 'ai_extraction',
+        reason
+      }
+    });
+    return { ok: false, reason, analysis };
+  }
 
   const comparisons = compareCandidateWithCv(candidate, extracted);
   const mismatches = comparisons.filter((item) => item.status === 'mismatch');
   const confidence = Number(extracted.confidence || 0);
   const evidence = {
-    source: 'loren_v2_cv_analysis',
+    source: 'lorren_v2_cv_analysis',
     generatedAt: new Date().toISOString(),
     textExtractionReason: textResult.reason,
     candidate: {
@@ -133,23 +240,26 @@ export async function analyzeCandidateCv(prisma, candidateId, options = {}) {
     warnings: extracted.warnings || []
   };
 
-  const analysis = await prisma.attachmentAnalysis.create({
-    data: {
-      candidateId,
-      classification: AttachmentClassification.CV_VALID,
-      confidence,
-      evidence: JSON.stringify(evidence),
-      mimeType: candidate.cvMimeType,
-      fileName: candidate.cvOriginalName
-    }
+  const analysis = await persistAttachmentAnalysis(prisma, candidate, {
+    classification: AttachmentClassification.CV_VALID,
+    confidence,
+    extractedText: textResult.text,
+    summary: mismatches.length
+      ? `Hoja de vida analizada con ${mismatches.length} diferencia(s) frente al chat.`
+      : 'Hoja de vida analizada sin diferencias detectadas frente al chat.',
+    modelUsed: MODEL,
+    rawResponse: evidence
   });
 
   return { ok: true, analysis, evidence };
 }
 
 export function parseCvAnalysisEvidence(analysis = {}) {
+  const value = analysis?.rawResponse ?? analysis?.evidence ?? null;
+  if (value && typeof value === 'object') return value;
+  if (typeof value !== 'string') return {};
   try {
-    return JSON.parse(analysis?.evidence || '{}');
+    return JSON.parse(value);
   } catch {
     return {};
   }
