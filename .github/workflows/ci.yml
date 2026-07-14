@@ -75,6 +75,9 @@ jobs:
       - name: Run contextual robustness regressions
         run: node --test test/contextualReplyRobustness.test.js
 
+      - name: Run contextual logging regressions
+        run: node --test test/contextualReplyLogging.test.js
+
       - name: Run hardening P0 regressions
         run: node --test test/hardeningP0.test.js
 
