@@ -153,9 +153,9 @@ export function isConsentAcceptance(text = '') {
 export function isConsentRejection(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
-  if (isQuestionLike(text) && !/^(no|negativo|no autorizo|no acepto|no doy)\b/.test(normalized)) return false;
+  if (isQuestionLike(text) && !/^(no|negativo|no autorizo|no acepto|no estoy de acuerdo|no doy)\b/.test(normalized)) return false;
   return hasAny(normalized, [
-    /\b(no autorizo|no acepto|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
+    /\b(no autorizo|no acepto|no estoy de acuerdo|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
     /\b(no|negativo|paso|no gracias)\b$/
   ]);
 }
