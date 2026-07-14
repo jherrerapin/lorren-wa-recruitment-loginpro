@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "id": "context-correction-during-data-collection-v1",
+  "title": "Lórren corrige un dato sin reiniciar la recolección",
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v2"
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-test-003",
+      "status": "EN_PROCESO",
+      "currentStep": "COLLECTING_DATA",
+      "dataConsentStatus": "ACCEPTED",
+      "vacancyId": "vacancy-test-bogota-warehouse",
+      "locality": "Suba",
+      "transportMode": null
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-test-bogota-warehouse",
+      "isActive": true,
+      "acceptingApplications": true,
+      "city": "Bogotá",
+      "title": "Auxiliar de bodega"
+    },
+    "pendingFields": ["transportMode"]
+  },
+  "history": [
+    {
+      "direction": "OUTBOUND",
+      "body": "¿Cuál es tu medio de transporte?"
+    }
+  ],
+  "inbound": {
+    "messageId": "test-message-context-002",
+    "type": "text",
+    "body": "Antes corrijo algo: no vivo en Suba, vivo en Engativá"
+  },
+  "expected": {
+    "interpretation": {
+      "intent": "CORRECT_CANDIDATE_DATA",
+      "additionalIntents": [],
+      "consentDecision": null,
+      "providedFields": {
+        "locality": "Engativá"
+      }
+    },
+    "plan": {
+      "actions": [
+        {
+          "type": "UPDATE_CANDIDATE_FIELDS",
+          "data": {
+            "fields": {
+              "locality": "Engativá"
+            }
+          }
+        },
+        {
+          "type": "ACKNOWLEDGE_CORRECTION"
+        },
+        {
+          "type": "RESUME_PENDING_FIELD",
+          "data": {
+            "field": "transportMode"
+          }
+        }
+      ],
+      "allowedWrites": [
+        "candidate.locality",
+        "candidate.lastOutboundAt",
+        "message.outbound"
+      ],
+      "forbiddenWrites": [
+        "candidate.transportMode",
+        "candidate.currentStep",
+        "candidate.status"
+      ],
+      "nextStep": "COLLECTING_DATA",
+      "pendingField": "transportMode"
+    },
+    "response": {
+      "requiredFacts": [
+        "Debe confirmar que la localidad fue corregida a Engativá",
+        "Debe retomar de forma natural la pregunta por el medio de transporte"
+      ],
+      "forbiddenClaims": [
+        "El medio de transporte quedó registrado",
+        "La postulación quedó completa"
+      ]
+    },
+    "finalState": {
+      "currentStep": "COLLECTING_DATA",
+      "locality": "Engativá",
+      "pendingFields": ["transportMode"]
+    }
+  }
+}
