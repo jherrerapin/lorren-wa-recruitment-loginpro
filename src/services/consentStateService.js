@@ -8,7 +8,7 @@ const ALLOWED_CANDIDATE_PATCH_FIELDS = new Set([
 ]);
 
 function requireNonEmptyString(value, label) {
-  const normalized = String(value || '').trim();
+  const normalized = String(value ?? '').trim();
   if (!normalized) throw new Error(`${label}_required`);
   return normalized;
 }
@@ -20,7 +20,8 @@ function normalizeNullableString(value) {
 }
 
 function normalizeTimestamp(value) {
-  const date = value instanceof Date ? value : new Date(value || Date.now());
+  const rawValue = value === null || value === undefined ? Date.now() : value;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(rawValue);
   if (Number.isNaN(date.getTime())) throw new Error('consent_timestamp_invalid');
   return date;
 }
@@ -46,6 +47,12 @@ function sanitizeCandidatePatch(candidatePatch = {}) {
     sanitized[field] = value;
   }
   return sanitized;
+}
+
+function validatePrismaContract(prisma) {
+  return typeof prisma?.candidate?.update === 'function'
+    && typeof prisma?.candidateDataConsentEvent?.create === 'function'
+    && typeof prisma?.$transaction === 'function';
 }
 
 export function buildConsentStateMutation({
@@ -102,7 +109,7 @@ export async function recordCandidateDataConsent(prisma, {
   candidatePatch = {},
   now = new Date()
 } = {}) {
-  if (!prisma?.candidate?.update || !prisma?.candidateDataConsentEvent?.create || !prisma?.$transaction) {
+  if (!validatePrismaContract(prisma)) {
     throw new Error('consent_prisma_contract_invalid');
   }
 
