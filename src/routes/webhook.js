@@ -37,7 +37,7 @@ import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/reply
 import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
-import { persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';
+import { persistInboundConversationMessage, persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';
 import { ContextualAllowedAction, evaluateContextualResponseGate, inferContextualSemanticIntent } from '../services/contextualResponseGate.js';
 import { FUTURE_PROFILE_CAPTURE_MODE, PAUSED_VACANCY_CAPTURE_MODE, resolveVacancyFirstGate, VacancyFirstGateAction } from '../services/vacancyFirstGate.js';
 import {
@@ -1253,21 +1253,17 @@ async function finalizeCandidateAfterCv(prisma, candidate, from) {
 
 export async function saveInboundMessage(prisma, candidateId, message, body, type, phone) {
   const waMessageId = message?.id || null;
-  const messageData = {
+  const persistInbound = (messageType) => persistInboundConversationMessage(prisma, {
     candidateId,
     waMessageId,
-    direction: MessageDirection.INBOUND,
-    messageType: type,
+    messageType,
     body,
     rawPayload: sanitizeForRawPayload(message)
-  };
+  });
   let insertResult;
 
   try {
-    insertResult = await prisma.message.createMany({
-      data: [messageData],
-      skipDuplicates: true
-    });
+    insertResult = await persistInbound(type);
   } catch (error) {
     const messageTypeMismatch = /invalid input value for enum "MessageType"/i.test(String(error?.message || ''));
     if (!messageTypeMismatch || type === MessageType.UNKNOWN) throw error;
@@ -1280,13 +1276,10 @@ export async function saveInboundMessage(prisma, candidateId, message, body, typ
       persistedType: MessageType.UNKNOWN
     }));
 
-    insertResult = await prisma.message.createMany({
-      data: [{ ...messageData, messageType: MessageType.UNKNOWN }],
-      skipDuplicates: true
-    });
+    insertResult = await persistInbound(MessageType.UNKNOWN);
   }
 
-  if (insertResult.count === 0) {
+  if (!insertResult.created) {
     console.log('[INBOUND_DUPLICATE_IGNORED]', JSON.stringify({
       phone: phone || null,
       waMessageId,

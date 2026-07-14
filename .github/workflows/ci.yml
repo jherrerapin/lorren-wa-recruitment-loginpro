@@ -106,7 +106,7 @@ jobs:
         run: node --test test/adminManualOutbound.test.js
 
       - name: Run webhook message authority regressions
-        run: node --test test/webhookMessageAuthority.test.js test/turnOrchestratorContracts.test.js
+        run: node --test test/webhookMessageAuthority.test.js test/webhookInboundMessageAuthority.test.js test/webhookIdempotency.test.js test/webhookPersistence.test.js test/turnOrchestratorContracts.test.js
 
       - name: Run reminder regressions
         run: node --test test/reminder.test.js

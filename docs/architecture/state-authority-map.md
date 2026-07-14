@@ -70,14 +70,17 @@ La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboun
 
 `admin.js` permanece declarado como escritor de `Message` porque la eliminación de un candidato borra sus mensajes dentro de la misma transacción mediante `tx.message.deleteMany()`. Esa operación no forma parte de la mensajería saliente y no se modifica en esta etapa.
 
-En `webhook.js` se migraron dos fronteras salientes acotadas:
+En `webhook.js` se migraron tres fronteras acotadas:
 
+- `saveInboundMessage()` delega la creación idempotente en `persistInboundConversationMessage()` y conserva `waMessageId`, sanitización del payload, fallback `MessageType.UNKNOWN`, detección de duplicados, actualización de `Candidate.lastInboundAt` y resolución del ID creado;
 - `saveOutboundMessage()` delega la persistencia común de respuestas `TEXT` y conserva la actualización posterior de `Candidate.lastOutboundAt`;
 - `recordIntentionalSilence()` delega la traza interna de silencio, preservando `visibility=internal`, `neverSendToCandidate=true` y su manejo tolerante de errores.
 
-El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y la programación del recordatorio permanece después. No se modifican interpretación, payload de seguridad, candidatos, agenda ni el inbox.
+El número de teléfono no se persiste en `Message` porque ese campo no existe en Prisma; continúa disponible en `Candidate`, en el payload original de WhatsApp y en los logs operativos del inbox.
 
-`webhook.js` permanece declarado como escritor de `Message` porque todavía controla el ingreso idempotente y otras mutaciones directas pendientes de inventario y migración.
+El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y la programación del recordatorio permanece después. No se modifican interpretación, payload de seguridad, candidatos, agenda ni el procesamiento multilinea.
+
+`webhook.js` permanece declarado como escritor de `Message` porque todavía actualiza la traza de depuración de un mensaje y marca lotes entrantes con `respondedAt`.
 
 Los escritores directos de `Message` permanecen en tres: webhook, administración por eliminación transaccional y el repositorio compartido.
 
