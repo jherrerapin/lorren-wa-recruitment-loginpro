@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
+import { parseConsentPendingMode } from '../src/services/dataConsentGate.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { replayFixtureInterpretation } from './conversation-replay/interpretationReplay.js';
 import { replayFixturePlanning } from './conversation-replay/planningReplay.js';
@@ -37,10 +38,32 @@ function assertExpectedFinalState(expected, actual, label) {
   }
 }
 
+function assertConsentDecisionEvidence(intent, replay, label) {
+  const expectedStatus = intent === 'ACCEPT_DATA_CONSENT' ? 'ACCEPTED' : 'REVOKED';
+  const expectedStep = expectedStatus === 'ACCEPTED' ? 'COLLECTING_DATA' : 'DONE';
+  assert.equal(replay.evidence.consentDecision, expectedStatus, `${label}: decisión de consentimiento incorrecta`);
+  assert.equal(replay.evidence.consentUpdate.dataConsentStatus, expectedStatus, `${label}: estado persistido incorrecto`);
+  assert.equal(replay.evidence.consentUpdate.currentStep, expectedStep, `${label}: transición de consentimiento incorrecta`);
+  assert.equal(replay.evidence.consentEvent.status, expectedStatus, `${label}: evento de consentimiento incorrecto`);
+  assert.equal(replay.evidence.consentEvent.version, 'lorren-v2-2026-07-v3', `${label}: versión de consentimiento incorrecta`);
+}
+
 function assertAuthorityEvidence(intent, replay, label) {
   if (intent === 'CONTINUE_APPLICATION') {
     assert.equal(replay.evidence.consentBoundary.block, true, `${label}: la frontera de consentimiento debe bloquear el turno`);
     assert.equal(replay.evidence.consentBoundary.reason, 'candidate_wants_to_continue', `${label}: debe conservar la razón real del gate`);
+  }
+
+  if (intent === 'ACCEPT_DATA_CONSENT' || intent === 'REJECT_DATA_CONSENT') {
+    assertConsentDecisionEvidence(intent, replay, label);
+  }
+
+  if (intent === 'SEND_ATTACHMENT') {
+    assert.equal(replay.evidence.consentBoundary.block, true, `${label}: el adjunto debe quedar bloqueado antes del consentimiento`);
+    assert.equal(replay.evidence.consentBoundary.reason, 'attachment_before_consent', `${label}: razón de bloqueo incorrecta`);
+    const pending = parseConsentPendingMode(replay.finalState.botResumeMode);
+    assert.equal(pending.pending, true, `${label}: debe quedar consentimiento pendiente`);
+    assert.equal(pending.cvResendRequired, true, `${label}: debe solicitarse reenvío del archivo después de autorizar`);
   }
 
   if (intent === 'ASK_VACANCY_SCHEDULE') {
