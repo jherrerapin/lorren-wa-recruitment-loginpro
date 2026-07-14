@@ -9,7 +9,10 @@ import {
 const CANONICAL_INTENT_BY_RUNTIME = Object.freeze({
   continue_application: 'CONTINUE_APPLICATION',
   ask_vacancy_schedule: 'ASK_VACANCY_SCHEDULE',
-  provide_correction: 'CORRECT_CANDIDATE_DATA'
+  provide_correction: 'CORRECT_CANDIDATE_DATA',
+  accept_data_consent: 'ACCEPT_DATA_CONSENT',
+  reject_data_consent: 'REJECT_DATA_CONSENT',
+  send_attachment: 'SEND_ATTACHMENT'
 });
 
 function lastOutboundQuestion(history = []) {
@@ -19,13 +22,17 @@ function lastOutboundQuestion(history = []) {
     ?.body || '';
 }
 
-function resolveConsentDecision(fixture) {
+function inboundText(fixture) {
+  return ['text', 'interactive'].includes(fixture.inbound.type)
+    ? String(fixture.inbound.body || '')
+    : String(fixture.inbound.caption || '');
+}
+
+function resolveConsentDecision(fixture, text) {
   const candidate = fixture.initialState.candidate;
   if (candidate.dataConsentStatus === 'ACCEPTED') return null;
 
   const consentPromptPending = parseConsentPendingMode(candidate.botResumeMode).pending;
-  const text = fixture.inbound.body;
-
   if (shouldRecordConsentRejection(text, { consentPromptPending })) return 'REVOKED';
   if (shouldRecordConsentAcceptance(text, { consentPromptPending })) return 'ACCEPTED';
   return null;
@@ -48,7 +55,7 @@ function deriveAdditionalIntents(primaryIntent, turn) {
 export async function replayFixtureInterpretation(fixture) {
   const candidate = fixture.initialState.candidate;
   const vacancy = fixture.initialState.vacancy;
-  const text = fixture.inbound.body;
+  const text = inboundText(fixture);
   const context = {
     tenantContext: fixture.tenantContext,
     policyContext: fixture.policyContext,
@@ -56,7 +63,9 @@ export async function replayFixtureInterpretation(fixture) {
     vacancy,
     currentStep: candidate.currentStep,
     pendingFields: fixture.initialState.pendingFields || [],
-    lastBotQuestion: lastOutboundQuestion(fixture.history)
+    lastBotQuestion: lastOutboundQuestion(fixture.history),
+    inboundType: fixture.inbound.type,
+    attachment: fixture.inbound.attachment || null
   };
 
   const turn = analyzeConversationTurn(text, { currentStep: candidate.currentStep });
@@ -72,12 +81,13 @@ export async function replayFixtureInterpretation(fixture) {
     interpretation: {
       intent,
       additionalIntents: deriveAdditionalIntents(intent, turn),
-      consentDecision: resolveConsentDecision(fixture),
+      consentDecision: resolveConsentDecision(fixture, text),
       providedFields: understanding.candidateFields
     },
     evidence: {
       turn,
-      understanding
+      understanding,
+      attachment: fixture.inbound.attachment ? structuredClone(fixture.inbound.attachment) : null
     }
   };
 }
