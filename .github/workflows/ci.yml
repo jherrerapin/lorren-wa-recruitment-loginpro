@@ -70,7 +70,7 @@ jobs:
         run: node --test test/flowDecisionAuthority.test.js
 
       - name: Run consent boundary regressions
-        run: node --test test/flexibleApplicationFlow.test.js
+        run: node --test test/flexibleApplicationFlow.test.js test/consentBoundaryHardening.test.js
 
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
