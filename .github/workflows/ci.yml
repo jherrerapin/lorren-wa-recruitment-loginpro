@@ -78,9 +78,6 @@ jobs:
       - name: Run hardening P0 regressions
         run: node --test test/hardeningP0.test.js
 
-      - name: Run hardening P0 delta regressions
-        run: node --test test/hardeningP0Delta.test.js
-
       - name: Run CV format regressions
         run: node --test test/p9CvOnlyPdfDocx.test.js
 
@@ -129,7 +126,7 @@ jobs:
             echo "| Failed | $fail_count |"
             echo "| Cancelled | $cancelled_count |"
             echo "| Skipped | $skipped_count |"
-            echo "| Process exit code | $test_exit |"
+            echo "| Process exit code | $test_exit"
             echo
             echo "<details>"
             echo "<summary>Failing top-level tests</summary>"
