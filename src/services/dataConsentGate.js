@@ -51,6 +51,8 @@ const PROFILE_DATA_FIELDS = new Set([
 ]);
 
 const NON_NAME_INTRODUCTION_PATTERN = /\b(mujer|hombre|femenin[ao]|masculin[ao]|candidat[ao]|interesad[ao]|auxiliar|operari[ao]|coordinador[ao]?|lider|bodega|cargue|descargue|servicios?|generales?|vacante|cargo|aplicar|postularme?)\b/;
+const CONSENT_SUBJECT_PATTERN = /\b(tratamiento|datos|dato personal|datos personales|hoja de vida|hv|documentos?|consentimiento|autorizacion)\b/;
+const OFFER_SUBJECT_PATTERN = /\b(vacante|oferta|cargo|trabajo|empleo|postulacion|entrevista)\b/;
 
 const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de recibir o guardar datos personales, hojas de vida o documentos, necesito tu autorización para tratarlos con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nPuedes responder de forma natural si autorizas o si no autorizas.`;
 const CONSENT_CLARIFIER_REPLY = 'Para continuar necesito saber si autorizas a LoginPro a tratar tus datos y hoja de vida para este proceso. Puedes responder de forma natural si autorizas o si no autorizas.';
@@ -99,24 +101,39 @@ function startsWithExplicitVacancyConfirmation(text = '') {
   return /^(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
 }
 
+function referencesConsentSubject(text = '') {
+  return CONSENT_SUBJECT_PATTERN.test(normalize(text));
+}
+
+function referencesOfferSubject(text = '') {
+  return OFFER_SUBJECT_PATTERN.test(normalize(text));
+}
+
 function hasExplicitConsentAcceptance(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
-  return hasAny(normalized, [
-    /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
-    /\b(estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso|tienen mi permiso|autorizacion concedida)\b/,
+
+  if (hasAny(normalized, [
+    /\b(autorizo|autorisado|autorizado|consiento)\b/,
+    /\b(doy mi consentimiento|doy consentimiento|autorizacion concedida)\b/,
     /\b(pueden|puede)\s+(usar|tratar|manejar|procesar|guardar)\s+(mis|los)\s+datos\b/,
     /\b(pueden|puede)\s+continuar\s+con\s+(mis|los)\s+datos\b/
-  ]);
+  ])) return true;
+
+  if (!referencesConsentSubject(normalized)) return false;
+  return /\b(acepto|estoy de acuerdo|doy permiso|tienen mi permiso)\b/.test(normalized);
 }
 
 function hasExplicitConsentRejection(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
-  return hasAny(normalized, [
-    /\b(no autorizo|no acepto|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
+
+  if (hasAny(normalized, [
+    /\b(no autorizo|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
     /\b(rechazo|revoco)\b.*\b(autorizacion|consentimiento|tratamiento de datos)\b/
-  ]);
+  ])) return true;
+
+  return referencesConsentSubject(normalized) && /\b(no acepto|no estoy de acuerdo)\b/.test(normalized);
 }
 
 export function isConsentAcceptance(text = '') {
@@ -145,12 +162,18 @@ export function isConsentRejection(text = '') {
 
 export function shouldRecordConsentAcceptance(text = '', { consentPromptPending = false } = {}) {
   if (!isConsentAcceptance(text)) return false;
-  return Boolean(consentPromptPending || hasExplicitConsentAcceptance(text));
+  if (hasExplicitConsentAcceptance(text)) return true;
+  if (!consentPromptPending) return false;
+  if (referencesOfferSubject(text) && !referencesConsentSubject(text)) return false;
+  return true;
 }
 
 export function shouldRecordConsentRejection(text = '', { consentPromptPending = false } = {}) {
   if (!isConsentRejection(text)) return false;
-  return Boolean(consentPromptPending || hasExplicitConsentRejection(text));
+  if (hasExplicitConsentRejection(text)) return true;
+  if (!consentPromptPending) return false;
+  if (referencesOfferSubject(text) && !referencesConsentSubject(text)) return false;
+  return true;
 }
 
 function isAffirmativeVacancyConfirmation(text = '') {
