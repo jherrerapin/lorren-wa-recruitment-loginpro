@@ -149,23 +149,23 @@ export async function analyzeAttachment({ buffer, mimeType = '', filename = '' }
   if (mime === 'application/msword' || name.endsWith('.doc')) {
     return buildResult({
       attachmentKind: 'doc',
-      classification: 'CV_VALID',
-      confidence: 0.86,
-      rationale: 'accepted_legacy_word_document',
-      evidence: ['doc_format_allowed_for_cv']
+      classification: 'OTHER',
+      confidence: 1,
+      rationale: 'legacy_word_document_not_supported',
+      evidence: ['doc_format_not_allowed_for_cv']
     });
   }
 
-  if (mime.includes('word') || name.endsWith('.docx')) {
+  if (mime.includes('wordprocessingml.document') || name.endsWith('.docx')) {
     const parsed = await extractDocxText(buffer).catch(() => ({ value: '' }));
     const text = String(parsed?.value || '').slice(0, 6000);
     if (process.env.OPENAI_API_KEY) {
       const ai = await classifyWithResponses({ mimeType: mime || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: name, textHint: text });
       if (ai.classification !== 'UNREADABLE' || text.trim().length < MIN_TEXT_LENGTH) {
-        return buildResult({ ...ai, attachmentKind: 'doc', extractedText: text });
+        return buildResult({ ...ai, attachmentKind: 'docx', extractedText: text });
       }
     }
-    return buildResult({ ...classifyFromText(text, 'doc'), attachmentKind: 'doc', extractedText: text });
+    return buildResult({ ...classifyFromText(text, 'docx'), attachmentKind: 'docx', extractedText: text });
   }
 
   return buildResult({ attachmentKind: 'other', classification: 'OTHER', confidence: 0.5, rationale: 'unsupported_format', evidence: ['unsupported_format'] });
