@@ -27,6 +27,14 @@ function validateOutboundContract(prisma) {
   );
 }
 
+function validatePayloadUpdateContract(prisma) {
+  return Boolean(
+    prisma
+    && prisma.message
+    && typeof prisma.message.update === 'function'
+  );
+}
+
 function buildMessageData({
   candidateId,
   direction,
@@ -92,5 +100,26 @@ export async function persistOutboundConversationMessage(prisma, input = {}) {
     created: true,
     message,
     data
+  };
+}
+
+export async function updateConversationMessagePayload(prisma, {
+  messageId,
+  rawPayload = null
+} = {}) {
+  if (!validatePayloadUpdateContract(prisma)) {
+    throw new Error('message_payload_update_prisma_contract_invalid');
+  }
+
+  const normalizedMessageId = requireNonEmptyString(messageId, 'message_id');
+  const message = await prisma.message.update({
+    where: { id: normalizedMessageId },
+    data: { rawPayload }
+  });
+
+  return {
+    updated: true,
+    message,
+    data: { rawPayload }
   };
 }
