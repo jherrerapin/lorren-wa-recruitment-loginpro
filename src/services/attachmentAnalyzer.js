@@ -1,3 +1,5 @@
+import { extractLegacyWordText } from './legacyWordText.js';
+
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MODEL = 'gpt-5.4-mini-2026-03-17';
 const MIN_TEXT_LENGTH = 80;
@@ -147,13 +149,35 @@ export async function analyzeAttachment({ buffer, mimeType = '', filename = '' }
   }
 
   if (mime === 'application/msword' || name.endsWith('.doc')) {
-    return buildResult({
-      attachmentKind: 'doc',
-      classification: 'OTHER',
-      confidence: 1,
-      rationale: 'legacy_word_document_not_supported',
-      evidence: ['doc_format_not_allowed_for_cv']
-    });
+    const extracted = extractLegacyWordText(buffer);
+    if (extracted.reason === 'invalid_doc_container') {
+      return buildResult({
+        attachmentKind: 'doc',
+        classification: 'OTHER',
+        confidence: 1,
+        rationale: 'invalid_legacy_word_container',
+        evidence: ['doc_extension_without_ole_container']
+      });
+    }
+
+    const text = String(extracted.text || '').slice(0, 6000);
+    if (!text) {
+      return buildResult({
+        attachmentKind: 'doc',
+        classification: 'CV_VALID',
+        confidence: 0.45,
+        rationale: 'legacy_word_container_requires_manual_review',
+        evidence: ['legacy_word_ole_container', 'manual_review_recommended']
+      });
+    }
+
+    if (process.env.OPENAI_API_KEY) {
+      const ai = await classifyWithResponses({ mimeType: mime || 'application/msword', filename: name, textHint: text });
+      if (ai.classification !== 'UNREADABLE' || text.trim().length < MIN_TEXT_LENGTH) {
+        return buildResult({ ...ai, attachmentKind: 'doc', extractedText: text });
+      }
+    }
+    return buildResult({ ...classifyFromText(text, 'doc'), attachmentKind: 'doc', extractedText: text });
   }
 
   if (mime.includes('wordprocessingml.document') || name.endsWith('.docx')) {
