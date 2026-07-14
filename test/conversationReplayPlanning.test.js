@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { replayFixtureInterpretation } from './conversation-replay/interpretationReplay.js';
 import { replayFixturePlanning } from './conversation-replay/planningReplay.js';
@@ -9,14 +10,8 @@ function collectCandidateChanges(initialCandidate, finalState) {
   const changed = [];
 
   for (const key of keys) {
-    if (key === 'pendingFields') continue;
-    if (!Object.hasOwn(finalState, key)) continue;
-    if (!assert.deepEqual) continue;
-    try {
-      assert.deepEqual(finalState[key], initialCandidate?.[key]);
-    } catch {
-      changed.push(`candidate.${key}`);
-    }
+    if (key === 'pendingFields' || !Object.hasOwn(finalState, key)) continue;
+    if (!isDeepStrictEqual(finalState[key], initialCandidate?.[key])) changed.push(`candidate.${key}`);
   }
 
   return changed;
