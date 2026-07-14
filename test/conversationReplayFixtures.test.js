@@ -141,6 +141,8 @@ function validateFixture(fixture, label) {
   assert.ok(expected.response && typeof expected.response === 'object', `${label}: falta expected.response`);
   assertStringArray(expected.response.requiredFacts, `${label}: expected.response.requiredFacts`);
   assertStringArray(expected.response.forbiddenClaims, `${label}: expected.response.forbiddenClaims`);
+  assertStringArray(expected.response.requiredText, `${label}: expected.response.requiredText`);
+  assertStringArray(expected.response.forbiddenText, `${label}: expected.response.forbiddenText`);
   assert.ok(expected.finalState && typeof expected.finalState === 'object', `${label}: falta expected.finalState`);
 
   inspectStructuredSensitiveValues(fixture, label);

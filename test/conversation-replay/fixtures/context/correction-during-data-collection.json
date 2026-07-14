@@ -118,7 +118,9 @@
       "forbiddenClaims": [
         "El medio de transporte quedó registrado",
         "La postulación quedó completa"
-      ]
+      ],
+      "requiredText": ["Engativá", "medio de transporte"],
+      "forbiddenText": ["medio de transporte quedó registrado", "postulación quedó completa"]
     },
     "finalState": {
       "currentStep": "COLLECTING_DATA",
