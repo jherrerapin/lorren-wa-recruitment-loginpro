@@ -37,6 +37,8 @@ La ruta `src/routes/lorenV2DataConsents.js` ya no escribe directamente `Candidat
 - actor que registró la decisión;
 - evento versionado con IP, agente de usuario y nota opcional.
 
+La autoridad puede recibir el cliente Prisma principal —abriendo una única transacción— o un cliente `tx` existente, reutilizando la unidad atómica del caso de uso sin intentar anidarla.
+
 El número total de escritores de `Candidate` permanece en quince porque la ruta administrativa fue reemplazada por la nueva autoridad compartida. `CandidateDataConsentEvent` continúa con dos escritores mientras `dataConsentGate.js` siga persistiendo directamente la decisión recibida por WhatsApp.
 
 Esta etapa se mantiene como `consolidating`. El consentimiento solo podrá marcarse `canonical` cuando el gate de WhatsApp también delegue en `ConsentStateService` y el manifiesto registre un único escritor.
