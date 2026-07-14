@@ -159,7 +159,7 @@ function planConsentDecision(fixture, state, interpretation) {
 
 function planPreConsentAttachment(fixture, state) {
   const boundary = evaluateConsentBoundary(state.candidate, buildInboundMessage(fixture));
-  if (!boundary.block || !['attachment_before_consent', 'consent_pending'].includes(boundary.reason)) {
+  if (!boundary.block || !['attachment_before_consent', 'consent_pending', 'consent_revoked'].includes(boundary.reason)) {
     throw new Error(`${fixture.id}: el adjunto no quedó protegido por la frontera de consentimiento`);
   }
 
