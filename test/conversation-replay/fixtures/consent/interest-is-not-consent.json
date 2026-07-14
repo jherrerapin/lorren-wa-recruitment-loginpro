@@ -10,7 +10,19 @@
   "policyContext": {
     "conversationPolicyVersion": "conversation-policy-test-v1",
     "vacancyPolicyVersion": "vacancy-policy-test-v1",
-    "consentVersion": "lorren-v2-2026-07-v2"
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "providerStubs": {
+    "aiResult": {
+      "status": "ok",
+      "intent": "continue_application",
+      "parsedFields": {},
+      "extraction": {
+        "turnType": "CONFIRMATION",
+        "fieldEvidence": {},
+        "conflicts": []
+      }
+    }
   },
   "initialState": {
     "candidate": {

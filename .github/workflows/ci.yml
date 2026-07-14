@@ -72,6 +72,9 @@ jobs:
       - name: Run consent boundary regressions
         run: node --test test/flexibleApplicationFlow.test.js test/consentBoundaryHardening.test.js
 
+      - name: Run deterministic conversation replay
+        run: node --test test/conversationReplayFixtures.test.js test/conversationReplayInterpretation.test.js
+
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
       # regression gate until its exact baseline is deterministic.

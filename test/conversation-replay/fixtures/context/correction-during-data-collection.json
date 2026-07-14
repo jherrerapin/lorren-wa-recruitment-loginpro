@@ -10,7 +10,33 @@
   "policyContext": {
     "conversationPolicyVersion": "conversation-policy-test-v1",
     "vacancyPolicyVersion": "vacancy-policy-test-v1",
-    "consentVersion": "lorren-v2-2026-07-v2"
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "providerStubs": {
+    "aiResult": {
+      "status": "ok",
+      "intent": "provide_correction",
+      "parsedFields": {
+        "locality": "Engativá"
+      },
+      "extraction": {
+        "turnType": "CORRECTION",
+        "fieldEvidence": {
+          "locality": {
+            "snippet": "vivo en Engativá",
+            "confidence": 0.98,
+            "source": "structured_output"
+          }
+        },
+        "conflicts": [
+          {
+            "field": "locality",
+            "previousValue": "Suba",
+            "newValue": "Engativá"
+          }
+        ]
+      }
+    }
   },
   "initialState": {
     "candidate": {
