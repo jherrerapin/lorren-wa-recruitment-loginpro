@@ -49,27 +49,27 @@ jobs:
                   raise SystemExit('No se encontró exactamente un import de WhatsApp')
               text = text.replace(import_old, import_new, 1)
 
-          old = """  await prisma.message.create({
-            data: {
-              candidateId: candidate.id,
-              direction: MessageDirection.OUTBOUND,
-              messageType: MessageType.TEXT,
-              body: finalBody,
-              rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
-            }
-          });"""
-          new = """  await persistOutboundConversationMessage(prisma, {
+          function_start = text.index('async function sendAdminOutboundMessage')
+          next_function = text.index('\nfunction buildManualInterviewReminderText', function_start)
+          direct_start_token = '  await prisma.message.create({'
+          repository_start_token = '  await persistOutboundConversationMessage(prisma, {'
+          direct_start = text.find(direct_start_token, function_start, next_function)
+          repository_start = text.find(repository_start_token, function_start, next_function)
+
+          if direct_start >= 0:
+              block_end = text.rfind('\n  });', direct_start, next_function)
+              if block_end < 0:
+                  raise SystemExit('No se encontró el cierre de la persistencia manual')
+              block_end += len('\n  });')
+              replacement = """  await persistOutboundConversationMessage(prisma, {
             candidateId: candidate.id,
             messageType: MessageType.TEXT,
             body: finalBody,
             rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
           });"""
-          if old not in text and new not in text:
-              raise SystemExit('No se encontró el bloque exacto de persistencia manual')
-          if old in text:
-              if text.count(old) != 1:
-                  raise SystemExit('El bloque de persistencia manual no es único')
-              text = text.replace(old, new, 1)
+              text = text[:direct_start] + replacement + text[block_end:]
+          elif repository_start < 0:
+              raise SystemExit('No se encontró persistencia directa ni migrada en sendAdminOutboundMessage')
 
           path.write_text(text, encoding='utf-8')
           PY
