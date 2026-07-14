@@ -18,6 +18,22 @@ const FALLBACK_INTENT_BY_SITUATION = Object.freeze({
   process_human_review_required: 'human_review'
 });
 
+const FIELD_LABELS = Object.freeze({
+  fullName: 'nombre completo',
+  documentType: 'tipo de documento',
+  documentNumber: 'número de documento',
+  phone: 'número de teléfono',
+  age: 'edad',
+  city: 'ciudad',
+  locality: 'localidad',
+  neighborhood: 'barrio',
+  medicalRestrictions: 'restricciones médicas',
+  transportMode: 'medio de transporte',
+  experienceInfo: 'si tienes experiencia',
+  experienceTime: 'tiempo de experiencia',
+  experienceSummary: 'en qué tienes experiencia'
+});
+
 function parseStructuredOutput(data = {}) {
   const output = data?.output || [];
   for (const item of output) {
@@ -32,7 +48,10 @@ function parseStructuredOutput(data = {}) {
 }
 
 function humanizeFieldName(field = '') {
-  return String(field || '')
+  const raw = String(field || '').trim();
+  if (!raw) return '';
+  if (FIELD_LABELS[raw]) return FIELD_LABELS[raw];
+  return raw
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .toLowerCase()
