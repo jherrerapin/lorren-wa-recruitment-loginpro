@@ -2,16 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageDirection, MessageType } from '@prisma/client';
 import {
+  markConversationMessagesResponded,
+  mergeConversationMessagePayload,
   persistInboundConversationMessage,
   persistOutboundConversationMessage,
   updateConversationMessagePayload
 } from '../src/services/conversationMessageRepository.js';
 
-function createPrismaMock({ inboundCount = 1 } = {}) {
+function createPrismaMock({ inboundCount = 1, updateManyCount = 2, existingRawPayload = { source: 'inbound' } } = {}) {
   const calls = {
     createMany: [],
     create: [],
-    update: []
+    findUnique: [],
+    update: [],
+    updateMany: []
   };
   const prisma = {
     message: {
@@ -23,9 +27,17 @@ function createPrismaMock({ inboundCount = 1 } = {}) {
         calls.create.push(data);
         return { id: 'message-test-1', ...data };
       },
+      findUnique: async (args) => {
+        calls.findUnique.push(args);
+        return { rawPayload: existingRawPayload };
+      },
       update: async (args) => {
         calls.update.push(args);
         return { id: args.where.id, ...args.data };
+      },
+      updateMany: async (args) => {
+        calls.updateMany.push(args);
+        return { count: updateManyCount };
       }
     }
   };
@@ -133,6 +145,54 @@ test('actualiza únicamente el payload del mensaje identificado', async () => {
   }]);
 });
 
+test('fusiona una traza en rawPayload sin borrar metadatos previos', async () => {
+  const { prisma, calls } = createPrismaMock({
+    existingRawPayload: { source: 'inbound', existing: true }
+  });
+  const debug = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };
+
+  const result = await mergeConversationMessagePayload(prisma, {
+    messageId: 'message-inbound-1',
+    patch: { debug }
+  });
+
+  assert.deepEqual(calls.findUnique, [{
+    where: { id: 'message-inbound-1' },
+    select: { rawPayload: true }
+  }]);
+  assert.deepEqual(calls.update, [{
+    where: { id: 'message-inbound-1' },
+    data: {
+      rawPayload: {
+        source: 'inbound',
+        existing: true,
+        debug
+      }
+    }
+  }]);
+  assert.equal(result.updated, true);
+  assert.deepEqual(result.rawPayload.debug, debug);
+});
+
+test('marca un lote deduplicado como respondido con fecha controlada', async () => {
+  const { prisma, calls } = createPrismaMock({ updateManyCount: 2 });
+  const respondedAt = new Date('2026-07-14T21:00:00.000Z');
+
+  const result = await markConversationMessagesResponded(prisma, {
+    messageIds: ['message-1', 'message-2', 'message-1'],
+    respondedAt
+  });
+
+  assert.equal(result.updated, 2);
+  assert.deepEqual(result.messageIds, ['message-1', 'message-2']);
+  assert.notEqual(result.respondedAt, respondedAt);
+  assert.equal(result.respondedAt.toISOString(), respondedAt.toISOString());
+  assert.deepEqual(calls.updateMany, [{
+    where: { id: { in: ['message-1', 'message-2'] } },
+    data: { respondedAt: result.respondedAt }
+  }]);
+});
+
 test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos antes de persistir', async () => {
   await assert.rejects(
     () => persistInboundConversationMessage({}, {
@@ -154,6 +214,19 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
       rawPayload: {}
     }),
     /message_payload_update_prisma_contract_invalid/
+  );
+  await assert.rejects(
+    () => mergeConversationMessagePayload({ message: { update: async () => {} } }, {
+      messageId: 'message-test-1',
+      patch: {}
+    }),
+    /message_payload_merge_prisma_contract_invalid/
+  );
+  await assert.rejects(
+    () => markConversationMessagesResponded({ message: { updateMany: true } }, {
+      messageIds: ['message-test-1']
+    }),
+    /message_responded_prisma_contract_invalid/
   );
 
   const { prisma, calls } = createPrismaMock();
@@ -200,7 +273,28 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
     }),
     /raw_payload_required/
   );
+  await assert.rejects(
+    () => mergeConversationMessagePayload(prisma, {
+      messageId: 'message-test-1',
+      patch: []
+    }),
+    /payload_patch_required/
+  );
+  await assert.rejects(
+    () => markConversationMessagesResponded(prisma, {
+      messageIds: []
+    }),
+    /message_ids_required/
+  );
+  await assert.rejects(
+    () => markConversationMessagesResponded(prisma, {
+      messageIds: ['message-test-1'],
+      respondedAt: 'fecha-inválida'
+    }),
+    /responded_at_invalid/
+  );
   assert.equal(calls.createMany.length, 0);
   assert.equal(calls.create.length, 0);
   assert.equal(calls.update.length, 0);
+  assert.equal(calls.updateMany.length, 0);
 });
