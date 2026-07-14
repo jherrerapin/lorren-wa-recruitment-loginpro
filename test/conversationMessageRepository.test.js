@@ -193,6 +193,13 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
     }),
     /raw_payload_required/
   );
+  await assert.rejects(
+    () => updateConversationMessagePayload(prisma, {
+      messageId: 'message-test-1',
+      rawPayload: undefined
+    }),
+    /raw_payload_required/
+  );
   assert.equal(calls.createMany.length, 0);
   assert.equal(calls.create.length, 0);
   assert.equal(calls.update.length, 0);
