@@ -17,6 +17,91 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  apply-webhook-message-completion:
+    name: Apply scoped webhook message completion
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 447 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact webhook message completion
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/routes/webhook.js')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = "import { persistInboundConversationMessage, persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';"
+          new_import = """import {
+            markConversationMessagesResponded,
+            mergeConversationMessagePayload,
+            persistInboundConversationMessage,
+            persistOutboundConversationMessage
+          } from '../services/conversationMessageRepository.js';"""
+          if old_import in text:
+              text = text.replace(old_import, new_import, 1)
+          elif 'mergeConversationMessagePayload' not in text or 'markConversationMessagesResponded' not in text:
+              raise SystemExit('No se encontró el import esperado del repositorio de mensajes')
+
+          trace_start = text.index('export async function attachDebugTrace')
+          trace_end = text.index('\nfunction createDebugTrace', trace_start)
+          trace_replacement = """export async function attachDebugTrace(prisma, messageId, debugTrace) {
+            if (!messageId) return;
+            return mergeConversationMessagePayload(prisma, {
+              messageId,
+              patch: { debug: debugTrace }
+            });
+          }"""
+          text = text[:trace_start] + trace_replacement + text[trace_end:]
+
+          multiline_start = text.index('const pendingBatch = await fetchPendingTextBatch')
+          direct_start = text.find('            await prisma.message.updateMany({', multiline_start)
+          delegated_start = text.find('            await markConversationMessagesResponded(prisma, {', multiline_start)
+          if direct_start >= 0:
+              direct_end = text.index('\n          } catch (error)', direct_start)
+              replacement = """            await markConversationMessagesResponded(prisma, {
+              messageIds: pendingBatch.map((item) => item.id),
+              respondedAt: new Date()
+            });"""
+              text = text[:direct_start] + replacement + text[direct_end:]
+          elif delegated_start < 0:
+              raise SystemExit('No se encontró el marcado directo ni delegado de respondedAt')
+
+          trace_block = text[trace_start:text.index('\nfunction createDebugTrace', trace_start)]
+          if 'prisma.message.update(' in trace_block or 'prisma.message.findUnique(' in trace_block:
+              raise SystemExit('Persistencia directa restante en attachDebugTrace')
+          if 'mergeConversationMessagePayload(prisma,' not in trace_block:
+              raise SystemExit('Falta delegación de attachDebugTrace')
+
+          processing_block = text[multiline_start:text.index('\n          } catch (error)', multiline_start)]
+          if 'prisma.message.updateMany(' in processing_block:
+              raise SystemExit('Persistencia directa restante en marcado respondedAt')
+          if 'markConversationMessagesResponded(prisma,' not in processing_block:
+              raise SystemExit('Falta delegación del marcado respondedAt')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/webhook.js
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "refactor: completar migración de mensajes del webhook"
+          git push origin HEAD:${{ github.head_ref }}
+
   state-authority:
     name: Validate state authorities
     runs-on: ubuntu-latest
