@@ -9,7 +9,6 @@ import {
   replyTokenCount,
   tokenOverlapRatio
 } from '../src/services/replySimilarityPolicy.js';
-import { buildPolicyReply } from '../src/services/responsePolicy.js';
 import { buildContextualReply } from '../src/services/contextualReply.js';
 
 test('replySimilarityPolicy centraliza normalización, conteo y overlap base', () => {
@@ -62,22 +61,6 @@ test('replySimilarityPolicy usa propósito o acción cuando existe aunque el ove
   );
 });
 
-test('responsePolicy usa la política centralizada sin cambiar fallback base', () => {
-  const result = buildPolicyReply({
-    replyIntent: 'request_missing_data',
-    recentOutbound: [
-      { body: 'Para continuar necesito este dato pendiente. En cuanto me lo compartas, seguimos.' },
-      { body: 'Vamos bien; compárteme ese dato puntual y seguimos.' },
-      { body: 'Gracias. Compárteme ese dato faltante y continúo de inmediato con tu proceso.' }
-    ],
-    fallback: 'Compárteme ese dato para avanzar.'
-  });
-
-  assert.equal(result.text, 'Compárteme ese dato para avanzar.');
-  assert.equal(result.intent, 'request_missing_data');
-});
-
-
 function withAxiosMock(handler, fn) {
   const original = axios.post.bind(axios);
   axios.post = handler;
@@ -88,7 +71,7 @@ function withAxiosMock(handler, fn) {
     });
 }
 
-test('contextualReply conserva repeat guard exacto y no bloquea replies cortos similares', async () => {
+test('contextualReply conserva repeat guard exacto y usa el fallback explícito del turno', async () => {
   process.env.OPENAI_API_KEY = 'test-key';
 
   await withAxiosMock(async () => ({
@@ -101,6 +84,7 @@ test('contextualReply conserva repeat guard exacto y no bloquea replies cortos s
     });
     assert.equal(exact.fallbackUsed, true);
     assert.equal(exact.reason, 'repeat_guard');
+    assert.equal(exact.text, 'Seguimos con tu proceso.');
   });
 
   await withAxiosMock(async () => ({

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPolicyReply } from '../src/services/responsePolicy.js';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
+import { buildSafeContextualFallbackText } from '../src/services/contextualReply.js';
 import { looksLikeCvFilenameText } from '../src/services/cvFlow.js';
 import { sanitizeRequiredDocumentsForBot, generateInterviewOffer, generateBookingConfirmation, preserveConfiguredInterviewDocuments } from '../src/services/naturalReply.js';
 import { CV_UNSAFE_FALLBACK_REPLY, sanitizeOutboundReply } from '../src/services/replySafety.js';
@@ -14,9 +14,9 @@ function assertNoForbiddenHvTerms(reply) {
   assert.doesNotMatch(reply, /minerva\s*1003/i);
 }
 
-test('responsePolicy pide HV solo en PDF o DOCX para intents críticos', () => {
-  for (const replyIntent of ['request_cv_pdf_word', 'request_missing_cv', 'attachment_unreadable', 'attachment_id_doc']) {
-    const { text } = buildPolicyReply({ replyIntent });
+test('fallbacks críticos piden HV solo como archivo PDF o DOCX', () => {
+  for (const situation of ['attachment_resume_photo', 'attachment_other_doc', 'attachment_unreadable', 'attachment_id_doc']) {
+    const text = buildSafeContextualFallbackText({ situation });
     assert.match(text, /PDF o DOCX/i);
     assertNoForbiddenHvTerms(text);
   }
@@ -26,7 +26,7 @@ test('image/jpeg no cuenta como CV válido y pide reenviar en PDF o DOCX', async
   const analysis = await analyzeAttachment({ buffer: Buffer.from('fake image bytes'), mimeType: 'image/jpeg', filename: 'hv.jpg' });
   const saveCv = analysis.classification === 'CV_VALID';
   const hasCv = saveCv;
-  const reply = buildPolicyReply({ replyIntent: 'request_cv_pdf_word' }).text;
+  const reply = buildSafeContextualFallbackText({ situation: 'attachment_resume_photo' });
 
   assert.equal(saveCv, false);
   assert.equal(hasCv, false);
@@ -82,7 +82,6 @@ test('caso Alfonso usa documentos de la vacante, no formato de carga de HV', asy
   assert.doesNotMatch(reply, /configurad/i);
   assert.doesNotMatch(reply, /PDF|DOCX/i);
 });
-
 
 test('naturalReply no usa fullName pendiente o rechazado como nombre en respuestas contextuales', async () => {
   const previousKey = process.env.OPENAI_API_KEY;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyFieldPolicy } from '../src/services/policyLayer.js';
-import { buildPolicyReply } from '../src/services/responsePolicy.js';
+import { buildSafeContextualFallbackText } from '../src/services/contextualReply.js';
 
 test('policy bloquea saludo como nombre', () => {
   const result = applyFieldPolicy({
@@ -42,14 +42,10 @@ test('género femenino explícito se persiste con evidencia sólida', () => {
   assert.equal(result.persistedFields.gender, 'FEMALE');
 });
 
-test('responsePolicy evita repetición fuerte en consecutivos', () => {
-  const repeated = 'Gracias por enviarlo. Para continuar necesito tu hoja de vida en PDF o DOCX.';
-  const reply = buildPolicyReply({
-    replyIntent: 'request_cv_pdf_word',
-    recentOutbound: [{ body: repeated }]
-  });
+test('fallback de archivo no válido explica el hecho y la acción necesaria', () => {
+  const reply = buildSafeContextualFallbackText({ situation: 'attachment_other_doc' });
 
-  assert.notEqual(reply.text, repeated);
-  assert.match(reply.text, /PDF|DOCX/i);
-  assert.equal(reply.intent, 'request_cv_pdf_word');
+  assert.match(reply, /no corresponde a una hoja de vida/i);
+  assert.match(reply, /PDF|DOCX/i);
+  assert.doesNotMatch(reply, /perfecto|vamos bien|seguimos con lo puntual/i);
 });
