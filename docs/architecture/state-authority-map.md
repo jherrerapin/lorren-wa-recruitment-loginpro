@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 6 | Alto | Fragmentado | `ConversationMessageRepository` |
+| `Message` | 5 | Alto | Fragmentado | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 2 | Crítico | En consolidación | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -54,7 +54,7 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 
 ### 3. Los mensajes todavía se persisten desde fronteras distintas
 
-La persistencia de `Message` está repartida entre webhook, gates, supervisor, recordatorios y administración. La autoridad objetivo debe distinguir:
+La persistencia de `Message` está repartida entre webhook, consentimiento, supervisor, recordatorios y administración. La autoridad objetivo debe distinguir:
 
 - mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
