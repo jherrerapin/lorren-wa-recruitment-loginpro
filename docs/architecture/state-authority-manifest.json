@@ -57,8 +57,7 @@
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Persistencia principal de mensajes entrantes y salientes" },
         { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Mensajería del supervisor" },
         { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Evidencia y respuestas de consentimiento" },
-        { "path": "src/services/reminder.js", "role": "operational", "reason": "Mensajes de seguimiento y recordatorio" },
-        { "path": "src/services/vacancyFirstGate.js", "role": "boundary", "reason": "Mensajes de identificación inicial de vacante" }
+        { "path": "src/services/reminder.js", "role": "operational", "reason": "Mensajes de seguimiento y recordatorio" }
       ]
     },
     "candidateDataConsentEvent": {
