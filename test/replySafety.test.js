@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeOutboundReply } from '../src/services/replySafety.js';
+import { CV_UNSAFE_FALLBACK_REPLY, sanitizeOutboundReply } from '../src/services/replySafety.js';
 
 const baseVacancy = {
   title: 'Auxiliar logístico',
@@ -30,6 +30,35 @@ test('bloquea pagos quincenales y contrato directo no soportados', () => {
   assert.ok(result.blockedClaims.includes('pagos_quincenales'));
 });
 
+test('normaliza instrucciones heredadas de carga a PDF o DOCX', () => {
+  const variants = [
+    'Adjunta tu hoja de vida como archivo PDF, DOC o DOCX.',
+    'Para registrar tu hoja de vida, adjunta el archivo real en PDF o Word/DOCX.',
+    'Carga tu CV en PDF, Word o DOCX.'
+  ];
+
+  for (const reply of variants) {
+    const result = sanitizeOutboundReply({ reply, vacancy: baseVacancy, source: 'bot_cv_request' });
+    assert.equal(result.blocked, false, reply);
+    assert.match(result.reply, /PDF o DOCX/i, reply);
+    assert.doesNotMatch(result.reply, /PDF\s*,\s*DOC\s+o\s+DOCX/i, reply);
+    assert.doesNotMatch(result.reply, /Word\/DOCX/i, reply);
+    assert.deepEqual(result.normalizations, ['cv_upload_format']);
+  }
+});
+
+test('el fallback de una instrucción insegura también usa solo PDF o DOCX', () => {
+  const result = sanitizeOutboundReply({
+    reply: 'Puedes enviarme la hoja de vida en foto o impresa.',
+    vacancy: baseVacancy,
+    source: 'bot_cv_request'
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(result.reply, CV_UNSAFE_FALLBACK_REPLY);
+  assert.match(result.reply, /PDF o DOCX/i);
+  assert.doesNotMatch(result.reply, /Word\/DOCX|PDF\s*,\s*DOC/i);
+});
 
 test('permite documentos de entrevista sensibles si están configurados en la vacante', () => {
   const vacancy = { ...baseVacancy, requiredDocuments: 'Hoja de vida Minerva 1003 o impresa y cédula original' };
@@ -38,6 +67,16 @@ test('permite documentos de entrevista sensibles si están configurados en la va
     vacancy
   });
   assert.equal(result.blocked, false);
+});
+
+test('no reescribe el formato documental configurado para llevar a entrevista', () => {
+  const vacancy = { ...baseVacancy, requiredDocuments: 'Hoja de vida en Word/DOCX y cédula original' };
+  const reply = 'Para la entrevista recuerda llevar Hoja de vida en Word/DOCX y cédula original.';
+  const result = sanitizeOutboundReply({ reply, vacancy });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.reply, reply);
+  assert.deepEqual(result.normalizations, []);
 });
 
 test('bloquea dirección de entrevista no registrada', () => {
@@ -51,7 +90,6 @@ test('bloquea horario especifico no registrado', () => {
   assert.equal(result.blocked, true);
   assert.ok(result.blockedClaims.includes('horario_especifico'));
 });
-
 
 test('no reescribe mensaje manual autorizado con restricciones de bot automático', () => {
   const manual = 'La vacante tiene prestaciones de ley y pagos quincenales.';
