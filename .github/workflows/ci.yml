@@ -81,6 +81,9 @@ jobs:
       - name: Run conversation planning replay
         run: node --test test/conversationReplayPlanning.test.js
 
+      - name: Run consent and attachment edge replay
+        run: node --test test/conversationReplayConsentAttachmentEdges.test.js
+
       - name: Run integral replay for interest without consent
         env:
           REPLAY_FIXTURE_ID: consent-interest-is-not-consent-v1
