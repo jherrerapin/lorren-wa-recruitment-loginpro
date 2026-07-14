@@ -121,8 +121,8 @@ test('fallback de dato pendiente menciona los campos reales y no una frase vací
     missingFields: ['documentType', 'neighborhood']
   });
 
-  assert.match(text, /document type/i);
-  assert.match(text, /neighborhood/i);
+  assert.match(text, /tipo de documento/i);
+  assert.match(text, /barrio/i);
   assert.doesNotMatch(text, /dato puntual|vamos bien|seguimos/i);
 });
 
@@ -134,7 +134,7 @@ test('fallback de HV válida reconoce el archivo y conserva lo pendiente', () =>
 
   assert.match(text, /hoja de vida/i);
   assert.match(text, /asociada a tu registro/i);
-  assert.match(text, /experience summary/i);
+  assert.match(text, /en qué tienes experiencia/i);
 });
 
 test('fallback explícito definido por la política del turno tiene prioridad', () => {
