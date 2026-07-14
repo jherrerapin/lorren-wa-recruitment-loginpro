@@ -33,7 +33,8 @@ function resolveConsentDecision(fixture) {
 
 function canonicalIntent(runtimeIntent = '') {
   const normalized = String(runtimeIntent || '').trim().toLowerCase();
-  return CANONICAL_INTENT_BY_RUNTIME[normalized] || normalized.toUpperCase();
+  const mappedIntent = CANONICAL_INTENT_BY_RUNTIME[normalized];
+  return typeof mappedIntent === 'string' ? mappedIntent : normalized.toUpperCase();
 }
 
 function deriveAdditionalIntents(primaryIntent, turn) {
