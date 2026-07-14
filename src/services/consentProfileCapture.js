@@ -21,8 +21,8 @@ const CAPTURABLE_FIELDS = new Set([
 ]);
 
 const CONSENT_DECLARATION_PREFIXES = [
-  /^(?:si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)?[\s,;:-]*(?:autorizo|acepto|consiento)(?:\s+(?:el\s+)?tratamiento(?:\s+de)?(?:\s+mis|\s+los)?\s+datos?)?/i,
-  /^(?:si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)?[\s,;:-]*(?:estoy\s+de\s+acuerdo|doy\s+mi\s+consentimiento|doy\s+consentimiento|doy\s+permiso|tienen\s+mi\s+permiso)/i,
+  /^(?:si|sí|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)?[\s,;:-]*(?:autorizo|acepto|consiento)(?:\s+(?:el\s+)?tratamiento(?:\s+de)?(?:\s+mis|\s+los)?\s+datos?)?/i,
+  /^(?:si|sí|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)?[\s,;:-]*(?:estoy\s+de\s+acuerdo|doy\s+mi\s+consentimiento|doy\s+consentimiento|doy\s+permiso|tienen\s+mi\s+permiso)/i,
   /^(?:pueden|puede)\s+(?:usar|tratar|manejar|procesar|guardar)\s+(?:mis|los)\s+datos/i,
   /^(?:pueden|puede)\s+continuar\s+con\s+(?:mis|los)\s+datos/i
 ];
