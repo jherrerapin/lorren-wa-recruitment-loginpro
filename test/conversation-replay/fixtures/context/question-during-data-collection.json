@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "context-question-during-data-collection-v1",
+  "title": "Lórren responde una pregunta y retoma el dato pendiente",
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-test-002",
+      "status": "EN_PROCESO",
+      "currentStep": "COLLECTING_DATA",
+      "dataConsentStatus": "ACCEPTED",
+      "vacancyId": "vacancy-test-bogota-warehouse",
+      "fullName": "Persona Prueba",
+      "documentType": "CC",
+      "documentNumber": "TEST-DOC-002",
+      "locality": null
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-test-bogota-warehouse",
+      "active": true,
+      "acceptingApplications": true,
+      "city": "Bogotá",
+      "title": "Auxiliar de bodega",
+      "conditions": "Turnos rotativos y salario registrado en la configuración de prueba"
+    },
+    "pendingFields": ["locality"]
+  },
+  "history": [
+    {
+      "direction": "OUTBOUND",
+      "body": "¿En qué localidad de Bogotá resides?"
+    }
+  ],
+  "inbound": {
+    "messageId": "test-message-context-001",
+    "type": "text",
+    "body": "Antes de responder, ¿el horario es rotativo?"
+  },
+  "expected": {
+    "understanding": {
+      "intents": ["ASK_VACANCY_SCHEDULE"],
+      "consentDecision": null,
+      "providedFields": {}
+    },
+    "plan": {
+      "actions": ["ANSWER_VACANCY_QUESTION", "RESUME_PENDING_FIELD"],
+      "allowedWrites": [],
+      "forbiddenWrites": [
+        "candidate.locality",
+        "candidate.currentStep",
+        "candidate.status"
+      ],
+      "nextStep": "COLLECTING_DATA",
+      "pendingField": "locality"
+    },
+    "response": {
+      "requiredFacts": [
+        "Debe responder con las condiciones registradas de la vacante",
+        "Debe retomar de forma natural la solicitud de la localidad"
+      ],
+      "forbiddenClaims": [
+        "La localidad quedó registrada",
+        "La postulación quedó completa"
+      ]
+    },
+    "finalState": {
+      "currentStep": "COLLECTING_DATA",
+      "pendingFields": ["locality"]
+    }
+  }
+}
