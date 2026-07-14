@@ -96,6 +96,9 @@ jobs:
       - name: Run consent boundary regressions
         run: node --test test/flexibleApplicationFlow.test.js test/consentBoundaryHardening.test.js
 
+      - name: Run consent state authority regressions
+        run: node --test test/consentStateService.test.js
+
       - name: Validate conversation replay fixtures
         run: node --test test/conversationReplayFixtures.test.js
 
