@@ -59,7 +59,11 @@ function inspectStructuredSensitiveValues(value, label = 'fixture') {
 }
 
 function collectConversationText(fixture) {
-  const fragments = [fixture?.inbound?.body, fixture?.inbound?.caption];
+  const fragments = [
+    fixture?.inbound?.body,
+    fixture?.inbound?.caption,
+    fixture?.inbound?.attachment?.fileName
+  ];
   for (const message of fixture?.history || []) fragments.push(message?.body);
   return fragments.filter((fragment) => typeof fragment === 'string').join('\n');
 }
@@ -75,7 +79,7 @@ function assertNoSensitiveConversationText(fixture, label) {
   assert.doesNotMatch(
     text,
     /(^|\D)\d{6,12}(?=\D|$)/,
-    `${label}: no debe contener números de documento reales en el texto conversacional`
+    `${label}: no debe contener números de documento reales en el texto conversacional o nombre del archivo`
   );
 }
 
@@ -113,6 +117,7 @@ function validateInbound(fixture, label) {
   assert.ok(ATTACHMENT_INBOUND_TYPES.has(inbound.type), `${label}: inbound.type no soportado`);
   assert.ok(inbound.attachment && typeof inbound.attachment === 'object' && !Array.isArray(inbound.attachment), `${label}: falta inbound.attachment`);
   assertNonEmptyString(inbound.attachment.fileName, `${label}: inbound.attachment.fileName`);
+  assert.ok(inbound.attachment.fileName.startsWith('TEST-'), `${label}: el nombre del adjunto debe ser sintético y comenzar por TEST-`);
   assertNonEmptyString(inbound.attachment.mimeType, `${label}: inbound.attachment.mimeType`);
   assert.ok(Number.isInteger(inbound.attachment.sizeBytes) && inbound.attachment.sizeBytes > 0, `${label}: inbound.attachment.sizeBytes debe ser entero positivo`);
   if (Object.hasOwn(inbound, 'body')) assert.equal(typeof inbound.body, 'string', `${label}: inbound.body opcional debe ser texto`);
