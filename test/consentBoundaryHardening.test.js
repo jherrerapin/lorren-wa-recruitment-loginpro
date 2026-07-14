@@ -5,7 +5,10 @@ import {
   buildConsentPendingMode,
   deriveConsentResumeUpdate,
   evaluateConsentBoundary,
-  parseConsentPendingMode
+  parseConsentPendingMode,
+  resolveConsentResumeContext,
+  shouldRecordConsentAcceptance,
+  shouldRecordConsentRejection
 } from '../src/services/dataConsentGate.js';
 import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
 import { getSupervisorPhone } from '../src/services/adminSupervisor.js';
@@ -63,6 +66,15 @@ test('una declaración explícita de género queda protegida antes del consentim
   assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
 });
 
+test('una inferencia gramatical de género no convierte el interés en datos de perfil', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: 'PENDING', currentStep: 'MENU', botResumeMode: null },
+    { type: 'text', text: { body: 'Estoy interesada en la vacante' } }
+  );
+
+  assert.deepEqual(decision, { block: false, reason: 'consent_not_required_for_this_turn' });
+});
+
 test('el modo pendiente conserva contexto de vacante alternativa y reenvío de HV', () => {
   const encoded = buildConsentPendingMode({
     resumeMode: 'alternative_vacancy_offer:vacancy-77',
@@ -76,6 +88,19 @@ test('el modo pendiente conserva contexto de vacante alternativa y reenvío de H
   });
 });
 
+test('un sí a una oferta no se registra como consentimiento antes de mostrar el aviso', () => {
+  assert.equal(shouldRecordConsentAcceptance('Sí', { consentPromptPending: false }), false);
+  assert.equal(shouldRecordConsentAcceptance('Sí, me interesa', { consentPromptPending: false }), false);
+  assert.equal(shouldRecordConsentAcceptance('Sí, autorizo el tratamiento de mis datos', { consentPromptPending: false }), true);
+  assert.equal(shouldRecordConsentAcceptance('Sí', { consentPromptPending: true }), true);
+});
+
+test('un no a una oferta no se registra como revocatoria sin aviso de consentimiento pendiente', () => {
+  assert.equal(shouldRecordConsentRejection('No', { consentPromptPending: false }), false);
+  assert.equal(shouldRecordConsentRejection('No autorizo el tratamiento de mis datos', { consentPromptPending: false }), true);
+  assert.equal(shouldRecordConsentRejection('No', { consentPromptPending: true }), true);
+});
+
 test('al autorizar se recupera la vacante alternativa aceptada', () => {
   assert.deepEqual(deriveConsentResumeUpdate('alternative_vacancy_offer:vacancy-77'), {
     vacancyId: 'vacancy-77',
@@ -84,7 +109,53 @@ test('al autorizar se recupera la vacante alternativa aceptada', () => {
   });
 });
 
-test('si una HV fue descartada antes de autorizar se solicita reenviarla', () => {
+test('la vacante alternativa se revalida antes de asignarla después del consentimiento', async () => {
+  const openVacancy = {
+    id: 'vacancy-77',
+    isActive: true,
+    acceptingApplications: true
+  };
+  const prisma = {
+    vacancy: {
+      findUnique: async () => openVacancy
+    }
+  };
+
+  const result = await resolveConsentResumeContext(prisma, 'alternative_vacancy_offer:vacancy-77');
+
+  assert.equal(result.alternativeUnavailable, false);
+  assert.equal(result.vacancy, openVacancy);
+  assert.deepEqual(result.resumeUpdate, {
+    vacancyId: 'vacancy-77',
+    currentStep: 'COLLECTING_DATA',
+    botResumeMode: null
+  });
+});
+
+test('una vacante alternativa cerrada no se asigna después del consentimiento', async () => {
+  const prisma = {
+    vacancy: {
+      findUnique: async () => ({
+        id: 'vacancy-77',
+        isActive: false,
+        acceptingApplications: false
+      })
+    }
+  };
+
+  const result = await resolveConsentResumeContext(prisma, 'alternative_vacancy_offer:vacancy-77');
+
+  assert.equal(result.alternativeUnavailable, true);
+  assert.equal(result.vacancy, null);
+  assert.equal(result.requestedVacancyId, 'vacancy-77');
+  assert.deepEqual(result.resumeUpdate, {
+    vacancyId: null,
+    currentStep: 'GREETING_SENT',
+    botResumeMode: null
+  });
+});
+
+test('si una HV fue descartada antes de autorizar se solicita reenviarla solo en PDF o DOCX', () => {
   const reply = buildConsentAcceptedReply(
     {
       fullName: 'Laura Pérez',
@@ -101,6 +172,8 @@ test('si una HV fue descartada antes de autorizar se solicita reenviarla', () =>
 
   assert.match(reply, /archivo anterior.*no fue guardado/i);
   assert.match(reply, /vuelve a adjuntar tu hoja de vida/i);
+  assert.match(reply, /PDF o DOCX/i);
+  assert.doesNotMatch(reply, /PDF, DOC o DOCX/i);
 });
 
 test('la captura admite varios prefijos naturales antes de autorizar', async () => {
