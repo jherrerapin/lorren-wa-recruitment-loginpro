@@ -11,6 +11,7 @@ Cada fixture describe un turno reproducible con:
 - estado inicial del candidato, la vacante y la conversación;
 - historial mínimo necesario;
 - mensaje recibido;
+- respuesta estructurada simulada del proveedor de IA;
 - interpretación esperada;
 - plan con acciones estructuradas y escrituras permitidas/prohibidas;
 - transición esperada;
@@ -27,16 +28,17 @@ La deduplicación de webhooks, validación de firmas, persistencia del inbox y r
 
 ## Etapas
 
-1. **Contrato de fixtures:** validación estructural, datos sintéticos e identidades únicas.
-2. **Replay de interpretación:** ejecutar la comprensión vigente y, posteriormente, `TurnUnderstanding` con proveedores simulados.
-3. **Replay de planificación:** validar acciones estructuradas, permisos y transiciones.
-4. **Replay integral:** ejecutar adaptadores en memoria sin WhatsApp, OpenAI ni base de datos reales.
-5. **Gate de CI:** impedir retirar una autoridad heredada cuando cambie un comportamiento protegido.
+1. **Contrato de fixtures:** validación estructural, datos sintéticos, proveedores simulados e identidades únicas.
+2. **Replay de interpretación:** ejecuta el arbitraje vigente, `conversationUnderstanding`, sanitización de campos y política de consentimiento con respuestas de proveedor simuladas.
+3. **Replay de planificación:** validará acciones estructuradas, permisos y transiciones.
+4. **Replay integral:** ejecutará adaptadores en memoria sin WhatsApp, OpenAI ni base de datos reales.
+5. **Gate de CI:** impide retirar una autoridad heredada cuando cambia un comportamiento protegido.
 
 ## Reglas
 
 - No usar Internet durante el replay.
-- No depender de respuestas no determinísticas de un modelo.
+- No llamar a un modelo real ni depender de respuestas no determinísticas.
+- Las respuestas simuladas del proveedor son entradas versionadas, no resultados esperados ocultos.
 - No guardar información personal real.
 - Declarar explícitamente `tenantContext` y las versiones de política.
 - Usar la forma vigente del runtime como punto de partida, sin impedir la evolución hacia varias intenciones.
@@ -45,6 +47,6 @@ La deduplicación de webhooks, validación de firmas, persistencia del inbox y r
 - Distinguir hechos que la respuesta debe contener de afirmaciones que no puede realizar.
 - Un cambio intencional de comportamiento requiere actualizar el fixture y justificarlo en el PR.
 
-## Estado inicial
+## Estado actual
 
-La primera fase únicamente valida el contrato de los fixtures. Todavía no sustituye el runtime ni ejecuta el webhook productivo.
+El contrato y el replay de interpretación son ejecutables. El replay todavía no aplica planes, no persiste estado y no ejecuta el webhook productivo.
