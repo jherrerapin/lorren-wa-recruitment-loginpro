@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { MessageDirection, MessageType } from '@prisma/client';
 import {
   persistInboundConversationMessage,
-  persistOutboundConversationMessage
+  persistOutboundConversationMessage,
+  updateConversationMessagePayload
 } from '../src/services/conversationMessageRepository.js';
 
 function createPrismaMock({ inboundCount = 1 } = {}) {
   const calls = {
     createMany: [],
-    create: []
+    create: [],
+    update: []
   };
   const prisma = {
     message: {
@@ -20,6 +22,10 @@ function createPrismaMock({ inboundCount = 1 } = {}) {
       create: async ({ data }) => {
         calls.create.push(data);
         return { id: 'message-test-1', ...data };
+      },
+      update: async ({ where, data }) => {
+        calls.update.push({ where, data });
+        return { id: where.id, ...data };
       }
     }
   };
@@ -89,6 +95,28 @@ test('persiste salida sin permitir que el consumidor altere la dirección', asyn
   assert.equal(result.message.id, 'message-test-1');
 });
 
+test('actualiza únicamente el payload del mensaje identificado', async () => {
+  const { prisma, calls } = createPrismaMock();
+  const rawPayload = {
+    source: 'admin_manual_review_request',
+    resolved: true,
+    resolvedAt: '2026-07-14T15:00:00.000Z'
+  };
+
+  const result = await updateConversationMessagePayload(prisma, {
+    messageId: 'message-test-pending-1',
+    rawPayload
+  });
+
+  assert.equal(result.updated, true);
+  assert.deepEqual(calls.update, [{
+    where: { id: 'message-test-pending-1' },
+    data: { rawPayload }
+  }]);
+  assert.equal(result.message.id, 'message-test-pending-1');
+  assert.equal(result.data.rawPayload, rawPayload);
+});
+
 test('admite cuerpos nulos y conserva payload JSON sin transformarlo', async () => {
   const { prisma, calls } = createPrismaMock();
   const rawPayload = { type: 'document', metadata: { synthetic: true } };
@@ -121,6 +149,13 @@ test('rechaza contratos, identificadores, tipos y fechas inválidas antes de per
     }),
     /outbound_message_prisma_contract_invalid/
   );
+  await assert.rejects(
+    () => updateConversationMessagePayload({ message: { update: true } }, {
+      messageId: 'message-test-1',
+      rawPayload: {}
+    }),
+    /message_payload_update_prisma_contract_invalid/
+  );
 
   const { prisma, calls } = createPrismaMock();
   await assert.rejects(
@@ -146,6 +181,14 @@ test('rechaza contratos, identificadores, tipos y fechas inválidas antes de per
     }),
     /responded_at_invalid/
   );
+  await assert.rejects(
+    () => updateConversationMessagePayload(prisma, {
+      messageId: '   ',
+      rawPayload: {}
+    }),
+    /message_id_required/
+  );
   assert.equal(calls.createMany.length, 0);
   assert.equal(calls.create.length, 0);
+  assert.equal(calls.update.length, 0);
 });
