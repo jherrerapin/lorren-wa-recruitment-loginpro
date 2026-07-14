@@ -17,8 +17,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  state-authority:
+    name: Validate state authorities
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate state authority manifest
+        run: node --test test/stateAuthorityManifest.test.js
+
+      - name: Upload state authority diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-authority-observed
+          path: state-authority-observed.json
+          if-no-files-found: error
+          retention-days: 3
+
   validate:
     name: Validate application
+    needs: state-authority
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

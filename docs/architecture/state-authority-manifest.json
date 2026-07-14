@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "scope": "Estado conversacional y de reclutamiento de alto riesgo",
+  "trackedOperations": [
+    "create",
+    "createMany",
+    "upsert",
+    "update",
+    "updateMany",
+    "delete",
+    "deleteMany"
+  ],
+  "models": {
+    "candidate": {
+      "tableName": "Candidate",
+      "domain": "recruitment-conversation",
+      "migrationStage": "fragmented",
+      "targetAuthority": "CandidateStateService",
+      "risk": "critical",
+      "writers": [
+        { "path": "src/routes/admin.js", "role": "admin", "reason": "Cambios manuales y administrativos del candidato" },
+        { "path": "src/routes/lorenV2DataConsents.js", "role": "admin", "reason": "Gestión administrativa de consentimiento" },
+        { "path": "src/routes/metaAdsStats.js", "role": "integration", "reason": "Sincronización y corrección de atribución Meta" },
+        { "path": "src/routes/publicDispatchClient.js", "role": "integration", "reason": "Vinculación con despacho" },
+        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Orquestación conversacional monolítica vigente" },
+        { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Intervenciones del supervisor" },
+        { "path": "src/services/campaignAttribution.js", "role": "integration", "reason": "Atribución de campaña y vacante" },
+        { "path": "src/services/chatEngine.js", "role": "legacy", "reason": "Motor conversacional alternativo" },
+        { "path": "src/services/consentProfileCapture.js", "role": "boundary", "reason": "Captura posterior al consentimiento" },
+        { "path": "src/services/conversationEngine.js", "role": "legacy", "reason": "Motor conversacional heredado" },
+        { "path": "src/services/cvStorage.js", "role": "boundary", "reason": "Persistencia de metadatos y contenido de CV" },
+        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento y reanudación" },
+        { "path": "src/services/metaAdsInsightsSync.js", "role": "integration", "reason": "Sincronización de datos Meta" },
+        { "path": "src/services/originRuntime.js", "role": "integration", "reason": "Origen y procedencia del candidato" },
+        { "path": "src/services/reminder.js", "role": "operational", "reason": "Estados y tiempos de recordatorios" }
+      ]
+    },
+    "interviewBooking": {
+      "tableName": "InterviewBooking",
+      "domain": "interviews",
+      "migrationStage": "fragmented",
+      "targetAuthority": "InterviewBookingStateService",
+      "risk": "critical",
+      "writers": [
+        { "path": "src/routes/admin.js", "role": "admin", "reason": "Cambios manuales de reserva" },
+        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Confirmación, cancelación y reprogramación desde conversación" },
+        { "path": "src/services/chatEngine.js", "role": "legacy", "reason": "Respuestas de agenda del motor alternativo" },
+        { "path": "src/services/interviewScheduler.js", "role": "boundary", "reason": "Creación y asignación de reservas" },
+        { "path": "src/services/reminder.js", "role": "operational", "reason": "Recordatorios y estados de respuesta" }
+      ]
+    },
+    "message": {
+      "tableName": "Message",
+      "domain": "conversation",
+      "migrationStage": "fragmented",
+      "targetAuthority": "ConversationMessageRepository",
+      "risk": "high",
+      "writers": [
+        { "path": "src/routes/admin.js", "role": "admin", "reason": "Mensajes manuales del administrador" },
+        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Persistencia principal de mensajes entrantes y salientes" },
+        { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Mensajería del supervisor" },
+        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Evidencia y respuestas de consentimiento" },
+        { "path": "src/services/reminder.js", "role": "operational", "reason": "Mensajes de seguimiento y recordatorio" }
+      ]
+    },
+    "candidateDataConsentEvent": {
+      "tableName": "CandidateDataConsentEvent",
+      "domain": "consent",
+      "migrationStage": "consolidating",
+      "targetAuthority": "ConsentStateService",
+      "risk": "critical",
+      "writers": [
+        { "path": "src/routes/lorenV2DataConsents.js", "role": "admin", "reason": "Decisiones administrativas de consentimiento" },
+        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Aceptación o revocatoria desde WhatsApp" }
+      ]
+    },
+    "attachmentAnalysis": {
+      "tableName": "AttachmentAnalysis",
+      "domain": "documents",
+      "migrationStage": "consolidating",
+      "targetAuthority": "AttachmentAnalysisRepository",
+      "risk": "high",
+      "writers": [
+        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Clasificación inicial dentro del webhook" },
+        { "path": "src/services/cvIntelligence.js", "role": "boundary", "reason": "Análisis estructurado de hoja de vida" }
+      ]
+    },
+    "jobQueue": {
+      "tableName": "JobQueue",
+      "domain": "notifications",
+      "migrationStage": "consolidating",
+      "targetAuthority": "JobQueueService",
+      "risk": "high",
+      "writers": [
+        { "path": "src/services/jobQueue.js", "role": "canonical", "reason": "Creación, reclamo y finalización de jobs, incluido SQL directo" }
+      ]
+    },
+    "candidateAdminEvent": {
+      "tableName": "CandidateAdminEvent",
+      "domain": "audit-observability",
+      "migrationStage": "consolidating",
+      "targetAuthority": "CandidateAdminAuditService",
+      "risk": "medium",
+      "writers": [
+        { "path": "src/routes/admin.js", "role": "admin", "reason": "Trazabilidad de cambios administrativos" }
+      ]
+    },
+    "interviewSlot": {
+      "tableName": "InterviewSlot",
+      "domain": "interviews",
+      "migrationStage": "fragmented",
+      "targetAuthority": "InterviewAvailabilityService",
+      "risk": "high",
+      "writers": [
+        { "path": "src/routes/admin.js", "role": "admin", "reason": "Configuración manual de disponibilidad" }
+      ]
+    }
+  }
+}
