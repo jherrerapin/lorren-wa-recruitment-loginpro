@@ -132,9 +132,9 @@ test('la confirmación de entrevista no se reemplaza por pedir HV cuando documen
   }
 });
 
-test('acepta hojas de vida .doc además de PDF y DOCX', async () => {
-  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), true);
-  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), true);
+test('rechaza hojas de vida .doc y exige PDF o DOCX', async () => {
+  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), false);
+  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), false);
 
   const analysis = await analyzeAttachment({
     buffer: Buffer.from('legacy word bytes'),
@@ -142,9 +142,10 @@ test('acepta hojas de vida .doc además de PDF y DOCX', async () => {
     filename: 'hv.doc'
   });
 
-  assert.equal(analysis.classification, 'CV_VALID');
+  assert.equal(analysis.classification, 'OTHER');
+  assert.equal(analysis.rationale, 'legacy_word_document_not_supported');
+  assert.deepEqual(analysis.evidence, ['doc_format_not_allowed_for_cv']);
 });
-
 
 test('guard de estado evita pedir ciudad, vacante o residencia ya registradas', async () => {
   const prisma = createMockPrisma({
@@ -209,7 +210,6 @@ test('guard de estado evita pedir HV cuando ya hay hoja de vida válida', async 
   assert.match(guarded.text, /hoja de vida/i);
   assert.doesNotMatch(guarded.text, /env[ií]ame tu hoja de vida como archivo/i);
 });
-
 
 test('conserva una localidad explícita de Bogotá aunque no esté en alias estáticos', () => {
   const parsed = parseNaturalData('Localidad de Usaquen');
