@@ -113,10 +113,9 @@ const LEGACY_CV_UPLOAD_FORMAT_PATTERNS = [
   /PDF\s*,\s*Word\s+(?:o|or)\s+DOCX/gi
 ];
 
-function isCandidateCvUploadInstruction(reply = '') {
-  const text = String(reply || '');
-  const mentionsCv = /\b(?:hoja\s+de\s+vida|hv|curr[ií]culum|cv)\b/i.test(text);
-  const requestsFileUpload = /\b(?:adjunt\w*|envi\w*|carg\w*|archivo\s+real|registr\w*)\b/i.test(text);
+function isCandidateCvUploadInstruction(reply) {
+  const mentionsCv = /\b(?:hoja\s+de\s+vida|hv|curr[ií]culum|cv)\b/i.test(reply);
+  const requestsFileUpload = /\b(?:adjunt\w*|envi\w*|carg\w*|archivo\s+real|registr\w*)\b/i.test(reply);
   return mentionsCv && requestsFileUpload;
 }
 
