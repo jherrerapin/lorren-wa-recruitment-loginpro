@@ -75,26 +75,20 @@ test('inbox persiste solo campos Prisma válidos y conserva trazabilidad e ident
   }]);
 });
 
-test('inbox duplicado no actualiza candidato ni consulta identidad creada', async () => {
+test('inbox duplicado no actualiza candidato ni consulta identidad creada', async (t) => {
   const { prisma, calls } = createPrismaMock({ duplicate: true });
-  const originalLog = console.log;
-  console.log = () => {};
+  t.mock.method(console, 'log', () => {});
 
-  try {
-    const result = await saveInboundMessage(
-      prisma,
-      'candidate-inbound-2',
-      { id: 'wamid.duplicate-1', from: '573001112233', type: 'text' },
-      'Hola repetido',
-      MessageType.TEXT,
-      '573001112233'
-    );
+  const result = await saveInboundMessage(
+    prisma,
+    'candidate-inbound-2',
+    { id: 'wamid.duplicate-1', from: '573001112233', type: 'text' },
+    'Hola repetido',
+    MessageType.TEXT,
+    '573001112233'
+  );
 
-    assert.deepEqual(result, { isNew: false, id: null });
-  } finally {
-    console.log = originalLog;
-  }
-
+  assert.deepEqual(result, { isNew: false, id: null });
   assert.equal(calls.createMany.length, 1);
   assert.equal(calls.candidateUpdate.length, 0);
   assert.equal(calls.findUnique.length, 0);
