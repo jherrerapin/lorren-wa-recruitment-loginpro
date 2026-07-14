@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "attachment-document-before-consent-v1",
+  "title": "Un documento enviado antes de autorizar no se descarga ni se guarda",
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "executionContext": {
+    "now": "2026-07-14T15:00:00.000Z"
+  },
+  "providerStubs": {
+    "aiResult": {
+      "status": "ok",
+      "intent": "send_attachment",
+      "parsedFields": {},
+      "extraction": {
+        "turnType": "ATTACHMENT",
+        "fieldEvidence": {},
+        "conflicts": []
+      }
+    }
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-test-006",
+      "status": "NUEVO",
+      "currentStep": "GREETING_SENT",
+      "dataConsentStatus": "PENDING",
+      "botResumeMode": null,
+      "vacancyId": "vacancy-test-bogota-attachment",
+      "cvData": null,
+      "cvStorageKey": null,
+      "cvOriginalName": null,
+      "cvMimeType": null
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-test-bogota-attachment",
+      "isActive": true,
+      "acceptingApplications": true,
+      "city": "Bogotá",
+      "title": "Auxiliar de bodega"
+    }
+  },
+  "history": [
+    {
+      "direction": "OUTBOUND",
+      "body": "¿Te interesa continuar con esta postulación?"
+    }
+  ],
+  "inbound": {
+    "messageId": "test-message-attachment-001",
+    "type": "document",
+    "attachment": {
+      "fileName": "TEST-HV.docx",
+      "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "sizeBytes": 2048
+    }
+  },
+  "expected": {
+    "interpretation": {
+      "intent": "SEND_ATTACHMENT",
+      "additionalIntents": [],
+      "consentDecision": null,
+      "providedFields": {}
+    },
+    "plan": {
+      "actions": [
+        {
+          "type": "REJECT_PRECONSENT_ATTACHMENT",
+          "data": {
+            "attachmentKind": "document",
+            "fileName": "TEST-HV.docx",
+            "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        },
+        {
+          "type": "ASK_DATA_CONSENT"
+        }
+      ],
+      "allowedWrites": [
+        "candidate.botResumeMode",
+        "candidate.lastOutboundAt",
+        "message.outbound"
+      ],
+      "forbiddenWrites": [
+        "candidate.cvData",
+        "candidate.cvStorageKey",
+        "candidate.cvOriginalName",
+        "candidate.cvMimeType",
+        "attachment.download",
+        "attachment.persist"
+      ],
+      "nextStep": "GREETING_SENT"
+    },
+    "response": {
+      "requiredFacts": [
+        "Debe informar que el archivo no fue descargado ni guardado",
+        "Debe solicitar autorización antes de recibir documentos"
+      ],
+      "forbiddenClaims": [
+        "La hoja de vida quedó registrada",
+        "El archivo fue almacenado"
+      ],
+      "requiredText": ["no lo descargué", "no lo guardé", "autorización"],
+      "forbiddenText": ["hoja de vida quedó registrada", "archivo guardado"]
+    },
+    "finalState": {
+      "dataConsentStatus": "PENDING",
+      "currentStep": "GREETING_SENT",
+      "botResumeMode": "awaiting_data_consent:eyJyZXN1bWVNb2RlIjpudWxsLCJjdlJlc2VuZFJlcXVpcmVkIjp0cnVlfQ",
+      "cvData": null,
+      "cvStorageKey": null,
+      "cvOriginalName": null,
+      "cvMimeType": null
+    }
+  }
+}
