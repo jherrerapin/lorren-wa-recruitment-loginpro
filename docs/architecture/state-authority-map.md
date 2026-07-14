@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 4 | Alto | En consolidación | `ConversationMessageRepository` |
+| `Message` | 3 | Alto | En consolidación | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -48,7 +48,13 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `dataConsentGate.js` ya no escribe `Message` directamente. La evidencia entrante y las respuestas salientes del gate pasan por `ConversationMessageRepository`.
 
-En `adminSupervisor.js` se migró únicamente `saveSupervisorOutbound()`, usado para persistir avisos internos enviados al hilo del supervisor. El supervisor permanece declarado porque `handleSupervisorInbound()` todavía crea y actualiza otros mensajes directamente.
+`adminSupervisor.js` ya no crea ni actualiza `Message` directamente. Su flujo completo delega:
+
+- la entrada idempotente del administrador mediante `persistInboundConversationMessage()`;
+- los avisos internos y la respuesta al candidato mediante `persistOutboundConversationMessage()`;
+- la resolución o actualización del requerimiento pendiente mediante `updateConversationMessagePayload()`.
+
+El supervisor conserva la interpretación de la instrucción, el envío por WhatsApp, selección de documentos, conocimiento validado y las pausas o reanudaciones del candidato. La autoridad compartida controla únicamente la persistencia de mensajes.
 
 `reminder.js` ya no escribe `Message` directamente. Su helper `storeOutbound()` delega en `persistOutboundConversationMessage()` y conserva:
 
@@ -64,12 +70,13 @@ La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboun
 
 `admin.js` permanece declarado como escritor de `Message` porque la eliminación de un candidato borra sus mensajes dentro de la misma transacción mediante `tx.message.deleteMany()`. Esa operación no forma parte de la mensajería saliente y no se modifica en esta etapa.
 
-Los escritores directos de `Message` permanecen en cuatro: webhook, administración por eliminación transaccional, supervisor y el repositorio compartido.
+Los escritores directos de `Message` bajan a tres: webhook, administración por eliminación transaccional y el repositorio compartido.
 
-El repositorio distingue actualmente dos contratos:
+El repositorio distingue actualmente tres contratos:
 
 - entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
-- salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie.
+- salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie;
+- actualización restringida exclusivamente a `rawPayload` sobre un mensaje identificado.
 
 Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, los consumidores migrados continúan enviando al proveedor antes de persistir. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
 
@@ -101,7 +108,7 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 
 ### 3. Los mensajes todavía se escriben desde fronteras distintas
 
-Las escrituras de `Message` siguen repartidas entre webhook, supervisor, eliminación administrativa y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
+Las escrituras directas de `Message` quedan repartidas entre el webhook, la eliminación administrativa y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
 
 - mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
