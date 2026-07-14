@@ -32,7 +32,7 @@
         { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento y reanudación; delega consentimiento y mensajes en autoridades compartidas" },
         { "path": "src/services/metaAdsInsightsSync.js", "role": "integration", "reason": "Sincronización de datos Meta" },
         { "path": "src/services/originRuntime.js", "role": "integration", "reason": "Origen y procedencia del candidato" },
-        { "path": "src/services/reminder.js", "role": "operational", "reason": "Estados y tiempos de recordatorios" }
+        { "path": "src/services/reminder.js", "role": "operational", "reason": "Estados y tiempos de recordatorios; delega la persistencia de mensajes" }
       ]
     },
     "interviewBooking": {
@@ -59,8 +59,7 @@
         { "path": "src/routes/admin.js", "role": "admin", "reason": "Mensajes manuales del administrador" },
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Persistencia principal de mensajes entrantes y salientes" },
         { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Mensajería del supervisor; solo los avisos internos salientes delegan actualmente en el repositorio compartido" },
-        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Persistencia compartida de mensajes entrantes idempotentes y salientes" },
-        { "path": "src/services/reminder.js", "role": "operational", "reason": "Mensajes de seguimiento y recordatorio" }
+        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Persistencia compartida de mensajes entrantes idempotentes y salientes" }
       ]
     },
     "candidateDataConsentEvent": {
