@@ -19,7 +19,6 @@
       "risk": "critical",
       "writers": [
         { "path": "src/routes/admin.js", "role": "admin", "reason": "Cambios manuales y administrativos del candidato" },
-        { "path": "src/routes/lorenV2DataConsents.js", "role": "admin", "reason": "Gestión administrativa de consentimiento" },
         { "path": "src/routes/metaAdsStats.js", "role": "integration", "reason": "Sincronización y corrección de atribución Meta" },
         { "path": "src/routes/publicDispatchClient.js", "role": "integration", "reason": "Vinculación con despacho" },
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Orquestación conversacional monolítica vigente" },
@@ -27,9 +26,10 @@
         { "path": "src/services/campaignAttribution.js", "role": "integration", "reason": "Atribución de campaña y vacante" },
         { "path": "src/services/chatEngine.js", "role": "legacy", "reason": "Motor conversacional alternativo" },
         { "path": "src/services/consentProfileCapture.js", "role": "boundary", "reason": "Captura posterior al consentimiento" },
+        { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Mutación atómica compartida de campos y evento de consentimiento" },
         { "path": "src/services/conversationEngine.js", "role": "legacy", "reason": "Motor conversacional heredado" },
         { "path": "src/services/cvStorage.js", "role": "boundary", "reason": "Persistencia de metadatos y contenido de CV" },
-        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento y reanudación" },
+        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento y reanudación todavía pendiente de migración" },
         { "path": "src/services/metaAdsInsightsSync.js", "role": "integration", "reason": "Sincronización de datos Meta" },
         { "path": "src/services/originRuntime.js", "role": "integration", "reason": "Origen y procedencia del candidato" },
         { "path": "src/services/reminder.js", "role": "operational", "reason": "Estados y tiempos de recordatorios" }
@@ -70,8 +70,8 @@
       "targetAuthority": "ConsentStateService",
       "risk": "critical",
       "writers": [
-        { "path": "src/routes/lorenV2DataConsents.js", "role": "admin", "reason": "Decisiones administrativas de consentimiento" },
-        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Aceptación o revocatoria desde WhatsApp" }
+        { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Autoridad compartida para actualización del candidato y evento versionado" },
+        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Aceptación o revocatoria desde WhatsApp todavía pendiente de migración" }
       ]
     },
     "attachmentAnalysis": {
