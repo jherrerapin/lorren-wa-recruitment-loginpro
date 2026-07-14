@@ -69,8 +69,26 @@ jobs:
       - name: Run flow-authority regression
         run: node --test test/flowDecisionAuthority.test.js
 
-      - name: Run factual fallback regressions
-        run: node --test test/contextualReply.test.js test/contextualReplyRobustness.test.js test/hardeningP0.test.js test/hardeningP0Delta.test.js test/p9CvOnlyPdfDocx.test.js test/replySimilarityPolicy.test.js test/responsePolicyRemoval.test.js
+      - name: Run contextual reply regressions
+        run: node --test test/contextualReply.test.js
+
+      - name: Run contextual robustness regressions
+        run: node --test test/contextualReplyRobustness.test.js
+
+      - name: Run hardening P0 regressions
+        run: node --test test/hardeningP0.test.js
+
+      - name: Run hardening P0 delta regressions
+        run: node --test test/hardeningP0Delta.test.js
+
+      - name: Run CV format regressions
+        run: node --test test/p9CvOnlyPdfDocx.test.js
+
+      - name: Run reply similarity regressions
+        run: node --test test/replySimilarityPolicy.test.js
+
+      - name: Run response-policy removal regression
+        run: node --test test/responsePolicyRemoval.test.js
 
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
