@@ -13,7 +13,9 @@ La estrategia aprobada es correcta si se ejecuta en este orden:
 5. consolidar contratos y autoridades únicas;
 6. completar el aislamiento multitenant;
 7. trasladar y administrar todas las reglas mediante configuración versionada;
-8. retirar el legado progresivamente.
+8. consolidar el núcleo conversacional y sus estados;
+9. configurar geografía, agenda y notificaciones;
+10. completar la operación SaaS y retirar el legado.
 
 No se recomienda una reescritura total ni una migración temprana a microservicios.
 
@@ -93,11 +95,24 @@ Los fixtures determinísticos se ejecutan en CI antes de retirar legado o habili
 
 Un proveedor o número puede compartir formatos de identificadores entre clientes. Por eso tenant y canal se resuelven antes de construir la clave durable del inbox.
 
-Ejemplo conceptual:
+La identidad primaria recomendada es una restricción única compuesta, no una concatenación libre:
 
 ```text
-idempotencyKey = tenantId + provider + channelId + externalMessageId
+UNIQUE (tenantId, provider, channelId, externalMessageId)
 ```
+
+Cuando sea necesario producir una única cadena o hash para una cola, caché o proveedor externo, se utilizará una serialización canónica no ambigua, por ejemplo:
+
+```text
+idempotencyKey = sha256(JSON.stringify([
+  tenantId,
+  provider,
+  channelId,
+  externalMessageId
+]))
+```
+
+También es válido un formato con longitudes explícitas. No se permite concatenar valores sin delimitación y escape canónicos, porque tuplas distintas podrían producir la misma cadena.
 
 Además, un segundo tenant no puede habilitarse mientras la recolección, geografía, consentimiento, documentos, agenda y recordatorios dependan implícitamente de reglas de LoginPro o Bogotá. La frontera debe resolver una política mínima versionada por tenant antes de procesar la conversación.
 
@@ -308,6 +323,32 @@ Antes del segundo tenant debe existir una versión mínima tenant-aware de estas
 - repositorios tenant-aware;
 - RLS, roles mínimos y almacenamiento segregado;
 - pruebas cruzadas y de configuración antes del segundo tenant.
+
+### Fase 6 — Configuración de negocio
+
+- completar y administrar políticas versionadas por tenant, operación y vacante;
+- retirar condiciones específicas del cliente del webhook;
+- separar contenido empresarial de lógica de aplicación.
+
+### Fase 7 — Núcleo conversacional y estados
+
+- interpretar una vez y planear una vez;
+- responder interrupciones y retomar pendientes;
+- centralizar estados e invariantes;
+- reducir el webhook a adaptador de entrada.
+
+### Fase 8 — Geografía, agenda y notificaciones
+
+- implementar políticas territoriales explicables;
+- corregir reprogramación y ventanas de recordatorio;
+- consolidar workers y recordatorios idempotentes.
+
+### Fase 9 — Operación SaaS y retiro de legado
+
+- métricas, costos, límites y auditoría por tenant;
+- gestión segura de credenciales;
+- eliminación de adaptadores, flags y código sin consumidores;
+- mantener como bloqueante toda la suite estable.
 
 ## 14. GPT interno
 
