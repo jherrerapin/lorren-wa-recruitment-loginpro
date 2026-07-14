@@ -18,7 +18,7 @@ function assertExpectedState(fixture, snapshot, label) {
     assert.deepEqual(
       aggregateState[field],
       expectedValue,
-      `${label}: estado inesperado tras el fallo en ${field}`
+      `${label}: estado inesperado en ${field}`
     );
   }
 }
@@ -63,6 +63,7 @@ test('una caída después del outbox se recupera sin reinterpretar ni repetir ca
 
       const recovery = await replayFixtureIntegral(fixture, adapters);
       assert.equal(recovery.duplicate, true, `${relativePath}: el reintento conserva la identidad duplicada`);
+      assert.equal(recovery.resumedProcessing, false, `${relativePath}: no debe reprocesar cuando ya existe outbox`);
       assert.equal(recovery.recoveryAttempted, true, `${relativePath}: debe intentar recuperar el outbox pendiente`);
       assert.equal(recovery.recovered, true, `${relativePath}: la entrega pendiente debe recuperarse`);
       assert.equal(recovery.interpreted, false, `${relativePath}: la recuperación no debe reinterpretar`);
@@ -87,10 +88,66 @@ test('una caída después del outbox se recupera sin reinterpretar ni repetir ca
       const deliveredSnapshot = afterRecovery;
       const finalDuplicate = await replayFixtureIntegral(fixture, adapters);
       assert.equal(finalDuplicate.duplicate, true, `${relativePath}: la tercera recepción sigue siendo duplicada`);
+      assert.equal(finalDuplicate.resumedProcessing, false, `${relativePath}: una salida ya entregada no debe reprocesarse`);
       assert.equal(finalDuplicate.recoveryAttempted, false, `${relativePath}: una salida ya entregada no necesita recuperación`);
       assert.equal(finalDuplicate.recovered, false, `${relativePath}: no debe declarar otra recuperación`);
       assert.equal(finalDuplicate.reply, null, `${relativePath}: no debe volver a responder`);
       assert.deepEqual(finalDuplicate.snapshot, deliveredSnapshot, `${relativePath}: la tercera recepción debe ser un no-op total`);
+    });
+  }
+});
+
+test('una caída entre inbox y outbox revierte cambios parciales y reanuda el turno', async (t) => {
+  for (const { fixture, relativePath } of loadConversationFixtures()) {
+    await t.test(relativePath, async () => {
+      const adapters = createInMemoryReplayAdapters(fixture, {
+        failures: { persistOutbound: 1 }
+      });
+
+      await assert.rejects(
+        () => replayFixtureIntegral(fixture, adapters),
+        /simulated_outbound_persistence_failure:/,
+        `${relativePath}: el primer intento debe fallar dentro del commit de estado y outbox`
+      );
+
+      const afterRollback = adapters.snapshot();
+      assert.equal(afterRollback.inboundMessages.length, 1, `${relativePath}: el inbox debe conservar el reclamo`);
+      assert.equal(afterRollback.outboundMessages.length, 0, `${relativePath}: no debe quedar un outbox parcial`);
+      assert.equal(afterRollback.deliveryAttempts.length, 0, `${relativePath}: no debe intentarse entregar sin outbox`);
+      assert.equal(afterRollback.deliveries.length, 0, `${relativePath}: no debe existir entrega`);
+      assert.deepEqual(afterRollback.candidates[0], fixture.initialState.candidate, `${relativePath}: los cambios del candidato deben revertirse`);
+      assert.deepEqual(afterRollback.conversationState.pendingFields, fixture.initialState.pendingFields || [], `${relativePath}: el pendiente conversacional debe revertirse`);
+      assert.equal(countAudit(afterRollback, 'INBOUND_CLAIMED'), 1, `${relativePath}: el reclamo debe permanecer auditado`);
+      assert.equal(countAudit(afterRollback, 'CANDIDATE_UPDATED'), 0, `${relativePath}: la auditoría de cambios parciales debe revertirse`);
+      assert.equal(countAudit(afterRollback, 'OUTBOUND_PERSISTED'), 0, `${relativePath}: no debe auditarse un outbox inexistente`);
+
+      const resumed = await replayFixtureIntegral(fixture, adapters);
+      assert.equal(resumed.duplicate, true, `${relativePath}: la entrada continúa reclamada`);
+      assert.equal(resumed.resumedProcessing, true, `${relativePath}: debe reanudar procesamiento al no existir outbox`);
+      assert.equal(resumed.interpreted, true, `${relativePath}: el turno incompleto debe reinterpretarse`);
+      assert.equal(resumed.planned, true, `${relativePath}: el turno incompleto debe replanificarse`);
+      assert.equal(resumed.recoveryAttempted, false, `${relativePath}: no es una recuperación de entrega`);
+      assert.equal(resumed.recovered, false, `${relativePath}: no debe marcarse como entrega recuperada`);
+      assert.deepEqual(
+        [...resumed.appliedWrites].sort(),
+        [...fixture.expected.plan.allowedWrites].sort(),
+        `${relativePath}: el commit reanudado debe aplicar una sola vez todas las escrituras autorizadas`
+      );
+
+      const afterResume = resumed.snapshot;
+      assert.equal(afterResume.inboundMessages.length, 1, `${relativePath}: no debe duplicarse el inbox`);
+      assert.equal(afterResume.outboundMessages.length, 1, `${relativePath}: debe existir un único outbox`);
+      assert.equal(afterResume.deliveries.length, 1, `${relativePath}: debe existir una única entrega`);
+      assert.equal(countAudit(afterResume, 'INBOUND_CLAIMED'), 1, `${relativePath}: el reclamo no debe duplicarse`);
+      assert.equal(countAudit(afterResume, 'OUTBOUND_PERSISTED'), 1, `${relativePath}: el outbox debe persistirse una sola vez`);
+      assert.equal(countAudit(afterResume, 'OUTBOUND_DELIVERED'), 1, `${relativePath}: la entrega debe ejecutarse una sola vez`);
+      assertExpectedState(fixture, afterResume, relativePath);
+
+      const completedSnapshot = afterResume;
+      const finalDuplicate = await replayFixtureIntegral(fixture, adapters);
+      assert.equal(finalDuplicate.resumedProcessing, false, `${relativePath}: el turno completado no debe reanudarse otra vez`);
+      assert.equal(finalDuplicate.reply, null, `${relativePath}: no debe emitir una segunda respuesta`);
+      assert.deepEqual(finalDuplicate.snapshot, completedSnapshot, `${relativePath}: el duplicado final debe ser un no-op total`);
     });
   }
 });
