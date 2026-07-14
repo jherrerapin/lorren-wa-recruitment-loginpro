@@ -13,7 +13,7 @@ La modernización debe:
 - separar negocio, persistencia, canales y proveedores externos;
 - permitir incorporar tenants y vacantes mediante configuración;
 - impedir efectos duplicados, estados incompatibles y accesos cruzados;
-- mantener a GitHub y a la base de datos propia como fuentes canónicas.
+- mantener a GitHub, la base de datos y el almacenamiento de objetos como fuentes canónicas de sus respectivos artefactos.
 
 ## 2. Premisa funcional
 
@@ -46,7 +46,7 @@ Tampoco autoriza:
 
 - #419 ya fue fusionado en `main` y retiró la matriz de frases prefabricadas.
 - #425 ya fue fusionado en `main` y estableció el contrato inicial del corpus conversacional.
-- #420 permanece en borrador, desactualizado respecto a `main` y con regresiones de consentimiento pendientes. No está listo para merge.
+- #420 permanece abierto y en validación final de su frontera de consentimiento.
 - Este PR consolida la hoja de ruta y su validación técnica.
 - #424 reserva la creación posterior del GPT interno de arquitectura y QA.
 
@@ -57,8 +57,10 @@ Tampoco autoriza:
 - Conservar los metadatos originales de Meta Ads de forma inmutable.
 - Resolver tenant, canal, campaña, anuncio, operación y vacante por identificadores objetivos.
 - Clasificar la atribución como `EXACT`, `CONFIRMED` o `UNKNOWN`.
-- Confirmar ciudad y vacante con el candidato antes de asignarlas definitivamente.
-- Preguntar sin inventar cuando los metadatos falten o sean ambiguos.
+- Una coincidencia `EXACT`, única y vinculada a una vacante vigente puede establecer inmediatamente el contexto y la atribución técnica sin pedir al candidato que repita la selección.
+- Después del saludo, Lórren debe comunicar de forma natural la ciudad y la vacante resueltas y permitir que el candidato las confirme o corrija. Esa interacción no bloquea ni reemplaza la evidencia objetiva original.
+- Las asociaciones parciales o ambiguas requieren confirmación expresa antes de convertirse en vacante final (`CONFIRMED`).
+- Cuando no exista evidencia suficiente (`UNKNOWN`), preguntar ciudad y cargo sin inventar una asociación.
 
 ### 5.2 Información, interés y consentimiento
 
@@ -237,32 +239,50 @@ Antes de habilitar un segundo tenant deberán cumplirse simultáneamente:
 - `TenantContext` obligatorio en casos de uso, repositorios, rutas, jobs, caché y almacenamiento.
 - Prohibición de consultas globales desde módulos de negocio.
 - Validación de pertenencia en referencias y acciones administrativas.
+- Las políticas mínimas que afectan recolección, geografía, consentimiento, vacantes, documentos, agenda y recordatorios deben resolverse por tenant y versión; un segundo cliente no puede heredar reglas de LoginPro o Bogotá por ausencia de configuración.
 
-### Base de datos
+### Base de datos y almacenamiento
 
 - `tenantId` en todas las entidades compartidas de negocio.
 - Unicidad compuesta por tenant; por ejemplo, el teléfono de un candidato no puede continuar como identificador global entre clientes.
 - Protección de relaciones cruzadas mediante claves o validaciones compuestas cuando sea viable.
 - RLS como defensa adicional, no como única barrera.
 - Roles de mínimo privilegio para API, workers y administración.
-- Pruebas negativas de lectura, escritura, asociación y procesamiento cruzados.
+- Objetos y claves de almacenamiento segregados o prefijados por tenant.
+- Pruebas negativas de lectura, escritura, asociación, descarga y procesamiento cruzados.
+
+El segundo tenant no se habilitará hasta aprobar tanto el aislamiento técnico como la resolución tenant-aware de las políticas mínimas. La configuración completa y la experiencia administrativa continuarán evolucionando después sin exponer al nuevo cliente a reglas heredadas.
 
 ## 10. Corpus y evaluación
 
-Cada fixture deberá incluir:
+### 10.1 Replay conversacional
+
+Los fixtures conversacionales comienzan después de que la entrada haya resuelto tenant, canal e identidad del evento. Cada escenario incluye:
 
 - `TenantContext`;
 - versiones de conversación, vacante, consentimiento y políticas relevantes;
 - estado inicial;
 - historial mínimo;
-- mensaje o lote entrante;
+- mensaje o lote entrante ya admitido por la frontera de entrada;
 - comprensión y plan esperados;
 - escrituras permitidas y prohibidas;
 - transición y estado final;
 - hechos obligatorios y afirmaciones prohibidas;
 - expectativa de envío, silencio o revisión.
 
-Las regresiones determinísticas serán gates de CI **antes** de retirar una capa heredada. Las evaluaciones con modelo real se utilizarán para comparar prompts o modelos, pero no sustituirán el gate reproducible.
+### 10.2 Replay de entrada e idempotencia
+
+La capa de entrada confiable tendrá fixtures separados, sin convertir una reentrega en intención conversacional. Estos escenarios incluirán:
+
+- tenant, proveedor y canal;
+- identificador externo del evento o mensaje;
+- clave de idempotencia esperada;
+- una o más entregas idénticas o equivalentes;
+- estado inicial del inbox y outbox;
+- cantidad esperada de escrituras de negocio, mensajes salientes, reservas, documentos y jobs;
+- expectativa de deduplicación y resultado final.
+
+Una reentrega válida debe producir cero efectos adicionales después de la primera ejecución. Las regresiones determinísticas de conversación y entrada serán gates de CI antes de retirar una capa heredada o habilitar la nueva arquitectura de inbox/outbox. Las evaluaciones con modelo real se utilizarán para comparar prompts o modelos, pero no sustituirán los gates reproducibles.
 
 ## 11. Observabilidad
 
@@ -283,15 +303,15 @@ Los logs deben evitar contenido sensible y conservar razones, estados, versiones
 ### Fase 0 — Seguridad y línea base
 
 - Actualizar #420 contra el `main` que ya contiene #419 y #425.
-- Resolver sus cuatro bloqueadores y devolver CI a verde.
+- Resolver sus bloqueadores y devolver CI a verde.
 - Corregir la persistencia de `AttachmentAnalysis` contra Prisma.
 - Unificar el contrato de HV en PDF/DOCX y rechazar `.doc`.
 - Inventariar deuda y añadir correlación mínima.
 
 ### Fase 1 — Caracterización y gates
 
-- Ampliar el corpus sanitizado ya iniciado.
-- Implementar replay determinístico.
+- Ampliar el corpus conversacional sanitizado ya iniciado.
+- Implementar replay determinístico conversacional.
 - Cubrir consentimiento, vacantes, datos, preguntas fuera de orden, agenda, recordatorios y errores.
 - Convertir los escenarios en gates obligatorios.
 
@@ -299,12 +319,14 @@ Los logs deben evitar contenido sensible y conservar razones, estados, versiones
 
 - Resolver tenant y canal antes de cualquier clave durable.
 - Introducir `TenantContext` mínimo sin migrar aún todo el esquema.
-- Probar que eventos de canales distintos no colisionan.
+- Introducir la resolución tenant-aware de las políticas mínimas necesarias para que un segundo cliente no herede reglas de LoginPro.
+- Probar que eventos de canales y tenants distintos no colisionan.
 
 ### Fase 3 — Entrada y salida confiables
 
 - Inbox idempotente.
 - Outbox transaccional.
+- Replay de reentregas y deduplicación.
 - Envío centralizado.
 - Jobs reintentables y deduplicados.
 - Correlación de trazas.
@@ -320,12 +342,12 @@ Los logs deben evitar contenido sensible y conservar razones, estados, versiones
 
 - Migrar `tenantId`, índices y restricciones.
 - Crear repositorios tenant-aware.
-- Añadir RLS y roles mínimos.
-- Aprobar pruebas de aislamiento antes de habilitar un segundo tenant.
+- Añadir RLS, roles mínimos y segregación de almacenamiento.
+- Aprobar pruebas de aislamiento y configuración mínima antes de habilitar un segundo tenant.
 
 ### Fase 6 — Configuración de negocio
 
-- Versionar políticas por tenant, operación y vacante.
+- Completar y administrar políticas versionadas por tenant, operación y vacante.
 - Retirar condiciones específicas del cliente del webhook.
 - Separar contenido empresarial de lógica de aplicación.
 
@@ -377,7 +399,7 @@ Será una herramienta privada de mantenimiento y supervisión. No modificará pr
 ## 15. Criterios de éxito
 
 - Un nuevo cliente se incorpora mediante configuración y credenciales.
-- Ningún tenant puede acceder a recursos de otro.
+- Ningún tenant puede acceder a recursos de otro ni heredar reglas de negocio de otro cliente.
 - Cada turno tiene una interpretación y un plan únicos.
 - Las preguntas fuera de orden se responden sin perder progreso.
 - Los efectos externos son idempotentes y auditables.
