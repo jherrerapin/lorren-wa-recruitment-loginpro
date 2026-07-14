@@ -109,7 +109,7 @@ export async function updateConversationMessagePayload(prisma, input = {}) {
   }
 
   const messageId = requireNonEmptyString(input.messageId, 'message_id');
-  if (!Object.hasOwn(input, 'rawPayload')) {
+  if (input.rawPayload === undefined) {
     throw new Error('raw_payload_required');
   }
 
