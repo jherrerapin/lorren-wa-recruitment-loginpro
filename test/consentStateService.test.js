@@ -18,14 +18,8 @@ const BASE_INPUT = Object.freeze({
   now: FIXED_NOW
 });
 
-function createPrismaMock() {
-  const calls = {
-    candidateUpdates: [],
-    consentEvents: [],
-    transactions: []
-  };
-
-  const prisma = {
+function createPersistenceDelegates(calls) {
+  return {
     candidate: {
       update: ({ where, data }) => {
         calls.candidateUpdates.push({ where, data });
@@ -37,7 +31,19 @@ function createPrismaMock() {
         calls.consentEvents.push(data);
         return Promise.resolve({ id: 'consent-event-test-1', ...data });
       }
-    },
+    }
+  };
+}
+
+function createPrismaMock() {
+  const calls = {
+    candidateUpdates: [],
+    consentEvents: [],
+    transactions: []
+  };
+  const delegates = createPersistenceDelegates(calls);
+  const prisma = {
+    ...delegates,
     $transaction: async (operations) => {
       calls.transactions.push(operations);
       return Promise.all(operations);
@@ -45,6 +51,17 @@ function createPrismaMock() {
   };
 
   return { prisma, calls };
+}
+
+function createTransactionClientMock() {
+  const calls = {
+    candidateUpdates: [],
+    consentEvents: []
+  };
+  return {
+    transactionClient: createPersistenceDelegates(calls),
+    calls
+  };
 }
 
 test('ACCEPTED actualiza candidato y crea evento dentro de una sola transacción', async () => {
@@ -89,6 +106,22 @@ test('ACCEPTED actualiza candidato y crea evento dentro de una sola transacción
   assert.equal(eventData.note, 'nota de prueba');
   assert.equal(result.recordedAt.toISOString(), FIXED_NOW.toISOString());
   assert.equal(result.candidate.dataConsentStatus, 'ACCEPTED');
+  assert.equal(result.event.status, 'ACCEPTED');
+});
+
+test('la autoridad usa un cliente tx existente sin abrir una transacción anidada', async () => {
+  const { transactionClient, calls } = createTransactionClientMock();
+
+  const result = await recordCandidateDataConsent(transactionClient, {
+    ...BASE_INPUT,
+    status: 'ACCEPTED',
+    candidatePatch: { currentStep: 'COLLECTING_DATA' }
+  });
+
+  assert.equal(Object.hasOwn(transactionClient, '$transaction'), false);
+  assert.equal(calls.candidateUpdates.length, 1);
+  assert.equal(calls.consentEvents.length, 1);
+  assert.equal(result.candidate.currentStep, 'COLLECTING_DATA');
   assert.equal(result.event.status, 'ACCEPTED');
 });
 
