@@ -8,6 +8,15 @@ function sorted(values) {
   return [...values].sort();
 }
 
+function selectedFixtures() {
+  const entries = loadConversationFixtures();
+  const requestedId = String(process.env.REPLAY_FIXTURE_ID || '').trim();
+  if (!requestedId) return entries;
+  const selected = entries.filter(({ fixture }) => fixture.id === requestedId);
+  assert.equal(selected.length, 1, `REPLAY_FIXTURE_ID no encontrado o duplicado: ${requestedId}`);
+  return selected;
+}
+
 function assertExpectedFinalState(expectedFinalState, snapshot, label) {
   assert.equal(snapshot.candidates.length, 1, `${label}: debe existir un único candidato`);
   const aggregateState = {
@@ -120,7 +129,7 @@ function assertIntegralEffects(firstReplay, fixture, label) {
 }
 
 test('el replay integral aplica el plan una sola vez y detiene reentregas antes de interpretar', async (t) => {
-  for (const { fixture, relativePath } of loadConversationFixtures()) {
+  for (const { fixture, relativePath } of selectedFixtures()) {
     await t.test(relativePath, async () => {
       const adapters = createInMemoryReplayAdapters(fixture);
       const firstReplay = await replayFixtureIntegral(fixture, adapters);
@@ -144,7 +153,7 @@ test('el replay integral aplica el plan una sola vez y detiene reentregas antes 
 });
 
 test('los adaptadores en memoria rechazan un TenantContext diferente', () => {
-  const [{ fixture }] = loadConversationFixtures();
+  const [{ fixture }] = selectedFixtures();
   const adapters = createInMemoryReplayAdapters(fixture);
   const foreignTenantContext = {
     ...fixture.tenantContext,
