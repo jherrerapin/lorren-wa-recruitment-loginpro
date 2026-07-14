@@ -17,6 +17,133 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  apply-supervisor-message-migration:
+    name: Apply scoped supervisor message migration
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 444 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact supervisor message migration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/services/adminSupervisor.js')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = "import { persistOutboundConversationMessage } from './conversationMessageRepository.js';"
+          new_import = """import {
+            persistInboundConversationMessage,
+            persistOutboundConversationMessage,
+            updateConversationMessagePayload
+          } from './conversationMessageRepository.js';"""
+          if old_import in text:
+              text = text.replace(old_import, new_import, 1)
+          elif 'persistInboundConversationMessage' not in text or 'updateConversationMessagePayload' not in text:
+              raise SystemExit('No se encontró el import esperado del repositorio de mensajes')
+
+          function_start = text.index('export async function handleSupervisorInbound')
+          function_end = len(text)
+
+          inbound_start = text.find('  await prisma.message.createMany({', function_start, function_end)
+          if inbound_start >= 0:
+              next_candidate_update = text.index('  await prisma.candidate.update({ where: { id: supervisor.id }', inbound_start)
+              inbound_replacement = """  await persistInboundConversationMessage(prisma, {
+            candidateId: supervisor.id,
+            waMessageId: message?.id || null,
+            messageType: MessageType.TEXT,
+            body,
+            rawPayload: message
+          });
+          """
+              text = text[:inbound_start] + inbound_replacement + text[next_candidate_update:]
+
+          ack_start = text.index("  if (supervisorDecision.action === 'INTERNAL_ACK')", function_start)
+          ack_update_start = text.find('    await prisma.message.update({', ack_start)
+          if ack_update_start >= 0:
+              ack_return_start = text.index('    return {', ack_update_start)
+              ack_replacement = """    await updateConversationMessagePayload(prisma, {
+              messageId: request.id,
+              rawPayload: {
+                ...payload,
+                resolved: Boolean(manualOutboundAfterRequest),
+                resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
+                resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
+                supervisorDecision
+              }
+            });
+          """
+              text = text[:ack_update_start] + ack_replacement + text[ack_return_start:]
+
+          send_start = text.index('  await sendTextMessage(candidate.phone, candidateReply);', ack_start)
+          outbound_start = text.find('  await prisma.message.create({', send_start)
+          if outbound_start >= 0:
+              candidate_update_start = text.index('  await prisma.candidate.update({', outbound_start)
+              outbound_replacement = """  await persistOutboundConversationMessage(prisma, {
+            candidateId: candidate.id,
+            messageType: MessageType.TEXT,
+            body: candidateReply,
+            rawPayload: {
+              source: 'admin_supervisor_answer',
+              supervisorPhone,
+              originalSupervisorInstruction: body,
+              aiModel: candidateReplyResult?.model || null,
+              aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
+              aiReason: candidateReplyResult?.reason || null,
+              requestMessageId: request.id,
+              supervisorDecision
+            }
+          });
+          """
+              text = text[:outbound_start] + outbound_replacement + text[candidate_update_start:]
+
+          final_old = "  await prisma.message.update({ where: { id: request.id }, data: { rawPayload: { ...payload, resolved: true, resolvedAt: new Date().toISOString() } } });"
+          final_new = """  await updateConversationMessagePayload(prisma, {
+            messageId: request.id,
+            rawPayload: {
+              ...payload,
+              resolved: true,
+              resolvedAt: new Date().toISOString()
+            }
+          });"""
+          if final_old in text:
+              text = text.replace(final_old, final_new, 1)
+          elif final_new not in text:
+              raise SystemExit('No se encontró la actualización final del requerimiento')
+
+          migrated_handle = text[function_start:]
+          forbidden = [
+              'prisma.message.createMany(',
+              'prisma.message.create(',
+              'prisma.message.update('
+          ]
+          remaining = [token for token in forbidden if token in migrated_handle]
+          if remaining:
+              raise SystemExit(f'Persistencias directas restantes en supervisor: {remaining}')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/adminSupervisor.js
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "refactor: completar migración de mensajes del supervisor"
+          git push origin HEAD:${{ github.head_ref }}
+
   state-authority:
     name: Validate state authorities
     runs-on: ubuntu-latest
