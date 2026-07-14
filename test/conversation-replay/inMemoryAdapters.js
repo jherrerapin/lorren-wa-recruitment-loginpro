@@ -136,6 +136,8 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     const record = {
       key,
       tenantId: tenantContext.tenantId,
+      channelId: tenantContext.channelId,
+      provider: tenantContext.provider,
       candidateId: requestedCandidateId,
       ...structuredClone(event),
       recordedAt: now
