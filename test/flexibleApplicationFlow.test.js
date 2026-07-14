@@ -2,15 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildVacancyQuestionReply,
+  evaluateConsentBoundary,
   isConsentAcceptance,
-  isConsentRejection
+  isConsentRejection,
+  removeHandledMessagesFromWebhook
 } from '../src/services/dataConsentGate.js';
 import { buildConsentQuestionReply } from '../src/services/consentFaq.js';
 import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
-import {
-  captureGatedCvDocument,
-  isSupportedGatedCvDocument
-} from '../src/services/gatedCvCapture.js';
 import {
   buildCandidateDataCollectionMessage,
   getCandidateReadiness
@@ -20,7 +18,7 @@ import {
   resolveCampaignForReferral
 } from '../src/services/campaignAttribution.js';
 
-test('consentimiento reconoce intención natural sin frase quemada', () => {
+test('consentimiento reconoce intención natural sin frase única', () => {
   assert.equal(isConsentAcceptance('Sí, estoy de acuerdo'), true);
   assert.equal(isConsentAcceptance('Pueden usar mis datos para la postulación'), true);
   assert.equal(isConsentAcceptance('Doy mi consentimiento, continuemos'), true);
@@ -51,26 +49,77 @@ test('durante el consentimiento responde con datos de la vacante sin inventar', 
 
   assert.match(buildVacancyQuestionReply(vacancy, '¿Cuánto pagan?'), /Salario a convenir/i);
   assert.match(buildVacancyQuestionReply(vacancy, '¿Dónde queda?'), /Sector Las Brisas/i);
-  assert.match(buildVacancyQuestionReply(vacancy, '¿Qué requisitos piden?'), /Técnico o tecnólogo/i);
+  assert.match(buildVacancyQuestionReply(vacancy, '¿Qué perfil piden?'), /Técnico o tecnólogo/i);
   assert.match(buildVacancyQuestionReply(vacancy, '¿Y si no tengo moto?'), /Técnico o tecnólogo/i);
 });
 
-test('después de autorizar conserva datos enviados antes y junto con la autorización', async () => {
+test('un archivo enviado antes del consentimiento queda bloqueado sin depender de una vacante', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
+    { type: 'document', document: { id: 'media-1', filename: 'hoja-de-vida.pdf' } }
+  );
+
+  assert.deepEqual(decision, { block: true, reason: 'attachment_before_consent' });
+});
+
+test('datos personales enviados espontáneamente se bloquean antes del consentimiento', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
+    { type: 'text', text: { body: 'Me llamo Juan Pérez y mi cédula es 1020304050' } }
+  );
+
+  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+});
+
+test('un perfil futuro sin vacancyId también exige consentimiento antes de capturar datos', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: null, vacancyId: null, currentStep: 'GREETING_SENT', botResumeMode: 'future_profile_capture' },
+    { type: 'text', text: { body: 'Me llamo Juan Pérez' } }
+  );
+
+  assert.deepEqual(decision, { block: true, reason: 'capture_mode_without_consent' });
+});
+
+test('un candidato con autorización aceptada no vuelve a ser bloqueado por el gate', () => {
+  const decision = evaluateConsentBoundary(
+    { dataConsentStatus: 'ACCEPTED', currentStep: 'COLLECTING_DATA', botResumeMode: null },
+    { type: 'document', document: { id: 'media-1', filename: 'hoja-de-vida.pdf' } }
+  );
+
+  assert.deepEqual(decision, { block: false, reason: 'consent_already_accepted' });
+});
+
+test('un lote conserva los mensajes no manejados cuando otro quedó en consentimiento', () => {
+  const body = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [
+            { id: 'wamid-blocked', from: '573001111111', type: 'document', timestamp: '1' },
+            { id: 'wamid-allowed', from: '573002222222', type: 'text', timestamp: '2', text: { body: 'Quiero información' } }
+          ]
+        }
+      }]
+    }]
+  };
+
+  removeHandledMessagesFromWebhook(body, [{ id: 'wamid-blocked', from: '573001111111', type: 'document', timestamp: '1' }]);
+
+  assert.deepEqual(body.entry[0].changes[0].value.messages.map((message) => message.id), ['wamid-allowed']);
+});
+
+test('después de autorizar solo procesa datos incluidos en el mismo mensaje de autorización', async () => {
   const candidate = {
     id: 'candidate-1',
-    fullName: null,
-    experienceInfo: null,
-    experienceTime: null,
-    experienceSummary: null
+    documentType: null,
+    documentNumber: null
   };
   let persisted = null;
   const prisma = {
     message: {
-      findMany: async () => [
-        { body: 'Sí autorizo. Tengo 2 años de experiencia en operaciones logísticas y manejo de personal.' },
-        { body: 'Vivo en el barrio Canaima' },
-        { body: 'Me llamo Juan Carlos Pérez' }
-      ]
+      findMany: async () => {
+        throw new Error('El historial anterior al consentimiento no debe consultarse');
+      }
     },
     candidate: {
       update: async ({ data }) => {
@@ -84,15 +133,39 @@ test('después de autorizar conserva datos enviados antes y junto con la autoriz
     prisma,
     candidate,
     vacancy: { city: 'Neiva' },
-    currentText: 'Sí autorizo. Tengo 2 años de experiencia en operaciones logísticas y manejo de personal.'
+    currentText: 'Sí autorizo. CC 1020304050'
   });
 
-  assert.equal(result.reason, 'profile_data_captured_after_consent');
-  assert.equal(persisted.fullName, 'Juan Carlos Pérez');
-  assert.equal(persisted.neighborhood, 'Canaima');
-  assert.equal(persisted.experienceInfo, 'Sí');
-  assert.equal(persisted.experienceTime, '2 años');
-  assert.match(persisted.experienceSummary, /operaciones logísticas/i);
+  assert.equal(result.reason, 'profile_data_captured_from_consent_message');
+  assert.equal(persisted.documentType, 'CC');
+  assert.equal(persisted.documentNumber, '1020304050');
+});
+
+test('los mensajes anteriores al consentimiento no se recuperan después de una aceptación sin datos', async () => {
+  const candidate = { id: 'candidate-2', fullName: null };
+  let updateCalled = false;
+  const prisma = {
+    message: {
+      findMany: async () => {
+        throw new Error('No debe consultar mensajes previos');
+      }
+    },
+    candidate: {
+      update: async () => {
+        updateCalled = true;
+      }
+    }
+  };
+
+  const result = await captureConsentedProfileData({
+    prisma,
+    candidate,
+    vacancy: { city: 'Bogotá' },
+    currentText: 'Sí, autorizo'
+  });
+
+  assert.equal(result.reason, 'no_new_profile_data');
+  assert.equal(updateCalled, false);
 });
 
 test('la recolección permite enviar datos juntos o por partes', () => {
@@ -122,57 +195,6 @@ test('si declara no tener experiencia no exige tiempo ni descripción', () => {
   }, { requireCv: false });
 
   assert.deepEqual(readiness.missingFields, []);
-});
-
-test('solo considera HV anticipada un documento con formato permitido', () => {
-  assert.equal(isSupportedGatedCvDocument({
-    type: 'document',
-    document: { id: 'media-1', mime_type: 'application/pdf', filename: 'hv.pdf' }
-  }), true);
-  assert.equal(isSupportedGatedCvDocument({
-    type: 'image',
-    image: { id: 'image-1', mime_type: 'image/jpeg' }
-  }), false);
-  assert.equal(isSupportedGatedCvDocument({
-    type: 'document',
-    document: { id: 'media-2', mime_type: 'image/jpeg', filename: 'foto.jpg' }
-  }), false);
-});
-
-test('captura una HV durante el gate sin alterar el estado conversacional', async () => {
-  const stored = [];
-  const prisma = {
-    candidate: {
-      findUnique: async () => ({ cvStorageKey: 'old-key' })
-    }
-  };
-  const message = {
-    type: 'document',
-    document: { id: 'media-1', mime_type: 'application/pdf', filename: 'hoja-vida.pdf' }
-  };
-
-  const result = await captureGatedCvDocument({
-    prisma,
-    candidateId: 'candidate-1',
-    message,
-    fetchMetadata: async () => ({ url: 'https://media.test/file' }),
-    download: async () => Buffer.from('cv-content'),
-    storeCv: async (_prisma, candidateId, buffer, options) => {
-      stored.push({ candidateId, buffer: buffer.toString(), options });
-    }
-  });
-
-  assert.equal(result.captured, true);
-  assert.equal(result.filename, 'hoja-vida.pdf');
-  assert.deepEqual(stored, [{
-    candidateId: 'candidate-1',
-    buffer: 'cv-content',
-    options: {
-      mimeType: 'application/pdf',
-      originalName: 'hoja-vida.pdf',
-      currentCvStorageKey: 'old-key'
-    }
-  }]);
 });
 
 test('atribución prioriza coincidencia exacta y conserva identificadores Meta', () => {
