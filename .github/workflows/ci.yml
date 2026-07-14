@@ -17,8 +17,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  state-authority:
+    name: Validate state authorities
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate state authority manifest
+        run: node --test test/stateAuthorityManifest.test.js
+
   validate:
     name: Validate application
+    needs: state-authority
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -62,9 +77,6 @@ jobs:
           while IFS= read -r -d '' file; do
             node --check "$file"
           done < <(find src test -type f -name '*.js' -print0)
-
-      - name: Validate state authority manifest
-        run: node --test test/stateAuthorityManifest.test.js
 
       - name: Run conversation turn arbitration regressions
         run: node --test test/conversationIntent.test.js
