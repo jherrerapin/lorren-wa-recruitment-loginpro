@@ -151,7 +151,7 @@ Se conservan por separado:
 
 ## 7. Consentimiento y archivos
 
-El nuevo invariante es no descargar ni guardar datos o archivos antes de autorización.
+Antes de la autorización solo se tratan y conservan los identificadores técnicos mínimos necesarios para recibir el mensaje, resolver tenant/canal, preservar la atribución y solicitar el consentimiento. No se extraen ni persisten campos de perfil, no se descargan archivos y no se procesa una HV.
 
 #420 debe:
 
@@ -171,7 +171,7 @@ La Fase 0 incluye dos deudas confirmadas:
 1. alinear `AttachmentAnalysis` con los campos reales de Prisma y evitar fallos silenciosos;
 2. unificar el contrato de hoja de vida en PDF/DOCX.
 
-No debe mantenerse una ruta que considere cualquier `.doc` como HV válida sin analizar su contenido.
+Las hojas de vida de reclutamiento deben aceptarse únicamente como PDF o DOCX. Los archivos `.doc` heredados se rechazan y Lórren solicita el reenvío en un formato permitido; analizar su contenido no los convierte en válidos.
 
 ## 9. Agenda y recordatorios
 
@@ -237,15 +237,15 @@ Una modificación futura no debe cambiar retroactivamente la explicación de una
 
 ### Fase 0 — Línea base
 
-- sincronizar #420 con el `main` que ya contiene #419;
+- sincronizar #420 con el `main` que ya contiene #419 y #425;
 - corregir sus regresiones y devolver CI a verde;
 - corregir `AttachmentAnalysis`;
-- unificar PDF/DOCX;
+- unificar PDF/DOCX y rechazar `.doc`;
 - iniciar trazabilidad e inventario de deuda.
 
 ### Fase 1 — Corpus y gates
 
-- ampliar #425;
+- ampliar el corpus ya fusionado mediante #425;
 - implementar replay;
 - cubrir recorridos críticos y errores;
 - hacer los escenarios bloqueantes.
@@ -281,7 +281,7 @@ Una modificación futura no debe cambiar retroactivamente la explicación de una
 
 ## 14. GPT interno
 
-El GPT de #424 se crea únicamente cuando la documentación, corpus, contratos, ADR y convenciones estén estables. Su función es mantenimiento, supervisión, QA y onboarding. No participa en el runtime ni sustituye a GitHub.
+El GPT de #424 se crea únicamente cuando la documentación, corpus, contratos, ADR, convenciones y política de actualización/versionado estén estables conforme a `gpt-auditor-readiness.md`. Su función es mantenimiento, supervisión, QA y onboarding. No participa en el runtime ni sustituye a GitHub.
 
 ## 15. Referencias primarias
 
