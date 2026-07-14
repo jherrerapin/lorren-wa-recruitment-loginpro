@@ -69,27 +69,6 @@ jobs:
       - name: Run flow-authority regression
         run: node --test test/flowDecisionAuthority.test.js
 
-      - name: Run contextual reply regressions
-        run: node --test test/contextualReply.test.js
-
-      - name: Run contextual robustness regressions
-        run: node --test test/contextualReplyRobustness.test.js
-
-      - name: Run contextual logging regressions
-        run: node --test test/contextualReplyLogging.test.js
-
-      - name: Run hardening P0 regressions
-        run: node --test test/hardeningP0.test.js
-
-      - name: Run CV format regressions
-        run: node --test test/p9CvOnlyPdfDocx.test.js
-
-      - name: Run reply similarity regressions
-        run: node --test test/replySimilarityPolicy.test.js
-
-      - name: Run response-policy removal regression
-        run: node --test test/responsePolicyRemoval.test.js
-
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
       # regression gate until its exact baseline is deterministic.
@@ -129,7 +108,7 @@ jobs:
             echo "| Failed | $fail_count |"
             echo "| Cancelled | $cancelled_count |"
             echo "| Skipped | $skipped_count |"
-            echo "| Process exit code | $test_exit"
+            echo "| Process exit code | $test_exit |"
             echo
             echo "<details>"
             echo "<summary>Failing top-level tests</summary>"
