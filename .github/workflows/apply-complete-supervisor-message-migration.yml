@@ -1,0 +1,154 @@
+name: Apply complete supervisor message migration
+
+on:
+  push:
+    branches:
+      - refactor/441-supervisor-message-repository
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-complete-supervisor-message-migration
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/441-supervisor-message-repository
+          fetch-depth: 0
+
+      - name: Apply exact supervisor writes migration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/services/adminSupervisor.js')
+          source = path.read_text()
+
+          old_import = "import { persistOutboundConversationMessage } from './conversationMessageRepository.js';"
+          new_import = """import {
+            persistInboundConversationMessage,
+            persistOutboundConversationMessage,
+            updateConversationMessagePayload
+          } from './conversationMessageRepository.js';"""
+          if old_import in source:
+              source = source.replace(old_import, new_import, 1)
+          elif new_import not in source:
+              raise SystemExit('repository import anchor missing')
+
+          old_inbound = """  await prisma.message.createMany({
+            data: [{
+              candidateId: supervisor.id,
+              waMessageId: message?.id || null,
+              direction: MessageDirection.INBOUND,
+              messageType: MessageType.TEXT,
+              body,
+              rawPayload: message
+            }],
+            skipDuplicates: true
+          });"""
+          new_inbound = """  await persistInboundConversationMessage(prisma, {
+            candidateId: supervisor.id,
+            waMessageId: message?.id || null,
+            messageType: MessageType.TEXT,
+            body,
+            rawPayload: message
+          });"""
+          if old_inbound in source:
+              source = source.replace(old_inbound, new_inbound, 1)
+          elif new_inbound not in source:
+              raise SystemExit('inbound message anchor missing')
+
+          old_ack = """    await prisma.message.update({
+              where: { id: request.id },
+              data: {
+                rawPayload: {
+                  ...payload,
+                  resolved: Boolean(manualOutboundAfterRequest),
+                  resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
+                  resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
+                  supervisorDecision
+                }
+              }
+            });"""
+          new_ack = """    await updateConversationMessagePayload(prisma, {
+              messageId: request.id,
+              rawPayload: {
+                ...payload,
+                resolved: Boolean(manualOutboundAfterRequest),
+                resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
+                resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
+                supervisorDecision
+              }
+            });"""
+          if old_ack in source:
+              source = source.replace(old_ack, new_ack, 1)
+          elif new_ack not in source:
+              raise SystemExit('internal ack update anchor missing')
+
+          old_candidate_outbound = """  await prisma.message.create({
+            data: {
+              candidateId: candidate.id,
+              direction: MessageDirection.OUTBOUND,
+              messageType: MessageType.TEXT,
+              body: candidateReply,
+              rawPayload: {
+                source: 'admin_supervisor_answer',
+                supervisorPhone,
+                originalSupervisorInstruction: body,
+                aiModel: candidateReplyResult?.model || null,
+                aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
+                aiReason: candidateReplyResult?.reason || null,
+                requestMessageId: request.id,
+                supervisorDecision
+              }
+            }
+          });"""
+          new_candidate_outbound = """  await persistOutboundConversationMessage(prisma, {
+            candidateId: candidate.id,
+            messageType: MessageType.TEXT,
+            body: candidateReply,
+            rawPayload: {
+              source: 'admin_supervisor_answer',
+              supervisorPhone,
+              originalSupervisorInstruction: body,
+              aiModel: candidateReplyResult?.model || null,
+              aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
+              aiReason: candidateReplyResult?.reason || null,
+              requestMessageId: request.id,
+              supervisorDecision
+            }
+          });"""
+          if old_candidate_outbound in source:
+              source = source.replace(old_candidate_outbound, new_candidate_outbound, 1)
+          elif new_candidate_outbound not in source:
+              raise SystemExit('candidate outbound anchor missing')
+
+          old_resolved = "  await prisma.message.update({ where: { id: request.id }, data: { rawPayload: { ...payload, resolved: true, resolvedAt: new Date().toISOString() } } });"
+          new_resolved = "  await updateConversationMessagePayload(prisma, { messageId: request.id, rawPayload: { ...payload, resolved: true, resolvedAt: new Date().toISOString() } });"
+          if old_resolved in source:
+              source = source.replace(old_resolved, new_resolved, 1)
+          elif new_resolved not in source:
+              raise SystemExit('resolved update anchor missing')
+
+          path.write_text(source)
+          PY
+
+      - name: Commit complete migration when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Migration already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/adminSupervisor.js
+          git commit -m "refactor: completar delegación de mensajes del supervisor"
+          git push origin HEAD:refactor/441-supervisor-message-repository
