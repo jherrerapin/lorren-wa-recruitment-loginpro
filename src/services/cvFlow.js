@@ -13,10 +13,13 @@ export function hasAllowedCvExtension(filename = '') {
 
 export function isCvMimeTypeAllowed(mimeType = '', filename = '') {
   const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
+  const extension = path.extname(filename || '').toLowerCase();
+
+  if (extension && !ALLOWED_CV_EXTENSIONS.includes(extension)) return false;
   if (ALLOWED_CV_MIME_TYPES.includes(normalizedMimeType)) return true;
 
   const mimeMissingOrGeneric = !normalizedMimeType || normalizedMimeType === 'application/octet-stream';
-  return mimeMissingOrGeneric && hasAllowedCvExtension(filename);
+  return mimeMissingOrGeneric && ALLOWED_CV_EXTENSIONS.includes(extension);
 }
 
 export function resolveStepAfterDataCompletion({ hasCv }) {
