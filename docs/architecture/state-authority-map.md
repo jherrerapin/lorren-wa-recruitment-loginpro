@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 5 | Alto | En consolidación | `ConversationMessageRepository` |
+| `Message` | 4 | Alto | En consolidación | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -48,22 +48,19 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `dataConsentGate.js` ya no escribe `Message` directamente. La evidencia entrante y las respuestas salientes del gate pasan por `ConversationMessageRepository`.
 
-En `adminSupervisor.js` se migró únicamente `saveSupervisorOutbound()`, usado para persistir avisos internos enviados al hilo del supervisor. Este flujo conserva:
+En `adminSupervisor.js` se migró únicamente `saveSupervisorOutbound()`, usado para persistir avisos internos enviados al hilo del supervisor. El supervisor permanece declarado porque `handleSupervisorInbound()` todavía crea y actualiza otros mensajes directamente.
 
-- payload `target=admin_supervisor`;
-- visibilidad interna y protección contra envío al candidato;
-- idioma, teléfono del supervisor y cuerpo;
-- retorno del registro creado para los consumidores existentes;
-- comportamiento silencioso cuando falta candidato o contrato Prisma.
+`reminder.js` ya no escribe `Message` directamente. Su helper `storeOutbound()` delega en `persistOutboundConversationMessage()` y conserva:
 
-El supervisor todavía escribe directamente otros mensajes dentro de `handleSupervisorInbound()`:
+- el candidato destinatario;
+- el cuerpo exacto del recordatorio;
+- el tipo de mensaje `TEXT`;
+- el payload de origen y metadatos;
+- el orden actual de envío y persistencia.
 
-- entrada idempotente del administrador;
-- actualización del payload del requerimiento pendiente;
-- respuesta saliente al candidato;
-- cierre final del requerimiento.
+La migración no modifica programación, reclamación, ventana de WhatsApp, reservas, estados del candidato ni jobs. `reminder.js` continúa como escritor de `Candidate` e `InterviewBooking`, pero deja de ser escritor de `Message`.
 
-Por esa razón `adminSupervisor.js` permanece declarado como escritor de `Message` y el total continúa en cinco: webhook, administración, supervisor, recordatorios y el repositorio compartido.
+Los escritores directos de `Message` bajan de cinco a cuatro: webhook, administración, supervisor y el repositorio compartido.
 
 El repositorio distingue actualmente dos contratos:
 
@@ -100,7 +97,7 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 
 ### 3. Los mensajes todavía se persisten desde fronteras distintas
 
-La persistencia de `Message` sigue repartida entre webhook, supervisor, recordatorios, administración y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
+La persistencia de `Message` sigue repartida entre webhook, supervisor, administración y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
 
 - mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
