@@ -9,6 +9,7 @@ import {
 import { captureConsentedProfileData } from './consentProfileCapture.js';
 import { buildConsentQuestionReply } from './consentFaq.js';
 import { isSupervisorPhone } from './adminSupervisor.js';
+import { recordCandidateDataConsent } from './consentStateService.js';
 
 export const DATA_CONSENT_VERSION = 'lorren-v2-2026-07-v3';
 
@@ -573,38 +574,26 @@ export async function resolveConsentResumeContext(prisma, resumeMode = null) {
 async function recordConsent(prisma, req, candidate, status, resumeUpdate = {}) {
   const now = new Date();
   const accepted = status === 'ACCEPTED';
-  const updateData = {
-    dataConsentStatus: status,
-    dataConsentVersion: DATA_CONSENT_VERSION,
-    dataConsentText: DATA_CONSENT_TEXT,
-    dataConsentSource: 'WHATSAPP_CANDIDATE',
-    dataConsentAcceptedAt: accepted ? now : null,
-    dataConsentRevokedAt: accepted ? null : now,
-    dataConsentRecordedBy: 'candidate_whatsapp',
-    currentStep: accepted ? ConversationStep.COLLECTING_DATA : ConversationStep.DONE,
-    status: accepted ? candidate.status : CandidateStatus.NUEVO,
-    botResumeMode: null,
-    lastInboundAt: now,
-    ...(accepted ? resumeUpdate : {})
-  };
-
-  const [updatedCandidate] = await prisma.$transaction([
-    prisma.candidate.update({ where: { id: candidate.id }, data: updateData }),
-    prisma.candidateDataConsentEvent.create({
-      data: {
-        candidateId: candidate.id,
-        status,
-        version: DATA_CONSENT_VERSION,
-        text: DATA_CONSENT_TEXT,
-        source: 'WHATSAPP_CANDIDATE',
-        actorUsername: 'candidate_whatsapp',
-        ipAddress: req.ip || null,
-        userAgent: req.get('user-agent') || null,
-        note: accepted ? 'Aceptación registrada por respuesta de WhatsApp.' : 'Revocatoria registrada por respuesta de WhatsApp.'
-      }
-    })
-  ]);
-  return updatedCandidate;
+  const result = await recordCandidateDataConsent(prisma, {
+    candidateId: candidate.id,
+    status,
+    version: DATA_CONSENT_VERSION,
+    text: DATA_CONSENT_TEXT,
+    source: 'WHATSAPP_CANDIDATE',
+    actorUsername: 'candidate_whatsapp',
+    ipAddress: req.ip || null,
+    userAgent: req.headers['user-agent'] || null,
+    note: accepted ? 'Aceptación registrada por respuesta de WhatsApp.' : 'Revocatoria registrada por respuesta de WhatsApp.',
+    candidatePatch: {
+      currentStep: accepted ? ConversationStep.COLLECTING_DATA : ConversationStep.DONE,
+      status: accepted ? candidate.status : CandidateStatus.NUEVO,
+      botResumeMode: null,
+      lastInboundAt: now,
+      ...(accepted ? resumeUpdate : {})
+    },
+    now
+  });
+  return result.candidate;
 }
 
 async function handleCampaignVacancyConfirmation(prisma, candidate, message, from, body) {

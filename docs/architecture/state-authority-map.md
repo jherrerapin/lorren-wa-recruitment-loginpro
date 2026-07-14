@@ -13,14 +13,14 @@ El inventario verificable está en `state-authority-manifest.json`. El gate `tes
 
 El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe la línea base que debe reducirse progresivamente.
 
-## Resultado de la auditoría inicial
+## Estado actual
 
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
 | `Message` | 5 | Alto | Fragmentado | `ConversationMessageRepository` |
-| `CandidateDataConsentEvent` | 2 | Crítico | En consolidación | `ConsentStateService` |
+| `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
 | `CandidateAdminEvent` | 1 | Medio | En consolidación | `CandidateAdminAuditService` |
@@ -28,20 +28,23 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 
 ## Progreso de consolidación
 
-### Consentimiento administrativo
+### Consentimiento canónico
 
-La ruta `src/routes/lorenV2DataConsents.js` ya no escribe directamente `Candidate` ni `CandidateDataConsentEvent`. Ahora delega en `ConsentStateService`, que aplica dentro de una sola transacción:
+La ruta `src/routes/lorenV2DataConsents.js` y el gate de WhatsApp `src/services/dataConsentGate.js` delegan la decisión versionada en `ConsentStateService`.
+
+La autoridad aplica conjuntamente:
 
 - estado, versión, texto y fuente del consentimiento;
 - fechas mutuamente excluyentes de aceptación o revocatoria;
 - actor que registró la decisión;
-- evento versionado con IP, agente de usuario y nota opcional.
+- evento versionado con IP, agente de usuario y nota opcional;
+- transiciones adicionales permitidas del candidato, como reanudación de flujo o vacante.
 
 La autoridad puede recibir el cliente Prisma principal —abriendo una única transacción— o un cliente `tx` existente, reutilizando la unidad atómica del caso de uso sin intentar anidarla.
 
-El número total de escritores de `Candidate` permanece en quince porque la ruta administrativa fue reemplazada por la nueva autoridad compartida. `CandidateDataConsentEvent` continúa con dos escritores mientras `dataConsentGate.js` siga persistiendo directamente la decisión recibida por WhatsApp.
+`CandidateDataConsentEvent` tiene ahora un único escritor: `ConsentStateService`. El scanner de CI impide que una ruta, gate o integración vuelva a crear eventos directamente.
 
-Esta etapa se mantiene como `consolidating`. El consentimiento solo podrá marcarse `canonical` cuando el gate de WhatsApp también delegue en `ConsentStateService` y el manifiesto registre un único escritor.
+`dataConsentGate.js` continúa listado como escritor de `Candidate` y `Message` porque conserva otras responsabilidades de frontera: mensajes, contexto pendiente, campañas y reanudación. Eso no le permite escribir directamente el evento de consentimiento.
 
 ## Hallazgos
 
@@ -79,14 +82,14 @@ La persistencia de `Message` está repartida entre webhook, consentimiento, supe
 - mensaje manual autorizado;
 - evidencia de consentimiento.
 
-### 4. Consentimiento y jobs muestran una ruta de consolidación más clara
+### 4. Consentimiento demuestra el patrón de migración
 
-`CandidateDataConsentEvent` mantiene dos escritores conocidos, pero uno ya es la autoridad compartida. `JobQueue` conserva un único escritor. Son los primeros agregados que pueden alcanzar una autoridad canónica porque sus contratos ya están protegidos por replay e idempotencia.
+La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Este patrón debe repetirse en mensajes y reservas.
 
 ## Clasificación de escritores
 
-- `canonical`: autoridad objetivo que ya recibe al menos una ruta migrada; solo será exclusiva cuando la etapa pase a `canonical`.
-- `boundary`: frontera especializada que todavía escribe directamente.
+- `canonical`: única autoridad permitida para escribir el agregado cuando la etapa es canónica.
+- `boundary`: frontera especializada que todavía escribe directamente otro estado del modelo.
 - `legacy`: ruta heredada que debe migrarse y retirarse.
 - `admin`: operación humana explícita que debe pasar por un caso de uso auditado.
 - `integration`: sincronización externa que no debe decidir transiciones conversacionales.
@@ -105,12 +108,11 @@ La persistencia de `Message` está repartida entre webhook, consentimiento, supe
 
 ## Orden recomendado de consolidación
 
-1. Completar la migración de `CandidateDataConsentEvent` y campos de consentimiento del candidato.
-2. `Message`, inbox y outbox.
-3. `InterviewBooking` y sus transiciones.
-4. Campos conversacionales de `Candidate`.
-5. Atribución, CV, recordatorios y operaciones administrativas del candidato.
-6. Disponibilidad de entrevista y configuración de slots.
+1. `Message`, inbox y outbox.
+2. `InterviewBooking` y sus transiciones.
+3. Campos conversacionales de `Candidate`.
+4. Atribución, CV, recordatorios y operaciones administrativas del candidato.
+5. Disponibilidad de entrevista y configuración de slots.
 
 ## Criterio de finalización
 
