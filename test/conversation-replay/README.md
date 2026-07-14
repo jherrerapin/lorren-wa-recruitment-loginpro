@@ -11,19 +11,25 @@ Cada fixture describe un turno reproducible con:
 - estado inicial del candidato, la vacante y la conversación;
 - historial mínimo necesario;
 - mensaje recibido;
-- comprensión esperada;
-- plan y escrituras permitidas;
+- interpretación esperada;
+- plan con acciones estructuradas y escrituras permitidas/prohibidas;
 - transición esperada;
 - hechos obligatorios y afirmaciones prohibidas en la respuesta;
 - estado final esperado.
 
-Los fixtures no contienen números de documento, teléfonos ni nombres reales. Todo identificador debe ser sintético y reconocible como dato de prueba.
+Los fixtures no contienen números de documento, teléfonos, correos ni nombres reales. Los valores sensibles estructurados deben utilizar el prefijo `TEST-` y todo identificador debe ser inequívocamente sintético.
+
+## Límite del corpus
+
+Este corpus comienza después de que la entrada haya resuelto tenant, canal e identidad del evento.
+
+La deduplicación de webhooks, validación de firmas, persistencia del inbox y rechazo de reentregas se probarán en la capa de entrada confiable. Un evento duplicado no debe convertirse en una intención conversacional ni llegar a `TurnUnderstanding`.
 
 ## Etapas
 
-1. **Contrato de fixtures:** validación estructural y detección de IDs duplicados.
-2. **Replay de comprensión:** ejecutar `TurnUnderstanding` con proveedores simulados.
-3. **Replay de planificación:** validar `TurnPlan`, permisos y transiciones.
+1. **Contrato de fixtures:** validación estructural, datos sintéticos e identidades únicas.
+2. **Replay de interpretación:** ejecutar la comprensión vigente y, posteriormente, `TurnUnderstanding` con proveedores simulados.
+3. **Replay de planificación:** validar acciones estructuradas, permisos y transiciones.
 4. **Replay integral:** ejecutar adaptadores en memoria sin WhatsApp, OpenAI ni base de datos reales.
 5. **Gate de CI:** impedir retirar una autoridad heredada cuando cambie un comportamiento protegido.
 
@@ -33,7 +39,9 @@ Los fixtures no contienen números de documento, teléfonos ni nombres reales. T
 - No depender de respuestas no determinísticas de un modelo.
 - No guardar información personal real.
 - Declarar explícitamente `tenantContext` y las versiones de política.
+- Usar la forma vigente del runtime como punto de partida, sin impedir la evolución hacia varias intenciones.
 - Separar `allowedWrites` y `forbiddenWrites`.
+- Incluir la persistencia del mensaje saliente cuando se espera una respuesta.
 - Distinguir hechos que la respuesta debe contener de afirmaciones que no puede realizar.
 - Un cambio intencional de comportamiento requiere actualizar el fixture y justificarlo en el PR.
 
