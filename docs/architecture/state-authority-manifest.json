@@ -22,7 +22,7 @@
         { "path": "src/routes/metaAdsStats.js", "role": "integration", "reason": "Sincronización y corrección de atribución Meta" },
         { "path": "src/routes/publicDispatchClient.js", "role": "integration", "reason": "Vinculación con despacho" },
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Orquestación conversacional monolítica vigente" },
-        { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Intervenciones del supervisor; delega únicamente avisos internos salientes en el repositorio compartido" },
+        { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Intervenciones del supervisor y pausas o reanudaciones; delega todos los mensajes en el repositorio compartido" },
         { "path": "src/services/campaignAttribution.js", "role": "integration", "reason": "Atribución de campaña y vacante" },
         { "path": "src/services/chatEngine.js", "role": "legacy", "reason": "Motor conversacional alternativo" },
         { "path": "src/services/consentProfileCapture.js", "role": "boundary", "reason": "Captura posterior al consentimiento" },
@@ -58,8 +58,7 @@
       "writers": [
         { "path": "src/routes/admin.js", "role": "admin", "reason": "La mensajería manual delega en el repositorio; conserva eliminación transaccional al borrar candidatos" },
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Persistencia principal de mensajes entrantes y salientes" },
-        { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Mensajería del supervisor; solo los avisos internos salientes delegan actualmente en el repositorio compartido" },
-        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Persistencia compartida de mensajes entrantes idempotentes y salientes" }
+        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Persistencia compartida de entradas idempotentes, salidas y actualización restringida de payload" }
       ]
     },
     "candidateDataConsentEvent": {
