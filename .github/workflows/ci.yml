@@ -69,6 +69,9 @@ jobs:
       - name: Run flow-authority regression
         run: node --test test/flowDecisionAuthority.test.js
 
+      - name: Run factual fallback regressions
+        run: node --test test/contextualReply.test.js test/contextualReplyRobustness.test.js test/hardeningP0.test.js test/hardeningP0Delta.test.js test/p9CvOnlyPdfDocx.test.js test/replySimilarityPolicy.test.js test/responsePolicyRemoval.test.js
+
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
       # regression gate until its exact baseline is deterministic.
