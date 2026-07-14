@@ -1,27 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 
-const FIXTURES_ROOT = fileURLToPath(new URL('./conversation-replay/fixtures/', import.meta.url));
 const SENSITIVE_FIELD_NAMES = new Set([
   'phone',
   'phoneNumber',
   'documentNumber',
   'email'
 ]);
-
-function collectJsonFiles(directory) {
-  return readdirSync(directory, { withFileTypes: true })
-    .flatMap((entry) => {
-      const fullPath = path.join(directory, entry.name);
-      return entry.isDirectory()
-        ? collectJsonFiles(fullPath)
-        : (entry.name.endsWith('.json') ? [fullPath] : []);
-    })
-    .sort();
-}
 
 function assertNonEmptyString(value, label) {
   assert.equal(typeof value, 'string', `${label} debe ser texto`);
@@ -90,9 +76,19 @@ function assertNoSensitiveConversationText(fixture, label) {
   );
 }
 
-function validateFixture(fixture, filePath) {
-  const label = path.relative(FIXTURES_ROOT, filePath);
+function validateProviderStubs(fixture, label) {
+  const aiResult = fixture?.providerStubs?.aiResult;
+  assert.ok(aiResult && typeof aiResult === 'object' && !Array.isArray(aiResult), `${label}: falta providerStubs.aiResult`);
+  assertNonEmptyString(aiResult.status, `${label}: providerStubs.aiResult.status`);
+  assertNonEmptyString(aiResult.intent, `${label}: providerStubs.aiResult.intent`);
+  assert.ok(aiResult.parsedFields && typeof aiResult.parsedFields === 'object' && !Array.isArray(aiResult.parsedFields), `${label}: parsedFields debe ser un objeto`);
+  assert.ok(aiResult.extraction && typeof aiResult.extraction === 'object' && !Array.isArray(aiResult.extraction), `${label}: falta extraction`);
+  assertNonEmptyString(aiResult.extraction.turnType, `${label}: extraction.turnType`);
+  assert.ok(aiResult.extraction.fieldEvidence && typeof aiResult.extraction.fieldEvidence === 'object' && !Array.isArray(aiResult.extraction.fieldEvidence), `${label}: fieldEvidence debe ser un objeto`);
+  assert.ok(Array.isArray(aiResult.extraction.conflicts), `${label}: extraction.conflicts debe ser un arreglo`);
+}
 
+function validateFixture(fixture, label) {
   assert.equal(fixture.schemaVersion, 1, `${label}: schemaVersion no soportada`);
   assertNonEmptyString(fixture.id, `${label}: id`);
   assertNonEmptyString(fixture.title, `${label}: title`);
@@ -106,6 +102,7 @@ function validateFixture(fixture, filePath) {
   assertNonEmptyString(fixture.policyContext.conversationPolicyVersion, `${label}: conversationPolicyVersion`);
   assertNonEmptyString(fixture.policyContext.vacancyPolicyVersion, `${label}: vacancyPolicyVersion`);
   assertNonEmptyString(fixture.policyContext.consentVersion, `${label}: consentVersion`);
+  validateProviderStubs(fixture, label);
 
   assert.ok(fixture.initialState && typeof fixture.initialState === 'object', `${label}: falta initialState`);
   assert.ok(fixture.initialState.candidate && typeof fixture.initialState.candidate === 'object', `${label}: falta initialState.candidate`);
@@ -150,23 +147,15 @@ function validateFixture(fixture, filePath) {
   assertNoSensitiveConversationText(fixture, label);
 }
 
-test('el corpus conversacional contiene fixtures válidos, versionados y con identidades únicas', () => {
-  const files = collectJsonFiles(FIXTURES_ROOT);
-  assert.ok(files.length >= 3, 'el corpus inicial debe incluir al menos tres escenarios');
+test('el corpus conversacional contiene fixtures válidos, versionados y con proveedores simulados', () => {
+  const entries = loadConversationFixtures();
+  assert.ok(entries.length >= 3, 'el corpus inicial debe incluir al menos tres escenarios');
 
   const fixtureIds = new Set();
   const inboundMessageIds = new Set();
 
-  for (const filePath of files) {
-    let fixture;
-    try {
-      fixture = JSON.parse(readFileSync(filePath, 'utf8'));
-    } catch (error) {
-      const relativePath = path.relative(FIXTURES_ROOT, filePath);
-      assert.fail(`Error al parsear JSON en ${relativePath}: ${error.message}`);
-    }
-
-    validateFixture(fixture, filePath);
+  for (const { fixture, relativePath } of entries) {
+    validateFixture(fixture, relativePath);
 
     assert.ok(!fixtureIds.has(fixture.id), `id de fixture duplicado: ${fixture.id}`);
     fixtureIds.add(fixture.id);
