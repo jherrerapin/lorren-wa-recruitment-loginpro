@@ -81,7 +81,34 @@ jobs:
       - name: Run conversation planning replay
         run: node --test test/conversationReplayPlanning.test.js
 
-      - name: Run integral conversation replay
+      - name: Run integral replay for interest without consent
+        env:
+          REPLAY_FIXTURE_ID: consent-interest-is-not-consent-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for vacancy question
+        env:
+          REPLAY_FIXTURE_ID: context-question-during-data-collection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for candidate correction
+        env:
+          REPLAY_FIXTURE_ID: context-correction-during-data-collection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for consent acceptance
+        env:
+          REPLAY_FIXTURE_ID: consent-explicit-acceptance-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for consent rejection
+        env:
+          REPLAY_FIXTURE_ID: consent-explicit-rejection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for pre-consent document
+        env:
+          REPLAY_FIXTURE_ID: attachment-document-before-consent-v1
         run: node --test test/conversationReplayIntegral.test.js
 
       - name: Run conversation recovery replay
