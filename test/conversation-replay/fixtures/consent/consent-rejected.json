@@ -136,7 +136,7 @@
         "La autorización quedó registrada",
         "La recolección de datos continuará"
       ],
-      "requiredText": ["No continuaré con la postulación", "no procesaré tus datos"],
+      "requiredText": ["No continuaré con la postulación", "ni procesaré tus datos"],
       "forbiddenText": ["autorización quedó registrada", "seguimos con tu postulación"]
     },
     "finalState": {
