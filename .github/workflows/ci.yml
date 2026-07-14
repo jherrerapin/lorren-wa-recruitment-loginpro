@@ -64,23 +64,7 @@ jobs:
           done < <(find src test -type f -name '*.js' -print0)
 
       - name: Run consent boundary regressions
-        shell: bash
-        run: |
-          set +e
-          node --test test/flexibleApplicationFlow.test.js > consent-test.log 2>&1
-          test_exit=$?
-          set -e
-          cat consent-test.log
-          exit "$test_exit"
-
-      - name: Upload consent regression diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: consent-regression-log
-          path: consent-test.log
-          if-no-files-found: ignore
-          retention-days: 1
+        run: node --test test/flexibleApplicationFlow.test.js
 
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
