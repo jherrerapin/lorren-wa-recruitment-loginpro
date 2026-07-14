@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
-import { buildPolicyReply } from '../src/services/responsePolicy.js';
+import { buildSafeContextualFallbackText } from '../src/services/contextualReply.js';
 import { runReminderDispatcher, scheduleReminderForCandidate } from '../src/services/reminder.js';
 import { applyFieldPolicy } from '../src/services/policyLayer.js';
 import { createMockPrisma } from './helpers/mockPrisma.js';
@@ -81,36 +81,39 @@ test('imagen se clasifica como CV_IMAGE_ONLY pero no como CV_VALID', async () =>
   assert.notEqual(result.classification, 'CV_VALID');
 });
 
-test('responsePolicy mantiene intención para pedir HV en PDF/Word', () => {
-  const result = buildPolicyReply({ replyIntent: 'request_cv_pdf_word', recentOutbound: [] });
-  assert.equal(result.intent, 'request_cv_pdf_word');
-  assert.match(result.text, /PDF|DOCX/i);
+test('fallback factual pide HV en PDF o DOCX sin frase de avance vacía', () => {
+  const text = buildSafeContextualFallbackText({ situation: 'attachment_resume_photo' });
+  assert.match(text, /PDF|DOCX/i);
+  assert.match(text, /no puedo registrarla/i);
+  assert.doesNotMatch(text, /perfecto|vamos bien|seguimos con lo puntual/i);
 });
 
-test('responsePolicy soporta request_missing_data con intención determinista', () => {
-  const result = buildPolicyReply({ replyIntent: 'request_missing_data', recentOutbound: [] });
-  assert.equal(result.intent, 'request_missing_data');
-  assert.match(result.text, /dato/i);
-});
-
-test('responsePolicy evita repetición fuerte incluso por similitud semántica', () => {
-  const repeated = 'Perfecto, para seguir me falta tu HV en PDF o DOCX.';
-  const result = buildPolicyReply({
-    replyIntent: 'request_cv_pdf_word',
-    recentOutbound: [{ body: 'Perfecto para seguir me falta tu hoja de vida en PDF o DOCX' }]
+test('fallback de dato pendiente identifica el dato real', () => {
+  const text = buildSafeContextualFallbackText({
+    situation: 'request_missing_data',
+    missingFields: ['documentType']
   });
-  assert.notEqual(result.text, repeated);
+  assert.match(text, /tipo de documento/i);
+  assert.doesNotMatch(text, /dato puntual|ese dato/i);
 });
 
-test('responsePolicy usa contexto de pregunta para evitar tono mecánico con adjunto', () => {
-  const result = buildPolicyReply({
-    replyIntent: 'request_missing_cv',
-    recentOutbound: [{ body: 'Gracias. Ese documento no corresponde a la hoja de vida. Por favor envíame tu HV en PDF o DOCX.' }],
-    contextSummary: 'pregunta sobre horario y adjunto archivo'
+test('fallback factual es estable y no rota frases para aparentar naturalidad', () => {
+  const context = { situation: 'attachment_unreadable' };
+  const first = buildSafeContextualFallbackText(context);
+  const second = buildSafeContextualFallbackText(context);
+
+  assert.equal(first, second);
+  assert.match(first, /no pude procesar/i);
+});
+
+test('una pregunta usa la respuesta factual entregada por la política del turno', () => {
+  const text = buildSafeContextualFallbackText({
+    situation: 'continue_flow',
+    fallbackText: 'El horario registrado para la vacante es de lunes a sábado en turnos rotativos.'
   });
 
-  assert.match(result.text, /Respondo tu pregunta y seguimos\./i);
-  assert.notMatch(result.text, /^Gracias\. Ese documento no corresponde/i);
+  assert.equal(text, 'El horario registrado para la vacante es de lunes a sábado en turnos rotativos.');
+  assert.doesNotMatch(text, /ya te respondo|después continuamos/i);
 });
 
 test('.doc se clasifica como OTHER y no se trata como CV válido', async () => {
