@@ -60,7 +60,11 @@ En `adminSupervisor.js` se migró únicamente `saveSupervisorOutbound()`, usado 
 
 La migración no modifica programación, reclamación, ventana de WhatsApp, reservas, estados del candidato ni jobs. `reminder.js` continúa como escritor de `Candidate` e `InterviewBooking`, pero deja de ser escritor de `Message`.
 
-Los escritores directos de `Message` bajan de cinco a cuatro: webhook, administración, supervisor y el repositorio compartido.
+La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboundMessage()`, delega ahora su creación saliente en `persistOutboundConversationMessage()`. Conserva el orden actual —envío al proveedor, actualización del candidato y persistencia—, el cuerpo exacto o saneado y el payload de intervención manual.
+
+`admin.js` permanece declarado como escritor de `Message` porque la eliminación de un candidato borra sus mensajes dentro de la misma transacción mediante `tx.message.deleteMany()`. Esa operación no forma parte de la mensajería saliente y no se modifica en esta etapa.
+
+Los escritores directos de `Message` permanecen en cuatro: webhook, administración por eliminación transaccional, supervisor y el repositorio compartido.
 
 El repositorio distingue actualmente dos contratos:
 
@@ -95,16 +99,17 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 - no emitir recordatorios para reservas cerradas;
 - no crear dos reservas activas para el mismo candidato y vacante.
 
-### 3. Los mensajes todavía se persisten desde fronteras distintas
+### 3. Los mensajes todavía se escriben desde fronteras distintas
 
-La persistencia de `Message` sigue repartida entre webhook, supervisor, administración y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
+Las escrituras de `Message` siguen repartidas entre webhook, supervisor, eliminación administrativa y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
 
 - mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
 - entrega del proveedor;
 - mensaje manual autorizado;
 - evidencia de consentimiento;
-- mensajería interna del supervisor.
+- mensajería interna del supervisor;
+- eliminación transaccional asociada al ciclo de vida del candidato.
 
 ### 4. Consentimiento demuestra el patrón de migración
 
