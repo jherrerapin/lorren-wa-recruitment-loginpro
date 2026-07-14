@@ -31,6 +31,15 @@ jobs:
       - name: Validate state authority manifest
         run: node --test test/stateAuthorityManifest.test.js
 
+      - name: Upload state authority diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-authority-observed
+          path: state-authority-observed.json
+          if-no-files-found: error
+          retention-days: 3
+
   validate:
     name: Validate application
     needs: state-authority
