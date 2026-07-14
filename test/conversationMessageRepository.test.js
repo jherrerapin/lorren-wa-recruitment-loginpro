@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { MessageDirection, MessageType } from '@prisma/client';
 import {
   persistInboundConversationMessage,
-  persistOutboundConversationMessage
+  persistOutboundConversationMessage,
+  updateConversationMessagePayload
 } from '../src/services/conversationMessageRepository.js';
 
 function createPrismaMock({ inboundCount = 1 } = {}) {
   const calls = {
     createMany: [],
-    create: []
+    create: [],
+    update: []
   };
   const prisma = {
     message: {
@@ -20,6 +22,10 @@ function createPrismaMock({ inboundCount = 1 } = {}) {
       create: async ({ data }) => {
         calls.create.push(data);
         return { id: 'message-test-1', ...data };
+      },
+      update: async (args) => {
+        calls.update.push(args);
+        return { id: args.where.id, ...args.data };
       }
     }
   };
@@ -106,7 +112,28 @@ test('admite cuerpos nulos y conserva payload JSON sin transformarlo', async () 
   assert.equal(data.rawPayload, rawPayload);
 });
 
-test('rechaza contratos, identificadores, tipos y fechas inválidas antes de persistir', async () => {
+test('actualiza únicamente el payload del mensaje identificado', async () => {
+  const { prisma, calls } = createPrismaMock();
+  const rawPayload = {
+    source: 'admin_manual_review_request',
+    resolved: true,
+    resolvedAt: '2026-07-14T20:00:00.000Z'
+  };
+
+  const result = await updateConversationMessagePayload(prisma, {
+    messageId: 'message-pending-1',
+    rawPayload
+  });
+
+  assert.equal(result.updated, true);
+  assert.equal(result.message.id, 'message-pending-1');
+  assert.deepEqual(calls.update, [{
+    where: { id: 'message-pending-1' },
+    data: { rawPayload }
+  }]);
+});
+
+test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos antes de persistir', async () => {
   await assert.rejects(
     () => persistInboundConversationMessage({}, {
       candidateId: 'candidate-test-1',
@@ -120,6 +147,13 @@ test('rechaza contratos, identificadores, tipos y fechas inválidas antes de per
       messageType: MessageType.TEXT
     }),
     /outbound_message_prisma_contract_invalid/
+  );
+  await assert.rejects(
+    () => updateConversationMessagePayload({ message: { update: true } }, {
+      messageId: 'message-test-1',
+      rawPayload: {}
+    }),
+    /message_payload_update_prisma_contract_invalid/
   );
 
   const { prisma, calls } = createPrismaMock();
@@ -146,6 +180,27 @@ test('rechaza contratos, identificadores, tipos y fechas inválidas antes de per
     }),
     /responded_at_invalid/
   );
+  await assert.rejects(
+    () => updateConversationMessagePayload(prisma, {
+      messageId: '  ',
+      rawPayload: {}
+    }),
+    /message_id_required/
+  );
+  await assert.rejects(
+    () => updateConversationMessagePayload(prisma, {
+      messageId: 'message-test-1'
+    }),
+    /raw_payload_required/
+  );
+  await assert.rejects(
+    () => updateConversationMessagePayload(prisma, {
+      messageId: 'message-test-1',
+      rawPayload: undefined
+    }),
+    /raw_payload_required/
+  );
   assert.equal(calls.createMany.length, 0);
   assert.equal(calls.create.length, 0);
+  assert.equal(calls.update.length, 0);
 });

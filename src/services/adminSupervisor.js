@@ -5,7 +5,11 @@ import { normalizeKnowledgeContent } from './botKnowledge.js';
 import { isCvMimeTypeAllowed } from './cvFlow.js';
 import { fetchMediaMetadata, downloadMedia } from './media.js';
 import { storeCandidateCv } from './cvStorage.js';
-import { persistOutboundConversationMessage } from './conversationMessageRepository.js';
+import {
+  persistInboundConversationMessage,
+  persistOutboundConversationMessage,
+  updateConversationMessagePayload
+} from './conversationMessageRepository.js';
 
 const DEFAULT_SUPERVISOR_PHONE = '3052982551';
 const WINDOW_WARNING_AFTER_MS = 23 * 60 * 60 * 1000;
@@ -492,16 +496,12 @@ export async function handleSupervisorInbound(prisma, message = {}) {
   const body = String(message?.text?.body || '').trim();
   const supervisor = await getOrCreateSupervisorCandidate(prisma);
 
-  await prisma.message.createMany({
-    data: [{
-      candidateId: supervisor.id,
-      waMessageId: message?.id || null,
-      direction: MessageDirection.INBOUND,
-      messageType: MessageType.TEXT,
-      body,
-      rawPayload: message
-    }],
-    skipDuplicates: true
+  await persistInboundConversationMessage(prisma, {
+    candidateId: supervisor.id,
+    waMessageId: message?.id || null,
+    messageType: MessageType.TEXT,
+    body,
+    rawPayload: message
   });
   await prisma.candidate.update({ where: { id: supervisor.id }, data: { lastInboundAt: new Date() } });
 
@@ -548,16 +548,14 @@ export async function handleSupervisorInbound(prisma, message = {}) {
   }
 
   if (supervisorDecision.action === 'INTERNAL_ACK') {
-    await prisma.message.update({
-      where: { id: request.id },
-      data: {
-        rawPayload: {
-          ...payload,
-          resolved: Boolean(manualOutboundAfterRequest),
-          resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
-          resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
-          supervisorDecision
-        }
+    await updateConversationMessagePayload(prisma, {
+      messageId: request.id,
+      rawPayload: {
+        ...payload,
+        resolved: Boolean(manualOutboundAfterRequest),
+        resolvedAt: manualOutboundAfterRequest ? new Date().toISOString() : payload.resolvedAt,
+        resolvedBy: manualOutboundAfterRequest ? 'manual_candidate_outbound_confirmed_by_supervisor_context' : payload.resolvedBy,
+        supervisorDecision
       }
     });
     return {
@@ -582,22 +580,19 @@ export async function handleSupervisorInbound(prisma, message = {}) {
   }
 
   await sendTextMessage(candidate.phone, candidateReply);
-  await prisma.message.create({
-    data: {
-      candidateId: candidate.id,
-      direction: MessageDirection.OUTBOUND,
-      messageType: MessageType.TEXT,
-      body: candidateReply,
-      rawPayload: {
-        source: 'admin_supervisor_answer',
-        supervisorPhone,
-        originalSupervisorInstruction: body,
-        aiModel: candidateReplyResult?.model || null,
-        aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
-        aiReason: candidateReplyResult?.reason || null,
-        requestMessageId: request.id,
-        supervisorDecision
-      }
+  await persistOutboundConversationMessage(prisma, {
+    candidateId: candidate.id,
+    messageType: MessageType.TEXT,
+    body: candidateReply,
+    rawPayload: {
+      source: 'admin_supervisor_answer',
+      supervisorPhone,
+      originalSupervisorInstruction: body,
+      aiModel: candidateReplyResult?.model || null,
+      aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
+      aiReason: candidateReplyResult?.reason || null,
+      requestMessageId: request.id,
+      supervisorDecision
     }
   });
   await prisma.candidate.update({
@@ -611,7 +606,14 @@ export async function handleSupervisorInbound(prisma, message = {}) {
       lastOutboundAt: new Date()
     }
   });
-  await prisma.message.update({ where: { id: request.id }, data: { rawPayload: { ...payload, resolved: true, resolvedAt: new Date().toISOString() } } });
+  await updateConversationMessagePayload(prisma, {
+    messageId: request.id,
+    rawPayload: {
+      ...payload,
+      resolved: true,
+      resolvedAt: new Date().toISOString()
+    }
+  });
   await addSupervisorKnowledge(
     prisma,
     candidate,
