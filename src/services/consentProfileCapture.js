@@ -20,9 +20,11 @@ const CAPTURABLE_FIELDS = new Set([
   'experienceSummary'
 ]);
 
+const CONSENT_PREFIX_TOKEN = String.raw`(?:si|sí|sii|sip|claro|correcto|de\s+acuerdo|dale|ok|listo)`;
+const CONSENT_PREFIXES = String.raw`(?:${CONSENT_PREFIX_TOKEN}[\s,;:-]*)*`;
 const CONSENT_DECLARATION_PREFIXES = [
-  /^(?:si|sí|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)?[\s,;:-]*(?:autorizo|acepto|consiento)(?:\s+(?:el\s+)?tratamiento(?:\s+de)?(?:\s+mis|\s+los)?\s+datos?)?/i,
-  /^(?:si|sí|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)?[\s,;:-]*(?:estoy\s+de\s+acuerdo|doy\s+mi\s+consentimiento|doy\s+consentimiento|doy\s+permiso|tienen\s+mi\s+permiso)/i,
+  new RegExp(`^${CONSENT_PREFIXES}(?:autorizo|acepto|consiento)(?:\\s+(?:el\\s+)?tratamiento(?:\\s+de)?(?:\\s+mis|\\s+los)?\\s+datos?)?`, 'i'),
+  new RegExp(`^${CONSENT_PREFIXES}(?:estoy\\s+de\\s+acuerdo|doy\\s+mi\\s+consentimiento|doy\\s+consentimiento|doy\\s+permiso|tienen\\s+mi\\s+permiso)`, 'i'),
   /^(?:pueden|puede)\s+(?:usar|tratar|manejar|procesar|guardar)\s+(?:mis|los)\s+datos/i,
   /^(?:pueden|puede)\s+continuar\s+con\s+(?:mis|los)\s+datos/i
 ];
@@ -71,8 +73,8 @@ export async function captureConsentedProfileData({
   }
 
   // Solo se procesa la parte de datos del mismo mensaje en que se registró la autorización.
-  // Se retira la declaración de consentimiento para que expresiones como "sí autorizo"
-  // no sean interpretadas erróneamente como nombre u otro dato del candidato.
+  // Se retira la declaración de consentimiento para que sus palabras no se interpreten
+  // erróneamente como nombre u otro dato del candidato.
   const profileText = stripConsentDeclaration(consentMessageText);
   if (!profileText) {
     return { candidate, capturedFields: [], reason: 'no_new_profile_data' };
