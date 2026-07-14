@@ -19,21 +19,27 @@ function isReadableCodePoint(codePoint) {
     || (codePoint >= 160 && codePoint <= 383);
 }
 
+function appendDecodedSequence(sequences, buffer, encoding, start, end, minimumByteLength) {
+  if (start < 0 || end - start < minimumByteLength) return;
+  const sequence = buffer.toString(encoding, start, end);
+  if (sequence.trim().length >= MIN_SEQUENCE_LENGTH) sequences.push(sequence);
+}
+
 function collectAsciiSequences(buffer) {
   const sequences = [];
-  let current = '';
+  let start = -1;
 
-  for (const byte of buffer) {
-    if (isReadableCodePoint(byte)) {
-      current += String.fromCharCode(byte);
+  for (let offset = 0; offset < buffer.length; offset += 1) {
+    if (isReadableCodePoint(buffer[offset])) {
+      if (start === -1) start = offset;
       continue;
     }
 
-    if (current.trim().length >= MIN_SEQUENCE_LENGTH) sequences.push(current);
-    current = '';
+    appendDecodedSequence(sequences, buffer, 'latin1', start, offset, MIN_SEQUENCE_LENGTH);
+    start = -1;
   }
 
-  if (current.trim().length >= MIN_SEQUENCE_LENGTH) sequences.push(current);
+  appendDecodedSequence(sequences, buffer, 'latin1', start, buffer.length, MIN_SEQUENCE_LENGTH);
   return sequences;
 }
 
@@ -41,19 +47,20 @@ function collectUtf16LeSequences(buffer) {
   const sequences = [];
 
   for (const startOffset of [0, 1]) {
-    let current = '';
+    let start = -1;
     for (let offset = startOffset; offset + 1 < buffer.length; offset += 2) {
       const codePoint = buffer.readUInt16LE(offset);
       if (isReadableCodePoint(codePoint)) {
-        current += String.fromCharCode(codePoint);
+        if (start === -1) start = offset;
         continue;
       }
 
-      if (current.trim().length >= MIN_SEQUENCE_LENGTH) sequences.push(current);
-      current = '';
+      appendDecodedSequence(sequences, buffer, 'utf16le', start, offset, MIN_SEQUENCE_LENGTH * 2);
+      start = -1;
     }
 
-    if (current.trim().length >= MIN_SEQUENCE_LENGTH) sequences.push(current);
+    const alignedEnd = buffer.length - ((buffer.length - startOffset) % 2);
+    appendDecodedSequence(sequences, buffer, 'utf16le', start, alignedEnd, MIN_SEQUENCE_LENGTH * 2);
   }
 
   return sequences;
