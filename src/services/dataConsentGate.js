@@ -582,7 +582,7 @@ async function recordConsent(prisma, req, candidate, status, resumeUpdate = {}) 
     source: 'WHATSAPP_CANDIDATE',
     actorUsername: 'candidate_whatsapp',
     ipAddress: req.ip || null,
-    userAgent: req.get('user-agent') || null,
+    userAgent: req.headers['user-agent'] || null,
     note: accepted ? 'Aceptación registrada por respuesta de WhatsApp.' : 'Revocatoria registrada por respuesta de WhatsApp.',
     candidatePatch: {
       currentStep: accepted ? ConversationStep.COLLECTING_DATA : ConversationStep.DONE,
