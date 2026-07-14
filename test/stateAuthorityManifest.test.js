@@ -1,0 +1,143 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sourceRoot = path.join(repositoryRoot, 'src');
+const manifestPath = path.join(repositoryRoot, 'docs', 'architecture', 'state-authority-manifest.json');
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+
+const VALID_MIGRATION_STAGES = new Set(['fragmented', 'consolidating', 'canonical']);
+const VALID_ROLES = new Set(['admin', 'boundary', 'canonical', 'integration', 'legacy', 'operational']);
+
+function normalizePath(value) {
+  return String(value || '').split(path.sep).join('/');
+}
+
+function collectJavaScriptFiles(directory) {
+  const files = [];
+  for (const entry of readdirSync(directory)) {
+    const absolutePath = path.join(directory, entry);
+    const stats = statSync(absolutePath);
+    if (stats.isDirectory()) files.push(...collectJavaScriptFiles(absolutePath));
+    else if (stats.isFile() && entry.endsWith('.js')) files.push(absolutePath);
+  }
+  return files;
+}
+
+function removeComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+function lineNumberAt(source, index) {
+  return source.slice(0, index).split('\n').length;
+}
+
+function collectStateWrites() {
+  const trackedModels = Object.keys(manifest.models);
+  const trackedOperations = manifest.trackedOperations;
+  const modelPattern = trackedModels.map((model) => model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const operationPattern = trackedOperations.map((operation) => operation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const writePattern = new RegExp(
+    `\\b(?:prisma|tx|transaction|db)(?:\\?\\.)?\\.(${modelPattern})(?:\\?\\.)?\\.(${operationPattern})\\s*\\(`,
+    'g'
+  );
+  const writes = [];
+
+  for (const absolutePath of collectJavaScriptFiles(sourceRoot)) {
+    const relativePath = normalizePath(path.relative(repositoryRoot, absolutePath));
+    const source = removeComments(readFileSync(absolutePath, 'utf8'));
+    for (const match of source.matchAll(writePattern)) {
+      writes.push({
+        path: relativePath,
+        model: match[1],
+        operation: match[2],
+        line: lineNumberAt(source, match.index)
+      });
+    }
+  }
+
+  return writes;
+}
+
+function writersByModel(writes) {
+  const result = new Map();
+  for (const write of writes) {
+    if (!result.has(write.model)) result.set(write.model, new Map());
+    const paths = result.get(write.model);
+    if (!paths.has(write.path)) paths.set(write.path, new Set());
+    paths.get(write.path).add(write.operation);
+  }
+  return result;
+}
+
+function formatObservedWriters(paths = new Map()) {
+  return [...paths.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([writerPath, operations]) => `${writerPath} [${[...operations].sort().join(', ')}]`)
+    .join('\n');
+}
+
+test('el manifiesto de autoridades declara contratos completos y válidos', () => {
+  assert.equal(manifest.schemaVersion, 1);
+  assert.ok(Array.isArray(manifest.trackedOperations) && manifest.trackedOperations.length > 0);
+  assert.ok(manifest.models && typeof manifest.models === 'object');
+
+  for (const [model, contract] of Object.entries(manifest.models)) {
+    assert.ok(contract.domain, `${model}: falta domain`);
+    assert.ok(contract.targetAuthority, `${model}: falta targetAuthority`);
+    assert.ok(VALID_MIGRATION_STAGES.has(contract.migrationStage), `${model}: migrationStage inválido`);
+    assert.ok(Array.isArray(contract.writers) && contract.writers.length > 0, `${model}: falta writers`);
+
+    const paths = new Set();
+    for (const writer of contract.writers) {
+      assert.ok(writer.path?.startsWith('src/'), `${model}: writer.path debe estar dentro de src`);
+      assert.ok(VALID_ROLES.has(writer.role), `${model}:${writer.path}: role inválido`);
+      assert.ok(writer.reason?.trim(), `${model}:${writer.path}: falta reason`);
+      assert.ok(!paths.has(writer.path), `${model}: writer duplicado ${writer.path}`);
+      paths.add(writer.path);
+    }
+
+    const canonicalWriters = contract.writers.filter((writer) => writer.role === 'canonical');
+    assert.ok(canonicalWriters.length <= 1, `${model}: no puede declarar más de una autoridad canónica`);
+    if (contract.migrationStage === 'canonical') {
+      assert.equal(canonicalWriters.length, 1, `${model}: un modelo canónico debe declarar exactamente una autoridad`);
+    }
+  }
+});
+
+test('ningún archivo escribe estado de alto riesgo fuera del manifiesto', () => {
+  const observed = writersByModel(collectStateWrites());
+
+  for (const [model, contract] of Object.entries(manifest.models)) {
+    const declaredPaths = new Set(contract.writers.map((writer) => writer.path));
+    const observedPaths = observed.get(model) || new Map();
+    const undeclared = [...observedPaths.keys()].filter((writerPath) => !declaredPaths.has(writerPath));
+
+    assert.deepEqual(
+      undeclared,
+      [],
+      `${model}: escritores no declarados:\n${formatObservedWriters(new Map(undeclared.map((writerPath) => [writerPath, observedPaths.get(writerPath)])))}`
+    );
+  }
+});
+
+test('el manifiesto no conserva escritores obsoletos o inexistentes', () => {
+  const observed = writersByModel(collectStateWrites());
+
+  for (const [model, contract] of Object.entries(manifest.models)) {
+    const observedPaths = observed.get(model) || new Map();
+    for (const writer of contract.writers) {
+      const absolutePath = path.join(repositoryRoot, writer.path);
+      assert.ok(statSync(absolutePath).isFile(), `${model}: archivo declarado inexistente ${writer.path}`);
+      assert.ok(
+        observedPaths.has(writer.path),
+        `${model}: ${writer.path} está declarado pero no contiene una escritura Prisma rastreable`
+      );
+    }
+  }
+});
