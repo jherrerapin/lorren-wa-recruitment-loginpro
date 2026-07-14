@@ -36,3 +36,15 @@ test('escalamiento tolera opciones inválidas y conserva resultado seguro', () =
     assert.equal(shouldEscalateHumanReview(value), false);
   }
 });
+
+test('campos llamados como propiedades del prototipo se tratan como texto y no como funciones', () => {
+  for (const field of ['constructor', 'toString', 'valueOf']) {
+    const text = buildSafeContextualFallbackText({
+      situation: 'request_missing_data',
+      missingFields: [field]
+    });
+
+    assert.equal(typeof text, 'string');
+    assert.match(text, new RegExp(field, 'i'));
+  }
+});
