@@ -30,9 +30,9 @@ test('bloquea pagos quincenales y contrato directo no soportados', () => {
   assert.ok(result.blockedClaims.includes('pagos_quincenales'));
 });
 
-test('normaliza instrucciones heredadas de carga a PDF o DOCX', () => {
+test('normaliza instrucciones automáticas de carga a PDF, DOC o DOCX', () => {
   const variants = [
-    'Adjunta tu hoja de vida como archivo PDF, DOC o DOCX.',
+    'Adjunta tu hoja de vida como archivo PDF o DOCX.',
     'Para registrar tu hoja de vida, adjunta el archivo real en PDF o Word/DOCX.',
     'Carga tu CV en PDF, Word o DOCX.'
   ];
@@ -40,14 +40,20 @@ test('normaliza instrucciones heredadas de carga a PDF o DOCX', () => {
   for (const reply of variants) {
     const result = sanitizeOutboundReply({ reply, vacancy: baseVacancy, source: 'bot_cv_request' });
     assert.equal(result.blocked, false, reply);
-    assert.match(result.reply, /PDF o DOCX/i, reply);
-    assert.doesNotMatch(result.reply, /PDF\s*,\s*DOC\s+o\s+DOCX/i, reply);
-    assert.doesNotMatch(result.reply, /Word\/DOCX/i, reply);
+    assert.match(result.reply, /PDF, DOC o DOCX/i, reply);
     assert.deepEqual(result.normalizations, ['cv_upload_format']);
   }
+
+  const canonical = sanitizeOutboundReply({
+    reply: 'Adjunta tu hoja de vida como archivo PDF, DOC o DOCX.',
+    vacancy: baseVacancy,
+    source: 'bot_cv_request'
+  });
+  assert.equal(canonical.reply, 'Adjunta tu hoja de vida como archivo PDF, DOC o DOCX.');
+  assert.deepEqual(canonical.normalizations, []);
 });
 
-test('el fallback de una instrucción insegura también usa solo PDF o DOCX', () => {
+test('el fallback de una instrucción insegura también permite PDF, DOC y DOCX', () => {
   const result = sanitizeOutboundReply({
     reply: 'Puedes enviarme la hoja de vida en foto o impresa.',
     vacancy: baseVacancy,
@@ -56,8 +62,7 @@ test('el fallback de una instrucción insegura también usa solo PDF o DOCX', ()
 
   assert.equal(result.blocked, true);
   assert.equal(result.reply, CV_UNSAFE_FALLBACK_REPLY);
-  assert.match(result.reply, /PDF o DOCX/i);
-  assert.doesNotMatch(result.reply, /Word\/DOCX|PDF\s*,\s*DOC/i);
+  assert.match(result.reply, /PDF, DOC o DOCX/i);
 });
 
 test('permite documentos de entrevista sensibles si están configurados en la vacante', () => {
