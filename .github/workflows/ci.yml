@@ -102,6 +102,9 @@ jobs:
       - name: Run supervisor coordination regressions
         run: node --test test/adminSupervisor.test.js
 
+      - name: Run admin manual outbound regressions
+        run: node --test test/adminManualOutbound.test.js
+
       - name: Run reminder regressions
         run: node --test test/reminder.test.js
 
