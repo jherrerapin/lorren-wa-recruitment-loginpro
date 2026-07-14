@@ -1086,7 +1086,7 @@ async function hasRecentResumePhotoReply(prisma, candidateId, minutes = 15) {
 }
 
 
-async function recordIntentionalSilence(prisma, candidate = {}, inboundText = '', details = {}) {
+export async function recordIntentionalSilence(prisma, candidate = {}, inboundText = '', details = {}) {
   const payload = {
     source: 'bot_silence_trace',
     visibility: 'internal',
@@ -1417,7 +1417,7 @@ export async function guardReplyWithConversationState(prisma, candidateId, reply
   };
 }
 
-async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
+export async function saveOutboundMessage(prisma, candidateId, body, rawPayload = { body }) {
   const payload = { body, source: 'bot_flow', ...(rawPayload || {}) };
   await persistOutboundConversationMessage(prisma, {
     candidateId,
