@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isCvMimeTypeAllowed, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../src/services/cvFlow.js';
+import {
+  ALLOWED_CV_EXTENSIONS,
+  hasAllowedCvExtension,
+  isCvMimeTypeAllowed,
+  resolveStepAfterDataCompletion,
+  shouldFinalizeAfterCv
+} from '../src/services/cvFlow.js';
 
 test('datos completos sin CV pasan a ASK_CV y no a DONE', () => {
   const step = resolveStepAfterDataCompletion({ hasCv: false });
@@ -8,11 +14,21 @@ test('datos completos sin CV pasan a ASK_CV y no a DONE', () => {
   assert.notEqual(step, 'DONE');
 });
 
-test('en ASK_CV solo se permite cierre con CV válido', () => {
-  assert.equal(isCvMimeTypeAllowed('application/pdf'), true);
-  assert.equal(isCvMimeTypeAllowed('application/msword'), false);
-  assert.equal(isCvMimeTypeAllowed('application/vnd.openxmlformats-officedocument.wordprocessingml.document'), true);
-  assert.equal(isCvMimeTypeAllowed('image/jpeg'), false);
+test('el contrato de carga permite únicamente PDF y DOCX', () => {
+  assert.deepEqual(ALLOWED_CV_EXTENSIONS, ['.pdf', '.docx']);
+  assert.equal(hasAllowedCvExtension('hv.pdf'), true);
+  assert.equal(hasAllowedCvExtension('hv.docx'), true);
+  assert.equal(hasAllowedCvExtension('hv.doc'), false);
+
+  assert.equal(isCvMimeTypeAllowed('application/pdf', 'hv.pdf'), true);
+  assert.equal(isCvMimeTypeAllowed('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'hv.docx'), true);
+  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.pdf'), true);
+  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.docx'), true);
+
+  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), false);
+  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), false);
+  assert.equal(isCvMimeTypeAllowed('', 'hv.doc'), false);
+  assert.equal(isCvMimeTypeAllowed('image/jpeg', 'hv.jpg'), false);
 });
 
 test('con CV recibido y sin campos faltantes sí se cierra en DONE', () => {
