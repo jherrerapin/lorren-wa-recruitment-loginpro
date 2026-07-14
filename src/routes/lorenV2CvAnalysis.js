@@ -85,6 +85,14 @@ function statusBadge(candidate = {}) {
   if (!hasCv(candidate)) return '<span class="badge error">Sin HV</span>';
   const analysis = latestAnalysis(candidate);
   if (!analysis) return '<span class="badge warn">Pendiente análisis</span>';
+
+  if (analysis.classification === 'UNREADABLE') {
+    return '<span class="badge error">Archivo ilegible</span>';
+  }
+  if (analysis.classification !== 'CV_VALID') {
+    return '<span class="badge warn">Análisis incompleto</span>';
+  }
+
   const evidence = parseCvAnalysisEvidence(analysis);
   const mismatches = Array.isArray(evidence.mismatches) ? evidence.mismatches.length : 0;
   if (mismatches > 0) return `<span class="badge warn">${mismatches} alerta(s)</span>`;
@@ -100,7 +108,8 @@ function renderAnalysisSummary(candidate = {}) {
   const warnings = Array.isArray(evidence.warnings) ? evidence.warnings : [];
   return `<div>
     <strong>Confianza:</strong> ${Math.round(Number(analysis.confidence || 0) * 100)}%<br>
-    <span class="muted">Analizado: ${formatDate(analysis.createdAt)}</span><br>
+    <span class="muted">Analizado: ${formatDate(analysis.analysedAt)}</span><br>
+    ${analysis.summary ? `<span class="muted">${escapeHtml(analysis.summary)}</span><br>` : ''}
     <span class="muted">Nombre HV: ${escapeHtml(extracted.fullName || 'No identificado')}</span><br>
     <span class="muted">Doc. HV: ${escapeHtml(extracted.documentNumber || 'No identificado')}</span><br>
     ${mismatches.length ? `<span class="badge warn">Diferencias: ${mismatches.map((item) => escapeHtml(item.field)).join(', ')}</span><br>` : ''}
@@ -137,7 +146,7 @@ async function loadCandidates(prisma) {
     take: 300,
     include: {
       vacancy: { select: { id: true, title: true, city: true } },
-      attachmentAnalyses: { orderBy: { createdAt: 'desc' }, take: 1 }
+      attachmentAnalyses: { orderBy: { analysedAt: 'desc' }, take: 1 }
     }
   });
 }
