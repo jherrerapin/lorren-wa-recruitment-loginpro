@@ -28,6 +28,8 @@ test('el contrato de carga permite únicamente PDF y DOCX', () => {
   assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), false);
   assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), false);
   assert.equal(isCvMimeTypeAllowed('', 'hv.doc'), false);
+  assert.equal(isCvMimeTypeAllowed('application/pdf', 'hv.doc'), false);
+  assert.equal(isCvMimeTypeAllowed('application/pdf', 'hv.exe'), false);
   assert.equal(isCvMimeTypeAllowed('image/jpeg', 'hv.jpg'), false);
 });
 
