@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { buildPolicyReply } from './responsePolicy.js';
 import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 import { ReplySimilarityThreshold, isSubstantiallySimilarReply } from './replySimilarityPolicy.js';
 import { LORREN_ROLE_LABEL } from './botKnowledge.js';
@@ -7,16 +6,17 @@ import { LORREN_ROLE_LABEL } from './botKnowledge.js';
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export const CONTEXTUAL_REPLY_MODEL = 'gpt-5.4-mini-2026-03-17';
 
-const FALLBACK_INTENT_BY_SITUATION = {
+const FALLBACK_INTENT_BY_SITUATION = Object.freeze({
   attachment_resume_photo: 'request_cv_pdf_word',
+  attachment_cv_valid: 'continue_flow',
   attachment_id_doc: 'attachment_id_doc',
   attachment_other_doc: 'request_missing_cv',
   attachment_unreadable: 'attachment_unreadable',
   request_missing_data: 'request_missing_data',
   confirm_data_correction: 'confirm_correction',
   continue_flow: 'continue_flow',
-  process_human_review_required: 'continue_flow'
-};
+  process_human_review_required: 'human_review'
+});
 
 function parseStructuredOutput(data = {}) {
   const output = data?.output || [];
@@ -29,6 +29,79 @@ function parseStructuredOutput(data = {}) {
     }
   }
   return null;
+}
+
+function humanizeFieldName(field = '') {
+  return String(field || '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .trim();
+}
+
+function formatMissingFields(fields = []) {
+  const labels = [...new Set((fields || []).map(humanizeFieldName).filter(Boolean))];
+  if (!labels.length) return '';
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')} y ${labels.at(-1)}`;
+}
+
+/**
+ * Fallback de seguridad basado únicamente en hechos del turno.
+ *
+ * No intenta variar frases, inferir una intención nueva ni decidir el avance del
+ * proceso. La política conversacional debe entregar `situation`,
+ * `missingFields`, `fallbackText` y `requiresHumanReview` ya validados.
+ */
+export function buildSafeContextualFallbackText(context = {}) {
+  const explicitFallback = String(context.fallbackText || '').trim();
+  if (explicitFallback) return explicitFallback;
+
+  const missing = formatMissingFields(context.missingFields);
+  const situation = context.situation || 'continue_flow';
+
+  if (situation === 'attachment_resume_photo') {
+    return 'Recibí la imagen, pero no puedo registrarla como hoja de vida. Envíala como archivo PDF o DOCX.';
+  }
+
+  if (situation === 'attachment_cv_valid') {
+    return missing
+      ? `Recibí tu hoja de vida y quedó asociada a tu registro. Para continuar me falta confirmar ${missing}.`
+      : 'Recibí tu hoja de vida y quedó asociada a tu registro.';
+  }
+
+  if (situation === 'attachment_id_doc') {
+    return 'El archivo recibido parece ser un documento de identidad y no reemplaza la hoja de vida. Para continuar, envía tu HV como archivo PDF o DOCX.';
+  }
+
+  if (situation === 'attachment_other_doc') {
+    return 'El archivo recibido no corresponde a una hoja de vida válida. Para continuar, envía tu HV como archivo PDF o DOCX.';
+  }
+
+  if (situation === 'attachment_unreadable') {
+    return 'No pude procesar el archivo que enviaste. Reenvía tu hoja de vida como archivo PDF o DOCX.';
+  }
+
+  if (situation === 'request_missing_data') {
+    return missing
+      ? `Para continuar necesito confirmar ${missing}.`
+      : 'Para continuar necesito confirmar el dato que quedó pendiente.';
+  }
+
+  if (situation === 'confirm_data_correction') {
+    return missing
+      ? `La corrección quedó registrada. Ahora me falta confirmar ${missing}.`
+      : 'La corrección quedó registrada.';
+  }
+
+  if (situation === 'process_human_review_required' || context.requiresHumanReview) {
+    return 'No tengo información suficiente para resolver este punto con seguridad. El equipo de selección revisará tu caso y te contactará por este medio.';
+  }
+
+  if (missing) return `Para continuar necesito confirmar ${missing}.`;
+
+  return 'Recibí tu mensaje y conservaré el punto pendiente del proceso sin reiniciar tu registro.';
 }
 
 function buildContextPayload(context = {}) {
@@ -78,21 +151,13 @@ function buildContextPayload(context = {}) {
 }
 
 function buildFallback(context = {}, reason = 'fallback') {
-  const intent = context.fallbackIntent
-    || FALLBACK_INTENT_BY_SITUATION[context.situation]
-    || 'continue_flow';
-  const fallback = buildPolicyReply({
-    replyIntent: intent,
-    recentOutbound: context.recentMessages || [],
-    fallback: context.fallbackText || ''
-  });
   return {
-    text: fallback.text,
+    text: buildSafeContextualFallbackText(context),
     situation: context.situation || 'continue_flow',
     usedModel: false,
     fallbackUsed: true,
     reason,
-    intent: fallback.intent,
+    intent: context.fallbackIntent || FALLBACK_INTENT_BY_SITUATION[context.situation] || 'continue_flow',
     escalateHuman: Boolean(context.requiresHumanReview),
     model: null
   };
@@ -109,7 +174,7 @@ export function shouldEscalateHumanReview({ attachmentAnalysis = null, contradic
 export async function buildContextualReply(context = {}) {
   if (context.situation === 'attachment_resume_photo') {
     return {
-      text: 'Gracias. Para poder registrar tu hoja de vida, envíamela como archivo PDF o Word/DOCX. No puedo registrarla en foto.',
+      text: buildSafeContextualFallbackText(context),
       situation: 'attachment_resume_photo',
       usedModel: false,
       fallbackUsed: true,
@@ -119,6 +184,7 @@ export async function buildContextualReply(context = {}) {
       model: null
     };
   }
+
   const payloadContext = buildContextPayload(context);
   if (!process.env.OPENAI_API_KEY) return buildFallback(context, 'openai_disabled');
 
@@ -129,7 +195,7 @@ export async function buildContextualReply(context = {}) {
         role: 'system',
         content: [{
           type: 'input_text',
-          text: `Eres ${LORREN_ROLE_LABEL} solo si el candidato pregunta directamente tu nombre, identidad o si eres bot; de resto actúas desde ese rol por WhatsApp sin presentarte. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas como "Ya tengo la información principal; voy a revisar el siguiente paso del proceso", no repitas texto reciente, responde preguntas primero y luego retoma el proceso solo si aporta valor. No inventes reglas: respeta la decision ya dada por el sistema. Para cualquier dato de la vacante, usa exclusivamente la vacante asignada incluida en el JSON del usuario, incluida la documentacion de entrevista indicada en la vacante; no uses conocimiento general, supuestos ni datos de otras vacantes. Si el dato no esta en esa vacante, di que no lo tienes registrado. Si requiere revision humana, dilo sin improvisar soluciones. Nunca digas que la hoja de vida puede enviarse en foto, imagen, impresa, Minerva física o como la tenga. Para este canal solo es válida como archivo PDF o DOCX.`
+          text: `Eres ${LORREN_ROLE_LABEL} solo si el candidato pregunta directamente tu nombre, identidad o si eres bot; de resto actúas desde ese rol por WhatsApp sin presentarte. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas, no repitas texto reciente, responde preguntas primero y luego retoma el proceso solo si aporta valor. No inventes reglas: respeta la decision ya dada por el sistema. Para cualquier dato de la vacante, usa exclusivamente la vacante asignada incluida en el JSON del usuario, incluida la documentacion de entrevista indicada en la vacante; no uses conocimiento general, supuestos ni datos de otras vacantes. Si el dato no esta en esa vacante, di que no lo tienes registrado. Si requiere revision humana, dilo sin improvisar soluciones. Nunca digas que la hoja de vida puede enviarse en foto, imagen, impresa, Minerva física o como la tenga. Para este canal solo es válida como archivo PDF o DOCX.`
         }]
       },
       {
