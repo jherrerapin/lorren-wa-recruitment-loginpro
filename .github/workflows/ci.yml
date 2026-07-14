@@ -17,6 +17,110 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  apply-webhook-inbound-migration:
+    name: Apply scoped webhook inbound migration
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 446 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact webhook inbound migration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/routes/webhook.js')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = "import { persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';"
+          new_import = "import { persistInboundConversationMessage, persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';"
+          if old_import in text:
+              text = text.replace(old_import, new_import, 1)
+          elif new_import not in text:
+              raise SystemExit('No se encontró el import esperado del repositorio de mensajes')
+
+          start = text.index('export async function saveInboundMessage')
+          end = text.index('\nasync function attachDebugTrace', start)
+          replacement = """export async function saveInboundMessage(prisma, candidateId, message, body, type, phone) {
+            const waMessageId = message?.id || null;
+            const persistInbound = (messageType) => persistInboundConversationMessage(prisma, {
+              candidateId,
+              waMessageId,
+              messageType,
+              body,
+              rawPayload: sanitizeForRawPayload(message)
+            });
+            let insertResult;
+
+            try {
+              insertResult = await persistInbound(type);
+            } catch (error) {
+              const messageTypeMismatch = /invalid input value for enum "MessageType"/i.test(String(error?.message || ''));
+              if (!messageTypeMismatch || type === MessageType.UNKNOWN) throw error;
+
+              console.warn('[INBOUND_MESSAGE_TYPE_FALLBACK]', JSON.stringify({
+                phone: phone || null,
+                candidateId,
+                waMessageId,
+                requestedType: type,
+                persistedType: MessageType.UNKNOWN
+              }));
+
+              insertResult = await persistInbound(MessageType.UNKNOWN);
+            }
+
+            if (!insertResult.created) {
+              console.log('[INBOUND_DUPLICATE_IGNORED]', JSON.stringify({
+                phone: phone || null,
+                waMessageId,
+                duplicate_ignored: true
+              }));
+              return { isNew: false, id: null };
+            }
+
+            if (prisma.candidate?.update) {
+              await prisma.candidate.update({ where: { id: candidateId }, data: { lastInboundAt: new Date() } });
+            }
+
+            if (!waMessageId) return { isNew: true, id: null };
+
+            const created = await prisma.message.findUnique({
+              where: { waMessageId },
+              select: { id: true }
+            });
+
+            return { isNew: true, id: created?.id || null };
+          }"""
+          text = text[:start] + replacement + text[end:]
+
+          migrated = text[start:start + len(replacement)]
+          if 'prisma.message.createMany(' in migrated:
+              raise SystemExit('Persistencia directa restante en saveInboundMessage')
+          if 'persistInboundConversationMessage(prisma,' not in migrated:
+              raise SystemExit('Falta delegación del inbox al repositorio')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/webhook.js
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "refactor: delegar inbox del webhook al repositorio"
+          git push origin HEAD:${{ github.head_ref }}
+
   state-authority:
     name: Validate state authorities
     runs-on: ubuntu-latest
@@ -106,7 +210,7 @@ jobs:
         run: node --test test/adminManualOutbound.test.js
 
       - name: Run webhook message authority regressions
-        run: node --test test/webhookMessageAuthority.test.js test/turnOrchestratorContracts.test.js
+        run: node --test test/webhookMessageAuthority.test.js test/webhookInboundMessageAuthority.test.js test/webhookIdempotency.test.js test/webhookPersistence.test.js test/turnOrchestratorContracts.test.js
 
       - name: Run reminder regressions
         run: node --test test/reminder.test.js
