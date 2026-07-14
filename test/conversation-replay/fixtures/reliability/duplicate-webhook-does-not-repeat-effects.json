@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "reliability-duplicate-webhook-v1",
+  "title": "La reentrega del mismo webhook no repite escrituras ni mensajes",
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-test-003",
+      "status": "EN_PROCESO",
+      "currentStep": "COLLECTING_DATA",
+      "dataConsentStatus": "ACCEPTED",
+      "vacancyId": "vacancy-test-neiva-warehouse",
+      "neighborhood": null
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-test-neiva-warehouse",
+      "active": true,
+      "acceptingApplications": true,
+      "city": "Neiva",
+      "title": "Auxiliar de bodega"
+    },
+    "inbox": {
+      "processedExternalMessageIds": ["test-message-duplicate-001"]
+    }
+  },
+  "history": [
+    {
+      "direction": "INBOUND",
+      "messageId": "test-message-duplicate-001",
+      "body": "Vivo en el barrio Canaima"
+    },
+    {
+      "direction": "OUTBOUND",
+      "body": "Gracias, registré tu barrio."
+    }
+  ],
+  "inbound": {
+    "messageId": "test-message-duplicate-001",
+    "type": "text",
+    "body": "Vivo en el barrio Canaima"
+  },
+  "expected": {
+    "understanding": {
+      "intents": ["DUPLICATE_EVENT"],
+      "consentDecision": null,
+      "providedFields": {}
+    },
+    "plan": {
+      "actions": ["ACKNOWLEDGE_DUPLICATE_WITHOUT_EFFECTS"],
+      "allowedWrites": [],
+      "forbiddenWrites": [
+        "candidate.neighborhood",
+        "message.outbound",
+        "application.updatedAt"
+      ],
+      "nextStep": "COLLECTING_DATA"
+    },
+    "response": {
+      "requiredFacts": [],
+      "forbiddenClaims": ["Registré nuevamente tu barrio"],
+      "sendMessage": false
+    },
+    "finalState": {
+      "currentStep": "COLLECTING_DATA",
+      "outboundMessagesAdded": 0,
+      "businessWritesAdded": 0
+    }
+  }
+}
