@@ -17,6 +17,16 @@ function collectCandidateChanges(initialCandidate, finalState) {
   return changed;
 }
 
+function assertForbiddenWriteWasNotApplied(forbiddenWrite, fixture, finalState, label) {
+  if (!forbiddenWrite.startsWith('candidate.')) return;
+  const field = forbiddenWrite.slice('candidate.'.length);
+  assert.deepEqual(
+    finalState[field],
+    fixture.initialState.candidate[field],
+    `${label}: una escritura prohibida modificó candidate.${field}`
+  );
+}
+
 function assertExpectedFinalState(expected, actual, label) {
   for (const [field, value] of Object.entries(expected || {})) {
     assert.deepEqual(actual[field], value, `${label}: estado final inesperado en ${field}`);
@@ -61,6 +71,7 @@ test('el replay determinístico reproduce acciones, escrituras y transiciones pr
           !replay.plan.allowedWrites.includes(forbiddenWrite),
           `${relativePath}: una escritura prohibida fue autorizada: ${forbiddenWrite}`
         );
+        assertForbiddenWriteWasNotApplied(forbiddenWrite, fixture, replay.finalState, relativePath);
       }
 
       const changedCandidatePaths = collectCandidateChanges(fixture.initialState.candidate, replay.finalState);
