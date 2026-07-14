@@ -114,9 +114,14 @@ function referencesOfferSubject(text = '') {
   return OFFER_SUBJECT_PATTERN.test(normalize(text));
 }
 
+function startsWithExplicitConsentRejection(text = '') {
+  return /^(no autorizo|no consiento|no doy mi consentimiento|no doy consentimiento|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito|no acepto|no estoy de acuerdo|rechazo|revoco)\b/.test(normalize(text));
+}
+
 function hasExplicitConsentRejection(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
+  if (isQuestionLike(text) && !startsWithExplicitConsentRejection(normalized)) return false;
 
   if (hasAny(normalized, [
     /\b(no autorizo|no consiento|no doy mi consentimiento|no doy consentimiento|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
@@ -143,7 +148,7 @@ function hasExplicitConsentAcceptance(text = '') {
 
 export function isConsentAcceptance(text = '') {
   const normalized = normalize(text);
-  if (!normalized || hasExplicitConsentRejection(normalized)) return false;
+  if (!normalized || hasExplicitConsentRejection(text)) return false;
   if (isQuestionLike(text) && !startsWithExplicitConsent(normalized)) return false;
   return hasAny(normalized, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
@@ -158,8 +163,8 @@ export function isConsentAcceptance(text = '') {
 export function isConsentRejection(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
-  if (hasExplicitConsentRejection(normalized)) return true;
-  if (isQuestionLike(text) && !/^(no|negativo|no autorizo|no acepto|no estoy de acuerdo|no doy)\b/.test(normalized)) return false;
+  if (isQuestionLike(text) && !startsWithExplicitConsentRejection(normalized)) return false;
+  if (hasExplicitConsentRejection(text)) return true;
   return /\b(no|negativo|paso|no gracias)\b$/.test(normalized);
 }
 
