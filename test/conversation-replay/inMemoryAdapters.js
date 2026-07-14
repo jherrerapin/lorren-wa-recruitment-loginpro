@@ -28,10 +28,16 @@ function cloneMapValues(map) {
   return [...map.values()].map((value) => structuredClone(value));
 }
 
+function normalizeFailureCount(value) {
+  const parsed = Number(value || 0);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
 export function createInMemoryReplayAdapters(fixture, options = {}) {
   const expectedTenantContext = structuredClone(fixture.tenantContext);
   const candidateId = fixture.initialState.candidate.candidateId;
   const now = options.now || '2026-07-14T15:00:00.000Z';
+  let remainingDeliveryFailures = normalizeFailureCount(options.failures?.deliverOutbound);
   const candidates = new Map([
     [tenantCandidateKey(expectedTenantContext, candidateId), structuredClone(fixture.initialState.candidate)]
   ]);
@@ -40,6 +46,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
   };
   const inboundMessages = new Map();
   const outboundMessages = new Map();
+  const deliveryAttempts = new Map();
   const deliveries = new Map();
   const auditEvents = [];
 
@@ -132,11 +139,50 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     return true;
   }
 
+  function readOutbound({ tenantContext, idempotencyKey }) {
+    validateContext(tenantContext);
+    assertNonEmptyString(idempotencyKey, 'idempotencyKey');
+    const record = outboundMessages.get(outboundKey(tenantContext, idempotencyKey));
+    return record ? structuredClone(record) : null;
+  }
+
+  function hasDelivery({ tenantContext, idempotencyKey }) {
+    validateContext(tenantContext);
+    assertNonEmptyString(idempotencyKey, 'idempotencyKey');
+    return deliveries.has(outboundKey(tenantContext, idempotencyKey));
+  }
+
   function deliverOutbound({ tenantContext, requestedCandidateId, idempotencyKey, body }) {
     validateContext(tenantContext);
     const key = outboundKey(tenantContext, idempotencyKey);
     if (deliveries.has(key)) return false;
     if (!outboundMessages.has(key)) throw new Error(`outbound_not_persisted:${idempotencyKey}`);
+
+    const previousAttempts = deliveryAttempts.get(key)?.attempts || 0;
+    const attempt = previousAttempts + 1;
+    deliveryAttempts.set(key, {
+      key,
+      tenantId: tenantContext.tenantId,
+      channelId: tenantContext.channelId,
+      provider: tenantContext.provider,
+      candidateId: requestedCandidateId,
+      idempotencyKey,
+      attempts: attempt,
+      lastAttemptAt: now
+    });
+
+    if (remainingDeliveryFailures > 0) {
+      remainingDeliveryFailures -= 1;
+      auditEvents.push({
+        type: 'OUTBOUND_DELIVERY_FAILED',
+        tenantId: tenantContext.tenantId,
+        candidateId: requestedCandidateId,
+        idempotencyKey,
+        attempt,
+        recordedAt: now
+      });
+      throw new Error(`simulated_delivery_failure:${idempotencyKey}`);
+    }
 
     deliveries.set(key, {
       key,
@@ -146,13 +192,15 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
       candidateId: requestedCandidateId,
       idempotencyKey,
       body,
-      deliveredAt: now
+      deliveredAt: now,
+      attempt
     });
     auditEvents.push({
       type: 'OUTBOUND_DELIVERED',
       tenantId: tenantContext.tenantId,
       candidateId: requestedCandidateId,
       idempotencyKey,
+      attempt,
       recordedAt: now
     });
     return true;
@@ -165,6 +213,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
       conversationState: structuredClone(conversationState),
       inboundMessages: cloneMapValues(inboundMessages),
       outboundMessages: cloneMapValues(outboundMessages),
+      deliveryAttempts: cloneMapValues(deliveryAttempts),
       deliveries: cloneMapValues(deliveries),
       auditEvents: structuredClone(auditEvents)
     };
@@ -176,6 +225,8 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     readCandidate,
     updateCandidate,
     persistOutbound,
+    readOutbound,
+    hasDelivery,
     deliverOutbound,
     snapshot
   };
