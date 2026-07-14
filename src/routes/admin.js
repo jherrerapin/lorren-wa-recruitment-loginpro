@@ -1046,11 +1046,11 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
     manualIntervention: true
   };
   await persistOutboundConversationMessage(prisma, {
-  candidateId: candidate.id,
-  messageType: MessageType.TEXT,
-  body: finalBody,
-  rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
-});
+    candidateId: candidate.id,
+    messageType: MessageType.TEXT,
+    body: finalBody,
+    rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
+  });
 }
 
 function buildManualInterviewReminderText(booking) {
