@@ -85,6 +85,10 @@ function composeReply(planningReplay) {
   return parts.join('\n\n').trim();
 }
 
+function outboundIdempotencyKey(fixture) {
+  return `${fixture.inbound.messageId}:reply:v1`;
+}
+
 function executeCandidateActions({ fixture, planningReplay, adapters }) {
   const candidateId = fixture.initialState.candidate.candidateId;
   const plan = planningReplay.plan;
@@ -127,7 +131,7 @@ function executeCandidateActions({ fixture, planningReplay, adapters }) {
 function persistAndDeliverReply({ fixture, planningReplay, adapters, body, appliedWrites }) {
   const candidateId = fixture.initialState.candidate.candidateId;
   const plan = planningReplay.plan;
-  const idempotencyKey = `${fixture.inbound.messageId}:reply:v1`;
+  const idempotencyKey = outboundIdempotencyKey(fixture);
 
   assertWriteAllowed(plan, 'message.outbound');
   const persisted = adapters.persistOutbound({
@@ -160,6 +164,39 @@ function persistAndDeliverReply({ fixture, planningReplay, adapters, body, appli
   return idempotencyKey;
 }
 
+function recoverPendingOutbound(fixture, adapters) {
+  const candidateId = fixture.initialState.candidate.candidateId;
+  const idempotencyKey = outboundIdempotencyKey(fixture);
+  const outbound = adapters.readOutbound({
+    tenantContext: fixture.tenantContext,
+    idempotencyKey
+  });
+
+  if (!outbound || adapters.hasDelivery({ tenantContext: fixture.tenantContext, idempotencyKey })) {
+    return {
+      recoveryAttempted: false,
+      recovered: false,
+      reply: null,
+      outboundIdempotencyKey: outbound ? idempotencyKey : null
+    };
+  }
+
+  const delivered = adapters.deliverOutbound({
+    tenantContext: fixture.tenantContext,
+    requestedCandidateId: candidateId,
+    idempotencyKey,
+    body: outbound.body
+  });
+  if (!delivered) throw new Error(`pending_outbound_not_recovered:${idempotencyKey}`);
+
+  return {
+    recoveryAttempted: true,
+    recovered: true,
+    reply: outbound.body,
+    outboundIdempotencyKey: idempotencyKey
+  };
+}
+
 export async function replayFixtureIntegral(fixture, adapters) {
   const candidateId = fixture.initialState.candidate.candidateId;
   const claimed = adapters.claimInbound({
@@ -170,12 +207,13 @@ export async function replayFixtureIntegral(fixture, adapters) {
   });
 
   if (!claimed) {
+    const recovery = recoverPendingOutbound(fixture, adapters);
     return {
       duplicate: true,
       interpreted: false,
       planned: false,
       appliedWrites: [],
-      reply: null,
+      ...recovery,
       snapshot: adapters.snapshot()
     };
   }
@@ -197,6 +235,8 @@ export async function replayFixtureIntegral(fixture, adapters) {
     duplicate: false,
     interpreted: true,
     planned: true,
+    recoveryAttempted: false,
+    recovered: false,
     interpretationReplay,
     planningReplay,
     appliedWrites,
