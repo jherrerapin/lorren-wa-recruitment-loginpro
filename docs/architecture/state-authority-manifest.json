@@ -12,6 +12,7 @@
   ],
   "models": {
     "candidate": {
+      "tableName": "Candidate",
       "domain": "recruitment-conversation",
       "migrationStage": "fragmented",
       "targetAuthority": "CandidateStateService",
@@ -35,6 +36,7 @@
       ]
     },
     "interviewBooking": {
+      "tableName": "InterviewBooking",
       "domain": "interviews",
       "migrationStage": "fragmented",
       "targetAuthority": "InterviewBookingStateService",
@@ -48,6 +50,7 @@
       ]
     },
     "message": {
+      "tableName": "Message",
       "domain": "conversation",
       "migrationStage": "fragmented",
       "targetAuthority": "ConversationMessageRepository",
@@ -61,6 +64,7 @@
       ]
     },
     "candidateDataConsentEvent": {
+      "tableName": "CandidateDataConsentEvent",
       "domain": "consent",
       "migrationStage": "consolidating",
       "targetAuthority": "ConsentStateService",
@@ -71,6 +75,7 @@
       ]
     },
     "attachmentAnalysis": {
+      "tableName": "AttachmentAnalysis",
       "domain": "documents",
       "migrationStage": "consolidating",
       "targetAuthority": "AttachmentAnalysisRepository",
@@ -81,15 +86,17 @@
       ]
     },
     "jobQueue": {
+      "tableName": "JobQueue",
       "domain": "notifications",
       "migrationStage": "consolidating",
       "targetAuthority": "JobQueueService",
       "risk": "high",
       "writers": [
-        { "path": "src/services/jobQueue.js", "role": "canonical", "reason": "Creación, reclamo y finalización de jobs" }
+        { "path": "src/services/jobQueue.js", "role": "canonical", "reason": "Creación, reclamo y finalización de jobs, incluido SQL directo" }
       ]
     },
     "candidateAdminEvent": {
+      "tableName": "CandidateAdminEvent",
       "domain": "audit-observability",
       "migrationStage": "consolidating",
       "targetAuthority": "CandidateAdminAuditService",
@@ -99,6 +106,7 @@
       ]
     },
     "interviewSlot": {
+      "tableName": "InterviewSlot",
       "domain": "interviews",
       "migrationStage": "fragmented",
       "targetAuthority": "InterviewAvailabilityService",
