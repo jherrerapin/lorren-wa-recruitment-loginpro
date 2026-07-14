@@ -9,6 +9,9 @@ const SENSITIVE_FIELD_NAMES = new Set([
   'email'
 ]);
 
+const TEXTUAL_INBOUND_TYPES = new Set(['text', 'interactive']);
+const ATTACHMENT_INBOUND_TYPES = new Set(['document', 'image']);
+
 function assertNonEmptyString(value, label) {
   assert.equal(typeof value, 'string', `${label} debe ser texto`);
   assert.ok(value.trim(), `${label} no puede estar vacío`);
@@ -56,7 +59,11 @@ function inspectStructuredSensitiveValues(value, label = 'fixture') {
 }
 
 function collectConversationText(fixture) {
-  const fragments = [fixture?.inbound?.body];
+  const fragments = [
+    fixture?.inbound?.body,
+    fixture?.inbound?.caption,
+    fixture?.inbound?.attachment?.fileName
+  ];
   for (const message of fixture?.history || []) fragments.push(message?.body);
   return fragments.filter((fragment) => typeof fragment === 'string').join('\n');
 }
@@ -72,7 +79,7 @@ function assertNoSensitiveConversationText(fixture, label) {
   assert.doesNotMatch(
     text,
     /(^|\D)\d{6,12}(?=\D|$)/,
-    `${label}: no debe contener números de documento reales en el texto conversacional`
+    `${label}: no debe contener números de documento reales en el texto conversacional o nombre del archivo`
   );
 }
 
@@ -86,6 +93,35 @@ function validateProviderStubs(fixture, label) {
   assertNonEmptyString(aiResult.extraction.turnType, `${label}: extraction.turnType`);
   assert.ok(aiResult.extraction.fieldEvidence && typeof aiResult.extraction.fieldEvidence === 'object' && !Array.isArray(aiResult.extraction.fieldEvidence), `${label}: fieldEvidence debe ser un objeto`);
   assert.ok(Array.isArray(aiResult.extraction.conflicts), `${label}: extraction.conflicts debe ser un arreglo`);
+}
+
+function validateExecutionContext(fixture, label) {
+  if (!fixture.executionContext) return;
+  assert.ok(typeof fixture.executionContext === 'object' && !Array.isArray(fixture.executionContext), `${label}: executionContext debe ser un objeto`);
+  assertNonEmptyString(fixture.executionContext.now, `${label}: executionContext.now`);
+  assert.ok(Number.isFinite(Date.parse(fixture.executionContext.now)), `${label}: executionContext.now debe ser ISO-8601 válido`);
+}
+
+function validateInbound(fixture, label) {
+  const inbound = fixture.inbound;
+  assert.ok(inbound && typeof inbound === 'object', `${label}: falta inbound`);
+  assertNonEmptyString(inbound.messageId, `${label}: inbound.messageId`);
+  assert.ok(inbound.messageId.startsWith('test-'), `${label}: el messageId debe ser sintético`);
+  assertNonEmptyString(inbound.type, `${label}: inbound.type`);
+
+  if (TEXTUAL_INBOUND_TYPES.has(inbound.type)) {
+    assertNonEmptyString(inbound.body, `${label}: inbound.body`);
+    return;
+  }
+
+  assert.ok(ATTACHMENT_INBOUND_TYPES.has(inbound.type), `${label}: inbound.type no soportado`);
+  assert.ok(inbound.attachment && typeof inbound.attachment === 'object' && !Array.isArray(inbound.attachment), `${label}: falta inbound.attachment`);
+  assertNonEmptyString(inbound.attachment.fileName, `${label}: inbound.attachment.fileName`);
+  assert.ok(inbound.attachment.fileName.startsWith('TEST-'), `${label}: el nombre del adjunto debe ser sintético y comenzar por TEST-`);
+  assertNonEmptyString(inbound.attachment.mimeType, `${label}: inbound.attachment.mimeType`);
+  assert.ok(Number.isInteger(inbound.attachment.sizeBytes) && inbound.attachment.sizeBytes > 0, `${label}: inbound.attachment.sizeBytes debe ser entero positivo`);
+  if (Object.hasOwn(inbound, 'body')) assert.equal(typeof inbound.body, 'string', `${label}: inbound.body opcional debe ser texto`);
+  if (Object.hasOwn(inbound, 'caption')) assert.equal(typeof inbound.caption, 'string', `${label}: inbound.caption opcional debe ser texto`);
 }
 
 function validateFixture(fixture, label) {
@@ -102,6 +138,7 @@ function validateFixture(fixture, label) {
   assertNonEmptyString(fixture.policyContext.conversationPolicyVersion, `${label}: conversationPolicyVersion`);
   assertNonEmptyString(fixture.policyContext.vacancyPolicyVersion, `${label}: vacancyPolicyVersion`);
   assertNonEmptyString(fixture.policyContext.consentVersion, `${label}: consentVersion`);
+  validateExecutionContext(fixture, label);
   validateProviderStubs(fixture, label);
 
   assert.ok(fixture.initialState && typeof fixture.initialState === 'object', `${label}: falta initialState`);
@@ -113,11 +150,7 @@ function validateFixture(fixture, label) {
   assert.equal(typeof fixture.initialState.vacancy.acceptingApplications, 'boolean', `${label}: vacancy.acceptingApplications debe ser booleano`);
 
   assert.ok(Array.isArray(fixture.history), `${label}: history debe ser un arreglo`);
-  assert.ok(fixture.inbound && typeof fixture.inbound === 'object', `${label}: falta inbound`);
-  assertNonEmptyString(fixture.inbound.messageId, `${label}: inbound.messageId`);
-  assert.ok(fixture.inbound.messageId.startsWith('test-'), `${label}: el messageId debe ser sintético`);
-  assertNonEmptyString(fixture.inbound.type, `${label}: inbound.type`);
-  assertNonEmptyString(fixture.inbound.body, `${label}: inbound.body`);
+  validateInbound(fixture, label);
 
   const expected = fixture.expected;
   assert.ok(expected && typeof expected === 'object', `${label}: falta expected`);
@@ -151,7 +184,7 @@ function validateFixture(fixture, label) {
 
 test('el corpus conversacional contiene fixtures válidos, versionados y con proveedores simulados', () => {
   const entries = loadConversationFixtures();
-  assert.ok(entries.length >= 3, 'el corpus inicial debe incluir al menos tres escenarios');
+  assert.ok(entries.length >= 6, 'el corpus debe incluir al menos seis escenarios protegidos');
 
   const fixtureIds = new Set();
   const inboundMessageIds = new Set();

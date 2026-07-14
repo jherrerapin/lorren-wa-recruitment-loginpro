@@ -8,6 +8,15 @@ function sorted(values) {
   return [...values].sort();
 }
 
+function selectedFixtures() {
+  const entries = loadConversationFixtures();
+  const requestedId = String(process.env.REPLAY_FIXTURE_ID || '').trim();
+  if (!requestedId) return entries;
+  const selected = entries.filter(({ fixture }) => fixture.id === requestedId);
+  assert.equal(selected.length, 1, `REPLAY_FIXTURE_ID no encontrado o duplicado: ${requestedId}`);
+  return selected;
+}
+
 function assertExpectedFinalState(expectedFinalState, snapshot, label) {
   assert.equal(snapshot.candidates.length, 1, `${label}: debe existir un único candidato`);
   const aggregateState = {
@@ -46,6 +55,7 @@ function assertTenantTraceability(snapshot, fixture, label) {
   const records = [
     ...snapshot.inboundMessages,
     ...snapshot.outboundMessages,
+    ...snapshot.consentEvents,
     ...snapshot.deliveries
   ];
 
@@ -58,6 +68,31 @@ function assertTenantTraceability(snapshot, fixture, label) {
   for (const message of [...snapshot.inboundMessages, ...snapshot.outboundMessages]) {
     assert.deepEqual(message.policyContext, fixture.policyContext, `${label}: se perdió la versión de políticas`);
   }
+}
+
+function assertConsentEffects(snapshot, fixture, label) {
+  const expectedDecision = fixture.expected.interpretation.consentDecision;
+  if (!expectedDecision) {
+    assert.equal(snapshot.consentEvents.length, 0, `${label}: no debe crear un evento de consentimiento`);
+    return;
+  }
+
+  assert.equal(snapshot.consentEvents.length, 1, `${label}: debe crear un único evento de consentimiento`);
+  assert.equal(snapshot.consentEvents[0].status, expectedDecision, `${label}: estado del evento incorrecto`);
+  assert.equal(snapshot.consentEvents[0].version, fixture.policyContext.consentVersion, `${label}: versión del evento incorrecta`);
+  assert.equal(snapshot.consentEvents[0].candidateId, fixture.initialState.candidate.candidateId, `${label}: candidato del evento incorrecto`);
+  assert.ok(snapshot.auditEvents.some((event) => event.type === 'CONSENT_EVENT_CREATED'), `${label}: falta auditoría del consentimiento`);
+}
+
+function assertAttachmentEffects(snapshot, fixture, label) {
+  assert.equal(snapshot.storedAttachments.length, 0, `${label}: el replay no debe almacenar adjuntos`);
+  if (!['document', 'image'].includes(fixture.inbound.type)) return;
+
+  assert.deepEqual(snapshot.inboundMessages[0].attachment, fixture.inbound.attachment, `${label}: debe conservar solo metadatos del adjunto entrante`);
+  assert.equal(snapshot.candidates[0].cvData ?? null, fixture.initialState.candidate.cvData ?? null, `${label}: no debe escribir cvData`);
+  assert.equal(snapshot.candidates[0].cvStorageKey ?? null, fixture.initialState.candidate.cvStorageKey ?? null, `${label}: no debe escribir cvStorageKey`);
+  assert.equal(snapshot.candidates[0].cvOriginalName ?? null, fixture.initialState.candidate.cvOriginalName ?? null, `${label}: no debe escribir cvOriginalName`);
+  assert.equal(snapshot.candidates[0].cvMimeType ?? null, fixture.initialState.candidate.cvMimeType ?? null, `${label}: no debe escribir cvMimeType`);
 }
 
 function assertIntegralEffects(firstReplay, fixture, label) {
@@ -88,11 +123,13 @@ function assertIntegralEffects(firstReplay, fixture, label) {
 
   assertExpectedFinalState(fixture.expected.finalState, snapshot, label);
   assertResponseContract(fixture.expected.response, firstReplay.reply, label);
+  assertConsentEffects(snapshot, fixture, label);
+  assertAttachmentEffects(snapshot, fixture, label);
   assertTenantTraceability(snapshot, fixture, label);
 }
 
 test('el replay integral aplica el plan una sola vez y detiene reentregas antes de interpretar', async (t) => {
-  for (const { fixture, relativePath } of loadConversationFixtures()) {
+  for (const { fixture, relativePath } of selectedFixtures()) {
     await t.test(relativePath, async () => {
       const adapters = createInMemoryReplayAdapters(fixture);
       const firstReplay = await replayFixtureIntegral(fixture, adapters);
@@ -116,7 +153,7 @@ test('el replay integral aplica el plan una sola vez y detiene reentregas antes 
 });
 
 test('los adaptadores en memoria rechazan un TenantContext diferente', () => {
-  const [{ fixture }] = loadConversationFixtures();
+  const [{ fixture }] = selectedFixtures();
   const adapters = createInMemoryReplayAdapters(fixture);
   const foreignTenantContext = {
     ...fixture.tenantContext,

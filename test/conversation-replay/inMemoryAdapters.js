@@ -24,6 +24,10 @@ function outboundKey(tenantContext, idempotencyKey) {
   return `${tenantContext.tenantId}:${tenantContext.channelId}:${idempotencyKey}:outbound`;
 }
 
+function consentEventKey(tenantContext, candidateId, status, index) {
+  return `${tenantContext.tenantId}:${candidateId}:${status}:${index}`;
+}
+
 function cloneMapValues(map) {
   return [...map.values()].map((value) => structuredClone(value));
 }
@@ -45,7 +49,7 @@ function normalizeFailureCount(value) {
 export function createInMemoryReplayAdapters(fixture, options = {}) {
   const expectedTenantContext = structuredClone(fixture.tenantContext);
   const candidateId = fixture.initialState.candidate.candidateId;
-  const now = options.now || '2026-07-14T15:00:00.000Z';
+  const now = options.now || fixture.executionContext?.now || '2026-07-14T15:00:00.000Z';
   let remainingOutboundPersistenceFailures = normalizeFailureCount(options.failures?.persistOutbound);
   let remainingDeliveryFailures = normalizeFailureCount(options.failures?.deliverOutbound);
   const candidates = new Map([
@@ -56,6 +60,8 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
   };
   const inboundMessages = new Map();
   const outboundMessages = new Map();
+  const consentEvents = new Map();
+  const storedAttachments = new Map();
   const deliveryAttempts = new Map();
   const deliveries = new Map();
   const auditEvents = [];
@@ -89,6 +95,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
       direction: 'INBOUND',
       messageType: message.type,
       body: message.body,
+      attachment: message.attachment ? structuredClone(message.attachment) : null,
       policyContext: structuredClone(policyContext),
       recordedAt: now
     });
@@ -117,6 +124,34 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
       recordedAt: now
     });
     return structuredClone(updated);
+  }
+
+  function createConsentEvent({ tenantContext, requestedCandidateId, event }) {
+    validateContext(tenantContext);
+    assertNonEmptyString(requestedCandidateId, 'candidateId');
+    assertNonEmptyString(event?.status, 'event.status');
+    assertNonEmptyString(event?.version, 'event.version');
+    const index = consentEvents.size + 1;
+    const key = consentEventKey(tenantContext, requestedCandidateId, event.status, index);
+    const record = {
+      key,
+      tenantId: tenantContext.tenantId,
+      channelId: tenantContext.channelId,
+      provider: tenantContext.provider,
+      candidateId: requestedCandidateId,
+      ...structuredClone(event),
+      recordedAt: now
+    };
+    consentEvents.set(key, record);
+    auditEvents.push({
+      type: 'CONSENT_EVENT_CREATED',
+      tenantId: tenantContext.tenantId,
+      candidateId: requestedCandidateId,
+      status: event.status,
+      version: event.version,
+      recordedAt: now
+    });
+    return structuredClone(record);
   }
 
   function persistOutbound({ tenantContext, policyContext, requestedCandidateId, idempotencyKey, body }) {
@@ -172,6 +207,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     const candidateSnapshot = cloneMapEntries(candidates);
     const conversationSnapshot = structuredClone(conversationState);
     const outboundSnapshot = cloneMapEntries(outboundMessages);
+    const consentEventSnapshot = cloneMapEntries(consentEvents);
     const auditSnapshot = structuredClone(auditEvents);
 
     try {
@@ -180,6 +216,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
       restoreMap(candidates, candidateSnapshot);
       conversationState.pendingFields = [...conversationSnapshot.pendingFields];
       restoreMap(outboundMessages, outboundSnapshot);
+      restoreMap(consentEvents, consentEventSnapshot);
       auditEvents.splice(0, auditEvents.length, ...auditSnapshot);
       throw error;
     }
@@ -253,6 +290,8 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
       conversationState: structuredClone(conversationState),
       inboundMessages: cloneMapValues(inboundMessages),
       outboundMessages: cloneMapValues(outboundMessages),
+      consentEvents: cloneMapValues(consentEvents),
+      storedAttachments: cloneMapValues(storedAttachments),
       deliveryAttempts: cloneMapValues(deliveryAttempts),
       deliveries: cloneMapValues(deliveries),
       auditEvents: structuredClone(auditEvents)
@@ -264,6 +303,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     claimInbound,
     readCandidate,
     updateCandidate,
+    createConsentEvent,
     persistOutbound,
     readOutbound,
     hasDelivery,

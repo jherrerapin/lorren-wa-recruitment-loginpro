@@ -1,11 +1,13 @@
-import { buildConsentPendingMode } from '../../src/services/dataConsentGate.js';
 import { replayFixtureInterpretation } from './interpretationReplay.js';
 import { replayFixturePlanning } from './planningReplay.js';
 
 const RESPONSE_ONLY_ACTIONS = new Set([
   'ACKNOWLEDGE_CORRECTION',
   'ANSWER_VACANCY_QUESTION',
-  'RESUME_PENDING_FIELD'
+  'CONTINUE_DATA_COLLECTION',
+  'REJECT_PRECONSENT_ATTACHMENT',
+  'RESUME_PENDING_FIELD',
+  'STOP_APPLICATION'
 ]);
 
 const FIELD_LABELS = Object.freeze({
@@ -58,19 +60,30 @@ function correctionAcknowledgement(plan) {
   return `Gracias, corregí ${naturalList(corrections)}.`;
 }
 
+function appendEvidenceReply(parts, value, errorCode) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(errorCode);
+  parts.push(value);
+}
+
 function composeReply(planningReplay) {
   const parts = [];
   const plan = planningReplay.plan;
 
   for (const action of plan.actions) {
     if (action.type === 'ASK_DATA_CONSENT') {
-      parts.push('Antes de continuar necesito tu autorización para el tratamiento de tus datos personales y hoja de vida con fines de reclutamiento. Puedes responder si autorizas o si no autorizas.');
+      appendEvidenceReply(parts, planningReplay.evidence.consentPrompt, 'consent_prompt_missing');
+      continue;
+    }
+    if (action.type === 'REJECT_PRECONSENT_ATTACHMENT') {
+      appendEvidenceReply(parts, planningReplay.evidence.attachmentReply, 'attachment_reply_missing');
+      continue;
+    }
+    if (action.type === 'CONTINUE_DATA_COLLECTION' || action.type === 'STOP_APPLICATION') {
+      appendEvidenceReply(parts, planningReplay.evidence.consentReply, 'consent_decision_reply_missing');
       continue;
     }
     if (action.type === 'ANSWER_VACANCY_QUESTION') {
-      const answer = planningReplay.evidence.vacancyAnswer;
-      if (typeof answer !== 'string' || !answer.trim()) throw new Error('vacancy_answer_missing');
-      parts.push(answer);
+      appendEvidenceReply(parts, planningReplay.evidence.vacancyAnswer, 'vacancy_answer_missing');
       continue;
     }
     if (action.type === 'ACKNOWLEDGE_CORRECTION') {
@@ -89,6 +102,30 @@ function outboundIdempotencyKey(fixture) {
   return `${fixture.inbound.messageId}:reply:v1`;
 }
 
+function executeConsentAction({ fixture, planningReplay, adapters, action, appliedWrites }) {
+  const candidateId = fixture.initialState.candidate.candidateId;
+  const candidateUpdate = action.data.candidateUpdate;
+  for (const field of Object.keys(candidateUpdate)) {
+    assertWriteAllowed(planningReplay.plan, `candidate.${field}`);
+  }
+
+  adapters.updateCandidate({
+    tenantContext: fixture.tenantContext,
+    requestedCandidateId: candidateId,
+    patch: candidateUpdate,
+    source: action.type
+  });
+  appliedWrites.push(...Object.keys(candidateUpdate).map((field) => `candidate.${field}`));
+
+  assertWriteAllowed(planningReplay.plan, 'consentEvent.create');
+  adapters.createConsentEvent({
+    tenantContext: fixture.tenantContext,
+    requestedCandidateId: candidateId,
+    event: action.data.event
+  });
+  appliedWrites.push('consentEvent.create');
+}
+
 function executeCandidateActions({ fixture, planningReplay, adapters }) {
   const candidateId = fixture.initialState.candidate.candidateId;
   const plan = planningReplay.plan;
@@ -100,10 +137,15 @@ function executeCandidateActions({ fixture, planningReplay, adapters }) {
       adapters.updateCandidate({
         tenantContext: fixture.tenantContext,
         requestedCandidateId: candidateId,
-        patch: { botResumeMode: buildConsentPendingMode() },
+        patch: { botResumeMode: planningReplay.finalState.botResumeMode },
         source: action.type
       });
       appliedWrites.push('candidate.botResumeMode');
+      continue;
+    }
+
+    if (action.type === 'RECORD_DATA_CONSENT') {
+      executeConsentAction({ fixture, planningReplay, adapters, action, appliedWrites });
       continue;
     }
 

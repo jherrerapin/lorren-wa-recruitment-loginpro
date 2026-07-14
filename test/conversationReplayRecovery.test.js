@@ -8,6 +8,10 @@ function countAudit(snapshot, type) {
   return snapshot.auditEvents.filter((event) => event.type === type).length;
 }
 
+function expectedConsentEventCount(fixture) {
+  return fixture.expected.interpretation.consentDecision ? 1 : 0;
+}
+
 function assertExpectedState(fixture, snapshot, label) {
   const aggregateState = {
     ...snapshot.candidates[0],
@@ -21,6 +25,8 @@ function assertExpectedState(fixture, snapshot, label) {
       `${label}: estado inesperado en ${field}`
     );
   }
+  assert.equal(snapshot.consentEvents.length, expectedConsentEventCount(fixture), `${label}: cantidad de eventos de consentimiento incorrecta`);
+  assert.equal(snapshot.storedAttachments.length, 0, `${label}: no debe almacenarse ningún adjunto durante el replay`);
 }
 
 function stableBusinessSnapshot(snapshot) {
@@ -28,7 +34,9 @@ function stableBusinessSnapshot(snapshot) {
     candidates: snapshot.candidates,
     conversationState: snapshot.conversationState,
     inboundMessages: snapshot.inboundMessages,
-    outboundMessages: snapshot.outboundMessages
+    outboundMessages: snapshot.outboundMessages,
+    consentEvents: snapshot.consentEvents,
+    storedAttachments: snapshot.storedAttachments
   };
 }
 
@@ -57,6 +65,7 @@ test('una caída después del outbox se recupera sin reinterpretar ni repetir ca
       assertExpectedState(fixture, afterFailure, relativePath);
 
       const candidateUpdateCountAfterFailure = countAudit(afterFailure, 'CANDIDATE_UPDATED');
+      const consentEventCountAfterFailure = countAudit(afterFailure, 'CONSENT_EVENT_CREATED');
       const businessStateAfterFailure = stableBusinessSnapshot(afterFailure);
       const outboundBody = afterFailure.outboundMessages[0].body;
       const lastOutboundAt = afterFailure.candidates[0].lastOutboundAt;
@@ -75,12 +84,13 @@ test('una caída después del outbox se recupera sin reinterpretar ni repetir ca
       assert.deepEqual(
         stableBusinessSnapshot(afterRecovery),
         businessStateAfterFailure,
-        `${relativePath}: candidato, conversación, inbox y outbox no deben cambiar durante la recuperación`
+        `${relativePath}: candidato, conversación, inbox, outbox, consentimiento y adjuntos no deben cambiar durante la recuperación`
       );
       assert.equal(afterRecovery.candidates[0].lastOutboundAt, lastOutboundAt, `${relativePath}: lastOutboundAt no debe reescribirse`);
       assert.equal(afterRecovery.deliveries.length, 1, `${relativePath}: debe existir una única entrega exitosa`);
       assert.equal(afterRecovery.deliveryAttempts[0].attempts, 2, `${relativePath}: la recuperación debe ser el segundo intento`);
       assert.equal(countAudit(afterRecovery, 'CANDIDATE_UPDATED'), candidateUpdateCountAfterFailure, `${relativePath}: no debe repetirse ninguna actualización del candidato`);
+      assert.equal(countAudit(afterRecovery, 'CONSENT_EVENT_CREATED'), consentEventCountAfterFailure, `${relativePath}: no debe duplicarse el evento de consentimiento`);
       assert.equal(countAudit(afterRecovery, 'OUTBOUND_PERSISTED'), 1, `${relativePath}: no debe persistirse otro outbox`);
       assert.equal(countAudit(afterRecovery, 'OUTBOUND_DELIVERY_FAILED'), 1, `${relativePath}: debe conservarse un único fallo`);
       assert.equal(countAudit(afterRecovery, 'OUTBOUND_DELIVERED'), 1, `${relativePath}: debe auditarse una única entrega exitosa`);
@@ -113,12 +123,15 @@ test('una caída entre inbox y outbox revierte cambios parciales y reanuda el tu
       const afterRollback = adapters.snapshot();
       assert.equal(afterRollback.inboundMessages.length, 1, `${relativePath}: el inbox debe conservar el reclamo`);
       assert.equal(afterRollback.outboundMessages.length, 0, `${relativePath}: no debe quedar un outbox parcial`);
+      assert.equal(afterRollback.consentEvents.length, 0, `${relativePath}: no debe quedar un evento de consentimiento parcial`);
+      assert.equal(afterRollback.storedAttachments.length, 0, `${relativePath}: no debe quedar un adjunto almacenado`);
       assert.equal(afterRollback.deliveryAttempts.length, 0, `${relativePath}: no debe intentarse entregar sin outbox`);
       assert.equal(afterRollback.deliveries.length, 0, `${relativePath}: no debe existir entrega`);
       assert.deepEqual(afterRollback.candidates[0], fixture.initialState.candidate, `${relativePath}: los cambios del candidato deben revertirse`);
       assert.deepEqual(afterRollback.conversationState.pendingFields, fixture.initialState.pendingFields || [], `${relativePath}: el pendiente conversacional debe revertirse`);
       assert.equal(countAudit(afterRollback, 'INBOUND_CLAIMED'), 1, `${relativePath}: el reclamo debe permanecer auditado`);
       assert.equal(countAudit(afterRollback, 'CANDIDATE_UPDATED'), 0, `${relativePath}: la auditoría de cambios parciales debe revertirse`);
+      assert.equal(countAudit(afterRollback, 'CONSENT_EVENT_CREATED'), 0, `${relativePath}: la auditoría de consentimiento parcial debe revertirse`);
       assert.equal(countAudit(afterRollback, 'OUTBOUND_PERSISTED'), 0, `${relativePath}: no debe auditarse un outbox inexistente`);
 
       const resumed = await replayFixtureIntegral(fixture, adapters);
@@ -137,6 +150,8 @@ test('una caída entre inbox y outbox revierte cambios parciales y reanuda el tu
       const afterResume = resumed.snapshot;
       assert.equal(afterResume.inboundMessages.length, 1, `${relativePath}: no debe duplicarse el inbox`);
       assert.equal(afterResume.outboundMessages.length, 1, `${relativePath}: debe existir un único outbox`);
+      assert.equal(afterResume.consentEvents.length, expectedConsentEventCount(fixture), `${relativePath}: evento de consentimiento incorrecto tras reanudar`);
+      assert.equal(afterResume.storedAttachments.length, 0, `${relativePath}: no debe almacenarse el adjunto al reanudar`);
       assert.equal(afterResume.deliveries.length, 1, `${relativePath}: debe existir una única entrega`);
       assert.equal(countAudit(afterResume, 'INBOUND_CLAIMED'), 1, `${relativePath}: el reclamo no debe duplicarse`);
       assert.equal(countAudit(afterResume, 'OUTBOUND_PERSISTED'), 1, `${relativePath}: el outbox debe persistirse una sola vez`);

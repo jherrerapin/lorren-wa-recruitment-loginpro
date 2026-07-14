@@ -72,8 +72,50 @@ jobs:
       - name: Run consent boundary regressions
         run: node --test test/flexibleApplicationFlow.test.js test/consentBoundaryHardening.test.js
 
-      - name: Run deterministic conversation replay
-        run: node --test test/conversationReplayFixtures.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js test/conversationReplayIntegral.test.js test/conversationReplayRecovery.test.js
+      - name: Validate conversation replay fixtures
+        run: node --test test/conversationReplayFixtures.test.js
+
+      - name: Run conversation interpretation replay
+        run: node --test test/conversationReplayInterpretation.test.js
+
+      - name: Run conversation planning replay
+        run: node --test test/conversationReplayPlanning.test.js
+
+      - name: Run consent and attachment edge replay
+        run: node --test test/conversationReplayConsentAttachmentEdges.test.js
+
+      - name: Run integral replay for interest without consent
+        env:
+          REPLAY_FIXTURE_ID: consent-interest-is-not-consent-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for vacancy question
+        env:
+          REPLAY_FIXTURE_ID: context-question-during-data-collection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for candidate correction
+        env:
+          REPLAY_FIXTURE_ID: context-correction-during-data-collection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for consent acceptance
+        env:
+          REPLAY_FIXTURE_ID: consent-explicit-acceptance-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for consent rejection
+        env:
+          REPLAY_FIXTURE_ID: consent-explicit-rejection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for pre-consent document
+        env:
+          REPLAY_FIXTURE_ID: attachment-document-before-consent-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run conversation recovery replay
+        run: node --test test/conversationReplayRecovery.test.js
 
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
