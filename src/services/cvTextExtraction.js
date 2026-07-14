@@ -1,5 +1,6 @@
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+import { extractLegacyWordText } from './legacyWordText.js';
 
 const MAX_TEXT_LENGTH = 12000;
 
@@ -14,6 +15,11 @@ function normalizeText(value = '') {
 
 function isPdf(mimeType = '', fileName = '') {
   return String(mimeType || '').includes('pdf') || String(fileName || '').toLowerCase().endsWith('.pdf');
+}
+
+function isDoc(mimeType = '', fileName = '') {
+  const name = String(fileName || '').toLowerCase();
+  return name.endsWith('.doc') || String(mimeType || '').toLowerCase() === 'application/msword';
 }
 
 function isDocx(mimeType = '', fileName = '') {
@@ -33,6 +39,11 @@ export async function extractCvText(buffer, options = {}) {
     const result = await pdfParse(buffer);
     const text = normalizeText(result?.text || '');
     return { ok: Boolean(text), text, reason: text ? 'pdf_text_extracted' : 'empty_pdf_text' };
+  }
+
+  if (isDoc(mimeType, fileName)) {
+    const result = extractLegacyWordText(buffer);
+    return { ...result, text: normalizeText(result.text) };
   }
 
   if (isDocx(mimeType, fileName)) {
