@@ -1,0 +1,66 @@
+name: Apply message repository cleanup
+
+on:
+  push:
+    branches:
+      - refactor/440-conversation-message-repository
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-message-repository-cleanup
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/440-conversation-message-repository
+          fetch-depth: 0
+
+      - name: Remove unused import and add blocking test
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          gate = Path('src/services/dataConsentGate.js')
+          source = gate.read_text()
+          source = source.replace(
+              "import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';",
+              "import { CandidateStatus, ConversationStep, MessageType } from '@prisma/client';",
+              1
+          )
+          gate.write_text(source)
+
+          ci = Path('.github/workflows/ci.yml')
+          workflow = ci.read_text()
+          old = """      - name: Run consent state authority regressions
+        run: node --test test/consentStateService.test.js
+"""
+          new = """      - name: Run consent and message authority regressions
+        run: node --test test/consentStateService.test.js test/conversationMessageRepository.test.js
+"""
+          if old in workflow:
+              workflow = workflow.replace(old, new, 1)
+          elif new not in workflow:
+              raise SystemExit('CI anchor missing')
+          ci.write_text(workflow)
+          PY
+
+      - name: Commit cleanup when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Cleanup already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/dataConsentGate.js .github/workflows/ci.yml
+          git commit -m "ci: bloquear repositorio compartido de mensajes"
+          git push origin HEAD:refactor/440-conversation-message-repository
