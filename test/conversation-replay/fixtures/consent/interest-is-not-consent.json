@@ -10,7 +10,7 @@
   "policyContext": {
     "conversationPolicyVersion": "conversation-policy-test-v1",
     "vacancyPolicyVersion": "vacancy-policy-test-v1",
-    "consentVersion": "lorren-v2-2026-07-v3"
+    "consentVersion": "lorren-v2-2026-07-v2"
   },
   "initialState": {
     "candidate": {
@@ -18,11 +18,12 @@
       "status": "NUEVO",
       "currentStep": "GREETING_SENT",
       "dataConsentStatus": "PENDING",
+      "botResumeMode": null,
       "vacancyId": "vacancy-test-neiva-leader"
     },
     "vacancy": {
       "vacancyId": "vacancy-test-neiva-leader",
-      "active": true,
+      "isActive": true,
       "acceptingApplications": true,
       "city": "Neiva",
       "title": "Líder de operación"
@@ -40,14 +41,23 @@
     "body": "Sí, me interesa continuar"
   },
   "expected": {
-    "understanding": {
-      "intents": ["CONTINUE_APPLICATION"],
+    "interpretation": {
+      "intent": "CONTINUE_APPLICATION",
+      "additionalIntents": [],
       "consentDecision": null,
       "providedFields": {}
     },
     "plan": {
-      "actions": ["ASK_DATA_CONSENT"],
-      "allowedWrites": ["candidate.botResumeMode"],
+      "actions": [
+        {
+          "type": "ASK_DATA_CONSENT"
+        }
+      ],
+      "allowedWrites": [
+        "candidate.botResumeMode",
+        "candidate.lastOutboundAt",
+        "message.outbound"
+      ],
       "forbiddenWrites": [
         "candidate.dataConsentStatus",
         "candidate.dataConsentAcceptedAt",
@@ -62,7 +72,8 @@
     },
     "finalState": {
       "dataConsentStatus": "PENDING",
-      "currentStep": "GREETING_SENT"
+      "currentStep": "GREETING_SENT",
+      "botResumeMode": "awaiting_data_consent"
     }
   }
 }
