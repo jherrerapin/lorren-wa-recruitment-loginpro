@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "consent-interest-is-not-consent-v1",
+  "title": "El interés en continuar no equivale a autorización de datos",
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-test-001",
+      "status": "NUEVO",
+      "currentStep": "GREETING_SENT",
+      "dataConsentStatus": "PENDING",
+      "vacancyId": "vacancy-test-neiva-leader"
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-test-neiva-leader",
+      "active": true,
+      "acceptingApplications": true,
+      "city": "Neiva",
+      "title": "Líder de operación"
+    }
+  },
+  "history": [
+    {
+      "direction": "OUTBOUND",
+      "body": "¿Te interesa continuar con esta postulación?"
+    }
+  ],
+  "inbound": {
+    "messageId": "test-message-consent-001",
+    "type": "text",
+    "body": "Sí, me interesa continuar"
+  },
+  "expected": {
+    "understanding": {
+      "intents": ["CONTINUE_APPLICATION"],
+      "consentDecision": null,
+      "providedFields": {}
+    },
+    "plan": {
+      "actions": ["ASK_DATA_CONSENT"],
+      "allowedWrites": ["candidate.botResumeMode"],
+      "forbiddenWrites": [
+        "candidate.dataConsentStatus",
+        "candidate.dataConsentAcceptedAt",
+        "candidate.fullName",
+        "candidate.documentNumber"
+      ],
+      "nextStep": "GREETING_SENT"
+    },
+    "response": {
+      "requiredFacts": ["Debe solicitar autorización para el tratamiento de datos antes de recolectar información personal"],
+      "forbiddenClaims": ["La autorización quedó registrada", "Ya guardé tus datos"]
+    },
+    "finalState": {
+      "dataConsentStatus": "PENDING",
+      "currentStep": "GREETING_SENT"
+    }
+  }
+}
