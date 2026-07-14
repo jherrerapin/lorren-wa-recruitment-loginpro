@@ -8,6 +8,41 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeCityListInput(value) {
+  if (Array.isArray(value)) return value;
+  const normalized = normalizeString(value);
+  if (!normalized) return [];
+
+  if (normalized.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(normalized);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Los registros antiguos guardan una sola ciudad como texto plano.
+    }
+  }
+
+  return [normalized];
+}
+
+export function normalizeUserScopeCities(value) {
+  const uniqueCities = new Map();
+  for (const rawCity of normalizeCityListInput(value)) {
+    const city = normalizeString(rawCity);
+    if (!city) continue;
+    const key = city.toLocaleLowerCase('es-CO');
+    if (!uniqueCities.has(key)) uniqueCities.set(key, city);
+  }
+  return [...uniqueCities.values()];
+}
+
+export function serializeUserScopeCities(value) {
+  const cities = normalizeUserScopeCities(value);
+  if (!cities.length) return null;
+  if (cities.length === 1) return cities[0];
+  return JSON.stringify(cities);
+}
+
 export function toSlug(value) {
   return String(value || '')
     .toLowerCase()
@@ -27,7 +62,8 @@ export function normalizeUserAccessScope(value) {
 export function buildRecruiterUsernameBase({ accessScope, scopeCity, vacancyTitle } = {}) {
   const scope = normalizeUserAccessScope(accessScope);
   if (scope === 'CITY') {
-    return `reclutador-${toSlug(scopeCity) || 'ciudad'}`;
+    const [firstCity] = normalizeUserScopeCities(scopeCity);
+    return `reclutador-${toSlug(firstCity) || 'ciudad'}`;
   }
   if (scope === 'VACANCY') {
     return `reclutador-${toSlug(vacancyTitle) || 'vacante'}`;
@@ -63,13 +99,15 @@ export function getAccessContext(source = {}) {
   const scope = role === 'dev'
     ? 'ALL'
     : normalizeUserAccessScope(source.userAccessScope || 'ALL');
+  const cities = normalizeUserScopeCities(source.userAccessCities ?? source.userAccessCity);
 
   return {
     role,
     username: source.username || null,
     userId: source.userId || null,
     scope,
-    city: normalizeString(source.userAccessCity),
+    city: cities[0] || null,
+    cities,
     vacancyId: normalizeString(source.userAccessVacancyId),
     isDev: role === 'dev',
     isAdmin: role === 'admin'
@@ -80,10 +118,17 @@ export function hasFullAccess(context = {}) {
   return context.isDev || context.scope === 'ALL';
 }
 
+function cityAccessFilter(context = {}) {
+  const cities = normalizeUserScopeCities(context.cities?.length ? context.cities : context.city);
+  if (!cities.length) return '__OUT_OF_SCOPE__';
+  if (cities.length === 1) return cities[0];
+  return { in: cities };
+}
+
 export function buildVacancyAccessWhere(context = {}) {
   if (hasFullAccess(context)) return {};
   if (context.scope === 'CITY') {
-    return { city: context.city || '__OUT_OF_SCOPE__' };
+    return { city: cityAccessFilter(context) };
   }
   if (context.scope === 'VACANCY') {
     return { id: context.vacancyId || '__OUT_OF_SCOPE__' };
@@ -96,7 +141,7 @@ export function buildCandidateAccessWhere(context = {}) {
   if (context.scope === 'CITY') {
     return {
       vacancy: {
-        city: context.city || '__OUT_OF_SCOPE__'
+        city: cityAccessFilter(context)
       }
     };
   }
@@ -109,7 +154,8 @@ export function buildCandidateAccessWhere(context = {}) {
 export function canAccessVacancy(context = {}, vacancy = {}) {
   if (hasFullAccess(context)) return true;
   if (context.scope === 'CITY') {
-    return normalizeString(vacancy?.city) === context.city;
+    const cities = normalizeUserScopeCities(context.cities?.length ? context.cities : context.city);
+    return cities.includes(normalizeString(vacancy?.city));
   }
   if (context.scope === 'VACANCY') {
     return vacancy?.id === context.vacancyId;
@@ -120,7 +166,8 @@ export function canAccessVacancy(context = {}, vacancy = {}) {
 export function canAccessCandidate(context = {}, candidate = {}) {
   if (hasFullAccess(context)) return true;
   if (context.scope === 'CITY') {
-    return normalizeString(candidate?.vacancy?.city) === context.city;
+    const cities = normalizeUserScopeCities(context.cities?.length ? context.cities : context.city);
+    return cities.includes(normalizeString(candidate?.vacancy?.city));
   }
   if (context.scope === 'VACANCY') {
     return candidate?.vacancyId === context.vacancyId || candidate?.vacancy?.id === context.vacancyId;
@@ -130,7 +177,12 @@ export function canAccessCandidate(context = {}, candidate = {}) {
 
 export function describeUserScope(user = {}) {
   const scope = normalizeUserAccessScope(user.accessScope);
-  if (scope === 'CITY') return `Ciudad: ${user.scopeCity || 'Sin ciudad'}`;
+  if (scope === 'CITY') {
+    const cities = normalizeUserScopeCities(user.scopeCities ?? user.scopeCity);
+    if (!cities.length) return 'Ciudades: Sin ciudad';
+    if (cities.length === 1) return `Ciudad: ${cities[0]}`;
+    return `Ciudades: ${cities.join(', ')}`;
+  }
   if (scope === 'VACANCY') return `Vacante: ${user.scopeVacancy?.title || user.scopeVacancyId || 'Sin vacante'}`;
   return 'Todas las vacantes';
 }
