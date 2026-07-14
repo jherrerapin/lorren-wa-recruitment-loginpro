@@ -1,5 +1,10 @@
 // routes/locations.js — CRUD de Ciudad y Operación
 import express from 'express';
+import {
+  normalizeUserAccessScope,
+  normalizeUserScopeCities,
+  serializeUserScopeCities
+} from '../services/appUsers.js';
 
 const CITY_USAGE_ORDER = ['RECRUITMENT', 'DISPATCH'];
 
@@ -19,6 +24,12 @@ function sessionAuth(req, res, next) {
   req.userRole = role;
   if (!['dev', 'admin'].includes(role)) return res.redirect('/admin');
   return next();
+}
+
+function canManageRecruiterUsers(req) {
+  const role = req.session?.userRole;
+  const source = req.session?.userSource;
+  return source === 'env' && (role === 'admin' || role === 'dev');
 }
 
 function flash(res, type, msg) {
@@ -41,6 +52,13 @@ function normalize(v) {
 
 function isChecked(value) {
   return value === 'on' || value === 'true' || value === true;
+}
+
+function redirectUsers(res, type, message, username = null) {
+  const params = new URLSearchParams();
+  params.set(type, message);
+  if (username) params.set('username', username);
+  return res.redirect(`/admin/users?${params.toString()}`);
 }
 
 function resolveCityUsage(body) {
@@ -112,6 +130,94 @@ export function locationsRouter(prisma) {
       include: { city: { select: { name: true, sourceModule: true, usedForRecruitment: true, usedForDispatch: true } } }
     });
     res.json(operations);
+  });
+
+  router.post('/users/:id/edit', async (req, res) => {
+    if (!canManageRecruiterUsers(req)) {
+      return redirectUsers(res, 'error', 'No tienes permisos para editar usuarios de reclutamiento.');
+    }
+
+    const user = await prisma.appUser.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        canAccessDispatch: true
+      }
+    });
+
+    if (!user) return redirectUsers(res, 'error', 'Usuario no encontrado.');
+    if (user.role !== 'ADMIN') {
+      return redirectUsers(res, 'error', 'Solo se pueden editar usuarios reclutadores.', user.username);
+    }
+
+    const accessScope = normalizeUserAccessScope(req.body.accessScope);
+    const data = {
+      accessScope,
+      recoveryPhone: normalize(req.body.recoveryPhone),
+      recoveryEmail: normalize(req.body.recoveryEmail)
+    };
+
+    if (req.userRole === 'dev') {
+      data.canAccessDispatch = isChecked(req.body.canAccessDispatch);
+    }
+
+    if (accessScope === 'ALL') {
+      data.scopeCity = null;
+      data.scopeVacancyId = null;
+    } else if (accessScope === 'CITY') {
+      const selectedCities = normalizeUserScopeCities(req.body.scopeCities ?? req.body.scopeCity);
+      if (!selectedCities.length) {
+        return redirectUsers(res, 'error', 'Debes seleccionar al menos una ciudad.', user.username);
+      }
+
+      const vacancies = await prisma.vacancy.findMany({
+        where: { city: { in: selectedCities } },
+        select: { city: true }
+      });
+      const availableCities = new Set(vacancies.map((vacancy) => vacancy.city));
+      const unavailableCities = selectedCities.filter((city) => !availableCities.has(city));
+      if (unavailableCities.length) {
+        return redirectUsers(
+          res,
+          'error',
+          `No se encontraron vacantes para: ${unavailableCities.join(', ')}.`,
+          user.username
+        );
+      }
+
+      data.scopeCity = serializeUserScopeCities(selectedCities);
+      data.scopeVacancyId = null;
+    } else {
+      const scopeVacancyId = normalize(req.body.scopeVacancyId);
+      if (!scopeVacancyId) {
+        return redirectUsers(res, 'error', 'Debes seleccionar una vacante específica.', user.username);
+      }
+
+      const vacancy = await prisma.vacancy.findUnique({
+        where: { id: scopeVacancyId },
+        select: { id: true }
+      });
+      if (!vacancy) {
+        return redirectUsers(res, 'error', 'La vacante seleccionada no existe.', user.username);
+      }
+
+      data.scopeCity = null;
+      data.scopeVacancyId = vacancy.id;
+    }
+
+    await prisma.appUser.update({
+      where: { id: user.id },
+      data
+    });
+
+    return redirectUsers(
+      res,
+      'success',
+      `Usuario ${user.username} actualizado. El nuevo alcance se aplicará en su próximo inicio de sesión.`,
+      user.username
+    );
   });
 
   router.post('/cities', async (req, res) => {
@@ -214,7 +320,7 @@ export function locationsRouter(prisma) {
       flash(res, 'success', `Operación renombrada a "${name}".`);
     } catch (err) {
       if (err.code === 'P2002') {
-        flash(res, 'error', `Ya existe una operación con ese nombre en la misma ciudad.`);
+        flash(res, 'error', 'Ya existe una operación con ese nombre en la misma ciudad.');
       } else {
         flash(res, 'error', 'Error al renombrar la operación.');
       }
@@ -236,7 +342,7 @@ export function locationsRouter(prisma) {
         flash(res, 'error', `No se puede eliminar "${op.name}" porque tiene ${op._count.vacancies} vacante(s) asociada(s). Reasigna o elimina las vacantes primero.`);
         return res.redirect('/admin/locations');
       }
-      await prisma.operation.delete({ where: { id: req.params.id } });
+      await prisma.operation.delete({ where: { id: op.id } });
       flash(res, 'success', `Operación "${op.name}" eliminada.`);
     } catch {
       flash(res, 'error', 'Error al eliminar la operación.');
