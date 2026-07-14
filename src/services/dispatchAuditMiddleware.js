@@ -55,6 +55,44 @@ function targetFor(req) {
     || 'dispatch';
 }
 
+async function refreshDatabaseUserPermissions(prisma, req) {
+  if (req.session?.userSource !== 'db' || !req.session?.userId || !prisma?.appUser?.findUnique) return;
+
+  const user = await prisma.appUser.findUnique({
+    where: { id: req.session.userId },
+    select: {
+      isActive: true,
+      accessScope: true,
+      scopeCity: true,
+      scopeVacancyId: true,
+      canAccessDispatch: true
+    }
+  });
+
+  if (!user || !user.isActive) {
+    req.session.userRole = null;
+    req.session.userId = null;
+    req.userRole = null;
+    req.userId = null;
+    return;
+  }
+
+  const accessScope = user.accessScope || 'ALL';
+  const accessCity = user.scopeCity || null;
+  const accessVacancyId = user.scopeVacancyId || null;
+  const canAccessDispatch = Boolean(user.canAccessDispatch);
+
+  req.session.userAccessScope = accessScope;
+  req.session.userAccessCity = accessCity;
+  req.session.userAccessVacancyId = accessVacancyId;
+  req.session.canAccessDispatch = canAccessDispatch;
+
+  req.userAccessScope = accessScope;
+  req.userAccessCity = accessCity;
+  req.userAccessVacancyId = accessVacancyId;
+  req.canAccessDispatch = canAccessDispatch;
+}
+
 export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
   return {
     entityType: 'DISPATCH',
@@ -79,7 +117,15 @@ export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
 }
 
 export function dispatchAuditMiddleware(prisma) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
+    try {
+      // Mantiene los permisos de usuarios de base de datos sincronizados sin
+      // obligarlos a cerrar sesión cuando un administrador cambia su alcance.
+      await refreshDatabaseUserPermissions(prisma, req);
+    } catch (error) {
+      console.warn('No fue posible refrescar los permisos del usuario.', error);
+    }
+
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
     const startedAt = Date.now();
     res.on('finish', () => {

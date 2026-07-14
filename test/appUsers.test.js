@@ -8,7 +8,9 @@ import {
   canAccessCandidate,
   canAccessVacancy,
   describeUserScope,
+  encodeUserAccessCities,
   getAccessContext,
+  normalizeUserAccessCities,
   normalizeUserAccessScope
 } from '../src/services/appUsers.js';
 
@@ -18,9 +20,21 @@ test('normalizeUserAccessScope cae a ALL cuando recibe un valor invalido', () =>
   assert.equal(normalizeUserAccessScope('cualquier-cosa'), 'ALL');
 });
 
+test('normaliza ciudades antiguas y múltiples sin romper compatibilidad', () => {
+  assert.deepEqual(normalizeUserAccessCities('Bogota'), ['Bogota']);
+  assert.deepEqual(normalizeUserAccessCities('["Bogota","Ibague","Bogota"]'), ['Bogota', 'Ibague']);
+  assert.deepEqual(normalizeUserAccessCities(['Neiva', 'Ibague']), ['Neiva', 'Ibague']);
+  assert.equal(encodeUserAccessCities(['Bogota']), 'Bogota');
+  assert.equal(encodeUserAccessCities(['Bogota', 'Ibague']), '["Bogota","Ibague"]');
+});
+
 test('buildRecruiterUsernameBase crea usernames segun el alcance', () => {
   assert.equal(buildRecruiterUsernameBase({ accessScope: 'ALL' }), 'reclutador-general');
   assert.equal(buildRecruiterUsernameBase({ accessScope: 'CITY', scopeCity: 'Bogota' }), 'reclutador-bogota');
+  assert.equal(
+    buildRecruiterUsernameBase({ accessScope: 'CITY', scopeCity: '["Ibague","Neiva"]' }),
+    'reclutador-ibague'
+  );
   assert.equal(
     buildRecruiterUsernameBase({ accessScope: 'VACANCY', vacancyTitle: 'Coordinador de Operaciones' }),
     'reclutador-coordinador-de-operaciones'
@@ -43,7 +57,7 @@ test('buildUniqueRecruiterUsername agrega consecutivo cuando el username ya exis
   assert.equal(username, 'reclutador-general-3');
 });
 
-test('helpers de acceso limitan ciudad y vacante correctamente', () => {
+test('helpers de acceso limitan una ciudad y una vacante correctamente', () => {
   const cityContext = getAccessContext({
     userRole: 'admin',
     userAccessScope: 'CITY',
@@ -55,7 +69,7 @@ test('helpers de acceso limitan ciudad y vacante correctamente', () => {
     userAccessVacancyId: 'vac-1'
   });
 
-  assert.deepEqual(buildVacancyAccessWhere(cityContext), { city: 'Ibague' });
+  assert.deepEqual(buildVacancyAccessWhere(cityContext), { city: { in: ['Ibague'] } });
   assert.deepEqual(buildCandidateAccessWhere(vacancyContext), { vacancyId: 'vac-1' });
 
   assert.equal(canAccessVacancy(cityContext, { id: 'vac-9', city: 'Ibague' }), true);
@@ -69,9 +83,30 @@ test('helpers de acceso limitan ciudad y vacante correctamente', () => {
   assert.equal(canAccessCandidate(vacancyContext, { vacancyId: 'vac-2', vacancy: { id: 'vac-2', city: 'Bogota' } }), false);
 });
 
+test('helpers de acceso permiten varias ciudades y todas sus vacantes', () => {
+  const context = getAccessContext({
+    userRole: 'admin',
+    userAccessScope: 'CITY',
+    userAccessCity: '["Bogota","Neiva"]'
+  });
+
+  assert.deepEqual(context.cities, ['Bogota', 'Neiva']);
+  assert.deepEqual(buildVacancyAccessWhere(context), { city: { in: ['Bogota', 'Neiva'] } });
+  assert.deepEqual(buildCandidateAccessWhere(context), {
+    vacancy: { city: { in: ['Bogota', 'Neiva'] } }
+  });
+  assert.equal(canAccessVacancy(context, { id: 'vac-1', city: 'Bogota' }), true);
+  assert.equal(canAccessVacancy(context, { id: 'vac-2', city: 'Neiva' }), true);
+  assert.equal(canAccessVacancy(context, { id: 'vac-3', city: 'Ibague' }), false);
+});
+
 test('describeUserScope resume el alcance visible del usuario', () => {
   assert.equal(describeUserScope({ accessScope: 'ALL' }), 'Todas las vacantes');
   assert.equal(describeUserScope({ accessScope: 'CITY', scopeCity: 'Bogota' }), 'Ciudad: Bogota');
+  assert.equal(
+    describeUserScope({ accessScope: 'CITY', scopeCity: '["Bogota","Neiva"]' }),
+    'Ciudades: Bogota, Neiva'
+  );
   assert.equal(
     describeUserScope({
       accessScope: 'VACANCY',
