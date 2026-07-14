@@ -26,6 +26,21 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | `CandidateAdminEvent` | 1 | Medio | En consolidación | `CandidateAdminAuditService` |
 | `InterviewSlot` | 1 | Alto | Fragmentado | `InterviewAvailabilityService` |
 
+## Progreso de consolidación
+
+### Consentimiento administrativo
+
+La ruta `src/routes/lorenV2DataConsents.js` ya no escribe directamente `Candidate` ni `CandidateDataConsentEvent`. Ahora delega en `ConsentStateService`, que aplica dentro de una sola transacción:
+
+- estado, versión, texto y fuente del consentimiento;
+- fechas mutuamente excluyentes de aceptación o revocatoria;
+- actor que registró la decisión;
+- evento versionado con IP, agente de usuario y nota opcional.
+
+El número total de escritores de `Candidate` permanece en quince porque la ruta administrativa fue reemplazada por la nueva autoridad compartida. `CandidateDataConsentEvent` continúa con dos escritores mientras `dataConsentGate.js` siga persistiendo directamente la decisión recibida por WhatsApp.
+
+Esta etapa se mantiene como `consolidating`. El consentimiento solo podrá marcarse `canonical` cuando el gate de WhatsApp también delegue en `ConsentStateService` y el manifiesto registre un único escritor.
+
 ## Hallazgos
 
 ### 1. `Candidate` funciona como agregado compartido por demasiados módulos
@@ -64,11 +79,11 @@ La persistencia de `Message` está repartida entre webhook, consentimiento, supe
 
 ### 4. Consentimiento y jobs muestran una ruta de consolidación más clara
 
-`CandidateDataConsentEvent` tiene dos escritores conocidos y `JobQueue` uno. Son buenos candidatos para convertirse primero en autoridades canónicas, porque sus contratos ya están protegidos por replay e idempotencia.
+`CandidateDataConsentEvent` mantiene dos escritores conocidos, pero uno ya es la autoridad compartida. `JobQueue` conserva un único escritor. Son los primeros agregados que pueden alcanzar una autoridad canónica porque sus contratos ya están protegidos por replay e idempotencia.
 
 ## Clasificación de escritores
 
-- `canonical`: única autoridad permitida cuando la migración finaliza.
+- `canonical`: autoridad objetivo que ya recibe al menos una ruta migrada; solo será exclusiva cuando la etapa pase a `canonical`.
 - `boundary`: frontera especializada que todavía escribe directamente.
 - `legacy`: ruta heredada que debe migrarse y retirarse.
 - `admin`: operación humana explícita que debe pasar por un caso de uso auditado.
@@ -88,7 +103,7 @@ La persistencia de `Message` está repartida entre webhook, consentimiento, supe
 
 ## Orden recomendado de consolidación
 
-1. `CandidateDataConsentEvent` y campos de consentimiento del candidato.
+1. Completar la migración de `CandidateDataConsentEvent` y campos de consentimiento del candidato.
 2. `Message`, inbox y outbox.
 3. `InterviewBooking` y sus transiciones.
 4. Campos conversacionales de `Candidate`.
