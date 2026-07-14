@@ -14,6 +14,7 @@ import {
 } from './interviewLifecycle.js';
 import { isFeatureEnabled } from './featureFlags.js';
 import { enqueueJob, JOB_TYPES } from './jobQueue.js';
+import { persistOutboundConversationMessage } from './conversationMessageRepository.js';
 
 export const CANDIDATE_PROCESS_REMINDER_DELAY_MS = Number.parseInt(
   process.env.CANDIDATE_PROCESS_REMINDER_DELAY_MS || String(2 * 60 * 60 * 1000),
@@ -234,14 +235,11 @@ export async function cancelReminderOnInbound(prisma, candidateId) {
 }
 
 async function storeOutbound(prisma, candidateId, body, metadata = {}) {
-  await prisma.message.create({
-    data: {
-      candidateId,
-      direction: 'OUTBOUND',
-      messageType: 'TEXT',
-      body,
-      rawPayload: metadata
-    }
+  await persistOutboundConversationMessage(prisma, {
+    candidateId,
+    messageType: 'TEXT',
+    body,
+    rawPayload: metadata
   });
 }
 
