@@ -12,6 +12,15 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 
 const VALID_MIGRATION_STAGES = new Set(['fragmented', 'consolidating', 'canonical']);
 const VALID_ROLES = new Set(['admin', 'boundary', 'canonical', 'integration', 'legacy', 'operational']);
+const RAW_OPERATION_BY_VERB = Object.freeze({
+  DELETE: 'rawDelete',
+  INSERT: 'rawInsert',
+  UPDATE: 'rawUpdate'
+});
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function normalizePath(value) {
   return String(value || '').split(path.sep).join('/');
@@ -38,28 +47,60 @@ function lineNumberAt(source, index) {
   return source.slice(0, index).split('\n').length;
 }
 
-function collectStateWrites() {
+function collectDelegateWrites(source, relativePath) {
   const trackedModels = Object.keys(manifest.models);
-  const trackedOperations = manifest.trackedOperations;
-  const modelPattern = trackedModels.map((model) => model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const operationPattern = trackedOperations.map((operation) => operation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const modelPattern = trackedModels.map(escapeRegex).join('|');
+  const operationPattern = manifest.trackedOperations.map(escapeRegex).join('|');
   const writePattern = new RegExp(
-    `\\b(?:prisma|tx|transaction|db)(?:\\?\\.)?\\.(${modelPattern})(?:\\?\\.)?\\.(${operationPattern})\\s*\\(`,
+    `\\b[A-Za-z_$][\\w$]*\\s*(?:\\?\\.|\\.)\\s*(${modelPattern})\\s*(?:\\?\\.|\\.)\\s*(${operationPattern})\\s*\\(`,
     'g'
   );
+  const writes = [];
+
+  for (const match of source.matchAll(writePattern)) {
+    writes.push({
+      path: relativePath,
+      model: match[1],
+      operation: match[2],
+      line: lineNumberAt(source, match.index),
+      access: 'delegate'
+    });
+  }
+  return writes;
+}
+
+function collectRawSqlWrites(source, relativePath) {
+  const modelByTableName = new Map(
+    Object.entries(manifest.models).map(([model, contract]) => [contract.tableName.toLowerCase(), model])
+  );
+  const tablePattern = [...modelByTableName.keys()].map(escapeRegex).join('|');
+  const rawMutationPattern = new RegExp(
+    `\\b(UPDATE|INSERT\\s+INTO|DELETE\\s+FROM)\\s+["'\\x60]?(${tablePattern})["'\\x60]?`,
+    'gi'
+  );
+  const writes = [];
+
+  for (const match of source.matchAll(rawMutationPattern)) {
+    const verb = match[1].split(/\s+/)[0].toUpperCase();
+    writes.push({
+      path: relativePath,
+      model: modelByTableName.get(match[2].toLowerCase()),
+      operation: RAW_OPERATION_BY_VERB[verb],
+      line: lineNumberAt(source, match.index),
+      access: 'rawSql'
+    });
+  }
+  return writes;
+}
+
+function collectStateWrites() {
   const writes = [];
 
   for (const absolutePath of collectJavaScriptFiles(sourceRoot)) {
     const relativePath = normalizePath(path.relative(repositoryRoot, absolutePath));
     const source = removeComments(readFileSync(absolutePath, 'utf8'));
-    for (const match of source.matchAll(writePattern)) {
-      writes.push({
-        path: relativePath,
-        model: match[1],
-        operation: match[2],
-        line: lineNumberAt(source, match.index)
-      });
-    }
+    writes.push(...collectDelegateWrites(source, relativePath));
+    writes.push(...collectRawSqlWrites(source, relativePath));
   }
 
   return writes;
@@ -108,6 +149,14 @@ function formatObservedWriters(paths = new Map()) {
     .join('\n');
 }
 
+function isExistingFile(absolutePath) {
+  try {
+    return statSync(absolutePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
 const observedWrites = collectStateWrites();
 const observedByModel = writersByModel(observedWrites);
 writeDiagnosticReport(observedWrites, observedByModel);
@@ -117,9 +166,13 @@ test('el manifiesto de autoridades declara contratos completos y válidos', () =
   assert.ok(Array.isArray(manifest.trackedOperations) && manifest.trackedOperations.length > 0);
   assert.ok(manifest.models && typeof manifest.models === 'object');
 
+  const tableNames = new Set();
   for (const [model, contract] of Object.entries(manifest.models)) {
     assert.ok(contract.domain, `${model}: falta domain`);
     assert.ok(contract.targetAuthority, `${model}: falta targetAuthority`);
+    assert.ok(contract.tableName?.trim(), `${model}: falta tableName para detectar SQL directo`);
+    assert.ok(!tableNames.has(contract.tableName.toLowerCase()), `${model}: tableName duplicado ${contract.tableName}`);
+    tableNames.add(contract.tableName.toLowerCase());
     assert.ok(VALID_MIGRATION_STAGES.has(contract.migrationStage), `${model}: migrationStage inválido`);
     assert.ok(Array.isArray(contract.writers) && contract.writers.length > 0, `${model}: falta writers`);
 
@@ -159,10 +212,10 @@ test('el manifiesto no conserva escritores obsoletos o inexistentes', () => {
     const observedPaths = observedByModel.get(model) || new Map();
     for (const writer of contract.writers) {
       const absolutePath = path.join(repositoryRoot, writer.path);
-      assert.ok(statSync(absolutePath).isFile(), `${model}: archivo declarado inexistente ${writer.path}`);
+      assert.ok(isExistingFile(absolutePath), `${model}: archivo declarado inexistente ${writer.path}`);
       assert.ok(
         observedPaths.has(writer.path),
-        `${model}: ${writer.path} está declarado pero no contiene una escritura Prisma rastreable`
+        `${model}: ${writer.path} está declarado pero no contiene una escritura Prisma o SQL rastreable`
       );
     }
   }
