@@ -4,12 +4,28 @@ import { DATA_CONSENT_VERSION } from '../src/services/dataConsentGate.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { replayFixtureInterpretation } from './conversation-replay/interpretationReplay.js';
 
-function assertSemanticEvidence(expectedIntent, replay, label) {
-  const { turn, understanding } = replay.evidence;
+function assertSemanticEvidence(expectedIntent, replay, fixture, label) {
+  const { turn, understanding, attachment } = replay.evidence;
 
   if (expectedIntent === 'CONTINUE_APPLICATION') {
     assert.equal(turn.interest, true, `${label}: el arbitraje debe reconocer interés`);
     assert.equal(replay.interpretation.consentDecision, null, `${label}: el interés no puede autorizar datos`);
+  }
+
+  if (expectedIntent === 'ACCEPT_DATA_CONSENT') {
+    assert.equal(replay.interpretation.consentDecision, 'ACCEPTED', `${label}: debe reconocer autorización explícita`);
+    assert.deepEqual(understanding.candidateFields, {}, `${label}: autorizar no debe inventar datos de perfil`);
+  }
+
+  if (expectedIntent === 'REJECT_DATA_CONSENT') {
+    assert.equal(replay.interpretation.consentDecision, 'REVOKED', `${label}: debe reconocer rechazo explícito`);
+    assert.deepEqual(understanding.candidateFields, {}, `${label}: rechazar no debe inventar datos de perfil`);
+  }
+
+  if (expectedIntent === 'SEND_ATTACHMENT') {
+    assert.deepEqual(attachment, fixture.inbound.attachment, `${label}: debe conservar metadatos del adjunto`);
+    assert.equal(replay.interpretation.consentDecision, null, `${label}: enviar un archivo no equivale a autorizar datos`);
+    assert.deepEqual(understanding.candidateFields, {}, `${label}: el nombre del archivo no debe convertirse en dato de perfil`);
   }
 
   if (expectedIntent === 'ASK_VACANCY_SCHEDULE') {
@@ -42,7 +58,7 @@ test('el replay determinístico reproduce la interpretación protegida del corpu
         fixture.expected.interpretation,
         `${relativePath}: la interpretación real se apartó del comportamiento protegido`
       );
-      assertSemanticEvidence(fixture.expected.interpretation.intent, replay, relativePath);
+      assertSemanticEvidence(fixture.expected.interpretation.intent, replay, fixture, relativePath);
     });
   }
 });
