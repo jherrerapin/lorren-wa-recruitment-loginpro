@@ -28,11 +28,19 @@ La deduplicación de webhooks, validación de firmas, persistencia del inbox y r
 
 ## Etapas
 
-1. **Contrato de fixtures:** validación estructural, datos sintéticos, proveedores simulados e identidades únicas.
+1. **Contrato de fixtures:** valida estructura, datos sintéticos, proveedores simulados e identidades únicas.
 2. **Replay de interpretación:** ejecuta el arbitraje vigente, `conversationUnderstanding`, sanitización de campos y política de consentimiento con respuestas de proveedor simuladas.
-3. **Replay de planificación:** validará acciones estructuradas, permisos y transiciones.
-4. **Replay integral:** ejecutará adaptadores en memoria sin WhatsApp, OpenAI ni base de datos reales.
+3. **Replay de planificación:** ejecuta las autoridades vigentes de consentimiento, respuesta contextual y política de campos; produce acciones, escrituras y transiciones sobre estado en memoria.
+4. **Replay integral:** ejecutará adaptadores de persistencia y salida en memoria sin WhatsApp, OpenAI ni base de datos reales.
 5. **Gate de CI:** impide retirar una autoridad heredada cuando cambia un comportamiento protegido.
+
+## Autoridades usadas por la planificación
+
+- `evaluateConsentBoundary()` y `buildConsentPendingMode()` para proteger datos antes de autorización.
+- `evaluateContextualResponseGate()` y `buildVacancyQuestionReply()` para responder preguntas sustentadas sin perder el campo pendiente.
+- `applyFieldPolicy()` para autorizar únicamente correcciones con evidencia suficiente.
+
+El adaptador de replay no sustituye estas autoridades ni se usa en producción; traduce sus resultados al contrato canónico del corpus para detectar divergencias.
 
 ## Reglas
 
@@ -49,4 +57,4 @@ La deduplicación de webhooks, validación de firmas, persistencia del inbox y r
 
 ## Estado actual
 
-El contrato y el replay de interpretación son ejecutables. El replay todavía no aplica planes, no persiste estado y no ejecuta el webhook productivo.
+El contrato, la interpretación y la planificación son ejecutables y bloqueantes en CI. El replay todavía no ejecuta adaptadores de persistencia, no envía mensajes y no ejecuta el webhook productivo.
