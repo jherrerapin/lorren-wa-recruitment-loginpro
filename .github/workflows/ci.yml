@@ -66,6 +66,9 @@ jobs:
       - name: Run conversation turn arbitration regressions
         run: node --test test/conversationIntent.test.js
 
+      - name: Run flow-authority regression
+        run: node --test test/flowDecisionAuthority.test.js
+
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
       # regression gate until its exact baseline is deterministic.
