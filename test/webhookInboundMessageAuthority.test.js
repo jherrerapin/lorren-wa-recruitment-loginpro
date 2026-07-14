@@ -57,7 +57,14 @@ test('inbox persiste solo campos Prisma válidos y conserva trazabilidad e ident
   assert.equal(persisted.direction, MessageDirection.INBOUND);
   assert.equal(persisted.messageType, MessageType.TEXT);
   assert.equal(persisted.body, 'Hola');
-  assert.deepEqual(persisted.rawPayload, rawMessage);
+  assert.deepEqual(persisted.rawPayload, {
+    id: 'wamid.inbound-1',
+    from: '573001112233',
+    timestamp: undefined,
+    type: 'text',
+    text: { body: 'Hola' },
+    document: undefined
+  });
   assert.equal(Object.hasOwn(persisted, 'phone'), false);
   assert.equal(calls.candidateUpdate.length, 1);
   assert.equal(calls.candidateUpdate[0].where.id, 'candidate-inbound-1');
