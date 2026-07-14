@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = path.join(repositoryRoot, 'src');
 const manifestPath = path.join(repositoryRoot, 'docs', 'architecture', 'state-authority-manifest.json');
+const reportPath = path.join(repositoryRoot, 'state-authority-observed.json');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 
 const VALID_MIGRATION_STAGES = new Set(['fragmented', 'consolidating', 'canonical']);
@@ -75,12 +76,41 @@ function writersByModel(writes) {
   return result;
 }
 
+function serializableObservedWriters(observed) {
+  return Object.fromEntries(
+    [...observed.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([model, paths]) => [
+        model,
+        Object.fromEntries(
+          [...paths.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([writerPath, operations]) => [writerPath, [...operations].sort()])
+        )
+      ])
+  );
+}
+
+function writeDiagnosticReport(writes, observed) {
+  const declared = Object.fromEntries(
+    Object.entries(manifest.models).map(([model, contract]) => [
+      model,
+      contract.writers.map((writer) => writer.path).sort()
+    ])
+  );
+  writeFileSync(reportPath, `${JSON.stringify({ declared, observed: serializableObservedWriters(observed), writes }, null, 2)}\n`);
+}
+
 function formatObservedWriters(paths = new Map()) {
   return [...paths.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([writerPath, operations]) => `${writerPath} [${[...operations].sort().join(', ')}]`)
     .join('\n');
 }
+
+const observedWrites = collectStateWrites();
+const observedByModel = writersByModel(observedWrites);
+writeDiagnosticReport(observedWrites, observedByModel);
 
 test('el manifiesto de autoridades declara contratos completos y válidos', () => {
   assert.equal(manifest.schemaVersion, 1);
@@ -111,11 +141,9 @@ test('el manifiesto de autoridades declara contratos completos y válidos', () =
 });
 
 test('ningún archivo escribe estado de alto riesgo fuera del manifiesto', () => {
-  const observed = writersByModel(collectStateWrites());
-
   for (const [model, contract] of Object.entries(manifest.models)) {
     const declaredPaths = new Set(contract.writers.map((writer) => writer.path));
-    const observedPaths = observed.get(model) || new Map();
+    const observedPaths = observedByModel.get(model) || new Map();
     const undeclared = [...observedPaths.keys()].filter((writerPath) => !declaredPaths.has(writerPath));
 
     assert.deepEqual(
@@ -127,10 +155,8 @@ test('ningún archivo escribe estado de alto riesgo fuera del manifiesto', () =>
 });
 
 test('el manifiesto no conserva escritores obsoletos o inexistentes', () => {
-  const observed = writersByModel(collectStateWrites());
-
   for (const [model, contract] of Object.entries(manifest.models)) {
-    const observedPaths = observed.get(model) || new Map();
+    const observedPaths = observedByModel.get(model) || new Map();
     for (const writer of contract.writers) {
       const absolutePath = path.join(repositoryRoot, writer.path);
       assert.ok(statSync(absolutePath).isFile(), `${model}: archivo declarado inexistente ${writer.path}`);
