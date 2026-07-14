@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "id": "consent-explicit-acceptance-v1",
+  "title": "La autorización explícita registra consentimiento y continúa la recolección",
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "executionContext": {
+    "now": "2026-07-14T15:00:00.000Z"
+  },
+  "providerStubs": {
+    "aiResult": {
+      "status": "ok",
+      "intent": "accept_data_consent",
+      "parsedFields": {},
+      "extraction": {
+        "turnType": "CONFIRMATION",
+        "fieldEvidence": {},
+        "conflicts": []
+      }
+    }
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-test-004",
+      "status": "NUEVO",
+      "currentStep": "GREETING_SENT",
+      "dataConsentStatus": "PENDING",
+      "dataConsentVersion": null,
+      "dataConsentText": null,
+      "dataConsentSource": null,
+      "dataConsentAcceptedAt": null,
+      "dataConsentRevokedAt": null,
+      "dataConsentRecordedBy": null,
+      "lastInboundAt": null,
+      "botResumeMode": "awaiting_data_consent",
+      "vacancyId": "vacancy-test-bogota-consent"
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-test-bogota-consent",
+      "isActive": true,
+      "acceptingApplications": true,
+      "city": "Bogotá",
+      "title": "Auxiliar de bodega",
+      "requiredCandidateFields": ["fullName"]
+    }
+  },
+  "history": [
+    {
+      "direction": "OUTBOUND",
+      "body": "Antes de continuar necesito tu autorización para el tratamiento de datos."
+    }
+  ],
+  "inbound": {
+    "messageId": "test-message-consent-accepted-001",
+    "type": "text",
+    "body": "Sí, autorizo el tratamiento de mis datos personales"
+  },
+  "expected": {
+    "interpretation": {
+      "intent": "ACCEPT_DATA_CONSENT",
+      "additionalIntents": [],
+      "consentDecision": "ACCEPTED",
+      "providedFields": {}
+    },
+    "plan": {
+      "actions": [
+        {
+          "type": "RECORD_DATA_CONSENT",
+          "data": {
+            "status": "ACCEPTED",
+            "version": "lorren-v2-2026-07-v3",
+            "candidateUpdate": {
+              "dataConsentStatus": "ACCEPTED",
+              "dataConsentVersion": "lorren-v2-2026-07-v3",
+              "dataConsentText": "Autorizo a LoginPro a tratar mis datos personales, hoja de vida y documentos enviados por WhatsApp para gestionar mi postulación, validar información, contactarme y conservar la trazabilidad del proceso. Entiendo que puedo solicitar consulta, actualización, corrección o revocatoria de esta autorización.",
+              "dataConsentSource": "WHATSAPP_CANDIDATE",
+              "dataConsentAcceptedAt": "2026-07-14T15:00:00.000Z",
+              "dataConsentRevokedAt": null,
+              "dataConsentRecordedBy": "candidate_whatsapp",
+              "currentStep": "COLLECTING_DATA",
+              "status": "NUEVO",
+              "botResumeMode": null,
+              "lastInboundAt": "2026-07-14T15:00:00.000Z"
+            },
+            "event": {
+              "status": "ACCEPTED",
+              "version": "lorren-v2-2026-07-v3",
+              "text": "Autorizo a LoginPro a tratar mis datos personales, hoja de vida y documentos enviados por WhatsApp para gestionar mi postulación, validar información, contactarme y conservar la trazabilidad del proceso. Entiendo que puedo solicitar consulta, actualización, corrección o revocatoria de esta autorización.",
+              "source": "WHATSAPP_CANDIDATE",
+              "actorUsername": "candidate_whatsapp",
+              "note": "Aceptación registrada por respuesta de WhatsApp."
+            }
+          }
+        },
+        {
+          "type": "CONTINUE_DATA_COLLECTION"
+        }
+      ],
+      "allowedWrites": [
+        "candidate.dataConsentStatus",
+        "candidate.dataConsentVersion",
+        "candidate.dataConsentText",
+        "candidate.dataConsentSource",
+        "candidate.dataConsentAcceptedAt",
+        "candidate.dataConsentRevokedAt",
+        "candidate.dataConsentRecordedBy",
+        "candidate.currentStep",
+        "candidate.status",
+        "candidate.botResumeMode",
+        "candidate.lastInboundAt",
+        "consentEvent.create",
+        "candidate.lastOutboundAt",
+        "message.outbound"
+      ],
+      "forbiddenWrites": [
+        "candidate.documentNumber",
+        "candidate.cvData",
+        "candidate.cvStorageKey"
+      ],
+      "nextStep": "COLLECTING_DATA"
+    },
+    "response": {
+      "requiredFacts": [
+        "Debe confirmar que la autorización quedó registrada",
+        "Debe continuar con la recolección del nombre completo"
+      ],
+      "forbiddenClaims": [
+        "La hoja de vida quedó almacenada",
+        "La postulación quedó completa"
+      ],
+      "requiredText": ["autorización quedó registrada", "nombre completo"],
+      "forbiddenText": ["No continuaré con la postulación", "postulación quedó completa"]
+    },
+    "finalState": {
+      "dataConsentStatus": "ACCEPTED",
+      "dataConsentVersion": "lorren-v2-2026-07-v3",
+      "dataConsentAcceptedAt": "2026-07-14T15:00:00.000Z",
+      "dataConsentRevokedAt": null,
+      "currentStep": "COLLECTING_DATA",
+      "status": "NUEVO",
+      "botResumeMode": null
+    }
+  }
+}
