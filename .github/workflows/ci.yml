@@ -49,41 +49,41 @@ jobs:
                   raise SystemExit('No se encontró exactamente el import ancla del supervisor')
               text = text.replace(import_anchor, import_anchor + repository_import, 1)
 
-          silence_old = """    await prisma.message.create({
-              data: {
-                candidateId: candidate.id,
-                direction: MessageDirection.OUTBOUND,
-                messageType: MessageType.TEXT,
-                body: `[silencio intencional] ${payload.reason}`,
-                rawPayload: payload
-              }
-            });"""
-          silence_new = """    await persistOutboundConversationMessage(prisma, {
-              candidateId: candidate.id,
-              messageType: MessageType.TEXT,
-              body: `[silencio intencional] ${payload.reason}`,
-              rawPayload: payload
-            });"""
-          if silence_old in text:
-              if text.count(silence_old) != 1:
-                  raise SystemExit('La persistencia de silencio no es única')
-              text = text.replace(silence_old, silence_new, 1)
-          elif silence_new not in text:
-              raise SystemExit('No se encontró la persistencia de silencio esperada')
+          silence_start = text.index('async function recordIntentionalSilence')
+          silence_end = text.index('async function pauseSilentlyForManualReview', silence_start)
+          silence_direct = text.find('    await prisma.message.create({', silence_start, silence_end)
+          silence_delegated = text.find('    await persistOutboundConversationMessage(prisma, {', silence_start, silence_end)
+          if silence_direct >= 0:
+              silence_block_end = text.index('\n  } catch (error)', silence_direct, silence_end)
+              replacement = (
+                  "    await persistOutboundConversationMessage(prisma, {\n"
+                  "      candidateId: candidate.id,\n"
+                  "      messageType: MessageType.TEXT,\n"
+                  "      body: `[silencio intencional] ${payload.reason}`,\n"
+                  "      rawPayload: payload\n"
+                  "    });"
+              )
+              text = text[:silence_direct] + replacement + text[silence_block_end:]
+          elif silence_delegated < 0:
+              raise SystemExit('No se encontró persistencia directa ni delegada del silencio')
 
-          outbound_old = "  await prisma.message.create({ data: { candidateId, direction: MessageDirection.OUTBOUND, messageType: MessageType.TEXT, body, rawPayload: payload } });"
-          outbound_new = """  await persistOutboundConversationMessage(prisma, {
-            candidateId,
-            messageType: MessageType.TEXT,
-            body,
-            rawPayload: payload
-          });"""
-          if outbound_old in text:
-              if text.count(outbound_old) != 1:
-                  raise SystemExit('La salida común no es única')
-              text = text.replace(outbound_old, outbound_new, 1)
-          elif outbound_new not in text:
-              raise SystemExit('No se encontró la salida común esperada')
+          outbound_start = text.index('async function saveOutboundMessage')
+          outbound_end = text.index('async function reply', outbound_start)
+          outbound_direct = text.find('  await prisma.message.create(', outbound_start, outbound_end)
+          outbound_delegated = text.find('  await persistOutboundConversationMessage(prisma, {', outbound_start, outbound_end)
+          if outbound_direct >= 0:
+              outbound_block_end = text.index('\n  await prisma.candidate.update', outbound_direct, outbound_end)
+              replacement = (
+                  "  await persistOutboundConversationMessage(prisma, {\n"
+                  "    candidateId,\n"
+                  "    messageType: MessageType.TEXT,\n"
+                  "    body,\n"
+                  "    rawPayload: payload\n"
+                  "  });"
+              )
+              text = text[:outbound_direct] + replacement + text[outbound_block_end:]
+          elif outbound_delegated < 0:
+              raise SystemExit('No se encontró persistencia directa ni delegada de la salida común')
 
           silence_start = text.index('async function recordIntentionalSilence')
           silence_end = text.index('async function pauseSilentlyForManualReview', silence_start)
