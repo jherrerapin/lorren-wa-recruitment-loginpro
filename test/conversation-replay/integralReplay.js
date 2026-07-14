@@ -85,6 +85,10 @@ function composeReply(planningReplay) {
   return parts.join('\n\n').trim();
 }
 
+function outboundIdempotencyKey(fixture) {
+  return `${fixture.inbound.messageId}:reply:v1`;
+}
+
 function executeCandidateActions({ fixture, planningReplay, adapters }) {
   const candidateId = fixture.initialState.candidate.candidateId;
   const plan = planningReplay.plan;
@@ -124,10 +128,10 @@ function executeCandidateActions({ fixture, planningReplay, adapters }) {
   return appliedWrites;
 }
 
-function persistAndDeliverReply({ fixture, planningReplay, adapters, body, appliedWrites }) {
+function commitReply({ fixture, planningReplay, adapters, body, appliedWrites }) {
   const candidateId = fixture.initialState.candidate.candidateId;
   const plan = planningReplay.plan;
-  const idempotencyKey = `${fixture.inbound.messageId}:reply:v1`;
+  const idempotencyKey = outboundIdempotencyKey(fixture);
 
   assertWriteAllowed(plan, 'message.outbound');
   const persisted = adapters.persistOutbound({
@@ -149,15 +153,104 @@ function persistAndDeliverReply({ fixture, planningReplay, adapters, body, appli
   });
   appliedWrites.push('candidate.lastOutboundAt');
 
+  return idempotencyKey;
+}
+
+function deliverCommittedReply({ fixture, adapters, idempotencyKey, body }) {
   const delivered = adapters.deliverOutbound({
     tenantContext: fixture.tenantContext,
-    requestedCandidateId: candidateId,
+    requestedCandidateId: fixture.initialState.candidate.candidateId,
     idempotencyKey,
     body
   });
   if (!delivered) throw new Error(`unexpected_duplicate_delivery:${idempotencyKey}`);
+}
 
-  return idempotencyKey;
+function recoverPendingOutbound(fixture, adapters) {
+  const candidateId = fixture.initialState.candidate.candidateId;
+  const idempotencyKey = outboundIdempotencyKey(fixture);
+  const outbound = adapters.readOutbound({
+    tenantContext: fixture.tenantContext,
+    idempotencyKey
+  });
+
+  if (!outbound) {
+    return {
+      outboundFound: false,
+      recoveryAttempted: false,
+      recovered: false,
+      reply: null,
+      outboundIdempotencyKey: null
+    };
+  }
+
+  if (adapters.hasDelivery({ tenantContext: fixture.tenantContext, idempotencyKey })) {
+    return {
+      outboundFound: true,
+      recoveryAttempted: false,
+      recovered: false,
+      reply: null,
+      outboundIdempotencyKey: idempotencyKey
+    };
+  }
+
+  const delivered = adapters.deliverOutbound({
+    tenantContext: fixture.tenantContext,
+    requestedCandidateId: candidateId,
+    idempotencyKey,
+    body: outbound.body
+  });
+  if (!delivered) throw new Error(`pending_outbound_not_recovered:${idempotencyKey}`);
+
+  return {
+    outboundFound: true,
+    recoveryAttempted: true,
+    recovered: true,
+    reply: outbound.body,
+    outboundIdempotencyKey: idempotencyKey
+  };
+}
+
+async function processTurn(fixture, adapters, { duplicate, resumedProcessing }) {
+  const interpretationReplay = await replayFixtureInterpretation(fixture);
+  const planningReplay = replayFixturePlanning(fixture, interpretationReplay);
+  const reply = composeReply(planningReplay);
+  if (!reply) throw new Error(`${fixture.id}: el plan no produjo respuesta saliente`);
+
+  const appliedWrites = [];
+  let outboundIdempotencyKey = null;
+  adapters.runInTransaction(() => {
+    appliedWrites.push(...executeCandidateActions({ fixture, planningReplay, adapters }));
+    outboundIdempotencyKey = commitReply({
+      fixture,
+      planningReplay,
+      adapters,
+      body: reply,
+      appliedWrites
+    });
+  });
+
+  deliverCommittedReply({
+    fixture,
+    adapters,
+    idempotencyKey: outboundIdempotencyKey,
+    body: reply
+  });
+
+  return {
+    duplicate,
+    resumedProcessing,
+    interpreted: true,
+    planned: true,
+    recoveryAttempted: false,
+    recovered: false,
+    interpretationReplay,
+    planningReplay,
+    appliedWrites,
+    outboundIdempotencyKey,
+    reply,
+    snapshot: adapters.snapshot()
+  };
 }
 
 export async function replayFixtureIntegral(fixture, adapters) {
@@ -169,39 +262,22 @@ export async function replayFixtureIntegral(fixture, adapters) {
     message: fixture.inbound
   });
 
-  if (!claimed) {
+  if (claimed) {
+    return processTurn(fixture, adapters, { duplicate: false, resumedProcessing: false });
+  }
+
+  const recovery = recoverPendingOutbound(fixture, adapters);
+  if (recovery.outboundFound) {
     return {
       duplicate: true,
+      resumedProcessing: false,
       interpreted: false,
       planned: false,
       appliedWrites: [],
-      reply: null,
+      ...recovery,
       snapshot: adapters.snapshot()
     };
   }
 
-  const interpretationReplay = await replayFixtureInterpretation(fixture);
-  const planningReplay = replayFixturePlanning(fixture, interpretationReplay);
-  const appliedWrites = executeCandidateActions({ fixture, planningReplay, adapters });
-  const reply = composeReply(planningReplay);
-  if (!reply) throw new Error(`${fixture.id}: el plan no produjo respuesta saliente`);
-  const outboundIdempotencyKey = persistAndDeliverReply({
-    fixture,
-    planningReplay,
-    adapters,
-    body: reply,
-    appliedWrites
-  });
-
-  return {
-    duplicate: false,
-    interpreted: true,
-    planned: true,
-    interpretationReplay,
-    planningReplay,
-    appliedWrites,
-    outboundIdempotencyKey,
-    reply,
-    snapshot: adapters.snapshot()
-  };
+  return processTurn(fixture, adapters, { duplicate: true, resumedProcessing: true });
 }
