@@ -56,7 +56,7 @@
       "targetAuthority": "ConversationMessageRepository",
       "risk": "high",
       "writers": [
-        { "path": "src/routes/admin.js", "role": "admin", "reason": "Mensajes manuales del administrador" },
+        { "path": "src/routes/admin.js", "role": "admin", "reason": "La mensajería manual delega en el repositorio; conserva eliminación transaccional al borrar candidatos" },
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Persistencia principal de mensajes entrantes y salientes" },
         { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Mensajería del supervisor; solo los avisos internos salientes delegan actualmente en el repositorio compartido" },
         { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Persistencia compartida de mensajes entrantes idempotentes y salientes" }
