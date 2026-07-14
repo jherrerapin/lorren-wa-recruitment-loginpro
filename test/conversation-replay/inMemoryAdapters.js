@@ -156,7 +156,14 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     validateContext(tenantContext);
     const key = outboundKey(tenantContext, idempotencyKey);
     if (deliveries.has(key)) return false;
-    if (!outboundMessages.has(key)) throw new Error(`outbound_not_persisted:${idempotencyKey}`);
+    const outbound = outboundMessages.get(key);
+    if (!outbound) throw new Error(`outbound_not_persisted:${idempotencyKey}`);
+    if (outbound.candidateId !== requestedCandidateId) {
+      throw new Error(`outbound_candidate_mismatch:${idempotencyKey}`);
+    }
+    if (outbound.body !== body) {
+      throw new Error(`outbound_body_mismatch:${idempotencyKey}`);
+    }
 
     const previousAttempts = deliveryAttempts.get(key)?.attempts || 0;
     const attempt = previousAttempts + 1;
