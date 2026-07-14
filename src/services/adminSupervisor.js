@@ -5,6 +5,7 @@ import { normalizeKnowledgeContent } from './botKnowledge.js';
 import { isCvMimeTypeAllowed } from './cvFlow.js';
 import { fetchMediaMetadata, downloadMedia } from './media.js';
 import { storeCandidateCv } from './cvStorage.js';
+import { persistOutboundConversationMessage } from './conversationMessageRepository.js';
 
 const DEFAULT_SUPERVISOR_PHONE = '3052982551';
 const WINDOW_WARNING_AFTER_MS = 23 * 60 * 60 * 1000;
@@ -120,23 +121,21 @@ function formatInterviewStatus(hasInterview) {
 
 async function saveSupervisorOutbound(prisma, candidateId, body, rawPayload = {}) {
   if (!prisma?.message?.create || !candidateId) return null;
-  return prisma.message.create({
-    data: {
-      candidateId,
-      direction: MessageDirection.OUTBOUND,
-      messageType: MessageType.TEXT,
-      body,
-      rawPayload: {
-        ...rawPayload,
-        target: 'admin_supervisor',
-        visibility: 'internal',
-        neverSendToCandidate: true,
-        language: 'es-CO',
-        supervisorPhone: getSupervisorPhone(),
-        body
-      }
+  const result = await persistOutboundConversationMessage(prisma, {
+    candidateId,
+    messageType: MessageType.TEXT,
+    body,
+    rawPayload: {
+      ...rawPayload,
+      target: 'admin_supervisor',
+      visibility: 'internal',
+      neverSendToCandidate: true,
+      language: 'es-CO',
+      supervisorPhone: getSupervisorPhone(),
+      body
     }
   });
+  return result.message;
 }
 
 export async function ensureSupervisorWindowOpen(prisma, { now = new Date() } = {}) {

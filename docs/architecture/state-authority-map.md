@@ -44,20 +44,33 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `CandidateDataConsentEvent` tiene ahora un único escritor: `ConsentStateService`. El scanner de CI impide que una ruta, gate o integración vuelva a crear eventos directamente.
 
-### Primera migración de mensajes
+### Migraciones de mensajes
 
 `dataConsentGate.js` ya no escribe `Message` directamente. La evidencia entrante y las respuestas salientes del gate pasan por `ConversationMessageRepository`.
 
-El repositorio distingue dos contratos:
+En `adminSupervisor.js` se migró únicamente `saveSupervisorOutbound()`, usado para persistir avisos internos enviados al hilo del supervisor. Este flujo conserva:
+
+- payload `target=admin_supervisor`;
+- visibilidad interna y protección contra envío al candidato;
+- idioma, teléfono del supervisor y cuerpo;
+- retorno del registro creado para los consumidores existentes;
+- comportamiento silencioso cuando falta candidato o contrato Prisma.
+
+El supervisor todavía escribe directamente otros mensajes dentro de `handleSupervisorInbound()`:
+
+- entrada idempotente del administrador;
+- actualización del payload del requerimiento pendiente;
+- respuesta saliente al candidato;
+- cierre final del requerimiento.
+
+Por esa razón `adminSupervisor.js` permanece declarado como escritor de `Message` y el total continúa en cinco: webhook, administración, supervisor, recordatorios y el repositorio compartido.
+
+El repositorio distingue actualmente dos contratos:
 
 - entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
 - salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie.
 
-El gate conserva la decisión sobre qué mensaje producir, su payload de consentimiento y la actualización de `Candidate.lastOutboundAt`. El repositorio controla únicamente la forma de persistir `Message`.
-
-Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, el gate continúa enviando la respuesta al proveedor antes de persistirla. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
-
-`Message` continúa con cinco escritores porque el gate fue sustituido por la nueva autoridad compartida. Los escritores pendientes de migración son webhook, administración, supervisor y recordatorios.
+Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, los consumidores migrados continúan enviando al proveedor antes de persistir. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
 
 ## Hallazgos
 
@@ -93,11 +106,12 @@ La persistencia de `Message` sigue repartida entre webhook, supervisor, recordat
 - mensaje saliente comprometido en outbox;
 - entrega del proveedor;
 - mensaje manual autorizado;
-- evidencia de consentimiento.
+- evidencia de consentimiento;
+- mensajería interna del supervisor.
 
 ### 4. Consentimiento demuestra el patrón de migración
 
-La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Ese mismo patrón comenzó a aplicarse en mensajes.
+La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Ese mismo patrón continúa aplicándose gradualmente en mensajes.
 
 ## Clasificación de escritores
 
