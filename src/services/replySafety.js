@@ -69,7 +69,7 @@ export function guardReplyAgainstReadinessDrift(reply = '', readiness = {}) {
   };
 }
 
-const CV_UNSAFE_FALLBACK_REPLY = 'Para continuar, envíame tu hoja de vida como archivo PDF o DOCX. No puedo registrarla en foto ni impresa por este medio.';
+const CV_UNSAFE_FALLBACK_REPLY = 'Para continuar, envíame tu hoja de vida como archivo PDF o Word/DOCX. No puedo registrarla en foto ni impresa por este medio.';
 
 const UNSAFE_CV_REPLY_PATTERNS = [
   /hoja\s+de\s+vida\s+en\s+foto/i,
@@ -105,38 +105,6 @@ function isConfiguredInterviewDocumentReply(reply = '', vacancy = null) {
 
   return configuredSensitiveTerms.length > 0
     && configuredSensitiveTerms.some((term) => normalizedReply.includes(normalizeText(term)));
-}
-
-const LEGACY_CV_UPLOAD_FORMAT_PATTERNS = [
-  /PDF\s*,\s*DOC\s+(?:o|or)\s+DOCX/gi,
-  /PDF\s+(?:o|or)\s+Word\/DOCX/gi,
-  /PDF\s*,\s*Word\s+(?:o|or)\s+DOCX/gi
-];
-
-function isCandidateCvUploadInstruction(reply) {
-  const mentionsCv = /\b(?:hoja\s+de\s+vida|hv|curr[ií]culum|cv)\b/i.test(reply);
-  const requestsFileUpload = /\b(?:adjunt\w*|envi\w*|carg\w*|archivo\s+real|registr\w*)\b/i.test(reply);
-  return mentionsCv && requestsFileUpload;
-}
-
-export function normalizeCvUploadFormatInstruction(reply = '', vacancy = null) {
-  const originalReply = String(reply || '').trim();
-  if (!originalReply || isConfiguredInterviewDocumentReply(originalReply, vacancy)) {
-    return { reply: originalReply, changed: false };
-  }
-  if (!isCandidateCvUploadInstruction(originalReply)) {
-    return { reply: originalReply, changed: false };
-  }
-
-  let normalizedReply = originalReply;
-  for (const pattern of LEGACY_CV_UPLOAD_FORMAT_PATTERNS) {
-    normalizedReply = normalizedReply.replace(pattern, 'PDF o DOCX');
-  }
-
-  return {
-    reply: normalizedReply,
-    changed: normalizedReply !== originalReply
-  };
 }
 
 function containsUnsafeCvInstruction(reply = '', vacancy = null) {
@@ -259,10 +227,7 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
     return { reply: originalReply, blocked: false, blockedClaims: [], reason: null, source };
   }
 
-  const cvFormatNormalization = normalizeCvUploadFormatInstruction(originalReply, vacancy);
-  const normalizedCvReply = cvFormatNormalization.reply;
-
-  if (containsUnsafeCvInstruction(normalizedCvReply, vacancy)) {
+  if (containsUnsafeCvInstruction(originalReply, vacancy)) {
     return {
       reply: CV_UNSAFE_FALLBACK_REPLY,
       blocked: true,
@@ -272,7 +237,7 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
   }
 
   const supportedText = collectSupportedText(vacancy || {});
-  const normalizedReply = normalizeText(normalizedCvReply);
+  const normalizedReply = normalizeText(originalReply);
   const blockedClaims = [];
 
   for (const claim of CLAIM_PATTERNS) {
@@ -283,7 +248,7 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
 
   const registeredAddress = normalizeText(getInterviewAddress(vacancy || {}));
   const canRevealInterviewAddress = currentStep === 'SCHEDULED';
-  for (const addressClaim of extractAddressClaims(normalizedCvReply)) {
+  for (const addressClaim of extractAddressClaims(originalReply)) {
     const normalizedAddress = normalizeText(addressClaim);
     if (normalizedAddress && (!registeredAddress || !registeredAddress.includes(normalizedAddress))) {
       blockedClaims.push(`unregistered_interview_address:${addressClaim}`);
@@ -294,13 +259,7 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
 
   const uniqueBlockedClaims = [...new Set(blockedClaims)];
   if (!uniqueBlockedClaims.length) {
-    return {
-      reply: normalizedCvReply,
-      blocked: false,
-      blockedClaims: [],
-      reason: null,
-      normalizations: cvFormatNormalization.changed ? ['cv_upload_format'] : []
-    };
+    return { reply: originalReply, blocked: false, blockedClaims: [], reason: null };
   }
 
   return {
