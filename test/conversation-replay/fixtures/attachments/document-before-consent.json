@@ -108,7 +108,7 @@
         "La hoja de vida quedó registrada",
         "El archivo fue almacenado"
       ],
-      "requiredText": ["no lo descargué", "no lo guardé", "autorización"],
+      "requiredText": ["no lo descargué", "ni lo guardé", "autorización"],
       "forbiddenText": ["hoja de vida quedó registrada", "archivo guardado"]
     },
     "finalState": {
