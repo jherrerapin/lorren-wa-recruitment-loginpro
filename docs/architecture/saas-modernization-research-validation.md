@@ -8,11 +8,11 @@ La estrategia aprobada es correcta si se ejecuta en este orden:
 
 1. estabilizar seguridad y línea base;
 2. caracterizar el comportamiento y convertirlo en gates;
-3. resolver un tenant mínimo en la frontera;
+3. resolver un tenant y una configuración mínima en la frontera;
 4. introducir inbox, outbox y trazabilidad;
 5. consolidar contratos y autoridades únicas;
 6. completar el aislamiento multitenant;
-7. trasladar las reglas a configuración versionada;
+7. trasladar y administrar todas las reglas mediante configuración versionada;
 8. retirar el legado progresivamente.
 
 No se recomienda una reescritura total ni una migración temprana a microservicios.
@@ -27,11 +27,19 @@ La base de datos de Lórren es la fuente de verdad para:
 - candidato, conversación y postulación;
 - atribución original y vacante confirmada;
 - consentimiento y evidencia;
-- datos y documentos;
+- metadatos, relaciones, clasificación, claves y estado de los documentos;
 - reservas, recordatorios y estados;
 - decisiones, transiciones y auditoría.
 
-La memoria de un proveedor de IA puede ser una optimización, nunca la única memoria ni autoridad empresarial.
+Cuando se utilice R2, S3 u otro almacenamiento de objetos, ese almacenamiento es la fuente de verdad de los bytes del archivo. La base de datos conserva la clave, el hash, el tipo, el tamaño, el propietario, el tenant, la autorización, el estado y la relación empresarial, pero no sustituye el contenido binario.
+
+Consecuencias:
+
+1. backups, restauraciones, migraciones, retención y borrado deben coordinar base de datos y almacenamiento;
+2. una referencia de base de datos sin objeto, o un objeto sin referencia autorizada, se considera una inconsistencia auditable;
+3. las claves de almacenamiento incorporan tenant y no se construyen únicamente con datos aportados por el usuario;
+4. el acceso al archivo valida tenant, autorización y relación antes de generar una descarga;
+5. la memoria de un proveedor de IA puede ser una optimización, nunca la única memoria ni autoridad empresarial.
 
 ### 2.2 Comprensión estructurada y efectos controlados
 
@@ -53,16 +61,16 @@ Esta secuencia evita confirmar un cambio de negocio sin disponer de un mensaje s
 
 ### 2.3 Evaluación antes de eliminación
 
-Antes de retirar cualquier parser, gate, redactor o rama de flujo se requiere un corpus sanitizado.
+Antes de retirar cualquier parser, gate, redactor o rama de flujo se requiere cobertura determinística en la capa correspondiente.
 
-Cada fixture debe contener:
+Los fixtures conversacionales contienen:
 
 - `TenantContext`;
-- canal y proveedor;
+- canal y proveedor ya resueltos;
 - versión de conversación, vacante, consentimiento y políticas aplicables;
 - estado inicial;
 - historial relevante;
-- mensaje o lote entrante;
+- mensaje o lote admitido por la entrada;
 - comprensión esperada;
 - plan esperado;
 - escrituras permitidas y prohibidas;
@@ -70,11 +78,20 @@ Cada fixture debe contener:
 - hechos obligatorios y afirmaciones prohibidas;
 - expectativa de envío, silencio o revisión.
 
-Los fixtures determinísticos se ejecutan en CI antes de retirar legado. Las pruebas con modelo real sirven para comparar calidad, pero no reemplazan un gate reproducible.
+Los fixtures de entrada e idempotencia contienen:
 
-## 3. Tenant antes de idempotencia durable
+- tenant, proveedor y canal;
+- identificador externo y clave de idempotencia;
+- primera entrega y reentregas;
+- estado inicial del inbox y outbox;
+- conteos esperados de escrituras, mensajes, reservas, documentos y jobs;
+- resultado final y evidencia de deduplicación.
 
-Un proveedor o número puede compartir formatos de identificadores entre clientes. Por eso el tenant y el canal deben resolverse antes de construir la clave durable del inbox.
+Los fixtures determinísticos se ejecutan en CI antes de retirar legado o habilitar inbox/outbox. Las pruebas con modelo real sirven para comparar calidad, pero no reemplazan un gate reproducible.
+
+## 3. Tenant y política mínima antes de idempotencia durable
+
+Un proveedor o número puede compartir formatos de identificadores entre clientes. Por eso tenant y canal se resuelven antes de construir la clave durable del inbox.
 
 Ejemplo conceptual:
 
@@ -82,7 +99,9 @@ Ejemplo conceptual:
 idempotencyKey = tenantId + provider + channelId + externalMessageId
 ```
 
-No debe existir un inbox global cuya identidad se migre después, porque podría producir colisiones, reprocesamiento o pérdida de eventos al incorporar el segundo tenant.
+Además, un segundo tenant no puede habilitarse mientras la recolección, geografía, consentimiento, documentos, agenda y recordatorios dependan implícitamente de reglas de LoginPro o Bogotá. La frontera debe resolver una política mínima versionada por tenant antes de procesar la conversación.
+
+No debe existir un inbox global cuya identidad se migre después, ni un segundo cliente operando con políticas heredadas por defecto. Ambos escenarios producirían colisiones, decisiones incorrectas o fugas de configuración.
 
 ## 4. Inbox y outbox
 
@@ -97,7 +116,7 @@ Cada evento entrante registra:
 - fechas de recepción y procesamiento;
 - estado, intentos y error saneado.
 
-Una reentrega no puede producir una segunda respuesta, reserva, carga de archivo o transición.
+Una reentrega no puede producir una segunda respuesta, reserva, carga de archivo o transición. La deduplicación ocurre antes de `TurnUnderstanding`; un duplicado no se convierte en intención conversacional.
 
 ### Outbox
 
@@ -120,34 +139,38 @@ El worker ejecuta el efecto, registra el resultado y reintenta sin duplicar. El 
 - Toda consulta de negocio exige `tenantId`.
 - Jobs, archivos, caché, métricas y credenciales conservan tenant.
 - Las referencias se validan antes de actualizar o asociar recursos.
+- Las políticas mínimas se resuelven por tenant y versión antes de habilitar un segundo cliente.
 - Las consultas globales quedan reservadas a casos administrativos explícitos.
 
-### Base de datos
+### Base de datos y almacenamiento
 
 - `tenantId` en entidades compartidas.
 - Unicidad compuesta por tenant.
 - Relaciones cruzadas protegidas mediante claves o validaciones compuestas.
 - RLS como defensa adicional.
 - Roles de mínimo privilegio.
-- Pruebas negativas de lectura, escritura, asociación y ejecución cruzadas.
+- Claves y permisos de almacenamiento segregados por tenant.
+- Pruebas negativas de lectura, escritura, asociación, descarga y ejecución cruzadas.
 
-RLS no es suficiente por sí sola porque roles privilegiados pueden omitirla.
+RLS no es suficiente por sí sola porque roles privilegiados pueden omitirla. Tampoco es suficiente prefijar objetos si la aplicación no comprueba la pertenencia antes de entregar una URL.
 
 ## 6. Atribución con certeza explícita
 
 El sistema no promete exactitud absoluta cuando Meta no entrega información suficiente.
 
-- `EXACT`: IDs objetivos resuelven una asociación única.
-- `CONFIRMED`: la asociación sugerida fue confirmada por el candidato.
-- `UNKNOWN`: la evidencia es insuficiente y Lórren pregunta.
+- `EXACT`: IDs objetivos resuelven una asociación única a una vacante vigente. Puede establecerse inmediatamente el contexto técnico y conservarse la evidencia original.
+- `CONFIRMED`: la asociación sugerida por evidencia parcial fue confirmada por el candidato antes de convertirse en vacante final.
+- `UNKNOWN`: la evidencia es insuficiente y Lórren pregunta sin inventar.
+
+En `EXACT`, Lórren comunica después del saludo la ciudad y vacante detectadas y permite corregirlas, pero no exige una respuesta redundante para conservar la atribución objetiva. Una corrección del candidato crea una decisión posterior auditable; nunca reescribe el evento original.
 
 Se conservan por separado:
 
 - evento original;
 - campaña y anuncio atribuidos;
-- vacante sugerida;
-- vacante confirmada;
-- método, versión y evidencia de la resolución.
+- vacante sugerida o resuelta por metadatos;
+- vacante finalmente utilizada en la postulación;
+- método, versión, fecha y evidencia de cada decisión.
 
 ## 7. Consentimiento y archivos
 
@@ -155,7 +178,7 @@ Antes de la autorización solo se tratan y conservan los identificadores técnic
 
 #420 debe:
 
-- diferenciar interés y autorización;
+- diferenciar interés, aceptación de vacante y autorización;
 - preservar el contexto pendiente;
 - rechazar de forma segura documentos anticipados;
 - solicitar reenvío posterior;
@@ -172,6 +195,8 @@ La Fase 0 incluye dos deudas confirmadas:
 2. unificar el contrato de hoja de vida en PDF/DOCX.
 
 Las hojas de vida de reclutamiento deben aceptarse únicamente como PDF o DOCX. Los archivos `.doc` heredados se rechazan y Lórren solicita el reenvío en un formato permitido; analizar su contenido no los convierte en válidos.
+
+La persistencia de un documento debe mantener consistentes la fila de base de datos y el objeto almacenado. Los fallos parciales requieren compensación, estado explícito o reconciliación; no se debe presentar como disponible un archivo cuyo objeto no exista.
 
 ## 9. Agenda y recordatorios
 
@@ -213,7 +238,8 @@ La correlación debe comenzar antes de la extracción modular y relacionar:
 - candidato y postulación;
 - reserva;
 - job y recordatorio;
-- outbox y mensaje saliente.
+- outbox y mensaje saliente;
+- clave y operación de almacenamiento de documentos.
 
 Los logs no expondrán tokens, cabeceras, archivos ni contenido sensible innecesario. Sí conservarán estado, razón, versión y error saneado.
 
@@ -233,33 +259,37 @@ Cada decisión relevante conserva la configuración efectiva utilizada:
 
 Una modificación futura no debe cambiar retroactivamente la explicación de una decisión anterior.
 
+Antes del segundo tenant debe existir una versión mínima tenant-aware de estas políticas. La Fase 6 completa su administración, experiencia de configuración y eliminación de condiciones heredadas, pero no habilita un cliente nuevo sobre reglas globales.
+
 ## 13. Orden técnico validado
 
 ### Fase 0 — Línea base
 
-- sincronizar #420 con el `main` que ya contiene #419 y #425;
+- sincronizar #420 con el `main` vigente;
 - corregir sus regresiones y devolver CI a verde;
 - corregir `AttachmentAnalysis`;
 - unificar PDF/DOCX y rechazar `.doc`;
 - iniciar trazabilidad e inventario de deuda.
 
-### Fase 1 — Corpus y gates
+### Fase 1 — Corpus conversacional y gates
 
 - ampliar el corpus ya fusionado mediante #425;
-- implementar replay;
+- implementar replay conversacional;
 - cubrir recorridos críticos y errores;
 - hacer los escenarios bloqueantes.
 
-### Fase 2 — Tenant mínimo
+### Fase 2 — Tenant y política mínima
 
 - resolver tenant/canal en la entrada;
 - propagar `TenantContext` mínimo;
-- probar aislamiento de eventos.
+- resolver políticas mínimas por tenant y versión;
+- probar aislamiento de eventos y configuración.
 
 ### Fase 3 — Fiabilidad transaccional
 
 - inbox;
 - outbox;
+- fixtures de reentrega e idempotencia;
 - envío centralizado;
 - workers idempotentes;
 - trazas correlacionadas.
@@ -276,8 +306,8 @@ Una modificación futura no debe cambiar retroactivamente la explicación de una
 
 - migraciones e índices compuestos;
 - repositorios tenant-aware;
-- RLS y roles mínimos;
-- pruebas cruzadas antes del segundo tenant.
+- RLS, roles mínimos y almacenamiento segregado;
+- pruebas cruzadas y de configuración antes del segundo tenant.
 
 ## 14. GPT interno
 
@@ -297,4 +327,4 @@ El GPT de #424 se crea únicamente cuando la documentación, corpus, contratos, 
 
 ## 16. Decisión final
 
-La modernización continúa de forma incremental. Ninguna extracción grande se inicia hasta que la frontera de consentimiento esté estabilizada y el corpus proteja los recorridos críticos.
+La modernización continúa de forma incremental. Ninguna extracción grande se inicia hasta que la frontera de consentimiento esté estabilizada y los gates protejan tanto el comportamiento conversacional como la fiabilidad de entrada.
