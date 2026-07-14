@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import axios from 'axios';
 import {
   buildContextualReply,
+  buildSafeContextualFallbackText,
   deriveAttachmentDecision,
   shouldEscalateHumanReview
 } from '../src/services/contextualReply.js';
@@ -89,13 +90,13 @@ test('foto de HV usa respuesta determinística sin llamar IA', async () => {
     });
     assert.equal(result.usedModel, false);
     assert.match(result.text, /PDF|DOCX/i);
-    assert.match(result.text, /No puedo registrarla en foto/i);
+    assert.match(result.text, /no puedo registrarla/i);
   });
 
   delete process.env.OPENAI_API_KEY;
 });
 
-test('si el modelo falla, responsePolicy actúa como fallback', async () => {
+test('si el modelo falla, el fallback describe el problema real del archivo', async () => {
   process.env.OPENAI_API_KEY = 'test-key';
 
   await withAxiosMock(async () => {
@@ -106,10 +107,43 @@ test('si el modelo falla, responsePolicy actúa como fallback', async () => {
       recentMessages: []
     });
     assert.equal(result.fallbackUsed, true);
+    assert.match(result.text, /no pude procesar/i);
     assert.match(result.text, /PDF|DOCX/i);
+    assert.doesNotMatch(result.text, /ya te respondo|seguimos con lo puntual|dato puntual/i);
   });
 
   delete process.env.OPENAI_API_KEY;
+});
+
+test('fallback de dato pendiente menciona los campos reales y no una frase vacía', () => {
+  const text = buildSafeContextualFallbackText({
+    situation: 'request_missing_data',
+    missingFields: ['documentType', 'neighborhood']
+  });
+
+  assert.match(text, /document type/i);
+  assert.match(text, /neighborhood/i);
+  assert.doesNotMatch(text, /dato puntual|vamos bien|seguimos/i);
+});
+
+test('fallback de HV válida reconoce el archivo y conserva lo pendiente', () => {
+  const text = buildSafeContextualFallbackText({
+    situation: 'attachment_cv_valid',
+    missingFields: ['experienceSummary']
+  });
+
+  assert.match(text, /hoja de vida/i);
+  assert.match(text, /asociada a tu registro/i);
+  assert.match(text, /experience summary/i);
+});
+
+test('fallback explícito definido por la política del turno tiene prioridad', () => {
+  const text = buildSafeContextualFallbackText({
+    situation: 'continue_flow',
+    fallbackText: 'La vacante está inactiva, pero puedo explicarte sus requisitos registrados.'
+  });
+
+  assert.equal(text, 'La vacante está inactiva, pero puedo explicarte sus requisitos registrados.');
 });
 
 test('contextual reply envía solo datos de vacante asignada incluyendo documentación de entrevista saneada', async () => {
