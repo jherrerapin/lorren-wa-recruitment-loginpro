@@ -1,4 +1,3 @@
-import { MessageDirection, MessageType } from '@prisma/client';
 import {
   alignCandidateLocationFields,
   isHighConfidenceLocalField,
@@ -21,60 +20,69 @@ const CAPTURABLE_FIELDS = new Set([
   'experienceSummary'
 ]);
 
+const CONSENT_PREFIX_TOKEN = String.raw`(?:si|sí|sii|sip|claro|correcto|de\s+acuerdo|dale|ok|listo)`;
+const CONSENT_PREFIXES = String.raw`(?:${CONSENT_PREFIX_TOKEN}[\s,;:-]*)*`;
+const CONSENT_DECLARATION_PREFIXES = [
+  new RegExp(`^${CONSENT_PREFIXES}(?:autorizo|acepto|consiento)(?:\\s+(?:el\\s+)?tratamiento(?:\\s+de)?(?:\\s+mis|\\s+los)?\\s+datos?)?`, 'i'),
+  new RegExp(`^${CONSENT_PREFIXES}(?:estoy\\s+de\\s+acuerdo|doy\\s+mi\\s+consentimiento|doy\\s+consentimiento|doy\\s+permiso|tienen\\s+mi\\s+permiso)`, 'i'),
+  /^(?:pueden|puede)\s+(?:usar|tratar|manejar|procesar|guardar)\s+(?:mis|los)\s+datos/i,
+  /^(?:pueden|puede)\s+continuar\s+con\s+(?:mis|los)\s+datos/i
+];
+
 function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== '';
 }
 
-function mergeHighConfidenceFields(target, text, vacancy) {
-  const parsed = parseNaturalData(text || '');
+function stripConsentDeclaration(text = '') {
+  let remaining = String(text || '').trim();
+  for (const pattern of CONSENT_DECLARATION_PREFIXES) {
+    if (!pattern.test(remaining)) continue;
+    remaining = remaining.replace(pattern, '').replace(/^[\s,.;:-]+/, '').trim();
+    break;
+  }
+  return remaining;
+}
+
+function extractHighConfidenceFields(text = '', vacancy = null) {
+  const parsed = parseNaturalData(text);
   let normalized = normalizeCandidateFields(parsed);
   normalized = alignCandidateLocationFields(normalized, vacancy, { clearAlternate: false });
 
+  const fields = {};
   for (const [field, value] of Object.entries(normalized)) {
     if (!CAPTURABLE_FIELDS.has(field) || !hasValue(value)) continue;
     if (!isHighConfidenceLocalField(field, value)) continue;
-    target[field] = value;
+    fields[field] = value;
   }
+  return fields;
 }
 
 export async function captureConsentedProfileData({
   prisma,
   candidate,
   vacancy = null,
-  currentText = '',
-  maxMessages = 12
+  currentText = ''
 } = {}) {
   if (!prisma?.candidate?.update || !candidate?.id) {
     return { candidate, capturedFields: [], reason: 'candidate_not_ready' };
   }
 
-  const recentMessages = prisma?.message?.findMany
-    ? await prisma.message.findMany({
-      where: {
-        candidateId: candidate.id,
-        direction: MessageDirection.INBOUND,
-        messageType: MessageType.TEXT
-      },
-      orderBy: { createdAt: 'desc' },
-      take: maxMessages,
-      select: { body: true }
-    })
-    : [];
+  const consentMessageText = String(currentText || '').trim();
+  if (!consentMessageText) {
+    return { candidate, capturedFields: [], reason: 'no_consented_message_data' };
+  }
 
-  const texts = [...recentMessages]
-    .reverse()
-    .map((message) => message?.body || '')
-    .filter(Boolean);
-  const normalizedCurrent = String(currentText || '').trim();
-  if (normalizedCurrent && texts.at(-1) !== normalizedCurrent) texts.push(normalizedCurrent);
+  // Solo se procesa la parte de datos del mismo mensaje en que se registró la autorización.
+  // Se retira la declaración de consentimiento para que sus palabras no se interpreten
+  // erróneamente como nombre u otro dato del candidato.
+  const profileText = stripConsentDeclaration(consentMessageText);
+  if (!profileText) {
+    return { candidate, capturedFields: [], reason: 'no_new_profile_data' };
+  }
 
-  const merged = {};
-  for (const text of texts) mergeHighConfidenceFields(merged, text, vacancy);
-
-  const normalizedMerged = normalizeCandidateFields(merged);
+  const extracted = extractHighConfidenceFields(profileText, vacancy);
   const update = {};
-  for (const [field, value] of Object.entries(normalizedMerged)) {
-    if (!CAPTURABLE_FIELDS.has(field) || !hasValue(value)) continue;
+  for (const [field, value] of Object.entries(extracted)) {
     if (!hasValue(candidate[field])) update[field] = value;
   }
 
@@ -90,6 +98,6 @@ export async function captureConsentedProfileData({
   return {
     candidate: updatedCandidate,
     capturedFields: Object.keys(update),
-    reason: 'profile_data_captured_after_consent'
+    reason: 'profile_data_captured_from_consent_message'
   };
 }
