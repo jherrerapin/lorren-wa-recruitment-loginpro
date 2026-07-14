@@ -193,6 +193,46 @@ test('el manifiesto de autoridades declara contratos completos y válidos', () =
   }
 });
 
+test('el scanner detecta alias arbitrarios, optional chaining y formato multilínea', () => {
+  const source = `
+    await prismaClient
+      ?.candidate
+      ?.update({ where: { id: 'TEST-ID' }, data: {} });
+
+    await customDatabase
+      .interviewBooking
+      .create({ data: {} });
+  `;
+  const writes = collectDelegateWrites(source, 'src/synthetic.js');
+
+  assert.deepEqual(
+    writes.map(({ model, operation, access }) => ({ model, operation, access })),
+    [
+      { model: 'candidate', operation: 'update', access: 'delegate' },
+      { model: 'interviewBooking', operation: 'create', access: 'delegate' }
+    ]
+  );
+});
+
+test('el scanner detecta mutaciones SQL directas y omite consultas de lectura', () => {
+  const source = `
+    await prisma.$executeRaw\`UPDATE "Candidate" SET "status" = 'NUEVO'\`;
+    await prisma.$queryRaw\`INSERT INTO "Message" ("id") VALUES ('TEST-ID') RETURNING *\`;
+    await tx.$executeRaw\`DELETE FROM "InterviewSlot" WHERE "id" = 'TEST-ID'\`;
+    await prisma.$queryRaw\`SELECT * FROM "Candidate"\`;
+  `;
+  const writes = collectRawSqlWrites(source, 'src/synthetic-raw.js');
+
+  assert.deepEqual(
+    writes.map(({ model, operation, access }) => ({ model, operation, access })),
+    [
+      { model: 'candidate', operation: 'rawUpdate', access: 'rawSql' },
+      { model: 'message', operation: 'rawInsert', access: 'rawSql' },
+      { model: 'interviewSlot', operation: 'rawDelete', access: 'rawSql' }
+    ]
+  );
+});
+
 test('ningún archivo escribe estado de alto riesgo fuera del manifiesto', () => {
   for (const [model, contract] of Object.entries(manifest.models)) {
     const declaredPaths = new Set(contract.writers.map((writer) => writer.path));
