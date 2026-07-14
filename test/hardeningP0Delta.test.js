@@ -7,6 +7,11 @@ import { createMockPrisma } from './helpers/mockPrisma.js';
 import { createWhatsappMock } from './helpers/mockWhatsapp.js';
 import { installOpenAIMock } from './helpers/mockOpenAI.js';
 
+function createLegacyWordBuffer(text = '') {
+  const signature = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  return Buffer.concat([signature, Buffer.alloc(16), Buffer.from(text, 'utf16le')]);
+}
+
 test('saludo no se persiste como fullName', () => {
   const result = applyFieldPolicy({
     fields: { fullName: 'hola buenas tardes' },
@@ -80,15 +85,27 @@ test('imagen se clasifica como CV_IMAGE_ONLY pero no como CV_VALID', async () =>
   assert.notEqual(result.classification, 'CV_VALID');
 });
 
-test('.doc se clasifica como OTHER y no se trata como CV válido', async () => {
+test('.doc Word clásico con texto de HV se clasifica como CV válido', async () => {
   const result = await analyzeAttachment({
-    buffer: Buffer.from('contenido binario doc legacy'),
+    buffer: createLegacyWordBuffer('Hoja de vida con perfil profesional y experiencia laboral'),
+    mimeType: 'application/msword',
+    filename: 'hv.doc'
+  });
+
+  assert.equal(result.classification, 'CV_VALID');
+  assert.equal(result.attachmentKind, 'doc');
+  assert.match(result.extractedText, /perfil profesional/i);
+});
+
+test('.doc renombrado sin contenedor Word no se acepta como CV', async () => {
+  const result = await analyzeAttachment({
+    buffer: Buffer.from('contenido que no es un archivo OLE de Word'),
     mimeType: 'application/msword',
     filename: 'hv.doc'
   });
 
   assert.equal(result.classification, 'OTHER');
-  assert.equal(result.rationale, 'unsupported_doc_format');
+  assert.equal(result.rationale, 'invalid_legacy_word_container');
 });
 
 test('campo crítico ambiguo activa protección de autodescarte', () => {

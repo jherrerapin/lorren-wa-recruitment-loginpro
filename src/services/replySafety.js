@@ -69,7 +69,7 @@ export function guardReplyAgainstReadinessDrift(reply = '', readiness = {}) {
   };
 }
 
-const CV_UNSAFE_FALLBACK_REPLY = 'Para continuar, envíame tu hoja de vida como archivo PDF o DOCX. No puedo registrarla en foto ni impresa por este medio.';
+const CV_UNSAFE_FALLBACK_REPLY = 'Para continuar, envíame tu hoja de vida como archivo PDF, DOC o DOCX. No puedo registrarla en foto ni impresa por este medio.';
 
 const UNSAFE_CV_REPLY_PATTERNS = [
   /hoja\s+de\s+vida\s+en\s+foto/i,
@@ -107,15 +107,15 @@ function isConfiguredInterviewDocumentReply(reply = '', vacancy = null) {
     && configuredSensitiveTerms.some((term) => normalizedReply.includes(normalizeText(term)));
 }
 
-const LEGACY_CV_UPLOAD_FORMAT_PATTERNS = [
-  /PDF\s*,\s*DOC\s+(?:o|or)\s+DOCX/gi,
+const CV_UPLOAD_FORMAT_PATTERNS = [
+  /PDF\s+(?:o|or)\s+DOCX/gi,
   /PDF\s+(?:o|or)\s+Word\/DOCX/gi,
   /PDF\s*,\s*Word\s+(?:o|or)\s+DOCX/gi
 ];
 
 function isCandidateCvUploadInstruction(reply) {
   const mentionsCv = /\b(?:hoja\s+de\s+vida|hv|curr[ií]culum|cv)\b/i.test(reply);
-  const requestsFileUpload = /\b(?:adjunt\w*|envi\w*|carg\w*|archivo\s+real|registr\w*)\b/i.test(reply);
+  const requestsFileUpload = /\b(?:adjunt\w*|envi\w*|carg\w*|archivo\s+real|registr\w*|reenv[ií]\w*)\b/i.test(reply);
   return mentionsCv && requestsFileUpload;
 }
 
@@ -129,8 +129,8 @@ export function normalizeCvUploadFormatInstruction(reply = '', vacancy = null) {
   }
 
   let normalizedReply = originalReply;
-  for (const pattern of LEGACY_CV_UPLOAD_FORMAT_PATTERNS) {
-    normalizedReply = normalizedReply.replace(pattern, 'PDF o DOCX');
+  for (const pattern of CV_UPLOAD_FORMAT_PATTERNS) {
+    normalizedReply = normalizedReply.replace(pattern, 'PDF, DOC o DOCX');
   }
 
   return {

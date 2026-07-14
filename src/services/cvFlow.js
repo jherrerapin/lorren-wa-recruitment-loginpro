@@ -2,10 +2,17 @@ import path from 'node:path';
 
 export const ALLOWED_CV_MIME_TYPES = [
   'application/pdf',
+  'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ];
 
-export const ALLOWED_CV_EXTENSIONS = ['.pdf', '.docx'];
+export const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
+
+const MIME_TYPES_BY_EXTENSION = Object.freeze({
+  '.pdf': new Set(['application/pdf']),
+  '.doc': new Set(['application/msword']),
+  '.docx': new Set(['application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+});
 
 export function hasAllowedCvExtension(filename = '') {
   return ALLOWED_CV_EXTENSIONS.includes(path.extname(filename || '').toLowerCase());
@@ -14,12 +21,15 @@ export function hasAllowedCvExtension(filename = '') {
 export function isCvMimeTypeAllowed(mimeType = '', filename = '') {
   const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
   const extension = path.extname(filename || '').toLowerCase();
-
-  if (extension && !ALLOWED_CV_EXTENSIONS.includes(extension)) return false;
-  if (ALLOWED_CV_MIME_TYPES.includes(normalizedMimeType)) return true;
-
   const mimeMissingOrGeneric = !normalizedMimeType || normalizedMimeType === 'application/octet-stream';
-  return mimeMissingOrGeneric && ALLOWED_CV_EXTENSIONS.includes(extension);
+
+  if (extension) {
+    if (!ALLOWED_CV_EXTENSIONS.includes(extension)) return false;
+    if (mimeMissingOrGeneric) return true;
+    return MIME_TYPES_BY_EXTENSION[extension].has(normalizedMimeType);
+  }
+
+  return ALLOWED_CV_MIME_TYPES.includes(normalizedMimeType);
 }
 
 export function resolveStepAfterDataCompletion({ hasCv }) {

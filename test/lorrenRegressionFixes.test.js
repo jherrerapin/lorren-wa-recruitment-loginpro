@@ -73,6 +73,11 @@ function candidate(overrides = {}) {
   };
 }
 
+function createLegacyWordBuffer(text) {
+  const signature = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  return Buffer.concat([signature, Buffer.alloc(16), Buffer.from(text, 'utf16le')]);
+}
+
 test('persiste la vacante cuando el candidato ya dio ciudad y cargo en GREETING_SENT', async () => {
   const prisma = createMockPrisma({
     candidates: [candidate()],
@@ -132,19 +137,18 @@ test('la confirmación de entrevista no se reemplaza por pedir HV cuando documen
   }
 });
 
-test('rechaza hojas de vida .doc y exige PDF o DOCX', async () => {
-  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), false);
-  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), false);
+test('acepta hojas de vida .doc además de PDF y DOCX', async () => {
+  assert.equal(isCvMimeTypeAllowed('application/msword', 'hv.doc'), true);
+  assert.equal(isCvMimeTypeAllowed('application/octet-stream', 'hv.doc'), true);
 
   const analysis = await analyzeAttachment({
-    buffer: Buffer.from('legacy word bytes'),
+    buffer: createLegacyWordBuffer('Hoja de vida con perfil profesional y experiencia laboral'),
     mimeType: 'application/msword',
     filename: 'hv.doc'
   });
 
-  assert.equal(analysis.classification, 'OTHER');
-  assert.equal(analysis.rationale, 'legacy_word_document_not_supported');
-  assert.deepEqual(analysis.evidence, ['doc_format_not_allowed_for_cv']);
+  assert.equal(analysis.classification, 'CV_VALID');
+  assert.equal(analysis.attachmentKind, 'doc');
 });
 
 test('guard de estado evita pedir ciudad, vacante o residencia ya registradas', async () => {

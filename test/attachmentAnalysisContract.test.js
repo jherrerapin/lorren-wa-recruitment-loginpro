@@ -24,7 +24,12 @@ function createPrismaForCandidate(candidate) {
   };
 }
 
-test('un archivo DOC heredado persiste un análisis no exitoso con campos reales de Prisma', async () => {
+function createLegacyWordBuffer(text) {
+  const signature = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  return Buffer.concat([signature, Buffer.alloc(16), Buffer.from(text, 'utf16le')]);
+}
+
+test('un archivo DOC legible avanza a análisis de IA y persiste campos reales de Prisma', async () => {
   const previousApiKey = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;
 
@@ -34,7 +39,7 @@ test('un archivo DOC heredado persiste un análisis no exitoso con campos reales
     fullName: 'Persona Prueba',
     documentNumber: 'TEST-DOC-1',
     locality: 'Zona Prueba',
-    cvData: Buffer.from('legacy word bytes'),
+    cvData: createLegacyWordBuffer('Hoja de vida Persona Prueba experiencia laboral'),
     cvStorageKey: null,
     cvOriginalName: 'hoja-de-vida.doc',
     cvMimeType: 'application/msword',
@@ -46,7 +51,7 @@ test('un archivo DOC heredado persiste un análisis no exitoso con campos reales
     const result = await analyzeCandidateCv(prisma, candidate.id);
 
     assert.equal(result.ok, false);
-    assert.equal(result.reason, 'unsupported_file_type');
+    assert.equal(result.reason, 'ai_not_configured');
     assert.equal(prisma.created.length, 1);
 
     const persisted = prisma.created[0];
@@ -66,9 +71,9 @@ test('un archivo DOC heredado persiste un análisis no exitoso con campos reales
     assert.equal(persisted.mimeType, 'application/msword');
     assert.equal(persisted.classification, 'OTHER');
     assert.equal(persisted.confidence, 0);
-    assert.match(persisted.summary, /PDF o DOCX/i);
-    assert.equal(persisted.rawResponse.stage, 'text_extraction');
-    assert.equal(persisted.rawResponse.reason, 'unsupported_file_type');
+    assert.match(persisted.extractedText, /Hoja de vida Persona Prueba/i);
+    assert.equal(persisted.rawResponse.stage, 'ai_extraction');
+    assert.equal(persisted.rawResponse.reason, 'ai_not_configured');
     assert.equal(Object.hasOwn(persisted, 'evidence'), false);
     assert.equal(Object.hasOwn(persisted, 'fileName'), false);
     assert.equal(Object.hasOwn(persisted, 'createdAt'), false);
