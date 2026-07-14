@@ -50,9 +50,20 @@ function sanitizeCandidatePatch(candidatePatch = {}) {
 }
 
 function validatePrismaContract(prisma) {
-  return typeof prisma?.candidate?.update === 'function'
-    && typeof prisma?.candidateDataConsentEvent?.create === 'function'
-    && typeof prisma?.$transaction === 'function';
+  return Boolean(
+    prisma
+    && prisma.candidate
+    && typeof prisma.candidate.update === 'function'
+    && prisma.candidateDataConsentEvent
+    && typeof prisma.candidateDataConsentEvent.create === 'function'
+  );
+}
+
+async function executeConsentOperations(prisma, operations) {
+  if (typeof prisma.$transaction === 'function') {
+    return prisma.$transaction(operations);
+  }
+  return Promise.all(operations);
 }
 
 export function buildConsentStateMutation({
@@ -123,8 +134,7 @@ export async function recordCandidateDataConsent(prisma, {
     candidatePatch,
     now
   });
-
-  const [candidate, event] = await prisma.$transaction([
+  const operations = [
     prisma.candidate.update({
       where: { id: normalizedCandidateId },
       data: mutation.candidateData
@@ -138,7 +148,9 @@ export async function recordCandidateDataConsent(prisma, {
         note: normalizeNullableString(note)
       }
     })
-  ]);
+  ];
+
+  const [candidate, event] = await executeConsentOperations(prisma, operations);
 
   return {
     candidate,
