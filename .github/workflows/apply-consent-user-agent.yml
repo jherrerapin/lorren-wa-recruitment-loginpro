@@ -1,0 +1,55 @@
+name: Apply consent user agent compatibility
+
+on:
+  push:
+    branches:
+      - refactor/439-consent-gate-authority
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-consent-user-agent
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/439-consent-gate-authority
+          fetch-depth: 0
+
+      - name: Replace Express-specific header access
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/services/dataConsentGate.js')
+          source = path.read_text()
+          old = "userAgent: req.get('user-agent') || null,"
+          new = "userAgent: req.headers['user-agent'] || null,"
+
+          if old in source:
+              source = source.replace(old, new, 1)
+          elif new not in source:
+              raise SystemExit('user-agent anchor missing')
+
+          path.write_text(source)
+          PY
+
+      - name: Commit compatibility change when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Change already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/dataConsentGate.js
+          git commit -m "refactor: usar encabezado estándar para user-agent"
+          git push origin HEAD:refactor/439-consent-gate-authority
