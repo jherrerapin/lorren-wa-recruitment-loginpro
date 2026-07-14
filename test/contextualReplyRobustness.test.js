@@ -45,6 +45,7 @@ test('campos llamados como propiedades del prototipo se tratan como texto y no c
     });
 
     assert.equal(typeof text, 'string');
-    assert.match(text, new RegExp(field, 'i'));
+    assert.match(text, /para continuar necesito confirmar/i);
+    assert.doesNotMatch(text, /function\s*\(|\[object Object\]|native code/i);
   }
 });
