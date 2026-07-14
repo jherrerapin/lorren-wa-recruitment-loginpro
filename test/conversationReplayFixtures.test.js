@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const FIXTURES_ROOT = fileURLToPath(new URL('./conversation-replay/fixtures/', import.meta.url));
 
 function collectJsonFiles(directory) {
-  return readdirSync(directory)
+  return readdirSync(directory, { withFileTypes: true })
     .flatMap((entry) => {
-      const fullPath = path.join(directory, entry);
-      return statSync(fullPath).isDirectory()
+      const fullPath = path.join(directory, entry.name);
+      return entry.isDirectory()
         ? collectJsonFiles(fullPath)
-        : (entry.endsWith('.json') ? [fullPath] : []);
+        : (entry.name.endsWith('.json') ? [fullPath] : []);
     })
     .sort();
 }
@@ -90,7 +90,14 @@ test('el corpus conversacional contiene fixtures válidos, versionados y sin IDs
 
   const ids = new Set();
   for (const filePath of files) {
-    const fixture = JSON.parse(readFileSync(filePath, 'utf8'));
+    let fixture;
+    try {
+      fixture = JSON.parse(readFileSync(filePath, 'utf8'));
+    } catch (error) {
+      const relativePath = path.relative(FIXTURES_ROOT, filePath);
+      assert.fail(`Error al parsear JSON en ${relativePath}: ${error.message}`);
+    }
+
     validateFixture(fixture, filePath);
     assert.ok(!ids.has(fixture.id), `id de fixture duplicado: ${fixture.id}`);
     ids.add(fixture.id);
