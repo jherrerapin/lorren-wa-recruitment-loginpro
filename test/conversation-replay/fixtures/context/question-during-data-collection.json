@@ -10,7 +10,7 @@
   "policyContext": {
     "conversationPolicyVersion": "conversation-policy-test-v1",
     "vacancyPolicyVersion": "vacancy-policy-test-v1",
-    "consentVersion": "lorren-v2-2026-07-v3"
+    "consentVersion": "lorren-v2-2026-07-v2"
   },
   "initialState": {
     "candidate": {
@@ -26,7 +26,7 @@
     },
     "vacancy": {
       "vacancyId": "vacancy-test-bogota-warehouse",
-      "active": true,
+      "isActive": true,
       "acceptingApplications": true,
       "city": "Bogotá",
       "title": "Auxiliar de bodega",
@@ -46,14 +46,28 @@
     "body": "Antes de responder, ¿el horario es rotativo?"
   },
   "expected": {
-    "understanding": {
-      "intents": ["ASK_VACANCY_SCHEDULE"],
+    "interpretation": {
+      "intent": "ASK_VACANCY_SCHEDULE",
+      "additionalIntents": [],
       "consentDecision": null,
       "providedFields": {}
     },
     "plan": {
-      "actions": ["ANSWER_VACANCY_QUESTION", "RESUME_PENDING_FIELD"],
-      "allowedWrites": [],
+      "actions": [
+        {
+          "type": "ANSWER_VACANCY_QUESTION"
+        },
+        {
+          "type": "RESUME_PENDING_FIELD",
+          "data": {
+            "field": "locality"
+          }
+        }
+      ],
+      "allowedWrites": [
+        "candidate.lastOutboundAt",
+        "message.outbound"
+      ],
       "forbiddenWrites": [
         "candidate.locality",
         "candidate.currentStep",
