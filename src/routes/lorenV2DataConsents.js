@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireLorenV2 } from '../services/lorenV2Gate.js';
+import { recordCandidateDataConsent } from '../services/consentStateService.js';
 
 const CONSENT_VERSION = 'loren-v2-2026-06-v1';
 const CONSENT_TEXT = 'Autorizo de manera libre, previa, expresa e informada el tratamiento de mis datos personales y documentos aportados dentro del proceso de reclutamiento, selección y validación documental de Opera Loginpro / Loren, incluyendo contacto por canales digitales, verificación de información suministrada, análisis de hoja de vida y conservación de la trazabilidad del proceso. Declaro que conozco que puedo solicitar información, actualización, rectificación o revocatoria de la autorización según la normativa aplicable de protección de datos personales.';
@@ -138,38 +139,21 @@ async function loadConsentDashboard(prisma) {
 }
 
 async function recordConsent(prisma, req, candidateId, status) {
-  const now = new Date();
   const source = 'LOREN_V2_ADMIN';
   const username = req.username || req.session?.username || null;
   const note = normalizeString(req.body?.note);
 
-  await prisma.$transaction([
-    prisma.candidate.update({
-      where: { id: candidateId },
-      data: {
-        dataConsentStatus: status,
-        dataConsentVersion: CONSENT_VERSION,
-        dataConsentText: CONSENT_TEXT,
-        dataConsentSource: source,
-        dataConsentAcceptedAt: status === 'ACCEPTED' ? now : null,
-        dataConsentRevokedAt: status === 'REVOKED' ? now : null,
-        dataConsentRecordedBy: username
-      }
-    }),
-    prisma.candidateDataConsentEvent.create({
-      data: {
-        candidateId,
-        status,
-        version: CONSENT_VERSION,
-        text: CONSENT_TEXT,
-        source,
-        actorUsername: username,
-        ipAddress: req.ip || null,
-        userAgent: req.get('user-agent') || null,
-        note
-      }
-    })
-  ]);
+  await recordCandidateDataConsent(prisma, {
+    candidateId,
+    status,
+    version: CONSENT_VERSION,
+    text: CONSENT_TEXT,
+    source,
+    actorUsername: username,
+    ipAddress: req.ip || null,
+    userAgent: req.get('user-agent') || null,
+    note
+  });
 }
 
 export function lorenV2DataConsentsRouter(prisma) {
