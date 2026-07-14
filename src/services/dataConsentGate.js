@@ -27,6 +27,11 @@ const PRE_CONSENT_CAPTURE_MODES = new Set([
   'paused_vacancy_capture'
 ]);
 
+const PRE_CONSENT_OFFER_TO_CAPTURE_MODE = new Map([
+  ['future_profile_offer', 'future_profile_capture'],
+  ['paused_vacancy', 'paused_vacancy_capture']
+]);
+
 const PROTECTED_STEPS = new Set([
   ConversationStep.COLLECTING_DATA,
   ConversationStep.CONFIRMING_DATA,
@@ -109,9 +114,21 @@ function referencesOfferSubject(text = '') {
   return OFFER_SUBJECT_PATTERN.test(normalize(text));
 }
 
-function hasExplicitConsentAcceptance(text = '') {
+function hasExplicitConsentRejection(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
+
+  if (hasAny(normalized, [
+    /\b(no autorizo|no consiento|no doy mi consentimiento|no doy consentimiento|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
+    /\b(rechazo|revoco)\b.*\b(autorizacion|consentimiento|tratamiento de datos)\b/
+  ])) return true;
+
+  return referencesConsentSubject(normalized) && /\b(no acepto|no estoy de acuerdo)\b/.test(normalized);
+}
+
+function hasExplicitConsentAcceptance(text = '') {
+  const normalized = normalize(text);
+  if (!normalized || hasExplicitConsentRejection(normalized)) return false;
 
   if (hasAny(normalized, [
     /\b(autorizo|autorisado|autorizado|consiento)\b/,
@@ -124,21 +141,9 @@ function hasExplicitConsentAcceptance(text = '') {
   return /\b(acepto|estoy de acuerdo|doy permiso|tienen mi permiso)\b/.test(normalized);
 }
 
-function hasExplicitConsentRejection(text = '') {
-  const normalized = normalize(text);
-  if (!normalized) return false;
-
-  if (hasAny(normalized, [
-    /\b(no autorizo|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
-    /\b(rechazo|revoco)\b.*\b(autorizacion|consentimiento|tratamiento de datos)\b/
-  ])) return true;
-
-  return referencesConsentSubject(normalized) && /\b(no acepto|no estoy de acuerdo)\b/.test(normalized);
-}
-
 export function isConsentAcceptance(text = '') {
   const normalized = normalize(text);
-  if (!normalized) return false;
+  if (!normalized || hasExplicitConsentRejection(normalized)) return false;
   if (isQuestionLike(text) && !startsWithExplicitConsent(normalized)) return false;
   return hasAny(normalized, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
@@ -153,11 +158,9 @@ export function isConsentAcceptance(text = '') {
 export function isConsentRejection(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
+  if (hasExplicitConsentRejection(normalized)) return true;
   if (isQuestionLike(text) && !/^(no|negativo|no autorizo|no acepto|no estoy de acuerdo|no doy)\b/.test(normalized)) return false;
-  return hasAny(normalized, [
-    /\b(no autorizo|no acepto|no estoy de acuerdo|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito el uso de mis datos)\b/,
-    /\b(no|negativo|paso|no gracias)\b$/
-  ]);
+  return /\b(no|negativo|paso|no gracias)\b$/.test(normalized);
 }
 
 export function shouldRecordConsentAcceptance(text = '', { consentPromptPending = false } = {}) {
@@ -238,11 +241,12 @@ function hasExplicitNameEvidence(text = '', fullName = '') {
 
   const normalizedText = normalize(raw);
   const normalizedName = normalize(fullName);
-  if (!normalizedName || !normalizedText.startsWith(`soy ${normalizedName}`)) return false;
+  if (!normalizedName) return false;
 
   const tokens = normalizedName.split(' ').filter(Boolean);
-  if (tokens.length < 2 || tokens.length > 6) return false;
-  return !NON_NAME_INTRODUCTION_PATTERN.test(normalizedName);
+  if (tokens.length < 2 || tokens.length > 6 || NON_NAME_INTRODUCTION_PATTERN.test(normalizedName)) return false;
+
+  return normalizedText === normalizedName || normalizedText.startsWith(`soy ${normalizedName}`);
 }
 
 function hasExplicitGenderEvidence(text = '') {
@@ -507,6 +511,15 @@ export function deriveConsentResumeUpdate(resumeMode = null) {
       botResumeMode: null
     };
   }
+
+  const captureMode = PRE_CONSENT_OFFER_TO_CAPTURE_MODE.get(String(resumeMode || ''));
+  if (captureMode) {
+    return {
+      currentStep: ConversationStep.COLLECTING_DATA,
+      botResumeMode: captureMode
+    };
+  }
+
   if (isPreConsentCaptureMode(resumeMode)) {
     return {
       currentStep: ConversationStep.COLLECTING_DATA,
