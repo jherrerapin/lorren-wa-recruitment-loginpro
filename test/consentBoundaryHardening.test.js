@@ -95,10 +95,24 @@ test('un sí a una oferta no se registra como consentimiento antes de mostrar el
   assert.equal(shouldRecordConsentAcceptance('Sí', { consentPromptPending: true }), true);
 });
 
+test('aceptar una vacante no equivale a aceptar el tratamiento de datos', () => {
+  assert.equal(shouldRecordConsentAcceptance('Acepto la vacante', { consentPromptPending: false }), false);
+  assert.equal(shouldRecordConsentAcceptance('Acepto la vacante', { consentPromptPending: true }), false);
+  assert.equal(shouldRecordConsentAcceptance('Acepto el tratamiento de mis datos', { consentPromptPending: false }), true);
+  assert.equal(shouldRecordConsentAcceptance('Estoy de acuerdo con el tratamiento de datos', { consentPromptPending: false }), true);
+});
+
 test('un no a una oferta no se registra como revocatoria sin aviso de consentimiento pendiente', () => {
   assert.equal(shouldRecordConsentRejection('No', { consentPromptPending: false }), false);
   assert.equal(shouldRecordConsentRejection('No autorizo el tratamiento de mis datos', { consentPromptPending: false }), true);
   assert.equal(shouldRecordConsentRejection('No', { consentPromptPending: true }), true);
+});
+
+test('rechazar una vacante no equivale a rechazar el tratamiento de datos', () => {
+  assert.equal(shouldRecordConsentRejection('No acepto la vacante', { consentPromptPending: false }), false);
+  assert.equal(shouldRecordConsentRejection('No acepto la vacante', { consentPromptPending: true }), false);
+  assert.equal(shouldRecordConsentRejection('No acepto el tratamiento de mis datos', { consentPromptPending: false }), true);
+  assert.equal(shouldRecordConsentRejection('No estoy de acuerdo con el tratamiento de datos', { consentPromptPending: false }), true);
 });
 
 test('al autorizar se recupera la vacante alternativa aceptada', () => {
