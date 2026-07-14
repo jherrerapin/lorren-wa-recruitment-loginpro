@@ -1,270 +1,300 @@
 # Validación técnica de la modernización SaaS de Lórren
 
-Relacionado con: #421, #422 y #415.
+Relacionado con: #421, #422, #423 y #424.
 
-## 1. Resultado de la validación
+## 1. Conclusión
 
-La dirección general de la hoja de ruta es correcta:
+La estrategia aprobada es correcta si se ejecuta en este orden:
 
-- evolución incremental, sin reescritura total;
-- monolito modular antes de considerar microservicios;
-- una sola interpretación estructurada por turno;
-- una sola política que produce el plan del turno;
-- reglas de negocio configurables por tenant y vacante;
-- límites determinísticos para consentimiento, persistencia, archivos, agenda y seguridad;
-- servicios de dominio separados de WhatsApp, OpenAI y Prisma;
-- retiro de legado únicamente después de caracterizar y reemplazar su comportamiento.
+1. estabilizar seguridad y línea base;
+2. caracterizar el comportamiento y convertirlo en gates;
+3. resolver un tenant mínimo en la frontera;
+4. introducir inbox, outbox y trazabilidad;
+5. consolidar contratos y autoridades únicas;
+6. completar el aislamiento multitenant;
+7. trasladar las reglas a configuración versionada;
+8. retirar el legado progresivamente.
 
-La investigación técnica obliga a incorporar los ajustes siguientes antes de iniciar una extracción estructural grande.
+No se recomienda una reescritura total ni una migración temprana a microservicios.
 
-## 2. Estado canónico bajo control de Lórren
+## 2. Decisiones obligatorias
 
-La base de datos de Lórren será la fuente de verdad para:
+### 2.1 Estado canónico propio
+
+La base de datos de Lórren es la fuente de verdad para:
 
 - tenant y configuración efectiva;
-- identidad del candidato;
-- conversación y mensajes relevantes;
-- vacante solicitada, sugerida, confirmada y asignada;
+- candidato, conversación y postulación;
+- atribución original y vacante confirmada;
 - consentimiento y evidencia;
-- postulación, datos y documentos;
+- datos y documentos;
 - reservas, recordatorios y estados;
 - decisiones, transiciones y auditoría.
 
-La memoria ofrecida por un proveedor de IA podrá utilizarse como optimización temporal, pero nunca como autoridad empresarial ni como única memoria del proceso.
+La memoria de un proveedor de IA puede ser una optimización, nunca la única memoria ni autoridad empresarial.
 
-Consecuencias:
+### 2.2 Comprensión estructurada y efectos controlados
 
-1. cada turno se reconstruye desde estado propio y hechos persistidos;
-2. las referencias externas de IA se almacenan solo como metadatos auxiliares;
-3. debe poder cambiarse el modelo o proveedor sin perder una postulación;
-4. los datos sensibles no se conservan externamente más allá de la política aprobada;
-5. toda decisión crítica puede reproducirse con información propia.
+La IA puede comprender lenguaje y redactar, pero no debe escribir directamente en Prisma ni ejecutar efectos externos sin validación.
 
-## 3. Evaluación antes de eliminación
+El ciclo validado es:
 
-Antes de retirar parsers, gates, redactores o ramas de flujo se creará un banco de conversaciones sanitizadas.
+1. resolver tenant y deduplicar;
+2. cargar estado y política versionada;
+3. obtener `TurnUnderstanding` con esquema estricto;
+4. validar evidencia, permisos e invariantes;
+5. construir `TurnPlan`;
+6. ejecutar cálculos de dominio sin efectos externos;
+7. generar y verificar la respuesta segura;
+8. persistir estado y outbox en una transacción;
+9. ejecutar el efecto mediante un worker idempotente.
 
-Cada escenario deberá contener:
+Esta secuencia evita confirmar un cambio de negocio sin disponer de un mensaje seguro y reintentable para comunicarlo.
 
-- estado inicial del candidato y la vacante;
+### 2.3 Evaluación antes de eliminación
+
+Antes de retirar cualquier parser, gate, redactor o rama de flujo se requiere un corpus sanitizado.
+
+Cada fixture debe contener:
+
+- `TenantContext`;
+- canal y proveedor;
+- versión de conversación, vacante, consentimiento y políticas aplicables;
+- estado inicial;
 - historial relevante;
 - mensaje o lote entrante;
-- `TurnUnderstanding` esperado;
-- `TurnPlan` esperado;
+- comprensión esperada;
+- plan esperado;
 - escrituras permitidas y prohibidas;
-- transición esperada;
-- hechos que deben aparecer en la respuesta;
-- afirmaciones que no deben aparecer;
-- expectativa de envío, silencio o revisión humana.
+- transición y estado final;
+- hechos obligatorios y afirmaciones prohibidas;
+- expectativa de envío, silencio o revisión.
 
-La evaluación tendrá dos niveles:
+Los fixtures determinísticos se ejecutan en CI antes de retirar legado. Las pruebas con modelo real sirven para comparar calidad, pero no reemplazan un gate reproducible.
 
-### Determinístico
+## 3. Tenant antes de idempotencia durable
 
-- modelos simulados mediante respuestas estructuradas reproducibles;
-- validación de invariantes, persistencia, transiciones y herramientas;
-- ejecución obligatoria en CI.
+Un proveedor o número puede compartir formatos de identificadores entre clientes. Por eso el tenant y el canal deben resolverse antes de construir la clave durable del inbox.
 
-### Conversacional
+Ejemplo conceptual:
 
-- corpus de regresión en español colombiano;
-- preguntas fuera de orden, correcciones, mensajes parciales, varias intenciones y errores ortográficos;
-- métricas de comprensión, continuidad, exactitud factual, repetición y comportamiento robotizado;
-- comparación controlada al cambiar prompts o modelos.
+```text
+idempotencyKey = tenantId + provider + channelId + externalMessageId
+```
 
-No se eliminará una capa antigua hasta que los escenarios que protegía estén cubiertos por la autoridad nueva.
+No debe existir un inbox global cuya identidad se migre después, porque podría producir colisiones, reprocesamiento o pérdida de eventos al incorporar el segundo tenant.
 
-## 4. Inbox, outbox e idempotencia
+## 4. Inbox y outbox
 
-La recepción y el envío se separarán del procesamiento conversacional.
+### Inbox
 
-### Inbox de eventos
+Cada evento entrante registra:
 
-Cada evento recibido del proveedor debe registrarse con:
+- tenant y canal;
+- proveedor;
+- ID externo o identidad de respaldo;
+- hash del contenido necesario para deduplicación;
+- fechas de recepción y procesamiento;
+- estado, intentos y error saneado.
 
-- tenant;
-- proveedor y canal;
-- identificador externo del evento o mensaje;
-- hash o identidad de respaldo;
-- fecha de recepción;
-- estado de procesamiento;
-- intentos y último error saneado.
+Una reentrega no puede producir una segunda respuesta, reserva, carga de archivo o transición.
 
-El identificador externo debe impedir que una reentrega produzca dos respuestas, dos documentos, dos reservas o dos cambios de estado.
+### Outbox
 
-### Outbox transaccional
+En la misma transacción del cambio de negocio se registra:
 
-Las acciones externas se registrarán en la misma transacción que el cambio de negocio:
+- cuerpo final del mensaje saliente;
+- destinatario y canal;
+- recordatorio o job;
+- evento de auditoría o integración;
+- clave de idempotencia;
+- contexto de trazabilidad.
 
-- mensaje de WhatsApp pendiente;
-- recordatorio;
-- notificación al reclutador;
-- almacenamiento o análisis asíncrono autorizado;
-- evento de auditoría o integración.
-
-Un worker enviará o ejecutará la acción, registrará el resultado y podrá reintentar sin duplicarla.
-
-Las claves de idempotencia incluirán tenant y entidad. El identificador del job de la cola no será la única protección contra duplicados.
+El worker ejecuta el efecto, registra el resultado y reintenta sin duplicar. El ID interno de la cola no será la única protección.
 
 ## 5. Aislamiento multitenant en dos capas
 
-El aislamiento se aplicará simultáneamente en aplicación y base de datos.
-
 ### Aplicación
 
-- `TenantContext` obligatorio antes de ejecutar un caso de uso;
-- repositorios que exigen `tenantId` en toda operación de negocio;
-- referencias compuestas o comprobaciones explícitas de pertenencia;
-- rutas, jobs, archivos, cachés y métricas con tenant obligatorio;
-- prohibición de consultas globales desde módulos de negocio salvo casos administrativos autorizados.
+- `TenantContext` obligatorio en casos de uso y repositorios.
+- Toda consulta de negocio exige `tenantId`.
+- Jobs, archivos, caché, métricas y credenciales conservan tenant.
+- Las referencias se validan antes de actualizar o asociar recursos.
+- Las consultas globales quedan reservadas a casos administrativos explícitos.
 
 ### Base de datos
 
-- `tenantId` en entidades compartidas;
-- índices y restricciones únicas compuestas con tenant;
-- claves foráneas que impidan relaciones cruzadas cuando sea viable;
-- Row Level Security como defensa adicional;
-- políticas de mínimo privilegio para conexiones y workers;
-- pruebas que intenten leer, actualizar, asociar y procesar recursos de otro tenant.
+- `tenantId` en entidades compartidas.
+- Unicidad compuesta por tenant.
+- Relaciones cruzadas protegidas mediante claves o validaciones compuestas.
+- RLS como defensa adicional.
+- Roles de mínimo privilegio.
+- Pruebas negativas de lectura, escritura, asociación y ejecución cruzadas.
 
-RLS no será la única barrera, porque conexiones privilegiadas o roles de servicio pueden omitirla.
+RLS no es suficiente por sí sola porque roles privilegiados pueden omitirla.
 
-## 6. Atribución con niveles de certeza
+## 6. Atribución con certeza explícita
 
-No se prometerá exactitud absoluta cuando el proveedor no entregue metadatos suficientes.
+El sistema no promete exactitud absoluta cuando Meta no entrega información suficiente.
 
-Cada primer contacto conservará el evento de atribución original e inmutable y se clasificará como:
+- `EXACT`: IDs objetivos resuelven una asociación única.
+- `CONFIRMED`: la asociación sugerida fue confirmada por el candidato.
+- `UNKNOWN`: la evidencia es insuficiente y Lórren pregunta.
 
-- `EXACT`: identificadores objetivos enlazados de manera única a tenant, campaña, anuncio y vacante configurada;
-- `CONFIRMED`: la asociación fue propuesta por metadatos parciales y confirmada expresamente por el candidato;
-- `UNKNOWN`: no existe evidencia suficiente y Lórren debe preguntar sin inventar.
+Se conservan por separado:
 
-Reglas:
+- evento original;
+- campaña y anuncio atribuidos;
+- vacante sugerida;
+- vacante confirmada;
+- método, versión y evidencia de la resolución.
 
-1. nunca reemplazar el evento original con una interpretación posterior;
-2. no usar similitud textual cuando haya identificadores objetivos;
-3. no asignar definitivamente una vacante antes de confirmarla con el candidato;
-4. registrar evidencia, método, versión de la configuración y fecha de la decisión;
-5. separar campaña atribuida, vacante sugerida y vacante finalmente confirmada.
+## 7. Consentimiento y archivos
 
-## 7. Comprensión estructurada y herramientas tipadas
+El nuevo invariante es no descargar ni guardar datos o archivos antes de autorización.
 
-La IA comprenderá y redactará, pero no escribirá directamente en Prisma ni ejecutará efectos externos sin validación.
+#420 debe:
 
-El ciclo objetivo será:
+- diferenciar interés y autorización;
+- preservar el contexto pendiente;
+- rechazar de forma segura documentos anticipados;
+- solicitar reenvío posterior;
+- revalidar una vacante alternativa antes de asignarla;
+- fallar de forma cerrada.
 
-1. cargar estado canónico y configuración efectiva;
-2. producir un `TurnUnderstanding` con esquema estricto;
-3. validar evidencia, confianza y campos permitidos;
-4. producir un `TurnPlan` único;
-5. ejecutar herramientas o casos de uso tipados;
-6. persistir transiciones y outbox de forma atómica;
-7. redactar desde hechos confirmados;
-8. aplicar seguridad factual antes del envío.
+El comportamiento legado que almacenaba archivos anticipados debe quedar caracterizado. La modernización no autoriza borrar retroactivamente esos archivos sin una política de retención y una migración separadas.
 
-Las herramientas se agruparán por dominio y tendrán entradas y resultados validados. Por ejemplo:
+## 8. Adjuntos
 
-- consultar información de vacante;
-- confirmar o cambiar vacante;
-- registrar consentimiento;
-- actualizar datos autorizados;
-- evaluar readiness y geografía;
-- consultar disponibilidad;
-- reservar, cancelar o solicitar reprogramación;
-- programar o cancelar recordatorios.
+La Fase 0 incluye dos deudas confirmadas:
 
-## 8. Geografía basada en datos espaciales
+1. alinear `AttachmentAnalysis` con los campos reales de Prisma y evitar fallos silenciosos;
+2. unificar el contrato de hoja de vida en PDF/DOCX.
 
-El modelo no decidirá viabilidad territorial mediante una lista libre de nombres o una búsqueda web durante cada conversación.
+No debe mantenerse una ruta que considere cualquier `.doc` como HV válida sin analizar su contenido.
+
+## 9. Agenda y recordatorios
+
+### Reprogramación
+
+El objetivo es marcar `RESCHEDULED` solo cuando existe una nueva reserva. El runtime vigente puede hacerlo antes; se registra como corrección planificada, no como comportamiento ya implementado.
+
+### Recordatorio de entrevista
+
+El requisito de producto es una hora antes. Los cuarenta minutos presentes en código o documentación heredada constituyen una migración pendiente que debe actualizar política y pruebas de manera coordinada.
+
+### Recordatorio de abandono
+
+El ancla será el último mensaje saliente que solicitó una acción, siempre que no exista un mensaje entrante posterior. Esto evita recordar dos horas después de una respuesta del candidato o usar una referencia temporal ambigua.
+
+## 10. Geografía basada en datos
+
+La IA no decide por una lista libre de nombres ni consulta Internet durante cada conversación.
 
 La solución combinará:
 
-1. catálogo canónico de país, departamento, municipio, ciudad, localidad, barrio, sector y alias;
-2. coordenadas o geometrías cuando estén disponibles;
-3. zonas de inclusión y exclusión por operación o vacante;
-4. reglas de radio o contención espacial;
-5. medio de transporte y restricciones configuradas;
-6. proveedor opcional de distancia o tiempo de ruta para casos que lo requieran;
-7. resultado versionado y explicable.
+- catálogo territorial y alias;
+- geometrías o coordenadas;
+- zonas de inclusión y exclusión;
+- radios, contención o corredores;
+- medio de transporte;
+- distancia o duración opcional;
+- política versionada y resultado explicable.
 
-La IA solo convertirá la expresión del candidato en candidatos de lugar. El backend resolverá la entidad geográfica y calculará la política.
+La IA propone lugares candidatos; el backend resuelve la entidad y calcula la viabilidad.
 
-## 9. Observabilidad desde el inicio
+## 11. Observabilidad desde la línea base
 
-La observabilidad no se pospone hasta el final.
+La correlación debe comenzar antes de la extracción modular y relacionar:
 
-Desde las primeras fases se propagará un contexto de trazabilidad por:
-
-- tenant;
-- evento de webhook;
+- tenant y canal;
+- evento e inbox;
 - conversación y turno;
 - candidato y postulación;
 - reserva;
-- job o recordatorio;
-- mensaje saliente.
+- job y recordatorio;
+- outbox y mensaje saliente.
 
-Las tareas asíncronas conservarán correlación con el turno que las originó. Los logs evitarán contenido sensible y expondrán decisiones, estados, razones y errores saneados.
+Los logs no expondrán tokens, cabeceras, archivos ni contenido sensible innecesario. Sí conservarán estado, razón, versión y error saneado.
 
-## 10. Configuración versionada
+## 12. Configuración versionada
 
-Las decisiones relevantes conservarán una referencia o copia de la configuración efectiva utilizada:
+Cada decisión relevante conserva la configuración efectiva utilizada:
 
 - campos requeridos;
-- política de experiencia;
+- experiencia;
+- documentos;
 - modalidad de cierre;
 - geografía;
-- agenda y anticipación mínima;
+- agenda;
 - reprogramación;
-- documentos;
 - recordatorios;
-- contenido oficial de la vacante.
+- información oficial de la vacante.
 
-Modificar una vacante mañana no debe cambiar retroactivamente la explicación de una decisión tomada hoy.
+Una modificación futura no debe cambiar retroactivamente la explicación de una decisión anterior.
 
-## 11. Orden de ejecución ajustado
+## 13. Orden técnico validado
 
-### Fase 0 — Seguridad y línea base
+### Fase 0 — Línea base
 
-1. resolver todos los bloqueadores funcionales de #420;
-2. integrar #420 y revalidar #419;
-3. corregir persistencia de análisis de adjuntos;
-4. unificar el contrato de formatos de hoja de vida;
-5. añadir trazabilidad mínima e inventario de deuda.
+- sincronizar #420 con el `main` que ya contiene #419;
+- corregir sus regresiones y devolver CI a verde;
+- corregir `AttachmentAnalysis`;
+- unificar PDF/DOCX;
+- iniciar trazabilidad e inventario de deuda.
 
-### Fase 1 — Caracterización y evaluación
+### Fase 1 — Corpus y gates
 
-1. crear corpus sanitizado de conversaciones críticas;
-2. implementar replay determinístico;
-3. fijar invariantes de consentimiento, datos, vacantes, agenda y recordatorios;
-4. convertir esas regresiones en gates de CI.
+- ampliar #425;
+- implementar replay;
+- cubrir recorridos críticos y errores;
+- hacer los escenarios bloqueantes.
 
-### Fase 2 — Entrada confiable
+### Fase 2 — Tenant mínimo
 
-1. introducir inbox idempotente para eventos del canal;
-2. definir outbox transaccional para mensajes y jobs;
-3. centralizar el envío y registro de mensajes;
-4. propagar correlación de trazas.
+- resolver tenant/canal en la entrada;
+- propagar `TenantContext` mínimo;
+- probar aislamiento de eventos.
 
-### Fase 3 — Contratos internos y autoridades únicas
+### Fase 3 — Fiabilidad transaccional
 
-1. introducir `TenantContext`, `TurnUnderstanding` y `TurnPlan`;
-2. crear adaptadores desde el flujo existente;
-3. centralizar readiness y transiciones;
-4. retirar autoridades paralelas solo después de migrar sus escenarios.
+- inbox;
+- outbox;
+- envío centralizado;
+- workers idempotentes;
+- trazas correlacionadas.
 
-### Fase 4 — Base multitenant
+### Fase 4 — Contratos y autoridades
 
-1. diseñar migración de `tenantId` y restricciones compuestas;
-2. crear repositorios tenant-aware;
-3. añadir RLS como defensa adicional;
-4. probar acceso cruzado antes de habilitar un segundo tenant.
+- `TurnUnderstanding`;
+- `TurnPlan`;
+- readiness, geografía y agenda canónicos;
+- adaptadores desde el legado;
+- retiro progresivo de duplicaciones.
 
-### Fases posteriores
+### Fase 5 — Multitenencia completa
 
-Continuar con configuración versionada de vacantes, atribución, geografía, agenda, recordatorios, operación SaaS y retiro de legado conforme a la hoja de ruta principal.
+- migraciones e índices compuestos;
+- repositorios tenant-aware;
+- RLS y roles mínimos;
+- pruebas cruzadas antes del segundo tenant.
 
-## 12. Decisión final
+## 14. GPT interno
 
-Se mantiene la estrategia de modernización incremental y monolito modular. No se recomienda una reescritura ni una migración temprana a microservicios.
+El GPT de #424 se crea únicamente cuando la documentación, corpus, contratos, ADR y convenciones estén estables. Su función es mantenimiento, supervisión, QA y onboarding. No participa en el runtime ni sustituye a GitHub.
 
-El primer trabajo de runtime continúa siendo estabilizar la frontera de consentimiento de #420. Ninguna extracción arquitectónica grande debe comenzar mientras esa base siga con observaciones funcionales abiertas.
+## 15. Referencias primarias
+
+- OpenAI: Structured Outputs, function calling y evaluaciones.
+- Microsoft Azure Architecture Center: multitenencia y patrón Strangler Fig.
+- AWS Well-Architected SaaS Lens.
+- PostgreSQL: Row Level Security.
+- Supabase: RLS y gestión de acceso.
+- OpenTelemetry: trazas y correlación.
+- PostGIS: operaciones espaciales como `ST_DWithin`.
+- BullMQ: jobs idempotentes y reintentos.
+- Twelve-Factor App: configuración externa, procesos y logs.
+
+## 16. Decisión final
+
+La modernización continúa de forma incremental. Ninguna extracción grande se inicia hasta que la frontera de consentimiento esté estabilizada y el corpus proteja los recorridos críticos.
