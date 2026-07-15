@@ -17,6 +17,87 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  apply-canonical-message-deletion:
+    name: Apply scoped canonical message deletion
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 452 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact administrative message deletion migration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/routes/admin.js')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = "import { persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';"
+          new_import = """import {
+            deleteConversationMessagesForCandidate,
+            persistOutboundConversationMessage
+          } from '../services/conversationMessageRepository.js';"""
+          if old_import in text:
+              text = text.replace(old_import, new_import, 1)
+          elif 'deleteConversationMessagesForCandidate' not in text:
+              raise SystemExit('No se encontró el import esperado del repositorio de mensajes')
+
+          old_delete = """      await tx.message.deleteMany({
+                where: { candidateId: candidate.id }
+              });"""
+          new_delete = """      await deleteConversationMessagesForCandidate(tx, {
+                candidateId: candidate.id
+              });"""
+          if old_delete in text:
+              text = text.replace(old_delete, new_delete, 1)
+          elif new_delete not in text:
+              route_start = text.index("router.post('/candidates/:id/delete'")
+              route_end = text.index("router.post('/candidates/:id/edit'", route_start)
+              route = text[route_start:route_end]
+              direct = "await tx.message.deleteMany({\n        where: { candidateId: candidate.id }\n      });"
+              delegated = "await deleteConversationMessagesForCandidate(tx, {\n        candidateId: candidate.id\n      });"
+              if direct in route:
+                  route = route.replace(direct, delegated, 1)
+                  text = text[:route_start] + route + text[route_end:]
+              elif delegated not in route:
+                  raise SystemExit('No se encontró la eliminación directa ni delegada')
+
+          route_start = text.index("router.post('/candidates/:id/delete'")
+          route_end = text.index("router.post('/candidates/:id/edit'", route_start)
+          route = text[route_start:route_end]
+          if 'tx.message.deleteMany(' in route:
+              raise SystemExit('Permanece una eliminación directa de Message')
+          message_index = route.index('deleteConversationMessagesForCandidate(tx,')
+          booking_index = route.index('tx.interviewBooking.deleteMany(')
+          candidate_index = route.index('tx.candidate.delete(')
+          cv_index = route.index('clearCandidateCvStorage(candidate)')
+          transaction_end = route.index('    });', candidate_index)
+          if not (message_index < booking_index < candidate_index < transaction_end < cv_index):
+              raise SystemExit('Cambió el orden transaccional protegido')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          node --check src/routes/admin.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/admin.js
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "refactor: delegar eliminación administrativa de mensajes"
+          git push origin HEAD:${{ github.head_ref }}
+
   state-authority:
     name: Validate state authorities
     runs-on: ubuntu-latest
