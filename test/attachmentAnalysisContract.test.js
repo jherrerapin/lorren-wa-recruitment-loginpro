@@ -10,6 +10,7 @@ import {
   safeErrorMessage,
   shouldUseVisualPdfFallback
 } from '../src/services/cvIntelligence.js';
+import { lorenV2CvAnalysisRouter } from '../src/routes/lorenV2CvAnalysis.js';
 
 function createPrismaForCandidate(candidate) {
   const created = [];
@@ -119,6 +120,74 @@ test('la vista usa analysedAt y no consulta createdAt en AttachmentAnalysis', ()
   assert.match(source, /attachmentAnalyses:\s*\{\s*orderBy:\s*\{\s*analysedAt:\s*'desc'/);
   assert.doesNotMatch(source, /attachmentAnalyses:\s*\{\s*orderBy:\s*\{\s*createdAt:/);
   assert.doesNotMatch(source, /formatDate\(analysis\.createdAt\)/);
+});
+
+test('la migración alinea AttachmentAnalysis sin borrar sus columnas antiguas', () => {
+  const migrationPath = fileURLToPath(new URL(
+    '../prisma/migrations/20260715190000_align_attachment_analysis_cv_fields/migration.sql',
+    import.meta.url
+  ));
+  const migration = readFileSync(migrationPath, 'utf8');
+
+  for (const column of ['originalName', 'extractedText', 'summary', 'analysedAt', 'modelUsed', 'rawResponse']) {
+    assert.match(migration, new RegExp(`ADD COLUMN IF NOT EXISTS "${column}"`));
+  }
+  assert.match(migration, /"originalName" = COALESCE\("originalName", "fileName"\)/);
+  assert.match(migration, /"analysedAt" = COALESCE\("analysedAt", "createdAt", CURRENT_TIMESTAMP\)/);
+  assert.match(migration, /jsonb_build_object\('legacyEvidence', "evidence"\)/);
+  assert.doesNotMatch(migration, /DROP (?:COLUMN|TABLE)/i);
+});
+
+test('la revisión evita la consulta duplicada y responde con la página ante errores inesperados', () => {
+  const routePath = fileURLToPath(new URL('../src/routes/lorenV2CvAnalysis.js', import.meta.url));
+  const source = readFileSync(routePath, 'utf8');
+  const runRoute = source.slice(
+    source.indexOf("router.post('/run'"),
+    source.indexOf("router.post('/:candidateId/analyze'")
+  );
+
+  assert.doesNotMatch(runRoute, /loadCandidates\(/);
+  assert.match(runRoute, /try\s*\{/);
+  assert.match(runRoute, /res\.status\(500\)\.send\(renderPage\(/);
+  assert.match(runRoute, /showCandidates:\s*false/);
+});
+
+test('POST /run conserva el formulario y devuelve un mensaje legible si falla la base', async () => {
+  const prisma = {
+    vacancy: {
+      findMany: async () => {
+        throw new Error('simulated database failure');
+      }
+    }
+  };
+  const router = lorenV2CvAnalysisRouter(prisma);
+  const runLayer = router.stack.find((layer) => layer.route?.path === '/run');
+  const handler = runLayer.route.stack[0].handle;
+  const response = {
+    statusCode: 200,
+    body: '',
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    send(body) {
+      this.body = body;
+      return this;
+    }
+  };
+  const originalConsoleError = console.error;
+  console.error = () => {};
+
+  try {
+    await handler({ body: { vacancyId: 'vacancy-test', desiredProfile: 'Perfil suficientemente detallado' } }, response);
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(response.statusCode, 500);
+  assert.match(response.body, /No fue posible revisar las hojas de vida en este momento/);
+  assert.match(response.body, /<form method="post" action="\/admin\/estadisticas\/cv-analysis\/run">/);
+  assert.doesNotMatch(response.body, /internal_server_error/);
 });
 
 test('los PDF sin texto o con texto insuficiente activan el segundo intento visual', () => {
