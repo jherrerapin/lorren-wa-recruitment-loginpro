@@ -8,13 +8,22 @@ const metrics = readFileSync(new URL('../src/services/metaRecruitmentStats.js', 
 const sync = readFileSync(new URL('../src/services/metaAdsInsightsSync.js', import.meta.url), 'utf8');
 const client = readFileSync(new URL('../src/services/metaAdsClient.js', import.meta.url), 'utf8');
 
-test('panel expone actualización manual y costos estimados sin historial', () => {
+test('panel explica resultados, costos y recomendaciones con lenguaje sencillo', () => {
   assert.match(dashboard, /Actualizar desde Meta/);
-  assert.match(dashboard, /Costo estimado individual/);
+  assert.match(dashboard, /Costo aproximado por persona/);
   assert.match(dashboard, /MetaAdSnapshot|metaAdSnapshot/);
   assert.doesNotMatch(dashboard, /Mostrar históricos\/no disponibles/);
   assert.doesNotMatch(dashboard, /name="historical"/);
   assert.match(dashboard, /Actualmente no existen anuncios en Meta Ads/);
+  assert.match(dashboard, /¿Qué produjo la inversión\?/);
+  assert.match(dashboard, /Cumplen los requisitos/);
+  assert.match(dashboard, /Asistieron a entrevista/);
+  assert.match(dashboard, /¿Qué necesita atención\?/);
+  assert.match(dashboard, /Qué conviene hacer/);
+  assert.match(dashboard, /Muy pocos datos/);
+  assert.match(dashboard, /no cambian campañas ni presupuestos automáticamente/i);
+  assert.match(dashboard, /<details class="technical">/);
+  assert.doesNotMatch(dashboard, /Hojas de vida válidas/);
 });
 
 test('consulta de anuncios exige inventario actual sincronizado', () => {
@@ -46,7 +55,15 @@ test('Marketing API exige una credencial dedicada distinta a WhatsApp', () => {
 
 test('panel no depende del presupuesto manual inexistente', () => {
   assert.doesNotMatch(dashboard, /budgetCOP/);
-  assert.match(dashboard, /Gasto real Meta/);
+  assert.match(dashboard, /Dinero invertido/);
+});
+
+test('costos de entrevistas e inasistencias usan resultados reales del proceso', () => {
+  assert.match(metrics, /booking\.status === 'NO_SHOW'/);
+  assert.doesNotMatch(metrics, /confirmed - metric\.attended/);
+  assert.match(metrics, /costPerScheduled/);
+  assert.match(metrics, /costPerAttended/);
+  assert.match(metrics, /costPerHired/);
 });
 
 test('atribución estadística no compara nombres ni tokens', () => {

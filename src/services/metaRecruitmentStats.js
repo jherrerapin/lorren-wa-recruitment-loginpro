@@ -54,6 +54,10 @@ function hasAttendedBooking(candidate = {}) {
   return (candidate.interviewBookings || []).some((booking) => booking.status === 'ATTENDED');
 }
 
+function hasNoShowBooking(candidate = {}) {
+  return (candidate.interviewBookings || []).some((booking) => booking.status === 'NO_SHOW');
+}
+
 export function dateKeyInTimeZone(value, timeZone = DEFAULT_TIME_ZONE) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
@@ -160,11 +164,17 @@ function createEmptyAdMetric(campaign = {}) {
     noShow: 0,
     completionRate: null,
     costPerCandidate: null,
+    costPerStartedProcess: null,
     costPerCompletedRegistration: null,
     costPerIncompleteRegistration: null,
     costPerCv: null,
     costPerApt: null,
+    costPerScheduled: null,
+    costPerConfirmed: null,
+    costPerAttended: null,
+    costPerNoShow: null,
     costPerHired: null,
+    costPerMetaConversation: null,
     costPerLinkClick: null,
     estimatedIncompleteSpend: 0,
     unattributedSpend: 0,
@@ -239,22 +249,28 @@ export function buildMetaAdStatistics({
     if (hasBooking(candidate)) metric.scheduled += 1;
     if (hasConfirmedBooking(candidate)) metric.confirmed += 1;
     if (hasAttendedBooking(candidate)) metric.attended += 1;
+    if (hasNoShowBooking(candidate)) metric.noShow += 1;
 
     const dateKey = candidateDateKey(candidate, timeZone);
     if (dateKey) metric.candidatesPerDay.set(dateKey, (metric.candidatesPerDay.get(dateKey) || 0) + 1);
   }
 
   for (const metric of metricsByCampaignId.values()) {
-    metric.noShow = Math.max(0, metric.confirmed - metric.attended);
     metric.completionRate = metric.candidatesCount
       ? Math.round((metric.completedRegistrations / metric.candidatesCount) * 100)
       : null;
     metric.costPerCandidate = safeCost(metric.spend, metric.candidatesCount);
+    metric.costPerStartedProcess = safeCost(metric.spend, metric.startedProcess);
     metric.costPerCompletedRegistration = safeCost(metric.spend, metric.completedRegistrations);
     metric.costPerIncompleteRegistration = safeCost(metric.spend, metric.incompleteRegistrations);
     metric.costPerCv = safeCost(metric.spend, metric.cvReceived);
     metric.costPerApt = safeCost(metric.spend, metric.apt);
+    metric.costPerScheduled = safeCost(metric.spend, metric.scheduled);
+    metric.costPerConfirmed = safeCost(metric.spend, metric.confirmed);
+    metric.costPerAttended = safeCost(metric.spend, metric.attended);
+    metric.costPerNoShow = safeCost(metric.spend, metric.noShow);
     metric.costPerHired = safeCost(metric.spend, metric.hired);
+    metric.costPerMetaConversation = safeCost(metric.spend, metric.metaConversationsStarted);
     metric.costPerLinkClick = safeCost(metric.spend, metric.inlineLinkClicks || metric.clicks);
 
     let allocatedSpend = 0;
@@ -307,11 +323,17 @@ export function aggregateMetaAdStatistics(metrics = []) {
     ? Math.round((total.completedRegistrations / total.candidatesCount) * 100)
     : null;
   total.costPerCandidate = safeCost(total.spend, total.candidatesCount);
+  total.costPerStartedProcess = safeCost(total.spend, total.startedProcess);
   total.costPerCompletedRegistration = safeCost(total.spend, total.completedRegistrations);
   total.costPerIncompleteRegistration = safeCost(total.spend, total.incompleteRegistrations);
   total.costPerCv = safeCost(total.spend, total.cvReceived);
   total.costPerApt = safeCost(total.spend, total.apt);
+  total.costPerScheduled = safeCost(total.spend, total.scheduled);
+  total.costPerConfirmed = safeCost(total.spend, total.confirmed);
+  total.costPerAttended = safeCost(total.spend, total.attended);
+  total.costPerNoShow = safeCost(total.spend, total.noShow);
   total.costPerHired = safeCost(total.spend, total.hired);
+  total.costPerMetaConversation = safeCost(total.spend, total.metaConversationsStarted);
   total.costPerLinkClick = safeCost(total.spend, total.inlineLinkClicks || total.clicks);
   return total;
 }
