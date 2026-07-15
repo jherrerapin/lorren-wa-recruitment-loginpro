@@ -1,7 +1,8 @@
 import {
   ACTIVE_INTERVIEW_BOOKING_STATUSES as ACTIVE_BOOKING_STATUSES,
   cancelActiveInterviewBookings,
-  createScheduledInterviewBooking
+  createScheduledInterviewBooking,
+  requestActiveInterviewBookingReschedule
 } from './interviewBookingStateService.js';
 
 /**
@@ -236,6 +237,9 @@ export async function createBooking(prisma, candidateId, vacancyId, slotId, sche
 }
 
 export async function cancelCandidateBookings(prisma, candidateId, replacementStatus = 'CANCELLED') {
+  if (replacementStatus === 'RESCHEDULED') {
+    return requestActiveInterviewBookingReschedule(prisma, { candidateId });
+  }
   return cancelActiveInterviewBookings(prisma, {
     candidateId,
     replacementStatus
