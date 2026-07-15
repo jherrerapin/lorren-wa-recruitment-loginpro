@@ -17,6 +17,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  apply-canonical-message-lifecycle:
+    name: Apply canonical Message lifecycle patch
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'refactor/451-canonical-message-lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out pull request branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+
+      - name: Apply scoped admin patch and remove temporary job
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+
+          admin_path = Path('src/routes/admin.js')
+          admin = admin_path.read_text(encoding='utf-8')
+
+          old_import = "import { persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';"
+          new_import = """import {
+            deleteConversationMessagesByCandidate,
+            persistOutboundConversationMessage
+          } from '../services/conversationMessageRepository.js';"""
+          if admin.count(old_import) != 1:
+              raise SystemExit(f'expected one repository import, found {admin.count(old_import)}')
+          admin = admin.replace(old_import, new_import, 1)
+
+          old_delete = """      await tx.message.deleteMany({
+                where: { candidateId: candidate.id }
+              });"""
+          new_delete = """      await deleteConversationMessagesByCandidate(tx, {
+                candidateId: candidate.id
+              });"""
+          if admin.count(old_delete) != 1:
+              raise SystemExit(f'expected one direct Message deletion, found {admin.count(old_delete)}')
+          admin = admin.replace(old_delete, new_delete, 1)
+          admin_path.write_text(admin, encoding='utf-8')
+
+          workflow_path = Path('.github/workflows/ci.yml')
+          workflow = workflow_path.read_text(encoding='utf-8')
+          old_gate = '        run: node --test test/adminManualOutbound.test.js\n'
+          new_gate = '        run: node --test test/adminManualOutbound.test.js test/adminCandidateDeletionMessageAuthority.test.js\n'
+          if workflow.count(old_gate) != 1:
+              raise SystemExit(f'expected one admin gate, found {workflow.count(old_gate)}')
+          workflow = workflow.replace(old_gate, new_gate, 1)
+
+          start_marker = '  apply-canonical-message-lifecycle:\n'
+          end_marker = '  state-authority:\n'
+          start = workflow.find(start_marker)
+          end = workflow.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('temporary job boundaries not found')
+          workflow = workflow[:start] + workflow[end:]
+          workflow_path.write_text(workflow, encoding='utf-8')
+          PY
+
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/admin.js .github/workflows/ci.yml
+          git commit -m "refactor: delegar eliminación administrativa de mensajes"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
   state-authority:
     name: Validate state authorities
     runs-on: ubuntu-latest
