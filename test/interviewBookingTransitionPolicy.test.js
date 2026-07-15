@@ -28,16 +28,18 @@ test('clasifica únicamente SCHEDULED y CONFIRMED como reservas activas', () => 
 });
 
 test('crea una reserva inicial únicamente cuando todavía no existe estado', () => {
-  const created = evaluate(InterviewBookingTransitionAction.CREATE_INITIAL, null);
-  assert.deepEqual(created, {
-    allowed: true,
-    action: InterviewBookingTransitionAction.CREATE_INITIAL,
-    currentStatus: null,
-    nextStatus: InterviewBookingStatus.SCHEDULED,
-    statusChanged: true,
-    reason: 'initial_booking_created',
-    metadata: {}
-  });
+  for (const emptyStatus of [null, undefined, '', '   ']) {
+    const created = evaluate(InterviewBookingTransitionAction.CREATE_INITIAL, emptyStatus);
+    assert.deepEqual(created, {
+      allowed: true,
+      action: InterviewBookingTransitionAction.CREATE_INITIAL,
+      currentStatus: null,
+      nextStatus: InterviewBookingStatus.SCHEDULED,
+      statusChanged: true,
+      reason: 'initial_booking_created',
+      metadata: {}
+    });
+  }
 
   const duplicate = evaluate(
     InterviewBookingTransitionAction.CREATE_INITIAL,
@@ -92,7 +94,7 @@ test('solicitar reprogramación no cierra ni cambia el estado activo', () => {
   assert.equal(rejected.allowed, false);
 });
 
-test('completa la reprogramación solo con una reserva reemplazante identificada', () => {
+test('completa la reprogramación solo desde un origen válido y con reemplazo identificado', () => {
   assert.throws(
     () => evaluate(
       InterviewBookingTransitionAction.COMPLETE_RESCHEDULE,
@@ -110,21 +112,38 @@ test('completa la reprogramación solo con una reserva reemplazante identificada
   assert.equal(result.nextStatus, InterviewBookingStatus.RESCHEDULED);
   assert.equal(result.metadata.replacementBookingId, 'booking-new-1');
 
-  const invalidOrigin = evaluate(
+  const invalidOriginWithoutReplacement = evaluate(
     InterviewBookingTransitionAction.COMPLETE_RESCHEDULE,
-    InterviewBookingStatus.CANCELLED,
+    InterviewBookingStatus.CANCELLED
+  );
+  assert.equal(invalidOriginWithoutReplacement.allowed, false);
+  assert.equal(invalidOriginWithoutReplacement.reason, 'transition_origin_not_allowed');
+
+  const repeated = evaluate(
+    InterviewBookingTransitionAction.COMPLETE_RESCHEDULE,
+    InterviewBookingStatus.RESCHEDULED,
     { replacementBookingId: 'booking-new-1' }
   );
-  assert.equal(invalidOrigin.allowed, false);
+  assert.equal(repeated.allowed, true);
+  assert.equal(repeated.statusChanged, false);
+  assert.equal(repeated.reason, 'booking_rescheduled_idempotent');
 });
 
-test('marca NO_RESPONSE únicamente desde SCHEDULED', () => {
+test('marca NO_RESPONSE únicamente desde SCHEDULED y admite repetición idempotente', () => {
   const result = evaluate(
     InterviewBookingTransitionAction.MARK_NO_RESPONSE,
     InterviewBookingStatus.SCHEDULED
   );
   assert.equal(result.allowed, true);
   assert.equal(result.nextStatus, InterviewBookingStatus.NO_RESPONSE);
+
+  const repeated = evaluate(
+    InterviewBookingTransitionAction.MARK_NO_RESPONSE,
+    InterviewBookingStatus.NO_RESPONSE
+  );
+  assert.equal(repeated.allowed, true);
+  assert.equal(repeated.statusChanged, false);
+  assert.match(repeated.reason, /idempotent/);
 
   for (const status of [
     InterviewBookingStatus.CONFIRMED,
@@ -206,7 +225,13 @@ test('cancela reservas operativamente abiertas o pendientes de respuesta tardía
   assert.equal(repeated.statusChanged, false);
 });
 
-test('rechaza estados y acciones desconocidos antes de construir una transición', () => {
+test('rechaza entradas, estados y acciones inválidos con errores de dominio', () => {
+  for (const invalidInput of [null, false, 'texto', []]) {
+    assert.throws(
+      () => evaluateInterviewBookingTransition(invalidInput),
+      /interview_booking_transition_input_invalid/
+    );
+  }
   assert.throws(
     () => evaluateInterviewBookingTransition({ action: 'UPDATE_ANYTHING', currentStatus: 'SCHEDULED' }),
     /interview_booking_transition_action_invalid/
