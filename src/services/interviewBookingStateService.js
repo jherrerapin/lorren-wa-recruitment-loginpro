@@ -1,7 +1,13 @@
 export const ACTIVE_INTERVIEW_BOOKING_STATUSES = Object.freeze(['SCHEDULED', 'CONFIRMED']);
 
 function requireNonEmptyString(value, label) {
-  const normalized = String(value ?? '').trim();
+  if (value === null || value === undefined) {
+    throw new Error(`${label}_required`);
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${label}_invalid`);
+  }
+  const normalized = value.trim();
   if (!normalized) throw new Error(`${label}_required`);
   return normalized;
 }
@@ -17,7 +23,7 @@ function requireTimestamp(value, label) {
   if (value === null || value === undefined || typeof value === 'boolean') {
     throw new Error(`${label}_invalid`);
   }
-  const timestamp = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  const timestamp = new Date(value);
   if (Number.isNaN(timestamp.getTime())) throw new Error(`${label}_invalid`);
   return timestamp;
 }
