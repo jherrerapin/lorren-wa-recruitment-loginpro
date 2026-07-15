@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { currentMetaAdsCampaignWhere } from '../src/routes/metaAdsStats.js';
+import {
+  currentMetaAdsCampaignWhere,
+  insightItems,
+  recommendationFor
+} from '../src/routes/metaAdsStats.js';
 
 const dashboard = readFileSync(new URL('../src/routes/metaAdsStats.js', import.meta.url), 'utf8');
 const metrics = readFileSync(new URL('../src/services/metaRecruitmentStats.js', import.meta.url), 'utf8');
@@ -64,6 +68,40 @@ test('costos de entrevistas e inasistencias usan resultados reales del proceso',
   assert.match(metrics, /costPerScheduled/);
   assert.match(metrics, /costPerAttended/);
   assert.match(metrics, /costPerHired/);
+});
+
+test('recomendaciones tratan métricas vacías como cero sin producir decisiones engañosas', () => {
+  const campaign = { vacancyId: 'vacancy-1' };
+  assert.equal(recommendationFor({ campaign, candidatesCount: 10 }).label, 'Revisar el registro');
+
+  const completeFunnel = {
+    campaign,
+    candidatesCount: 10,
+    completedRegistrations: 10,
+    cvReceived: 10,
+    apt: 10,
+    scheduled: 10,
+    attended: 10,
+    hired: 1
+  };
+  assert.equal(
+    recommendationFor({ ...completeFunnel, costPerHired: null }, { costPerHired: 10000 }).label,
+    'Seguir observando'
+  );
+  assert.equal(
+    recommendationFor({ ...completeFunnel, costPerHired: 8000 }, { costPerHired: 10000 }).label,
+    'Buen resultado'
+  );
+});
+
+test('alertas conservan pérdidas visibles cuando llegan valores nulos o indefinidos', () => {
+  const missingCv = insightItems({ totals: { candidatesCount: 10, cvReceived: undefined } });
+  assert.equal(missingCv.some((item) => item.title === 'Pocas personas están enviando su hoja de vida'), true);
+
+  const missingAppointments = insightItems({
+    totals: { candidatesCount: 10, cvReceived: 10, apt: 5, scheduled: null }
+  });
+  assert.equal(missingAppointments.some((item) => item.title === 'Hay candidatos que cumplen, pero pocos agendan'), true);
 });
 
 test('atribución estadística no compara nombres ni tokens', () => {

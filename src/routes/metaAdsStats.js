@@ -94,8 +94,20 @@ function rate(part, total) {
   return `${Math.round((Number(part || 0) / Number(total)) * 100)}%`;
 }
 
+function nonNegativeNumber(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function comparableCost(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function confidenceFor(metric = {}) {
-  const candidates = Number(metric.candidatesCount || 0);
+  const candidates = nonNegativeNumber(metric.candidatesCount);
   if (candidates === 0) return { label: 'Sin datos', cls: 'muted' };
   if (candidates < 5) return { label: 'Muy pocos datos', cls: 'muted' };
   if (candidates < 15) return { label: 'Datos iniciales', cls: 'info' };
@@ -103,9 +115,19 @@ function confidenceFor(metric = {}) {
   return { label: 'Datos sólidos', cls: 'good' };
 }
 
-function recommendationFor(metric = {}, totals = {}) {
-  const candidates = Number(metric.candidatesCount || 0);
-  const spend = Number(metric.spend || 0);
+export function recommendationFor(metric = {}, totals = {}) {
+  const candidates = nonNegativeNumber(metric.candidatesCount);
+  const spend = nonNegativeNumber(metric.spend);
+  const completedRegistrations = nonNegativeNumber(metric.completedRegistrations);
+  const cvReceived = nonNegativeNumber(metric.cvReceived);
+  const apt = nonNegativeNumber(metric.apt);
+  const scheduled = nonNegativeNumber(metric.scheduled);
+  const attended = nonNegativeNumber(metric.attended);
+  const hired = nonNegativeNumber(metric.hired);
+  const costPerHired = comparableCost(metric.costPerHired);
+  const averageCostPerHired = comparableCost(totals.costPerHired);
+  const costPerApt = comparableCost(metric.costPerApt);
+  const averageCostPerApt = comparableCost(totals.costPerApt);
 
   if (!metric.campaign?.vacancyId) {
     return { label: 'Asociar vacante', detail: 'Lórren necesita saber a qué vacante pertenece este anuncio.', cls: 'bad' };
@@ -116,25 +138,25 @@ function recommendationFor(metric = {}, totals = {}) {
   if (candidates < 5) {
     return { label: 'Esperar más datos', detail: 'Aún no hay suficiente información para recomendar cambios.', cls: 'muted' };
   }
-  if (metric.completedRegistrations / candidates < 0.4) {
+  if (completedRegistrations / candidates < 0.4) {
     return { label: 'Revisar el registro', detail: 'Muchas personas llegan, pero no terminan de entregar la información.', cls: 'warn' };
   }
-  if (metric.cvReceived / candidates < 0.45) {
+  if (cvReceived / candidates < 0.45) {
     return { label: 'Facilitar la hoja de vida', detail: 'Pocas personas que llegan terminan enviando su hoja de vida.', cls: 'warn' };
   }
-  if (metric.cvReceived >= 5 && metric.apt / metric.cvReceived < 0.3) {
+  if (cvReceived >= 5 && apt / cvReceived < 0.3) {
     return { label: 'Aclarar requisitos', detail: 'Llegan hojas de vida, pero pocos candidatos cumplen los requisitos.', cls: 'warn' };
   }
-  if (metric.apt >= 3 && metric.scheduled / metric.apt < 0.5) {
+  if (apt >= 3 && scheduled / apt < 0.5) {
     return { label: 'Revisar las citas', detail: 'Hay candidatos que cumplen, pero pocos alcanzan a agendar entrevista.', cls: 'warn' };
   }
-  if (metric.scheduled >= 3 && metric.attended / metric.scheduled < 0.5) {
+  if (scheduled >= 3 && attended / scheduled < 0.5) {
     return { label: 'Mejorar asistencia', detail: 'Se agendan entrevistas, pero menos de la mitad de las personas asiste.', cls: 'warn' };
   }
-  if (metric.hired > 0 && (!totals.costPerHired || metric.costPerHired <= totals.costPerHired)) {
+  if (hired > 0 && costPerHired !== null && averageCostPerHired !== null && costPerHired <= averageCostPerHired) {
     return { label: 'Buen resultado', detail: 'Consigue contrataciones con un costo menor o igual al promedio del periodo.', cls: 'good' };
   }
-  if (metric.apt >= 3 && (!totals.costPerApt || metric.costPerApt <= totals.costPerApt)) {
+  if (apt >= 3 && costPerApt !== null && averageCostPerApt !== null && costPerApt <= averageCostPerApt) {
     return { label: 'Buen costo por candidato', detail: 'Consigue personas que cumplen a un costo menor o igual al promedio del periodo.', cls: 'good' };
   }
   return { label: 'Seguir observando', detail: 'El anuncio tiene actividad, pero todavía no muestra una ventaja clara.', cls: 'info' };
@@ -294,34 +316,44 @@ function funnel(total = {}, currency = 'COP') {
   return `<section class="card"><div class="card-title">¿Hasta dónde avanzaron las personas?</div><p class="section-help">El costo aumenta cuando menos personas alcanzan una etapa. Los porcentajes ayudan a encontrar dónde se está frenando el proceso.</p><div class="funnel">${steps.map(([label,value,cost,stepRate])=>`<div class="step"><strong>${formatInteger(value)}</strong><span>${escapeHtml(label)}</span><em>${escapeHtml(stepRate)}</em><small>${formatMoney(cost,currency)} por resultado</small></div>`).join('')}</div></section>`;
 }
 
-function insightItems(data = {}) {
+export function insightItems(data = {}) {
   const total = data.totals || {};
   const currency = data.account?.currency;
   const items = [];
+  const spend = nonNegativeNumber(total.spend);
+  const candidates = nonNegativeNumber(total.candidatesCount);
+  const incompleteRegistrations = nonNegativeNumber(total.incompleteRegistrations);
+  const cvReceived = nonNegativeNumber(total.cvReceived);
+  const apt = nonNegativeNumber(total.apt);
+  const scheduled = nonNegativeNumber(total.scheduled);
+  const attended = nonNegativeNumber(total.attended);
+  const noShow = nonNegativeNumber(total.noShow);
+  const hired = nonNegativeNumber(total.hired);
+  const unattributedSpend = nonNegativeNumber(total.unattributedSpend);
 
-  if (Number(total.spend || 0) > 0 && !total.candidatesCount) {
+  if (spend > 0 && candidates === 0) {
     items.push({ cls: 'bad', title: 'Hay inversión, pero no hay candidatos relacionados', text: 'Revisa cómo se están relacionando los anuncios y confirma que los mensajes de WhatsApp estén llegando correctamente a Lórren.' });
   }
-  if (total.candidatesCount >= 5 && total.incompleteRegistrations / total.candidatesCount >= 0.4) {
-    items.push({ cls: 'warn', title: `${formatInteger(total.incompleteRegistrations)} personas no terminaron el registro`, text: `Representan ${rate(total.incompleteRegistrations,total.candidatesCount)} de quienes llegaron. La inversión aproximada relacionada con estos casos es ${formatMoney(total.estimatedIncompleteSpend,currency)}.` });
+  if (candidates >= 5 && incompleteRegistrations / candidates >= 0.4) {
+    items.push({ cls: 'warn', title: `${formatInteger(incompleteRegistrations)} personas no terminaron el registro`, text: `Representan ${rate(incompleteRegistrations,candidates)} de quienes llegaron. La inversión aproximada relacionada con estos casos es ${formatMoney(total.estimatedIncompleteSpend,currency)}.` });
   }
-  if (total.candidatesCount >= 5 && total.cvReceived / total.candidatesCount < 0.45) {
+  if (candidates >= 5 && cvReceived / candidates < 0.45) {
     items.push({ cls: 'warn', title: 'Pocas personas están enviando su hoja de vida', text: 'Conviene revisar si la solicitud del archivo es clara y si el candidato entiende cómo enviarlo.' });
   }
-  if (total.cvReceived >= 5 && total.apt / total.cvReceived < 0.3) {
+  if (cvReceived >= 5 && apt / cvReceived < 0.3) {
     items.push({ cls: 'warn', title: 'Muchas hojas de vida no terminan en candidatos que cumplen', text: 'El anuncio puede estar atrayendo perfiles diferentes a los requisitos reales de la vacante.' });
   }
-  if (total.apt >= 3 && total.scheduled / total.apt < 0.5) {
+  if (apt >= 3 && scheduled / apt < 0.5) {
     items.push({ cls: 'warn', title: 'Hay candidatos que cumplen, pero pocos agendan', text: 'Revisa la disponibilidad de horarios, la dirección y el tiempo que tarda el sistema en ofrecer una cita.' });
   }
-  if (total.scheduled >= 3 && total.attended / total.scheduled < 0.5) {
-    items.push({ cls: 'warn', title: 'La asistencia a entrevistas es baja', text: `${formatInteger(total.noShow)} candidato(s) aparecen con inasistencia registrada. Revisa recordatorios, ubicación y horarios.` });
+  if (scheduled >= 3 && attended / scheduled < 0.5) {
+    items.push({ cls: 'warn', title: 'La asistencia a entrevistas es baja', text: `${formatInteger(noShow)} candidato(s) aparecen con inasistencia registrada. Revisa recordatorios, ubicación y horarios.` });
   }
-  if (total.hired > 0) {
-    items.push({ cls: 'good', title: `${formatInteger(total.hired)} contratación(es) relacionadas con anuncios`, text: `El costo actual por contratación es ${formatMoney(total.costPerHired,currency)}.` });
+  if (hired > 0) {
+    items.push({ cls: 'good', title: `${formatInteger(hired)} contratación(es) relacionadas con anuncios`, text: `El costo actual por contratación es ${formatMoney(total.costPerHired,currency)}.` });
   }
-  if (Number(total.unattributedSpend || 0) > Number(total.spend || 0) * 0.25) {
-    items.push({ cls: 'info', title: 'Parte de la inversión no pudo relacionarse con personas', text: `${formatMoney(total.unattributedSpend,currency)} no se pudo distribuir por anuncio y día. Esta cifra es una estimación y sirve para revisar la calidad de esa relación.` });
+  if (unattributedSpend > spend * 0.25) {
+    items.push({ cls: 'info', title: 'Parte de la inversión no pudo relacionarse con personas', text: `${formatMoney(unattributedSpend,currency)} no se pudo distribuir por anuncio y día. Esta cifra es una estimación y sirve para revisar la calidad de esa relación.` });
   }
   if (!items.length) {
     items.push({ cls: 'info', title: 'Aún no hay una pérdida dominante', text: 'Continúa acumulando resultados. Lórren mostrará una alerta cuando encuentre un punto del proceso que necesite atención.' });
