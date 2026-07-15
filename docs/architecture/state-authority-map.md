@@ -84,6 +84,8 @@ El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y 
 
 Los escritores directos de `Message` bajan a dos: administración por eliminación transaccional y `ConversationMessageRepository`.
 
+El agregado permanece `consolidating`: la eliminación administrativa todavía no delega en una operación canónica de ciclo de vida.
+
 El repositorio distingue actualmente cinco contratos:
 
 - entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
