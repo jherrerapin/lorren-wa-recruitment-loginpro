@@ -39,63 +39,114 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('src/routes/webhook.js')
-          text = path.read_text(encoding='utf-8')
+          webhook_path = Path('src/routes/webhook.js')
+          webhook = webhook_path.read_text(encoding='utf-8')
 
           old_import = "import { persistInboundConversationMessage, persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';"
-          new_import = """import {
-            markConversationMessagesResponded,
-            mergeConversationMessagePayload,
-            persistInboundConversationMessage,
-            persistOutboundConversationMessage
-          } from '../services/conversationMessageRepository.js';"""
-          if old_import in text:
-              text = text.replace(old_import, new_import, 1)
-          elif 'mergeConversationMessagePayload' not in text or 'markConversationMessagesResponded' not in text:
+          new_import = (
+              "import {\n"
+              "  markConversationMessagesResponded,\n"
+              "  mergeConversationMessagePayload,\n"
+              "  persistInboundConversationMessage,\n"
+              "  persistOutboundConversationMessage\n"
+              "} from '../services/conversationMessageRepository.js';"
+          )
+          if old_import in webhook:
+              webhook = webhook.replace(old_import, new_import, 1)
+          elif 'mergeConversationMessagePayload' not in webhook or 'markConversationMessagesResponded' not in webhook:
               raise SystemExit('No se encontró el import esperado del repositorio de mensajes')
 
-          trace_start = text.index('export async function attachDebugTrace')
-          trace_end = text.index('\nfunction createDebugTrace', trace_start)
-          trace_replacement = """export async function attachDebugTrace(prisma, messageId, debugTrace) {
+          old_trace = """async function attachDebugTrace(prisma, messageId, debugTrace) {
+            if (!messageId) return;
+            const current = await prisma.message.findUnique({ where: { id: messageId }, select: { rawPayload: true } });
+            await prisma.message.update({ where: { id: messageId }, data: { rawPayload: { ...(current?.rawPayload || {}), debugTrace } } });
+          }"""
+          new_trace = """async function attachDebugTrace(prisma, messageId, debugTrace) {
             if (!messageId) return;
             return mergeConversationMessagePayload(prisma, {
               messageId,
-              patch: { debug: debugTrace }
+              patch: { debugTrace }
             });
           }"""
-          text = text[:trace_start] + trace_replacement + text[trace_end:]
+          if old_trace in webhook:
+              webhook = webhook.replace(old_trace, new_trace, 1)
+          elif new_trace not in webhook:
+              raise SystemExit('No se encontró attachDebugTrace directo ni delegado')
 
-          multiline_start = text.index('const pendingBatch = await fetchPendingTextBatch')
-          direct_start = text.find('            await prisma.message.updateMany({', multiline_start)
-          delegated_start = text.find('            await markConversationMessagesResponded(prisma, {', multiline_start)
-          if direct_start >= 0:
-              direct_end = text.index('\n          } catch (error)', direct_start)
-              replacement = """            await markConversationMessagesResponded(prisma, {
+          old_responded = """            await prisma.message.updateMany({
+              where: { id: { in: pendingBatch.map((item) => item.id) } },
+              data: { respondedAt: new Date() }
+            });"""
+          new_responded = """            await markConversationMessagesResponded(prisma, {
               messageIds: pendingBatch.map((item) => item.id),
               respondedAt: new Date()
             });"""
-              text = text[:direct_start] + replacement + text[direct_end:]
-          elif delegated_start < 0:
+          if old_responded in webhook:
+              webhook = webhook.replace(old_responded, new_responded, 1)
+          elif new_responded not in webhook:
               raise SystemExit('No se encontró el marcado directo ni delegado de respondedAt')
 
-          trace_block = text[trace_start:text.index('\nfunction createDebugTrace', trace_start)]
+          trace_start = webhook.index('async function attachDebugTrace')
+          trace_end = webhook.index('\nasync function prepareCandidateForInboundAutomation', trace_start)
+          trace_block = webhook[trace_start:trace_end]
           if 'prisma.message.update(' in trace_block or 'prisma.message.findUnique(' in trace_block:
               raise SystemExit('Persistencia directa restante en attachDebugTrace')
-          if 'mergeConversationMessagePayload(prisma,' not in trace_block:
-              raise SystemExit('Falta delegación de attachDebugTrace')
+          if 'patch: { debugTrace }' not in trace_block:
+              raise SystemExit('La traza no conserva la clave debugTrace')
 
-          processing_block = text[multiline_start:text.index('\n          } catch (error)', multiline_start)]
-          if 'prisma.message.updateMany(' in processing_block:
+          multiline_start = webhook.index('const pendingBatch = await fetchPendingTextBatch')
+          multiline_end = webhook.index('\n          } catch (error)', multiline_start)
+          multiline_block = webhook[multiline_start:multiline_end]
+          if 'prisma.message.updateMany(' in multiline_block:
               raise SystemExit('Persistencia directa restante en marcado respondedAt')
-          if 'markConversationMessagesResponded(prisma,' not in processing_block:
+          if 'markConversationMessagesResponded(prisma,' not in multiline_block:
               raise SystemExit('Falta delegación del marcado respondedAt')
 
-          path.write_text(text, encoding='utf-8')
+          webhook_path.write_text(webhook, encoding='utf-8')
+
+          repository_path = Path('src/services/conversationMessageRepository.js')
+          repository = repository_path.read_text(encoding='utf-8')
+          old_normalizer = """function normalizeExistingJsonObject(value) {
+            return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+          }"""
+          new_normalizer = """function normalizeExistingJsonObject(value) {
+            return value || {};
+          }"""
+          if old_normalizer in repository:
+              repository = repository.replace(old_normalizer, new_normalizer, 1)
+          elif new_normalizer not in repository:
+              raise SystemExit('No se encontró el normalizador de payload esperado')
+          repository_path.write_text(repository, encoding='utf-8')
+
+          test_path = Path('test/conversationMessageRepository.test.js')
+          tests = test_path.read_text(encoding='utf-8')
+          old_test = """  const debug = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };
+
+            const result = await mergeConversationMessagePayload(prisma, {
+              messageId: 'message-inbound-1',
+              patch: { debug }
+            });"""
+          new_test = """  const debugTrace = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };
+
+            const result = await mergeConversationMessagePayload(prisma, {
+              messageId: 'message-inbound-1',
+              patch: { debugTrace }
+            });"""
+          if old_test in tests:
+              tests = tests.replace(old_test, new_test, 1)
+          else:
+              tests = tests.replace("  const debug = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };", "  const debugTrace = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };", 1)
+              tests = tests.replace('    patch: { debug }', '    patch: { debugTrace }', 1)
+          tests = tests.replace('        debug\n', '        debugTrace\n', 1)
+          tests = tests.replace('  assert.deepEqual(result.rawPayload.debug, debug);', '  assert.deepEqual(result.rawPayload.debugTrace, debugTrace);', 1)
+          if 'patch: { debugTrace }' not in tests or 'result.rawPayload.debugTrace' not in tests:
+              raise SystemExit('La prueba no conserva la clave debugTrace')
+          test_path.write_text(tests, encoding='utf-8')
           PY
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/routes/webhook.js
+          git add src/routes/webhook.js src/services/conversationMessageRepository.js test/conversationMessageRepository.test.js
           if git diff --cached --quiet; then
             exit 0
           fi
