@@ -50,6 +50,13 @@ function normalizeExpectedPauseSnapshot(expected = {}, { requirePaused = false }
   };
 }
 
+async function loadCandidateTransitionMiss(client, candidateId) {
+  const candidate = await client.candidate.findUnique({
+    where: { id: candidateId }
+  });
+  return { count: 0, candidate };
+}
+
 async function applyConditionalCandidatePauseTransition(client, {
   candidateId,
   expected,
@@ -96,6 +103,10 @@ export async function pauseCandidateAutomationFromAdmin(client, input = {}) {
   const nowInput = input.now === undefined ? new Date() : input.now;
   const now = requireValidDate(nowInput, 'candidate_pause_now');
 
+  if (expected.botPaused) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId);
+  }
+
   return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
     expected,
@@ -114,7 +125,11 @@ export async function pauseCandidateAutomationFromAdmin(client, input = {}) {
 export async function resumeCandidateAutomationFromAdmin(client, input = {}) {
   const candidateClient = requireCandidateClient(client);
   const candidateId = requireCandidateId(input.candidateId);
-  const expected = normalizeExpectedPauseSnapshot(input.expected, { requirePaused: true });
+  const expected = normalizeExpectedPauseSnapshot(input.expected);
+
+  if (!expected.botPaused) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId);
+  }
 
   return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
