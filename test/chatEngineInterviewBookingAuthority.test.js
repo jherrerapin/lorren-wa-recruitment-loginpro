@@ -6,8 +6,8 @@ const source = fs.readFileSync('src/services/chatEngine.js', 'utf8');
 
 function between(start, end) {
   const startIndex = source.indexOf(start);
-  const endIndex = source.indexOf(end, startIndex + start.length);
   assert.notEqual(startIndex, -1, `No se encontró el marcador inicial: ${start}`);
+  const endIndex = source.indexOf(end, startIndex + start.length);
   assert.notEqual(endIndex, -1, `No se encontró el marcador final: ${end}`);
   return source.slice(startIndex, endIndex);
 }
