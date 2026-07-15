@@ -363,6 +363,14 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
     /responded_at_invalid/
   );
   await assert.rejects(
+    () => deleteConversationMessagesForCandidate(prisma, null),
+    /candidate_message_delete_input_invalid/
+  );
+  await assert.rejects(
+    () => deleteConversationMessagesForCandidate(prisma, 'candidate-test-1'),
+    /candidate_message_delete_input_invalid/
+  );
+  await assert.rejects(
     () => deleteConversationMessagesForCandidate(prisma, {
       candidateId: '   '
     }),
