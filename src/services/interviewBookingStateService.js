@@ -120,7 +120,7 @@ export async function cancelActiveInterviewBookings(prisma, input = {}) {
   const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
   const replacementStatus = requireNonEmptyString(input.replacementStatus ?? 'CANCELLED', 'replacement_status');
 
-  const result = await prisma.interviewBooking.updateMany({
+  return prisma.interviewBooking.updateMany({
     where: {
       candidateId,
       status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
@@ -130,10 +130,4 @@ export async function cancelActiveInterviewBookings(prisma, input = {}) {
       reminderWindowClosed: true
     }
   });
-
-  return {
-    updated: result.count,
-    candidateId,
-    replacementStatus
-  };
 }
