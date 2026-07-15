@@ -359,14 +359,10 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
   assert.equal(strongInput.sources.cv.experienceSummary, 'Dos años manejando inventarios y Excel.');
   assert.deepEqual(strongInput.sources.registration, {
     transportMode: 'Moto',
-    residence: 'Suba',
-    declaredExperience: {
-      hasExperience: 'Sí',
-      duration: '2 años',
-      summary: 'Registro: Dos años manejando inventarios y Excel.'
-    },
-    availability: 'Tiempo completo'
+    residence: 'Suba'
   });
+  assert.equal('declaredExperience' in strongInput.sources.registration, false);
+  assert.equal('availability' in strongInput.sources.registration, false);
   for (const excludedField of ['fullName', 'phone', 'documentNumber', 'age', 'gender', 'medicalRestrictions']) {
     assert.equal(JSON.stringify(strongInput).includes(`"${excludedField}"`), false);
   }
@@ -396,6 +392,8 @@ test('Terra es el modelo por defecto y las tareas especializadas permiten overri
   assert.match(routeSource, /Revisión manual/);
   assert.match(routeSource, /Datos registrados por el candidato/);
   assert.match(routeSource, /Medio de transporte/);
+  assert.doesNotMatch(routeSource, /Experiencia declarada/);
+  assert.doesNotMatch(routeSource, /\['Disponibilidad', candidate\?\.availability\]/);
   assert.match(routeSource, /Evidencia encontrada \(HV o registro\)/);
   assert.doesNotMatch(routeSource, /cambiar.*estado.*candidato/i);
 });
