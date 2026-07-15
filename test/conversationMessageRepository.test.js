@@ -9,7 +9,12 @@ import {
   updateConversationMessagePayload
 } from '../src/services/conversationMessageRepository.js';
 
-function createPrismaMock({ inboundCount = 1, updateManyCount = 2, existingRawPayload = { source: 'inbound' } } = {}) {
+function createPrismaMock({
+  inboundCount = 1,
+  updateManyCount = 2,
+  existingRawPayload = { source: 'inbound' },
+  messageExists = true
+} = {}) {
   const calls = {
     createMany: [],
     create: [],
@@ -29,7 +34,7 @@ function createPrismaMock({ inboundCount = 1, updateManyCount = 2, existingRawPa
       },
       findUnique: async (args) => {
         calls.findUnique.push(args);
-        return { rawPayload: existingRawPayload };
+        return messageExists ? { rawPayload: existingRawPayload } : null;
       },
       update: async (args) => {
         calls.update.push(args);
@@ -174,6 +179,21 @@ test('fusiona una traza en rawPayload sin borrar metadatos previos', async () =>
   assert.deepEqual(result.rawPayload.debugTrace, debugTrace);
 });
 
+test('rechaza la fusión si el mensaje no existe sin intentar una actualización', async () => {
+  const { prisma, calls } = createPrismaMock({ messageExists: false });
+
+  await assert.rejects(
+    () => mergeConversationMessagePayload(prisma, {
+      messageId: 'message-missing-1',
+      patch: { debugTrace: { currentStep_before: 'MENU' } }
+    }),
+    /message_not_found/
+  );
+
+  assert.equal(calls.findUnique.length, 1);
+  assert.equal(calls.update.length, 0);
+});
+
 test('marca un lote deduplicado como respondido con fecha controlada', async () => {
   const { prisma, calls } = createPrismaMock({ updateManyCount: 2 });
   const respondedAt = new Date('2026-07-14T21:00:00.000Z');
@@ -254,6 +274,14 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
     /responded_at_invalid/
   );
   await assert.rejects(
+    () => persistOutboundConversationMessage(prisma, {
+      candidateId: 'candidate-test-1',
+      messageType: MessageType.TEXT,
+      respondedAt: true
+    }),
+    /responded_at_invalid/
+  );
+  await assert.rejects(
     () => updateConversationMessagePayload(prisma, {
       messageId: '  ',
       rawPayload: {}
@@ -290,6 +318,20 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
     () => markConversationMessagesResponded(prisma, {
       messageIds: ['message-test-1'],
       respondedAt: 'fecha-inválida'
+    }),
+    /responded_at_invalid/
+  );
+  await assert.rejects(
+    () => markConversationMessagesResponded(prisma, {
+      messageIds: ['message-test-1'],
+      respondedAt: null
+    }),
+    /responded_at_invalid/
+  );
+  await assert.rejects(
+    () => markConversationMessagesResponded(prisma, {
+      messageIds: ['message-test-1'],
+      respondedAt: false
     }),
     /responded_at_invalid/
   );
