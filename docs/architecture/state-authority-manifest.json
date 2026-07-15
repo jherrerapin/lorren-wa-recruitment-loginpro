@@ -52,12 +52,11 @@
     "message": {
       "tableName": "Message",
       "domain": "conversation",
-      "migrationStage": "consolidating",
+      "migrationStage": "canonical",
       "targetAuthority": "ConversationMessageRepository",
       "risk": "high",
       "writers": [
-        { "path": "src/routes/admin.js", "role": "admin", "reason": "La mensajería manual delega en el repositorio; conserva eliminación transaccional al borrar candidatos" },
-        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Entradas idempotentes, salidas, reemplazo y fusión de payload, y marcado por lote de respondedAt" }
+        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Única autoridad para entradas idempotentes, salidas, payload, respondedAt y eliminación por candidato" }
       ]
     },
     "candidateDataConsentEvent": {
