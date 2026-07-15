@@ -35,7 +35,7 @@ import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
 import { buildManualInterventionCandidateUpdate, buildManualWhatsAppOpenCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
-import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';
+import { listOfferableSlots, createBooking, formatInterviewDate } from '../services/interviewScheduler.js';
 import {
   ACTIVE_INTERVIEW_BOOKING_STATUSES,
   applyAdministrativeInterviewBookingAction,
@@ -2309,28 +2309,14 @@ export function adminRouter(prisma) {
         return res.redirect(withFlashMessage(returnTo, 'error', 'Ese horario ya no está disponible. Actualiza la página e intenta de nuevo.'));
       }
 
-      await prisma.$transaction(async (tx) => {
-        const activeBooking = await tx.interviewBooking.findFirst({
-          where: {
-            candidateId: candidate.id,
-            status: { in: ACTIVE_BOOKING_STATUSES }
-          },
-          select: { id: true }
-        });
-
-        if (activeBooking) {
-          await cancelCandidateBookings(tx, candidate.id, 'RESCHEDULED');
-        }
-
-        await createBooking(
-          tx,
-          candidate.id,
-          candidate.vacancyId,
-          chosenOffer.slot.id,
-          chosenOffer.date,
-          !chosenOffer.windowOk
-        );
-      });
+      await createBooking(
+        prisma,
+        candidate.id,
+        candidate.vacancyId,
+        chosenOffer.slot.id,
+        chosenOffer.date,
+        !chosenOffer.windowOk
+      );
 
       try {
         await prisma.candidate.update({

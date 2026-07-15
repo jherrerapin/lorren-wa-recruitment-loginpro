@@ -239,18 +239,13 @@ Hasta tomar esa decisión, la eliminación física queda reservada a corrección
 
 ### Asignación manual
 
-1. Verifica slot ofrecible.
-2. Abre una transacción.
-3. Busca una reserva activa según la lista administrativa.
-4. Invoca `cancelCandidateBookings(tx, ..., 'RESCHEDULED')`.
-5. Crea la nueva reserva con `createBooking(tx, ...)`.
-6. Fuera de la transacción, cambia al candidato a `SCHEDULED`, con fallback a `SCHEDULING`.
+1. Verifica que el slot siga siendo ofrecible.
+2. Llama una sola vez a `createBooking(prisma, ...)` con el cliente Prisma principal.
+3. La autoridad reutiliza la reserva exacta o reemplaza las activas y crea la nueva dentro de su propia transacción `Serializable`.
+4. Fuera de la transacción de reservas, cambia al candidato a `SCHEDULED`, con fallback a `SCHEDULING`.
+5. Registra la auditoría administrativa.
 
-La reserva se reemplaza transaccionalmente, pero:
-
-- si solo encuentra `RESCHEDULED`, el scheduler no lo modifica porque solo actúa sobre `SCHEDULED`/`CONFIRMED`;
-- el paso del candidato queda fuera de la transacción;
-- la auditoría también queda fuera.
+La ruta ya no abre una transacción externa, no preconsulta `InterviewBooking` y no llama `cancelCandidateBookings(..., 'RESCHEDULED')`. Esto conserva en la autoridad el rollback conjunto, los reintentos `P2034` y la recuperación exacta ante `P2002`. El paso del candidato y la auditoría permanecen fuera de la transacción de reservas para conservar el comportamiento existente.
 
 ## Inconsistencias confirmadas
 
