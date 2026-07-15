@@ -134,17 +134,19 @@ test('la migración alinea AttachmentAnalysis sin borrar sus columnas antiguas',
   }
   assert.match(migration, /"originalName" = COALESCE\("originalName", "fileName"\)/);
   assert.match(migration, /"analysedAt" = COALESCE\("analysedAt", "createdAt", CURRENT_TIMESTAMP\)/);
-  assert.match(migration, /jsonb_build_object\('legacyEvidence', "evidence"\)/);
+  assert.match(migration, /jsonb_build_object\('legacyEvidenceText', "evidence"\)/);
+  assert.doesNotMatch(migration, /"evidence"::jsonb/);
   assert.doesNotMatch(migration, /DROP (?:COLUMN|TABLE)/i);
 });
 
 test('la revisión evita la consulta duplicada y responde con la página ante errores inesperados', () => {
   const routePath = fileURLToPath(new URL('../src/routes/lorenV2CvAnalysis.js', import.meta.url));
   const source = readFileSync(routePath, 'utf8');
-  const runRoute = source.slice(
-    source.indexOf("router.post('/run'"),
-    source.indexOf("router.post('/:candidateId/analyze'")
-  );
+  const startIndex = source.indexOf("router.post('/run'");
+  const endIndex = source.indexOf("router.post('/:candidateId/analyze'");
+  assert.ok(startIndex >= 0, 'No se encontró el inicio de la ruta /run');
+  assert.ok(endIndex > startIndex, 'No se encontró el final de la ruta /run');
+  const runRoute = source.slice(startIndex, endIndex);
 
   assert.doesNotMatch(runRoute, /loadCandidates\(/);
   assert.match(runRoute, /try\s*\{/);
