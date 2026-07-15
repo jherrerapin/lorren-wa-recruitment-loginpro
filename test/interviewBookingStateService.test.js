@@ -29,7 +29,6 @@ function matchesWhere(booking, where = {}) {
   if (where.scheduledAt !== undefined
     && new Date(booking.scheduledAt).getTime() !== new Date(where.scheduledAt).getTime()) return false;
   if (where.status?.in && !where.status.in.includes(booking.status)) return false;
-  if (where.id?.not !== undefined && booking.id === where.id.not) return false;
   return true;
 }
 
@@ -167,7 +166,7 @@ test('reutiliza una reserva activa exacta sin crear ni cerrar otra', async () =>
   assert.equal(getState()[0].status, 'SCHEDULED');
 });
 
-test('crea el reemplazo antes de cerrar la reserva anterior dentro de una transacción serializable', async () => {
+test('cierra y crea dentro de una transacción serializable compatible con el índice único activo', async () => {
   const { prisma, calls, getState } = createPrismaHarness({ bookings: [activeBooking] });
 
   const result = await createScheduledInterviewBooking(prisma, bookingInput);
@@ -176,19 +175,18 @@ test('crea el reemplazo antes de cerrar la reserva anterior dentro de una transa
   const replacement = state.find((booking) => booking.id === result.id);
 
   assert.deepEqual(calls.transactions, [{ isolationLevel: 'Serializable' }]);
-  assert.deepEqual(calls.sequence, ['findMany', 'create', 'updateMany']);
+  assert.deepEqual(calls.sequence, ['findMany', 'updateMany', 'create']);
   assert.equal(previous.status, 'RESCHEDULED');
   assert.equal(previous.reminderWindowClosed, true);
   assert.equal(replacement.status, 'SCHEDULED');
   assert.equal(replacement.reminderWindowClosed, false);
   assert.deepEqual(calls.updateMany[0].where, {
     candidateId: 'candidate-1',
-    id: { not: result.id },
     status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
   });
 });
 
-test('un fallo al crear revierte la unidad y conserva activa la reserva anterior', async () => {
+test('un fallo al crear revierte el cierre y conserva activa la reserva anterior', async () => {
   const createFailure = new Error('database unavailable');
   const { prisma, calls, getState } = createPrismaHarness({
     bookings: [activeBooking],
@@ -200,14 +198,14 @@ test('un fallo al crear revierte la unidad y conserva activa la reserva anterior
     (error) => error === createFailure
   );
 
-  assert.deepEqual(calls.sequence, ['findMany', 'create']);
-  assert.equal(calls.updateMany.length, 0);
+  assert.deepEqual(calls.sequence, ['findMany', 'updateMany', 'create']);
+  assert.equal(calls.updateMany.length, 1);
   assert.deepEqual(getState(), [activeBooking]);
 });
 
-test('un fallo al cerrar la anterior también revierte la reserva recién creada', async () => {
+test('un fallo al cerrar impide crear y revierte la unidad', async () => {
   const updateFailure = new Error('update failed');
-  const { prisma, getState } = createPrismaHarness({
+  const { prisma, calls, getState } = createPrismaHarness({
     bookings: [activeBooking],
     updateErrors: [updateFailure]
   });
@@ -217,6 +215,8 @@ test('un fallo al cerrar la anterior también revierte la reserva recién creada
     (error) => error === updateFailure
   );
 
+  assert.deepEqual(calls.sequence, ['findMany', 'updateMany']);
+  assert.equal(calls.create.length, 0);
   assert.deepEqual(getState(), [activeBooking]);
 });
 
@@ -227,7 +227,7 @@ test('reutiliza un tx existente sin intentar abrir una transacción anidada', as
   const state = getState();
 
   assert.equal(calls.transactions.length, 0);
-  assert.deepEqual(calls.sequence, ['findMany', 'create', 'updateMany']);
+  assert.deepEqual(calls.sequence, ['findMany', 'updateMany', 'create']);
   assert.equal(state.find((booking) => booking.id === activeBooking.id).status, 'RESCHEDULED');
   assert.equal(state.find((booking) => booking.id === result.id).status, 'SCHEDULED');
 });
@@ -251,6 +251,7 @@ test('ante P2002 solo recupera la reserva concurrente exacta solicitada', async 
     ...bookingInput
   };
   const { prisma } = createPrismaHarness({
+    bookings: [activeBooking],
     createErrors: [createError('P2002')],
     afterRollback: ({ insertBooking }) => insertBooking(concurrentExact)
   });
@@ -267,6 +268,7 @@ test('no confunde otra reserva activa con la reserva concurrente exacta', async 
     id: 'booking-concurrent-other-slot'
   };
   const { prisma } = createPrismaHarness({
+    bookings: [activeBooking],
     createErrors: [uniqueFailure],
     afterRollback: ({ insertBooking }) => insertBooking(concurrentOtherSlot)
   });
