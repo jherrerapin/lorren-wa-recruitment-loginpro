@@ -18,7 +18,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
-| `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
+| `InterviewBooking` | 5 | Crítico | En consolidación | `InterviewBookingStateService` |
 | `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
@@ -84,6 +84,25 @@ El repositorio distingue actualmente seis contratos:
 
 La autoridad de persistencia de `Message` ya es canónica. Esto no significa que exista un outbox productivo: los consumidores migrados continúan enviando al proveedor antes de persistir para preservar el comportamiento actual. El outbox, los estados de entrega y la idempotencia de salida siguen siendo una evolución separada.
 
+### Reservas de entrevista en consolidación
+
+`InterviewBookingStateService` establece la primera frontera compartida del agregado. `interviewScheduler.js` conserva la resolución de fechas, cupos, anticipación mínima, ventana de WhatsApp y selección del siguiente slot, pero deja de escribir `InterviewBooking` directamente.
+
+Las funciones públicas del scheduler mantienen su firma y retorno:
+
+- `createBooking()` delega en `createScheduledInterviewBooking()`;
+- `cancelCandidateBookings()` delega en `cancelActiveInterviewBookings()` y conserva el resultado `{ count }` de Prisma.
+
+La nueva autoridad protege las invariantes vigentes sin introducir una transacción o cambiar estados:
+
+- una reserva activa idéntica se reutiliza;
+- antes de crear otra reserva se cierran las activas del candidato con el `replacementStatus` recibido;
+- la nueva reserva continúa naciendo como `SCHEDULED` por defecto de Prisma;
+- si la creación falla por una carrera, se recupera la reserva activa más próxima;
+- la cancelación solo afecta estados `SCHEDULED` o `CONFIRMED` y cierra la ventana de recordatorio.
+
+El número de escritores permanece en cinco porque administración, webhook, `chatEngine` y recordatorios aún realizan otras transiciones directamente. El scheduler sale del inventario y es sustituido por la autoridad canónica objetivo.
+
 ## Hallazgos
 
 ### 1. `Candidate` funciona como agregado compartido por demasiados módulos
@@ -101,9 +120,9 @@ Lo modifican rutas HTTP, webhook, motores conversacionales, consentimiento, atri
 
 La meta no es mover estas quince escrituras a un archivo gigante. La autoridad objetivo debe exponer casos de uso y validar transiciones, mientras cada dominio conserva su propia decisión especializada.
 
-### 2. Las reservas tienen varias autoridades de transición
+### 2. Las reservas conservan cuatro fronteras directas por migrar
 
-`InterviewBooking` se modifica desde agenda, webhook, recordatorios, administración y un motor conversacional alternativo. Antes de extraer agenda deben centralizarse invariantes como:
+Después de extraer las mutaciones del scheduler, `InterviewBooking` todavía se modifica desde webhook, recordatorios, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:
 
 - no marcar `RESCHEDULED` sin una nueva reserva;
 - no confirmar una reserva cancelada;
@@ -148,7 +167,7 @@ La consolidación se completó sin mover las políticas de negocio del panel ni 
 ## Orden recomendado de consolidación
 
 1. Diseñar outbox y estados de entrega sobre la autoridad canónica de `Message`.
-2. `InterviewBooking` y sus transiciones.
+2. Completar `InterviewBooking` y sus transiciones.
 3. Campos conversacionales de `Candidate`.
 4. Atribución, CV, recordatorios y operaciones administrativas del candidato.
 5. Disponibilidad de entrevista y configuración de slots.
