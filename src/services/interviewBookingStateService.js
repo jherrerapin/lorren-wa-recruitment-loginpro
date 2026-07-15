@@ -356,6 +356,7 @@ export async function markInterviewBookingNoResponse(prisma, input = {}) {
       candidateId,
       status: InterviewBookingStatus.SCHEDULED,
       reminderSentAt: { not: null },
+      reminderResponse: null,
       scheduledAt: {
         gte: now,
         lte: windowEnd
