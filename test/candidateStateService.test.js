@@ -4,6 +4,7 @@ import { resumeCandidateAutomationOnInbound } from '../src/services/candidateSta
 
 function sameValue(left, right) {
   if (left instanceof Date || right instanceof Date) {
+    if (left == null || right == null) return left === right;
     return new Date(left).getTime() === new Date(right).getTime();
   }
   return left === right;
