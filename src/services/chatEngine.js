@@ -2,6 +2,7 @@ import axios from 'axios';
 import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
 import { getNextAvailableSlotAfter, formatInterviewDate } from './interviewScheduler.js';
+import { applyInterviewReminderResponse } from './interviewBookingStateService.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { guardReplyAgainstReadinessDrift, sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
@@ -132,15 +133,15 @@ async function loadActiveInterviewBooking(prisma, candidateId) {
 async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inboundText, booking, intent, classification, currentStep, now = new Date(), nextSlot = null }) {
   if (!booking?.id || !APPOINTMENT_ACTION_INTENTS.has(intent)) return null;
 
+  const transition = await applyInterviewReminderResponse(prisma, {
+    bookingId: booking.id,
+    currentStatus: booking.status,
+    responseText: inboundText,
+    intent
+  });
+  if (transition.count !== 1) return null;
+
   if (intent === 'confirm_attendance') {
-    await prisma.interviewBooking.update({
-      where: { id: booking.id },
-      data: {
-        status: 'CONFIRMED',
-        reminderResponse: inboundText,
-        reminderWindowClosed: true
-      }
-    });
     return buildEngineHandledResult({
       currentStep,
       intent,
@@ -150,14 +151,6 @@ async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inb
   }
 
   if (intent === 'cancel_interview') {
-    await prisma.interviewBooking.update({
-      where: { id: booking.id },
-      data: {
-        status: 'CANCELLED',
-        reminderResponse: inboundText,
-        reminderWindowClosed: true
-      }
-    });
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {
@@ -174,15 +167,6 @@ async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inb
   }
 
   if (intent === 'reschedule_interview') {
-    await prisma.interviewBooking.update({
-      where: { id: booking.id },
-      data: {
-        status: 'RESCHEDULED',
-        reminderResponse: inboundText,
-        reminderWindowClosed: true
-      }
-    });
-
     const lastInboundAt = candidate.lastInboundAt ? new Date(candidate.lastInboundAt) : null;
     const alternative = nextSlot?.slot && !nextSlot?.isConfirmedBooking
       ? nextSlot

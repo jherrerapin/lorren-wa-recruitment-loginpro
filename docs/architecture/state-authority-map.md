@@ -18,7 +18,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
-| `InterviewBooking` | 3 | Crítico | En consolidación | `InterviewBookingStateService` |
+| `InterviewBooking` | 2 | Crítico | En consolidación | `InterviewBookingStateService` |
 | `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
@@ -107,7 +107,7 @@ La autoridad protege estas invariantes:
 - la limpieza por ciclo de vida elimina reservas únicamente por candidato y reutiliza la transacción recibida;
 - la asignación manual valida primero la oferta y después delega una sola creación o sustitución atómica con el cliente Prisma raíz.
 
-`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El panel delega transiciones manuales, eliminación individual, limpieza por ciclo de vida y asignación manual; conserva permisos, acceso, auditoría y el orden mensajes → reservas → candidato. `admin.js` no escribe `InterviewBooking` ni coordina un cierre previo redundante. El número total de escritores permanece en tres: webhook, `chatEngine` y la autoridad canónica.
+`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El panel delega transiciones manuales, eliminación individual, limpieza por ciclo de vida y asignación manual; conserva permisos, acceso, auditoría y el orden mensajes → reservas → candidato. `chatEngine.js` delega confirmación, cancelación y solicitud de reprogramación; una carrera no produce una respuesta de éxito y la solicitud conserva la reserva activa. `admin.js` y `chatEngine.js` no escriben `InterviewBooking` directamente. El número total de escritores baja a dos: webhook y la autoridad canónica.
 
 ## Hallazgos
 
@@ -126,9 +126,9 @@ Lo modifican rutas HTTP, webhook, motores conversacionales, consentimiento, atri
 
 La meta no es mover estas quince escrituras a un archivo gigante. La autoridad objetivo debe exponer casos de uso y validar transiciones, mientras cada dominio conserva su propia decisión especializada.
 
-### 2. Las reservas conservan dos fronteras directas por migrar
+### 2. Las reservas conservan una frontera directa por migrar
 
-Después de extraer scheduler, recordatorios, transiciones manuales, eliminaciones físicas y asignación manual, `InterviewBooking` todavía se modifica directamente desde webhook y un motor conversacional alternativo. Las responsabilidades administrativas quedaron migradas; las dos fronteras restantes continúan bajo #453 y #421. Deben centralizarse gradualmente invariantes como:
+Después de extraer scheduler, recordatorios, administración y `chatEngine.js`, `InterviewBooking` todavía se modifica directamente solo desde el webhook. La frontera conversacional principal continúa bajo #453 y #421 y debe migrarse preservando replays, textos y orden de efectos. Deben centralizarse gradualmente invariantes como:
 
 - no marcar `RESCHEDULED` sin una nueva reserva;
 - no confirmar una reserva cancelada;

@@ -18,21 +18,81 @@
       "targetAuthority": "CandidateStateService",
       "risk": "critical",
       "writers": [
-        { "path": "src/routes/admin.js", "role": "admin", "reason": "Cambios manuales y administrativos del candidato" },
-        { "path": "src/routes/metaAdsStats.js", "role": "integration", "reason": "Sincronización y corrección de atribución Meta" },
-        { "path": "src/routes/publicDispatchClient.js", "role": "integration", "reason": "Vinculación con despacho" },
-        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Orquestación conversacional monolítica vigente" },
-        { "path": "src/services/adminSupervisor.js", "role": "admin", "reason": "Intervenciones del supervisor y pausas o reanudaciones; delega todos los mensajes en el repositorio compartido" },
-        { "path": "src/services/campaignAttribution.js", "role": "integration", "reason": "Atribución de campaña y vacante" },
-        { "path": "src/services/chatEngine.js", "role": "legacy", "reason": "Motor conversacional alternativo" },
-        { "path": "src/services/consentProfileCapture.js", "role": "boundary", "reason": "Captura posterior al consentimiento" },
-        { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Mutación atómica compartida de campos y evento de consentimiento" },
-        { "path": "src/services/conversationEngine.js", "role": "legacy", "reason": "Motor conversacional heredado" },
-        { "path": "src/services/cvStorage.js", "role": "boundary", "reason": "Persistencia de metadatos y contenido de CV" },
-        { "path": "src/services/dataConsentGate.js", "role": "boundary", "reason": "Frontera de consentimiento y reanudación; delega consentimiento y mensajes en autoridades compartidas" },
-        { "path": "src/services/metaAdsInsightsSync.js", "role": "integration", "reason": "Sincronización de datos Meta" },
-        { "path": "src/services/originRuntime.js", "role": "integration", "reason": "Origen y procedencia del candidato" },
-        { "path": "src/services/reminder.js", "role": "operational", "reason": "Estados y tiempos de recordatorios; delega la persistencia de mensajes" }
+        {
+          "path": "src/routes/admin.js",
+          "role": "admin",
+          "reason": "Cambios manuales y administrativos del candidato"
+        },
+        {
+          "path": "src/routes/metaAdsStats.js",
+          "role": "integration",
+          "reason": "Sincronización y corrección de atribución Meta"
+        },
+        {
+          "path": "src/routes/publicDispatchClient.js",
+          "role": "integration",
+          "reason": "Vinculación con despacho"
+        },
+        {
+          "path": "src/routes/webhook.js",
+          "role": "legacy",
+          "reason": "Orquestación conversacional monolítica vigente"
+        },
+        {
+          "path": "src/services/adminSupervisor.js",
+          "role": "admin",
+          "reason": "Intervenciones del supervisor y pausas o reanudaciones; delega todos los mensajes en el repositorio compartido"
+        },
+        {
+          "path": "src/services/campaignAttribution.js",
+          "role": "integration",
+          "reason": "Atribución de campaña y vacante"
+        },
+        {
+          "path": "src/services/chatEngine.js",
+          "role": "legacy",
+          "reason": "Motor conversacional alternativo"
+        },
+        {
+          "path": "src/services/consentProfileCapture.js",
+          "role": "boundary",
+          "reason": "Captura posterior al consentimiento"
+        },
+        {
+          "path": "src/services/consentStateService.js",
+          "role": "canonical",
+          "reason": "Mutación atómica compartida de campos y evento de consentimiento"
+        },
+        {
+          "path": "src/services/conversationEngine.js",
+          "role": "legacy",
+          "reason": "Motor conversacional heredado"
+        },
+        {
+          "path": "src/services/cvStorage.js",
+          "role": "boundary",
+          "reason": "Persistencia de metadatos y contenido de CV"
+        },
+        {
+          "path": "src/services/dataConsentGate.js",
+          "role": "boundary",
+          "reason": "Frontera de consentimiento y reanudación; delega consentimiento y mensajes en autoridades compartidas"
+        },
+        {
+          "path": "src/services/metaAdsInsightsSync.js",
+          "role": "integration",
+          "reason": "Sincronización de datos Meta"
+        },
+        {
+          "path": "src/services/originRuntime.js",
+          "role": "integration",
+          "reason": "Origen y procedencia del candidato"
+        },
+        {
+          "path": "src/services/reminder.js",
+          "role": "operational",
+          "reason": "Estados y tiempos de recordatorios; delega la persistencia de mensajes"
+        }
       ]
     },
     "interviewBooking": {
@@ -42,9 +102,16 @@
       "targetAuthority": "InterviewBookingStateService",
       "risk": "critical",
       "writers": [
-        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Confirmación, cancelación y reprogramación desde conversación" },
-        { "path": "src/services/chatEngine.js", "role": "legacy", "reason": "Respuestas de agenda del motor alternativo" },
-        { "path": "src/services/interviewBookingStateService.js", "role": "canonical", "reason": "Creación, reemplazo, cancelación, recordatorios, respuestas, transiciones manuales y eliminaciones físicas de reservas" }
+        {
+          "path": "src/routes/webhook.js",
+          "role": "legacy",
+          "reason": "Confirmación, cancelación y reprogramación desde conversación"
+        },
+        {
+          "path": "src/services/interviewBookingStateService.js",
+          "role": "canonical",
+          "reason": "Creación, reemplazo, cancelación, recordatorios, respuestas, transiciones manuales y eliminaciones físicas de reservas"
+        }
       ]
     },
     "message": {
@@ -54,7 +121,11 @@
       "targetAuthority": "ConversationMessageRepository",
       "risk": "high",
       "writers": [
-        { "path": "src/services/conversationMessageRepository.js", "role": "canonical", "reason": "Entradas idempotentes, salidas, mutaciones de payload, marcado de respondedAt y eliminación por ciclo de vida del candidato" }
+        {
+          "path": "src/services/conversationMessageRepository.js",
+          "role": "canonical",
+          "reason": "Entradas idempotentes, salidas, mutaciones de payload, marcado de respondedAt y eliminación por ciclo de vida del candidato"
+        }
       ]
     },
     "candidateDataConsentEvent": {
@@ -64,7 +135,11 @@
       "targetAuthority": "ConsentStateService",
       "risk": "critical",
       "writers": [
-        { "path": "src/services/consentStateService.js", "role": "canonical", "reason": "Única autoridad para actualización del candidato y creación del evento versionado" }
+        {
+          "path": "src/services/consentStateService.js",
+          "role": "canonical",
+          "reason": "Única autoridad para actualización del candidato y creación del evento versionado"
+        }
       ]
     },
     "attachmentAnalysis": {
@@ -74,8 +149,16 @@
       "targetAuthority": "AttachmentAnalysisRepository",
       "risk": "high",
       "writers": [
-        { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Clasificación inicial dentro del webhook" },
-        { "path": "src/services/cvIntelligence.js", "role": "boundary", "reason": "Análisis estructurado de hoja de vida" }
+        {
+          "path": "src/routes/webhook.js",
+          "role": "legacy",
+          "reason": "Clasificación inicial dentro del webhook"
+        },
+        {
+          "path": "src/services/cvIntelligence.js",
+          "role": "boundary",
+          "reason": "Análisis estructurado de hoja de vida"
+        }
       ]
     },
     "jobQueue": {
@@ -85,7 +168,11 @@
       "targetAuthority": "JobQueueService",
       "risk": "high",
       "writers": [
-        { "path": "src/services/jobQueue.js", "role": "canonical", "reason": "Creación, reclamo y finalización de jobs, incluido SQL directo" }
+        {
+          "path": "src/services/jobQueue.js",
+          "role": "canonical",
+          "reason": "Creación, reclamo y finalización de jobs, incluido SQL directo"
+        }
       ]
     },
     "candidateAdminEvent": {
@@ -95,7 +182,11 @@
       "targetAuthority": "CandidateAdminAuditService",
       "risk": "medium",
       "writers": [
-        { "path": "src/routes/admin.js", "role": "admin", "reason": "Trazabilidad de cambios administrativos" }
+        {
+          "path": "src/routes/admin.js",
+          "role": "admin",
+          "reason": "Trazabilidad de cambios administrativos"
+        }
       ]
     },
     "interviewSlot": {
@@ -105,7 +196,11 @@
       "targetAuthority": "InterviewAvailabilityService",
       "risk": "high",
       "writers": [
-        { "path": "src/routes/admin.js", "role": "admin", "reason": "Configuración manual de disponibilidad" }
+        {
+          "path": "src/routes/admin.js",
+          "role": "admin",
+          "reason": "Configuración manual de disponibilidad"
+        }
       ]
     }
   }
