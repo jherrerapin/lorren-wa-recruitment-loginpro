@@ -44,6 +44,9 @@ test('solo registra reanudación cuando la comparación condicional fue aplicada
   const returnIndex = resumeFunction.lastIndexOf('return transition.candidate || candidate');
 
   assert.ok(transitionIndex >= 0);
+  assert.ok(countGuardIndex >= 0);
+  assert.ok(logIndex >= 0);
+  assert.ok(returnIndex >= 0);
   assert.ok(countGuardIndex > transitionIndex, 'El log debe depender del resultado persistido.');
   assert.ok(logIndex > countGuardIndex, 'No se debe informar reanudación antes de count === 1.');
   assert.ok(returnIndex > logIndex, 'La función debe devolver el estado actual después de la comparación.');
