@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   sync-pr-base:
-    name: Synchronize PR base and remove sync job
+    name: Synchronize PR base and reconcile booking gates
     if: github.event_name == 'pull_request' && github.event.pull_request.number == 454 && github.actor != 'github-actions[bot]'
     permissions:
       contents: write
@@ -33,31 +33,71 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Merge current main and remove this temporary job
+      - name: Merge current main and reconcile only CI workflow
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+
+          set +e
           git merge --no-commit --no-ff origin/main
+          merge_exit=$?
+          set -e
+
+          conflicts=$(git diff --name-only --diff-filter=U)
+          if [ -n "$conflicts" ]; then
+            if [ "$conflicts" != ".github/workflows/ci.yml" ]; then
+              echo "Conflictos fuera del workflow protegido:"
+              echo "$conflicts"
+              exit 1
+            fi
+            git checkout --theirs .github/workflows/ci.yml
+          elif [ "$merge_exit" -ne 0 ]; then
+            echo "El merge falló sin un conflicto resoluble del workflow"
+            exit 1
+          fi
+
           python - <<'PY'
           from pathlib import Path
 
           path = Path('.github/workflows/ci.yml')
           text = path.read_text(encoding='utf-8')
-          start = text.index('  sync-pr-base:')
-          end = text.index('  state-authority:', start)
-          text = text[:start] + text[end:]
-          if 'contents: write' in text or 'sync-pr-base:' in text:
-              raise SystemExit('No se retiró completamente el job temporal')
+
+          if '  sync-pr-base:' in text:
+              start = text.index('  sync-pr-base:')
+              end = text.index('  state-authority:', start)
+              text = text[:start] + text[end:]
+
+          authority_gate = """      - name: Run interview booking authority regressions
+                run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js
+
+          """
+          anchor = """      - name: Run consent and message authority regressions
+                run: node --test test/consentStateService.test.js test/conversationMessageRepository.test.js
+
+          """
           if 'Run interview booking authority regressions' not in text:
-              raise SystemExit('Se perdió el gate de autoridad de reservas')
+              if anchor not in text:
+                  raise SystemExit('No se encontró el ancla para insertar el gate de autoridad')
+              text = text.replace(anchor, anchor + authority_gate, 1)
+
           if 'Run interview booking transition policy regressions' not in text:
               raise SystemExit('No se incorporó el gate de política de transiciones de main')
+          if 'contents: write' in text or 'sync-pr-base:' in text:
+              raise SystemExit('No se retiró completamente el job temporal')
+
           path.write_text(text, encoding='utf-8')
           PY
+
           git add .github/workflows/ci.yml
+          remaining=$(git diff --name-only --diff-filter=U)
+          if [ -n "$remaining" ]; then
+            echo "Persisten conflictos después de reconciliar CI:"
+            echo "$remaining"
+            exit 1
+          fi
           git commit --no-edit
           git push origin HEAD:${{ github.head_ref }}
 
