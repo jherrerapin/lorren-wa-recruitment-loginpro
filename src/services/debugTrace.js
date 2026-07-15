@@ -1,3 +1,5 @@
+import { getOpenAiModelConfig } from './openAiModelConfig.js';
+
 const CANDIDATE_FIELDS = [
   'fullName',
   'documentType',
@@ -16,20 +18,23 @@ const CANDIDATE_FIELDS = [
 export { CANDIDATE_FIELDS };
 
 export function createDebugTrace({ phone, currentStepBefore }) {
+  const models = getOpenAiModelConfig();
   return {
     phone,
     currentStep_before: currentStepBefore || null,
     currentStep_after: currentStepBefore || null,
     openai_used: false,
     openai_status: process.env.OPENAI_API_KEY ? 'fallback' : 'disabled',
-    openai_model: process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17',
-    response_model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-    extraction_model: process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17',
+    openai_model: models.extraction.model,
+    response_model: models.conversation.model,
+    response_model_source: models.conversation.source,
+    extraction_model: models.extraction.model,
+    extraction_model_source: models.extraction.source,
     openai_temperature_omitted: true,
     openai_input_tokens: 0,
     openai_output_tokens: 0,
     openai_total_tokens: 0,
-    model_usage: { extractionModel: process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17', responseModel: process.env.OPENAI_MODEL || 'gpt-5-mini', input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    model_usage: { extractionModel: models.extraction.model, responseModel: models.conversation.model, input_tokens: 0, output_tokens: 0, total_tokens: 0 },
     blockedClaims: [],
     fallbackReason: null,
     openai_intent: 'unknown',

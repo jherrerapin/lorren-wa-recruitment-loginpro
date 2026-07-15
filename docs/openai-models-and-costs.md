@@ -1,7 +1,11 @@
-# Modelos OpenAI, guard rails y costo
+# Modelos OpenAI, controles y costo
 
-- `OPENAI_EXTRACTION_MODEL`: controla el extractor estructurado con Responses API (`src/ai/extractRecruitmentTurn.js`). Analiza turno, intención, datos del candidato, género, documento, residencia y señales de adjuntos. Recomendación inicial: `gpt-5.4-mini-2026-03-17`; `gpt-5-mini` solo si las regresiones se mantienen estables.
-- `OPENAI_MODEL`: controla el motor conversacional/chat-completions (`src/services/conversationEngine.js`) y parser legacy cuando aplique. Sugiere `reply`, `nextStep`, `actions` y `extractedFields`; el backend valida antes de persistir, agendar o enviar.
+- `OPENAI_MODEL`: es el modelo principal. Controla el motor conversacional y sirve como respaldo para las tareas especializadas. El valor predeterminado de la aplicación es `gpt-5.6-terra`.
+- `OPENAI_EXTRACTION_MODEL`: override opcional para extracción estructurada, consentimiento y origen del candidato.
+- `OPENAI_CV_MODEL`: override opcional para lectura y comparación de hojas de vida.
+- `OPENAI_ATTACHMENT_MODEL`: override opcional para clasificar archivos recibidos por el bot.
+- `OPENAI_CONTEXTUAL_REPLY_MODEL`: override opcional para respuestas contextuales.
+- `OPENAI_SUPERVISOR_REPLY_MODEL`: override opcional para respuestas solicitadas por el coordinador.
 - `FF_RESPONSES_EXTRACTOR`: habilita/deshabilita el extractor estructurado Responses.
 - `USE_CONVERSATION_ENGINE`: habilita/deshabilita el motor conversacional. Las respuestas determinísticas de vacante y adjuntos deben preferirse cuando el dato se puede resolver por código.
 - `OPENAI_MIN_FIELD_CONFIDENCE`: umbral mínimo para persistir campos sugeridos por IA.
@@ -9,8 +13,10 @@
 
 ## Recomendación de costo
 
-No subir todas las capas a modelos más caros. Mantener extracción y respuesta separadas permite usar un modelo más estable para extracción y un modelo más económico para redacción. Si `OPENAI_MODEL=gpt-5-nano`, la seguridad depende de `replySafety`, `fieldSanitizer` y guard rails de agenda, no del modelo.
+`gpt-5.6-terra` ofrece un mejor equilibrio cuando importa entender contexto, documentos y criterios de selección. Si el volumen conversacional crece y el costo o la velocidad pesan más, puede configurarse `OPENAI_MODEL=gpt-5.6-luna` y conservar Terra solo en `OPENAI_EXTRACTION_MODEL` y `OPENAI_CV_MODEL`.
+
+La selección efectiva y la variable que la originó están centralizadas en `src/services/openAiModelConfig.js`. Las trazas guardan `response_model_source` y `extraction_model_source`; así se puede comprobar si Railway aplicó `OPENAI_MODEL` o si la aplicación usó el valor predeterminado.
 
 ## Monitoreo sugerido
 
-Monitorear `blockedClaims`, `rejectedFields`, `botPauseReason`, `fallbackReason`, `openai_input_tokens`, `openai_output_tokens`, `openai_total_tokens`, `extractionModel` y `responseModel` en `debugTrace`/logs.
+Monitorear `blockedClaims`, `rejectedFields`, `botPauseReason`, `fallbackReason`, `openai_input_tokens`, `openai_output_tokens`, `openai_total_tokens`, `extractionModel`, `responseModel`, `extraction_model_source` y `response_model_source` en `debugTrace`/logs.

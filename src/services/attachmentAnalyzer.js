@@ -1,7 +1,8 @@
 import { extractLegacyWordText } from './legacyWordText.js';
+import { OPENAI_ATTACHMENT_MODEL } from './openAiModelConfig.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
-const MODEL = 'gpt-5.4-mini-2026-03-17';
+const MODEL = OPENAI_ATTACHMENT_MODEL;
 const MIN_TEXT_LENGTH = 80;
 
 async function postResponses(payload) {

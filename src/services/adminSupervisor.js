@@ -10,13 +10,14 @@ import {
   persistOutboundConversationMessage,
   updateConversationMessagePayload
 } from './conversationMessageRepository.js';
+import { OPENAI_SUPERVISOR_REPLY_MODEL } from './openAiModelConfig.js';
 
 const DEFAULT_SUPERVISOR_PHONE = '3052982551';
 const WINDOW_WARNING_AFTER_MS = 23 * 60 * 60 * 1000;
 const WINDOW_CLOSED_AFTER_MS = 24 * 60 * 60 * 1000;
 const DOT_COOLDOWN_MS = 60 * 60 * 1000;
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
-const SUPERVISOR_REPLY_MODEL = process.env.OPENAI_SUPERVISOR_REPLY_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4-mini-2026-03-17';
+const SUPERVISOR_REPLY_MODEL = OPENAI_SUPERVISOR_REPLY_MODEL;
 
 export function getSupervisorPhone() {
   return String(process.env.ADMIN_WHATSAPP_NUMBER || process.env.FORWARD_MEDIA_TO || DEFAULT_SUPERVISOR_PHONE).replace(/\D/g, '');

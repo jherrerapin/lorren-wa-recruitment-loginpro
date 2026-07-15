@@ -20,9 +20,14 @@
  */
 
 import { FlowDeciderAction } from './flowDecider.js';
+import { modelSupportsTemperature } from './aiParser.js';
+import { OPENAI_CONVERSATION_MODEL } from './openAiModelConfig.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const DEFAULT_MODEL = OPENAI_CONVERSATION_MODEL;
+const NATURAL_REPLY_TEMPERATURE = Object.freeze(
+  modelSupportsTemperature(DEFAULT_MODEL) ? { temperature: 0.78 } : {}
+);
 
 async function postOpenAi(url, payload, config) {
   const { default: axios } = await import('axios');
@@ -246,7 +251,7 @@ export async function generateNaturalReply({
         model: DEFAULT_MODEL,
         messages,
         max_completion_tokens: 220,
-        temperature: 0.78
+        ...NATURAL_REPLY_TEMPERATURE
       },
       {
         headers: {
@@ -310,7 +315,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
           { role: 'user', content: inboundText }
         ],
         max_completion_tokens: 160,
-        temperature: 0.78
+        ...NATURAL_REPLY_TEMPERATURE
       },
       {
         headers: {
@@ -383,7 +388,7 @@ export async function generateInterviewOffer({
         model: DEFAULT_MODEL,
         messages: [{ role: 'system', content: systemPrompt }],
         max_completion_tokens: 120,
-        temperature: 0.78
+        ...NATURAL_REPLY_TEMPERATURE
       },
       {
         headers: {
@@ -448,7 +453,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
         model: DEFAULT_MODEL,
         messages: [{ role: 'system', content: systemPrompt }],
         max_completion_tokens: 160,
-        temperature: 0.78
+        ...NATURAL_REPLY_TEMPERATURE
       },
       {
         headers: {

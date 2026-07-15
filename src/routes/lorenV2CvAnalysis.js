@@ -1,6 +1,10 @@
 import express from 'express';
 import { requireLorenV2 } from '../services/lorenV2Gate.js';
-import { analyzeCandidateCv, parseCvAnalysisEvidence } from '../services/cvIntelligence.js';
+import {
+  analyzeCandidateCv,
+  parseCvAnalysisEvidence,
+  reviewVacancyCandidates
+} from '../services/cvIntelligence.js';
 
 function escapeHtml(value = '') {
   return String(value)
@@ -38,26 +42,68 @@ function renderLayout({ title, body }) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #f4f5f7; color: #1a1d23; }
-    .navbar { background: #1e2d3d; padding: 0 24px; display: flex; align-items: center; gap: 20px; min-height: 52px; flex-wrap: wrap; }
-    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 600; }
-    .navbar a:hover { color: #fff; }
-    .navbar .spacer { flex: 1; }
-    .page { max-width: 1280px; margin: 0 auto; padding: 24px 20px 48px; }
-    .card { background: #fff; border: 1px solid #e1e4e8; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 18px; margin-bottom: 18px; }
-    h1 { font-size: 22px; margin: 0 0 6px; color: #1e2d3d; }
-    h2 { font-size: 16px; margin: 0 0 12px; color: #1e2d3d; }
-    p { color: #6b7280; line-height: 1.5; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: #f9fafb; }
-    th, td { padding: 9px 10px; border-bottom: 1px solid #eaecef; vertical-align: top; }
-    .badge { display: inline-flex; border-radius: 999px; padding: 3px 8px; background: #eef2ff; color: #3730a3; font-weight: 700; font-size: 11px; }
-    .badge.ok { background: #e6f4f1; color: #0d7a6b; }
-    .badge.warn { background: #fff7ed; color: #9a3412; }
-    .badge.error { background: #fee2e2; color: #991b1b; }
-    .muted { color: #6b7280; font-size: 12px; }
-    .btn { border: 0; border-radius: 8px; padding: 8px 11px; background: #0d7a6b; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
-    .alert { border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; background: #e6f4f1; color: #0d7a6b; font-weight: 700; }
+    :root { --navy:#1e2d3d; --green:#0d7a6b; --green-soft:#e6f4f1; --border:#e1e4e8; --muted:#667085; --bg:#f4f5f7; --orange:#b45309; --red:#b42318; --blue:#175cd3; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:Inter,Arial,sans-serif; background:var(--bg); color:#1a1d23; }
+    .navbar { background:var(--navy); padding:0 24px; display:flex; align-items:center; gap:20px; min-height:52px; flex-wrap:wrap; }
+    .navbar a { color:#cbd5e0; text-decoration:none; font-size:13px; font-weight:700; }
+    .navbar a:hover,.navbar a.active { color:#fff; }
+    .navbar .spacer { flex:1; }
+    .page { max-width:1380px; margin:0 auto; padding:24px 20px 52px; }
+    .hero { background:linear-gradient(135deg,#173044,#0d7a6b); color:#fff; border:0; }
+    .hero h1,.hero p { color:#fff; }
+    .card { background:#fff; border:1px solid var(--border); border-radius:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); padding:19px; margin-bottom:18px; }
+    h1 { font-size:24px; margin:0 0 7px; color:var(--navy); }
+    h2 { font-size:18px; margin:0 0 12px; color:var(--navy); }
+    h3 { font-size:15px; margin:0 0 8px; color:var(--navy); }
+    p { color:var(--muted); line-height:1.55; margin:6px 0; }
+    .setup { display:grid; grid-template-columns:minmax(240px,.7fr) minmax(360px,1.3fr); gap:14px; align-items:end; }
+    label { display:flex; flex-direction:column; gap:7px; color:#344054; font-size:13px; font-weight:800; }
+    select,textarea { width:100%; border:1px solid #cfd4dc; border-radius:9px; padding:10px 11px; color:#172033; background:#fff; font:inherit; }
+    select { min-height:44px; }
+    textarea { min-height:116px; resize:vertical; line-height:1.45; }
+    .hint { color:var(--muted); font-size:12px; font-weight:500; }
+    .actions { display:flex; justify-content:flex-end; margin-top:13px; gap:8px; flex-wrap:wrap; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:9px; padding:10px 14px; background:var(--green); color:#fff; font-size:13px; font-weight:800; cursor:pointer; text-decoration:none; }
+    .btn.secondary { color:#344054; background:#fff; border:1px solid #cfd4dc; }
+    .btn.small { padding:7px 10px; font-size:12px; }
+    .alert { border-radius:10px; padding:11px 13px; margin-bottom:15px; background:var(--green-soft); color:var(--green); font-weight:750; }
+    .alert.error { background:#fff1f0; color:var(--red); border:1px solid #fecdca; }
+    .alert.warn { background:#fffaeb; color:#93370d; border:1px solid #fedf89; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:10px; }
+    .kpi { border:1px solid var(--border); border-radius:11px; padding:14px; background:#f8fafc; }
+    .kpi strong { display:block; font-size:27px; line-height:1; color:var(--navy); }
+    .kpi span { display:block; color:var(--muted); font-size:12px; margin-top:6px; }
+    .kpi.good { background:#ecfdf3; border-color:#abefc6; }.kpi.good strong { color:#067647; }
+    .kpi.info { background:#eff8ff; border-color:#b2ddff; }.kpi.info strong { color:var(--blue); }
+    .kpi.warn { background:#fffaeb; border-color:#fedf89; }.kpi.warn strong { color:var(--orange); }
+    .badge { display:inline-flex; border-radius:999px; padding:4px 9px; background:#eef2ff; color:#3730a3; font-weight:800; font-size:11px; }
+    .badge.ok { background:#e6f4f1; color:var(--green); }
+    .badge.warn { background:#fff7ed; color:#9a3412; }
+    .badge.error { background:#fee2e2; color:#991b1b; }
+    .badge.required { background:#fff1f0; color:#b42318; }
+    .badge.preferred { background:#eff8ff; color:#175cd3; }
+    .muted { color:var(--muted); font-size:12px; }
+    .criteria { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .criterion { border:1px solid var(--border); border-radius:10px; padding:9px 11px; background:#f8fafc; max-width:360px; }
+    .criterion strong { font-size:12px; color:var(--navy); }.criterion p { font-size:11px; margin:4px 0 0; }
+    .group { margin-top:20px; }
+    .group-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+    .result-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+    .result { border:1px solid var(--border); border-radius:12px; padding:15px; background:#fff; }
+    .result.strong { border-left:5px solid #12b76a; }.result.possible { border-left:5px solid #2e90fa; }.result.low { border-left:5px solid #f79009; }.result.manual { border-left:5px solid #d92d20; }
+    .result-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+    .score { font-size:22px; font-weight:900; color:var(--navy); white-space:nowrap; }
+    .list-title { margin:12px 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#475467; font-weight:900; }
+    ul { margin:5px 0 0; padding-left:18px; color:#475467; font-size:12px; line-height:1.45; }
+    .result-actions { display:flex; gap:7px; margin-top:13px; flex-wrap:wrap; }
+    .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:11px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+    th { text-align:left; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.05em; background:#f9fafb; }
+    th,td { padding:10px; border-bottom:1px solid #eaecef; vertical-align:top; }
+    tr:last-child td { border-bottom:0; }
+    .empty { text-align:center; color:var(--muted); padding:28px 14px; }
+    @media(max-width:760px) { .page{padding:15px 10px 40px}.setup{grid-template-columns:1fr}.actions .btn{width:100%}.navbar{padding:0 10px;gap:12px}.result-grid{grid-template-columns:1fr} }
   </style>
 </head>
 <body>
@@ -68,7 +114,7 @@ function renderLayout({ title, body }) {
     <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
     <a href="/admin/estadisticas/reports">Reportes</a>
     <a href="/admin/estadisticas/data-consents">Datos personales</a>
-    <a href="/admin/estadisticas/cv-analysis">Análisis HV</a>
+    <a class="active" href="/admin/estadisticas/cv-analysis">Análisis HV</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
@@ -84,58 +130,165 @@ function latestAnalysis(candidate = {}) {
 function statusBadge(candidate = {}) {
   if (!hasCv(candidate)) return '<span class="badge error">Sin HV</span>';
   const analysis = latestAnalysis(candidate);
-  if (!analysis) return '<span class="badge warn">Pendiente análisis</span>';
-
-  if (analysis.classification === 'UNREADABLE') {
-    return '<span class="badge error">Archivo ilegible</span>';
-  }
-  if (analysis.classification !== 'CV_VALID') {
-    return '<span class="badge warn">Análisis incompleto</span>';
-  }
-
+  if (!analysis) return '<span class="badge warn">Aún no revisada</span>';
+  if (analysis.classification === 'UNREADABLE') return '<span class="badge error">Revisión manual</span>';
+  if (analysis.classification !== 'CV_VALID') return '<span class="badge warn">Análisis incompleto</span>';
   const evidence = parseCvAnalysisEvidence(analysis);
-  const mismatches = Array.isArray(evidence.mismatches) ? evidence.mismatches.length : 0;
-  if (mismatches > 0) return `<span class="badge warn">${mismatches} alerta(s)</span>`;
-  return '<span class="badge ok">Analizada</span>';
+  return evidence.extractionMode === 'visual_pdf'
+    ? '<span class="badge ok">Leída desde el PDF</span>'
+    : '<span class="badge ok">Lista para comparar</span>';
 }
 
-function renderAnalysisSummary(candidate = {}) {
-  const analysis = latestAnalysis(candidate);
-  if (!analysis) return '<span class="muted">Sin análisis todavía.</span>';
-  const evidence = parseCvAnalysisEvidence(analysis);
-  const extracted = evidence.extracted || {};
-  const mismatches = Array.isArray(evidence.mismatches) ? evidence.mismatches : [];
-  const warnings = Array.isArray(evidence.warnings) ? evidence.warnings : [];
-  return `<div>
-    <strong>Confianza:</strong> ${Math.round(Number(analysis.confidence || 0) * 100)}%<br>
-    <span class="muted">Analizado: ${formatDate(analysis.analysedAt)}</span><br>
-    ${analysis.summary ? `<span class="muted">${escapeHtml(analysis.summary)}</span><br>` : ''}
-    <span class="muted">Nombre HV: ${escapeHtml(extracted.fullName || 'No identificado')}</span><br>
-    <span class="muted">Doc. HV: ${escapeHtml(extracted.documentNumber || 'No identificado')}</span><br>
-    ${mismatches.length ? `<span class="badge warn">Diferencias: ${mismatches.map((item) => escapeHtml(item.field)).join(', ')}</span><br>` : ''}
-    ${warnings.length ? `<span class="muted">Advertencias: ${warnings.map(escapeHtml).join(' | ')}</span>` : ''}
-  </div>`;
+function renderVacancyOptions(vacancies = [], selectedId = '') {
+  return vacancies.map((vacancy) => {
+    const selected = vacancy.id === selectedId ? ' selected' : '';
+    const city = vacancy.city ? ` · ${vacancy.city}` : '';
+    return `<option value="${escapeHtml(vacancy.id)}"${selected}>${escapeHtml(vacancy.title || 'Vacante sin nombre')}${escapeHtml(city)}</option>`;
+  }).join('');
 }
 
-function renderRows(candidates = []) {
-  if (!candidates.length) return '<tr><td colspan="6">No hay candidatos con hoja de vida.</td></tr>';
-  return candidates.map((candidate) => `<tr>
+function renderProfileForm(vacancies, { vacancyId = '', desiredProfile = '' } = {}) {
+  return `<section class="card">
+    <h2>1. Elige la vacante y cuéntanos qué buscas</h2>
+    <form method="post" action="/admin/estadisticas/cv-analysis/run">
+      <div class="setup">
+        <label>Vacante
+          <select name="vacancyId" required>
+            <option value="">Selecciona una vacante</option>
+            ${renderVacancyOptions(vacancies, vacancyId)}
+          </select>
+          <span class="hint">Solo se revisarán las personas registradas en esta vacante que tengan hoja de vida.</span>
+        </label>
+        <label>Perfil que necesitas
+          <textarea name="desiredProfile" maxlength="4000" required placeholder="Ejemplo: Busco una persona con al menos un año manejando inventarios, que haya usado Excel y tenga experiencia recibiendo mercancía. Es deseable que conozca SAP.">${escapeHtml(desiredProfile)}</textarea>
+          <span class="hint">Escríbelo con tus palabras. El sistema mostrará cómo entendió tu solicitud antes de presentar resultados.</span>
+        </label>
+      </div>
+      <div class="actions"><button class="btn" type="submit">Revisar hojas de vida</button></div>
+    </form>
+  </section>`;
+}
+
+function renderCandidateTable(candidates = [], vacancyId = '') {
+  if (!vacancyId) return '<section class="card"><div class="empty">Selecciona una vacante para ver sus hojas de vida.</div></section>';
+  if (!candidates.length) return '<section class="card"><div class="empty">Esta vacante todavía no tiene candidatos con hoja de vida.</div></section>';
+  const rows = candidates.map((candidate) => `<tr>
     <td><strong>${escapeHtml(candidate.fullName || 'Sin nombre')}</strong><br><span class="muted">${escapeHtml(candidate.phone || '')}</span></td>
-    <td>${escapeHtml(candidate.vacancy?.title || 'Sin vacante')}<br><span class="muted">${escapeHtml(candidate.vacancy?.city || '')}</span></td>
-    <td>${escapeHtml(candidate.cvOriginalName || 'HV almacenada')}<br><span class="muted">${escapeHtml(candidate.cvMimeType || '')}</span></td>
+    <td>${escapeHtml(candidate.cvOriginalName || 'Hoja de vida almacenada')}<br><span class="muted">${escapeHtml(candidate.cvMimeType || '')}</span></td>
     <td>${statusBadge(candidate)}</td>
-    <td>${renderAnalysisSummary(candidate)}</td>
-    <td>
-      <form method="post" action="/admin/estadisticas/cv-analysis/${candidate.id}/analyze">
-        <button class="btn" type="submit">Analizar HV</button>
-      </form>
-    </td>
+    <td>${latestAnalysis(candidate) ? formatDate(latestAnalysis(candidate).analysedAt) : 'Sin análisis'}</td>
+    <td><a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}">Ver candidato</a></td>
   </tr>`).join('');
+  return `<section class="card">
+    <h2>Hojas de vida disponibles (${candidates.length})</h2>
+    <p>Al iniciar la revisión se reutilizarán los análisis que ya estén completos y se procesarán los documentos pendientes.</p>
+    <div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Archivo</th><th>Lectura</th><th>Último análisis</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+  </section>`;
 }
 
-async function loadCandidates(prisma) {
+function renderCriteria(profile = {}) {
+  profile = profile || {};
+  const criteria = Array.isArray(profile.criteria) ? profile.criteria : [];
+  if (!criteria.length) return '';
+  return `<section class="card">
+    <h2>2. Así entendimos el perfil</h2>
+    <p>${escapeHtml(profile.summary || '')}</p>
+    <div class="criteria">${criteria.map((criterion) => `<div class="criterion">
+      <span class="badge ${criterion.priority === 'REQUIRED' ? 'required' : 'preferred'}">${criterion.priority === 'REQUIRED' ? 'Importante' : 'Deseable'}</span>
+      <strong>${escapeHtml(criterion.label)}</strong>
+      <p>${escapeHtml(criterion.description)}${criterion.minimumMonths ? ` · Mínimo ${Math.round(criterion.minimumMonths / 12 * 10) / 10} año(s)` : ''}</p>
+    </div>`).join('')}</div>
+    ${profile.warnings?.length ? `<div class="alert warn" style="margin-top:12px">${profile.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
+  </section>`;
+}
+
+function renderStringList(title, items = []) {
+  if (!Array.isArray(items) || !items.length) return '';
+  return `<div class="list-title">${escapeHtml(title)}</div><ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+}
+
+function renderResultCard(result, kind) {
+  const candidate = result.candidate || {};
+  const match = result.match;
+  const labels = {
+    strong: 'Coincidencia alta',
+    possible: 'Puede encajar',
+    low: 'Poca evidencia',
+    manual: 'Revisar manualmente'
+  };
+  return `<article class="result ${kind}">
+    <div class="result-top">
+      <div><h3>${escapeHtml(candidate.fullName || 'Candidato sin nombre')}</h3><span class="muted">${escapeHtml(candidate.cvOriginalName || 'Hoja de vida almacenada')}</span></div>
+      ${match ? `<div class="score">${Math.round(match.score)}%</div>` : '<span class="badge error">Manual</span>'}
+    </div>
+    <span class="badge ${kind === 'strong' ? 'ok' : kind === 'manual' ? 'error' : 'warn'}" style="margin-top:10px">${labels[kind]}</span>
+    ${result.manualReason ? `<p>${escapeHtml(result.manualReason)}</p>` : ''}
+    ${renderStringList('Por qué puede servir', match?.reasons)}
+    ${renderStringList('Lo que sí aparece en la hoja de vida', match?.evidence)}
+    ${renderStringList('Lo que falta confirmar', match?.gaps)}
+    <div class="result-actions">
+      <a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}">Ver candidato</a>
+      <a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}/cv">Descargar HV</a>
+    </div>
+  </article>`;
+}
+
+function renderResultGroup(title, help, items, kind) {
+  if (!items.length) return '';
+  return `<section class="group">
+    <div class="group-head"><div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(help)}</p></div><span class="badge">${items.length}</span></div>
+    <div class="result-grid">${items.map((item) => renderResultCard(item, kind)).join('')}</div>
+  </section>`;
+}
+
+function renderReviewResults(review) {
+  if (!review?.ok) return '';
+  if (!review.stats.total) return '<section class="card"><div class="empty">No hay hojas de vida para revisar en esta vacante.</div></section>';
+  const groups = review.groups;
+  return `${review.truncated ? '<div class="alert warn">Se revisaron las 120 hojas de vida más recientes. Usa una vacante o periodo más específico si necesitas abarcar más registros.</div>' : ''}
+    <section class="card">
+      <h2>3. Resultado de la revisión</h2>
+      <p>El orden es una ayuda para comenzar la revisión. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p>
+      <div class="grid">
+        <div class="kpi"><strong>${review.stats.total}</strong><span>Hojas de vida encontradas</span></div>
+        <div class="kpi good"><strong>${review.stats.strong}</strong><span>Con evidencia clara del perfil</span></div>
+        <div class="kpi info"><strong>${review.stats.possible}</strong><span>Pueden encajar; falta confirmar</span></div>
+        <div class="kpi warn"><strong>${review.stats.low}</strong><span>Con poca evidencia relacionada</span></div>
+        <div class="kpi warn"><strong>${review.stats.manual}</strong><span>Necesitan revisión manual</span></div>
+      </div>
+      ${review.warnings?.length ? `<div class="alert warn" style="margin-top:12px">${review.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
+      <p class="muted" style="margin-top:12px">Modelo usado: ${escapeHtml(review.modelUsed || 'No informado')}</p>
+    </section>
+    ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida contiene evidencia clara de varios puntos importantes.', groups.strong, 'strong')}
+    ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas, pero conviene confirmar experiencia o información faltante.', groups.possible, 'possible')}
+    ${renderResultGroup('Poca evidencia en el documento', 'La hoja de vida se pudo leer, pero muestra poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low')}
+    ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual')}`;
+}
+
+function errorMessage(reason = '') {
+  const messages = {
+    vacancy_required: 'Selecciona una vacante antes de iniciar la revisión.',
+    vacancy_not_found: 'La vacante seleccionada ya no existe.',
+    profile_too_short: 'Cuéntanos un poco más sobre la experiencia o conocimientos que buscas.',
+    ai_not_configured: 'OpenAI no está configurado para ejecutar este análisis.',
+    profile_analysis_failed: 'No fue posible entender el perfil en este momento. Intenta nuevamente.',
+    match_analysis_failed: 'Las hojas de vida se procesaron, pero no fue posible compararlas en este momento.'
+  };
+  return messages[reason] || 'No fue posible completar la revisión.';
+}
+
+async function loadVacancies(prisma) {
+  return prisma.vacancy.findMany({
+    orderBy: [{ city: 'asc' }, { title: 'asc' }],
+    select: { id: true, title: true, city: true }
+  });
+}
+
+async function loadCandidates(prisma, vacancyId) {
+  if (!vacancyId) return [];
   return prisma.candidate.findMany({
     where: {
+      vacancyId,
       OR: [
         { cvStorageKey: { not: null } },
         { cvData: { not: null } },
@@ -151,38 +304,74 @@ async function loadCandidates(prisma) {
   });
 }
 
+function renderPage({ vacancies, candidates, vacancyId = '', desiredProfile = '', review = null, message = '', error = '' }) {
+  const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
+    ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
+    <section class="card hero">
+      <h1>Encuentra las hojas de vida que vale la pena revisar primero</h1>
+      <p>Elige una vacante, describe el perfil con tus palabras y Lórren organizará los documentos según la evidencia encontrada. Los archivos difíciles de leer quedarán separados para revisión manual.</p>
+    </section>
+    ${renderProfileForm(vacancies, { vacancyId, desiredProfile })}
+    ${review ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review)}` : renderCandidateTable(candidates, vacancyId)}`;
+  return renderLayout({ title: 'Análisis de hojas de vida — Lórren', body });
+}
+
 export function lorenV2CvAnalysisRouter(prisma) {
   const router = express.Router();
   router.use(requireLorenV2);
 
   router.get('/', async (req, res) => {
-    const candidates = await loadCandidates(prisma);
-    const message = normalizeString(req.query.message);
-    const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
-      <section class="card">
-        <h1>Análisis inteligente de hojas de vida</h1>
-        <p>Esta vista permite analizar HV recibidas, extraer datos principales y comparar lo encontrado en el documento contra la información registrada por chat.</p>
-      </section>
-      <section class="card">
-        <h2>Candidatos con HV</h2>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead><tr><th>Candidato</th><th>Vacante</th><th>Archivo</th><th>Estado</th><th>Resumen IA</th><th>Acción</th></tr></thead>
-            <tbody>${renderRows(candidates)}</tbody>
-          </table>
-        </div>
-      </section>`;
-    res.send(renderLayout({ title: 'Análisis HV — Estadísticas', body }));
+    const vacancyId = normalizeString(req.query.vacancyId) || '';
+    const [vacancies, candidates] = await Promise.all([
+      loadVacancies(prisma),
+      loadCandidates(prisma, vacancyId)
+    ]);
+    res.send(renderPage({
+      vacancies,
+      candidates,
+      vacancyId,
+      message: normalizeString(req.query.message) || ''
+    }));
   });
 
-  router.get('/json', async (_req, res) => {
-    const candidates = await loadCandidates(prisma);
-    res.json({ ok: true, candidates });
+  router.get('/json', async (req, res) => {
+    const vacancyId = normalizeString(req.query.vacancyId) || '';
+    const candidates = await loadCandidates(prisma, vacancyId);
+    res.json({ ok: true, vacancyId, candidates });
+  });
+
+  router.post('/run', async (req, res) => {
+    const vacancyId = normalizeString(req.body?.vacancyId) || '';
+    const desiredProfile = normalizeString(req.body?.desiredProfile)?.slice(0, 4000) || '';
+    const [vacancies, candidates] = await Promise.all([
+      loadVacancies(prisma),
+      loadCandidates(prisma, vacancyId)
+    ]);
+
+    let review;
+    try {
+      review = await reviewVacancyCandidates(prisma, { vacancyId, desiredProfile });
+    } catch (error) {
+      console.error('[CV_REVIEW_ERROR]', { vacancyId, message: error?.message?.slice(0, 180) });
+      review = { ok: false, reason: 'match_analysis_failed' };
+    }
+
+    if (!review.ok) {
+      return res.status(400).send(renderPage({
+        vacancies,
+        candidates,
+        vacancyId,
+        desiredProfile,
+        error: errorMessage(review.reason)
+      }));
+    }
+
+    return res.send(renderPage({ vacancies, candidates, vacancyId, desiredProfile, review }));
   });
 
   router.post('/:candidateId/analyze', async (req, res) => {
     const result = await analyzeCandidateCv(prisma, req.params.candidateId);
-    const message = result.ok ? 'Análisis de HV generado.' : `No fue posible analizar la HV: ${result.reason}`;
+    const message = result.ok ? 'Hoja de vida analizada.' : `No fue posible analizar la hoja de vida: ${result.reason}`;
     res.redirect(`/admin/estadisticas/cv-analysis?message=${encodeURIComponent(message)}`);
   });
 
