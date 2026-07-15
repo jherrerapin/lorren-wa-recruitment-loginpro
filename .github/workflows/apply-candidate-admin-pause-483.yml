@@ -44,13 +44,13 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore .github/workflows/ci.yml
           git add \
             src/routes/admin.js \
-            .github/workflows/ci.yml \
             docs/architecture/state-authority-manifest.json \
             docs/architecture/state-authority-map.md
           git add -u -- scripts/apply-candidate-admin-pause-authority.mjs
-          allowed='^(src/routes/admin.js|.github/workflows/ci.yml|docs/architecture/state-authority-manifest.json|docs/architecture/state-authority-map.md|scripts/apply-candidate-admin-pause-authority.mjs)$'
+          allowed='^(src/routes/admin.js|docs/architecture/state-authority-manifest.json|docs/architecture/state-authority-map.md|scripts/apply-candidate-admin-pause-authority.mjs)$'
           unexpected=$(git diff --cached --name-only | grep -Ev "$allowed" || true)
           if [ -n "$unexpected" ]; then
             echo "Unexpected files in scoped migration:"
