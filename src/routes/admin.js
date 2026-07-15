@@ -26,7 +26,10 @@ import {
   normalizeCandidateStatusForUI
 } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
-import { persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';
+import {
+  deleteConversationMessagesForCandidate,
+  persistOutboundConversationMessage
+} from '../services/conversationMessageRepository.js';
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
@@ -2548,8 +2551,8 @@ export function adminRouter(prisma) {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.message.deleteMany({
-        where: { candidateId: candidate.id }
+      await deleteConversationMessagesForCandidate(tx, {
+        candidateId: candidate.id
       });
 
       await tx.interviewBooking.deleteMany({
