@@ -529,13 +529,7 @@ function candidateForMatching(candidate, analysis) {
       },
       registration: {
         transportMode: registeredTransport,
-        residence: registeredResidence,
-        declaredExperience: {
-          hasExperience: compact(candidate.experienceInfo) || null,
-          duration: compact(candidate.experienceTime) || null,
-          summary: compact(candidate.experienceSummary) || null
-        },
-        availability: compact(candidate.availability) || null
+        residence: registeredResidence
       }
     }
   };
@@ -568,8 +562,8 @@ async function matchCandidateBatch(interpretedProfile, candidates, options = {})
     systemText: `Compara la información disponible de cada candidato con un perfil buscado para apoyar a un coordinador humano.
 Cada candidato contiene dos fuentes separadas: sources.cv para la hoja de vida y sources.registration para los datos declarados durante el registro.
 Usa únicamente la evidencia entregada. No inventes experiencia, estudios ni habilidades.
-Para experiencia, estudios, cargos, habilidades y certificaciones, prioriza la hoja de vida y complementa con la experiencia declarada en el registro.
-Para medio de transporte, residencia y disponibilidad, usa el registro; no esperes que esos datos aparezcan en la hoja de vida.
+Para experiencia, estudios, cargos, habilidades y certificaciones, usa la hoja de vida.
+Del registro solo recibirás medio de transporte y residencia; no esperes que esos datos aparezcan en la hoja de vida.
 Cuando cites evidencia, inicia cada frase con "Hoja de vida:" o "Registro:" para que el coordinador conozca la fuente.
 Si las fuentes se contradicen, muestra el punto como algo por confirmar y no elijas silenciosamente una versión.
 La ausencia de información debe aparecer como un faltante, no como una afirmación negativa.
