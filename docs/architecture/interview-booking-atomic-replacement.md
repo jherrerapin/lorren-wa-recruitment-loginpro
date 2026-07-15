@@ -4,9 +4,16 @@
 
 Este documento complementa el inventario de transiciones de `InterviewBooking` y corrige la descripción inicial de `InterviewBookingStateService` introducida en #454.
 
-La invariante canónica es:
+La base de datos protege dos invariantes mediante índices únicos parciales:
 
-> Una reserva anterior solo puede pasar a `RESCHEDULED` cuando ya existe una reserva reemplazante válida dentro de la misma unidad atómica.
+- un candidato solo puede tener una reserva activa;
+- una misma cita activa exacta no puede duplicarse.
+
+Por esa razón, no es posible insertar una segunda reserva `SCHEDULED` mientras la anterior siga activa.
+
+La garantía canónica es:
+
+> La reserva anterior y su reemplazo cambian como una sola unidad: otros procesos nunca observan el cierre anterior sin la nueva reserva, y cualquier fallo revierte ambos cambios.
 
 ## Contrato de creación y reemplazo
 
@@ -17,17 +24,20 @@ La invariante canónica es:
 - slot;
 - fecha programada.
 
-Cuando no existe una coincidencia exacta:
+Cuando no existe una coincidencia exacta y sí hay una reserva activa:
 
-1. consulta las reservas activas del candidato;
-2. valida `CREATE_INITIAL` o `REQUEST_RESCHEDULE` mediante la política canónica;
-3. crea la nueva reserva como `SCHEDULED`;
-4. valida `COMPLETE_RESCHEDULE` con el ID real del reemplazo;
-5. cambia a `RESCHEDULED` únicamente las reservas activas anteriores, excluyendo la nueva por ID.
+1. consulta y valida las reservas activas del candidato;
+2. valida `REQUEST_RESCHEDULE` mediante la política canónica;
+3. dentro de la misma transacción cambia las reservas anteriores a `RESCHEDULED`;
+4. crea la nueva reserva como `SCHEDULED`;
+5. valida `COMPLETE_RESCHEDULE` con el ID real del reemplazo;
+6. confirma conjuntamente cierre y creación.
+
+El orden interno respeta `InterviewBooking_one_active_per_candidate_idx`. El cierre previo no es visible fuera de la transacción. Si la creación o la validación posterior falla, PostgreSQL revierte el cierre y la reserva anterior permanece activa.
+
+Cuando no existe una reserva activa, la autoridad valida `CREATE_INITIAL`, crea la reserva y no ejecuta un `updateMany` redundante.
 
 Con el cliente Prisma principal, los pasos se ejecutan en una transacción interactiva con aislamiento `Serializable`. Si el consumidor ya entrega un cliente `tx`, se reutiliza esa transacción y no se abre otra.
-
-Un fallo al crear el reemplazo o cerrar la reserva anterior revierte toda la unidad. La reserva anterior permanece activa.
 
 ## Concurrencia
 
@@ -47,6 +57,6 @@ Los destinos arbitrarios quedan rechazados. La matriz de transiciones proviene d
 
 - `createBooking()` delega la creación o reemplazo;
 - `cancelCandidateBookings(..., 'CANCELLED')` ejecuta cancelación real;
-- `cancelCandidateBookings(..., 'RESCHEDULED')` registra conceptualmente una solicitud y no cierra la reserva.
+- `cancelCandidateBookings(..., 'RESCHEDULED')` representa una solicitud y no cierra la reserva.
 
 Webhook, recordatorios, panel administrativo y motor conversacional todavía tienen transiciones directas pendientes de migración. Este documento no declara `InterviewBooking` como agregado completamente canónico.
