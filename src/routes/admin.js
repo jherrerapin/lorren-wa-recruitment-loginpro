@@ -34,7 +34,10 @@ import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/reply
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
 import { buildManualInterventionCandidateUpdate, buildManualWhatsAppOpenCandidateUpdate } from '../services/adminOutboundPolicy.js';
-import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
+import {
+  pauseCandidateAutomationFromAdmin,
+  resumeCandidateAutomationFromAdmin
+} from '../services/candidateStateService.js';
 import { listOfferableSlots, createBooking, formatInterviewDate } from '../services/interviewScheduler.js';
 import {
   ACTIVE_INTERVIEW_BOOKING_STATUSES,
@@ -2717,18 +2720,42 @@ export function adminRouter(prisma) {
   router.post('/candidates/:id/bot-pause', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const reason = normalizeString(req.body.reason) || 'Pausa manual desde admin';
-    if (!await ensureCandidateIdAccess(prisma, req, id, res, `/admin/candidates/${id}`)) return;
-    await prisma.candidate.update({
+    const candidate = await prisma.candidate.findUnique({
       where: { id },
-      data: {
+      select: {
+        id: true,
+        vacancyId: true,
         botPaused: true,
-        botPausedAt: new Date(),
-        botPausedBy: req.userRole || 'admin',
-        botPauseReason: reason,
-        reminderScheduledFor: null,
-        reminderState: 'CANCELLED'
+        botPausedAt: true,
+        botPausedBy: true,
+        botPauseReason: true,
+        botResumeMode: true,
+        vacancy: { select: { id: true, city: true } }
       }
     });
+    if (!candidate) {
+      return res.redirect(`/admin/candidates/${id}?botPauseError=` + encodeURIComponent('Candidato no encontrado.'));
+    }
+    if (!ensureCandidateAccess(req, candidate, res, `/admin/candidates/${id}`)) return;
+
+    const transition = await pauseCandidateAutomationFromAdmin(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        botPaused: candidate.botPaused,
+        botPausedAt: candidate.botPausedAt ?? null,
+        botPausedBy: candidate.botPausedBy ?? null,
+        botPauseReason: candidate.botPauseReason ?? null,
+        botResumeMode: candidate.botResumeMode ?? null
+      },
+      actor: req.userRole || 'admin',
+      reason,
+      now: new Date()
+    });
+
+    if (transition.count !== 1) {
+      return res.redirect(`/admin/candidates/${id}?botPauseError=` + encodeURIComponent('El estado del bot cambió mientras se procesaba la solicitud. Actualiza la página e intenta de nuevo.'));
+    }
+
     await logCandidateAdminEvent(prisma, {
       candidateId: id,
       actorRole: req.userRole,
@@ -2741,17 +2768,39 @@ export function adminRouter(prisma) {
 
   router.post('/candidates/:id/bot-resume', ensureDevRole, async (req, res) => {
     const { id } = req.params;
-    if (!await ensureCandidateIdAccess(prisma, req, id, res, `/admin/candidates/${id}`)) return;
-    await prisma.candidate.update({
+    const candidate = await prisma.candidate.findUnique({
       where: { id },
-      data: {
-        botPaused: false,
-        botPausedAt: null,
-        botPauseReason: null,
-        reminderScheduledFor: null,
-        reminderState: 'CANCELLED'
+      select: {
+        id: true,
+        vacancyId: true,
+        botPaused: true,
+        botPausedAt: true,
+        botPausedBy: true,
+        botPauseReason: true,
+        botResumeMode: true,
+        vacancy: { select: { id: true, city: true } }
       }
     });
+    if (!candidate) {
+      return res.redirect(`/admin/candidates/${id}?botPauseError=` + encodeURIComponent('Candidato no encontrado.'));
+    }
+    if (!ensureCandidateAccess(req, candidate, res, `/admin/candidates/${id}`)) return;
+
+    const transition = await resumeCandidateAutomationFromAdmin(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        botPaused: candidate.botPaused,
+        botPausedAt: candidate.botPausedAt ?? null,
+        botPausedBy: candidate.botPausedBy ?? null,
+        botPauseReason: candidate.botPauseReason ?? null,
+        botResumeMode: candidate.botResumeMode ?? null
+      }
+    });
+
+    if (transition.count !== 1) {
+      return res.redirect(`/admin/candidates/${id}?botPauseError=` + encodeURIComponent('El estado del bot cambió mientras se procesaba la solicitud. Actualiza la página e intenta de nuevo.'));
+    }
+
     await logCandidateAdminEvent(prisma, {
       candidateId: id,
       actorRole: req.userRole,
