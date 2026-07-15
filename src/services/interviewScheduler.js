@@ -1,3 +1,9 @@
+import {
+  ACTIVE_INTERVIEW_BOOKING_STATUSES as ACTIVE_BOOKING_STATUSES,
+  cancelActiveInterviewBookings,
+  createScheduledInterviewBooking
+} from './interviewBookingStateService.js';
+
 /**
  * interviewScheduler.js
  *
@@ -12,7 +18,6 @@ const MIN_HOURS_ADVANCE = 6;
 const REMINDER_MINUTES_BEFORE = 60;
 const WA_WINDOW_HOURS = 24;
 const COLOMBIA_OFFSET_MS = 5 * 60 * 60 * 1000;
-const ACTIVE_BOOKING_STATUSES = ['SCHEDULED', 'CONFIRMED'];
 
 function toColombiaClock(date) {
   return new Date(date.getTime() - COLOMBIA_OFFSET_MS);
@@ -219,58 +224,21 @@ export async function getNextAvailableSlotAfter(prisma, vacancyId, lastInboundAt
   return offers[currentIndex + 1] || emptySlotResult();
 }
 
-async function findExactActiveBooking(prisma, candidateId, vacancyId, slotId, scheduledAt) {
-  return prisma.interviewBooking.findFirst({
-    where: {
-      candidateId,
-      vacancyId,
-      slotId,
-      scheduledAt,
-      status: { in: ACTIVE_BOOKING_STATUSES }
-    }
-  });
-}
-
-async function findAnyActiveBooking(prisma, candidateId) {
-  return prisma.interviewBooking.findFirst({
-    where: {
-      candidateId,
-      status: { in: ACTIVE_BOOKING_STATUSES }
-    },
-    orderBy: { scheduledAt: 'asc' }
-  });
-}
-
 export async function createBooking(prisma, candidateId, vacancyId, slotId, scheduledAt, reminderWindowClosed = false, replacementStatus = 'RESCHEDULED') {
-  const exactExisting = await findExactActiveBooking(prisma, candidateId, vacancyId, slotId, scheduledAt);
-  if (exactExisting) return exactExisting;
-
-  await prisma.interviewBooking.updateMany({
-    where: {
-      candidateId,
-      status: { in: ACTIVE_BOOKING_STATUSES }
-    },
-    data: {
-      status: replacementStatus,
-      reminderWindowClosed: true
-    }
+  return createScheduledInterviewBooking(prisma, {
+    candidateId,
+    vacancyId,
+    slotId,
+    scheduledAt,
+    reminderWindowClosed,
+    replacementStatus
   });
-
-  try {
-    return await prisma.interviewBooking.create({
-      data: { candidateId, vacancyId, slotId, scheduledAt, reminderWindowClosed }
-    });
-  } catch (error) {
-    const active = await findAnyActiveBooking(prisma, candidateId);
-    if (active) return active;
-    throw error;
-  }
 }
 
 export async function cancelCandidateBookings(prisma, candidateId, replacementStatus = 'CANCELLED') {
-  return prisma.interviewBooking.updateMany({
-    where: { candidateId, status: { in: ACTIVE_BOOKING_STATUSES } },
-    data: { status: replacementStatus, reminderWindowClosed: true }
+  return cancelActiveInterviewBookings(prisma, {
+    candidateId,
+    replacementStatus
   });
 }
 
