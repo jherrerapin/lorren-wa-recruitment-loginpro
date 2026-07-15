@@ -3,7 +3,8 @@ import { requireLorenV2 } from '../services/lorenV2Gate.js';
 import {
   analyzeCandidateCv,
   parseCvAnalysisEvidence,
-  reviewVacancyCandidates
+  reviewVacancyCandidates,
+  safeErrorMessage
 } from '../services/cvIntelligence.js';
 
 function escapeHtml(value = '') {
@@ -352,7 +353,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
     try {
       review = await reviewVacancyCandidates(prisma, { vacancyId, desiredProfile });
     } catch (error) {
-      console.error('[CV_REVIEW_ERROR]', { vacancyId, message: error?.message?.slice(0, 180) });
+      console.error('[CV_REVIEW_ERROR]', { vacancyId, error: safeErrorMessage(error) });
       review = { ok: false, reason: 'match_analysis_failed' };
     }
 

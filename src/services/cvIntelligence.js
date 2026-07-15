@@ -154,7 +154,7 @@ function compareCandidateWithCv(candidate = {}, extracted = {}) {
   ].filter(Boolean);
 }
 
-function safeErrorMessage(error) {
+export function safeErrorMessage(error) {
   const message = error?.message || String(error || 'unknown_error');
   const stack = error?.stack ? `\nStack: ${error.stack}` : '';
   return `${message}${stack}`

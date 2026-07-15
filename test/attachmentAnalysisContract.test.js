@@ -7,6 +7,7 @@ import {
   groupCandidateReviewResults,
   parseCvAnalysisEvidence,
   reviewVacancyCandidates,
+  safeErrorMessage,
   shouldUseVisualPdfFallback
 } from '../src/services/cvIntelligence.js';
 
@@ -97,6 +98,17 @@ test('la evidencia se lee desde rawResponse y conserva compatibilidad con regist
   assert.deepEqual(parseCvAnalysisEvidence(legacy), { warnings: ['registro_anterior'] });
 
   assert.deepEqual(parseCvAnalysisEvidence({ rawResponse: 'json inválido' }), {});
+});
+
+test('los errores conservan un stack limitado sin exponer credenciales', () => {
+  const error = new Error('Fallo Bearer sk-super-secreto');
+  error.stack = `${error.stack}\naccess_token=token-privado`;
+  const summary = safeErrorMessage(error);
+
+  assert.match(summary, /Stack:/);
+  assert.doesNotMatch(summary, /sk-super-secreto/);
+  assert.doesNotMatch(summary, /token-privado/);
+  assert.ok(summary.length <= 1000);
 });
 
 test('la vista usa analysedAt y no consulta createdAt en AttachmentAnalysis', () => {
