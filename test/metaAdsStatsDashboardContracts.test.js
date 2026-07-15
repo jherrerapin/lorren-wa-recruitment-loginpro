@@ -19,8 +19,12 @@ test('panel explica resultados, costos y recomendaciones con lenguaje sencillo',
   assert.doesNotMatch(dashboard, /Mostrar históricos\/no disponibles/);
   assert.doesNotMatch(dashboard, /name="historical"/);
   assert.match(dashboard, /Actualmente no existen anuncios en Meta Ads/);
-  assert.match(dashboard, /¿Qué produjo la inversión\?/);
-  assert.match(dashboard, /Cumplen los requisitos/);
+  assert.match(dashboard, /Datos entregados por Meta/);
+  assert.match(dashboard, /Resultados registrados dentro de Lórren/);
+  assert.match(dashboard, /Aprobados por el equipo/);
+  assert.match(dashboard, /no equivale necesariamente a una persona única/);
+  assert.doesNotMatch(dashboard, /rate\(total\.candidatesCount, total\.metaConversationsStarted\)/);
+  assert.doesNotMatch(dashboard, /Cumplen los requisitos/);
   assert.match(dashboard, /Asistieron a entrevista/);
   assert.match(dashboard, /¿Qué necesita atención\?/);
   assert.match(dashboard, /Qué conviene hacer/);
@@ -80,6 +84,7 @@ test('recomendaciones tratan métricas vacías como cero sin producir decisiones
     completedRegistrations: 10,
     cvReceived: 10,
     apt: 10,
+    selectionOutcomes: 10,
     scheduled: 10,
     attended: 10,
     hired: 1
@@ -97,9 +102,9 @@ test('alertas conservan pérdidas visibles cuando llegan valores nulos o indefin
   assert.equal(missingCv.some((item) => item.title === 'Pocas personas están enviando su hoja de vida'), true);
 
   const missingAppointments = insightItems({
-    totals: { candidatesCount: 10, cvReceived: 10, apt: 5, scheduled: null }
+    totals: { candidatesCount: 10, cvReceived: 10, apt: 5, selectionOutcomes: 5, scheduled: null }
   });
-  assert.equal(missingAppointments.some((item) => item.title === 'Hay candidatos que cumplen, pero pocos agendan'), true);
+  assert.equal(missingAppointments.some((item) => item.title === 'Hay candidatos aprobados, pero pocos agendan'), true);
 });
 
 test('consejos de entrevista respetan vacantes sin agenda y resultados pendientes', () => {
@@ -109,6 +114,7 @@ test('consejos de entrevista respetan vacantes sin agenda y resultados pendiente
     completedRegistrations: 10,
     cvReceived: 10,
     apt: 3,
+    selectionOutcomes: 3,
     hired: 0
   };
   const pending = { ...baseMetric, scheduled: 3, attended: 0, noShow: 0 };
@@ -127,7 +133,7 @@ test('consejos de entrevista respetan vacantes sin agenda y resultados pendiente
   assert.equal(recommendationFor(cvOnly, [cvOnly]).label, 'Seguir observando');
 
   const cvOnlyInsights = insightItems({ totals: cvOnly, metrics: [cvOnly] });
-  assert.equal(cvOnlyInsights.some((item) => item.title === 'Hay candidatos que cumplen, pero pocos agendan'), false);
+  assert.equal(cvOnlyInsights.some((item) => item.title === 'Hay candidatos aprobados, pero pocos agendan'), false);
   const pendingInsights = insightItems({ totals: pending, metrics: [pending] });
   assert.equal(pendingInsights.some((item) => item.title === 'La asistencia a entrevistas es baja'), false);
   const resolvedInsights = insightItems({ totals: resolvedNoShows, metrics: [resolvedNoShows] });
@@ -149,6 +155,27 @@ test('candidatos no elegibles no se presentan como abandono del formulario', () 
   const alerts = insightItems({ totals: metric, metrics: [metric] });
   assert.equal(alerts.some((item) => item.title === '5 personas no cumplen un requisito'), true);
   assert.equal(alerts.some((item) => /no terminaron el registro/.test(item.title)), false);
+});
+
+test('hojas de vida sin decisiones no se presentan como perfiles que incumplen', () => {
+  const metric = {
+    campaign: { id: 'campaign-1', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: true } },
+    spend: 16574,
+    candidatesCount: 41,
+    completedRegistrations: 17,
+    cvReceived: 20,
+    apt: 0,
+    selectionOutcomes: 0,
+    scheduled: 0,
+    attended: 0,
+    noShow: 0,
+    hired: 0
+  };
+
+  assert.equal(recommendationFor(metric, [metric]).label, 'Revisar hojas de vida');
+  const alerts = insightItems({ totals: metric, metrics: [metric] });
+  assert.equal(alerts.some((item) => item.title === 'Hay hojas de vida pendientes de decisión'), true);
+  assert.equal(alerts.some((item) => /no cumplen/i.test(item.title)), false);
 });
 
 test('atribución estadística no compara nombres ni tokens', () => {

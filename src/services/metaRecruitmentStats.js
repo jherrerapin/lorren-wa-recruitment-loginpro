@@ -38,6 +38,10 @@ function isApt(candidate = {}) {
   return ['APROBADO', 'CONTRATADO'].includes(String(candidate.status || ''));
 }
 
+function hasSelectionOutcome(candidate = {}) {
+  return ['APROBADO', 'RECHAZADO', 'CONTRATADO'].includes(String(candidate.status || ''));
+}
+
 function isHired(candidate = {}) {
   return String(candidate.status || '') === 'CONTRATADO';
 }
@@ -78,11 +82,14 @@ export function dateKeyInTimeZone(value, timeZone = DEFAULT_TIME_ZONE) {
 
 export function extractMessagingConversations(rawActions = []) {
   if (!Array.isArray(rawActions)) return 0;
-  return rawActions.reduce((total, action) => {
-    const type = String(action?.action_type || '').toLowerCase();
-    if (!type.includes('messaging_conversation_started')) return total;
-    return total + asInteger(action?.value);
-  }, 0);
+  const actionTypes = new Set([
+    'onsite_conversion.messaging_conversation_started_7d',
+    'messaging_conversation_started_7d'
+  ]);
+  const values = rawActions
+    .filter((action) => actionTypes.has(String(action?.action_type || '').toLowerCase()))
+    .map((action) => asInteger(action?.value));
+  return values.length ? Math.max(...values) : 0;
 }
 
 export function candidateMatchesAdExactly(candidate = {}, campaign = {}) {
@@ -158,6 +165,7 @@ function createEmptyAdMetric(campaign = {}) {
     ineligible: 0,
     cvReceived: 0,
     apt: 0,
+    selectionOutcomes: 0,
     hired: 0,
     scheduled: 0,
     confirmed: 0,
@@ -248,6 +256,7 @@ export function buildMetaAdStatistics({
     if (state.stageCode === 'INELIGIBLE') metric.ineligible += 1;
     if (state.hasCv) metric.cvReceived += 1;
     if (isApt(candidate)) metric.apt += 1;
+    if (hasSelectionOutcome(candidate)) metric.selectionOutcomes += 1;
     if (isHired(candidate)) metric.hired += 1;
     if (hasBooking(candidate)) metric.scheduled += 1;
     if (hasConfirmedBooking(candidate)) metric.confirmed += 1;
@@ -315,6 +324,7 @@ export function aggregateMetaAdStatistics(metrics = []) {
     ineligible: 0,
     cvReceived: 0,
     apt: 0,
+    selectionOutcomes: 0,
     hired: 0,
     scheduled: 0,
     confirmed: 0,
