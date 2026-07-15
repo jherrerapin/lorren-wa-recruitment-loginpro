@@ -12,6 +12,9 @@ function normalizeNullableString(value) {
 }
 
 function normalizeTimestamp(value, label) {
+  if (value === null || typeof value === 'boolean') {
+    throw new Error(`${label}_invalid`);
+  }
   const timestamp = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(timestamp.getTime())) throw new Error(`${label}_invalid`);
   return timestamp;
@@ -174,8 +177,11 @@ export async function mergeConversationMessagePayload(prisma, input = {}) {
     where: { id: messageId },
     select: { rawPayload: true }
   });
+  if (!persisted) {
+    throw new Error('message_not_found');
+  }
   const rawPayload = {
-    ...normalizeExistingJsonObject(persisted?.rawPayload),
+    ...normalizeExistingJsonObject(persisted.rawPayload),
     ...patch
   };
   const message = await prisma.message.update({
@@ -197,7 +203,8 @@ export async function markConversationMessagesResponded(prisma, input = {}) {
   }
 
   const messageIds = requireMessageIds(input.messageIds);
-  const respondedAt = normalizeTimestamp(input.respondedAt ?? new Date(), 'responded_at');
+  const respondedAtInput = Object.hasOwn(input, 'respondedAt') ? input.respondedAt : new Date();
+  const respondedAt = normalizeTimestamp(respondedAtInput, 'responded_at');
   const result = await prisma.message.updateMany({
     where: { id: { in: messageIds } },
     data: { respondedAt }
