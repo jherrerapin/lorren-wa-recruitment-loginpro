@@ -73,7 +73,13 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add \
+            src/routes/webhook.js \
+            test/webhookInterviewBookingAuthority.test.js \
+            docs/architecture/state-authority-manifest.json \
+            docs/architecture/state-authority-map.md \
+            docs/architecture/interview-booking-transition-inventory.md
+          git add -u -- .codex-477-bootstrap.md scripts/apply-webhook-interview-authority.mjs
           allowed='^(src/routes/webhook.js|test/webhookInterviewBookingAuthority.test.js|docs/architecture/state-authority-manifest.json|docs/architecture/state-authority-map.md|docs/architecture/interview-booking-transition-inventory.md|\.codex-477-bootstrap.md|scripts/apply-webhook-interview-authority.mjs)$'
           unexpected=$(git diff --cached --name-only | grep -Ev "$allowed" || true)
           if [ -n "$unexpected" ]; then
