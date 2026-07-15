@@ -113,7 +113,7 @@ test('mensaje libre manual se envía y se guarda exactamente sin filtro de IA/se
   }
 });
 
-test('la eliminación administrativa delega mensajes y conserva el orden transaccional', () => {
+test('la eliminación administrativa delega mensajes y reservas conservando el orden transaccional', () => {
   const source = fs.readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8');
   const routeStart = source.indexOf("router.post('/candidates/:id/delete'");
   const routeEnd = source.indexOf("router.post('/candidates/:id/edit'", routeStart);
@@ -121,14 +121,21 @@ test('la eliminación administrativa delega mensajes y conserva el orden transac
 
   const route = source.slice(routeStart, routeEnd);
   assert.doesNotMatch(route, /tx\.message\.deleteMany\s*\(/);
+  assert.doesNotMatch(route, /tx\.interviewBooking\.deleteMany\s*\(/);
   assert.match(route, /deleteConversationMessagesForCandidate\(tx,\s*\{\s*candidateId:\s*candidate\.id\s*\}\)/s);
+  assert.match(route, /deleteCandidateInterviewBookings\(tx,\s*\{\s*candidateId:\s*candidate\.id\s*\}\)/s);
 
   const messageIndex = route.indexOf('deleteConversationMessagesForCandidate(tx,');
-  const bookingIndex = route.indexOf('tx.interviewBooking.deleteMany(');
+  const bookingIndex = route.indexOf('deleteCandidateInterviewBookings(tx,');
   const candidateIndex = route.indexOf('tx.candidate.delete(');
   const transactionEnd = route.indexOf('    });', candidateIndex);
   const cvCleanupIndex = route.indexOf('clearCandidateCvStorage(candidate)');
 
+  assert.ok(messageIndex >= 0, 'No se encontró la eliminación delegada de mensajes');
+  assert.ok(bookingIndex >= 0, 'No se encontró la eliminación delegada de reservas');
+  assert.ok(candidateIndex >= 0, 'No se encontró la eliminación del candidato');
+  assert.ok(transactionEnd >= 0, 'No se encontró el cierre de la transacción');
+  assert.ok(cvCleanupIndex >= 0, 'No se encontró la limpieza del CV');
   assert.ok(messageIndex < bookingIndex, 'Los mensajes deben eliminarse antes de las reservas');
   assert.ok(bookingIndex < candidateIndex, 'Las reservas deben eliminarse antes del candidato');
   assert.ok(candidateIndex < transactionEnd, 'El candidato debe eliminarse dentro de la transacción');
