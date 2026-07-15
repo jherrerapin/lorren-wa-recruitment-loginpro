@@ -19,6 +19,7 @@ test('aceptar horario crea booking SCHEDULED y no CONFIRMED', async () => {
   const calls = [];
   const prisma = {
     interviewBooking: {
+      findMany: async () => [],
       findFirst: async () => null,
       create: async ({ data }) => {
         calls.push(data);
