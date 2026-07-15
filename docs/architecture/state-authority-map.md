@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 3 | Alto | En consolidación | `ConversationMessageRepository` |
+| `Message` | 2 | Alto | En consolidación | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -70,25 +70,29 @@ La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboun
 
 `admin.js` permanece declarado como escritor de `Message` porque la eliminación de un candidato borra sus mensajes dentro de la misma transacción mediante `tx.message.deleteMany()`. Esa operación no forma parte de la mensajería saliente y no se modifica en esta etapa.
 
-En `webhook.js` se migraron tres fronteras acotadas:
+`webhook.js` ya no crea ni actualiza `Message` directamente. Sus cinco fronteras de escritura delegan en el repositorio compartido:
 
-- `saveInboundMessage()` delega la creación idempotente en `persistInboundConversationMessage()` y conserva `waMessageId`, sanitización del payload, fallback `MessageType.UNKNOWN`, detección de duplicados, actualización de `Candidate.lastInboundAt` y resolución del ID creado;
-- `saveOutboundMessage()` delega la persistencia común de respuestas `TEXT` y conserva la actualización posterior de `Candidate.lastOutboundAt`;
-- `recordIntentionalSilence()` delega la traza interna de silencio, preservando `visibility=internal`, `neverSendToCandidate=true` y su manejo tolerante de errores.
+- `saveInboundMessage()` usa `persistInboundConversationMessage()` y conserva `waMessageId`, sanitización del payload, fallback `MessageType.UNKNOWN`, detección de duplicados, actualización de `Candidate.lastInboundAt` y resolución del ID creado;
+- `saveOutboundMessage()` usa `persistOutboundConversationMessage()` y conserva la actualización posterior de `Candidate.lastOutboundAt`;
+- `recordIntentionalSilence()` usa la persistencia saliente para su traza interna, preservando `visibility=internal`, `neverSendToCandidate=true` y manejo tolerante de errores;
+- `attachDebugTrace()` usa `mergeConversationMessagePayload()` y conserva la clave histórica `debugTrace` sin borrar metadatos previos;
+- el cierre exitoso del lote multilinea usa `markConversationMessagesResponded()` con los mismos IDs y una fecha nueva, en el mismo punto anterior al `catch` y al `finally`.
 
 El número de teléfono no se persiste en `Message` porque ese campo no existe en Prisma; continúa disponible en `Candidate`, en el payload original de WhatsApp y en los logs operativos del inbox.
 
-El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y la programación del recordatorio permanece después. No se modifican interpretación, payload de seguridad, candidatos, agenda ni el procesamiento multilinea.
+El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y la programación del recordatorio permanece después. No se modifican interpretación, payload de seguridad, candidatos, agenda, adjuntos ni procesamiento conversacional.
 
-`webhook.js` permanece declarado como escritor de `Message` porque todavía actualiza la traza de depuración de un mensaje y marca lotes entrantes con `respondedAt`.
+Los escritores directos de `Message` bajan a dos: administración por eliminación transaccional y `ConversationMessageRepository`.
 
-Los escritores directos de `Message` permanecen en tres: webhook, administración por eliminación transaccional y el repositorio compartido.
+El agregado permanece `consolidating`: la eliminación administrativa todavía no delega en una operación canónica de ciclo de vida.
 
-El repositorio distingue actualmente tres contratos:
+El repositorio distingue actualmente cinco contratos:
 
 - entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
 - salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie;
-- actualización restringida exclusivamente a `rawPayload` sobre un mensaje identificado.
+- reemplazo restringido exclusivamente a `rawPayload` sobre un mensaje identificado;
+- fusión de un patch en `rawPayload` sin borrar metadatos previos;
+- marcado por lote de `respondedAt` con IDs deduplicados y fecha validada.
 
 Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, los consumidores migrados continúan enviando al proveedor antes de persistir. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
 
@@ -118,9 +122,11 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 - no emitir recordatorios para reservas cerradas;
 - no crear dos reservas activas para el mismo candidato y vacante.
 
-### 3. Los mensajes todavía se escriben desde fronteras distintas
+### 3. La persistencia conversacional quedó concentrada, pero la eliminación administrativa sigue separada
 
-Las escrituras directas de `Message` quedan repartidas entre el webhook, la eliminación administrativa y el nuevo repositorio. La autoridad objetivo debe terminar distinguiendo:
+Las creaciones y actualizaciones de `Message` pasan por `ConversationMessageRepository`. La única escritura directa restante fuera del repositorio es la eliminación transaccional de mensajes al borrar un candidato desde `admin.js`.
+
+La autoridad todavía debe evolucionar para distinguir explícitamente:
 
 - mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
