@@ -112,7 +112,7 @@ jobs:
         run: node --test test/webhookMessageAuthority.test.js test/webhookInboundMessageAuthority.test.js test/webhookIdempotency.test.js test/webhookPersistence.test.js test/turnOrchestratorContracts.test.js
 
       - name: Run reminder regressions
-        run: node --test test/reminder.test.js
+        run: node --test test/reminder.test.js test/interviewBookingReminderStateService.test.js
 
       - name: Run interview booking transition policy regressions
         run: node --test test/interviewBookingTransitionPolicy.test.js

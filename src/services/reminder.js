@@ -15,6 +15,13 @@ import {
 import { isFeatureEnabled } from './featureFlags.js';
 import { enqueueJob, JOB_TYPES } from './jobQueue.js';
 import { persistOutboundConversationMessage } from './conversationMessageRepository.js';
+import {
+  ACTIVE_INTERVIEW_BOOKING_STATUSES,
+  applyInterviewReminderResponse,
+  claimInterviewBookingReminder as claimInterviewBookingReminderState,
+  closeUnclaimedInterviewReminderWindow as closeUnclaimedInterviewReminderWindowState,
+  markInterviewBookingNoResponse
+} from './interviewBookingStateService.js';
 
 export const CANDIDATE_PROCESS_REMINDER_DELAY_MS = Number.parseInt(
   process.env.CANDIDATE_PROCESS_REMINDER_DELAY_MS || String(2 * 60 * 60 * 1000),
@@ -25,7 +32,7 @@ const INTERVIEW_REMINDER_LEAD_MS = Number.parseInt(
 ) || (60 * 60 * 1000);
 const INTERVIEW_REMINDER_EARLY_TOLERANCE_MS = 5 * 60 * 1000;
 const INTERVIEW_REMINDER_LATE_TOLERANCE_MS = 10 * 60 * 1000;
-const ACTIVE_INTERVIEW_STATUSES = ['SCHEDULED', 'CONFIRMED'];
+const ACTIVE_INTERVIEW_STATUSES = ACTIVE_INTERVIEW_BOOKING_STATUSES;
 const NO_RESPONSE_ELIGIBLE_INTERVIEW_STATUSES = ['SCHEDULED'];
 const INTERVIEW_KEEPALIVE_SOURCE = 'interview_window_keepalive';
 const INTERVIEW_BOOKING_REMINDER_SOURCE = 'interview_booking_reminder';
@@ -300,15 +307,8 @@ async function hasReminderReplyAfterSentAt(prisma, booking) {
 
 async function closeUnclaimedInterviewReminderWindow(prisma, booking) {
   if (!booking?.id || typeof prisma?.interviewBooking?.updateMany !== 'function') return false;
-  const result = await prisma.interviewBooking.updateMany({
-    where: {
-      id: booking.id,
-      reminderSentAt: null,
-      reminderWindowClosed: false
-    },
-    data: {
-      reminderWindowClosed: true
-    }
+  const result = await closeUnclaimedInterviewReminderWindowState(prisma, {
+    bookingId: booking.id
   });
   return result.count === 1;
 }
@@ -344,22 +344,12 @@ async function claimInterviewBookingReminder(prisma, booking, now, { windowStart
     return false;
   }
 
-  const result = await prisma.interviewBooking.updateMany({
-    where: {
-      id: booking.id,
-      candidateId: booking.candidateId,
-      status: { in: ACTIVE_INTERVIEW_STATUSES },
-      reminderSentAt: null,
-      reminderWindowClosed: false,
-      scheduledAt: {
-        gte: windowStart,
-        lte: windowEnd
-      }
-    },
-    data: {
-      reminderSentAt: now,
-      reminderWindowClosed: true
-    }
+  const result = await claimInterviewBookingReminderState(prisma, {
+    bookingId: booking.id,
+    candidateId: booking.candidateId,
+    now,
+    windowStart,
+    windowEnd
   });
 
   return result.count === 1;
@@ -367,21 +357,11 @@ async function claimInterviewBookingReminder(prisma, booking, now, { windowStart
 
 async function claimInterviewNoResponse(prisma, booking, now, windowEnd) {
   if (!booking?.id || typeof prisma?.interviewBooking?.updateMany !== 'function') return false;
-  const result = await prisma.interviewBooking.updateMany({
-    where: {
-      id: booking.id,
-      candidateId: booking.candidateId,
-      status: { in: NO_RESPONSE_ELIGIBLE_INTERVIEW_STATUSES },
-      reminderSentAt: { not: null },
-      scheduledAt: {
-        gte: now,
-        lte: windowEnd
-      }
-    },
-    data: {
-      status: 'NO_RESPONSE',
-      reminderWindowClosed: true
-    }
+  const result = await markInterviewBookingNoResponse(prisma, {
+    bookingId: booking.id,
+    candidateId: booking.candidateId,
+    now,
+    windowEnd
   });
   return result.count === 1;
 }
@@ -632,27 +612,19 @@ export async function handleInterviewReminderResponse(prisma, candidateId, respo
   if (!booking) return { status: 'UNCHANGED', intent: 'none' };
 
   const intent = detectInterviewIntent({ text: responseText, booking, now });
-  const statusByIntent = {
-    confirm_attendance: 'CONFIRMED',
-    cancel_interview: 'CANCELLED',
-    reschedule_interview: 'RESCHEDULED'
-  };
-  const nextStatus = statusByIntent[intent];
-  if (!nextStatus) return { status: 'UNCHANGED', intent };
+  if (!['confirm_attendance', 'cancel_interview', 'reschedule_interview'].includes(intent)) {
+    return { status: 'UNCHANGED', intent };
+  }
 
-  const transition = await prisma.interviewBooking.updateMany({
-    where: {
-      id: booking.id,
-      status: { in: ACTIVE_INTERVIEW_STATUSES }
-    },
-    data: {
-      status: nextStatus,
-      reminderResponse: responseText,
-      reminderWindowClosed: true
-    }
+  const transition = await applyInterviewReminderResponse(prisma, {
+    bookingId: booking.id,
+    currentStatus: booking.status,
+    responseText,
+    intent
   });
   if (transition.count !== 1) return { status: 'UNCHANGED', intent };
 
+  const nextStatus = transition.nextStatus;
   const updatedBooking = typeof prisma.interviewBooking.findUnique === 'function'
     ? await prisma.interviewBooking.findUnique({ where: { id: booking.id } })
     : { ...booking, status: nextStatus, reminderResponse: responseText, reminderWindowClosed: true };

@@ -18,7 +18,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
-| `InterviewBooking` | 5 | Crítico | En consolidación | `InterviewBookingStateService` |
+| `InterviewBooking` | 4 | Crítico | En consolidación | `InterviewBookingStateService` |
 | `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
@@ -86,22 +86,22 @@ La autoridad de persistencia de `Message` ya es canónica. Esto no significa que
 
 ### Reservas de entrevista en consolidación
 
-`InterviewBookingStateService` establece la primera frontera compartida del agregado. `interviewScheduler.js` conserva la resolución de fechas, cupos, anticipación mínima, ventana de WhatsApp y selección del siguiente slot, pero deja de escribir `InterviewBooking` directamente.
+`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación y las mutaciones operativas de recordatorios. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs. Ninguno de los dos escribe `InterviewBooking` directamente.
 
-Las funciones públicas del scheduler mantienen su firma y retorno:
+La autoridad protege estas invariantes:
 
-- `createBooking()` delega en `createScheduledInterviewBooking()`;
-- `cancelCandidateBookings()` delega en `cancelActiveInterviewBookings()` y conserva el resultado `{ count }` de Prisma.
+- una reserva activa exacta se reutiliza;
+- el reemplazo respeta el índice único parcial de una reserva activa por candidato;
+- el cierre anterior y la creación del reemplazo se confirman o revierten juntos dentro de una transacción serializable;
+- con un cliente `tx` existente se reutiliza la unidad sin abrir una transacción anidada;
+- los conflictos `P2034` se reintentan de forma acotada;
+- una recuperación `P2002` solo acepta la reserva exacta por candidato, vacante, slot y fecha;
+- una solicitud de reprogramación conserva `SCHEDULED` o `CONFIRMED` hasta que exista un reemplazo válido;
+- la cancelación ordinaria solo produce `CANCELLED`;
+- `NO_RESPONSE` solo se aplica desde `SCHEDULED` con recordatorio enviado y dentro de su ventana;
+- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia.
 
-La nueva autoridad protege las invariantes vigentes sin introducir una transacción o cambiar estados:
-
-- una reserva activa idéntica se reutiliza;
-- antes de crear otra reserva se cierran las activas del candidato con el `replacementStatus` recibido;
-- la nueva reserva continúa naciendo como `SCHEDULED` por defecto de Prisma;
-- si la creación falla por una carrera, se recupera la reserva activa más próxima;
-- la cancelación solo afecta estados `SCHEDULED` o `CONFIRMED` y cierra la ventana de recordatorio.
-
-El número de escritores permanece en cinco porque administración, webhook, `chatEngine` y recordatorios aún realizan otras transiciones directamente. El scheduler sale del inventario y es sustituido por la autoridad canónica objetivo.
+`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El número de escritores directos baja a cuatro: administración, webhook, `chatEngine` y la autoridad canónica.
 
 ## Hallazgos
 
@@ -120,14 +120,14 @@ Lo modifican rutas HTTP, webhook, motores conversacionales, consentimiento, atri
 
 La meta no es mover estas quince escrituras a un archivo gigante. La autoridad objetivo debe exponer casos de uso y validar transiciones, mientras cada dominio conserva su propia decisión especializada.
 
-### 2. Las reservas conservan cuatro fronteras directas por migrar
+### 2. Las reservas conservan tres fronteras directas por migrar
 
-Después de extraer las mutaciones del scheduler, `InterviewBooking` todavía se modifica desde webhook, recordatorios, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:
+Después de extraer scheduler y recordatorios, `InterviewBooking` todavía se modifica desde webhook, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:
 
 - no marcar `RESCHEDULED` sin una nueva reserva;
 - no confirmar una reserva cancelada;
-- no emitir recordatorios para reservas cerradas;
-- no crear dos reservas activas para el mismo candidato y vacante.
+- no revivir reservas cerradas desde el panel;
+- no crear dos reservas activas para el mismo candidato.
 
 ### 3. La persistencia de mensajes ya tiene una autoridad única
 
