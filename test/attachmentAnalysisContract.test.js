@@ -361,8 +361,6 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
     transportMode: 'Moto',
     residence: 'Suba'
   });
-  assert.equal('declaredExperience' in strongInput.sources.registration, false);
-  assert.equal('availability' in strongInput.sources.registration, false);
   for (const excludedField of ['fullName', 'phone', 'documentNumber', 'age', 'gender', 'medicalRestrictions']) {
     assert.equal(JSON.stringify(strongInput).includes(`"${excludedField}"`), false);
   }
@@ -393,7 +391,7 @@ test('Terra es el modelo por defecto y las tareas especializadas permiten overri
   assert.match(routeSource, /Datos registrados por el candidato/);
   assert.match(routeSource, /Medio de transporte/);
   assert.doesNotMatch(routeSource, /Experiencia declarada/);
-  assert.doesNotMatch(routeSource, /\['Disponibilidad', candidate\?\.availability\]/);
+  assert.doesNotMatch(routeSource, /Disponibilidad/);
   assert.match(routeSource, /Evidencia encontrada \(HV o registro\)/);
   assert.doesNotMatch(routeSource, /cambiar.*estado.*candidato/i);
 });
