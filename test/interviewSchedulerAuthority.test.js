@@ -11,6 +11,11 @@ test('interviewScheduler conserva sus funciones públicas y delega las mutacione
   assert.match(schedulerSource, /return cancelActiveInterviewBookings\(prisma,\s*\{/s);
 });
 
+test('RESCHEDULED en el adaptador representa solicitud y no cierra la reserva', () => {
+  assert.match(schedulerSource, /if \(replacementStatus === 'RESCHEDULED'\) \{/);
+  assert.match(schedulerSource, /return requestActiveInterviewBookingReschedule\(prisma, \{ candidateId \}\);/);
+});
+
 test('interviewScheduler no escribe InterviewBooking directamente', () => {
   assert.doesNotMatch(schedulerSource, /prisma\.interviewBooking\.(?:create|update|updateMany|delete|deleteMany|upsert)\s*\(/);
 });
