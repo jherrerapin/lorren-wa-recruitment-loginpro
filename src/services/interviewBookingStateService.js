@@ -140,31 +140,32 @@ async function createOrReplaceInsideTransaction(client, input) {
   });
   const replacementBookingId = requireNonEmptyString(created?.id, 'created_booking_id');
 
-  for (const currentStatus of ACTIVE_INTERVIEW_BOOKING_STATUSES) {
-    assertAllowedTransition(evaluateInterviewBookingTransition({
-      action: InterviewBookingTransitionAction.COMPLETE_RESCHEDULE,
-      currentStatus,
-      replacementBookingId
-    }));
-  }
-
-  await client.interviewBooking.updateMany({
-    where: {
-      candidateId: input.candidateId,
-      id: { not: replacementBookingId },
-      status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
-    },
-    data: {
-      status: InterviewBookingStatus.RESCHEDULED,
-      reminderWindowClosed: true
+  if (activeBookings.length) {
+    for (const booking of activeBookings) {
+      assertAllowedTransition(evaluateInterviewBookingTransition({
+        action: InterviewBookingTransitionAction.COMPLETE_RESCHEDULE,
+        currentStatus: booking.status,
+        replacementBookingId
+      }));
     }
-  });
+
+    await client.interviewBooking.updateMany({
+      where: {
+        candidateId: input.candidateId,
+        id: { not: replacementBookingId },
+        status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
+      },
+      data: {
+        status: InterviewBookingStatus.RESCHEDULED,
+        reminderWindowClosed: true
+      }
+    });
+  }
 
   return created;
 }
 
 async function runSerializableTransaction(prisma, input) {
-  let lastError;
   for (let attempt = 1; attempt <= MAX_SERIALIZABLE_RETRIES; attempt += 1) {
     try {
       return await prisma.$transaction(
@@ -172,13 +173,11 @@ async function runSerializableTransaction(prisma, input) {
         { isolationLevel: SERIALIZABLE_ISOLATION_LEVEL }
       );
     } catch (error) {
-      lastError = error;
       if (!isRetryableTransactionConflict(error) || attempt === MAX_SERIALIZABLE_RETRIES) {
         throw error;
       }
     }
   }
-  throw lastError;
 }
 
 export async function createScheduledInterviewBooking(prisma, input = {}) {
