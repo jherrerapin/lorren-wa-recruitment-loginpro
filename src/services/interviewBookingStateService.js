@@ -110,6 +110,18 @@ async function findExactActiveBooking(client, input) {
   });
 }
 
+async function createBookingRow(client, input) {
+  return client.interviewBooking.create({
+    data: {
+      candidateId: input.candidateId,
+      vacancyId: input.vacancyId,
+      slotId: input.slotId,
+      scheduledAt: input.scheduledAt,
+      reminderWindowClosed: input.reminderWindowClosed
+    }
+  });
+}
+
 async function createOrReplaceInsideTransaction(client, input) {
   const activeBookings = await listActiveBookings(client, input.candidateId);
   const exactExisting = activeBookings.find((booking) => isExactBooking(booking, input));
@@ -120,46 +132,36 @@ async function createOrReplaceInsideTransaction(client, input) {
       action: InterviewBookingTransitionAction.CREATE_INITIAL,
       currentStatus: null
     }));
-  } else {
-    for (const booking of activeBookings) {
-      assertAllowedTransition(evaluateInterviewBookingTransition({
-        action: InterviewBookingTransitionAction.REQUEST_RESCHEDULE,
-        currentStatus: booking.status
-      }));
-    }
+    return createBookingRow(client, input);
   }
 
-  const created = await client.interviewBooking.create({
-    data: {
+  for (const booking of activeBookings) {
+    assertAllowedTransition(evaluateInterviewBookingTransition({
+      action: InterviewBookingTransitionAction.REQUEST_RESCHEDULE,
+      currentStatus: booking.status
+    }));
+  }
+
+  await client.interviewBooking.updateMany({
+    where: {
       candidateId: input.candidateId,
-      vacancyId: input.vacancyId,
-      slotId: input.slotId,
-      scheduledAt: input.scheduledAt,
-      reminderWindowClosed: input.reminderWindowClosed
+      status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
+    },
+    data: {
+      status: InterviewBookingStatus.RESCHEDULED,
+      reminderWindowClosed: true
     }
   });
+
+  const created = await createBookingRow(client, input);
   const replacementBookingId = requireNonEmptyString(created?.id, 'created_booking_id');
 
-  if (activeBookings.length) {
-    for (const booking of activeBookings) {
-      assertAllowedTransition(evaluateInterviewBookingTransition({
-        action: InterviewBookingTransitionAction.COMPLETE_RESCHEDULE,
-        currentStatus: booking.status,
-        replacementBookingId
-      }));
-    }
-
-    await client.interviewBooking.updateMany({
-      where: {
-        candidateId: input.candidateId,
-        id: { not: replacementBookingId },
-        status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
-      },
-      data: {
-        status: InterviewBookingStatus.RESCHEDULED,
-        reminderWindowClosed: true
-      }
-    });
+  for (const booking of activeBookings) {
+    assertAllowedTransition(evaluateInterviewBookingTransition({
+      action: InterviewBookingTransitionAction.COMPLETE_RESCHEDULE,
+      currentStatus: booking.status,
+      replacementBookingId
+    }));
   }
 
   return created;
