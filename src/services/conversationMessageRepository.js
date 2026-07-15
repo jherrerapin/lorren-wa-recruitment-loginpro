@@ -25,7 +25,7 @@ function requireJsonObject(value, label) {
 }
 
 function normalizeExistingJsonObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return value || {};
 }
 
 function requireMessageIds(value) {

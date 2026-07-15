@@ -37,7 +37,12 @@ import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/reply
 import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
-import { persistInboundConversationMessage, persistOutboundConversationMessage } from '../services/conversationMessageRepository.js';
+import {
+  markConversationMessagesResponded,
+  mergeConversationMessagePayload,
+  persistInboundConversationMessage,
+  persistOutboundConversationMessage
+} from '../services/conversationMessageRepository.js';
 import { ContextualAllowedAction, evaluateContextualResponseGate, inferContextualSemanticIntent } from '../services/contextualResponseGate.js';
 import { FUTURE_PROFILE_CAPTURE_MODE, PAUSED_VACANCY_CAPTURE_MODE, resolveVacancyFirstGate, VacancyFirstGateAction } from '../services/vacancyFirstGate.js';
 import {
@@ -1303,8 +1308,10 @@ export async function saveInboundMessage(prisma, candidateId, message, body, typ
 }
 async function attachDebugTrace(prisma, messageId, debugTrace) {
   if (!messageId) return;
-  const current = await prisma.message.findUnique({ where: { id: messageId }, select: { rawPayload: true } });
-  await prisma.message.update({ where: { id: messageId }, data: { rawPayload: { ...(current?.rawPayload || {}), debugTrace } } });
+  return mergeConversationMessagePayload(prisma, {
+    messageId,
+    patch: { debugTrace }
+  });
 }
 
 async function prepareCandidateForInboundAutomation(prisma, candidate = {}) {
@@ -2679,9 +2686,9 @@ export function webhookRouter(prisma) {
               consolidatedInputSummary: summarizeConsolidatedInput(consolidatedText)
             });
             await markPotentialDuplicateByDocument(prisma, candidate.id);
-            await prisma.message.updateMany({
-              where: { id: { in: pendingBatch.map((item) => item.id) } },
-              data: { respondedAt: new Date() }
+            await markConversationMessagesResponded(prisma, {
+              messageIds: pendingBatch.map((item) => item.id),
+              respondedAt: new Date()
             });
           } catch (error) {
             debugTrace.error_summary = summarizeError(error);

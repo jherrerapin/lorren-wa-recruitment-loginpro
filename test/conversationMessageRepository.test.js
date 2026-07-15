@@ -149,11 +149,11 @@ test('fusiona una traza en rawPayload sin borrar metadatos previos', async () =>
   const { prisma, calls } = createPrismaMock({
     existingRawPayload: { source: 'inbound', existing: true }
   });
-  const debug = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };
+  const debugTrace = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };
 
   const result = await mergeConversationMessagePayload(prisma, {
     messageId: 'message-inbound-1',
-    patch: { debug }
+    patch: { debugTrace }
   });
 
   assert.deepEqual(calls.findUnique, [{
@@ -166,12 +166,12 @@ test('fusiona una traza en rawPayload sin borrar metadatos previos', async () =>
       rawPayload: {
         source: 'inbound',
         existing: true,
-        debug
+        debugTrace
       }
     }
   }]);
   assert.equal(result.updated, true);
-  assert.deepEqual(result.rawPayload.debug, debug);
+  assert.deepEqual(result.rawPayload.debugTrace, debugTrace);
 });
 
 test('marca un lote deduplicado como respondido con fecha controlada', async () => {
