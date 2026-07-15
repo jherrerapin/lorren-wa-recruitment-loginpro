@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 2 | Alto | En consolidación | `ConversationMessageRepository` |
+| `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -44,31 +44,15 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `CandidateDataConsentEvent` tiene ahora un único escritor: `ConsentStateService`. El scanner de CI impide que una ruta, gate o integración vuelva a crear eventos directamente.
 
-### Migraciones de mensajes
+### Mensajes canónicos
 
 `dataConsentGate.js` ya no escribe `Message` directamente. La evidencia entrante y las respuestas salientes del gate pasan por `ConversationMessageRepository`.
 
-`adminSupervisor.js` ya no crea ni actualiza `Message` directamente. Su flujo completo delega:
+`adminSupervisor.js` delega la entrada idempotente, los avisos internos, las respuestas al candidato y la resolución del requerimiento pendiente. Conserva la interpretación de la instrucción, el envío por WhatsApp, la selección de documentos, el conocimiento validado y las pausas o reanudaciones del candidato.
 
-- la entrada idempotente del administrador mediante `persistInboundConversationMessage()`;
-- los avisos internos y la respuesta al candidato mediante `persistOutboundConversationMessage()`;
-- la resolución o actualización del requerimiento pendiente mediante `updateConversationMessagePayload()`.
+`reminder.js` delega la persistencia de sus mensajes y conserva programación, reclamación, ventana de WhatsApp, reservas, estados del candidato y jobs.
 
-El supervisor conserva la interpretación de la instrucción, el envío por WhatsApp, selección de documentos, conocimiento validado y las pausas o reanudaciones del candidato. La autoridad compartida controla únicamente la persistencia de mensajes.
-
-`reminder.js` ya no escribe `Message` directamente. Su helper `storeOutbound()` delega en `persistOutboundConversationMessage()` y conserva:
-
-- el candidato destinatario;
-- el cuerpo exacto del recordatorio;
-- el tipo de mensaje `TEXT`;
-- el payload de origen y metadatos;
-- el orden actual de envío y persistencia.
-
-La migración no modifica programación, reclamación, ventana de WhatsApp, reservas, estados del candidato ni jobs. `reminder.js` continúa como escritor de `Candidate` e `InterviewBooking`, pero deja de ser escritor de `Message`.
-
-La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboundMessage()`, delega ahora su creación saliente en `persistOutboundConversationMessage()`. Conserva el orden actual —envío al proveedor, actualización del candidato y persistencia—, el cuerpo exacto o saneado y el payload de intervención manual.
-
-`admin.js` permanece declarado como escritor de `Message` porque la eliminación de un candidato borra sus mensajes dentro de la misma transacción mediante `tx.message.deleteMany()`. Esa operación no forma parte de la mensajería saliente y no se modifica en esta etapa.
+La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboundMessage()`, delega su creación saliente y conserva el orden actual —envío al proveedor, actualización del candidato y persistencia—, el cuerpo exacto o saneado y el payload de intervención manual.
 
 `webhook.js` ya no crea ni actualiza `Message` directamente. Sus cinco fronteras de escritura delegan en el repositorio compartido:
 
@@ -76,25 +60,29 @@ La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboun
 - `saveOutboundMessage()` usa `persistOutboundConversationMessage()` y conserva la actualización posterior de `Candidate.lastOutboundAt`;
 - `recordIntentionalSilence()` usa la persistencia saliente para su traza interna, preservando `visibility=internal`, `neverSendToCandidate=true` y manejo tolerante de errores;
 - `attachDebugTrace()` usa `mergeConversationMessagePayload()` y conserva la clave histórica `debugTrace` sin borrar metadatos previos;
-- el cierre exitoso del lote multilinea usa `markConversationMessagesResponded()` con los mismos IDs y una fecha nueva, en el mismo punto anterior al `catch` y al `finally`.
+- el cierre exitoso del lote multilinea usa `markConversationMessagesResponded()` con los mismos IDs y una fecha validada, en el mismo punto anterior al `catch` y al `finally`.
 
-El número de teléfono no se persiste en `Message` porque ese campo no existe en Prisma; continúa disponible en `Candidate`, en el payload original de WhatsApp y en los logs operativos del inbox.
+La eliminación administrativa del candidato también delega ahora en `deleteConversationMessagesForCandidate(tx, ...)`. La ruta conserva la misma transacción y el mismo orden:
 
-El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y la programación del recordatorio permanece después. No se modifican interpretación, payload de seguridad, candidatos, agenda, adjuntos ni procesamiento conversacional.
+1. eliminar los mensajes del candidato;
+2. eliminar sus reservas de entrevista;
+3. eliminar el candidato;
+4. limpiar el CV almacenado después de cerrar la transacción.
 
-Los escritores directos de `Message` bajan a dos: administración por eliminación transaccional y `ConversationMessageRepository`.
+La operación recibe el mismo cliente transaccional `tx`; no abre una transacción adicional ni modifica reservas, candidato, permisos o almacenamiento.
 
-El agregado permanece `consolidating`: la eliminación administrativa todavía no delega en una operación canónica de ciclo de vida.
+`ConversationMessageRepository` es el único escritor directo de `Message`. El scanner de CI bloquea que una ruta, adaptador o servicio vuelva a ejecutar `create`, `update`, `updateMany` o `deleteMany` directamente sobre el modelo.
 
-El repositorio distingue actualmente cinco contratos:
+El repositorio distingue actualmente seis contratos:
 
 - entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
 - salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie;
 - reemplazo restringido exclusivamente a `rawPayload` sobre un mensaje identificado;
 - fusión de un patch en `rawPayload` sin borrar metadatos previos;
-- marcado por lote de `respondedAt` con IDs deduplicados y fecha validada.
+- marcado por lote de `respondedAt` con IDs deduplicados y fecha validada;
+- eliminación de mensajes por candidato sobre el cliente Prisma o transaccional recibido.
 
-Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, los consumidores migrados continúan enviando al proveedor antes de persistir. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
+La autoridad de persistencia de `Message` ya es canónica. Esto no significa que exista un outbox productivo: los consumidores migrados continúan enviando al proveedor antes de persistir para preservar el comportamiento actual. El outbox, los estados de entrega y la idempotencia de salida siguen siendo una evolución separada.
 
 ## Hallazgos
 
@@ -122,31 +110,28 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 - no emitir recordatorios para reservas cerradas;
 - no crear dos reservas activas para el mismo candidato y vacante.
 
-### 3. La persistencia conversacional quedó concentrada, pero la eliminación administrativa sigue separada
+### 3. La persistencia de mensajes ya tiene una autoridad única
 
-Las creaciones y actualizaciones de `Message` pasan por `ConversationMessageRepository`. La única escritura directa restante fuera del repositorio es la eliminación transaccional de mensajes al borrar un candidato desde `admin.js`.
+Todas las creaciones, actualizaciones y eliminaciones de `Message` pasan por `ConversationMessageRepository`. Las fronteras conservan sus decisiones y unidades transaccionales, pero no controlan directamente cómo se persiste el agregado.
 
-La autoridad todavía debe evolucionar para distinguir explícitamente:
+La siguiente evolución del dominio debe distinguir explícitamente:
 
-- mensaje entrante reclamado de forma idempotente;
 - mensaje saliente comprometido en outbox;
-- entrega del proveedor;
-- mensaje manual autorizado;
-- evidencia de consentimiento;
-- mensajería interna del supervisor;
-- eliminación transaccional asociada al ciclo de vida del candidato.
+- intento de entrega al proveedor;
+- confirmación o fallo de entrega;
+- reintentos e idempotencia de salida.
 
 ### 4. Consentimiento demuestra el patrón de migración
 
-La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. Ese mismo patrón continúa aplicándose gradualmente en mensajes.
+La consolidación se completó sin mover las políticas de negocio del panel ni del gate. Cada consumidor conserva cuándo aceptar o revocar, pero una sola autoridad controla cómo persistir la decisión y el evento. El mismo patrón permitió completar `Message` sin reescribir las decisiones conversacionales.
 
 ## Clasificación de escritores
 
-- `canonical`: autoridad objetivo que ya recibe al menos un consumidor migrado; solo será exclusiva cuando la etapa pase a `canonical`.
-- `boundary`: frontera especializada que todavía escribe directamente otro estado del modelo.
-- `legacy`: ruta heredada que debe migrarse y retirarse.
-- `admin`: operación humana explícita que debe pasar por un caso de uso auditado.
-- `integration`: sincronización externa que no debe decidir transiciones conversacionales.
+- `canonical`: autoridad única del agregado para las operaciones rastreadas;
+- `boundary`: frontera especializada que todavía escribe directamente otro estado del modelo;
+- `legacy`: ruta heredada que debe migrarse y retirarse;
+- `admin`: operación humana explícita que debe pasar por un caso de uso auditado;
+- `integration`: sincronización externa que no debe decidir transiciones conversacionales;
 - `operational`: jobs, recordatorios o tareas internas.
 
 ## Reglas para nuevos cambios
@@ -162,7 +147,7 @@ La consolidación se completó sin mover las políticas de negocio del panel ni 
 
 ## Orden recomendado de consolidación
 
-1. Completar `Message`, inbox y outbox.
+1. Diseñar outbox y estados de entrega sobre la autoridad canónica de `Message`.
 2. `InterviewBooking` y sus transiciones.
 3. Campos conversacionales de `Candidate`.
 4. Atribución, CV, recordatorios y operaciones administrativas del candidato.
