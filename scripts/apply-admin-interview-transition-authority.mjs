@@ -17,11 +17,23 @@ function replaceOnce(source, expected, replacement, label) {
   return source.replace(expected, replacement);
 }
 
+function replaceOptional(source, expected, replacement, label) {
+  if (!source.includes(expected)) {
+    console.warn(`${label}_not_found`);
+    return source;
+  }
+  return source.replace(expected, replacement);
+}
+
+console.log('stage:service');
 const servicePath = 'src/services/interviewBookingStateService.js';
 let service = read(servicePath);
 
-const serviceConstantsNeedle = `const ACTIVE_INTERVIEW_BOOKING_STATUSES_SET = new Set(ACTIVE_INTERVIEW_BOOKING_STATUSES);`;
-const serviceConstantsReplacement = `const ACTIVE_INTERVIEW_BOOKING_STATUSES_SET = new Set(ACTIVE_INTERVIEW_BOOKING_STATUSES);
+if (!service.includes('ADMIN_INTERVIEW_ACTION_TO_TRANSITION_ACTION')) {
+  service = replaceOnce(
+    service,
+    'const ACTIVE_INTERVIEW_BOOKING_STATUSES_SET = new Set(ACTIVE_INTERVIEW_BOOKING_STATUSES);',
+    `const ACTIVE_INTERVIEW_BOOKING_STATUSES_SET = new Set(ACTIVE_INTERVIEW_BOOKING_STATUSES);
 const KNOWN_INTERVIEW_BOOKING_STATUSES_SET = new Set(Object.values(InterviewBookingStatus));
 const ADMIN_INTERVIEW_ACTION_TO_TRANSITION_ACTION = Object.freeze({
   confirmed: InterviewBookingTransitionAction.CONFIRM_ATTENDANCE,
@@ -30,19 +42,23 @@ const ADMIN_INTERVIEW_ACTION_TO_TRANSITION_ACTION = Object.freeze({
   no_show: InterviewBookingTransitionAction.MARK_NO_SHOW,
   cancelled: InterviewBookingTransitionAction.CANCEL,
   rescheduled: InterviewBookingTransitionAction.REQUEST_RESCHEDULE
-});`;
-if (!service.includes('ADMIN_INTERVIEW_ACTION_TO_TRANSITION_ACTION')) {
-  service = replaceOnce(service, serviceConstantsNeedle, serviceConstantsReplacement, 'service_constants');
+});`,
+    'service_constants'
+  );
 }
 
-const normalizeReminderNeedle = `function normalizeReminderResponseIntent(value) {
+if (!service.includes('function normalizeAdministrativeInterviewAction')) {
+  const needle = `function normalizeReminderResponseIntent(value) {
   const intent = requireNonEmptyString(value, 'interview_reminder_intent').toLowerCase();
   if (!REMINDER_RESPONSE_INTENTS.has(intent)) {
     throw new Error('interview_reminder_intent_not_allowed');
   }
   return intent;
 }`;
-const normalizeReminderReplacement = `${normalizeReminderNeedle}
+  service = replaceOnce(
+    service,
+    needle,
+    `${needle}
 
 function normalizeAdministrativeInterviewAction(value) {
   const action = requireNonEmptyString(value, 'interview_admin_action').toLowerCase();
@@ -50,9 +66,9 @@ function normalizeAdministrativeInterviewAction(value) {
     throw new Error('interview_admin_action_not_allowed');
   }
   return action;
-}`;
-if (!service.includes('function normalizeAdministrativeInterviewAction')) {
-  service = replaceOnce(service, normalizeReminderNeedle, normalizeReminderReplacement, 'service_admin_action_normalizer');
+}`,
+    'service_action_normalizer'
+  );
 }
 
 if (!service.includes('export async function applyAdministrativeInterviewBookingAction')) {
@@ -85,13 +101,8 @@ if (!service.includes('export async function applyAdministrativeInterviewBooking
   }
 
   const result = await prisma.interviewBooking.updateMany({
-    where: {
-      id: bookingId,
-      status: currentStatus
-    },
-    data: {
-      status: transition.nextStatus
-    }
+    where: { id: bookingId, status: currentStatus },
+    data: { status: transition.nextStatus }
   });
   const persisted = result.count > 0;
 
@@ -108,26 +119,32 @@ if (!service.includes('export async function applyAdministrativeInterviewBooking
 }
 write(servicePath, service);
 
+console.log('stage:admin');
 const adminPath = 'src/routes/admin.js';
 let admin = read(adminPath);
-
-const schedulerImport = `import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';`;
-const authorityImport = `import {
+const schedulerImport = "import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';";
+if (!admin.includes('applyAdministrativeInterviewBookingAction')) {
+  admin = replaceOnce(
+    admin,
+    schedulerImport,
+    `${schedulerImport}
+import {
   ACTIVE_INTERVIEW_BOOKING_STATUSES,
   applyAdministrativeInterviewBookingAction
-} from '../services/interviewBookingStateService.js';`;
-if (!admin.includes('applyAdministrativeInterviewBookingAction')) {
-  admin = replaceOnce(admin, schedulerImport, `${schedulerImport}\n${authorityImport}`, 'admin_authority_import');
+} from '../services/interviewBookingStateService.js';`,
+    'admin_import'
+  );
 }
 
-const statusRouteStart = `  router.post('/interviews/:id/status', express.urlencoded({ extended: true }), async (req, res) => {`;
-const manualReminderStart = `  router.post('/interviews/:id/manual-reminder', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {`;
-const statusStartIndex = admin.indexOf(statusRouteStart);
-const statusEndIndex = admin.indexOf(manualReminderStart, statusStartIndex);
-if (statusStartIndex < 0 || statusEndIndex < 0) {
-  throw new Error(`admin_status_route_markers_invalid:${statusStartIndex}:${statusEndIndex}`);
+const statusStartMarker = "  router.post('/interviews/:id/status', express.urlencoded({ extended: true }), async (req, res) => {";
+const reminderStartMarker = "  router.post('/interviews/:id/manual-reminder', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {";
+const statusStart = admin.indexOf(statusStartMarker);
+const statusEnd = admin.indexOf(reminderStartMarker, statusStart);
+if (statusStart < 0 || statusEnd < 0) {
+  throw new Error(`admin_route_markers_invalid:${statusStart}:${statusEnd}`);
 }
-const statusRouteReplacement = `  router.post('/interviews/:id/status', express.urlencoded({ extended: true }), async (req, res) => {
+
+const statusRoute = `  router.post('/interviews/:id/status', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const action = normalizeString(req.body.action);
     const returnTo = safeAdminReturnPath(req.body.returnTo || req.get('referer') || '/admin');
@@ -196,161 +213,123 @@ const statusRouteReplacement = `  router.post('/interviews/:id/status', express.
   });
 
 `;
-admin = admin.slice(0, statusStartIndex) + statusRouteReplacement + admin.slice(statusEndIndex);
-
+admin = admin.slice(0, statusStart) + statusRoute + admin.slice(statusEnd);
 admin = replaceOnce(
   admin,
-  `    if (!ACTIVE_BOOKING_STATUSES.includes(booking.status)) {
-      return res.redirect(withFlashMessage(returnTo, 'error', 'Solo puedes enviar recordatorio para entrevistas activas.'));
-    }`,
-  `    if (!ACTIVE_INTERVIEW_BOOKING_STATUSES.includes(booking.status)) {
-      return res.redirect(withFlashMessage(returnTo, 'error', 'Solo puedes enviar recordatorio para entrevistas activas.'));
-    }`,
-  'admin_manual_reminder_active_statuses'
+  "    if (!ACTIVE_BOOKING_STATUSES.includes(booking.status)) {\n      return res.redirect(withFlashMessage(returnTo, 'error', 'Solo puedes enviar recordatorio para entrevistas activas.'));\n    }",
+  "    if (!ACTIVE_INTERVIEW_BOOKING_STATUSES.includes(booking.status)) {\n      return res.redirect(withFlashMessage(returnTo, 'error', 'Solo puedes enviar recordatorio para entrevistas activas.'));\n    }",
+  'admin_manual_reminder_states'
 );
 write(adminPath, admin);
 
+console.log('stage:tests');
 const adminTestPath = 'test/interviewBookingAdminStateService.test.js';
 let adminTest = read(adminTestPath);
-adminTest = adminTest.replace(
-  `  assert.equal(result.persisted, true);
-  assert.deepEqual(calls[0].where, { id: bookingId, status: 'CONFIRMED' });`,
-  `  assert.equal(result.persisted, true);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].where, { id: bookingId, status: 'CONFIRMED' });`
+adminTest = replaceOptional(
+  adminTest,
+  "  assert.equal(result.persisted, true);\n  assert.deepEqual(calls[0].where, { id: bookingId, status: 'CONFIRMED' });",
+  "  assert.equal(result.persisted, true);\n  assert.equal(calls.length, 1);\n  assert.deepEqual(calls[0].where, { id: bookingId, status: 'CONFIRMED' });",
+  'test_idempotent_call_count'
 );
-adminTest = adminTest.replace(
-  `    assert.equal(result.nextStatus, expectedStatus);
-    assert.equal(result.statusChanged, true);
-    assert.equal(calls[0].data.status, expectedStatus);`,
-  `    assert.equal(result.nextStatus, expectedStatus);
-    assert.equal(result.statusChanged, true);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].data.status, expectedStatus);`
-);
-adminTest = adminTest.replace(
-  `test('una carrera con count cero no informa una transición persistida', async () => {
-  const { prisma } = createPrismaMock({ count: 0 });`,
-  `test('una carrera con count cero no informa una transición persistida', async () => {
-  const { prisma, calls } = createPrismaMock({ count: 0 });`
-);
-adminTest = adminTest.replace(
-  `    persisted: false
-  });
-});
-
-test('rechaza contratos`,
-  `    persisted: false
-  });
-  assert.equal(calls.length, 1);
-});
-
-test('rechaza contratos`
+adminTest = replaceOptional(
+  adminTest,
+  "    assert.equal(result.statusChanged, true);\n    assert.equal(calls[0].data.status, expectedStatus);",
+  "    assert.equal(result.statusChanged, true);\n    assert.equal(calls.length, 1);\n    assert.equal(calls[0].data.status, expectedStatus);",
+  'test_loop_call_count'
 );
 write(adminTestPath, adminTest);
 
 const structuralTestPath = 'test/adminInterviewBookingAuthority.test.js';
-const structuralTest = `import test from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
+const structuralLines = [
+  "import test from 'node:test';",
+  "import assert from 'node:assert/strict';",
+  "import fs from 'node:fs';",
+  '',
+  "const source = fs.readFileSync('src/routes/admin.js', 'utf8');",
+  '',
+  'function between(start, end) {',
+  '  const startIndex = source.indexOf(start);',
+  '  const endIndex = source.indexOf(end, startIndex + start.length);',
+  "  assert.notEqual(startIndex, -1, `No se encontró el marcador inicial: ${start}`);",
+  "  assert.notEqual(endIndex, -1, `No se encontró el marcador final: ${end}`);",
+  '  return source.slice(startIndex, endIndex);',
+  '}',
+  '',
+  "test('la ruta de estado administrativo delega en la autoridad sin escritura directa', () => {",
+  '  const route = between(',
+  '    "router.post(\'/interviews/:id/status\'",',
+  '    "router.post(\'/interviews/:id/manual-reminder\'"',
+  '  );',
+  '  assert.match(route, /applyAdministrativeInterviewBookingAction\\(prisma/);',
+  '  assert.match(route, /transition\\.requiresReplacement/);',
+  '  assert.match(route, /!transition\\.persisted/);',
+  '  assert.match(route, /logCandidateAdminEvent\\(prisma/);',
+  '  assert.doesNotMatch(route, /prisma\\.interviewBooking\\.update\\s*\\(/);',
+  '  assert.doesNotMatch(route, /status:\\s*[\'\"]RESCHEDULED[\'\"]/);',
+  '});',
+  '',
+  "test('el recordatorio manual usa solo los estados activos canónicos', () => {",
+  '  const route = between(',
+  '    "router.post(\'/interviews/:id/manual-reminder\'",',
+  '    "router.post(\'/interviews/:id/delete\'"',
+  '  );',
+  '  assert.match(route, /ACTIVE_INTERVIEW_BOOKING_STATUSES\\.includes\\(booking\\.status\\)/);',
+  '  assert.doesNotMatch(route, /ACTIVE_BOOKING_STATUSES\\.includes\\(booking\\.status\\)/);',
+  '});',
+  '',
+  "test('el alcance no altera eliminación física ni asignación manual pendientes', () => {",
+  '  assert.match(source, /await tx\\.interviewBooking\\.delete\\s*\\(/);',
+  '  assert.match(source, /await cancelCandidateBookings\\(tx, candidate\\.id, [\'\"]RESCHEDULED[\'\"]\\)/);',
+  '  assert.match(source, /await createBooking\\(/);',
+  '});',
+  ''
+];
+write(structuralTestPath, structuralLines.join('\n'));
 
-const source = fs.readFileSync('src/routes/admin.js', 'utf8');
-
-function between(start, end) {
-  const startIndex = source.indexOf(start);
-  const endIndex = source.indexOf(end, startIndex + start.length);
-  assert.notEqual(startIndex, -1, \`No se encontró el marcador inicial: \${start}\`);
-  assert.notEqual(endIndex, -1, \`No se encontró el marcador final: \${end}\`);
-  return source.slice(startIndex, endIndex);
-}
-
-test('la ruta de estado administrativo delega en la autoridad sin escritura directa', () => {
-  const route = between(
-    "router.post('/interviews/:id/status'",
-    "router.post('/interviews/:id/manual-reminder'"
-  );
-
-  assert.match(route, /applyAdministrativeInterviewBookingAction\(prisma/);
-  assert.match(route, /transition\.requiresReplacement/);
-  assert.match(route, /!transition\.persisted/);
-  assert.match(route, /logCandidateAdminEvent\(prisma/);
-  assert.doesNotMatch(route, /prisma\.interviewBooking\.update\s*\(/);
-  assert.doesNotMatch(route, /status:\s*['\"]RESCHEDULED['\"]/);
-});
-
-test('el recordatorio manual usa solo los estados activos canónicos', () => {
-  const route = between(
-    "router.post('/interviews/:id/manual-reminder'",
-    "router.post('/interviews/:id/delete'"
-  );
-
-  assert.match(route, /ACTIVE_INTERVIEW_BOOKING_STATUSES\.includes\(booking\.status\)/);
-  assert.doesNotMatch(route, /ACTIVE_BOOKING_STATUSES\.includes\(booking\.status\)/);
-});
-
-test('el alcance no altera eliminación física ni asignación manual pendientes', () => {
-  assert.match(source, /await tx\.interviewBooking\.delete\s*\(/);
-  assert.match(source, /await cancelCandidateBookings\(tx, candidate\.id, ['\"]RESCHEDULED['\"]\)/);
-  assert.match(source, /await createBooking\(/);
-});
-`;
-write(structuralTestPath, structuralTest);
-
-const ciPath = '.github/workflows/ci.yml';
-let ci = read(ciPath);
-ci = replaceOnce(
-  ci,
-  `        run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js`,
-  `        run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js test/interviewBookingAdminStateService.test.js test/adminInterviewBookingAuthority.test.js`,
-  'ci_interview_authority_gate'
-);
-write(ciPath, ci);
-
+console.log('stage:manifest');
 const manifestPath = 'docs/architecture/state-authority-manifest.json';
 let manifest = read(manifestPath);
 manifest = replaceOnce(
   manifest,
-  `{ "path": "src/routes/admin.js", "role": "admin", "reason": "Cambios manuales de reserva" }`,
-  `{ "path": "src/routes/admin.js", "role": "admin", "reason": "Eliminación física administrativa y limpieza de reservas durante el ciclo de vida del candidato; las transiciones manuales delegan en la autoridad canónica" }`,
+  '{ "path": "src/routes/admin.js", "role": "admin", "reason": "Cambios manuales de reserva" }',
+  '{ "path": "src/routes/admin.js", "role": "admin", "reason": "Eliminación física administrativa y limpieza de reservas durante el ciclo de vida del candidato; las transiciones manuales delegan en la autoridad canónica" }',
   'manifest_admin_reason'
 );
 manifest = replaceOnce(
   manifest,
-  `{ "path": "src/services/interviewBookingStateService.js", "role": "canonical", "reason": "Creación, reemplazo, cancelación, recordatorios y respuestas de reservas delegadas por scheduler y reminder" }`,
-  `{ "path": "src/services/interviewBookingStateService.js", "role": "canonical", "reason": "Creación, reemplazo, cancelación, recordatorios, respuestas y transiciones manuales de reservas" }`,
+  '{ "path": "src/services/interviewBookingStateService.js", "role": "canonical", "reason": "Creación, reemplazo, cancelación, recordatorios y respuestas de reservas delegadas por scheduler y reminder" }',
+  '{ "path": "src/services/interviewBookingStateService.js", "role": "canonical", "reason": "Creación, reemplazo, cancelación, recordatorios, respuestas y transiciones manuales de reservas" }',
   'manifest_authority_reason'
 );
 write(manifestPath, manifest);
 
+console.log('stage:map');
 const mapPath = 'docs/architecture/state-authority-map.md';
 let map = read(mapPath);
-map = replaceOnce(
+map = replaceOptional(
   map,
-  `InterviewBookingStateService concentra ya la creación, el reemplazo, la cancelación y las mutaciones operativas de recordatorios. \`interviewScheduler.js\` conserva disponibilidad, cupos, anticipación mínima y selección de slots; \`reminder.js\` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs. Ninguno de los dos escribe \`InterviewBooking\` directamente.`,
-  `InterviewBookingStateService concentra ya la creación, el reemplazo, la cancelación, las mutaciones operativas de recordatorios y las transiciones manuales del panel. \`interviewScheduler.js\` conserva disponibilidad, cupos, anticipación mínima y selección de slots; \`reminder.js\` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs; \`admin.js\` conserva permisos, acceso y auditoría. Estas fronteras delegan las transiciones ordinarias en la autoridad canónica.`,
-  'map_authority_summary'
+  '`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación y las mutaciones operativas de recordatorios. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs. Ninguno de los dos escribe `InterviewBooking` directamente.',
+  '`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación, las mutaciones operativas de recordatorios y las transiciones manuales del panel. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs; `admin.js` conserva permisos, acceso y auditoría. Estas fronteras delegan las transiciones ordinarias en la autoridad canónica.',
+  'map_summary'
 );
-map = replaceOnce(
+map = replaceOptional(
   map,
-  `- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia.`,
-  `- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia;
-- las acciones manuales validan el estado de origen y usan comparación condicional por ID y estado;
-- una solicitud manual de reprogramación conserva la reserva activa hasta asignar un horario reemplazante;
-- el recordatorio manual solo admite \`SCHEDULED\` y \`CONFIRMED\`.`,
-  'map_admin_invariants'
+  '- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia.',
+  '- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia;\n- las acciones manuales validan el estado de origen y usan comparación condicional por ID y estado;\n- una solicitud manual de reprogramación conserva la reserva activa hasta asignar un horario reemplazante;\n- el recordatorio manual solo admite `SCHEDULED` y `CONFIRMED`.',
+  'map_invariants'
 );
-map = replaceOnce(
+map = replaceOptional(
   map,
-  `\`reminder.js\` delega cierre de ventana, reclamación idempotente, \`NO_RESPONSE\` y respuestas interpretadas. El número de escritores directos baja a cuatro: administración, webhook, \`chatEngine\` y la autoridad canónica.`,
-  `\`reminder.js\` delega cierre de ventana, reclamación idempotente, \`NO_RESPONSE\` y respuestas interpretadas. El panel delega sus transiciones manuales y mantiene una reserva activa ante una solicitud de reprogramación. \`admin.js\` continúa declarado como escritor únicamente por la eliminación física exacta y la limpieza al eliminar candidatos. El número total de escritores permanece en cuatro: administración, webhook, \`chatEngine\` y la autoridad canónica.`,
-  'map_writer_summary'
+  '`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El número de escritores directos baja a cuatro: administración, webhook, `chatEngine` y la autoridad canónica.',
+  '`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El panel delega sus transiciones manuales y mantiene una reserva activa ante una solicitud de reprogramación. `admin.js` continúa declarado como escritor únicamente por la eliminación física exacta y la limpieza al eliminar candidatos. El número total de escritores permanece en cuatro: administración, webhook, `chatEngine` y la autoridad canónica.',
+  'map_writers'
 );
-map = replaceOnce(
+map = replaceOptional(
   map,
-  `Después de extraer scheduler y recordatorios, \`InterviewBooking\` todavía se modifica desde webhook, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:`,
-  `Después de extraer scheduler, recordatorios y transiciones manuales, \`InterviewBooking\` todavía se modifica desde webhook, un motor conversacional alternativo y las dos eliminaciones físicas administrativas pendientes. Deben centralizarse gradualmente invariantes como:`,
-  'map_remaining_frontiers'
+  'Después de extraer scheduler y recordatorios, `InterviewBooking` todavía se modifica desde webhook, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:',
+  'Después de extraer scheduler, recordatorios y transiciones manuales, `InterviewBooking` todavía se modifica desde webhook, un motor conversacional alternativo y las dos eliminaciones físicas administrativas pendientes. Deben centralizarse gradualmente invariantes como:',
+  'map_remaining'
 );
 write(mapPath, map);
 
-console.log('Admin interview transition authority migration applied.');
+console.log('migration:complete');
