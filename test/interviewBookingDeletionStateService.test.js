@@ -40,6 +40,7 @@ test('la eliminación administrativa exige coincidencia exacta de reserva y cand
   });
 
   assert.deepEqual(result, { count: 1 });
+  assert.equal(mock.calls.length, 1);
   assert.deepEqual(mock.calls, [{
     where: {
       id: bookingId,
@@ -70,6 +71,7 @@ test('la limpieza de ciclo de vida elimina todas las reservas solo por candidato
   });
 
   assert.deepEqual(result, { count: 3 });
+  assert.equal(mock.calls.length, 1);
   assert.deepEqual(mock.calls, [{
     where: { candidateId }
   }]);
