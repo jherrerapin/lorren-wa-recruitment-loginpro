@@ -16,6 +16,12 @@ function requireCandidateId(candidateId) {
   return normalized;
 }
 
+function requireNonEmptyString(value, fieldName) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) throw new TypeError(`${fieldName}_required`);
+  return normalized;
+}
+
 function requireValidDate(value, fieldName) {
   if (value === null || typeof value === 'boolean') {
     throw new TypeError(`${fieldName}_invalid`);
@@ -25,13 +31,16 @@ function requireValidDate(value, fieldName) {
   return date;
 }
 
-function normalizeExpectedPause(expected = {}) {
-  if (expected?.botPaused !== true) {
+function normalizeExpectedPauseSnapshot(expected = {}, { requirePaused = false } = {}) {
+  if (typeof expected?.botPaused !== 'boolean') {
+    throw new TypeError('candidate_expected_pause_snapshot_required');
+  }
+  if (requirePaused && expected.botPaused !== true) {
     throw new TypeError('candidate_expected_paused_state_required');
   }
 
   return {
-    botPaused: true,
+    botPaused: expected.botPaused,
     botPausedAt: expected.botPausedAt == null
       ? null
       : requireValidDate(expected.botPausedAt, 'candidate_expected_bot_paused_at'),
@@ -41,22 +50,20 @@ function normalizeExpectedPause(expected = {}) {
   };
 }
 
-export async function resumeCandidateAutomationOnInbound(client, input = {}) {
-  const candidateClient = requireCandidateClient(client);
-  const candidateId = requireCandidateId(input.candidateId);
-  const expected = normalizeExpectedPause(input.expected);
-  const nowInput = input.now === undefined ? new Date() : input.now;
-  const now = requireValidDate(nowInput, 'candidate_resume_now');
-
-  const result = await candidateClient.candidate.updateMany({
+async function applyConditionalCandidatePauseTransition(client, {
+  candidateId,
+  expected,
+  data
+}) {
+  const result = await client.candidate.updateMany({
     where: {
       id: candidateId,
       ...expected
     },
-    data: buildInboundResumeUpdate(now)
+    data
   });
 
-  const candidate = await candidateClient.candidate.findUnique({
+  const candidate = await client.candidate.findUnique({
     where: { id: candidateId }
   });
 
@@ -64,4 +71,62 @@ export async function resumeCandidateAutomationOnInbound(client, input = {}) {
     count: Number(result?.count || 0),
     candidate
   };
+}
+
+export async function resumeCandidateAutomationOnInbound(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeExpectedPauseSnapshot(input.expected, { requirePaused: true });
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_resume_now');
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: buildInboundResumeUpdate(now)
+  });
+}
+
+export async function pauseCandidateAutomationFromAdmin(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeExpectedPauseSnapshot(input.expected);
+  const actor = requireNonEmptyString(input.actor, 'candidate_pause_actor');
+  const reason = requireNonEmptyString(input.reason, 'candidate_pause_reason');
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_pause_now');
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: {
+      botPaused: true,
+      botPausedAt: now,
+      botPausedBy: actor,
+      botPauseReason: reason,
+      botResumeMode: 'manual_resume_dashboard',
+      reminderScheduledFor: null,
+      reminderState: 'CANCELLED'
+    }
+  });
+}
+
+export async function resumeCandidateAutomationFromAdmin(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeExpectedPauseSnapshot(input.expected, { requirePaused: true });
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: {
+      botPaused: false,
+      botPausedAt: null,
+      botPausedBy: null,
+      botPauseReason: null,
+      botResumeMode: 'manual_resume_dashboard',
+      reminderScheduledFor: null,
+      reminderState: 'CANCELLED'
+    }
+  });
 }
