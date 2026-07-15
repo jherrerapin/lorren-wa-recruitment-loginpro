@@ -59,4 +59,6 @@ Los destinos arbitrarios quedan rechazados. La matriz de transiciones proviene d
 - `cancelCandidateBookings(..., 'CANCELLED')` ejecuta cancelación real;
 - `cancelCandidateBookings(..., 'RESCHEDULED')` representa una solicitud y no cierra la reserva.
 
-Webhook, recordatorios, panel administrativo y motor conversacional todavía tienen transiciones directas pendientes de migración. Este documento no declara `InterviewBooking` como agregado completamente canónico.
+La asignación manual del panel llama `createBooking()` una sola vez con el cliente Prisma principal. No abre una transacción externa, no preconsulta reservas activas y no solicita una reprogramación redundante. Por ello, el reemplazo usa directamente aislamiento `Serializable`, rollback conjunto, reintentos `P2034` y recuperación exacta `P2002` de la autoridad.
+
+Las responsabilidades administrativas de `InterviewBooking` están migradas. Webhook y `chatEngine` continúan como las dos fronteras directas pendientes bajo #453 y #421; por esa razón el agregado todavía permanece en consolidación.
