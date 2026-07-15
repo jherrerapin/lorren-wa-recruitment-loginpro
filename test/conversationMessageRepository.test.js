@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageDirection, MessageType } from '@prisma/client';
 import {
+  deleteConversationMessagesByCandidate,
   markConversationMessagesResponded,
   mergeConversationMessagePayload,
   persistInboundConversationMessage,
@@ -12,6 +13,7 @@ import {
 function createPrismaMock({
   inboundCount = 1,
   updateManyCount = 2,
+  deleteManyCount = 3,
   existingRawPayload = { source: 'inbound' },
   messageExists = true
 } = {}) {
@@ -20,7 +22,8 @@ function createPrismaMock({
     create: [],
     findUnique: [],
     update: [],
-    updateMany: []
+    updateMany: [],
+    deleteMany: []
   };
   const prisma = {
     message: {
@@ -43,6 +46,10 @@ function createPrismaMock({
       updateMany: async (args) => {
         calls.updateMany.push(args);
         return { count: updateManyCount };
+      },
+      deleteMany: async (args) => {
+        calls.deleteMany.push(args);
+        return { count: deleteManyCount };
       }
     }
   };
@@ -213,6 +220,22 @@ test('marca un lote deduplicado como respondido con fecha controlada', async () 
   }]);
 });
 
+test('elimina mensajes por candidato usando el cliente Prisma o transaccional recibido', async () => {
+  const { prisma: tx, calls } = createPrismaMock({ deleteManyCount: 3 });
+
+  const result = await deleteConversationMessagesByCandidate(tx, {
+    candidateId: 'candidate-delete-1'
+  });
+
+  assert.deepEqual(result, {
+    deleted: 3,
+    candidateId: 'candidate-delete-1'
+  });
+  assert.deepEqual(calls.deleteMany, [{
+    where: { candidateId: 'candidate-delete-1' }
+  }]);
+});
+
 test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos antes de persistir', async () => {
   await assert.rejects(
     () => persistInboundConversationMessage({}, {
@@ -247,6 +270,12 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
       messageIds: ['message-test-1']
     }),
     /message_responded_prisma_contract_invalid/
+  );
+  await assert.rejects(
+    () => deleteConversationMessagesByCandidate({ message: { deleteMany: true } }, {
+      candidateId: 'candidate-test-1'
+    }),
+    /message_delete_by_candidate_prisma_contract_invalid/
   );
 
   const { prisma, calls } = createPrismaMock();
@@ -335,8 +364,15 @@ test('rechaza contratos, identificadores, tipos, fechas y payloads inválidos an
     }),
     /responded_at_invalid/
   );
+  await assert.rejects(
+    () => deleteConversationMessagesByCandidate(prisma, {
+      candidateId: '   '
+    }),
+    /candidate_id_required/
+  );
   assert.equal(calls.createMany.length, 0);
   assert.equal(calls.create.length, 0);
   assert.equal(calls.update.length, 0);
   assert.equal(calls.updateMany.length, 0);
+  assert.equal(calls.deleteMany.length, 0);
 });
