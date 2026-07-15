@@ -1,7 +1,10 @@
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
 
 function requireCandidateClient(client) {
-  if (!client?.candidate?.updateMany || !client?.candidate?.findUnique) {
+  if (
+    typeof client?.candidate?.updateMany !== 'function'
+    || typeof client?.candidate?.findUnique !== 'function'
+  ) {
     throw new TypeError('candidate_state_client_required');
   }
   return client;
