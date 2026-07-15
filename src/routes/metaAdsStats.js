@@ -106,6 +106,42 @@ function comparableCost(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function metricKey(metric = {}) {
+  return metric.campaign?.id || metric.metaAdId || null;
+}
+
+function peerAverageCost(metric, metrics = [], field) {
+  if (!Array.isArray(metrics)) return null;
+  const currentKey = metricKey(metric);
+  const costs = metrics
+    .filter((candidate) => candidate !== metric && (!currentKey || metricKey(candidate) !== currentKey))
+    .map((candidate) => comparableCost(candidate?.[field]))
+    .filter((cost) => cost !== null);
+  if (!costs.length) return null;
+  return costs.reduce((sum, cost) => sum + cost, 0) / costs.length;
+}
+
+function schedulingSummary(data = {}, total = {}) {
+  if (!Array.isArray(data.metrics)) {
+    return {
+      enabled: true,
+      apt: nonNegativeNumber(total.apt),
+      scheduled: nonNegativeNumber(total.scheduled),
+      attended: nonNegativeNumber(total.attended),
+      noShow: nonNegativeNumber(total.noShow)
+    };
+  }
+
+  const metrics = data.metrics.filter((metric) => metric.campaign?.vacancy?.schedulingEnabled !== false);
+  return {
+    enabled: metrics.length > 0,
+    apt: metrics.reduce((sum, metric) => sum + nonNegativeNumber(metric.apt), 0),
+    scheduled: metrics.reduce((sum, metric) => sum + nonNegativeNumber(metric.scheduled), 0),
+    attended: metrics.reduce((sum, metric) => sum + nonNegativeNumber(metric.attended), 0),
+    noShow: metrics.reduce((sum, metric) => sum + nonNegativeNumber(metric.noShow), 0)
+  };
+}
+
 function confidenceFor(metric = {}) {
   const candidates = nonNegativeNumber(metric.candidatesCount);
   if (candidates === 0) return { label: 'Sin datos', cls: 'muted' };
@@ -115,19 +151,23 @@ function confidenceFor(metric = {}) {
   return { label: 'Datos sólidos', cls: 'good' };
 }
 
-export function recommendationFor(metric = {}, totals = {}) {
+export function recommendationFor(metric = {}, metrics = []) {
   const candidates = nonNegativeNumber(metric.candidatesCount);
   const spend = nonNegativeNumber(metric.spend);
   const completedRegistrations = nonNegativeNumber(metric.completedRegistrations);
+  const ineligible = nonNegativeNumber(metric.ineligible);
   const cvReceived = nonNegativeNumber(metric.cvReceived);
   const apt = nonNegativeNumber(metric.apt);
   const scheduled = nonNegativeNumber(metric.scheduled);
   const attended = nonNegativeNumber(metric.attended);
+  const noShow = nonNegativeNumber(metric.noShow);
   const hired = nonNegativeNumber(metric.hired);
   const costPerHired = comparableCost(metric.costPerHired);
-  const averageCostPerHired = comparableCost(totals.costPerHired);
+  const averageCostPerHired = peerAverageCost(metric, metrics, 'costPerHired');
   const costPerApt = comparableCost(metric.costPerApt);
-  const averageCostPerApt = comparableCost(totals.costPerApt);
+  const averageCostPerApt = peerAverageCost(metric, metrics, 'costPerApt');
+  const schedulingEnabled = metric.campaign?.vacancy?.schedulingEnabled !== false;
+  const attendanceOutcomes = attended + noShow;
 
   if (!metric.campaign?.vacancyId) {
     return { label: 'Asociar vacante', detail: 'Lórren necesita saber a qué vacante pertenece este anuncio.', cls: 'bad' };
@@ -138,6 +178,9 @@ export function recommendationFor(metric = {}, totals = {}) {
   if (candidates < 5) {
     return { label: 'Esperar más datos', detail: 'Aún no hay suficiente información para recomendar cambios.', cls: 'muted' };
   }
+  if (ineligible / candidates >= 0.3) {
+    return { label: 'Aclarar requisitos', detail: 'Muchas personas completan sus datos, pero no cumplen un requisito de la vacante.', cls: 'warn' };
+  }
   if (completedRegistrations / candidates < 0.4) {
     return { label: 'Revisar el registro', detail: 'Muchas personas llegan, pero no terminan de entregar la información.', cls: 'warn' };
   }
@@ -147,10 +190,10 @@ export function recommendationFor(metric = {}, totals = {}) {
   if (cvReceived >= 5 && apt / cvReceived < 0.3) {
     return { label: 'Aclarar requisitos', detail: 'Llegan hojas de vida, pero pocos candidatos cumplen los requisitos.', cls: 'warn' };
   }
-  if (apt >= 3 && scheduled / apt < 0.5) {
+  if (schedulingEnabled && apt >= 3 && scheduled / apt < 0.5) {
     return { label: 'Revisar las citas', detail: 'Hay candidatos que cumplen, pero pocos alcanzan a agendar entrevista.', cls: 'warn' };
   }
-  if (scheduled >= 3 && attended / scheduled < 0.5) {
+  if (schedulingEnabled && attendanceOutcomes >= 3 && attended / attendanceOutcomes < 0.5) {
     return { label: 'Mejorar asistencia', detail: 'Se agendan entrevistas, pero menos de la mitad de las personas asiste.', cls: 'warn' };
   }
   if (hired > 0 && costPerHired !== null && averageCostPerHired !== null && costPerHired <= averageCostPerHired) {
@@ -296,11 +339,13 @@ function filters(data = {}) {
 function topMetrics(data = {}) {
   const total = data.totals;
   const currency = data.account?.currency;
-  return `<section class="card"><div class="card-title">¿Qué produjo la inversión?</div><p class="section-help">Estas cifras unen el dinero invertido en Meta con los resultados registrados dentro de Lórren.</p><div class="grid"><div class="kpi purple"><strong>${formatMoney(total.spend, currency)}</strong><span>Dinero invertido</span><em>Importado directamente desde Meta</em></div><div class="kpi"><strong>${formatInteger(total.candidatesCount)}</strong><span>Personas que llegaron por anuncios</span><em>${formatMoney(total.costPerCandidate, currency)} por persona</em></div><div class="kpi"><strong>${formatInteger(total.completedRegistrations)}</strong><span>Terminaron el registro</span><em>${rate(total.completedRegistrations,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerCompletedRegistration,currency)} c/u</em></div><div class="kpi"><strong>${formatInteger(total.cvReceived)}</strong><span>Enviaron hoja de vida</span><em>${rate(total.cvReceived,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerCv,currency)} c/u</em></div><div class="kpi primary"><strong>${formatInteger(total.apt)}</strong><span>Cumplen los requisitos</span><em>${rate(total.apt,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerApt,currency)} c/u</em></div><div class="kpi"><strong>${formatInteger(total.attended)}</strong><span>Asistieron a entrevista</span><em>${rate(total.attended,total.scheduled)} de los agendados · ${formatMoney(total.costPerAttended,currency)} c/u</em></div><div class="kpi primary"><strong>${formatInteger(total.hired)}</strong><span>Fueron contratados</span><em>${rate(total.hired,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerHired,currency)} c/u</em></div><div class="kpi orange"><strong>${formatMoney(total.estimatedIncompleteSpend,currency)}</strong><span>Inversión en registros incompletos</span><em>Valor aproximado, no un cobro individual exacto</em></div></div></section>`;
+  const attendanceOutcomes = nonNegativeNumber(total.attended) + nonNegativeNumber(total.noShow);
+  return `<section class="card"><div class="card-title">¿Qué produjo la inversión?</div><p class="section-help">Estas cifras unen el dinero invertido en Meta con los resultados registrados dentro de Lórren.</p><div class="grid"><div class="kpi purple"><strong>${formatMoney(total.spend, currency)}</strong><span>Dinero invertido</span><em>Importado directamente desde Meta</em></div><div class="kpi"><strong>${formatInteger(total.candidatesCount)}</strong><span>Personas que llegaron por anuncios</span><em>${formatMoney(total.costPerCandidate, currency)} por persona</em></div><div class="kpi"><strong>${formatInteger(total.completedRegistrations)}</strong><span>Terminaron el registro</span><em>${rate(total.completedRegistrations,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerCompletedRegistration,currency)} c/u</em></div><div class="kpi"><strong>${formatInteger(total.cvReceived)}</strong><span>Enviaron hoja de vida</span><em>${rate(total.cvReceived,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerCv,currency)} c/u</em></div><div class="kpi primary"><strong>${formatInteger(total.apt)}</strong><span>Cumplen los requisitos</span><em>${rate(total.apt,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerApt,currency)} c/u</em></div><div class="kpi"><strong>${formatInteger(total.attended)}</strong><span>Asistieron a entrevista</span><em>${rate(total.attended,attendanceOutcomes)} de las entrevistas con resultado · ${formatMoney(total.costPerAttended,currency)} c/u</em></div><div class="kpi primary"><strong>${formatInteger(total.hired)}</strong><span>Fueron contratados</span><em>${rate(total.hired,total.candidatesCount)} de quienes llegaron · ${formatMoney(total.costPerHired,currency)} c/u</em></div><div class="kpi orange"><strong>${formatMoney(total.estimatedIncompleteSpend,currency)}</strong><span>Inversión en registros incompletos</span><em>Valor aproximado, no un cobro individual exacto</em></div></div></section>`;
 }
 
 function funnel(total = {}, currency = 'COP') {
   const candidateBase = total.candidatesCount;
+  const attendanceOutcomes = nonNegativeNumber(total.attended) + nonNegativeNumber(total.noShow);
   const steps = [
     ['Conversaciones iniciadas', total.metaConversationsStarted, total.costPerMetaConversation, 'Dato entregado por Meta'],
     ['Llegaron a Lórren', total.candidatesCount, total.costPerCandidate, `${rate(total.candidatesCount, total.metaConversationsStarted)} de las conversaciones`],
@@ -310,7 +355,7 @@ function funnel(total = {}, currency = 'COP') {
     ['Cumplen requisitos', total.apt, total.costPerApt, `${rate(total.apt, candidateBase)} de quienes llegaron`],
     ['Agendaron entrevista', total.scheduled, total.costPerScheduled, `${rate(total.scheduled, candidateBase)} de quienes llegaron`],
     ['Confirmaron asistencia', total.confirmed, total.costPerConfirmed, `${rate(total.confirmed, total.scheduled)} de los agendados`],
-    ['Asistieron', total.attended, total.costPerAttended, `${rate(total.attended, total.scheduled)} de los agendados`],
+    ['Asistieron', total.attended, total.costPerAttended, `${rate(total.attended, attendanceOutcomes)} de las entrevistas con resultado`],
     ['Fueron contratados', total.hired, total.costPerHired, `${rate(total.hired, candidateBase)} de quienes llegaron`]
   ];
   return `<section class="card"><div class="card-title">¿Hasta dónde avanzaron las personas?</div><p class="section-help">El costo aumenta cuando menos personas alcanzan una etapa. Los porcentajes ayudan a encontrar dónde se está frenando el proceso.</p><div class="funnel">${steps.map(([label,value,cost,stepRate])=>`<div class="step"><strong>${formatInteger(value)}</strong><span>${escapeHtml(label)}</span><em>${escapeHtml(stepRate)}</em><small>${formatMoney(cost,currency)} por resultado</small></div>`).join('')}</div></section>`;
@@ -323,31 +368,40 @@ export function insightItems(data = {}) {
   const spend = nonNegativeNumber(total.spend);
   const candidates = nonNegativeNumber(total.candidatesCount);
   const incompleteRegistrations = nonNegativeNumber(total.incompleteRegistrations);
+  const ineligible = nonNegativeNumber(total.ineligible);
   const cvReceived = nonNegativeNumber(total.cvReceived);
   const apt = nonNegativeNumber(total.apt);
-  const scheduled = nonNegativeNumber(total.scheduled);
-  const attended = nonNegativeNumber(total.attended);
-  const noShow = nonNegativeNumber(total.noShow);
+  const interview = schedulingSummary(data, total);
   const hired = nonNegativeNumber(total.hired);
   const unattributedSpend = nonNegativeNumber(total.unattributedSpend);
+  const registrationDropOff = Math.max(0, incompleteRegistrations - ineligible);
+  const registrationDropOffSpend = Math.max(
+    0,
+    nonNegativeNumber(total.estimatedIncompleteSpend) - nonNegativeNumber(total.estimatedIneligibleSpend)
+  );
+  const highIneligibleRate = candidates >= 5 && ineligible / candidates >= 0.3;
 
   if (spend > 0 && candidates === 0) {
     items.push({ cls: 'bad', title: 'Hay inversión, pero no hay candidatos relacionados', text: 'Revisa cómo se están relacionando los anuncios y confirma que los mensajes de WhatsApp estén llegando correctamente a Lórren.' });
   }
-  if (candidates >= 5 && incompleteRegistrations / candidates >= 0.4) {
-    items.push({ cls: 'warn', title: `${formatInteger(incompleteRegistrations)} personas no terminaron el registro`, text: `Representan ${rate(incompleteRegistrations,candidates)} de quienes llegaron. La inversión aproximada relacionada con estos casos es ${formatMoney(total.estimatedIncompleteSpend,currency)}.` });
+  if (highIneligibleRate) {
+    items.push({ cls: 'warn', title: `${formatInteger(ineligible)} personas no cumplen un requisito`, text: 'Conviene revisar si el anuncio explica claramente los requisitos indispensables de la vacante.' });
+  }
+  if (candidates >= 5 && registrationDropOff / candidates >= 0.4) {
+    items.push({ cls: 'warn', title: `${formatInteger(registrationDropOff)} personas no terminaron el registro`, text: `Representan ${rate(registrationDropOff,candidates)} de quienes llegaron. La inversión aproximada relacionada con estos casos es ${formatMoney(registrationDropOffSpend,currency)}.` });
   }
   if (candidates >= 5 && cvReceived / candidates < 0.45) {
     items.push({ cls: 'warn', title: 'Pocas personas están enviando su hoja de vida', text: 'Conviene revisar si la solicitud del archivo es clara y si el candidato entiende cómo enviarlo.' });
   }
-  if (cvReceived >= 5 && apt / cvReceived < 0.3) {
+  if (!highIneligibleRate && cvReceived >= 5 && apt / cvReceived < 0.3) {
     items.push({ cls: 'warn', title: 'Muchas hojas de vida no terminan en candidatos que cumplen', text: 'El anuncio puede estar atrayendo perfiles diferentes a los requisitos reales de la vacante.' });
   }
-  if (apt >= 3 && scheduled / apt < 0.5) {
+  if (interview.enabled && interview.apt >= 3 && interview.scheduled / interview.apt < 0.5) {
     items.push({ cls: 'warn', title: 'Hay candidatos que cumplen, pero pocos agendan', text: 'Revisa la disponibilidad de horarios, la dirección y el tiempo que tarda el sistema en ofrecer una cita.' });
   }
-  if (scheduled >= 3 && attended / scheduled < 0.5) {
-    items.push({ cls: 'warn', title: 'La asistencia a entrevistas es baja', text: `${formatInteger(noShow)} candidato(s) aparecen con inasistencia registrada. Revisa recordatorios, ubicación y horarios.` });
+  const attendanceOutcomes = interview.attended + interview.noShow;
+  if (interview.enabled && attendanceOutcomes >= 3 && interview.attended / attendanceOutcomes < 0.5) {
+    items.push({ cls: 'warn', title: 'La asistencia a entrevistas es baja', text: `${formatInteger(interview.noShow)} candidato(s) aparecen con inasistencia registrada. Revisa recordatorios, ubicación y horarios.` });
   }
   if (hired > 0) {
     items.push({ cls: 'good', title: `${formatInteger(hired)} contratación(es) relacionadas con anuncios`, text: `El costo actual por contratación es ${formatMoney(total.costPerHired,currency)}.` });
@@ -372,7 +426,7 @@ function adsTable(data = {}) {
     const campaign = metric.campaign;
     const vacancy = campaign.vacancy;
     const confidence = confidenceFor(metric);
-    const recommendation = recommendationFor(metric, data.totals);
+    const recommendation = recommendationFor(metric, data.metrics);
     return `<tr><td><div class="name">${escapeHtml(metric.metaAdName || campaign.name)}</div><div class="muted-text">${escapeHtml(metric.metaCampaignName || 'Campaña Meta sin nombre')}</div><details class="technical"><summary>Ver datos publicitarios</summary><div>${metaStatusBadge(campaign)}<br>Impresiones: ${formatInteger(metric.impressions)} · Alcance: ${formatInteger(metric.reach)}<br>Clics: ${formatInteger(metric.inlineLinkClicks || metric.clicks)} · Costo por clic: ${formatMoney(metric.costPerLinkClick,data.account?.currency)}<br><span class="mono">ad_id: ${escapeHtml(metric.metaAdId)}</span></div></details></td><td>${vacancy?`<div class="name">${escapeHtml(vacancy.title)}</div><div class="muted-text">${escapeHtml(campaign.city || vacancy.city)}</div>`:`<span class="badge bad">Sin vacante asociada</span>`}</td><td><div class="name">${formatMoney(metric.spend,data.account?.currency)}</div><div class="muted-text">Inversión del periodo</div></td><td><div class="metric-pair"><strong>${formatInteger(metric.candidatesCount)} personas</strong><span>${formatMoney(metric.costPerCandidate,data.account?.currency)} por persona</span><span class="badge ${confidence.cls}">${escapeHtml(confidence.label)}</span></div></td><td><div class="metric-pair"><strong>${formatInteger(metric.completedRegistrations)} terminaron</strong><span>${formatInteger(metric.cvReceived)} enviaron hoja de vida</span><span>${formatInteger(metric.incompleteRegistrations)} no terminaron</span></div></td><td><div class="metric-pair"><strong>${formatInteger(metric.apt)} cumplen</strong><span>${rate(metric.apt,metric.candidatesCount)} de quienes llegaron</span></div></td><td><div class="metric-pair"><strong>${formatInteger(metric.scheduled)} agendaron</strong><span>${formatInteger(metric.attended)} asistieron</span><span>${formatInteger(metric.noShow)} no asistieron</span></div></td><td><div class="metric-pair"><strong>${formatInteger(metric.hired)} contratados</strong><span>${rate(metric.hired,metric.candidatesCount)} de quienes llegaron</span></div></td><td><div class="cost-stack"><span>Por persona que cumple <b>${formatMoney(metric.costPerApt,data.account?.currency)}</b></span><span>Por asistente <b>${formatMoney(metric.costPerAttended,data.account?.currency)}</b></span><span>Por contratación <b>${formatMoney(metric.costPerHired,data.account?.currency)}</b></span></div></td><td class="decision"><span class="badge ${recommendation.cls}">${escapeHtml(recommendation.label)}</span><div class="muted-text">${escapeHtml(recommendation.detail)}</div></td><td><a class="btn secondary small" href="${BASE_PATH}/campaigns/${encodeURIComponent(campaign.id)}?from=${encodeURIComponent(data.range.since)}&to=${encodeURIComponent(data.range.until)}">Ver detalle</a></td></tr>`;
   }).join('');
   return `<section class="card"><div class="card-title">¿Qué anuncios están dando mejores resultados? (${data.metrics.length})</div><p class="section-help">La lectura se basa en resultados del reclutamiento. Un anuncio con pocos datos nunca se marca como ganador ni se recomienda suspender automáticamente.</p><div class="plain-note"><strong>Cómo leer los costos:</strong> la inversión total viene de Meta. Los costos por etapa se calculan dividiendo esa inversión entre las personas que alcanzaron cada resultado. El costo estimado por persona y la inversión en registros incompletos son aproximaciones.</div><div class="table-wrap"><table class="results"><thead><tr><th>Anuncio</th><th>Vacante</th><th>Invertido</th><th>Personas</th><th>Registro</th><th>Cumplen</th><th>Entrevistas</th><th>Contrataciones</th><th>Costos importantes</th><th>Qué conviene hacer</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
@@ -407,7 +461,7 @@ async function renderDetail(prisma, req, res) {
   const cityOptions = data.cities.map((item)=>`<option value="${escapeHtml(item.name)}" ${campaign.city===item.name?'selected':''}>${escapeHtml(item.name)}</option>`).join('');
   const vacancyOptions = data.vacancies.map((item)=>`<option value="${escapeHtml(item.id)}" ${campaign.vacancyId===item.id?'selected':''}>${escapeHtml(item.title)} — ${escapeHtml(item.city)}${item.isActive?'':' (inactiva)'}</option>`).join('');
   const detailData = { ...data, totals: metric, metrics: [metric] };
-  const recommendation = recommendationFor(metric, data.totals);
+  const recommendation = recommendationFor(metric, data.metrics);
   const body = `<div class="header"><div><a class="btn secondary small" href="${BASE_PATH}/campaigns?from=${encodeURIComponent(data.range.since)}&to=${encodeURIComponent(data.range.until)}">← Volver</a><h1 style="margin-top:10px">${escapeHtml(metric.metaAdName || campaign.name)}</h1><p>${escapeHtml(metric.metaCampaignName || 'Campaña Meta')} · <span class="mono">ad_id ${escapeHtml(metric.metaAdId)}</span></p></div><div>${metaStatusBadge(campaign)}</div></div><div class="alert ${recommendation.cls === 'bad' ? 'bad' : recommendation.cls === 'warn' ? 'warn' : recommendation.cls === 'good' ? 'good' : 'info'}"><strong>${escapeHtml(recommendation.label)}:</strong> ${escapeHtml(recommendation.detail)}</div><section class="card"><div class="card-title">¿A qué vacante pertenece?</div><div class="plain-note">Esta relación no modifica el anuncio en Meta. Le indica a Lórren qué vacante debe usar cuando una persona llega desde este anuncio.</div><form class="association" method="post" action="${BASE_PATH}/campaigns/${escapeHtml(campaign.id)}/edit"><label>Ciudad<select name="city"><option value="">Sin ciudad</option>${cityOptions}</select></label><label>Vacante<select name="vacancyId"><option value="">Sin vacante</option>${vacancyOptions}</select></label><button class="btn primary" type="submit">Guardar asociación</button></form></section>${topMetrics(detailData)}${funnel(metric,data.account?.currency)}${insightsPanel(detailData)}<section class="card"><div class="card-title">Personas que llegaron por este anuncio (${metric.candidatesCount})</div>${candidateRows(metric,data.account?.currency||'COP')}</section>`;
   return res.send(layout(`Anuncio: ${metric.metaAdName || campaign.name}`, body));
 }
@@ -481,7 +535,7 @@ async function jsonList(prisma, req, res) {
       costPerAttended: metric.costPerAttended,
       costPerHired: metric.costPerHired,
       confidence: confidenceFor(metric).label,
-      recommendation: recommendationFor(metric, data.totals).label
+      recommendation: recommendationFor(metric, data.metrics).label
     }))
   });
 }

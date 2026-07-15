@@ -71,7 +71,7 @@ test('costos de entrevistas e inasistencias usan resultados reales del proceso',
 });
 
 test('recomendaciones tratan métricas vacías como cero sin producir decisiones engañosas', () => {
-  const campaign = { vacancyId: 'vacancy-1' };
+  const campaign = { id: 'campaign-1', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: true } };
   assert.equal(recommendationFor({ campaign, candidatesCount: 10 }).label, 'Revisar el registro');
 
   const completeFunnel = {
@@ -84,14 +84,12 @@ test('recomendaciones tratan métricas vacías como cero sin producir decisiones
     attended: 10,
     hired: 1
   };
-  assert.equal(
-    recommendationFor({ ...completeFunnel, costPerHired: null }, { costPerHired: 10000 }).label,
-    'Seguir observando'
-  );
-  assert.equal(
-    recommendationFor({ ...completeFunnel, costPerHired: 8000 }, { costPerHired: 10000 }).label,
-    'Buen resultado'
-  );
+  const peer = { campaign: { id: 'campaign-2' }, costPerHired: 10000 };
+  const missingCost = { ...completeFunnel, costPerHired: null };
+  const favorableCost = { ...completeFunnel, costPerHired: 8000 };
+  assert.equal(recommendationFor(missingCost, [missingCost, peer]).label, 'Seguir observando');
+  assert.equal(recommendationFor(favorableCost, [favorableCost]).label, 'Seguir observando');
+  assert.equal(recommendationFor(favorableCost, [favorableCost, peer]).label, 'Buen resultado');
 });
 
 test('alertas conservan pérdidas visibles cuando llegan valores nulos o indefinidos', () => {
@@ -102,6 +100,55 @@ test('alertas conservan pérdidas visibles cuando llegan valores nulos o indefin
     totals: { candidatesCount: 10, cvReceived: 10, apt: 5, scheduled: null }
   });
   assert.equal(missingAppointments.some((item) => item.title === 'Hay candidatos que cumplen, pero pocos agendan'), true);
+});
+
+test('consejos de entrevista respetan vacantes sin agenda y resultados pendientes', () => {
+  const baseMetric = {
+    campaign: { id: 'campaign-1', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: true } },
+    candidatesCount: 10,
+    completedRegistrations: 10,
+    cvReceived: 10,
+    apt: 3,
+    hired: 0
+  };
+  const pending = { ...baseMetric, scheduled: 3, attended: 0, noShow: 0 };
+  const resolvedNoShows = { ...pending, noShow: 3 };
+  const cvOnly = {
+    ...baseMetric,
+    campaign: { id: 'campaign-cv', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: false } },
+    scheduled: 0,
+    attended: 0,
+    noShow: 0
+  };
+
+  assert.equal(recommendationFor(pending, [pending]).label, 'Seguir observando');
+  assert.equal(recommendationFor(resolvedNoShows, [resolvedNoShows]).label, 'Mejorar asistencia');
+  assert.equal(recommendationFor({ ...baseMetric, scheduled: 0 }, [baseMetric]).label, 'Revisar las citas');
+  assert.equal(recommendationFor(cvOnly, [cvOnly]).label, 'Seguir observando');
+
+  const cvOnlyInsights = insightItems({ totals: cvOnly, metrics: [cvOnly] });
+  assert.equal(cvOnlyInsights.some((item) => item.title === 'Hay candidatos que cumplen, pero pocos agendan'), false);
+  const pendingInsights = insightItems({ totals: pending, metrics: [pending] });
+  assert.equal(pendingInsights.some((item) => item.title === 'La asistencia a entrevistas es baja'), false);
+  const resolvedInsights = insightItems({ totals: resolvedNoShows, metrics: [resolvedNoShows] });
+  assert.equal(resolvedInsights.some((item) => item.title === 'La asistencia a entrevistas es baja'), true);
+});
+
+test('candidatos no elegibles no se presentan como abandono del formulario', () => {
+  const metric = {
+    campaign: { id: 'campaign-1', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: true } },
+    candidatesCount: 5,
+    completedRegistrations: 0,
+    incompleteRegistrations: 5,
+    ineligible: 5,
+    cvReceived: 5,
+    apt: 0
+  };
+
+  assert.equal(recommendationFor(metric, [metric]).label, 'Aclarar requisitos');
+  const alerts = insightItems({ totals: metric, metrics: [metric] });
+  assert.equal(alerts.some((item) => item.title === '5 personas no cumplen un requisito'), true);
+  assert.equal(alerts.some((item) => /no terminaron el registro/.test(item.title)), false);
 });
 
 test('atribución estadística no compara nombres ni tokens', () => {

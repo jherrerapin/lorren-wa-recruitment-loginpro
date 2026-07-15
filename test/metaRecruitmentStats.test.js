@@ -177,6 +177,37 @@ test('inasistencia usa el estado NO_SHOW y no se deduce de confirmados menos asi
   assert.equal(metric.noShow, 1);
 });
 
+test('candidatos no elegibles se separan de los abandonos del registro', () => {
+  const restrictedVacancy = { ...vacancy, minAge: 35 };
+  const campaign = {
+    id: 'campaign-ad-1',
+    code: 'ad-1',
+    name: 'Anuncio 1',
+    vacancyId: restrictedVacancy.id,
+    vacancy: restrictedVacancy
+  };
+  const candidate = completeCandidate({
+    age: 30,
+    status: 'NUEVO',
+    vacancy: restrictedVacancy,
+    vacancyId: restrictedVacancy.id
+  });
+  const snapshots = [{
+    date: new Date('2026-07-10T00:00:00.000Z'),
+    metaAdId: 'ad-1',
+    spend: 5000
+  }];
+
+  const [metric] = buildMetaAdStatistics({ campaigns: [campaign], candidates: [candidate], snapshots });
+  assert.equal(metric.ineligible, 1);
+  assert.equal(metric.incompleteRegistrations, 1);
+  assert.equal(metric.estimatedIneligibleSpend, 5000);
+
+  const total = aggregateMetaAdStatistics([metric]);
+  assert.equal(total.ineligible, 1);
+  assert.equal(total.estimatedIneligibleSpend, 5000);
+});
+
 test('acciones de Meta se suman por coincidencia de conversación iniciada', () => {
   assert.equal(extractMessagingConversations([
     { action_type: 'messaging_conversation_started_7d', value: '2' },

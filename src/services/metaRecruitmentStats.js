@@ -155,6 +155,7 @@ function createEmptyAdMetric(campaign = {}) {
     startedProcess: 0,
     completedRegistrations: 0,
     incompleteRegistrations: 0,
+    ineligible: 0,
     cvReceived: 0,
     apt: 0,
     hired: 0,
@@ -177,6 +178,7 @@ function createEmptyAdMetric(campaign = {}) {
     costPerMetaConversation: null,
     costPerLinkClick: null,
     estimatedIncompleteSpend: 0,
+    estimatedIneligibleSpend: 0,
     unattributedSpend: 0,
     dailySpend: new Map(),
     candidatesPerDay: new Map()
@@ -243,6 +245,7 @@ export function buildMetaAdStatistics({
     if (state.startedProcess) metric.startedProcess += 1;
     if (state.complete) metric.completedRegistrations += 1;
     else metric.incompleteRegistrations += 1;
+    if (state.stageCode === 'INELIGIBLE') metric.ineligible += 1;
     if (state.hasCv) metric.cvReceived += 1;
     if (isApt(candidate)) metric.apt += 1;
     if (isHired(candidate)) metric.hired += 1;
@@ -281,7 +284,12 @@ export function buildMetaAdStatistics({
       candidate.estimatedCost = safeCost(dailySpend, dailyCandidates);
       if (candidate.estimatedCost !== null) {
         allocatedSpend += candidate.estimatedCost;
-        if (!candidate.registrationState.complete) metric.estimatedIncompleteSpend += candidate.estimatedCost;
+        if (!candidate.registrationState.complete) {
+          metric.estimatedIncompleteSpend += candidate.estimatedCost;
+          if (candidate.registrationState.stageCode === 'INELIGIBLE') {
+            metric.estimatedIneligibleSpend += candidate.estimatedCost;
+          }
+        }
       }
     }
     metric.unattributedSpend = Math.max(0, Math.round(metric.spend - allocatedSpend));
@@ -304,6 +312,7 @@ export function aggregateMetaAdStatistics(metrics = []) {
     startedProcess: 0,
     completedRegistrations: 0,
     incompleteRegistrations: 0,
+    ineligible: 0,
     cvReceived: 0,
     apt: 0,
     hired: 0,
@@ -312,6 +321,7 @@ export function aggregateMetaAdStatistics(metrics = []) {
     attended: 0,
     noShow: 0,
     estimatedIncompleteSpend: 0,
+    estimatedIneligibleSpend: 0,
     unattributedSpend: 0
   };
 
