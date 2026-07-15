@@ -27,11 +27,14 @@ jobs:
       - name: Apply scoped migration
         run: node scripts/apply-webhook-interview-authority.mjs
 
-      - name: Validate scoped migration
-        run: |
-          node --check src/routes/webhook.js
-          node --test test/webhookInterviewBookingAuthority.test.js
-          node --test test/stateAuthorityManifest.test.js
+      - name: Check webhook syntax
+        run: node --check src/routes/webhook.js
+
+      - name: Run webhook booking authority regression
+        run: node --test test/webhookInterviewBookingAuthority.test.js
+
+      - name: Validate state authority manifest
+        run: node --test test/stateAuthorityManifest.test.js
 
       - name: Publish scoped migration
         shell: bash
