@@ -64,8 +64,8 @@ jobs:
 
           workflow_path = Path('.github/workflows/ci.yml')
           workflow = workflow_path.read_text(encoding='utf-8')
-          old_gate = '        run: node --test test/adminManualOutbound.test.js\n'
-          new_gate = '        run: node --test test/adminManualOutbound.test.js test/adminCandidateDeletionMessageAuthority.test.js\n'
+          old_gate = '        run: node --test test/admin' + 'ManualOutbound.test.js\n'
+          new_gate = '        run: node --test test/admin' + 'ManualOutbound.test.js test/adminCandidateDeletionMessageAuthority.test.js\n'
           if workflow.count(old_gate) != 1:
               raise SystemExit(f'expected one admin gate, found {workflow.count(old_gate)}')
           workflow = workflow.replace(old_gate, new_gate, 1)
