@@ -30,8 +30,9 @@ import { buildContextualReply, deriveAttachmentDecision, shouldEscalateHumanRevi
 import { isFeatureEnabled } from '../services/featureFlags.js';
 import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
-import { cancelCandidateBookings, createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
+import { createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
+import { applyInterviewReminderResponse } from '../services/interviewBookingStateService.js';
 import { buildInterviewDocumentsSentence, buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
 import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
@@ -581,6 +582,35 @@ async function loadActiveInterviewBooking(prisma, candidateId) {
       reminderWindowClosed: true
     }
   });
+}
+
+async function applyActiveInterviewResponse(prisma, candidate, activeBooking, responseText, intent) {
+  if (!activeBooking?.id || !activeBooking?.status) {
+    await recordIntentionalSilence(prisma, candidate, responseText, {
+      reason: 'interview_booking_missing_for_response',
+      gate: 'interview_booking_authority',
+      action: intent
+    });
+    return null;
+  }
+
+  const transition = await applyInterviewReminderResponse(prisma, {
+    bookingId: activeBooking.id,
+    currentStatus: activeBooking.status,
+    responseText,
+    intent
+  });
+
+  if (transition.count !== 1) {
+    await recordIntentionalSilence(prisma, candidate, responseText, {
+      reason: 'interview_booking_transition_not_applied',
+      gate: 'interview_booking_authority',
+      action: intent
+    });
+    return null;
+  }
+
+  return transition;
 }
 
 async function loadVacancyContext(prisma, vacancyId) {
@@ -2094,16 +2124,9 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     const interviewIntent = detectInterviewIntent({ text: cleanText, booking: activeBooking, now: new Date() });
 
     if (interviewIntent === 'cancel_interview') {
-      if (activeBooking?.id) {
-        await prisma.interviewBooking.update({
-          where: { id: activeBooking.id },
-          data: {
-            status: 'CANCELLED',
-            reminderResponse: cleanText,
-            reminderWindowClosed: true
-          }
-        });
-      }
+      const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'cancel_interview');
+      if (!transition) return;
+
       await prisma.candidate.update({
         where: { id: candidate.id },
         data: {
@@ -2116,16 +2139,9 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (interviewIntent === 'reschedule_interview' || isSchedulingRescheduleIntent(cleanText)) {
-      if (activeBooking?.id) {
-        await prisma.interviewBooking.update({
-          where: { id: activeBooking.id },
-          data: {
-            status: 'RESCHEDULED',
-            reminderResponse: cleanText,
-            reminderWindowClosed: true
-          }
-        });
-      }
+      const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'reschedule_interview');
+      if (!transition) return;
+
       if (!nextSlot?.slot) {
         await pauseInterviewFlow(prisma, candidate.id, 'No hay un siguiente slot valido para reagendar');
         const body = 'En este momento no tengo un siguiente horario válido para ofrecerte. El equipo te contactará para ayudarte con la reprogramación.';
@@ -2145,14 +2161,9 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (interviewIntent === 'confirm_attendance') {
-      await prisma.interviewBooking.update({
-        where: { id: activeBooking.id },
-        data: {
-          status: 'CONFIRMED',
-          reminderResponse: cleanText,
-          reminderWindowClosed: true
-        }
-      });
+      const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'confirm_attendance');
+      if (!transition) return;
+
       const body = `Perfecto, gracias por confirmar asistencia. Te esperamos ${nextSlot?.formattedDate || 'en el horario acordado'}.`;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'interview_attendance_confirmed' });
     }
@@ -2167,11 +2178,6 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
-      await cancelCandidateBookings(
-        prisma,
-        candidate.id,
-        candidate.currentStep === ConversationStep.SCHEDULED ? 'RESCHEDULED' : 'CANCELLED'
-      );
       await createBooking(prisma, candidate.id, candidate.vacancyId, nextSlot.slot.id, nextSlot.date, !nextSlot.windowOk);
       await prisma.candidate.update({
         where: { id: candidate.id },

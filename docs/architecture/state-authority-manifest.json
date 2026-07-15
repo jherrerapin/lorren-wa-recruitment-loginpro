@@ -98,15 +98,10 @@
     "interviewBooking": {
       "tableName": "InterviewBooking",
       "domain": "interviews",
-      "migrationStage": "consolidating",
+      "migrationStage": "canonical",
       "targetAuthority": "InterviewBookingStateService",
       "risk": "critical",
       "writers": [
-        {
-          "path": "src/routes/webhook.js",
-          "role": "legacy",
-          "reason": "Confirmación, cancelación y reprogramación desde conversación"
-        },
         {
           "path": "src/services/interviewBookingStateService.js",
           "role": "canonical",

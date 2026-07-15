@@ -42,18 +42,20 @@ La confirmación de asistencia exige booking activo y entrevista futura. Se admi
 
 `NO_RESPONSE` exige booking activo, recordatorio enviado, ausencia de respuesta posterior, mismo día en Bogotá y máximo cinco minutos restantes.
 
-## Escritores directos observados
+## Autoridad y consumidores migrados
 
-| Escritor | Responsabilidad | Auditoría |
+| Componente | Responsabilidad conservada | Persistencia de reservas |
 | --- | --- | --- |
-| `src/services/interviewScheduler.js` | creación, reemplazo y cancelación de reservas activas | Completa |
-| `src/services/reminder.js` | reclamación y cierre de ventanas; `NO_RESPONSE` | Completa |
-| `src/routes/admin.js` | estado manual, recordatorio, eliminación y asignación | Completa |
-| `src/routes/webhook.js` | confirmación, cancelación, reprogramación y creación conversacional | Completa; se migrará al final |
+| `src/services/interviewBookingStateService.js` | transiciones, creación, reemplazo, recordatorios y eliminaciones | Único escritor canónico |
+| `src/services/interviewScheduler.js` | disponibilidad, cupos, anticipación y selección de slots | Delega en la autoridad |
+| `src/services/reminder.js` | ventanas, dispatchers, WhatsApp y jobs | Delega en la autoridad |
+| `src/routes/admin.js` | permisos, auditoría y acciones humanas | Delega en la autoridad |
+| `src/services/chatEngine.js` | clasificación y respuestas del motor alternativo | Delega en la autoridad |
+| `src/routes/webhook.js` | interpretación, silencios, textos, candidato y payloads | Delega en la autoridad |
 
-No se retirará un escritor del manifiesto hasta delegar todas sus mutaciones y cubrirlas con pruebas.
+No quedan escrituras directas de `InterviewBooking` fuera de `InterviewBookingStateService`. El manifiesto y su scanner bloquean regresiones.
 
-## Invariantes objetivo
+## Invariantes objetivo## Invariantes objetivo
 
 1. Aceptar inicialmente un horario crea `SCHEDULED`, no `CONFIRMED`.
 2. `CONFIRMED` representa confirmación de asistencia dentro de la política temporal.
@@ -131,39 +133,19 @@ Antes, el dispatcher comprueba si existe un inbound posterior a `reminderSentAt`
 
 ## webhook.js
 
-### cancel_interview
+### Estado migrado
 
-Cambia el booking activo a `CANCELLED`, guarda respuesta, cierra ventana y limpia recordatorio del candidato.
+El bloque de agenda conserva clasificación, resolución de slots, textos, payloads, pausas y efectos del candidato, pero delega toda persistencia de reservas:
 
-### reschedule_interview
+- `cancel_interview`: aplica la transición condicional por ID y estado; después limpia el recordatorio del candidato;
+- `reschedule_interview`: registra respuesta y cierre de ventana sin cambiar el estado activo; después pausa u ofrece una alternativa;
+- `confirm_attendance`: aplica `CONFIRMED` mediante comparación condicional antes de responder;
+- aceptación inicial: mantiene el scheduling guard y llama una sola vez a `createBooking(prisma, ...)`; la autoridad reutiliza la reserva exacta o sustituye y crea dentro de su transacción serializable;
+- reserva ausente o carrera: registra silencio intencional y termina sin respuesta de éxito ni efectos posteriores.
 
-1. Cambia inmediatamente el booking a `RESCHEDULED`.
-2. Después comprueba `nextSlot`.
-3. Sin slot, pausa el flujo y deja la reserva cerrada.
-4. Con slot, cambia al candidato a `SCHEDULING` y lo ofrece.
-5. La nueva reserva solo se crea tras una confirmación posterior.
+El webhook deja de llamar `cancelCandidateBookings()` antes de crear y ya no ejecuta escrituras Prisma directas sobre `InterviewBooking`.
 
-Reproduce la misma inconsistencia del motor alternativo: usa `RESCHEDULED` como solicitud, aunque lifecycle lo trata como cierre y el objetivo lo reserva para reprogramación completada.
-
-### confirm_attendance
-
-Cambia por ID a `CONFIRMED`, guarda la respuesta, cierra la ventana y responde con el horario.
-
-### Confirmación inicial del horario
-
-1. Ejecuta `cancelCandidateBookings()`.
-2. Llama a `createBooking()`.
-3. Cambia al candidato a `SCHEDULED`.
-4. Envía confirmación.
-
-Riesgos:
-
-- no hay transacción común;
-- `createBooking()` repite el reemplazo;
-- un fallo de creación puede dejar al candidato sin reserva activa;
-- dentro de una rama que exige `SCHEDULING`, la condición que escogería `RESCHEDULED` normalmente termina usando `CANCELLED`.
-
-## admin.js
+## admin.js## admin.js
 
 ### Definición administrativa de activo
 
@@ -236,58 +218,32 @@ Hasta tomar esa decisión, la eliminación física queda reservada a corrección
 
 La ruta ya no abre una transacción externa, no preconsulta `InterviewBooking` y no llama `cancelCandidateBookings(..., 'RESCHEDULED')`. Esto conserva en la autoridad el rollback conjunto, los reintentos `P2034` y la recuperación exacta ante `P2002`. El paso del candidato y la auditoría permanecen fuera de la transacción de reservas para conservar el comportamiento existente.
 
-## Inconsistencias confirmadas
+## Estado consolidado y deuda restante
 
-### RESCHEDULED tiene significados incompatibles
+### Autoridad canónica completada
 
-- lifecycle, scheduler y reminder: cerrado;
-- panel: activo y elegible para reminder;
-- webhook: solicitud sin reserva nueva;
-- chat engine: solicitud registrada por la autoridad sin cerrar la reserva activa;
-- scheduler: reserva anterior realmente reemplazada.
+Todas las transiciones vigentes pasan por `InterviewBookingStateService`. `RESCHEDULED` solo se asigna durante una sustitución que crea una reserva válida; una solicitud conserva la reserva activa. La creación inicial y el reemplazo son atómicos, y las respuestas comparan el booking exacto y su estado leído.
 
-La solución alineada con el objetivo es diferenciar:
+### Deuda separada
 
-- `RESCHEDULE_REQUESTED`: solicitud registrada, si se amplía Prisma;
-- `RESCHEDULED`: reserva anterior reemplazada por una nueva válida.
+El modelo aún no incorpora historial inmutable, actor y motivo estructurados para todas las transiciones, reserva reemplazante explícita, retención ni `tenantId`. Esa evolución no altera la autoridad canónica alcanzada.
 
-No se cambiará Prisma en este PR.
+## Matriz canónica vigente
 
-### Una ruta cierra antes de reemplazar
-
-El webhook todavía asigna `RESCHEDULED` antes de disponibilidad o nueva reserva. `chatEngine.js` ya conserva la reserva activa.
-
-### La creación conversacional no es atómica
-
-El webhook cancela y crea sin transacción, aunque `createBooking()` ya hace reemplazo interno.
-
-### El panel permite transiciones arbitrarias
-
-Valida destino, no origen ni transición.
-
-### No existe historial unificado
-
-`CandidateAdminEvent` registra cambios manuales, pero las transiciones automáticas no comparten historial con actor, motivo, fuente y reserva reemplazante.
-
-## Matriz observada
-
-| Origen | Acción | Destino o efecto | Escritor | Atomicidad |
+| Origen | Acción | Destino o efecto | Autoridad | Atomicidad o guard |
 | --- | --- | --- | --- | --- |
-| sin reserva exacta | aceptar horario | nueva `SCHEDULED` | scheduler/webhook/admin | depende del consumidor |
-| `SCHEDULED`/`CONFIRMED` | crear reemplazo | anterior `RESCHEDULED`, nueva `SCHEDULED` | scheduler | solo con `tx` externo |
-| activo | cancelar por candidato | `CANCELLED` | scheduler | `updateMany` único |
-| ventana abierta | cerrar duplicado | cierre de ventana | reminder | condicional por booking |
-| activo | reclamar reminder | fecha + cierre | reminder | condicional por booking |
-| `SCHEDULED` | sin respuesta | `NO_RESPONSE` | reminder | condicional por booking |
-| activo | confirmar asistencia | `CONFIRMED` | webhook / autoridad para chat engine | directa en webhook; condicional por ID y estado en autoridad |
-| activo | cancelar entrevista | `CANCELLED` | webhook / autoridad para chat engine | booking y candidato separados; transición condicional en autoridad |
-| activo | pedir reprogramación | webhook: `RESCHEDULED` sin reemplazo; chat engine: conserva activo | webhook / autoridad para chat engine | webhook inconsistente; chat engine condicional |
-| cualquier estado visible | acción manual | uno de seis destinos | admin | sin guard de origen |
-| booking existente | asignar manualmente | reemplazo + nueva `SCHEDULED` | admin/scheduler | booking en `tx`; candidato fuera |
-| booking exacto | corregir/eliminar | borrado físico | admin | transaccional |
-| candidato eliminado | limpiar bookings | borrado físico por candidato | admin | transaccional |
+| sin reserva exacta | aceptar horario | nueva `SCHEDULED` | autoridad | transacción serializable |
+| `SCHEDULED`/`CONFIRMED` | crear reemplazo | anterior `RESCHEDULED`, nueva `SCHEDULED` | autoridad | cierre y creación atómicos |
+| activo | confirmar asistencia | `CONFIRMED` | autoridad | condicional por ID y estado |
+| activo | cancelar entrevista | `CANCELLED` | autoridad | condicional por ID y estado |
+| activo | pedir reprogramación | conserva estado y registra respuesta | autoridad | condicional por ID y estado |
+| ventana abierta | reclamar o cerrar recordatorio | fechas y cierre | autoridad | filtros idempotentes |
+| `SCHEDULED` | sin respuesta | `NO_RESPONSE` | autoridad | booking exacto y ventana |
+| estado permitido | acción administrativa | destino validado | autoridad | origen validado y auditoría externa |
+| booking exacto | corregir/eliminar | borrado físico | autoridad | coincidencia booking/candidato |
+| candidato eliminado | limpiar bookings | borrado por candidato | autoridad | reutiliza `tx` |
 
-## Contratos objetivo
+## Contratos objetivo## Contratos objetivo
 
 `InterviewBookingStateService` no expondrá una actualización genérica. Contratos previstos:
 
@@ -326,20 +282,20 @@ Cada contrato declarará booking exacto o criterio permitido, origen, destino, c
 14. Servicio funciona con Prisma principal y `tx`.
 15. Respuesta tardía queda trazada con hora real.
 
-## Orden de trabajo
+## Orden de trabajo completado
 
-1. Convertir el inventario en matriz canónica de transiciones permitidas.
-2. Añadir pruebas negativas sin cambiar consumidores.
-3. Crear el esqueleto de `InterviewBookingStateService`.
-4. Migrar scheduler y hacer atómico el reemplazo.
-5. Migrar reminder conservando filtros condicionales.
-6. Migrar admin con acciones y eliminaciones explícitas auditadas.
-7. Migrar chat engine heredado mediante la autoridad compartida.
-8. Migrar webhook al final, preservando replays.
-9. Diseñar historial, retención y `tenantId` en fases separadas.
-10. Marcar canónico solo con un escritor en el manifiesto.
+1. Matriz canónica de transiciones: completada.
+2. Pruebas negativas: completadas.
+3. Autoridad compartida: completada.
+4. Scheduler y reemplazo atómico: completados.
+5. Recordatorios: migrados.
+6. Administración: migrada.
+7. Chat engine: migrado.
+8. Webhook: migrado preservando replays.
+9. Historial, retención y `tenantId`: evolución separada.
+10. `InterviewBooking`: marcado canónico con un único escritor.
 
-## Fuera de alcance
+## Fuera de alcance## Fuera de alcance
 
 - migraciones Prisma o `tenantId`;
 - cambiar anticipación u horizonte;

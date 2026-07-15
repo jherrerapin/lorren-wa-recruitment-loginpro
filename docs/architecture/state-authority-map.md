@@ -18,7 +18,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
-| `InterviewBooking` | 2 | Crítico | En consolidación | `InterviewBookingStateService` |
+| `InterviewBooking` | 1 | Crítico | Canónico | `InterviewBookingStateService` |
 | `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
@@ -84,30 +84,25 @@ El repositorio distingue actualmente seis contratos:
 
 La autoridad de persistencia de `Message` ya es canónica. Esto no significa que exista un outbox productivo: los consumidores migrados continúan enviando al proveedor antes de persistir para preservar el comportamiento actual. El outbox, los estados de entrega y la idempotencia de salida siguen siendo una evolución separada.
 
-### Reservas de entrevista en consolidación
+### Reservas de entrevista canónicas
 
-`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación, las mutaciones operativas de recordatorios, las transiciones manuales y las eliminaciones físicas. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs; `admin.js` conserva permisos, acceso, auditoría y transacciones de ciclo de vida ajenas al reemplazo. La asignación manual entrega el cliente Prisma raíz para que la autoridad controle directamente la transacción serializable y sus reintentos.
+`InterviewBookingStateService` es el único escritor de `InterviewBooking`. Scheduler, recordatorios, panel, chat engine y webhook conservan sus decisiones especializadas, pero delegan la persistencia y las transiciones en la autoridad compartida.
 
 La autoridad protege estas invariantes:
 
 - una reserva activa exacta se reutiliza;
 - el reemplazo respeta el índice único parcial de una reserva activa por candidato;
 - el cierre anterior y la creación del reemplazo se confirman o revierten juntos dentro de una transacción serializable;
-- con un cliente `tx` existente se reutiliza la unidad sin abrir una transacción anidada;
-- los conflictos `P2034` se reintentan de forma acotada;
-- una recuperación `P2002` solo acepta la reserva exacta por candidato, vacante, slot y fecha;
-- una solicitud de reprogramación conserva `SCHEDULED` o `CONFIRMED` hasta que exista un reemplazo válido;
-- la cancelación ordinaria solo produce `CANCELLED`;
-- `NO_RESPONSE` solo se aplica desde `SCHEDULED` con recordatorio enviado y dentro de su ventana;
-- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia;
-- las acciones manuales validan el estado de origen y usan comparación condicional por ID y estado;
-- una solicitud manual de reprogramación conserva la reserva activa hasta asignar un horario reemplazante;
-- el recordatorio manual solo admite `SCHEDULED` y `CONFIRMED`;
-- la eliminación individual exige coincidencia exacta por reserva y candidato;
-- la limpieza por ciclo de vida elimina reservas únicamente por candidato y reutiliza la transacción recibida;
-- la asignación manual valida primero la oferta y después delega una sola creación o sustitución atómica con el cliente Prisma raíz.
+- los conflictos `P2034` se reintentan de forma acotada y una recuperación `P2002` solo acepta la reserva exacta;
+- una solicitud de reprogramación conserva `SCHEDULED` o `CONFIRMED` hasta crear un reemplazo válido;
+- confirmación y cancelación comparan ID y estado leído antes de informar éxito;
+- el webhook registra como silencio intencional una reserva ausente o una carrera y no ejecuta efectos posteriores;
+- la aceptación conversacional valida primero la oferta y delega una sola creación o sustitución atómica con el cliente Prisma raíz;
+- recordatorios, acciones manuales y eliminaciones conservan sus filtros y contratos explícitos.
 
-`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El panel delega transiciones manuales, eliminación individual, limpieza por ciclo de vida y asignación manual; conserva permisos, acceso, auditoría y el orden mensajes → reservas → candidato. `chatEngine.js` delega confirmación, cancelación y solicitud de reprogramación; una carrera no produce una respuesta de éxito y la solicitud conserva la reserva activa. `admin.js` y `chatEngine.js` no escriben `InterviewBooking` directamente. El número total de escritores baja a dos: webhook y la autoridad canónica.
+El scanner de CI bloquea cualquier nueva escritura directa fuera de la autoridad. Los textos, horarios, payloads, interpretación conversacional y efectos existentes sobre el candidato permanecen en sus fronteras.
+
+## Hallazgos
 
 ## Hallazgos
 
@@ -126,16 +121,11 @@ Lo modifican rutas HTTP, webhook, motores conversacionales, consentimiento, atri
 
 La meta no es mover estas quince escrituras a un archivo gigante. La autoridad objetivo debe exponer casos de uso y validar transiciones, mientras cada dominio conserva su propia decisión especializada.
 
-### 2. Las reservas conservan una frontera directa por migrar
+### 2. Las reservas tienen autoridad canónica
 
-Después de extraer scheduler, recordatorios, administración y `chatEngine.js`, `InterviewBooking` todavía se modifica directamente solo desde el webhook. La frontera conversacional principal continúa bajo #453 y #421 y debe migrarse preservando replays, textos y orden de efectos. Deben centralizarse gradualmente invariantes como:
+La consolidación de `InterviewBooking` quedó completa: no existen escrituras directas desde rutas, webhooks, scheduler, recordatorios, panel o motores conversacionales. La evolución pendiente es separada y comprende historial inmutable, actor y motivo estructurados, retención y `tenantId`.
 
-- no marcar `RESCHEDULED` sin una nueva reserva;
-- no confirmar una reserva cancelada;
-- no revivir reservas cerradas desde el panel;
-- no crear dos reservas activas para el mismo candidato.
-
-### 3. La persistencia de mensajes ya tiene una autoridad única
+### 3. La persistencia de mensajes ya tiene una autoridad única### 3. La persistencia de mensajes ya tiene una autoridad única
 
 Todas las creaciones, actualizaciones y eliminaciones de `Message` pasan por `ConversationMessageRepository`. Las fronteras conservan sus decisiones y unidades transaccionales, pero no controlan directamente cómo se persiste el agregado.
 
@@ -173,7 +163,7 @@ La consolidación se completó sin mover las políticas de negocio del panel ni 
 ## Orden recomendado de consolidación
 
 1. Diseñar outbox y estados de entrega sobre la autoridad canónica de `Message`.
-2. Completar `InterviewBooking` y sus transiciones.
+2. Diseñar historial, retención y `tenantId` sobre la autoridad canónica de `InterviewBooking`.
 3. Campos conversacionales de `Candidate`.
 4. Atribución, CV, recordatorios y operaciones administrativas del candidato.
 5. Disponibilidad de entrevista y configuración de slots.
