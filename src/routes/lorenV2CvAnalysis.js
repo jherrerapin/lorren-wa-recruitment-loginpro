@@ -305,7 +305,7 @@ async function loadCandidates(prisma, vacancyId) {
   });
 }
 
-function renderPage({ vacancies, candidates, vacancyId = '', desiredProfile = '', review = null, message = '', error = '' }) {
+function renderPage({ vacancies, candidates = [], vacancyId = '', desiredProfile = '', review = null, message = '', error = '', showCandidates = true }) {
   const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
     ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
     <section class="card hero">
@@ -313,7 +313,9 @@ function renderPage({ vacancies, candidates, vacancyId = '', desiredProfile = ''
       <p>Elige una vacante, describe el perfil con tus palabras y Lórren organizará los documentos según la evidencia encontrada. Los archivos difíciles de leer quedarán separados para revisión manual.</p>
     </section>
     ${renderProfileForm(vacancies, { vacancyId, desiredProfile })}
-    ${review ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review)}` : renderCandidateTable(candidates, vacancyId)}`;
+    ${review
+      ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review)}`
+      : showCandidates ? renderCandidateTable(candidates, vacancyId) : ''}`;
   return renderLayout({ title: 'Análisis de hojas de vida — Lórren', body });
 }
 
@@ -344,30 +346,32 @@ export function lorenV2CvAnalysisRouter(prisma) {
   router.post('/run', async (req, res) => {
     const vacancyId = normalizeString(req.body?.vacancyId) || '';
     const desiredProfile = normalizeString(req.body?.desiredProfile)?.slice(0, 4000) || '';
-    const [vacancies, candidates] = await Promise.all([
-      loadVacancies(prisma),
-      loadCandidates(prisma, vacancyId)
-    ]);
-
-    let review;
+    let vacancies = [];
     try {
-      review = await reviewVacancyCandidates(prisma, { vacancyId, desiredProfile });
+      vacancies = await loadVacancies(prisma);
+      const review = await reviewVacancyCandidates(prisma, { vacancyId, desiredProfile });
+
+      if (!review.ok) {
+        return res.status(400).send(renderPage({
+          vacancies,
+          vacancyId,
+          desiredProfile,
+          error: errorMessage(review.reason),
+          showCandidates: false
+        }));
+      }
+
+      return res.send(renderPage({ vacancies, vacancyId, desiredProfile, review }));
     } catch (error) {
       console.error('[CV_REVIEW_ERROR]', { vacancyId, error: safeErrorMessage(error) });
-      review = { ok: false, reason: 'match_analysis_failed' };
-    }
-
-    if (!review.ok) {
-      return res.status(400).send(renderPage({
+      return res.status(500).send(renderPage({
         vacancies,
-        candidates,
         vacancyId,
         desiredProfile,
-        error: errorMessage(review.reason)
+        error: 'No fue posible revisar las hojas de vida en este momento. Intenta nuevamente; si el problema continúa, informa al administrador.',
+        showCandidates: false
       }));
     }
-
-    return res.send(renderPage({ vacancies, candidates, vacancyId, desiredProfile, review }));
   });
 
   router.post('/:candidateId/analyze', async (req, res) => {
