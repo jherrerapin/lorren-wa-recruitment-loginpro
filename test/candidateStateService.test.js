@@ -139,9 +139,24 @@ test('rechaza cliente, candidato, fecha y snapshot de pausa inválidos', async (
     /candidate_resume_now_invalid/
   );
   await assert.rejects(
+    () => resumeCandidateAutomationOnInbound(client, { candidateId: pausedCandidate.id, expected: expectedSnapshot, now: null }),
+    /candidate_resume_now_invalid/
+  );
+  await assert.rejects(
+    () => resumeCandidateAutomationOnInbound(client, { candidateId: pausedCandidate.id, expected: expectedSnapshot, now: false }),
+    /candidate_resume_now_invalid/
+  );
+  await assert.rejects(
     () => resumeCandidateAutomationOnInbound(client, {
       candidateId: pausedCandidate.id,
       expected: { ...expectedSnapshot, botPausedAt: 'no-date' }
+    }),
+    /candidate_expected_bot_paused_at_invalid/
+  );
+  await assert.rejects(
+    () => resumeCandidateAutomationOnInbound(client, {
+      candidateId: pausedCandidate.id,
+      expected: { ...expectedSnapshot, botPausedAt: false }
     }),
     /candidate_expected_bot_paused_at_invalid/
   );
