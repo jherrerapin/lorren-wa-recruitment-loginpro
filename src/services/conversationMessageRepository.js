@@ -229,6 +229,9 @@ export async function deleteConversationMessagesForCandidate(prisma, input = {})
   if (!validateCandidateDeleteContract(prisma)) {
     throw new Error('candidate_message_delete_prisma_contract_invalid');
   }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('candidate_message_delete_input_invalid');
+  }
 
   const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
   const result = await prisma.message.deleteMany({
