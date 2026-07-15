@@ -1,0 +1,52 @@
+name: Fix webhook pending reschedule 478
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  fix:
+    if: github.event.pull_request.number == 478 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply scoped correction
+        run: node scripts/fix-webhook-reschedule-authority.mjs
+
+      - name: Validate correction
+        run: |
+          node --check src/routes/webhook.js
+          node --test test/webhookInterviewBookingAuthority.test.js
+          node --test test/stateAuthorityManifest.test.js
+
+      - name: Publish scoped correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/webhook.js test/webhookInterviewBookingAuthority.test.js
+          git add -u -- scripts/fix-webhook-reschedule-authority.mjs
+          allowed='^(src/routes/webhook.js|test/webhookInterviewBookingAuthority.test.js|scripts/fix-webhook-reschedule-authority.mjs)$'
+          unexpected=$(git diff --cached --name-only | grep -Ev "$allowed" || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files in scoped correction:"
+            echo "$unexpected"
+            exit 1
+          fi
+          git commit -m "fix: preservar reprogramación de oferta pendiente"
+          git push origin HEAD:${{ github.head_ref }}
