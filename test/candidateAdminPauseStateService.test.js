@@ -174,6 +174,34 @@ test('una pausa concurrente no es sobrescrita ni levantada', async () => {
   assert.equal(resumeHarness.calls.transactions, 0);
 });
 
+test('una transición administrativa ya satisfecha devuelve no-op sin escribir', async () => {
+  const pauseHarness = createHarness(pausedCandidate);
+  const pauseResult = await pauseCandidateAutomationFromAdmin(pauseHarness.client, {
+    candidateId: pausedCandidate.id,
+    expected: pausedSnapshot,
+    actor: 'dev',
+    reason: 'Pausa repetida',
+    now: new Date('2026-07-15T16:05:00.000Z')
+  });
+
+  assert.equal(pauseResult.count, 0);
+  assert.equal(pauseResult.candidate.botPaused, true);
+  assert.equal(pauseHarness.calls.updateMany.length, 0);
+  assert.equal(pauseHarness.calls.findUnique.length, 1);
+
+  const resumeHarness = createHarness(unpausedCandidate);
+  const resumeResult = await resumeCandidateAutomationFromAdmin(resumeHarness.client, {
+    candidateId: unpausedCandidate.id,
+    expected: unpausedSnapshot
+  });
+
+  assert.equal(resumeResult.count, 0);
+  assert.equal(resumeResult.candidate.botPaused, false);
+  assert.equal(resumeHarness.calls.updateMany.length, 0);
+  assert.equal(resumeHarness.calls.findUnique.length, 1);
+  assert.equal(resumeHarness.calls.transactions, 0);
+});
+
 test('rechaza entradas administrativas inválidas', async () => {
   await assert.rejects(
     () => pauseCandidateAutomationFromAdmin(null, {}),
@@ -227,8 +255,8 @@ test('rechaza entradas administrativas inválidas', async () => {
   await assert.rejects(
     () => resumeCandidateAutomationFromAdmin(client, {
       candidateId: unpausedCandidate.id,
-      expected: unpausedSnapshot
+      expected: {}
     }),
-    /candidate_expected_paused_state_required/
+    /candidate_expected_pause_snapshot_required/
   );
 });
