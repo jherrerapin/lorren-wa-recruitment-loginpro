@@ -2,9 +2,10 @@ import axios from 'axios';
 import { sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 import { ReplySimilarityThreshold, isSubstantiallySimilarReply } from './replySimilarityPolicy.js';
 import { LORREN_ROLE_LABEL } from './botKnowledge.js';
+import { OPENAI_CONTEXTUAL_REPLY_MODEL } from './openAiModelConfig.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
-export const CONTEXTUAL_REPLY_MODEL = 'gpt-5.4-mini-2026-03-17';
+export const CONTEXTUAL_REPLY_MODEL = OPENAI_CONTEXTUAL_REPLY_MODEL;
 
 const FALLBACK_INTENT_BY_SITUATION = Object.freeze({
   attachment_resume_photo: 'request_cv_pdf_word',

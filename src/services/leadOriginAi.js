@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { LEAD_ORIGIN_SCHEMA } from '../ai/leadOriginSchema.js';
+import { OPENAI_EXTRACTION_MODEL } from './openAiModelConfig.js';
 
 const URL = 'https://api.openai.com/v1/responses';
-const MODEL = process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17';
+const MODEL = OPENAI_EXTRACTION_MODEL;
 
 function parseOutput(data = {}) {
   for (const item of data?.output || []) {

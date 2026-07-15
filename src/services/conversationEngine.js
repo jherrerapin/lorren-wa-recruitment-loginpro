@@ -29,12 +29,15 @@ import {
 } from './replySimilarityPolicy.js';
 import { applyCommuteAdvisoryToReply } from './commuteAdvisoryPolicy.js';
 import { applyRejectionMemoryPolicy, buildRequirementRejectionDecision } from './rejectionPolicy.js';
+import { OPENAI_CONVERSATION_MODEL } from './openAiModelConfig.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-// OPENAI_MODEL controla únicamente el motor conversacional legacy/chat-completions:
+// OPENAI_MODEL controla el motor conversacional legacy/chat-completions:
 // redacta reply, nextStep, actions y extractedFields sugeridos. La seguridad final
 // queda en guard rails determinísticos de backend, no en el modelo.
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
+// Terra es el valor predeterminado por calidad. Las tareas especializadas pueden
+// usar un override propio sin dejar de heredar OPENAI_MODEL cuando no lo tengan.
+const DEFAULT_MODEL = OPENAI_CONVERSATION_MODEL;
 const ENGINE_FALLBACK_REPLY = buildSafeFallbackReply();
 const CORE_PROFILE_FIELDS = [
   'fullName',
