@@ -80,6 +80,15 @@ function createPrismaHarness({
           calls.create.push(args);
           const error = queuedCreateErrors.shift();
           if (error) throw error;
+
+          const activeExists = state.some((booking) => (
+            booking.candidateId === args.data.candidateId
+            && ACTIVE_INTERVIEW_BOOKING_STATUSES.includes(booking.status)
+          ));
+          if (activeExists) {
+            throw createError('P2002', 'InterviewBooking_one_active_per_candidate_idx');
+          }
+
           createdCount += 1;
           const created = {
             id: `booking-created-${createdCount}`,
@@ -251,7 +260,6 @@ test('ante P2002 solo recupera la reserva concurrente exacta solicitada', async 
     ...bookingInput
   };
   const { prisma } = createPrismaHarness({
-    bookings: [activeBooking],
     createErrors: [createError('P2002')],
     afterRollback: ({ insertBooking }) => insertBooking(concurrentExact)
   });
@@ -268,7 +276,6 @@ test('no confunde otra reserva activa con la reserva concurrente exacta', async 
     id: 'booking-concurrent-other-slot'
   };
   const { prisma } = createPrismaHarness({
-    bookings: [activeBooking],
     createErrors: [uniqueFailure],
     afterRollback: ({ insertBooking }) => insertBooking(concurrentOtherSlot)
   });
