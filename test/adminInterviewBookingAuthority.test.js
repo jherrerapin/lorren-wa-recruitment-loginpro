@@ -44,12 +44,19 @@ test('la eliminación individual delega por id y candidato antes de reajustar el
   assert.match(route, /candidateId:\s*booking\.candidateId/);
   assert.match(route, /deletion\.count\s*===\s*0/);
   assert.doesNotMatch(route, /tx\.interviewBooking\.delete\s*\(/);
+  const deletionIndex = route.indexOf('deletion.count === 0');
+  const remainingIndex = route.indexOf('remainingActiveBooking');
+  const updateIndex = route.indexOf('tx.candidate.update');
+
+  assert.ok(deletionIndex >= 0, 'No se encontró "deletion.count === 0"');
+  assert.ok(remainingIndex >= 0, 'No se encontró "remainingActiveBooking"');
+  assert.ok(updateIndex >= 0, 'No se encontró "tx.candidate.update"');
   assert.ok(
-    route.indexOf('deletion.count === 0') < route.indexOf('remainingActiveBooking'),
+    deletionIndex < remainingIndex,
     'La carrera debe resolverse antes de buscar reservas activas restantes.'
   );
   assert.ok(
-    route.indexOf('remainingActiveBooking') < route.indexOf('tx.candidate.update'),
+    remainingIndex < updateIndex,
     'El paso solo se reajusta después de comprobar reservas activas restantes.'
   );
 });

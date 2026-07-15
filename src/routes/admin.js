@@ -38,7 +38,9 @@ import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
 import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';
 import {
   ACTIVE_INTERVIEW_BOOKING_STATUSES,
-  applyAdministrativeInterviewBookingAction
+  applyAdministrativeInterviewBookingAction,
+  deleteAdministrativeInterviewBooking,
+  deleteCandidateInterviewBookings
 } from '../services/interviewBookingStateService.js';
 import { getReminderMissingItems } from '../services/reminder.js';
 import { clearCandidateCvStorage, resolveCandidateCvBuffer, storeCandidateCv } from '../services/cvStorage.js';
@@ -2212,10 +2214,15 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Agendamiento no encontrado.'));
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.interviewBooking.delete({
-        where: { id: booking.id }
+    const deletionResult = await prisma.$transaction(async (tx) => {
+      const deletion = await deleteAdministrativeInterviewBooking(tx, {
+        bookingId: booking.id,
+        candidateId: booking.candidateId
       });
+
+      if (deletion.count === 0) {
+        return { deleted: false };
+      }
 
       const remainingActiveBooking = await tx.interviewBooking.findFirst({
         where: {
@@ -2233,7 +2240,17 @@ export function adminRouter(prisma) {
           }
         });
       }
+
+      return { deleted: true };
     });
+
+    if (!deletionResult.deleted) {
+      return res.redirect(withFlashMessage(
+        returnTo,
+        'error',
+        'El agendamiento cambió mientras se procesaba la eliminación. Actualiza la página e intenta nuevamente.'
+      ));
+    }
 
     return res.redirect(withFlashMessage(returnTo, 'success', 'Agendamiento eliminado correctamente.'));
   });
@@ -2592,8 +2609,8 @@ export function adminRouter(prisma) {
         candidateId: candidate.id
       });
 
-      await tx.interviewBooking.deleteMany({
-        where: { candidateId: candidate.id }
+      await deleteCandidateInterviewBookings(tx, {
+        candidateId: candidate.id
       });
 
       await tx.candidate.delete({
