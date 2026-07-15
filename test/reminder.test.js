@@ -286,7 +286,7 @@ test('booking pasa a NO_RESPONSE faltando 5 minutos si no hubo respuesta al remi
   }
 });
 
-async function assertReminderTransition({ candidateText, expectedStatus }) {
+async function assertReminderTransition({ candidateText, expectedStatus, expectedIntent = null }) {
   setupWhatsappEnv();
   process.env.ADMIN_WHATSAPP_NUMBER = '570000000099';
   const now = new Date('2026-04-08T14:30:00.000Z');
@@ -326,6 +326,7 @@ async function assertReminderTransition({ candidateText, expectedStatus }) {
   try {
     const result = await handleInterviewReminderResponse(prisma, candidateId, candidateText, { now });
     assert.equal(result.status, expectedStatus);
+    if (expectedIntent) assert.equal(result.intent, expectedIntent);
     assert.equal(prisma.state.interviewBookings[0].status, expectedStatus);
     assert.equal(prisma.state.interviewBookings[0].reminderResponse, candidateText);
     assert.equal(whatsappMock.sentMessages.length, 0);
@@ -349,10 +350,11 @@ test('respuesta de cancelación al recordatorio cambia entrevista a CANCELLED si
   });
 });
 
-test('respuesta de reprogramación al recordatorio cambia entrevista a RESCHEDULED sin enviar WhatsApp', async () => {
+test('respuesta de reprogramación conserva la reserva activa sin enviar WhatsApp', async () => {
   await assertReminderTransition({
     candidateText: 'Necesito reprogramar la entrevista',
-    expectedStatus: 'RESCHEDULED'
+    expectedStatus: 'SCHEDULED',
+    expectedIntent: 'reschedule_interview'
   });
 });
 

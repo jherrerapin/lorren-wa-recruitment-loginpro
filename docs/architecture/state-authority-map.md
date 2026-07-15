@@ -18,7 +18,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
-| `InterviewBooking` | 5 | Crítico | En consolidación | `InterviewBookingStateService` |
+| `InterviewBooking` | 4 | Crítico | En consolidación | `InterviewBookingStateService` |
 | `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
@@ -101,7 +101,7 @@ La nueva autoridad protege las invariantes vigentes sin introducir una transacci
 - si la creación falla por una carrera, se recupera la reserva activa más próxima;
 - la cancelación solo afecta estados `SCHEDULED` o `CONFIRMED` y cierra la ventana de recordatorio.
 
-El número de escritores permanece en cinco porque administración, webhook, `chatEngine` y recordatorios aún realizan otras transiciones directamente. El scheduler sale del inventario y es sustituido por la autoridad canónica objetivo.
+`reminder.js` delega ahora cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. La solicitud de reprogramación conserva la reserva activa hasta crear un reemplazo válido. El número de escritores baja a cuatro: administración, webhook, `chatEngine` y la autoridad canónica.
 
 ## Hallazgos
 
@@ -120,9 +120,9 @@ Lo modifican rutas HTTP, webhook, motores conversacionales, consentimiento, atri
 
 La meta no es mover estas quince escrituras a un archivo gigante. La autoridad objetivo debe exponer casos de uso y validar transiciones, mientras cada dominio conserva su propia decisión especializada.
 
-### 2. Las reservas conservan cuatro fronteras directas por migrar
+### 2. Las reservas conservan tres fronteras directas por migrar
 
-Después de extraer las mutaciones del scheduler, `InterviewBooking` todavía se modifica desde webhook, recordatorios, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:
+Después de extraer scheduler y recordatorios, `InterviewBooking` todavía se modifica desde webhook, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:
 
 - no marcar `RESCHEDULED` sin una nueva reserva;
 - no confirmar una reserva cancelada;
