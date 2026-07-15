@@ -17,6 +17,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sync-pr-base:
+    name: Synchronize PR base and remove sync job
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 454 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge current main and remove this temporary job
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-commit --no-ff origin/main
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/ci.yml')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('  sync-pr-base:')
+          end = text.index('  state-authority:', start)
+          text = text[:start] + text[end:]
+          if 'contents: write' in text or 'sync-pr-base:' in text:
+              raise SystemExit('No se retiró completamente el job temporal')
+          if 'Run interview booking authority regressions' not in text:
+              raise SystemExit('Se perdió el gate de autoridad de reservas')
+          if 'Run interview booking transition policy regressions' not in text:
+              raise SystemExit('No se incorporó el gate de política de transiciones de main')
+          path.write_text(text, encoding='utf-8')
+          PY
+          git add .github/workflows/ci.yml
+          git commit --no-edit
+          git push origin HEAD:${{ github.head_ref }}
+
   state-authority:
     name: Validate state authorities
     runs-on: ubuntu-latest
