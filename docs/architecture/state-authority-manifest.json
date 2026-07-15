@@ -92,6 +92,11 @@
           "path": "src/services/reminder.js",
           "role": "operational",
           "reason": "Estados y tiempos de recordatorios; delega la persistencia de mensajes"
+        },
+        {
+          "path": "src/services/candidateStateService.js",
+          "role": "boundary",
+          "reason": "Primera frontera de la autoridad objetivo para reanudación condicional por mensaje entrante; Candidate continúa fragmentado"
         }
       ]
     },
