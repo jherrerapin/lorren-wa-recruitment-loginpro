@@ -15,21 +15,27 @@ const baseBooking = {
   reminderWindowClosed: false
 };
 
-test('aceptar horario crea booking SCHEDULED y no CONFIRMED', async () => {
+test('aceptar horario crea booking SCHEDULED y no ejecuta cierre de reemplazo', async () => {
   const calls = [];
+  let updateManyCalls = 0;
   const prisma = {
     interviewBooking: {
+      findMany: async () => [],
       findFirst: async () => null,
       create: async ({ data }) => {
         calls.push(data);
         return { id: 'book-created', status: data.status || 'SCHEDULED', ...data };
       },
-      updateMany: async () => ({ count: 0 })
+      updateMany: async () => {
+        updateManyCalls += 1;
+        return { count: 0 };
+      }
     }
   };
 
   const booking = await createBooking(prisma, 'cand-1', 'vac-1', 'slot-1', new Date('2026-04-24T18:00:00.000Z'));
   assert.equal(calls.length, 1);
+  assert.equal(updateManyCalls, 0);
   assert.equal(booking.status, 'SCHEDULED');
 });
 
