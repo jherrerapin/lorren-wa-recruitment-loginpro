@@ -19,7 +19,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 5 | Crítico | Fragmentado | `InterviewBookingStateService` |
-| `Message` | 2 | Alto | En consolidación | `ConversationMessageRepository` |
+| `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
 | `JobQueue` | 1 | Alto | En consolidación | `JobQueueService` |
@@ -44,7 +44,7 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `CandidateDataConsentEvent` tiene ahora un único escritor: `ConsentStateService`. El scanner de CI impide que una ruta, gate o integración vuelva a crear eventos directamente.
 
-### Migraciones de mensajes
+### Mensajes canónicos
 
 `dataConsentGate.js` ya no escribe `Message` directamente. La evidencia entrante y las respuestas salientes del gate pasan por `ConversationMessageRepository`.
 
@@ -66,9 +66,9 @@ El supervisor conserva la interpretación de la instrucción, el envío por What
 
 La migración no modifica programación, reclamación, ventana de WhatsApp, reservas, estados del candidato ni jobs. `reminder.js` continúa como escritor de `Candidate` e `InterviewBooking`, pero deja de ser escritor de `Message`.
 
-La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboundMessage()`, delega ahora su creación saliente en `persistOutboundConversationMessage()`. Conserva el orden actual —envío al proveedor, actualización del candidato y persistencia—, el cuerpo exacto o saneado y el payload de intervención manual.
+La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboundMessage()`, delega su creación saliente en `persistOutboundConversationMessage()`. La eliminación administrativa de un candidato delega sus mensajes en `deleteConversationMessagesByCandidate(tx, { candidateId })`.
 
-`admin.js` permanece declarado como escritor de `Message` porque la eliminación de un candidato borra sus mensajes dentro de la misma transacción mediante `tx.message.deleteMany()`. Esa operación no forma parte de la mensajería saliente y no se modifica en esta etapa.
+Esta delegación conserva la misma transacción y el orden existente: primero mensajes, luego reservas y finalmente candidato. La limpieza externa de la hoja de vida continúa después de confirmar la transacción, por lo que la centralización no rompe atomicidad ni altera el ciclo de vida vigente.
 
 `webhook.js` ya no crea ni actualiza `Message` directamente. Sus cinco fronteras de escritura delegan en el repositorio compartido:
 
@@ -82,17 +82,16 @@ El número de teléfono no se persiste en `Message` porque ese campo no existe e
 
 El envío al proveedor continúa ocurriendo antes de `saveOutboundMessage()`, y la programación del recordatorio permanece después. No se modifican interpretación, payload de seguridad, candidatos, agenda, adjuntos ni procesamiento conversacional.
 
-Los escritores directos de `Message` bajan a dos: administración por eliminación transaccional y `ConversationMessageRepository`.
+`ConversationMessageRepository` es el único escritor directo de `Message`; el agregado queda en estado `canonical` y el scanner de CI impide que otro archivo vuelva a mutarlo directamente.
 
-El agregado permanece `consolidating`: la eliminación administrativa todavía no delega en una operación canónica de ciclo de vida.
-
-El repositorio distingue actualmente cinco contratos:
+El repositorio distingue actualmente seis contratos:
 
 - entrada idempotente mediante `waMessageId`, `createMany` y `skipDuplicates`;
 - salida con dirección controlada por la autoridad, sin permitir que el consumidor la cambie;
 - reemplazo restringido exclusivamente a `rawPayload` sobre un mensaje identificado;
 - fusión de un patch en `rawPayload` sin borrar metadatos previos;
-- marcado por lote de `respondedAt` con IDs deduplicados y fecha validada.
+- marcado por lote de `respondedAt` con IDs deduplicados y fecha validada;
+- eliminación por candidato, compatible con el cliente Prisma principal o una transacción `tx` existente.
 
 Esta etapa no implementa todavía un outbox productivo. Para preservar el comportamiento actual, los consumidores migrados continúan enviando al proveedor antes de persistir. La siguiente etapa debe introducir un contrato explícito de salida comprometida, estado de entrega e idempotencia antes de modificar ese orden.
 
@@ -122,9 +121,9 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 - no emitir recordatorios para reservas cerradas;
 - no crear dos reservas activas para el mismo candidato y vacante.
 
-### 3. La persistencia conversacional quedó concentrada, pero la eliminación administrativa sigue separada
+### 3. La persistencia y el ciclo de vida de `Message` ya tienen una autoridad única
 
-Las creaciones y actualizaciones de `Message` pasan por `ConversationMessageRepository`. La única escritura directa restante fuera del repositorio es la eliminación transaccional de mensajes al borrar un candidato desde `admin.js`.
+Todas las creaciones, actualizaciones y eliminaciones rastreadas de `Message` pasan por `ConversationMessageRepository`. Las rutas, gates, recordatorios, supervisor y administración conservan sus decisiones y unidades transaccionales, pero ya no mutan el modelo directamente.
 
 La autoridad todavía debe evolucionar para distinguir explícitamente:
 
@@ -134,7 +133,9 @@ La autoridad todavía debe evolucionar para distinguir explícitamente:
 - mensaje manual autorizado;
 - evidencia de consentimiento;
 - mensajería interna del supervisor;
-- eliminación transaccional asociada al ciclo de vida del candidato.
+- políticas de retención y eliminación asociadas al ciclo de vida del candidato.
+
+La deuda siguiente ya no es dispersión de escritores, sino confiabilidad de entrega, idempotencia externa, estado de proveedor y retención configurable por tenant.
 
 ### 4. Consentimiento demuestra el patrón de migración
 
@@ -162,7 +163,7 @@ La consolidación se completó sin mover las políticas de negocio del panel ni 
 
 ## Orden recomendado de consolidación
 
-1. Completar `Message`, inbox y outbox.
+1. Completar el contrato de outbox y entrega de `Message`.
 2. `InterviewBooking` y sus transiciones.
 3. Campos conversacionales de `Candidate`.
 4. Atribución, CV, recordatorios y operaciones administrativas del candidato.
