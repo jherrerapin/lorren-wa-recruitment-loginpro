@@ -9,14 +9,16 @@ ALTER TABLE "AttachmentAnalysis"
   ADD COLUMN IF NOT EXISTS "rawResponse" JSONB;
 
 -- Preserve the legacy filename, date and evidence when their new equivalents
--- have not been populated yet.
+-- have not been populated yet. The legacy `evidence` column contains free text
+-- (for example "image" or joined rationale), not guaranteed JSON, so casting it
+-- directly to jsonb would make the whole deployment fail for valid old rows.
 UPDATE "AttachmentAnalysis"
 SET
   "originalName" = COALESCE("originalName", "fileName"),
   "analysedAt" = COALESCE("analysedAt", "createdAt", CURRENT_TIMESTAMP),
   "rawResponse" = CASE
     WHEN "rawResponse" IS NULL AND "evidence" IS NOT NULL
-      THEN jsonb_build_object('legacyEvidence', "evidence")
+      THEN jsonb_build_object('legacyEvidenceText', "evidence")
     ELSE "rawResponse"
   END;
 
