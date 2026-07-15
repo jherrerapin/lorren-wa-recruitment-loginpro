@@ -21,6 +21,15 @@ const REMINDER_RESPONSE_INTENTS = new Set([
   'reschedule_interview'
 ]);
 const ACTIVE_INTERVIEW_BOOKING_STATUSES_SET = new Set(ACTIVE_INTERVIEW_BOOKING_STATUSES);
+const KNOWN_INTERVIEW_BOOKING_STATUSES_SET = new Set(Object.values(InterviewBookingStatus));
+const ADMIN_INTERVIEW_ACTION_TO_TRANSITION_ACTION = Object.freeze({
+  confirmed: InterviewBookingTransitionAction.CONFIRM_ATTENDANCE,
+  attended: InterviewBookingTransitionAction.MARK_ATTENDED,
+  no_response: InterviewBookingTransitionAction.MARK_NO_RESPONSE,
+  no_show: InterviewBookingTransitionAction.MARK_NO_SHOW,
+  cancelled: InterviewBookingTransitionAction.CANCEL,
+  rescheduled: InterviewBookingTransitionAction.REQUEST_RESCHEDULE
+});
 
 function requireNonEmptyString(value, label) {
   if (value === null || value === undefined) {
@@ -100,6 +109,14 @@ function normalizeReminderResponseIntent(value) {
     throw new Error('interview_reminder_intent_not_allowed');
   }
   return intent;
+}
+
+function normalizeAdministrativeInterviewAction(value) {
+  const action = requireNonEmptyString(value, 'interview_admin_action').toLowerCase();
+  if (!Object.hasOwn(ADMIN_INTERVIEW_ACTION_TO_TRANSITION_ACTION, action)) {
+    throw new Error('interview_admin_action_not_allowed');
+  }
+  return action;
 }
 
 function resolveReminderResponseTransition(intent, currentStatus) {
@@ -401,5 +418,50 @@ export async function applyInterviewReminderResponse(prisma, input = {}) {
     previousStatus: currentStatus,
     nextStatus: wasApplied ? transition.nextStatus : currentStatus,
     statusChanged: wasApplied && transition.statusChanged
+  };
+}
+
+export async function applyAdministrativeInterviewBookingAction(prisma, input = {}) {
+  requireBookingClient(prisma, ['updateMany'], 'interview_admin_transition');
+  const transitionInput = requireInputObject(input, 'interview_admin_transition_input');
+  const bookingId = requireNonEmptyString(transitionInput.bookingId, 'booking_id');
+  const currentStatus = requireAllowedStatus(
+    transitionInput.currentStatus,
+    KNOWN_INTERVIEW_BOOKING_STATUSES_SET,
+    'current_status'
+  );
+  const action = normalizeAdministrativeInterviewAction(transitionInput.action);
+  const transition = assertAllowedTransition(evaluateInterviewBookingTransition({
+    action: ADMIN_INTERVIEW_ACTION_TO_TRANSITION_ACTION[action],
+    currentStatus
+  }));
+  const requiresReplacement = transition.metadata?.requiresReplacement === true;
+
+  if (requiresReplacement) {
+    return {
+      count: 0,
+      action,
+      previousStatus: currentStatus,
+      nextStatus: currentStatus,
+      statusChanged: false,
+      requiresReplacement: true,
+      persisted: false
+    };
+  }
+
+  const result = await prisma.interviewBooking.updateMany({
+    where: { id: bookingId, status: currentStatus },
+    data: { status: transition.nextStatus }
+  });
+  const persisted = result.count > 0;
+
+  return {
+    count: result.count,
+    action,
+    previousStatus: currentStatus,
+    nextStatus: persisted ? transition.nextStatus : currentStatus,
+    statusChanged: persisted && transition.statusChanged,
+    requiresReplacement: false,
+    persisted
   };
 }

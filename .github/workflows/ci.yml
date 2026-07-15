@@ -100,7 +100,7 @@ jobs:
         run: node --test test/consentStateService.test.js test/conversationMessageRepository.test.js
 
       - name: Run interview booking authority regressions
-        run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js
+        run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js test/interviewBookingAdminStateService.test.js test/adminInterviewBookingAuthority.test.js
 
       - name: Run supervisor coordination regressions
         run: node --test test/adminSupervisor.test.js
