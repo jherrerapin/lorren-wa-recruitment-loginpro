@@ -25,7 +25,9 @@ jobs:
           persist-credentials: true
 
       - name: Apply scoped migration
-        run: node scripts/apply-admin-interview-transition-authority.mjs
+        run: |
+          node scripts/apply-admin-interview-transition-authority.mjs
+          git checkout -- .github/workflows/ci.yml
 
       - name: Validate scoped migration
         run: |
@@ -42,7 +44,6 @@ jobs:
             src/routes/admin.js \
             test/interviewBookingAdminStateService.test.js \
             test/adminInterviewBookingAuthority.test.js \
-            .github/workflows/ci.yml \
             docs/architecture/state-authority-manifest.json \
             docs/architecture/state-authority-map.md
           git commit -m "refactor: controlar transiciones manuales de entrevista"
