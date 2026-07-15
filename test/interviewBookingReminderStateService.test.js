@@ -73,6 +73,21 @@ test('reclama el recordatorio con filtros de estado, ventana e idempotencia', as
   }]);
 });
 
+test('un claim perdido por concurrencia conserva count cero sin lanzar', async () => {
+  const { prisma, calls } = createPrismaMock({ count: 0 });
+
+  const result = await claimInterviewBookingReminder(prisma, {
+    bookingId,
+    candidateId,
+    now,
+    windowStart,
+    windowEnd
+  });
+
+  assert.deepEqual(result, { count: 0 });
+  assert.equal(calls.length, 1);
+});
+
 test('rechaza una ventana de recordatorio invertida antes de escribir', async () => {
   const { prisma, calls } = createPrismaMock();
 
@@ -167,7 +182,7 @@ test('cancelar una reserva activa produce CANCELLED', async () => {
   assert.equal(calls[0].data.status, 'CANCELLED');
 });
 
-test('solicitar reprogramación conserva el estado activo y registra la respuesta', async () => {
+test('solicitar reprogramación conserva SCHEDULED y registra la respuesta', async () => {
   const { prisma, calls } = createPrismaMock();
 
   const result = await applyInterviewReminderResponse(prisma, {
@@ -191,6 +206,45 @@ test('solicitar reprogramación conserva el estado activo y registra la respuest
       reminderResponse: 'Necesito otro horario',
       reminderWindowClosed: true
     }
+  });
+});
+
+test('solicitar reprogramación conserva CONFIRMED hasta crear reemplazo', async () => {
+  const { prisma, calls } = createPrismaMock();
+
+  const result = await applyInterviewReminderResponse(prisma, {
+    bookingId,
+    currentStatus: 'CONFIRMED',
+    responseText: 'Quisiera cambiar la hora',
+    intent: 'reschedule_interview'
+  });
+
+  assert.deepEqual(result, {
+    count: 1,
+    intent: 'reschedule_interview',
+    previousStatus: 'CONFIRMED',
+    nextStatus: 'CONFIRMED',
+    statusChanged: false
+  });
+  assert.equal(calls[0].data.status, 'CONFIRMED');
+});
+
+test('una carrera con count cero no informa una transición que no se persistió', async () => {
+  const { prisma } = createPrismaMock({ count: 0 });
+
+  const result = await applyInterviewReminderResponse(prisma, {
+    bookingId,
+    currentStatus: 'SCHEDULED',
+    responseText: 'Confirmo',
+    intent: 'confirm_attendance'
+  });
+
+  assert.deepEqual(result, {
+    count: 0,
+    intent: 'confirm_attendance',
+    previousStatus: 'SCHEDULED',
+    nextStatus: 'SCHEDULED',
+    statusChanged: false
   });
 });
 
