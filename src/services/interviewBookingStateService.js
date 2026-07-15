@@ -1,3 +1,7 @@
+/**
+ * Primera autoridad compartida de InterviewBooking.
+ * Inventario vigente: docs/architecture/interview-booking-transition-inventory.md
+ */
 export const ACTIVE_INTERVIEW_BOOKING_STATUSES = Object.freeze(['SCHEDULED', 'CONFIRMED']);
 
 function requireNonEmptyString(value, label) {
