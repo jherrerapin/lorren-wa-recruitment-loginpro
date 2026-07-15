@@ -36,6 +36,10 @@ import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma
 import { buildManualInterventionCandidateUpdate, buildManualWhatsAppOpenCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import { describeResumeBehavior } from '../services/botAutomationPolicy.js';
 import { listOfferableSlots, createBooking, cancelCandidateBookings, formatInterviewDate } from '../services/interviewScheduler.js';
+import {
+  ACTIVE_INTERVIEW_BOOKING_STATUSES,
+  applyAdministrativeInterviewBookingAction
+} from '../services/interviewBookingStateService.js';
 import { getReminderMissingItems } from '../services/reminder.js';
 import { clearCandidateCvStorage, resolveCandidateCvBuffer, storeCandidateCv } from '../services/cvStorage.js';
 import { isStorageConfigured } from '../services/storage.js';
@@ -2076,10 +2080,9 @@ export function adminRouter(prisma) {
   router.post('/interviews/:id/status', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const action = normalizeString(req.body.action);
-    const nextStatus = action ? BOOKING_ACTION_STATUS[action] : null;
     const returnTo = safeAdminReturnPath(req.body.returnTo || req.get('referer') || '/admin');
 
-    if (!nextStatus) {
+    if (!action) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Acción de entrevista inválida.'));
     }
 
@@ -2092,17 +2095,51 @@ export function adminRouter(prisma) {
     }
     if (!await ensureCandidateIdAccess(prisma, req, booking.candidateId, res, returnTo)) return;
 
-    await prisma.interviewBooking.update({
-      where: { id },
-      data: { status: nextStatus }
-    });
+    let transition;
+    try {
+      transition = await applyAdministrativeInterviewBookingAction(prisma, {
+        bookingId: booking.id,
+        currentStatus: booking.status,
+        action
+      });
+    } catch (error) {
+      console.error('[admin_interview_status_transition]', {
+        bookingId: booking.id,
+        currentStatus: booking.status,
+        action,
+        error: error?.message || error
+      });
+      const message = error?.message === 'interview_admin_action_not_allowed'
+        ? 'Acción de entrevista inválida.'
+        : String(error?.message || '').startsWith('interview_booking_transition_not_allowed:')
+          ? 'Ese cambio no está permitido desde el estado actual de la entrevista.'
+          : 'No fue posible actualizar la entrevista en este momento.';
+      return res.redirect(withFlashMessage(returnTo, 'error', message));
+    }
+
+    if (transition.requiresReplacement) {
+      return res.redirect(withFlashMessage(
+        returnTo,
+        'error',
+        'Para reprogramar la entrevista, selecciona primero un nuevo horario desde “Asignar horario”. La reserva actual se mantiene activa.'
+      ));
+    }
+
+    if (!transition.persisted) {
+      return res.redirect(withFlashMessage(
+        returnTo,
+        'error',
+        'La entrevista cambió mientras se procesaba la acción. Actualiza la página e intenta nuevamente.'
+      ));
+    }
+
     await logCandidateAdminEvent(prisma, {
       candidateId: booking.candidateId,
       actorRole: req.userRole,
       eventType: 'INTERVIEW_STATUS_CHANGED',
       eventLabel: 'Actualizó estado de entrevista',
-      fromValue: booking.status,
-      toValue: nextStatus
+      fromValue: transition.previousStatus,
+      toValue: transition.nextStatus
     });
 
     return res.redirect(withFlashMessage(returnTo, 'success', 'Entrevista actualizada correctamente.'));
@@ -2130,7 +2167,7 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Entrevista no encontrada.'));
     }
     if (!await ensureCandidateIdAccess(prisma, req, booking.candidateId, res, returnTo)) return;
-    if (!ACTIVE_BOOKING_STATUSES.includes(booking.status)) {
+    if (!ACTIVE_INTERVIEW_BOOKING_STATUSES.includes(booking.status)) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'Solo puedes enviar recordatorio para entrevistas activas.'));
     }
 

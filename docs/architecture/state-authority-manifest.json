@@ -42,10 +42,10 @@
       "targetAuthority": "InterviewBookingStateService",
       "risk": "critical",
       "writers": [
-        { "path": "src/routes/admin.js", "role": "admin", "reason": "Cambios manuales de reserva" },
+        { "path": "src/routes/admin.js", "role": "admin", "reason": "Eliminación física administrativa y limpieza de reservas durante el ciclo de vida del candidato; las transiciones manuales delegan en la autoridad canónica" },
         { "path": "src/routes/webhook.js", "role": "legacy", "reason": "Confirmación, cancelación y reprogramación desde conversación" },
         { "path": "src/services/chatEngine.js", "role": "legacy", "reason": "Respuestas de agenda del motor alternativo" },
-        { "path": "src/services/interviewBookingStateService.js", "role": "canonical", "reason": "Creación, reemplazo, cancelación, recordatorios y respuestas de reservas delegadas por scheduler y reminder" }
+        { "path": "src/services/interviewBookingStateService.js", "role": "canonical", "reason": "Creación, reemplazo, cancelación, recordatorios, respuestas y transiciones manuales de reservas" }
       ]
     },
     "message": {

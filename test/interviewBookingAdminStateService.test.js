@@ -56,6 +56,7 @@ test('confirmación repetida es idempotente y sigue comprobando existencia', asy
   assert.equal(result.nextStatus, 'CONFIRMED');
   assert.equal(result.statusChanged, false);
   assert.equal(result.persisted, true);
+  assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].where, { id: bookingId, status: 'CONFIRMED' });
 });
 
@@ -80,6 +81,7 @@ test('permite cerrar el resultado real desde NO_RESPONSE', async () => {
     const result = await apply(prisma, action, 'NO_RESPONSE');
     assert.equal(result.nextStatus, expectedStatus);
     assert.equal(result.statusChanged, true);
+    assert.equal(calls.length, 1);
     assert.equal(calls[0].data.status, expectedStatus);
   }
 });

@@ -86,7 +86,7 @@ La autoridad de persistencia de `Message` ya es canónica. Esto no significa que
 
 ### Reservas de entrevista en consolidación
 
-`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación y las mutaciones operativas de recordatorios. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs. Ninguno de los dos escribe `InterviewBooking` directamente.
+`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación, las mutaciones operativas de recordatorios y las transiciones manuales del panel. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs; `admin.js` conserva permisos, acceso y auditoría. Estas fronteras delegan las transiciones ordinarias en la autoridad canónica.
 
 La autoridad protege estas invariantes:
 
@@ -99,9 +99,12 @@ La autoridad protege estas invariantes:
 - una solicitud de reprogramación conserva `SCHEDULED` o `CONFIRMED` hasta que exista un reemplazo válido;
 - la cancelación ordinaria solo produce `CANCELLED`;
 - `NO_RESPONSE` solo se aplica desde `SCHEDULED` con recordatorio enviado y dentro de su ventana;
-- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia.
+- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia;
+- las acciones manuales validan el estado de origen y usan comparación condicional por ID y estado;
+- una solicitud manual de reprogramación conserva la reserva activa hasta asignar un horario reemplazante;
+- el recordatorio manual solo admite `SCHEDULED` y `CONFIRMED`.
 
-`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El número de escritores directos baja a cuatro: administración, webhook, `chatEngine` y la autoridad canónica.
+`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El panel delega sus transiciones manuales y mantiene una reserva activa ante una solicitud de reprogramación. `admin.js` continúa declarado como escritor únicamente por la eliminación física exacta y la limpieza al eliminar candidatos. El número total de escritores permanece en cuatro: administración, webhook, `chatEngine` y la autoridad canónica.
 
 ## Hallazgos
 
@@ -122,7 +125,7 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 
 ### 2. Las reservas conservan tres fronteras directas por migrar
 
-Después de extraer scheduler y recordatorios, `InterviewBooking` todavía se modifica desde webhook, administración y un motor conversacional alternativo. Deben centralizarse gradualmente invariantes como:
+Después de extraer scheduler, recordatorios y transiciones manuales, `InterviewBooking` todavía se modifica desde webhook, un motor conversacional alternativo y las dos eliminaciones físicas administrativas pendientes. Deben centralizarse gradualmente invariantes como:
 
 - no marcar `RESCHEDULED` sin una nueva reserva;
 - no confirmar una reserva cancelada;
