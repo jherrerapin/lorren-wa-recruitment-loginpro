@@ -15,7 +15,7 @@
 
 `gpt-5.6-terra` ofrece un mejor equilibrio cuando importa entender contexto, documentos y criterios de selección. Si el volumen conversacional crece y el costo o la velocidad pesan más, puede configurarse `OPENAI_MODEL=gpt-5.6-luna` y conservar Terra solo en `OPENAI_EXTRACTION_MODEL` y `OPENAI_CV_MODEL`.
 
-La selección efectiva y la variable que la originó están centralizadas en `src/services/openAiModelConfig.js`. Las trazas guardan `response_model_source` y `extraction_model_source`; así se puede comprobar si Railway aplicó `OPENAI_MODEL` o si la aplicación usó el valor predeterminado.
+La selección efectiva y la variable que la originó están centralizadas en `src/services/openAiModelConfig.js`. Al iniciar, Railway muestra el evento `[OPENAI_MODEL_CONFIG]` con los modelos efectivos y sus fuentes. Las trazas también guardan `response_model_source` y `extraction_model_source` para comprobar cada conversación.
 
 ## Monitoreo sugerido
 
