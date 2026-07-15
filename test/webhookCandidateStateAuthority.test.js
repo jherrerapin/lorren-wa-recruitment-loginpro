@@ -58,6 +58,8 @@ test('preserva las decisiones puras de bloqueo y reanudación', () => {
   const authorityIndex = resumeFunction.indexOf('resumeCandidateAutomationOnInbound');
 
   assert.ok(blockIndex >= 0);
+  assert.ok(resumePolicyIndex >= 0);
+  assert.ok(authorityIndex >= 0);
   assert.ok(resumePolicyIndex > blockIndex);
   assert.ok(authorityIndex > resumePolicyIndex);
 });
