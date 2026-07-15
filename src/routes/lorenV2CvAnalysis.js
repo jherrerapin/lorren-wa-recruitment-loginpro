@@ -98,6 +98,11 @@ function renderLayout({ title, body }) {
     .list-title { margin:12px 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#475467; font-weight:900; }
     ul { margin:5px 0 0; padding-left:18px; color:#475467; font-size:12px; line-height:1.45; }
     .result-actions { display:flex; gap:7px; margin-top:13px; flex-wrap:wrap; }
+    .registered { margin-top:12px; border:1px solid #b2ddff; border-radius:10px; padding:11px; background:#f5fbff; }
+    .registered-title { color:var(--blue); font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px; }
+    .registered-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(125px,1fr)); gap:8px; }
+    .registered-item span { display:block; color:var(--muted); font-size:10px; margin-bottom:2px; }
+    .registered-item strong { display:block; color:var(--navy); font-size:12px; line-height:1.35; }
     .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:11px; }
     table { width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
     th { text-align:left; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.05em; background:#f9fafb; }
@@ -182,7 +187,7 @@ function renderCandidateTable(candidates = [], vacancyId = '') {
   </tr>`).join('');
   return `<section class="card">
     <h2>Hojas de vida disponibles (${candidates.length})</h2>
-    <p>Al iniciar la revisión se reutilizarán los análisis que ya estén completos y se procesarán los documentos pendientes.</p>
+    <p>Al iniciar la revisión se reutilizarán los análisis completos, se procesarán los documentos pendientes y se combinarán con los datos del registro.</p>
     <div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Archivo</th><th>Lectura</th><th>Último análisis</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   </section>`;
 }
@@ -208,6 +213,25 @@ function renderStringList(title, items = []) {
   return `<div class="list-title">${escapeHtml(title)}</div><ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
 }
 
+function renderRegisteredData(candidate = {}) {
+  const experience = [candidate.experienceInfo, candidate.experienceTime, candidate.experienceSummary]
+    .map(normalizeString)
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(' · ');
+  const items = [
+    ['Medio de transporte', candidate.transportMode],
+    ['Residencia', candidate.locality || candidate.neighborhood || candidate.zone],
+    ['Experiencia declarada', experience],
+    ['Disponibilidad', candidate.availability]
+  ].filter(([, value]) => normalizeString(value));
+  if (!items.length) return '';
+  return `<div class="registered">
+    <div class="registered-title">Datos registrados por el candidato</div>
+    <div class="registered-grid">${items.map(([label, value]) => `<div class="registered-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('')}</div>
+  </div>`;
+}
+
 function renderResultCard(result, kind) {
   const candidate = result.candidate || {};
   const match = result.match;
@@ -224,8 +248,9 @@ function renderResultCard(result, kind) {
     </div>
     <span class="badge ${kind === 'strong' ? 'ok' : kind === 'manual' ? 'error' : 'warn'}" style="margin-top:10px">${labels[kind]}</span>
     ${result.manualReason ? `<p>${escapeHtml(result.manualReason)}</p>` : ''}
+    ${renderRegisteredData(candidate)}
     ${renderStringList('Por qué puede servir', match?.reasons)}
-    ${renderStringList('Lo que sí aparece en la hoja de vida', match?.evidence)}
+    ${renderStringList('Evidencia encontrada (HV o registro)', match?.evidence)}
     ${renderStringList('Lo que falta confirmar', match?.gaps)}
     <div class="result-actions">
       <a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}">Ver candidato</a>
@@ -249,7 +274,7 @@ function renderReviewResults(review) {
   return `${review.truncated ? '<div class="alert warn">Se revisaron las 120 hojas de vida más recientes. Usa una vacante o periodo más específico si necesitas abarcar más registros.</div>' : ''}
     <section class="card">
       <h2>3. Resultado de la revisión</h2>
-      <p>El orden es una ayuda para comenzar la revisión. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p>
+      <p>El orden combina la hoja de vida con los datos laborales y operativos del registro. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p>
       <div class="grid">
         <div class="kpi"><strong>${review.stats.total}</strong><span>Hojas de vida encontradas</span></div>
         <div class="kpi good"><strong>${review.stats.strong}</strong><span>Con evidencia clara del perfil</span></div>
@@ -260,9 +285,9 @@ function renderReviewResults(review) {
       ${review.warnings?.length ? `<div class="alert warn" style="margin-top:12px">${review.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
       <p class="muted" style="margin-top:12px">Modelo usado: ${escapeHtml(review.modelUsed || 'No informado')}</p>
     </section>
-    ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida contiene evidencia clara de varios puntos importantes.', groups.strong, 'strong')}
+    ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida y/o el registro contienen evidencia clara de varios puntos importantes.', groups.strong, 'strong')}
     ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas, pero conviene confirmar experiencia o información faltante.', groups.possible, 'possible')}
-    ${renderResultGroup('Poca evidencia en el documento', 'La hoja de vida se pudo leer, pero muestra poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low')}
+    ${renderResultGroup('Poca evidencia para el perfil', 'La hoja de vida y los datos registrados muestran poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low')}
     ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual')}`;
 }
 
@@ -310,7 +335,7 @@ function renderPage({ vacancies, candidates = [], vacancyId = '', desiredProfile
     ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
     <section class="card hero">
       <h1>Encuentra las hojas de vida que vale la pena revisar primero</h1>
-      <p>Elige una vacante, describe el perfil con tus palabras y Lórren organizará los documentos según la evidencia encontrada. Los archivos difíciles de leer quedarán separados para revisión manual.</p>
+      <p>Elige una vacante, describe el perfil con tus palabras y Lórren combinará la hoja de vida con los datos registrados para organizar los resultados. Los archivos difíciles de leer quedarán separados para revisión manual.</p>
     </section>
     ${renderProfileForm(vacancies, { vacancyId, desiredProfile })}
     ${review
