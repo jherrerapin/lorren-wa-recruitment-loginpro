@@ -346,6 +346,10 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
   assert.equal(review.stats.possible, 1);
   assert.equal(review.stats.manual, 1);
   assert.equal(review.groups.strong[0].candidate.id, 'candidate-strong');
+  assert.deepEqual(review.groups.strong[0].match.evidence, [
+    'dos años manejando inventarios y Excel.',
+    'Registro: medio de transporte Moto.'
+  ]);
   assert.equal(review.groups.manual[0].candidate.id, 'candidate-unmatched');
   assert.match(review.groups.manual[0].manualReason, /no fue posible compararla/i);
   assert.equal(calls.length, 2);
@@ -366,8 +370,8 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
   }
   assert.match(calls[1].input[0].content[0].text, /sources\.cv/);
   assert.match(calls[1].input[0].content[0].text, /sources\.registration/);
-  assert.match(calls[1].input[0].content[0].text, /Hoja de vida:/);
-  assert.match(calls[1].input[0].content[0].text, /Registro:/);
+  assert.match(calls[1].input[0].content[0].text, /No antepongas "Hoja de vida:"/);
+  assert.match(calls[1].input[0].content[0].text, /Usa "Registro:" solo/);
 });
 
 test('Terra es el modelo por defecto y las tareas especializadas permiten overrides', () => {
