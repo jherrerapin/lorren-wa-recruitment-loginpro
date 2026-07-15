@@ -262,6 +262,7 @@ test('booking pasa a NO_RESPONSE faltando 5 minutos si no hubo respuesta al remi
       scheduledAt: new Date(INTERVIEW_10_AM_CO),
       status: 'SCHEDULED',
       reminderSentAt: new Date(REMINDER_9_00_AM_CO),
+      reminderResponse: null,
       reminderWindowClosed: true
     }],
     vacancies: [{ id: 'vac', isActive: true, schedulingEnabled: true }],
