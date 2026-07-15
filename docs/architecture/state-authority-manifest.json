@@ -96,7 +96,7 @@
         {
           "path": "src/services/candidateStateService.js",
           "role": "boundary",
-          "reason": "Primera frontera de la autoridad objetivo para reanudación condicional por mensaje entrante; Candidate continúa fragmentado"
+          "reason": "Frontera de la autoridad objetivo para reanudación condicional por inbound y pausa o reanudación explícita desde admin; Candidate continúa fragmentado"
         }
       ]
     },
