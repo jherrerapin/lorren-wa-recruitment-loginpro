@@ -33,30 +33,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Merge current main and remove temporary job
+      - name: Merge current main and publish
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          git merge --no-commit --no-ff origin/main
-
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('.github/workflows/ci.yml')
-          text = path.read_text(encoding='utf-8')
-          start = text.index('  sync-pr-base:')
-          end = text.index('  state-authority:', start)
-          text = text[:start] + text[end:]
-          if 'sync-pr-base:' in text or 'contents: write' in text:
-              raise SystemExit('No se retiró completamente el job temporal')
-          path.write_text(text, encoding='utf-8')
-          PY
-
-          git add .github/workflows/ci.yml
-          git commit --no-edit
+          git merge --no-edit --no-ff origin/main
           git push origin HEAD:${{ github.head_ref }}
 
   state-authority:
