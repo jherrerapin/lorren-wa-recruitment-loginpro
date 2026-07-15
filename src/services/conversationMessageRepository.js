@@ -77,6 +77,14 @@ function validateRespondedContract(prisma) {
   );
 }
 
+function validateCandidateDeleteContract(prisma) {
+  return Boolean(
+    prisma
+    && prisma.message
+    && typeof prisma.message.deleteMany === 'function'
+  );
+}
+
 function buildMessageData({
   candidateId,
   direction,
@@ -214,5 +222,21 @@ export async function markConversationMessagesResponded(prisma, input = {}) {
     updated: result.count,
     messageIds,
     respondedAt
+  };
+}
+
+export async function deleteConversationMessagesForCandidate(prisma, input = {}) {
+  if (!validateCandidateDeleteContract(prisma)) {
+    throw new Error('candidate_message_delete_prisma_contract_invalid');
+  }
+
+  const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
+  const result = await prisma.message.deleteMany({
+    where: { candidateId }
+  });
+
+  return {
+    deleted: result.count,
+    candidateId
   };
 }
