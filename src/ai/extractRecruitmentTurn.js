@@ -1,11 +1,14 @@
 import axios from 'axios';
 import { RECRUITMENT_EXTRACTION_SCHEMA } from './recruitmentExtractionSchema.js';
+import { OPENAI_EXTRACTION_MODEL } from '../services/openAiModelConfig.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 // OPENAI_EXTRACTION_MODEL controla únicamente esta capa Responses API:
 // extracción estructurada de turno, datos, género, documento, residencia, adjuntos e intención.
 // No controla redacción conversacional ni acciones de agenda.
-const MODEL = process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17';
+// Terra aporta el nivel de criterio de la familia mini para interpretar datos
+// y contexto; si no hay override, hereda el modelo principal del bot.
+const MODEL = OPENAI_EXTRACTION_MODEL;
 
 function extractUsage(data = {}) {
   const usage = data?.usage || {};

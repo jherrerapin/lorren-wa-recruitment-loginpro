@@ -50,6 +50,7 @@ import {
   buildSilentProfileCaptureUpdate,
   shouldSilentCaptureProfileData
 } from '../services/silentProfileCapture.js';
+import { getOpenAiModelConfig } from '../services/openAiModelConfig.js';
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
@@ -829,6 +830,7 @@ function shouldUsePrimaryConversationEngine(candidate, inboundText = '') {
 }
 
 async function replyWithEngine(prisma, candidate, from, inboundText, providedVacancy = null, options = {}) {
+  const effectiveModels = getOpenAiModelConfig();
   const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, candidate, inboundText, providedVacancy);
   const engineResult = await runChatEngine({
     prisma,
@@ -848,10 +850,11 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     options.debugTrace.openai_input_tokens = Number(options.debugTrace.openai_input_tokens || 0) + Number(usage.input_tokens || 0);
     options.debugTrace.openai_output_tokens = Number(options.debugTrace.openai_output_tokens || 0) + Number(usage.output_tokens || 0);
     options.debugTrace.openai_total_tokens = Number(options.debugTrace.openai_total_tokens || 0) + Number(usage.total_tokens || 0);
-    options.debugTrace.response_model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+    options.debugTrace.response_model = effectiveModels.conversation.model;
+    options.debugTrace.response_model_source = effectiveModels.conversation.source;
     options.debugTrace.model_usage = {
       ...(options.debugTrace.model_usage || {}),
-      responseModel: process.env.OPENAI_MODEL || 'gpt-5-mini',
+      responseModel: effectiveModels.conversation.model,
       input_tokens: options.debugTrace.openai_input_tokens,
       output_tokens: options.debugTrace.openai_output_tokens,
       total_tokens: options.debugTrace.openai_total_tokens
@@ -1574,8 +1577,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   debugTrace.openai_input_tokens = combinedUsage.input_tokens;
   debugTrace.openai_output_tokens = combinedUsage.output_tokens;
   debugTrace.openai_total_tokens = combinedUsage.total_tokens;
-  debugTrace.extraction_model = process.env.OPENAI_EXTRACTION_MODEL || 'gpt-5.4-mini-2026-03-17';
-  debugTrace.response_model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+  const effectiveModels = getOpenAiModelConfig();
+  debugTrace.extraction_model = effectiveModels.extraction.model;
+  debugTrace.extraction_model_source = effectiveModels.extraction.source;
+  debugTrace.response_model = effectiveModels.conversation.model;
+  debugTrace.response_model_source = effectiveModels.conversation.source;
   debugTrace.model_usage = {
     extractionModel: debugTrace.extraction_model,
     responseModel: debugTrace.response_model,

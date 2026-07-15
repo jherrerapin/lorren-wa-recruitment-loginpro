@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { analyzeCandidateCv, parseCvAnalysisEvidence } from '../src/services/cvIntelligence.js';
+import {
+  analyzeCandidateCv,
+  groupCandidateReviewResults,
+  parseCvAnalysisEvidence,
+  reviewVacancyCandidates,
+  safeErrorMessage,
+  shouldUseVisualPdfFallback
+} from '../src/services/cvIntelligence.js';
 
 function createPrismaForCandidate(candidate) {
   const created = [];
@@ -93,12 +100,194 @@ test('la evidencia se lee desde rawResponse y conserva compatibilidad con regist
   assert.deepEqual(parseCvAnalysisEvidence({ rawResponse: 'json inválido' }), {});
 });
 
+test('los errores conservan un stack limitado sin exponer credenciales', () => {
+  const error = new Error('Fallo Bearer sk-super-secreto');
+  error.stack = `${error.stack}\naccess_token=token-privado`;
+  const summary = safeErrorMessage(error);
+
+  assert.match(summary, /Stack:/);
+  assert.doesNotMatch(summary, /sk-super-secreto/);
+  assert.doesNotMatch(summary, /token-privado/);
+  assert.ok(summary.length <= 1000);
+});
+
 test('la vista usa analysedAt y no consulta createdAt en AttachmentAnalysis', () => {
   const routePath = fileURLToPath(new URL('../src/routes/lorenV2CvAnalysis.js', import.meta.url));
   const source = readFileSync(routePath, 'utf8');
 
-  assert.match(source, /analysis\.analysedAt/);
+  assert.match(source, /formatDate\(latestAnalysis\(candidate\)\.analysedAt\)/);
   assert.match(source, /attachmentAnalyses:\s*\{\s*orderBy:\s*\{\s*analysedAt:\s*'desc'/);
   assert.doesNotMatch(source, /attachmentAnalyses:\s*\{\s*orderBy:\s*\{\s*createdAt:/);
   assert.doesNotMatch(source, /formatDate\(analysis\.createdAt\)/);
+});
+
+test('los PDF sin texto o con texto insuficiente activan el segundo intento visual', () => {
+  assert.equal(shouldUseVisualPdfFallback(
+    { cvMimeType: 'application/pdf', cvOriginalName: 'hv.pdf' },
+    { ok: false, reason: 'empty_pdf_text' }
+  ), true);
+  assert.equal(shouldUseVisualPdfFallback(
+    { cvMimeType: 'application/pdf', cvOriginalName: 'hv.pdf' },
+    { ok: false, reason: 'text_extraction_failed' }
+  ), true);
+  assert.equal(shouldUseVisualPdfFallback(
+    { cvMimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', cvOriginalName: 'hv.docx' },
+    { ok: false, reason: 'empty_docx_text' }
+  ), false);
+  assert.equal(shouldUseVisualPdfFallback(
+    { cvMimeType: 'application/pdf', cvOriginalName: 'minerva-fotos.pdf' },
+    { ok: true, reason: 'pdf_text_extracted', text: 'Página 1' }
+  ), true);
+  assert.equal(shouldUseVisualPdfFallback(
+    { cvMimeType: 'application/pdf', cvOriginalName: 'hv-digital.pdf' },
+    { ok: true, reason: 'pdf_text_extracted', text: 'Experiencia laboral verificable '.repeat(5) }
+  ), false);
+});
+
+test('los resultados se agrupan por utilidad y nunca convierten revisión manual en rechazo', () => {
+  const grouped = groupCandidateReviewResults([
+    { candidate: { id: 'possible' }, match: { level: 'POSSIBLE', score: 63 } },
+    { candidate: { id: 'strong-low' }, match: { level: 'STRONG', score: 79 } },
+    { candidate: { id: 'strong-high' }, match: { level: 'STRONG', score: 91 } },
+    { candidate: { id: 'manual' }, match: null, manualReason: 'No fue posible leer el documento.' },
+    { candidate: { id: 'low' }, match: { level: 'LOW', score: 20 } }
+  ]);
+
+  assert.deepEqual(grouped.strong.map((item) => item.candidate.id), ['strong-high', 'strong-low']);
+  assert.deepEqual(grouped.possible.map((item) => item.candidate.id), ['possible']);
+  assert.deepEqual(grouped.low.map((item) => item.candidate.id), ['low']);
+  assert.deepEqual(grouped.manual.map((item) => item.candidate.id), ['manual']);
+  assert.equal(JSON.stringify(grouped).includes('RECHAZADO'), false);
+});
+
+function cachedCandidate(id, experienceSummary) {
+  return {
+    id,
+    fullName: `Persona ${id}`,
+    phone: `TEST-${id}`,
+    vacancyId: 'vacancy-1',
+    cvStorageKey: `test/${id}.pdf`,
+    cvData: null,
+    cvOriginalName: `${id}.pdf`,
+    cvMimeType: 'application/pdf',
+    updatedAt: new Date('2026-07-15T12:00:00.000Z'),
+    vacancy: { id: 'vacancy-1', title: 'Auxiliar de inventarios', city: 'Bogotá' },
+    attachmentAnalyses: [{
+      id: `analysis-${id}`,
+      classification: 'CV_VALID',
+      confidence: 0.9,
+      analysedAt: new Date('2026-07-15T12:00:00.000Z'),
+      rawResponse: {
+        documentReference: `storage:test/${id}.pdf`,
+        extracted: {
+          city: 'Bogotá',
+          locality: null,
+          experienceSummary,
+          lastRole: 'Auxiliar',
+          educationSummary: 'Bachiller',
+          estimatedExperienceMonths: 18,
+          skills: ['Excel', 'Inventarios'],
+          certifications: [],
+          experience: []
+        }
+      }
+    }]
+  };
+}
+
+test('la revisión por vacante interpreta el perfil, ordena coincidencias y separa comparaciones faltantes', async () => {
+  const candidates = [
+    cachedCandidate('candidate-strong', 'Dos años manejando inventarios y Excel.'),
+    cachedCandidate('candidate-possible', 'Seis meses apoyando bodega.'),
+    cachedCandidate('candidate-unmatched', 'Experiencia en atención al cliente.')
+  ];
+  const calls = [];
+  const openAiPost = async (payload) => {
+    calls.push(payload);
+    const schemaName = payload.text.format.name;
+    if (schemaName === 'loren_desired_candidate_profile') {
+      return { data: { output: [{ content: [{ parsed: {
+        summary: 'Experiencia en inventarios y manejo de Excel.',
+        criteria: [{
+          id: 'inventarios',
+          label: 'Experiencia en inventarios',
+          description: 'Ha trabajado controlando o recibiendo mercancía.',
+          priority: 'REQUIRED',
+          minimumMonths: 12,
+          keywords: ['inventarios', 'mercancía']
+        }],
+        warnings: []
+      } }] }] } };
+    }
+    return { data: { output: [{ content: [{ parsed: { results: [
+      {
+        candidateId: 'candidate-possible',
+        level: 'POSSIBLE',
+        score: 58,
+        reasons: ['Tiene experiencia relacionada con bodega.'],
+        evidence: ['Seis meses apoyando bodega.'],
+        gaps: ['Falta confirmar un año de experiencia.']
+      },
+      {
+        candidateId: 'candidate-strong',
+        level: 'STRONG',
+        score: 92,
+        reasons: ['Cumple experiencia y Excel.'],
+        evidence: ['Dos años manejando inventarios y Excel.'],
+        gaps: []
+      }
+    ] } }] }] } };
+  };
+  const prisma = {
+    vacancy: {
+      findUnique: async () => ({
+        id: 'vacancy-1',
+        title: 'Auxiliar de inventarios',
+        city: 'Bogotá',
+        requirements: null,
+        roleDescription: null
+      })
+    },
+    candidate: {
+      findMany: async () => candidates
+    }
+  };
+
+  const review = await reviewVacancyCandidates(prisma, {
+    vacancyId: 'vacancy-1',
+    desiredProfile: 'Busco experiencia de un año en inventarios y manejo de Excel.'
+  }, { openAiPost });
+
+  assert.equal(review.ok, true);
+  assert.equal(review.modelUsed, 'gpt-5.6-terra');
+  assert.equal(review.stats.total, 3);
+  assert.equal(review.stats.strong, 1);
+  assert.equal(review.stats.possible, 1);
+  assert.equal(review.stats.manual, 1);
+  assert.equal(review.groups.strong[0].candidate.id, 'candidate-strong');
+  assert.equal(review.groups.manual[0].candidate.id, 'candidate-unmatched');
+  assert.match(review.groups.manual[0].manualReason, /no fue posible compararla/i);
+  assert.equal(calls.length, 2);
+  assert.equal(calls.every((payload) => payload.model === 'gpt-5.6-terra'), true);
+});
+
+test('Terra es el modelo por defecto y las tareas especializadas permiten overrides', () => {
+  const conversationPath = fileURLToPath(new URL('../src/services/conversationEngine.js', import.meta.url));
+  const extractionPath = fileURLToPath(new URL('../src/ai/extractRecruitmentTurn.js', import.meta.url));
+  const configPath = fileURLToPath(new URL('../src/services/openAiModelConfig.js', import.meta.url));
+  const routePath = fileURLToPath(new URL('../src/routes/lorenV2CvAnalysis.js', import.meta.url));
+  const conversationSource = readFileSync(conversationPath, 'utf8');
+  const extractionSource = readFileSync(extractionPath, 'utf8');
+  const configSource = readFileSync(configPath, 'utf8');
+  const routeSource = readFileSync(routePath, 'utf8');
+
+  assert.match(configSource, /DEFAULT_OPENAI_MODEL = 'gpt-5\.6-terra'/);
+  assert.match(configSource, /resolveModel\(\['OPENAI_EXTRACTION_MODEL', 'OPENAI_MODEL'\]\)/);
+  assert.match(configSource, /resolveModel\(\['OPENAI_CV_MODEL', 'OPENAI_EXTRACTION_MODEL', 'OPENAI_MODEL'\]\)/);
+  assert.match(conversationSource, /const DEFAULT_MODEL = OPENAI_CONVERSATION_MODEL/);
+  assert.match(extractionSource, /const MODEL = OPENAI_EXTRACTION_MODEL/);
+  assert.match(routeSource, /name="vacancyId" required/);
+  assert.match(routeSource, /name="desiredProfile"/);
+  assert.match(routeSource, /Revisión manual/);
+  assert.doesNotMatch(routeSource, /cambiar.*estado.*candidato/i);
 });

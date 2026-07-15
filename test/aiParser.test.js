@@ -1,12 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
-import { tryOpenAIParse, parseModelJson, summarizeOpenAIError } from '../src/services/aiParser.js';
+import { tryOpenAIParse, parseModelJson, summarizeOpenAIError, modelSupportsTemperature } from '../src/services/aiParser.js';
+
+let previousExtractorFlag;
+
+test.beforeEach(() => {
+  previousExtractorFlag = process.env.FF_RESPONSES_EXTRACTOR;
+  process.env.FF_RESPONSES_EXTRACTOR = 'false';
+});
+
+test.afterEach(() => {
+  if (previousExtractorFlag === undefined) delete process.env.FF_RESPONSES_EXTRACTOR;
+  else process.env.FF_RESPONSES_EXTRACTOR = previousExtractorFlag;
+});
 
 test('parseModelJson handles fenced json', () => {
   const parsed = parseModelJson('```json\n{"intent":"apply_intent","fullName":"Ana"}\n```');
   assert.equal(parsed.intent, 'apply_intent');
   assert.equal(parsed.fullName, 'Ana');
+});
+
+test('los modelos GPT-5 omiten temperature cuando usan razonamiento por defecto', () => {
+  assert.equal(modelSupportsTemperature('gpt-5.6-terra'), false);
+  assert.equal(modelSupportsTemperature('gpt-5.6-luna'), false);
+  assert.equal(modelSupportsTemperature('gpt-4o-mini'), true);
 });
 
 test('tryOpenAIParse returns ok with parsed fields from chat completions', async (t) => {

@@ -31,6 +31,7 @@ import { referralAttributionMiddleware } from './services/referralAttribution.js
 import { canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
+import { getOpenAiModelConfig } from './services/openAiModelConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -719,4 +720,7 @@ app.use((err, _req, res, next) => {
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server listening on ${port}`));
+app.listen(port, () => {
+  console.log(`Server listening on ${port}`);
+  console.info('[OPENAI_MODEL_CONFIG]', JSON.stringify(getOpenAiModelConfig()));
+});

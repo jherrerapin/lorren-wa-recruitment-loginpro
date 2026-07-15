@@ -10,9 +10,10 @@
 import axios from 'axios';
 import { extractRecruitmentTurn } from '../ai/extractRecruitmentTurn.js';
 import { isFeatureEnabled } from './featureFlags.js';
+import { OPENAI_EXTRACTION_MODEL, getOpenAiModelConfig } from './openAiModelConfig.js';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
-const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini'];
+const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'gpt-5'];
 
 function buildPrompt() {
   return `Eres un reclutador humano experto leyendo mensajes de WhatsApp de candidatos a empleo en Colombia.
@@ -146,11 +147,11 @@ export async function tryOpenAIParse(text, context = {}) {
       intent: extraction.replyIntent || null,
       parsedFields: extraction.fields || {},
       extraction,
-      model: extracted.model || 'gpt-5.4-mini-2026-03-17'
+      model: extracted.model || OPENAI_EXTRACTION_MODEL
     };
   }
 
-  const model = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+  const model = getOpenAiModelConfig().conversation.model;
   const temp = parseOptionalTemperature();
   const useTemp = temp.value !== null && modelSupportsTemperature(model);
 

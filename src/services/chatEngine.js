@@ -8,6 +8,7 @@ import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.
 import { detectConversationIntent } from './conversationIntent.js';
 import { classifyInterviewIntent } from './interviewIntentClassifier.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
+import { OPENAI_EXTRACTION_MODEL } from './openAiModelConfig.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PAUSED_VACANCY_FLAG = 'paused_vacancy';
@@ -22,7 +23,7 @@ function buildDeterministicProgressReply(actResult = {}) {
   return null;
 }
 
-const CONSENT_MODEL = process.env.OPENAI_EXTRACTION_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const CONSENT_MODEL = OPENAI_EXTRACTION_MODEL;
 const APPOINTMENT_ACTION_INTENTS = new Set([
   'confirm_attendance',
   'cancel_interview',
