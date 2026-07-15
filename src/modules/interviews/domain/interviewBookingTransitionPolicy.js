@@ -41,8 +41,8 @@ function requireKnownAction(value) {
 }
 
 function normalizeCurrentStatus(value, { allowEmpty = false } = {}) {
-  if ((value === null || value === undefined || value === '') && allowEmpty) return null;
   const status = String(value ?? '').trim().toUpperCase();
+  if (!status && allowEmpty) return null;
   if (!KNOWN_STATUSES.has(status)) throw new Error('interview_booking_status_invalid');
   return status;
 }
@@ -60,6 +60,13 @@ function normalizeTimestamp(value, label) {
   const timestamp = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(timestamp.getTime())) throw new Error(`${label}_invalid`);
   return timestamp;
+}
+
+function requireTransitionInput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('interview_booking_transition_input_invalid');
+  }
+  return value;
 }
 
 function allowedResult({ action, currentStatus, nextStatus, reason, metadata = {} }) {
@@ -116,8 +123,9 @@ export function isInterviewBookingAutomationClosedStatus(value) {
 }
 
 export function evaluateInterviewBookingTransition(input = {}) {
-  const action = requireKnownAction(input.action);
-  const currentStatus = normalizeCurrentStatus(input.currentStatus, {
+  const transitionInput = requireTransitionInput(input);
+  const action = requireKnownAction(transitionInput.action);
+  const currentStatus = normalizeCurrentStatus(transitionInput.currentStatus, {
     allowEmpty: action === InterviewBookingTransitionAction.CREATE_INITIAL
   });
 
@@ -168,13 +176,13 @@ export function evaluateInterviewBookingTransition(input = {}) {
       });
 
     case InterviewBookingTransitionAction.COMPLETE_RESCHEDULE: {
-      const replacementBookingId = requireNonEmptyString(
-        input.replacementBookingId,
-        'replacement_booking_id'
-      );
       if (!ACTIVE_STATUSES.has(currentStatus) && currentStatus !== InterviewBookingStatus.RESCHEDULED) {
         return rejectedResult({ action, currentStatus, reason: 'transition_origin_not_allowed' });
       }
+      const replacementBookingId = requireNonEmptyString(
+        transitionInput.replacementBookingId,
+        'replacement_booking_id'
+      );
       return allowedResult({
         action,
         currentStatus,
@@ -225,7 +233,7 @@ export function evaluateInterviewBookingTransition(input = {}) {
       if (currentStatus !== InterviewBookingStatus.NO_RESPONSE) {
         return rejectedResult({ action, currentStatus, reason: 'transition_origin_not_allowed' });
       }
-      const respondedAt = normalizeTimestamp(input.respondedAt, 'responded_at');
+      const respondedAt = normalizeTimestamp(transitionInput.respondedAt, 'responded_at');
       return allowedResult({
         action,
         currentStatus,
