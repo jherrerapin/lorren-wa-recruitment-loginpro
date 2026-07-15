@@ -86,22 +86,22 @@ La autoridad de persistencia de `Message` ya es canónica. Esto no significa que
 
 ### Reservas de entrevista en consolidación
 
-`InterviewBookingStateService` establece la primera frontera compartida del agregado. `interviewScheduler.js` conserva la resolución de fechas, cupos, anticipación mínima, ventana de WhatsApp y selección del siguiente slot, pero deja de escribir `InterviewBooking` directamente.
+`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación y las mutaciones operativas de recordatorios. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs. Ninguno de los dos escribe `InterviewBooking` directamente.
 
-Las funciones públicas del scheduler mantienen su firma y retorno:
+La autoridad protege estas invariantes:
 
-- `createBooking()` delega en `createScheduledInterviewBooking()`;
-- `cancelCandidateBookings()` delega en `cancelActiveInterviewBookings()` y conserva el resultado `{ count }` de Prisma.
+- una reserva activa exacta se reutiliza;
+- el reemplazo respeta el índice único parcial de una reserva activa por candidato;
+- el cierre anterior y la creación del reemplazo se confirman o revierten juntos dentro de una transacción serializable;
+- con un cliente `tx` existente se reutiliza la unidad sin abrir una transacción anidada;
+- los conflictos `P2034` se reintentan de forma acotada;
+- una recuperación `P2002` solo acepta la reserva exacta por candidato, vacante, slot y fecha;
+- una solicitud de reprogramación conserva `SCHEDULED` o `CONFIRMED` hasta que exista un reemplazo válido;
+- la cancelación ordinaria solo produce `CANCELLED`;
+- `NO_RESPONSE` solo se aplica desde `SCHEDULED` con recordatorio enviado y dentro de su ventana;
+- el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia.
 
-La nueva autoridad protege las invariantes vigentes sin introducir una transacción o cambiar estados:
-
-- una reserva activa idéntica se reutiliza;
-- antes de crear otra reserva se cierran las activas del candidato con el `replacementStatus` recibido;
-- la nueva reserva continúa naciendo como `SCHEDULED` por defecto de Prisma;
-- si la creación falla por una carrera, se recupera la reserva activa más próxima;
-- la cancelación solo afecta estados `SCHEDULED` o `CONFIRMED` y cierra la ventana de recordatorio.
-
-`reminder.js` delega ahora cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. La solicitud de reprogramación conserva la reserva activa hasta crear un reemplazo válido. El número de escritores baja a cuatro: administración, webhook, `chatEngine` y la autoridad canónica.
+`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El número de escritores directos baja a cuatro: administración, webhook, `chatEngine` y la autoridad canónica.
 
 ## Hallazgos
 
@@ -126,8 +126,8 @@ Después de extraer scheduler y recordatorios, `InterviewBooking` todavía se mo
 
 - no marcar `RESCHEDULED` sin una nueva reserva;
 - no confirmar una reserva cancelada;
-- no emitir recordatorios para reservas cerradas;
-- no crear dos reservas activas para el mismo candidato y vacante.
+- no revivir reservas cerradas desde el panel;
+- no crear dos reservas activas para el mismo candidato.
 
 ### 3. La persistencia de mensajes ya tiene una autoridad única
 
