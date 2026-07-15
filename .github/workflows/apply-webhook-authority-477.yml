@@ -31,7 +31,25 @@ jobs:
         run: node --check src/routes/webhook.js
 
       - name: Run webhook booking authority regression
-        run: node --test test/webhookInterviewBookingAuthority.test.js
+        id: regression
+        continue-on-error: true
+        shell: bash
+        run: node --test test/webhookInterviewBookingAuthority.test.js > webhook-authority-test.log 2>&1
+
+      - name: Upload regression output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webhook-authority-test-output
+          path: webhook-authority-test.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce webhook booking authority regression
+        if: steps.regression.outcome == 'failure'
+        run: |
+          cat webhook-authority-test.log
+          exit 1
 
       - name: Validate state authority manifest
         run: node --test test/stateAuthorityManifest.test.js
