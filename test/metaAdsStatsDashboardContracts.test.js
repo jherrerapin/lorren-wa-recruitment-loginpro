@@ -1,20 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { currentMetaAdsCampaignWhere } from '../src/routes/metaAdsStats.js';
+import {
+  currentMetaAdsCampaignWhere,
+  insightItems,
+  recommendationFor
+} from '../src/routes/metaAdsStats.js';
 
 const dashboard = readFileSync(new URL('../src/routes/metaAdsStats.js', import.meta.url), 'utf8');
 const metrics = readFileSync(new URL('../src/services/metaRecruitmentStats.js', import.meta.url), 'utf8');
 const sync = readFileSync(new URL('../src/services/metaAdsInsightsSync.js', import.meta.url), 'utf8');
 const client = readFileSync(new URL('../src/services/metaAdsClient.js', import.meta.url), 'utf8');
 
-test('panel expone actualización manual y costos estimados sin historial', () => {
+test('panel explica resultados, costos y recomendaciones con lenguaje sencillo', () => {
   assert.match(dashboard, /Actualizar desde Meta/);
-  assert.match(dashboard, /Costo estimado individual/);
+  assert.match(dashboard, /Costo aproximado por persona/);
   assert.match(dashboard, /MetaAdSnapshot|metaAdSnapshot/);
   assert.doesNotMatch(dashboard, /Mostrar históricos\/no disponibles/);
   assert.doesNotMatch(dashboard, /name="historical"/);
   assert.match(dashboard, /Actualmente no existen anuncios en Meta Ads/);
+  assert.match(dashboard, /¿Qué produjo la inversión\?/);
+  assert.match(dashboard, /Cumplen los requisitos/);
+  assert.match(dashboard, /Asistieron a entrevista/);
+  assert.match(dashboard, /¿Qué necesita atención\?/);
+  assert.match(dashboard, /Qué conviene hacer/);
+  assert.match(dashboard, /Muy pocos datos/);
+  assert.match(dashboard, /no cambian campañas ni presupuestos automáticamente/i);
+  assert.match(dashboard, /<details class="technical">/);
+  assert.doesNotMatch(dashboard, /Hojas de vida válidas/);
 });
 
 test('consulta de anuncios exige inventario actual sincronizado', () => {
@@ -46,7 +59,96 @@ test('Marketing API exige una credencial dedicada distinta a WhatsApp', () => {
 
 test('panel no depende del presupuesto manual inexistente', () => {
   assert.doesNotMatch(dashboard, /budgetCOP/);
-  assert.match(dashboard, /Gasto real Meta/);
+  assert.match(dashboard, /Dinero invertido/);
+});
+
+test('costos de entrevistas e inasistencias usan resultados reales del proceso', () => {
+  assert.match(metrics, /booking\.status === 'NO_SHOW'/);
+  assert.doesNotMatch(metrics, /confirmed - metric\.attended/);
+  assert.match(metrics, /costPerScheduled/);
+  assert.match(metrics, /costPerAttended/);
+  assert.match(metrics, /costPerHired/);
+});
+
+test('recomendaciones tratan métricas vacías como cero sin producir decisiones engañosas', () => {
+  const campaign = { id: 'campaign-1', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: true } };
+  assert.equal(recommendationFor({ campaign, candidatesCount: 10 }).label, 'Revisar el registro');
+
+  const completeFunnel = {
+    campaign,
+    candidatesCount: 10,
+    completedRegistrations: 10,
+    cvReceived: 10,
+    apt: 10,
+    scheduled: 10,
+    attended: 10,
+    hired: 1
+  };
+  const peer = { campaign: { id: 'campaign-2' }, costPerHired: 10000 };
+  const missingCost = { ...completeFunnel, costPerHired: null };
+  const favorableCost = { ...completeFunnel, costPerHired: 8000 };
+  assert.equal(recommendationFor(missingCost, [missingCost, peer]).label, 'Seguir observando');
+  assert.equal(recommendationFor(favorableCost, [favorableCost]).label, 'Seguir observando');
+  assert.equal(recommendationFor(favorableCost, [favorableCost, peer]).label, 'Buen resultado');
+});
+
+test('alertas conservan pérdidas visibles cuando llegan valores nulos o indefinidos', () => {
+  const missingCv = insightItems({ totals: { candidatesCount: 10, cvReceived: undefined } });
+  assert.equal(missingCv.some((item) => item.title === 'Pocas personas están enviando su hoja de vida'), true);
+
+  const missingAppointments = insightItems({
+    totals: { candidatesCount: 10, cvReceived: 10, apt: 5, scheduled: null }
+  });
+  assert.equal(missingAppointments.some((item) => item.title === 'Hay candidatos que cumplen, pero pocos agendan'), true);
+});
+
+test('consejos de entrevista respetan vacantes sin agenda y resultados pendientes', () => {
+  const baseMetric = {
+    campaign: { id: 'campaign-1', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: true } },
+    candidatesCount: 10,
+    completedRegistrations: 10,
+    cvReceived: 10,
+    apt: 3,
+    hired: 0
+  };
+  const pending = { ...baseMetric, scheduled: 3, attended: 0, noShow: 0 };
+  const resolvedNoShows = { ...pending, noShow: 3 };
+  const cvOnly = {
+    ...baseMetric,
+    campaign: { id: 'campaign-cv', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: false } },
+    scheduled: 0,
+    attended: 0,
+    noShow: 0
+  };
+
+  assert.equal(recommendationFor(pending, [pending]).label, 'Seguir observando');
+  assert.equal(recommendationFor(resolvedNoShows, [resolvedNoShows]).label, 'Mejorar asistencia');
+  assert.equal(recommendationFor({ ...baseMetric, scheduled: 0 }, [baseMetric]).label, 'Revisar las citas');
+  assert.equal(recommendationFor(cvOnly, [cvOnly]).label, 'Seguir observando');
+
+  const cvOnlyInsights = insightItems({ totals: cvOnly, metrics: [cvOnly] });
+  assert.equal(cvOnlyInsights.some((item) => item.title === 'Hay candidatos que cumplen, pero pocos agendan'), false);
+  const pendingInsights = insightItems({ totals: pending, metrics: [pending] });
+  assert.equal(pendingInsights.some((item) => item.title === 'La asistencia a entrevistas es baja'), false);
+  const resolvedInsights = insightItems({ totals: resolvedNoShows, metrics: [resolvedNoShows] });
+  assert.equal(resolvedInsights.some((item) => item.title === 'La asistencia a entrevistas es baja'), true);
+});
+
+test('candidatos no elegibles no se presentan como abandono del formulario', () => {
+  const metric = {
+    campaign: { id: 'campaign-1', vacancyId: 'vacancy-1', vacancy: { schedulingEnabled: true } },
+    candidatesCount: 5,
+    completedRegistrations: 0,
+    incompleteRegistrations: 5,
+    ineligible: 5,
+    cvReceived: 5,
+    apt: 0
+  };
+
+  assert.equal(recommendationFor(metric, [metric]).label, 'Aclarar requisitos');
+  const alerts = insightItems({ totals: metric, metrics: [metric] });
+  assert.equal(alerts.some((item) => item.title === '5 personas no cumplen un requisito'), true);
+  assert.equal(alerts.some((item) => /no terminaron el registro/.test(item.title)), false);
 });
 
 test('atribución estadística no compara nombres ni tokens', () => {

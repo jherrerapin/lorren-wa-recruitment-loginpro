@@ -48,7 +48,7 @@ function completeCandidate(overrides = {}) {
 test('registro completo usa consentimiento, campos dinámicos y HV válida', () => {
   const complete = buildCandidateRegistrationState(completeCandidate(), { vacancyId: vacancy.id, vacancy });
   const missingExperience = buildCandidateRegistrationState(
-    completeCandidate({ experienceSummary: null }),
+    completeCandidate({ experienceSummary: null, status: 'NUEVO' }),
     { vacancyId: vacancy.id, vacancy }
   );
   const pendingConsent = buildCandidateRegistrationState(
@@ -110,14 +110,15 @@ test('un candidato no se duplica por nombres o tokens parecidos', () => {
 test('costo estimado individual distribuye gasto por anuncio y día', () => {
   const campaign = { id: 'campaign-ad-1', code: 'ad-1', name: 'Anuncio 1', vacancyId: vacancy.id, vacancy };
   const candidates = [
-    completeCandidate(),
+    completeCandidate({ interviewBookings: [{ status: 'ATTENDED' }] }),
     completeCandidate({
       id: 'candidate-2',
       phone: '573000000002',
       fullName: 'Carlos Gómez',
       documentNumber: '987654321',
       experienceSummary: null,
-      status: 'NUEVO'
+      status: 'NUEVO',
+      interviewBookings: [{ status: 'NO_SHOW' }]
     })
   ];
   const snapshots = [{
@@ -143,10 +144,68 @@ test('costo estimado individual distribuye gasto por anuncio y día', () => {
   assert.equal(metric.candidates[1].estimatedCost, 10000);
   assert.equal(metric.estimatedIncompleteSpend, 10000);
   assert.equal(metric.metaConversationsStarted, 5);
+  assert.equal(metric.scheduled, 2);
+  assert.equal(metric.confirmed, 1);
+  assert.equal(metric.attended, 1);
+  assert.equal(metric.noShow, 1);
+  assert.equal(metric.costPerMetaConversation, 4000);
+  assert.equal(metric.costPerScheduled, 10000);
+  assert.equal(metric.costPerConfirmed, 20000);
+  assert.equal(metric.costPerAttended, 20000);
+  assert.equal(metric.costPerNoShow, 20000);
 
   const total = aggregateMetaAdStatistics([metric]);
   assert.equal(total.costPerIncompleteRegistration, 20000);
   assert.equal(total.estimatedIncompleteSpend, 10000);
+  assert.equal(total.costPerScheduled, 10000);
+  assert.equal(total.costPerAttended, 20000);
+  assert.equal(total.noShow, 1);
+});
+
+test('inasistencia usa el estado NO_SHOW y no se deduce de confirmados menos asistentes', () => {
+  const campaign = { id: 'campaign-ad-1', code: 'ad-1', name: 'Anuncio 1', vacancyId: vacancy.id, vacancy };
+  const candidates = [
+    completeCandidate({ id: 'confirmed', interviewBookings: [{ status: 'CONFIRMED' }] }),
+    completeCandidate({ id: 'no-show', interviewBookings: [{ status: 'NO_SHOW' }] })
+  ];
+
+  const [metric] = buildMetaAdStatistics({ campaigns: [campaign], candidates, snapshots: [] });
+
+  assert.equal(metric.scheduled, 2);
+  assert.equal(metric.confirmed, 1);
+  assert.equal(metric.attended, 0);
+  assert.equal(metric.noShow, 1);
+});
+
+test('candidatos no elegibles se separan de los abandonos del registro', () => {
+  const restrictedVacancy = { ...vacancy, minAge: 35 };
+  const campaign = {
+    id: 'campaign-ad-1',
+    code: 'ad-1',
+    name: 'Anuncio 1',
+    vacancyId: restrictedVacancy.id,
+    vacancy: restrictedVacancy
+  };
+  const candidate = completeCandidate({
+    age: 30,
+    status: 'NUEVO',
+    vacancy: restrictedVacancy,
+    vacancyId: restrictedVacancy.id
+  });
+  const snapshots = [{
+    date: new Date('2026-07-10T00:00:00.000Z'),
+    metaAdId: 'ad-1',
+    spend: 5000
+  }];
+
+  const [metric] = buildMetaAdStatistics({ campaigns: [campaign], candidates: [candidate], snapshots });
+  assert.equal(metric.ineligible, 1);
+  assert.equal(metric.incompleteRegistrations, 1);
+  assert.equal(metric.estimatedIneligibleSpend, 5000);
+
+  const total = aggregateMetaAdStatistics([metric]);
+  assert.equal(total.ineligible, 1);
+  assert.equal(total.estimatedIneligibleSpend, 5000);
 });
 
 test('acciones de Meta se suman por coincidencia de conversación iniciada', () => {
