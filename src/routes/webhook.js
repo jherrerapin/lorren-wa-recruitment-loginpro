@@ -2139,8 +2139,17 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     if (interviewIntent === 'reschedule_interview' || isSchedulingRescheduleIntent(cleanText)) {
-      const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'reschedule_interview');
-      if (!transition) return;
+      if (activeBooking?.id && activeBooking?.status) {
+        const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'reschedule_interview');
+        if (!transition) return;
+      } else if (interviewIntent === 'reschedule_interview') {
+        await recordIntentionalSilence(prisma, candidate, cleanText, {
+          reason: 'interview_booking_missing_for_response',
+          gate: 'interview_booking_authority',
+          action: 'reschedule_interview'
+        });
+        return;
+      }
 
       if (!nextSlot?.slot) {
         await pauseInterviewFlow(prisma, candidate.id, 'No hay un siguiente slot valido para reagendar');

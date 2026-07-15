@@ -64,11 +64,18 @@ test('cancelación persiste antes de limpiar candidato y responder', () => {
   assert.match(cancelBranch, /source:\s*['"]interview_booking_cancel['"]/);
 });
 
-test('reprogramación conserva reserva activa y registra solicitud antes de pausa u oferta', () => {
+test('reprogramación distingue reserva activa de una oferta pendiente', () => {
+  const activeGuardIndex = rescheduleBranch.indexOf('if (activeBooking?.id && activeBooking?.status)');
   const authorityIndex = rescheduleBranch.indexOf('applyActiveInterviewResponse');
+  const missingBookingIndex = rescheduleBranch.indexOf("else if (interviewIntent === 'reschedule_interview')");
+  const silenceIndex = rescheduleBranch.indexOf('recordIntentionalSilence', missingBookingIndex);
+  const noSlotIndex = rescheduleBranch.indexOf('if (!nextSlot?.slot)');
   const pauseIndex = rescheduleBranch.indexOf('pauseInterviewFlow');
   const candidateIndex = rescheduleBranch.indexOf('prisma.candidate.update');
-  assert.ok(authorityIndex >= 0);
+
+  assert.ok(activeGuardIndex >= 0 && authorityIndex > activeGuardIndex);
+  assert.ok(missingBookingIndex > authorityIndex && silenceIndex > missingBookingIndex);
+  assert.ok(noSlotIndex > silenceIndex, 'La oferta pendiente debe continuar hacia la resolución del siguiente slot.');
   assert.ok(pauseIndex > authorityIndex);
   assert.ok(candidateIndex > authorityIndex);
   assert.doesNotMatch(rescheduleBranch, /RESCHEDULED/);
