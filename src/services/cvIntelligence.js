@@ -4,6 +4,7 @@ import { CV_EXTRACTION_SCHEMA } from '../ai/cvExtractionSchema.js';
 import { resolveCandidateCvBuffer } from './cvStorage.js';
 import { extractCvText } from './cvTextExtraction.js';
 import { OPENAI_CV_MODEL } from './openAiModelConfig.js';
+import { normalizeTransportMode } from './transportMode.js';
 
 const AttachmentClassification = Object.freeze({
   CV_VALID: 'CV_VALID',
@@ -506,19 +507,36 @@ async function mapWithConcurrency(items, limit, worker) {
 
 function candidateForMatching(candidate, analysis) {
   const extracted = parseCvAnalysisEvidence(analysis).extracted || {};
+  const registeredTransport = normalizeTransportMode(candidate.transportMode) || compact(candidate.transportMode) || null;
+  const registeredResidence = compact(candidate.locality)
+    || compact(candidate.neighborhood)
+    || compact(candidate.zone)
+    || null;
   return {
     candidateId: candidate.id,
-    documentConfidence: Number(analysis.confidence || 0),
-    profile: {
-      city: extracted.city || null,
-      locality: extracted.locality || null,
-      experienceSummary: extracted.experienceSummary || null,
-      lastRole: extracted.lastRole || null,
-      educationSummary: extracted.educationSummary || null,
-      estimatedExperienceMonths: extracted.estimatedExperienceMonths ?? null,
-      skills: Array.isArray(extracted.skills) ? extracted.skills : [],
-      certifications: Array.isArray(extracted.certifications) ? extracted.certifications : [],
-      experience: Array.isArray(extracted.experience) ? extracted.experience : []
+    sources: {
+      cv: {
+        confidence: Number(analysis.confidence || 0),
+        city: extracted.city || null,
+        locality: extracted.locality || null,
+        experienceSummary: extracted.experienceSummary || null,
+        lastRole: extracted.lastRole || null,
+        educationSummary: extracted.educationSummary || null,
+        estimatedExperienceMonths: extracted.estimatedExperienceMonths ?? null,
+        skills: Array.isArray(extracted.skills) ? extracted.skills : [],
+        certifications: Array.isArray(extracted.certifications) ? extracted.certifications : [],
+        experience: Array.isArray(extracted.experience) ? extracted.experience : []
+      },
+      registration: {
+        transportMode: registeredTransport,
+        residence: registeredResidence,
+        declaredExperience: {
+          hasExperience: compact(candidate.experienceInfo) || null,
+          duration: compact(candidate.experienceTime) || null,
+          summary: compact(candidate.experienceSummary) || null
+        },
+        availability: compact(candidate.availability) || null
+      }
     }
   };
 }
@@ -526,8 +544,9 @@ function candidateForMatching(candidate, analysis) {
 async function interpretDesiredProfile(vacancy, desiredProfile, options = {}) {
   return requestStructuredOutput({
     schema: DESIRED_PROFILE_SCHEMA,
-    systemText: `Convierte la descripción sencilla de un coordinador en criterios claros para revisar hojas de vida.
-No agregues requisitos que el coordinador no haya pedido.
+    systemText: `Convierte la descripción sencilla de un coordinador en criterios claros para revisar perfiles de candidatos.
+Puedes usar requisitos que estén escritos explícitamente en la vacante o en la solicitud del coordinador.
+No agregues requisitos que no aparezcan en ninguna de esas dos fuentes.
 Separa lo indispensable de lo deseable. Si un tiempo mínimo no está claro, usa null.
 No uses nombre, género, edad, fotografía ni otros rasgos personales como criterios.
 Escribe etiquetas y explicaciones fáciles de entender.`,
@@ -546,12 +565,17 @@ Escribe etiquetas y explicaciones fáciles de entender.`,
 async function matchCandidateBatch(interpretedProfile, candidates, options = {}) {
   return requestStructuredOutput({
     schema: CANDIDATE_MATCH_SCHEMA,
-    systemText: `Compara hojas de vida con un perfil buscado para apoyar a un coordinador humano.
+    systemText: `Compara la información disponible de cada candidato con un perfil buscado para apoyar a un coordinador humano.
+Cada candidato contiene dos fuentes separadas: sources.cv para la hoja de vida y sources.registration para los datos declarados durante el registro.
 Usa únicamente la evidencia entregada. No inventes experiencia, estudios ni habilidades.
+Para experiencia, estudios, cargos, habilidades y certificaciones, prioriza la hoja de vida y complementa con la experiencia declarada en el registro.
+Para medio de transporte, residencia y disponibilidad, usa el registro; no esperes que esos datos aparezcan en la hoja de vida.
+Cuando cites evidencia, inicia cada frase con "Hoja de vida:" o "Registro:" para que el coordinador conozca la fuente.
+Si las fuentes se contradicen, muestra el punto como algo por confirmar y no elijas silenciosamente una versión.
 La ausencia de información debe aparecer como un faltante, no como una afirmación negativa.
 STRONG significa que existe evidencia clara para la mayoría de criterios indispensables.
 POSSIBLE significa que hay señales útiles, pero faltan datos o experiencia para confirmar.
-LOW significa que el documento sí fue leído, pero contiene poca evidencia relacionada.
+LOW significa que la información sí fue revisada, pero contiene poca evidencia relacionada.
 No rechaces candidatos ni uses información personal. Devuelve razones breves y evidencia concreta.`,
     userContent: JSON.stringify({
       interpretedProfile,
