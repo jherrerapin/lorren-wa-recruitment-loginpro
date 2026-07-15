@@ -111,6 +111,9 @@ jobs:
       - name: Run reminder regressions
         run: node --test test/reminder.test.js
 
+      - name: Run interview booking transition policy regressions
+        run: node --test test/interviewBookingTransitionPolicy.test.js
+
       - name: Validate conversation replay fixtures
         run: node --test test/conversationReplayFixtures.test.js
 
