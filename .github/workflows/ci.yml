@@ -99,6 +99,9 @@ jobs:
       - name: Run consent and message authority regressions
         run: node --test test/consentStateService.test.js test/conversationMessageRepository.test.js
 
+      - name: Run interview booking authority regressions
+        run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js
+
       - name: Run supervisor coordination regressions
         run: node --test test/adminSupervisor.test.js
 
