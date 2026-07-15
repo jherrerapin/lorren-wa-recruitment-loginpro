@@ -24,6 +24,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Preserve generated test escapes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/apply-webhook-interview-authority.mjs')
+          content = path.read_text(encoding='utf-8')
+          content = content.replace(
+              "write(testPath, `import test from 'node:test';",
+              "write(testPath, String.raw`import test from 'node:test';",
+              1,
+          )
+          content = content.replace(
+              r"  assert.notEqual(startIndex, -1, \`No se encontró el marcador inicial: \${start}\`);",
+              "  assert.notEqual(startIndex, -1, 'No se encontró el marcador inicial: ' + start);",
+              1,
+          )
+          content = content.replace(
+              r"  assert.notEqual(endIndex, -1, \`No se encontró el marcador final: \${end}\`);",
+              "  assert.notEqual(endIndex, -1, 'No se encontró el marcador final: ' + end);",
+              1,
+          )
+          path.write_text(content, encoding='utf-8')
+          PY
+
       - name: Apply scoped migration
         run: node scripts/apply-webhook-interview-authority.mjs
 
