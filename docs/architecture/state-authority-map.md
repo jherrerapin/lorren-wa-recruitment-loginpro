@@ -28,13 +28,13 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 
 ## Progreso de consolidación
 
-### Candidate: primera frontera migrada
+### Candidate: dos fronteras migradas
 
-`CandidateStateService` inicia como autoridad estrecha sin convertir todavía el agregado en canónico. En el manifiesto se declara como `boundary` transitorio porque `ConsentStateService` continúa siendo el escritor canónico del subgrupo de consentimiento mientras los demás consumidores todavía escriben otros campos de `Candidate`.
+`CandidateStateService` continúa como autoridad estrecha sin convertir todavía el agregado en canónico. En el manifiesto se declara como `boundary` transitorio porque `ConsentStateService` conserva la autoridad especializada del consentimiento y otros consumidores todavía escriben grupos distintos de `Candidate`.
 
-La primera operación centralizada es la reanudación por mensaje entrante después de una pausa manual. El webhook conserva la decisión mediante `shouldBlockAutomation()` y `shouldResumeAutomationOnInbound()`, pero la persistencia compara el snapshot completo de pausa —ID, marca temporal, actor, motivo y modo de reanudación— mediante `updateMany`. Si otra operación cambió la pausa, `count=0` evita sobrescribirla y el webhook devuelve el estado actual sin registrar una reanudación falsa.
+La primera frontera centralizada fue la reanudación por mensaje entrante después de una pausa manual. La segunda incorpora los botones explícitos de pausar y reanudar del panel administrativo. Los tres casos de uso comparan el snapshot completo de pausa —ID, marca temporal, actor, motivo y modo de reanudación— mediante `updateMany`. Si otra operación cambió ese estado, `count=0` evita sobrescribir o levantar una intervención concurrente y tampoco permite registrar un evento administrativo falso.
 
-La incorporación temporal de la nueva frontera aumenta el inventario a dieciséis escritores porque los quince consumidores heredados todavía modifican otros grupos de campos de `Candidate`. El agregado permanece `fragmented` hasta migrar cada frontera y resolver la autoridad final por composición de casos de uso.
+El inventario permanece en dieciséis escritores porque `admin.js` todavía modifica otros grupos de campos de `Candidate`. El agregado continúa `fragmented` hasta migrar cada frontera y resolver la autoridad final por composición de casos de uso.
 
 ### Consentimiento canónico
 
