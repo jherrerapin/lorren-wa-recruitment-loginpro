@@ -165,12 +165,24 @@ test('rechaza contratos, entradas e identificadores inválidos antes de escribir
     /slot_id_required/
   );
   await assert.rejects(
+    () => createScheduledInterviewBooking(prisma, { ...bookingInput, candidateId: true }),
+    /candidate_id_invalid/
+  );
+  await assert.rejects(
+    () => createScheduledInterviewBooking(prisma, { ...bookingInput, replacementStatus: {} }),
+    /replacement_status_invalid/
+  );
+  await assert.rejects(
     () => cancelActiveInterviewBookings(prisma, 'candidate-1'),
     /interview_booking_cancel_input_invalid/
   );
   await assert.rejects(
     () => cancelActiveInterviewBookings(prisma, { candidateId: '' }),
     /candidate_id_required/
+  );
+  await assert.rejects(
+    () => cancelActiveInterviewBookings(prisma, { candidateId: 'candidate-1', replacementStatus: false }),
+    /replacement_status_invalid/
   );
 
   assert.equal(calls.updateMany.length, 0);
