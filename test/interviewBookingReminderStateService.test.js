@@ -105,7 +105,7 @@ test('rechaza una ventana de recordatorio invertida antes de escribir', async ()
   assert.equal(calls.length, 0);
 });
 
-test('marca NO_RESPONSE únicamente desde SCHEDULED y dentro de los cinco minutos', async () => {
+test('marca NO_RESPONSE únicamente desde SCHEDULED sin respuesta y dentro de los cinco minutos', async () => {
   const { prisma, calls } = createPrismaMock();
 
   const result = await markInterviewBookingNoResponse(prisma, {
@@ -122,6 +122,7 @@ test('marca NO_RESPONSE únicamente desde SCHEDULED y dentro de los cinco minuto
       candidateId,
       status: 'SCHEDULED',
       reminderSentAt: { not: null },
+      reminderResponse: null,
       scheduledAt: { gte: windowStart, lte: windowEnd }
     },
     data: {
