@@ -20,7 +20,8 @@ import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../servic
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
 import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitizer.js';
-import { buildInboundResumeUpdate, shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../services/botAutomationPolicy.js';
+import { shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../services/botAutomationPolicy.js';
+import { resumeCandidateAutomationOnInbound } from '../services/candidateStateService.js';
 import { runChatEngine } from '../services/chatEngine.js';
 import { think, extractEngineCandidateFields } from '../services/conversationEngine.js';
 import { storeCandidateCv } from '../services/cvStorage.js';
@@ -1352,18 +1353,27 @@ async function prepareCandidateForInboundAutomation(prisma, candidate = {}) {
   if (shouldBlockAutomation(candidate, { direction: 'INBOUND' })) return candidate;
   if (!shouldResumeAutomationOnInbound(candidate)) return candidate;
 
-  const resumed = await prisma.candidate.update({
-    where: { id: candidate.id },
-    data: buildInboundResumeUpdate(new Date())
+  const transition = await resumeCandidateAutomationOnInbound(prisma, {
+    candidateId: candidate.id,
+    expected: {
+      botPaused: candidate.botPaused,
+      botPausedAt: candidate.botPausedAt ?? null,
+      botPausedBy: candidate.botPausedBy ?? null,
+      botPauseReason: candidate.botPauseReason ?? null,
+      botResumeMode: candidate.botResumeMode ?? null
+    },
+    now: new Date()
   });
 
-  console.info('[BOT_RESUMED_BY_INBOUND]', JSON.stringify({
-    candidateId: candidate.id,
-    previousReason: candidate.botPauseReason || null,
-    previousResumeMode: candidate.botResumeMode || null
-  }));
+  if (transition.count === 1) {
+    console.info('[BOT_RESUMED_BY_INBOUND]', JSON.stringify({
+      candidateId: candidate.id,
+      previousReason: candidate.botPauseReason || null,
+      previousResumeMode: candidate.botResumeMode || null
+    }));
+  }
 
-  return resumed;
+  return transition.candidate || candidate;
 }
 
 

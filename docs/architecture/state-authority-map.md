@@ -17,7 +17,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
-| `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
+| `Candidate` | 16 | Crítico | Fragmentado | `CandidateStateService` |
 | `InterviewBooking` | 1 | Crítico | Canónico | `InterviewBookingStateService` |
 | `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
@@ -27,6 +27,14 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | `InterviewSlot` | 1 | Alto | Fragmentado | `InterviewAvailabilityService` |
 
 ## Progreso de consolidación
+
+### Candidate: primera frontera migrada
+
+`CandidateStateService` inicia como autoridad estrecha sin convertir todavía el agregado en canónico. En el manifiesto se declara como `boundary` transitorio porque `ConsentStateService` continúa siendo el escritor canónico del subgrupo de consentimiento mientras los demás consumidores todavía escriben otros campos de `Candidate`.
+
+La primera operación centralizada es la reanudación por mensaje entrante después de una pausa manual. El webhook conserva la decisión mediante `shouldBlockAutomation()` y `shouldResumeAutomationOnInbound()`, pero la persistencia compara el snapshot completo de pausa —ID, marca temporal, actor, motivo y modo de reanudación— mediante `updateMany`. Si otra operación cambió la pausa, `count=0` evita sobrescribirla y el webhook devuelve el estado actual sin registrar una reanudación falsa.
+
+La incorporación temporal de la nueva frontera aumenta el inventario a dieciséis escritores porque los quince consumidores heredados todavía modifican otros grupos de campos de `Candidate`. El agregado permanece `fragmented` hasta migrar cada frontera y resolver la autoridad final por composición de casos de uso.
 
 ### Consentimiento canónico
 
@@ -104,8 +112,6 @@ El scanner de CI bloquea cualquier nueva escritura directa fuera de la autoridad
 
 ## Hallazgos
 
-## Hallazgos
-
 ### 1. `Candidate` funciona como agregado compartido por demasiados módulos
 
 Lo modifican rutas HTTP, webhook, motores conversacionales, consentimiento, atribución, archivos, recordatorios, supervisor e integraciones. Esto permite que varios componentes decidan directamente sobre:
@@ -125,7 +131,7 @@ La meta no es mover estas quince escrituras a un archivo gigante. La autoridad o
 
 La consolidación de `InterviewBooking` quedó completa: no existen escrituras directas desde rutas, webhooks, scheduler, recordatorios, panel o motores conversacionales. La evolución pendiente es separada y comprende historial inmutable, actor y motivo estructurados, retención y `tenantId`.
 
-### 3. La persistencia de mensajes ya tiene una autoridad única### 3. La persistencia de mensajes ya tiene una autoridad única
+### 3. La persistencia de mensajes ya tiene una autoridad única
 
 Todas las creaciones, actualizaciones y eliminaciones de `Message` pasan por `ConversationMessageRepository`. Las fronteras conservan sus decisiones y unidades transaccionales, pero no controlan directamente cómo se persiste el agregado.
 
