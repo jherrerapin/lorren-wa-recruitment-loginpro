@@ -34,8 +34,54 @@ test('el recordatorio manual usa solo los estados activos canónicos', () => {
   assert.doesNotMatch(route, /ACTIVE_BOOKING_STATUSES\.includes\(booking\.status\)/);
 });
 
-test('el alcance no altera eliminación física ni asignación manual pendientes', () => {
-  assert.match(source, /await tx\.interviewBooking\.delete\s*\(/);
-  assert.match(source, /await cancelCandidateBookings\(tx, candidate\.id, ['"]RESCHEDULED['"]\)/);
-  assert.match(source, /await createBooking\(/);
+test('la eliminación individual delega por id y candidato antes de reajustar el paso', () => {
+  const route = between(
+    "router.post('/interviews/:id/delete'",
+    "router.post('/candidates/:id/interview-assign'"
+  );
+  assert.match(route, /deleteAdministrativeInterviewBooking\(tx,\s*\{/);
+  assert.match(route, /bookingId:\s*booking\.id/);
+  assert.match(route, /candidateId:\s*booking\.candidateId/);
+  assert.match(route, /deletion\.count\s*===\s*0/);
+  assert.doesNotMatch(route, /tx\.interviewBooking\.delete\s*\(/);
+  const deletionIndex = route.indexOf('deletion.count === 0');
+  const remainingIndex = route.indexOf('remainingActiveBooking');
+  const updateIndex = route.indexOf('tx.candidate.update');
+
+  assert.ok(deletionIndex >= 0, 'No se encontró "deletion.count === 0"');
+  assert.ok(remainingIndex >= 0, 'No se encontró "remainingActiveBooking"');
+  assert.ok(updateIndex >= 0, 'No se encontró "tx.candidate.update"');
+  assert.ok(
+    deletionIndex < remainingIndex,
+    'La carrera debe resolverse antes de buscar reservas activas restantes.'
+  );
+  assert.ok(
+    remainingIndex < updateIndex,
+    'El paso solo se reajusta después de comprobar reservas activas restantes.'
+  );
+});
+
+test('la eliminación del candidato conserva el orden mensajes, reservas y candidato', () => {
+  const route = between(
+    "router.post('/candidates/:id/delete'",
+    "router.post('/candidates/:id/edit'"
+  );
+  assert.match(route, /deleteCandidateInterviewBookings\(tx,\s*\{/);
+  assert.match(route, /candidateId:\s*candidate\.id/);
+  assert.doesNotMatch(route, /tx\.interviewBooking\.deleteMany\s*\(/);
+
+  const messagesIndex = route.indexOf('deleteConversationMessagesForCandidate(tx');
+  const bookingsIndex = route.indexOf('deleteCandidateInterviewBookings(tx');
+  const candidateIndex = route.indexOf('tx.candidate.delete');
+  assert.ok(messagesIndex >= 0 && messagesIndex < bookingsIndex);
+  assert.ok(bookingsIndex < candidateIndex);
+});
+
+test('la asignación manual permanece fuera del alcance de esta fase', () => {
+  const route = between(
+    "router.post('/candidates/:id/interview-assign'",
+    "router.post('/candidates/:id/status'"
+  );
+  assert.match(route, /await cancelCandidateBookings\(tx, candidate\.id, ['"]RESCHEDULED['"]\)/);
+  assert.match(route, /await createBooking\(/);
 });

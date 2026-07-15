@@ -465,3 +465,27 @@ export async function applyAdministrativeInterviewBookingAction(prisma, input = 
     persisted
   };
 }
+
+export async function deleteAdministrativeInterviewBooking(prisma, input = {}) {
+  requireBookingClient(prisma, ['deleteMany'], 'interview_admin_delete');
+  const deleteInput = requireInputObject(input, 'interview_admin_delete_input');
+  const bookingId = requireNonEmptyString(deleteInput.bookingId, 'booking_id');
+  const candidateId = requireNonEmptyString(deleteInput.candidateId, 'candidate_id');
+
+  return prisma.interviewBooking.deleteMany({
+    where: {
+      id: bookingId,
+      candidateId
+    }
+  });
+}
+
+export async function deleteCandidateInterviewBookings(prisma, input = {}) {
+  requireBookingClient(prisma, ['deleteMany'], 'interview_candidate_cleanup');
+  const cleanupInput = requireInputObject(input, 'interview_candidate_cleanup_input');
+  const candidateId = requireNonEmptyString(cleanupInput.candidateId, 'candidate_id');
+
+  return prisma.interviewBooking.deleteMany({
+    where: { candidateId }
+  });
+}

@@ -18,7 +18,7 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 | Agregado o modelo | Escritores declarados | Riesgo | Estado de migración | Autoridad objetivo |
 | --- | ---: | --- | --- | --- |
 | `Candidate` | 15 | Crítico | Fragmentado | `CandidateStateService` |
-| `InterviewBooking` | 4 | Crítico | En consolidación | `InterviewBookingStateService` |
+| `InterviewBooking` | 3 | Crítico | En consolidación | `InterviewBookingStateService` |
 | `Message` | 1 | Alto | Canónico | `ConversationMessageRepository` |
 | `CandidateDataConsentEvent` | 1 | Crítico | Canónico | `ConsentStateService` |
 | `AttachmentAnalysis` | 2 | Alto | En consolidación | `AttachmentAnalysisRepository` |
@@ -86,7 +86,7 @@ La autoridad de persistencia de `Message` ya es canónica. Esto no significa que
 
 ### Reservas de entrevista en consolidación
 
-`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación, las mutaciones operativas de recordatorios y las transiciones manuales del panel. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs; `admin.js` conserva permisos, acceso y auditoría. Estas fronteras delegan las transiciones ordinarias en la autoridad canónica.
+`InterviewBookingStateService` concentra ya la creación, el reemplazo, la cancelación, las mutaciones operativas de recordatorios, las transiciones manuales y las eliminaciones físicas. `interviewScheduler.js` conserva disponibilidad, cupos, anticipación mínima y selección de slots; `reminder.js` conserva ventanas, dispatchers, mensajes, WhatsApp y jobs; `admin.js` conserva permisos, acceso, auditoría y las transacciones de ciclo de vida. Estas fronteras delegan la persistencia de reservas en la autoridad canónica.
 
 La autoridad protege estas invariantes:
 
@@ -102,9 +102,11 @@ La autoridad protege estas invariantes:
 - el claim del recordatorio y el cierre de ventana conservan filtros condicionales e idempotencia;
 - las acciones manuales validan el estado de origen y usan comparación condicional por ID y estado;
 - una solicitud manual de reprogramación conserva la reserva activa hasta asignar un horario reemplazante;
-- el recordatorio manual solo admite `SCHEDULED` y `CONFIRMED`.
+- el recordatorio manual solo admite `SCHEDULED` y `CONFIRMED`;
+- la eliminación individual exige coincidencia exacta por reserva y candidato;
+- la limpieza por ciclo de vida elimina reservas únicamente por candidato y reutiliza la transacción recibida.
 
-`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El panel delega sus transiciones manuales y mantiene una reserva activa ante una solicitud de reprogramación. `admin.js` continúa declarado como escritor únicamente por la eliminación física exacta y la limpieza al eliminar candidatos. El número total de escritores permanece en cuatro: administración, webhook, `chatEngine` y la autoridad canónica.
+`reminder.js` delega cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. El panel delega transiciones manuales, eliminación individual y limpieza por ciclo de vida; conserva permisos, acceso, auditoría, transacciones y el orden mensajes → reservas → candidato. `admin.js` deja de ser escritor directo de `InterviewBooking`. El número total de escritores baja a tres: webhook, `chatEngine` y la autoridad canónica.
 
 ## Hallazgos
 
@@ -123,9 +125,9 @@ Lo modifican rutas HTTP, webhook, motores conversacionales, consentimiento, atri
 
 La meta no es mover estas quince escrituras a un archivo gigante. La autoridad objetivo debe exponer casos de uso y validar transiciones, mientras cada dominio conserva su propia decisión especializada.
 
-### 2. Las reservas conservan tres fronteras directas por migrar
+### 2. Las reservas conservan dos fronteras directas por migrar
 
-Después de extraer scheduler, recordatorios y transiciones manuales, `InterviewBooking` todavía se modifica desde webhook, un motor conversacional alternativo y las dos eliminaciones físicas administrativas pendientes. Deben centralizarse gradualmente invariantes como:
+Después de extraer scheduler, recordatorios, transiciones manuales y eliminaciones físicas administrativas, `InterviewBooking` todavía se modifica directamente desde webhook y un motor conversacional alternativo. La asignación manual del panel ya delega sus escrituras, aunque su orquestación conserva una cancelación previa redundante que debe migrarse al reemplazo atómico. Deben centralizarse gradualmente invariantes como:
 
 - no marcar `RESCHEDULED` sin una nueva reserva;
 - no confirmar una reserva cancelada;
