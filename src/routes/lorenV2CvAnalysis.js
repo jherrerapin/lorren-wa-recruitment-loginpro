@@ -214,19 +214,12 @@ function renderStringList(title, items = []) {
 }
 
 function renderRegisteredData(candidate = {}) {
-  const experience = [candidate?.experienceInfo, candidate?.experienceTime, candidate?.experienceSummary]
-    .map(normalizeString)
-    .filter(Boolean)
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .join(' · ');
   const residence = [candidate?.locality, candidate?.neighborhood, candidate?.zone]
     .map(normalizeString)
     .find(Boolean);
   const items = [
     ['Medio de transporte', candidate?.transportMode],
-    ['Residencia', residence],
-    ['Experiencia declarada', experience],
-    ['Disponibilidad', candidate?.availability]
+    ['Residencia', residence]
   ].filter(([, value]) => normalizeString(value));
   if (!items.length) return '';
   return `<div class="registered">
@@ -277,7 +270,7 @@ function renderReviewResults(review) {
   return `${review.truncated ? '<div class="alert warn">Se revisaron las 120 hojas de vida más recientes. Usa una vacante o periodo más específico si necesitas abarcar más registros.</div>' : ''}
     <section class="card">
       <h2>3. Resultado de la revisión</h2>
-      <p>El orden combina la hoja de vida con los datos laborales y operativos del registro. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p>
+      <p>El orden combina la hoja de vida con el medio de transporte y la residencia registrados. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p>
       <div class="grid">
         <div class="kpi"><strong>${review.stats.total}</strong><span>Hojas de vida encontradas</span></div>
         <div class="kpi good"><strong>${review.stats.strong}</strong><span>Con evidencia clara del perfil</span></div>

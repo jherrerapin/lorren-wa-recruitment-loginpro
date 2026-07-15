@@ -529,13 +529,7 @@ function candidateForMatching(candidate, analysis) {
       },
       registration: {
         transportMode: registeredTransport,
-        residence: registeredResidence,
-        declaredExperience: {
-          hasExperience: compact(candidate.experienceInfo) || null,
-          duration: compact(candidate.experienceTime) || null,
-          summary: compact(candidate.experienceSummary) || null
-        },
-        availability: compact(candidate.availability) || null
+        residence: registeredResidence
       }
     }
   };
@@ -568,9 +562,10 @@ async function matchCandidateBatch(interpretedProfile, candidates, options = {})
     systemText: `Compara la información disponible de cada candidato con un perfil buscado para apoyar a un coordinador humano.
 Cada candidato contiene dos fuentes separadas: sources.cv para la hoja de vida y sources.registration para los datos declarados durante el registro.
 Usa únicamente la evidencia entregada. No inventes experiencia, estudios ni habilidades.
-Para experiencia, estudios, cargos, habilidades y certificaciones, prioriza la hoja de vida y complementa con la experiencia declarada en el registro.
-Para medio de transporte, residencia y disponibilidad, usa el registro; no esperes que esos datos aparezcan en la hoja de vida.
-Cuando cites evidencia, inicia cada frase con "Hoja de vida:" o "Registro:" para que el coordinador conozca la fuente.
+Para experiencia, estudios, cargos, habilidades y certificaciones, usa la hoja de vida.
+Del registro solo recibirás medio de transporte y residencia; no esperes que esos datos aparezcan en la hoja de vida.
+No antepongas "Hoja de vida:" a las evidencias tomadas del documento; escríbelas directamente para evitar repeticiones.
+Usa "Registro:" solo cuando la evidencia provenga del medio de transporte o la residencia registrados por el candidato.
 Si las fuentes se contradicen, muestra el punto como algo por confirmar y no elijas silenciosamente una versión.
 La ausencia de información debe aparecer como un faltante, no como una afirmación negativa.
 STRONG significa que existe evidencia clara para la mayoría de criterios indispensables.
@@ -594,7 +589,9 @@ function normalizeMatch(match = {}) {
     level,
     score,
     reasons: Array.isArray(match.reasons) ? match.reasons.map(compact).filter(Boolean).slice(0, 5) : [],
-    evidence: Array.isArray(match.evidence) ? match.evidence.map(compact).filter(Boolean).slice(0, 6) : [],
+    evidence: Array.isArray(match.evidence)
+      ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 6)
+      : [],
     gaps: Array.isArray(match.gaps) ? match.gaps.map(compact).filter(Boolean).slice(0, 6) : []
   };
 }

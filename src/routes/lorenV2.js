@@ -45,25 +45,10 @@ function renderStatisticsHub() {
         <div class="hub-card-title">Anuncios Meta Ads</div>
         <div class="hub-card-desc">Inventario actual, inversión, embudo de conversión y asociación con vacantes.</div>
       </a>
-      <a href="/admin/estadisticas/reports" class="hub-card">
-        <div class="hub-card-icon">📊</div>
-        <div class="hub-card-title">Reportes</div>
-        <div class="hub-card-desc">Exportar datos de candidatos y métricas en Excel.</div>
-      </a>
       <a href="/admin/estadisticas/cv-analysis" class="hub-card">
         <div class="hub-card-icon">🧠</div>
         <div class="hub-card-title">Análisis de HV</div>
         <div class="hub-card-desc">Revisión de hojas de vida procesadas por IA.</div>
-      </a>
-      <a href="/admin/estadisticas/daily-summary" class="hub-card">
-        <div class="hub-card-icon">📋</div>
-        <div class="hub-card-title">Resumen diario</div>
-        <div class="hub-card-desc">Resumen de actividad del día y candidatos nuevos.</div>
-      </a>
-      <a href="/admin/estadisticas/data-consents" class="hub-card">
-        <div class="hub-card-icon">🔒</div>
-        <div class="hub-card-title">Consentimientos</div>
-        <div class="hub-card-desc">Gestión de consentimientos de datos personales.</div>
       </a>
     </div>
   </main>
