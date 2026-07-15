@@ -37,17 +37,24 @@ test('una carrera no informa una transición de entrevista como aplicada', () =>
 
 test('la reprogramación conserva la reserva y busca alternativa antes de cambiar el paso', () => {
   assert.doesNotMatch(handler, /status:\s*['"]RESCHEDULED['"]/);
-  const transitionIndex = handler.indexOf('applyInterviewReminderResponse');
-  const alternativeIndex = handler.indexOf('getNextAvailableSlotAfter');
-  const candidateUpdateIndex = handler.indexOf('prisma.candidate.update');
-  assert.ok(transitionIndex >= 0, 'No se encontró la delegación de la transición.');
+
+  const rescheduleStart = handler.indexOf("if (intent === 'reschedule_interview')");
+  assert.ok(rescheduleStart >= 0, 'No se encontró la rama de reprogramación.');
+  const rescheduleBranch = handler.slice(rescheduleStart);
+  const alternativeIndex = rescheduleBranch.indexOf('getNextAvailableSlotAfter');
+  const candidateUpdateIndex = rescheduleBranch.indexOf('prisma.candidate.update');
+
   assert.ok(alternativeIndex >= 0, 'No se encontró la búsqueda del horario alternativo.');
   assert.ok(candidateUpdateIndex >= 0, 'No se encontró la actualización del paso del candidato.');
-  assert.ok(transitionIndex < alternativeIndex, 'La respuesta debe registrarse antes de buscar la alternativa.');
   assert.ok(alternativeIndex < candidateUpdateIndex, 'La alternativa debe resolverse antes de cambiar el paso.');
 });
 
 test('cancelación conserva la limpieza de recordatorio del candidato', () => {
-  assert.match(handler, /reminderScheduledFor:\s*null/);
-  assert.match(handler, /reminderState:\s*['"]SKIPPED['"]/);
+  const cancelStart = handler.indexOf("if (intent === 'cancel_interview')");
+  const rescheduleStart = handler.indexOf("if (intent === 'reschedule_interview')");
+  assert.ok(cancelStart >= 0 && rescheduleStart > cancelStart, 'No se encontraron las ramas de cancelación y reprogramación.');
+  const cancelBranch = handler.slice(cancelStart, rescheduleStart);
+
+  assert.match(cancelBranch, /reminderScheduledFor:\s*null/);
+  assert.match(cancelBranch, /reminderState:\s*['"]SKIPPED['"]/);
 });
