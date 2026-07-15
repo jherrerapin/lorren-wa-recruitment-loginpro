@@ -33,29 +33,27 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Apply deterministic migration and remove temporary mechanism
+      - name: Apply deterministic migration or publish diagnostic
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          node scripts/apply-reminder-authority-migration.mjs
+          set +e
+          node scripts/apply-reminder-authority-migration.mjs > reminder-migration-output.txt 2>&1
+          migration_exit=$?
+          set -e
+          cat reminder-migration-output.txt
 
-          python - <<'PY'
-          from pathlib import Path
+          if [ "$migration_exit" -ne 0 ]; then
+            git add reminder-migration-output.txt
+            git commit -m "chore: capture reminder migration diagnostic"
+            git push origin HEAD:${{ github.head_ref }}
+            exit "$migration_exit"
+          fi
 
-          path = Path('.github/workflows/ci.yml')
-          text = path.read_text(encoding='utf-8')
-          start = text.index('  apply-reminder-authority-migration:')
-          end = text.index('  state-authority:', start)
-          text = text[:start] + text[end:]
-          if 'apply-reminder-authority-migration:' in text or 'contents: write' in text:
-              raise SystemExit('No se retiró completamente el mecanismo temporal')
-          path.write_text(text, encoding='utf-8')
-          PY
-
-          rm scripts/apply-reminder-authority-migration.mjs
+          rm reminder-migration-output.txt
 
           if grep -Eq 'prisma\.interviewBooking\.(create|createMany|update|updateMany|delete|deleteMany|upsert)[[:space:]]*\(' src/services/reminder.js; then
             echo 'Persisten escrituras directas de InterviewBooking en reminder.js'
@@ -64,9 +62,7 @@ jobs:
 
           git add src/services/reminder.js test/reminder.test.js \
             docs/architecture/state-authority-manifest.json \
-            docs/architecture/state-authority-map.md \
-            .github/workflows/ci.yml \
-            scripts/apply-reminder-authority-migration.mjs
+            docs/architecture/state-authority-map.md
           git commit -m "refactor: delegar estados de recordatorio de entrevista"
           git push origin HEAD:${{ github.head_ref }}
 
