@@ -1,25 +1,40 @@
 import fs from 'node:fs';
 
+function log(label) {
+  console.log(`[REMINDER_MIGRATION] ${label}`);
+}
+
 function replaceBetween(source, startMarker, endMarker, replacement, label) {
   const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start + startMarker.length);
+  const end = source.indexOf(endMarker, Math.max(0, start) + startMarker.length);
   if (start < 0 || end < 0 || end <= start) {
     throw new Error(`migration_marker_not_found:${label}`);
   }
+  log(label);
   return source.slice(0, start) + replacement.trimEnd() + '\n\n' + source.slice(end);
 }
 
 function replaceOnce(source, expected, replacement, label) {
   const first = source.indexOf(expected);
-  const second = source.indexOf(expected, first + expected.length);
+  const second = first < 0 ? -1 : source.indexOf(expected, first + expected.length);
   if (first < 0 || second >= 0) {
     throw new Error(`migration_expected_once:${label}`);
   }
-  return source.replace(expected, replacement);
+  log(label);
+  return source.slice(0, first) + replacement + source.slice(first + expected.length);
+}
+
+function replaceRegexOnce(source, pattern, replacement, label) {
+  const matches = [...source.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))];
+  if (matches.length !== 1) {
+    throw new Error(`migration_regex_once:${label}:${matches.length}`);
+  }
+  log(label);
+  return source.replace(pattern, replacement);
 }
 
 const reminderPath = 'src/services/reminder.js';
-let reminder = fs.readFileSync(reminderPath, 'utf8');
+let reminder = fs.readFileSync(reminderPath, 'utf8').replaceAll('\r\n', '\n');
 
 reminder = replaceOnce(
   reminder,
@@ -31,7 +46,7 @@ reminder = replaceOnce(
 reminder = replaceOnce(
   reminder,
   "const ACTIVE_INTERVIEW_STATUSES = ['SCHEDULED', 'CONFIRMED'];\nconst NO_RESPONSE_ELIGIBLE_INTERVIEW_STATUSES = ['SCHEDULED'];",
-  'const ACTIVE_INTERVIEW_STATUSES = ACTIVE_INTERVIEW_BOOKING_STATUSES;',
+  "const ACTIVE_INTERVIEW_STATUSES = ACTIVE_INTERVIEW_BOOKING_STATUSES;\nconst NO_RESPONSE_ELIGIBLE_INTERVIEW_STATUSES = ['SCHEDULED'];",
   'status_constants'
 );
 
@@ -138,9 +153,10 @@ if (/prisma\.interviewBooking\.(?:create|createMany|update|updateMany|delete|del
   throw new Error('reminder_direct_interview_booking_write_remaining');
 }
 fs.writeFileSync(reminderPath, reminder, 'utf8');
+log('reminder_written');
 
 const testPath = 'test/reminder.test.js';
-let testSource = fs.readFileSync(testPath, 'utf8');
+let testSource = fs.readFileSync(testPath, 'utf8').replaceAll('\r\n', '\n');
 testSource = replaceOnce(
   testSource,
   'async function assertReminderTransition({ candidateText, expectedStatus }) {',
@@ -153,46 +169,52 @@ testSource = replaceOnce(
   "    assert.equal(result.status, expectedStatus);\n    if (expectedIntent) assert.equal(result.intent, expectedIntent);\n    assert.equal(prisma.state.interviewBookings[0].status, expectedStatus);",
   'test_helper_intent'
 );
-testSource = replaceOnce(
+testSource = replaceRegexOnce(
   testSource,
-  "test('respuesta de reprogramación al recordatorio cambia entrevista a RESCHEDULED sin enviar WhatsApp', async () => {\n  await assertReminderTransition({\n    candidateText: 'Necesito reprogramar la entrevista',\n    expectedStatus: 'RESCHEDULED'\n  });\n});",
+  /test\('respuesta de reprogramación al recordatorio cambia entrevista a RESCHEDULED sin enviar WhatsApp', async \(\) => \{\n\s*await assertReminderTransition\(\{\n\s*candidateText: 'Necesito reprogramar la entrevista',\n\s*expectedStatus: 'RESCHEDULED'\n\s*\}\);\n\}\);/,
   "test('respuesta de reprogramación conserva la reserva activa sin enviar WhatsApp', async () => {\n  await assertReminderTransition({\n    candidateText: 'Necesito reprogramar la entrevista',\n    expectedStatus: 'SCHEDULED',\n    expectedIntent: 'reschedule_interview'\n  });\n});",
   'reschedule_test'
 );
 fs.writeFileSync(testPath, testSource, 'utf8');
+log('tests_written');
 
 const manifestPath = 'docs/architecture/state-authority-manifest.json';
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const beforeWriters = manifest.models.interviewBooking.writers.length;
 manifest.models.interviewBooking.writers = manifest.models.interviewBooking.writers.filter(
   (writer) => writer.path !== 'src/services/reminder.js'
 );
+if (manifest.models.interviewBooking.writers.length !== beforeWriters - 1) {
+  throw new Error('reminder_manifest_writer_not_removed_once');
+}
 const authorityWriter = manifest.models.interviewBooking.writers.find(
   (writer) => writer.path === 'src/services/interviewBookingStateService.js'
 );
 if (!authorityWriter) throw new Error('interview_booking_authority_writer_missing');
 authorityWriter.reason = 'Creación, reemplazo, cancelación, recordatorios y respuestas de reservas delegadas por scheduler y reminder';
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+log('manifest_written');
 
 const mapPath = 'docs/architecture/state-authority-map.md';
-let map = fs.readFileSync(mapPath, 'utf8');
-map = replaceOnce(
+let map = fs.readFileSync(mapPath, 'utf8').replaceAll('\r\n', '\n');
+map = replaceRegexOnce(
   map,
-  '| `InterviewBooking` | 5 | Crítico | En consolidación | `InterviewBookingStateService` |',
+  /\| `InterviewBooking` \| 5 \| Crítico \| En consolidación \| `InterviewBookingStateService` \|/,
   '| `InterviewBooking` | 4 | Crítico | En consolidación | `InterviewBookingStateService` |',
   'map_writer_count'
 );
-map = replaceOnce(
+map = replaceRegexOnce(
   map,
-  'El número de escritores permanece en cinco porque administración, webhook, `chatEngine` y recordatorios aún realizan otras transiciones directamente. El scheduler sale del inventario y es sustituido por la autoridad canónica objetivo.',
+  /El número de escritores permanece en cinco porque administración, webhook, `chatEngine` y recordatorios aún realizan otras transiciones directamente\. El scheduler sale del inventario y es sustituido por la autoridad canónica objetivo\./,
   '`reminder.js` delega ahora cierre de ventana, reclamación idempotente, `NO_RESPONSE` y respuestas interpretadas. La solicitud de reprogramación conserva la reserva activa hasta crear un reemplazo válido. El número de escritores baja a cuatro: administración, webhook, `chatEngine` y la autoridad canónica.',
   'map_reminder_progress'
 );
-map = replaceOnce(
+map = replaceRegexOnce(
   map,
-  '### 2. Las reservas conservan cuatro fronteras directas por migrar\n\nDespués de extraer las mutaciones del scheduler, `InterviewBooking` todavía se modifica desde webhook, recordatorios, administración y un motor conversacional alternativo.',
+  /### 2\. Las reservas conservan cuatro fronteras directas por migrar\n\nDespués de extraer las mutaciones del scheduler, `InterviewBooking` todavía se modifica desde webhook, recordatorios, administración y un motor conversacional alternativo\./,
   '### 2. Las reservas conservan tres fronteras directas por migrar\n\nDespués de extraer scheduler y recordatorios, `InterviewBooking` todavía se modifica desde webhook, administración y un motor conversacional alternativo.',
   'map_remaining_frontiers'
 );
 fs.writeFileSync(mapPath, map, 'utf8');
-
-console.log('Reminder authority migration applied successfully.');
+log('map_written');
+log('success');
