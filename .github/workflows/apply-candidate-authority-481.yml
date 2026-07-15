@@ -27,12 +27,22 @@ jobs:
       - name: Apply scoped migration
         run: node scripts/apply-candidate-inbound-resume-authority.mjs
 
-      - name: Validate scoped migration
+      - name: Check syntax
         run: |
           node --check src/services/candidateStateService.js
           node --check src/routes/webhook.js
-          node --test test/candidateStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminBotPause.test.js
-          node --test test/stateAuthorityManifest.test.js
+
+      - name: Run CandidateStateService unit tests
+        run: node --test test/candidateStateService.test.js
+
+      - name: Run webhook Candidate authority regression
+        run: node --test test/webhookCandidateStateAuthority.test.js
+
+      - name: Run existing pause policy regressions
+        run: node --test test/adminBotPause.test.js
+
+      - name: Validate state authority manifest
+        run: node --test test/stateAuthorityManifest.test.js
 
       - name: Publish scoped migration
         shell: bash
