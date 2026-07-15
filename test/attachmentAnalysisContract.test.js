@@ -394,6 +394,8 @@ test('Terra es el modelo por defecto y las tareas especializadas permiten overri
   assert.match(routeSource, /Revisión manual/);
   assert.match(routeSource, /Datos registrados por el candidato/);
   assert.match(routeSource, /Medio de transporte/);
+  assert.match(routeSource, /medio de transporte y la residencia registrados/);
+  assert.doesNotMatch(routeSource, /datos laborales y operativos del registro/);
   assert.doesNotMatch(routeSource, /Experiencia declarada/);
   assert.doesNotMatch(routeSource, /Disponibilidad/);
   assert.match(routeSource, /Evidencia encontrada \(HV o registro\)/);
