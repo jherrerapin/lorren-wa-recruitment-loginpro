@@ -109,7 +109,7 @@ test('propaga el error de creación cuando no aparece una reserva activa concurr
   );
 });
 
-test('cancela únicamente reservas activas y cierra su ventana de recordatorio', async () => {
+test('cancela únicamente reservas activas, cierra su ventana y conserva el retorno Prisma', async () => {
   const { prisma, calls } = createPrismaMock({ updateCount: 2 });
 
   const result = await cancelActiveInterviewBookings(prisma, {
@@ -117,11 +117,7 @@ test('cancela únicamente reservas activas y cierra su ventana de recordatorio',
     replacementStatus: 'CANCELLED'
   });
 
-  assert.deepEqual(result, {
-    updated: 2,
-    candidateId: 'candidate-1',
-    replacementStatus: 'CANCELLED'
-  });
+  assert.deepEqual(result, { count: 2 });
   assert.deepEqual(calls.updateMany, [{
     where: {
       candidateId: 'candidate-1',
