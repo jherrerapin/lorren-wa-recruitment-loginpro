@@ -14,6 +14,9 @@ function requireCandidateId(candidateId) {
 }
 
 function requireValidDate(value, fieldName) {
+  if (value === null || typeof value === 'boolean') {
+    throw new TypeError(`${fieldName}_invalid`);
+  }
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) throw new TypeError(`${fieldName}_invalid`);
   return date;
@@ -39,7 +42,8 @@ export async function resumeCandidateAutomationOnInbound(client, input = {}) {
   const candidateClient = requireCandidateClient(client);
   const candidateId = requireCandidateId(input.candidateId);
   const expected = normalizeExpectedPause(input.expected);
-  const now = requireValidDate(input.now ?? new Date(), 'candidate_resume_now');
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_resume_now');
 
   const result = await candidateClient.candidate.updateMany({
     where: {
