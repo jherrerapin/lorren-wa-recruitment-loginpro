@@ -73,14 +73,18 @@ jobs:
           elif new_trace not in webhook:
               raise SystemExit('No se encontró attachDebugTrace directo ni delegado')
 
-          old_responded = """            await prisma.message.updateMany({
-              where: { id: { in: pendingBatch.map((item) => item.id) } },
-              data: { respondedAt: new Date() }
-            });"""
-          new_responded = """            await markConversationMessagesResponded(prisma, {
-              messageIds: pendingBatch.map((item) => item.id),
-              respondedAt: new Date()
-            });"""
+          old_responded = (
+              "            await prisma.message.updateMany({\n"
+              "              where: { id: { in: pendingBatch.map((item) => item.id) } },\n"
+              "              data: { respondedAt: new Date() }\n"
+              "            });"
+          )
+          new_responded = (
+              "            await markConversationMessagesResponded(prisma, {\n"
+              "              messageIds: pendingBatch.map((item) => item.id),\n"
+              "              respondedAt: new Date()\n"
+              "            });"
+          )
           if old_responded in webhook:
               webhook = webhook.replace(old_responded, new_responded, 1)
           elif new_responded not in webhook:
@@ -120,24 +124,9 @@ jobs:
 
           test_path = Path('test/conversationMessageRepository.test.js')
           tests = test_path.read_text(encoding='utf-8')
-          old_test = """  const debug = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };
-
-            const result = await mergeConversationMessagePayload(prisma, {
-              messageId: 'message-inbound-1',
-              patch: { debug }
-            });"""
-          new_test = """  const debugTrace = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };
-
-            const result = await mergeConversationMessagePayload(prisma, {
-              messageId: 'message-inbound-1',
-              patch: { debugTrace }
-            });"""
-          if old_test in tests:
-              tests = tests.replace(old_test, new_test, 1)
-          else:
-              tests = tests.replace("  const debug = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };", "  const debugTrace = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };", 1)
-              tests = tests.replace('    patch: { debug }', '    patch: { debugTrace }', 1)
-          tests = tests.replace('        debug\n', '        debugTrace\n', 1)
+          tests = tests.replace("  const debug = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };", "  const debugTrace = { currentStep_before: 'MENU', currentStep_after: 'COLLECTING_DATA' };", 1)
+          tests = tests.replace('    patch: { debug }', '    patch: { debugTrace }', 1)
+          tests = tests.replace("        debug\n", "        debugTrace\n", 1)
           tests = tests.replace('  assert.deepEqual(result.rawPayload.debug, debug);', '  assert.deepEqual(result.rawPayload.debugTrace, debugTrace);', 1)
           if 'patch: { debugTrace }' not in tests or 'result.rawPayload.debugTrace' not in tests:
               raise SystemExit('La prueba no conserva la clave debugTrace')
