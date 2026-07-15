@@ -144,6 +144,7 @@ test('costo estimado individual distribuye gasto por anuncio y día', () => {
   assert.equal(metric.candidates[1].estimatedCost, 10000);
   assert.equal(metric.estimatedIncompleteSpend, 10000);
   assert.equal(metric.metaConversationsStarted, 5);
+  assert.equal(metric.selectionOutcomes, 1);
   assert.equal(metric.scheduled, 2);
   assert.equal(metric.confirmed, 1);
   assert.equal(metric.attended, 1);
@@ -160,6 +161,7 @@ test('costo estimado individual distribuye gasto por anuncio y día', () => {
   assert.equal(total.costPerScheduled, 10000);
   assert.equal(total.costPerAttended, 20000);
   assert.equal(total.noShow, 1);
+  assert.equal(total.selectionOutcomes, 1);
 });
 
 test('inasistencia usa el estado NO_SHOW y no se deduce de confirmados menos asistentes', () => {
@@ -208,10 +210,17 @@ test('candidatos no elegibles se separan de los abandonos del registro', () => {
   assert.equal(total.estimatedIneligibleSpend, 5000);
 });
 
-test('acciones de Meta se suman por coincidencia de conversación iniciada', () => {
+test('conversaciones de Meta conservan un solo valor sin sumar alias jerárquicos', () => {
   assert.equal(extractMessagingConversations([
     { action_type: 'messaging_conversation_started_7d', value: '2' },
     { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '3' },
     { action_type: 'link_click', value: '10' }
-  ]), 5);
+  ]), 3);
+  assert.equal(extractMessagingConversations([
+    { action_type: 'messaging_conversation_started_7d', value: '2' }
+  ]), 2);
+  assert.equal(extractMessagingConversations([
+    { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '3' },
+    { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '2' }
+  ]), 3);
 });
