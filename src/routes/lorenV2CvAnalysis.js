@@ -214,19 +214,12 @@ function renderStringList(title, items = []) {
 }
 
 function renderRegisteredData(candidate = {}) {
-  const experience = [candidate?.experienceInfo, candidate?.experienceTime, candidate?.experienceSummary]
-    .map(normalizeString)
-    .filter(Boolean)
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .join(' · ');
   const residence = [candidate?.locality, candidate?.neighborhood, candidate?.zone]
     .map(normalizeString)
     .find(Boolean);
   const items = [
     ['Medio de transporte', candidate?.transportMode],
-    ['Residencia', residence],
-    ['Experiencia declarada', experience],
-    ['Disponibilidad', candidate?.availability]
+    ['Residencia', residence]
   ].filter(([, value]) => normalizeString(value));
   if (!items.length) return '';
   return `<div class="registered">
