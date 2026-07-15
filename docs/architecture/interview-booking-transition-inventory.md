@@ -49,7 +49,6 @@ La confirmación de asistencia exige booking activo y entrevista futura. Se admi
 | `src/services/interviewScheduler.js` | creación, reemplazo y cancelación de reservas activas | Completa |
 | `src/services/reminder.js` | reclamación y cierre de ventanas; `NO_RESPONSE` | Completa |
 | `src/routes/admin.js` | estado manual, recordatorio, eliminación y asignación | Completa |
-| `src/services/chatEngine.js` | confirmación, cancelación y solicitud de reprogramación | Completa |
 | `src/routes/webhook.js` | confirmación, cancelación, reprogramación y creación conversacional | Completa; se migrará al final |
 
 No se retirará un escritor del manifiesto hasta delegar todas sus mutaciones y cubrirlas con pruebas.
@@ -119,26 +118,16 @@ Antes, el dispatcher comprueba si existe un inbound posterior a `reminderSentAt`
 
 ## chatEngine.js
 
-`handleAppointmentIntentDirectly()` carga una reserva activa y muta por ID.
+### Estado migrado
 
-### confirm_attendance
+`handleAppointmentIntentDirectly()` conserva la carga de la reserva activa, la clasificación de intención y los textos existentes, pero delega confirmación, cancelación y solicitud de reprogramación en `applyInterviewReminderResponse()`.
 
-Asigna `CONFIRMED`, guarda `reminderResponse`, cierra la ventana y responde con la fecha. La clasificación previa usa `interviewLifecycle.js`.
+- confirmación: la autoridad cambia a `CONFIRMED`, guarda la respuesta y cierra la ventana;
+- cancelación: la autoridad cambia a `CANCELLED`; después el motor limpia el recordatorio del candidato;
+- reprogramación: la autoridad guarda la solicitud y cierra la ventana sin cambiar `SCHEDULED` o `CONFIRMED`; después el motor busca una alternativa y mueve al candidato a `SCHEDULING`;
+- concurrencia: si la comparación por ID y estado devuelve `count=0`, el motor no informa una transición como exitosa ni ejecuta efectos secundarios.
 
-### cancel_interview
-
-Asigna `CANCELLED`, guarda la respuesta, cierra la ventana y limpia el recordatorio del candidato.
-
-### reschedule_interview
-
-1. Asigna inmediatamente `RESCHEDULED` a la reserva anterior.
-2. Guarda la respuesta y cierra la ventana.
-3. Después busca una alternativa.
-4. Cambia al candidato a `SCHEDULING`.
-5. Ofrece el horario si existe; si no, informa que un humano ayudará.
-6. No crea una nueva reserva.
-
-Hallazgo crítico: cierra la única reserva antes de comprobar disponibilidad y sin reemplazo válido.
+`chatEngine.js` deja de escribir `InterviewBooking` directamente. El webhook queda como única frontera directa pendiente.
 
 ## webhook.js
 
@@ -253,7 +242,8 @@ La ruta ya no abre una transacción externa, no preconsulta `InterviewBooking` y
 
 - lifecycle, scheduler y reminder: cerrado;
 - panel: activo y elegible para reminder;
-- webhook y chat engine: solicitud sin reserva nueva;
+- webhook: solicitud sin reserva nueva;
+- chat engine: solicitud registrada por la autoridad sin cerrar la reserva activa;
 - scheduler: reserva anterior realmente reemplazada.
 
 La solución alineada con el objetivo es diferenciar:
@@ -263,9 +253,9 @@ La solución alineada con el objetivo es diferenciar:
 
 No se cambiará Prisma en este PR.
 
-### Dos rutas cierran antes de reemplazar
+### Una ruta cierra antes de reemplazar
 
-Webhook y chat engine asignan `RESCHEDULED` antes de disponibilidad o nueva reserva.
+El webhook todavía asigna `RESCHEDULED` antes de disponibilidad o nueva reserva. `chatEngine.js` ya conserva la reserva activa.
 
 ### La creación conversacional no es atómica
 
@@ -289,9 +279,9 @@ Valida destino, no origen ni transición.
 | ventana abierta | cerrar duplicado | cierre de ventana | reminder | condicional por booking |
 | activo | reclamar reminder | fecha + cierre | reminder | condicional por booking |
 | `SCHEDULED` | sin respuesta | `NO_RESPONSE` | reminder | condicional por booking |
-| activo | confirmar asistencia | `CONFIRMED` | webhook/chat engine | actualización única |
-| activo | cancelar entrevista | `CANCELLED` | webhook/chat engine | booking y candidato separados |
-| activo | pedir reprogramación | `RESCHEDULED` sin reemplazo | webhook/chat engine | inconsistente |
+| activo | confirmar asistencia | `CONFIRMED` | webhook / autoridad para chat engine | directa en webhook; condicional por ID y estado en autoridad |
+| activo | cancelar entrevista | `CANCELLED` | webhook / autoridad para chat engine | booking y candidato separados; transición condicional en autoridad |
+| activo | pedir reprogramación | webhook: `RESCHEDULED` sin reemplazo; chat engine: conserva activo | webhook / autoridad para chat engine | webhook inconsistente; chat engine condicional |
 | cualquier estado visible | acción manual | uno de seis destinos | admin | sin guard de origen |
 | booking existente | asignar manualmente | reemplazo + nueva `SCHEDULED` | admin/scheduler | booking en `tx`; candidato fuera |
 | booking exacto | corregir/eliminar | borrado físico | admin | transaccional |
@@ -344,7 +334,7 @@ Cada contrato declarará booking exacto o criterio permitido, origen, destino, c
 4. Migrar scheduler y hacer atómico el reemplazo.
 5. Migrar reminder conservando filtros condicionales.
 6. Migrar admin con acciones y eliminaciones explícitas auditadas.
-7. Migrar chat engine heredado.
+7. Migrar chat engine heredado mediante la autoridad compartida.
 8. Migrar webhook al final, preservando replays.
 9. Diseñar historial, retención y `tenantId` en fases separadas.
 10. Marcar canónico solo con un escritor en el manifiesto.
