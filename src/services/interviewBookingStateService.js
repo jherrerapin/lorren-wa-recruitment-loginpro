@@ -72,7 +72,7 @@ export async function createScheduledInterviewBooking(prisma, input = {}) {
   const vacancyId = requireNonEmptyString(input.vacancyId, 'vacancy_id');
   const slotId = requireNonEmptyString(input.slotId, 'slot_id');
   const scheduledAt = requireTimestamp(input.scheduledAt, 'scheduled_at');
-  const reminderWindowClosed = input.reminderWindowClosed ?? false;
+  const reminderWindowClosed = input.reminderWindowClosed === undefined ? false : input.reminderWindowClosed;
   const replacementStatus = requireNonEmptyString(input.replacementStatus ?? 'RESCHEDULED', 'replacement_status');
 
   const exactExisting = await findExactActiveBooking(prisma, {
