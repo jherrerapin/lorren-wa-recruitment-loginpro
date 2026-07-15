@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import express from 'express';
 import axios from 'axios';
 import { adminRouter } from '../src/routes/admin.js';
@@ -110,4 +111,26 @@ test('mensaje libre manual se envía y se guarda exactamente sin filtro de IA/se
     axios.post = originalPost;
     await new Promise(resolve => server.close(resolve));
   }
+});
+
+test('la eliminación administrativa delega mensajes y conserva el orden transaccional', () => {
+  const source = fs.readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8');
+  const routeStart = source.indexOf("router.post('/candidates/:id/delete'");
+  const routeEnd = source.indexOf("router.post('/candidates/:id/edit'", routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart, 'No se encontró la ruta de eliminación del candidato');
+
+  const route = source.slice(routeStart, routeEnd);
+  assert.doesNotMatch(route, /tx\.message\.deleteMany\s*\(/);
+  assert.match(route, /deleteConversationMessagesForCandidate\(tx,\s*\{\s*candidateId:\s*candidate\.id\s*\}\)/s);
+
+  const messageIndex = route.indexOf('deleteConversationMessagesForCandidate(tx,');
+  const bookingIndex = route.indexOf('tx.interviewBooking.deleteMany(');
+  const candidateIndex = route.indexOf('tx.candidate.delete(');
+  const transactionEnd = route.indexOf('    });', candidateIndex);
+  const cvCleanupIndex = route.indexOf('clearCandidateCvStorage(candidate)');
+
+  assert.ok(messageIndex < bookingIndex, 'Los mensajes deben eliminarse antes de las reservas');
+  assert.ok(bookingIndex < candidateIndex, 'Las reservas deben eliminarse antes del candidato');
+  assert.ok(candidateIndex < transactionEnd, 'El candidato debe eliminarse dentro de la transacción');
+  assert.ok(transactionEnd < cvCleanupIndex, 'La limpieza del CV debe permanecer fuera de la transacción');
 });
