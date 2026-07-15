@@ -20,6 +20,7 @@ const REMINDER_RESPONSE_INTENTS = new Set([
   'cancel_interview',
   'reschedule_interview'
 ]);
+const ACTIVE_INTERVIEW_BOOKING_STATUSES_SET = new Set(ACTIVE_INTERVIEW_BOOKING_STATUSES);
 
 function requireNonEmptyString(value, label) {
   if (value === null || value === undefined) {
@@ -373,7 +374,7 @@ export async function applyInterviewReminderResponse(prisma, input = {}) {
   const bookingId = requireNonEmptyString(responseInput.bookingId, 'booking_id');
   const currentStatus = requireAllowedStatus(
     responseInput.currentStatus,
-    new Set(ACTIVE_INTERVIEW_BOOKING_STATUSES),
+    ACTIVE_INTERVIEW_BOOKING_STATUSES_SET,
     'current_status'
   );
   const responseText = requireNonEmptyString(responseInput.responseText, 'reminder_response');
@@ -391,12 +392,13 @@ export async function applyInterviewReminderResponse(prisma, input = {}) {
       reminderWindowClosed: true
     }
   });
+  const wasApplied = result.count > 0;
 
   return {
     count: result.count,
     intent,
     previousStatus: currentStatus,
-    nextStatus: transition.nextStatus,
-    statusChanged: transition.statusChanged
+    nextStatus: wasApplied ? transition.nextStatus : currentStatus,
+    statusChanged: wasApplied && transition.statusChanged
   };
 }
