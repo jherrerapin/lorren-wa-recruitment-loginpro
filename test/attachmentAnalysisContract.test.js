@@ -241,6 +241,16 @@ function cachedCandidate(id, experienceSummary) {
     cvData: null,
     cvOriginalName: `${id}.pdf`,
     cvMimeType: 'application/pdf',
+    locality: 'Suba',
+    neighborhood: null,
+    transportMode: id === 'candidate-strong' ? 'Motocicleta propia' : 'Transporte público',
+    experienceInfo: 'Sí',
+    experienceTime: id === 'candidate-strong' ? '2 años' : '6 meses',
+    experienceSummary: `Registro: ${experienceSummary}`,
+    availability: 'Tiempo completo',
+    age: 29,
+    gender: 'FEMALE',
+    medicalRestrictions: 'Dato que no debe enviarse',
     updatedAt: new Date('2026-07-15T12:00:00.000Z'),
     vacancy: { id: 'vacancy-1', title: 'Auxiliar de inventarios', city: 'Bogotá' },
     attachmentAnalyses: [{
@@ -296,7 +306,7 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
         level: 'POSSIBLE',
         score: 58,
         reasons: ['Tiene experiencia relacionada con bodega.'],
-        evidence: ['Seis meses apoyando bodega.'],
+        evidence: ['Hoja de vida: seis meses apoyando bodega.', 'Registro: transporte público.'],
         gaps: ['Falta confirmar un año de experiencia.']
       },
       {
@@ -304,7 +314,7 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
         level: 'STRONG',
         score: 92,
         reasons: ['Cumple experiencia y Excel.'],
-        evidence: ['Dos años manejando inventarios y Excel.'],
+        evidence: ['Hoja de vida: dos años manejando inventarios y Excel.', 'Registro: medio de transporte Moto.'],
         gaps: []
       }
     ] } }] }] } };
@@ -315,7 +325,7 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
         id: 'vacancy-1',
         title: 'Auxiliar de inventarios',
         city: 'Bogotá',
-        requirements: null,
+        requirements: 'Debe contar con moto propia.',
         roleDescription: null
       })
     },
@@ -340,6 +350,30 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
   assert.match(review.groups.manual[0].manualReason, /no fue posible compararla/i);
   assert.equal(calls.length, 2);
   assert.equal(calls.every((payload) => payload.model === 'gpt-5.6-terra'), true);
+
+  const profileInput = JSON.parse(calls[0].input[1].content[0].text);
+  assert.equal(profileInput.vacancy.requirements, 'Debe contar con moto propia.');
+
+  const matchInput = JSON.parse(calls[1].input[1].content[0].text);
+  const strongInput = matchInput.candidates.find((candidate) => candidate.candidateId === 'candidate-strong');
+  assert.equal(strongInput.sources.cv.experienceSummary, 'Dos años manejando inventarios y Excel.');
+  assert.deepEqual(strongInput.sources.registration, {
+    transportMode: 'Moto',
+    residence: 'Suba',
+    declaredExperience: {
+      hasExperience: 'Sí',
+      duration: '2 años',
+      summary: 'Registro: Dos años manejando inventarios y Excel.'
+    },
+    availability: 'Tiempo completo'
+  });
+  for (const excludedField of ['fullName', 'phone', 'documentNumber', 'age', 'gender', 'medicalRestrictions']) {
+    assert.equal(JSON.stringify(strongInput).includes(`"${excludedField}"`), false);
+  }
+  assert.match(calls[1].input[0].content[0].text, /sources\.cv/);
+  assert.match(calls[1].input[0].content[0].text, /sources\.registration/);
+  assert.match(calls[1].input[0].content[0].text, /Hoja de vida:/);
+  assert.match(calls[1].input[0].content[0].text, /Registro:/);
 });
 
 test('Terra es el modelo por defecto y las tareas especializadas permiten overrides', () => {
@@ -360,5 +394,8 @@ test('Terra es el modelo por defecto y las tareas especializadas permiten overri
   assert.match(routeSource, /name="vacancyId" required/);
   assert.match(routeSource, /name="desiredProfile"/);
   assert.match(routeSource, /Revisión manual/);
+  assert.match(routeSource, /Datos registrados por el candidato/);
+  assert.match(routeSource, /Medio de transporte/);
+  assert.match(routeSource, /Evidencia encontrada \(HV o registro\)/);
   assert.doesNotMatch(routeSource, /cambiar.*estado.*candidato/i);
 });
