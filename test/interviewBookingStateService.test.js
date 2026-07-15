@@ -81,6 +81,17 @@ test('cierra reservas activas antes de crear la nueva reserva programada', async
   });
 });
 
+test('conserva un valor explícito de reminderWindowClosed sin normalizarlo', async () => {
+  const { prisma, calls } = createPrismaMock();
+
+  await createScheduledInterviewBooking(prisma, {
+    ...bookingInput,
+    reminderWindowClosed: null
+  });
+
+  assert.equal(calls.create[0].data.reminderWindowClosed, null);
+});
+
 test('ante error de creación recupera una reserva activa concurrente', async () => {
   const concurrent = { id: 'booking-concurrent', status: 'SCHEDULED' };
   const createError = new Error('unique constraint');
