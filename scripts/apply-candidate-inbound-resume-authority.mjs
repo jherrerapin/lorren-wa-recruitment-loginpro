@@ -86,8 +86,8 @@ if (!candidate || candidate.migrationStage !== 'fragmented') {
 if (!candidate.writers.some((writer) => writer.path === 'src/services/candidateStateService.js')) {
   candidate.writers.push({
     path: 'src/services/candidateStateService.js',
-    role: 'canonical',
-    reason: 'Primera autoridad estrecha para reanudación condicional por mensaje entrante y futura consolidación de Candidate'
+    role: 'boundary',
+    reason: 'Primera frontera de la autoridad objetivo para reanudación condicional por mensaje entrante; Candidate continúa fragmentado'
   });
 }
 write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -103,11 +103,11 @@ map = replaceOnce(
 const marker = '## Progreso de consolidación\n\n';
 const progress = `### Candidate: primera frontera migrada
 
-\`CandidateStateService\` inicia como autoridad estrecha sin convertir todavía el agregado en canónico. La primera operación centralizada es la reanudación por mensaje entrante después de una pausa manual.
+\`CandidateStateService\` inicia como autoridad estrecha sin convertir todavía el agregado en canónico. En el manifiesto se declara como \`boundary\` transitorio porque \`ConsentStateService\` continúa siendo el escritor canónico del subgrupo de consentimiento mientras los demás consumidores todavía escriben otros campos de \`Candidate\`.
 
-El webhook conserva la decisión mediante \`shouldBlockAutomation()\` y \`shouldResumeAutomationOnInbound()\`, pero la persistencia compara el snapshot completo de pausa —ID, marca temporal, actor, motivo y modo de reanudación— mediante \`updateMany\`. Si otra operación cambió la pausa, \`count=0\` evita sobrescribirla y el webhook devuelve el estado actual sin registrar una reanudación falsa.
+La primera operación centralizada es la reanudación por mensaje entrante después de una pausa manual. El webhook conserva la decisión mediante \`shouldBlockAutomation()\` y \`shouldResumeAutomationOnInbound()\`, pero la persistencia compara el snapshot completo de pausa —ID, marca temporal, actor, motivo y modo de reanudación— mediante \`updateMany\`. Si otra operación cambió la pausa, \`count=0\` evita sobrescribirla y el webhook devuelve el estado actual sin registrar una reanudación falsa.
 
-La incorporación temporal de la autoridad aumenta el inventario a dieciséis escritores porque los quince consumidores heredados todavía modifican otros grupos de campos de \`Candidate\`. El agregado permanece \`fragmented\` hasta migrar cada frontera.
+La incorporación temporal de la nueva frontera aumenta el inventario a dieciséis escritores porque los quince consumidores heredados todavía modifican otros grupos de campos de \`Candidate\`. El agregado permanece \`fragmented\` hasta migrar cada frontera y resolver la autoridad final por composición de casos de uso.
 
 `;
 map = replaceOnce(map, marker, marker + progress, 'candidate_progress_section');
