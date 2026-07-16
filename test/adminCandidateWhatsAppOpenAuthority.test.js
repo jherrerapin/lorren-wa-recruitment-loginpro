@@ -49,7 +49,9 @@ test('la ruta carga el snapshot completo antes de delegar', () => {
 test('valida enlace antes de persistir y no escribe Candidate directamente', () => {
   const linkIndex = route.indexOf('buildWhatsAppLink(candidate.phone)');
   const authorityIndex = route.indexOf('recordManualWhatsAppOpen');
-  assert.ok(linkIndex >= 0 && authorityIndex > linkIndex);
+  assert.ok(linkIndex >= 0);
+  assert.ok(authorityIndex >= 0);
+  assert.ok(authorityIndex > linkIndex);
   assert.doesNotMatch(route, /prisma\.candidate\.(?:update|updateMany)\s*\(/);
   assert.doesNotMatch(route, /buildManualWhatsAppOpenCandidateUpdate/);
 });
@@ -62,6 +64,10 @@ test('un conflicto termina antes de auditoría y apertura externa', () => {
   const redirectIndex = route.lastIndexOf('return res.redirect(whatsappUrl)');
 
   assert.ok(authorityIndex >= 0);
+  assert.ok(countIndex >= 0);
+  assert.ok(eventIndex >= 0);
+  assert.ok(whatsappUrlIndex >= 0);
+  assert.ok(redirectIndex >= 0);
   assert.ok(countIndex > authorityIndex);
   assert.ok(eventIndex > countIndex);
   assert.ok(whatsappUrlIndex > countIndex);
@@ -73,6 +79,10 @@ test('solo registra CONTACTADO después de una transición persistida', () => {
   const countIndex = route.indexOf('transition.count !== 1');
   const roleGuardIndex = route.indexOf("req.userRole !== 'dev'");
   const eventIndex = route.indexOf("eventType: 'WHATSAPP_OPENED'");
+
+  assert.ok(countIndex >= 0);
+  assert.ok(roleGuardIndex >= 0);
+  assert.ok(eventIndex >= 0);
   assert.ok(roleGuardIndex > countIndex);
   assert.ok(eventIndex > roleGuardIndex);
   assert.match(route, /candidate\.status !== 'CONTACTADO'/);
