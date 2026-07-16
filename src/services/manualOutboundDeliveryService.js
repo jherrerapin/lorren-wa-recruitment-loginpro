@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { MessageType } from '@prisma/client';
-import { safeErrorMessage } from './cvIntelligence.js';
+import { safeErrorMessage } from './errorSanitization.js';
 import {
   claimManualOutboundDelivery,
   finalizeManualOutboundDelivery,

@@ -21,11 +21,6 @@ function getValue(row, key) {
 }
 
 function matchesCondition(value, condition) {
-  if (value instanceof Date || condition instanceof Date) {
-    if (value == null || condition == null) return value === condition;
-    return normalizeDate(value).getTime() === normalizeDate(condition).getTime();
-  }
-
   if (condition && typeof condition === 'object' && !Array.isArray(condition) && !(condition instanceof Date)) {
     if (Object.hasOwn(condition, 'in')) {
       return condition.in.includes(value);
@@ -33,15 +28,23 @@ function matchesCondition(value, condition) {
     if (Object.hasOwn(condition, 'not')) {
       return !matchesCondition(value, condition.not);
     }
-    if (Object.hasOwn(condition, 'lte') && normalizeDate(value).getTime() > normalizeDate(condition.lte).getTime()) {
-      return false;
-    }
-    if (Object.hasOwn(condition, 'gte') && normalizeDate(value).getTime() < normalizeDate(condition.gte).getTime()) {
-      return false;
-    }
-    if (Object.hasOwn(condition, 'lte') || Object.hasOwn(condition, 'gte')) {
+
+    const hasDateRange = ['lt', 'lte', 'gt', 'gte'].some((operator) => Object.hasOwn(condition, operator));
+    if (hasDateRange) {
+      const normalizedValue = normalizeDate(value);
+      const valueTime = normalizedValue instanceof Date ? normalizedValue.getTime() : Number.NaN;
+      if (Number.isNaN(valueTime)) return false;
+      if (Object.hasOwn(condition, 'lt') && valueTime >= normalizeDate(condition.lt).getTime()) return false;
+      if (Object.hasOwn(condition, 'lte') && valueTime > normalizeDate(condition.lte).getTime()) return false;
+      if (Object.hasOwn(condition, 'gt') && valueTime <= normalizeDate(condition.gt).getTime()) return false;
+      if (Object.hasOwn(condition, 'gte') && valueTime < normalizeDate(condition.gte).getTime()) return false;
       return true;
     }
+  }
+
+  if (value instanceof Date || condition instanceof Date) {
+    if (value == null || condition == null) return value === condition;
+    return normalizeDate(value).getTime() === normalizeDate(condition).getTime();
   }
 
   return value === condition;
