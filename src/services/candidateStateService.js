@@ -1,3 +1,4 @@
+import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
 
 function requireCandidateClient(client) {
@@ -22,6 +23,14 @@ function requireNonEmptyString(value, fieldName) {
   return normalized;
 }
 
+function requireCandidateAdminRole(value) {
+  const role = String(value || '').trim().toLowerCase();
+  if (!['dev', 'admin'].includes(role)) {
+    throw new TypeError('candidate_admin_role_invalid');
+  }
+  return role;
+}
+
 function requireValidDate(value, fieldName) {
   if (value === null || typeof value === 'boolean') {
     throw new TypeError(`${fieldName}_invalid`);
@@ -29,6 +38,10 @@ function requireValidDate(value, fieldName) {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) throw new TypeError(`${fieldName}_invalid`);
   return date;
+}
+
+function normalizeNullableDate(value, fieldName) {
+  return value == null ? null : requireValidDate(value, fieldName);
 }
 
 function normalizeExpectedPauseSnapshot(expected = {}, { requirePaused = false } = {}) {
@@ -41,12 +54,25 @@ function normalizeExpectedPauseSnapshot(expected = {}, { requirePaused = false }
 
   return {
     botPaused: expected.botPaused,
-    botPausedAt: expected.botPausedAt == null
-      ? null
-      : requireValidDate(expected.botPausedAt, 'candidate_expected_bot_paused_at'),
+    botPausedAt: normalizeNullableDate(expected.botPausedAt, 'candidate_expected_bot_paused_at'),
     botPausedBy: expected.botPausedBy ?? null,
     botPauseReason: expected.botPauseReason ?? null,
     botResumeMode: expected.botResumeMode ?? null
+  };
+}
+
+function normalizeManualWhatsAppOpenSnapshot(expected = {}, role) {
+  const snapshot = normalizeExpectedPauseSnapshot(expected);
+  if (role === 'dev') {
+    return {
+      ...snapshot,
+      devLastSeenAt: normalizeNullableDate(expected.devLastSeenAt, 'candidate_expected_dev_last_seen_at')
+    };
+  }
+
+  return {
+    ...snapshot,
+    status: requireNonEmptyString(expected.status, 'candidate_expected_status')
   };
 }
 
@@ -143,5 +169,29 @@ export async function resumeCandidateAutomationFromAdmin(client, input = {}) {
       reminderScheduledFor: null,
       reminderState: 'CANCELLED'
     }
+  });
+}
+
+export async function recordManualWhatsAppOpen(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const role = requireCandidateAdminRole(input.role);
+  const actor = requireNonEmptyString(input.actor, 'candidate_whatsapp_open_actor');
+  const expected = normalizeManualWhatsAppOpenSnapshot(input.expected, role);
+  const reason = input.reason === undefined
+    ? 'Conversacion tomada manualmente por apertura de WhatsApp desde dashboard'
+    : requireNonEmptyString(input.reason, 'candidate_whatsapp_open_reason');
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_whatsapp_open_now');
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: buildManualWhatsAppOpenCandidateUpdate({
+      now,
+      role,
+      pausedBy: actor,
+      reason
+    })
   });
 }
