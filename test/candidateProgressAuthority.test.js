@@ -132,14 +132,14 @@ test('los contratos multilinea preservan el compare-and-set observado', () => {
   }
 
   const webhook = readSource('src/routes/webhook.js');
-  assert.match(webhook, /async function scheduleMultilineWindow\(prisma, candidateId, context = \{\}\)/);
-  assert.match(webhook, /multilineWindowUntil:\s*windowUntil/);
-  assert.match(webhook, /multilineBatchVersion:\s*\{ increment: 1 \}/);
-  assert.match(webhook, /async function tryAcquireMultilineProcessing\(prisma, candidateId, batchVersion\)/);
-  assert.match(webhook, /multilineBatchVersion:\s*batchVersion/);
-  assert.match(webhook, /multilineWindowUntil:\s*\{ lte: new Date\(\) \}/);
-  assert.match(webhook, /multilineWindowUntil:\s*null/);
-  assert.match(webhook, /return acquired\.count === 1/);
+  assert.match(webhook, /async\s+function\s+scheduleMultilineWindow\s*\(\s*prisma\s*,\s*candidateId\s*,\s*context\s*=\s*\{\s*\}\s*\)/);
+  assert.match(webhook, /multilineWindowUntil\s*:\s*windowUntil/);
+  assert.match(webhook, /multilineBatchVersion\s*:\s*\{\s*increment\s*:\s*1\s*,?\s*\}/);
+  assert.match(webhook, /async\s+function\s+tryAcquireMultilineProcessing\s*\(\s*prisma\s*,\s*candidateId\s*,\s*batchVersion\s*\)/);
+  assert.match(webhook, /multilineBatchVersion\s*:\s*batchVersion/);
+  assert.match(webhook, /multilineWindowUntil\s*:\s*\{\s*lte\s*:\s*new\s+Date\(\s*\)\s*\}/);
+  assert.match(webhook, /multilineWindowUntil\s*:\s*null/);
+  assert.match(webhook, /return\s+acquired\.count\s*===\s*1/);
 });
 
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
