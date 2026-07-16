@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { dispatchAuditMiddleware } from '../src/services/dispatchAuditMiddleware.js';
 
 function readSource(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -106,15 +107,78 @@ test('users view has one form with dispatch checkbox and no operations-only form
   assert.doesNotMatch(usersView, /\/admin\/users\/create-operations/);
 });
 
-test('reclutador-general solo aparece en el listado de usuarios para DEV', () => {
+test('los perfiles protegidos solo aparecen en el listado de usuarios para DEV', () => {
   const adminSource = readSource('src/routes/admin.js');
   const start = adminSource.indexOf('function buildManageableUsersWhere');
   const end = adminSource.indexOf('function isManualAttentionCandidate', start);
   const visibilityRule = adminSource.slice(start, end);
 
   assert.ok(start >= 0 && end > start);
-  assert.match(visibilityRule, /accessContext\.isDev\s*\?\s*\{\}\s*:\s*\{\s*username:\s*\{\s*not:\s*'reclutador-general'/);
+  assert.match(visibilityRule, /hiddenUsernames\s*=\s*\['reclutador-general',\s*environmentAdminUsername\(\)\]/);
+  assert.match(visibilityRule, /accessContext\.isDev\s*\?\s*\{\}\s*:\s*\{\s*username:\s*\{\s*notIn:/);
   assert.match(visibilityRule, /return \{ role: 'ADMIN', \.\.\.visibilityWhere \}/);
+});
+
+test('reclutador-general puede administrar usuarios y el perfil de Railway queda protegido', () => {
+  const adminSource = readSource('src/routes/admin.js');
+  const locationsSource = readSource('src/routes/locations.js');
+  const usersView = readSource('src/views/users.ejs');
+
+  assert.match(adminSource, /source\s*===\s*'db'[\s\S]*?username\s*===\s*'reclutador-general'[\s\S]*?accessScope\s*===\s*'ALL'/);
+  assert.match(adminSource, /if \(accessContext\.isDev\) \{\s*await ensureEnvironmentAdminProfile\(prisma\)/);
+  assert.match(adminSource, /passwordHash:\s*await bcrypt\.hash\(randomUUID\(\),\s*12\)/);
+  assert.match(locationsSource, /req\.userSource\s*===\s*'db'[\s\S]*?req\.username\s*===\s*'reclutador-general'[\s\S]*?req\.userAccessScope\s*===\s*'ALL'/);
+  assert.match(locationsSource, /req\.userRole\s*!==\s*'dev'\s*&&\s*isProtectedRecruiterProfile\(user\)/);
+  assert.match(usersView, /Perfil principal configurado en Railway/);
+  assert.match(usersView, /user\.username\s*!==\s*environmentAdminUsername[\s\S]*?reset-password/);
+});
+
+test('la cuenta reclutador de Railway recibe los permisos editados sin cerrar sesión', async (t) => {
+  const previousAdminUser = process.env.ADMIN_USER;
+  process.env.ADMIN_USER = 'reclutador';
+  t.after(() => {
+    if (previousAdminUser === undefined) delete process.env.ADMIN_USER;
+    else process.env.ADMIN_USER = previousAdminUser;
+  });
+
+  let requestedWhere = null;
+  const prisma = {
+    appUser: {
+      findUnique: async ({ where }) => {
+        requestedWhere = where;
+        return {
+          id: 'env-profile-1',
+          isActive: true,
+          accessScope: 'ALL',
+          scopeCity: null,
+          scopeVacancyId: null,
+          canAccessDispatch: true,
+          canAccessStatistics: true,
+          canAccessMetaAds: false,
+          canAccessCvAnalysis: true
+        };
+      }
+    }
+  };
+  const req = {
+    method: 'GET',
+    path: '/admin',
+    session: {
+      userSource: 'env',
+      userRole: 'admin',
+      username: 'reclutador',
+      userId: null
+    }
+  };
+
+  await dispatchAuditMiddleware(prisma)(req, {}, () => {});
+
+  assert.deepEqual(requestedWhere, { username: 'reclutador' });
+  assert.equal(req.session.userId, 'env-profile-1');
+  assert.equal(req.session.canAccessDispatch, true);
+  assert.equal(req.session.canAccessMetaAds, false);
+  assert.equal(req.session.canAccessCvAnalysis, true);
+  assert.equal(req.session.canAccessStatistics, true);
 });
 
 test('operations-only creation routes were removed from server', () => {

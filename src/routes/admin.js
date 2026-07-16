@@ -2,6 +2,7 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import {
@@ -80,15 +81,66 @@ function sessionAuth(req, res, next) {
 function canManageRecruiterUsers(req) {
   const role = req.userRole || req.session?.userRole;
   const source = req.userSource || req.session?.userSource;
-  return source === 'env' && (role === 'admin' || role === 'dev');
+  const username = req.username || req.session?.username;
+  const accessScope = req.userAccessScope || req.session?.userAccessScope;
+  if (source === 'env' && (role === 'admin' || role === 'dev')) return true;
+  return source === 'db'
+    && role === 'admin'
+    && username === 'reclutador-general'
+    && accessScope === 'ALL';
 }
 
 function ensureRecruiterUserManagementAccess(req, res) {
   if (canManageRecruiterUsers(req)) return true;
   if (res) {
-    return res.redirect('/admin?error=' + encodeURIComponent('La gestión de usuarios solo está disponible para reclutador y devloginpro.'));
+    return res.redirect('/admin?error=' + encodeURIComponent('La gestión de usuarios solo está disponible para reclutador general y devloginpro.'));
   }
   return false;
+}
+
+function environmentAdminUsername() {
+  return normalizeString(process.env.ADMIN_USER);
+}
+
+function isEnvironmentAdminProfile(user = {}) {
+  const username = environmentAdminUsername();
+  return Boolean(username && user.username === username);
+}
+
+function isProtectedRecruiterProfile(user = {}) {
+  return user.username === 'reclutador-general' || isEnvironmentAdminProfile(user);
+}
+
+async function ensureEnvironmentAdminProfile(prisma) {
+  const username = environmentAdminUsername();
+  if (!username) return null;
+
+  const existing = await prisma.appUser.findUnique({ where: { username } });
+  if (existing) return existing;
+
+  try {
+    return await prisma.appUser.create({
+      data: {
+        username,
+        passwordHash: await bcrypt.hash(randomUUID(), 12),
+        role: 'ADMIN',
+        accessScope: 'ALL',
+        scopeCity: null,
+        scopeVacancyId: null,
+        canAccessDispatch: false,
+        canAccessStatistics: false,
+        canAccessMetaAds: false,
+        canAccessCvAnalysis: false,
+        createdByUsername: 'Sistema: perfil principal de Railway',
+        isActive: true
+      }
+    });
+  } catch (error) {
+    if (error?.code === 'P2002') {
+      return prisma.appUser.findUnique({ where: { username } });
+    }
+    throw error;
+  }
 }
 
 function normalizeString(value) {
@@ -519,9 +571,10 @@ async function ensureVacancyIdAccess(prisma, req, vacancyId, res, returnTo = '/a
 }
 
 function buildManageableUsersWhere(accessContext = {}) {
+  const hiddenUsernames = ['reclutador-general', environmentAdminUsername()].filter(Boolean);
   const visibilityWhere = accessContext.isDev
     ? {}
-    : { username: { not: 'reclutador-general' } };
+    : { username: { notIn: [...new Set(hiddenUsernames)] } };
 
   if (accessContext.isDev || accessContext.scope === 'ALL') {
     return { role: 'ADMIN', ...visibilityWhere };
@@ -3034,6 +3087,9 @@ export function adminRouter(prisma) {
   router.get('/users', async (req, res) => {
     if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const accessContext = getRequestAccessContext(req);
+    if (accessContext.isDev) {
+      await ensureEnvironmentAdminProfile(prisma);
+    }
     const [users, vacancies] = await Promise.all([
       prisma.appUser.findMany({
         where: buildManageableUsersWhere(accessContext),
@@ -3074,7 +3130,8 @@ export function adminRouter(prisma) {
       revealedRecoveryCode: normalizeString(req.query.recoveryCode),
       highlightedUsername: normalizeString(req.query.username),
       currentUsername: req.username || '',
-      currentUserId: req.userId || ''
+      currentUserId: req.userId || '',
+      environmentAdminUsername: environmentAdminUsername() || ''
     });
   });
 
@@ -3157,6 +3214,12 @@ export function adminRouter(prisma) {
     if (user.role !== 'ADMIN') {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios reclutadores.'));
     }
+    if (isEnvironmentAdminProfile(user)) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('La contraseña del perfil principal se administra en Railway.'));
+    }
+    if (!accessContext.isDev && isProtectedRecruiterProfile(user)) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo DEV puede administrar este perfil protegido.'));
+    }
 
     const userIsManageable = accessContext.isDev || accessContext.scope === 'ALL'
       ? true
@@ -3201,6 +3264,12 @@ export function adminRouter(prisma) {
     }
     if (user.role !== 'ADMIN') {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios reclutadores.'));
+    }
+    if (isEnvironmentAdminProfile(user)) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('La recuperación del perfil principal se administra en Railway.'));
+    }
+    if (!accessContext.isDev && isProtectedRecruiterProfile(user)) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo DEV puede administrar este perfil protegido.'));
     }
 
     const userIsManageable = accessContext.isDev || accessContext.scope === 'ALL'
@@ -3248,6 +3317,12 @@ export function adminRouter(prisma) {
     }
     if (user.role !== 'ADMIN') {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios reclutadores.'));
+    }
+    if (isEnvironmentAdminProfile(user)) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('El perfil principal se activa y desactiva desde Railway.'));
+    }
+    if (!accessContext.isDev && isProtectedRecruiterProfile(user)) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo DEV puede administrar este perfil protegido.'));
     }
 
     const userIsManageable = accessContext.isDev || accessContext.scope === 'ALL'

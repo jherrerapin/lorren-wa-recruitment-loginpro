@@ -215,7 +215,7 @@
               const userCities = [...new Set([...metadata.cities, ...selectedVacancies.map((vacancy) => vacancy.city)].filter(Boolean))];
             %>
               <tr>
-                <td><strong><%= user.username %></strong><% if (user.username === highlightedUsername) { %><small>Último usuario intervenido</small><% } %><small>Creado por: <%= user.createdByUsername || 'Sistema' %></small></td>
+                <td><strong><%= user.username %></strong><% if (user.username === environmentAdminUsername) { %><small>Perfil principal configurado en Railway</small><% } %><% if (user.username === highlightedUsername) { %><small>Último usuario intervenido</small><% } %><small>Creado por: <%= user.createdByUsername || 'Sistema' %></small></td>
                 <td>
                   <% if (user.accessScope === 'ALL') { %>
                     Todas las vacantes
@@ -229,11 +229,13 @@
                 </td>
                 <td>Reclutamiento<% if (user.canAccessDispatch) { %><small>Operaciones / Despacho</small><% } %><% if (user.canAccessMetaAds) { %><small>Estadísticas: Meta Ads</small><% } %><% if (user.canAccessCvAnalysis) { %><small>Estadísticas: Análisis HV</small><% } %></td>
                 <td><span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>"><%= user.isActive ? 'Activo' : 'Inactivo' %></span><small>Último cambio de contraseña: <%= user.lastPasswordResetAt ? user.lastPasswordResetAt.toLocaleString('es-CO', { hour12: false }) : 'Sin registro' %></small></td>
-                <td><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.recoveryEmail || '—' %></small><small>Recuperación disponible desde /recover.</small></td>
+                <td><% if (user.username === environmentAdminUsername) { %><small>La contraseña y recuperación se administran en Railway.</small><% } else { %><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.recoveryEmail || '—' %></small><small>Recuperación disponible desde /recover.</small><% } %></td>
                 <td>
-                  <form method="post" action="/admin/users/<%= user.id %>/toggle" class="inline-form"><button type="submit" class="btn <%= user.isActive ? 'btn-danger' : 'btn-secondary' %>"><%= user.isActive ? 'Desactivar' : 'Activar' %></button></form>
-                  <form method="post" action="/admin/users/<%= user.id %>/reset-recovery-code" class="inline-form"><button type="submit" class="btn btn-warning">Regenerar código</button></form>
-                  <form method="post" action="/admin/users/<%= user.id %>/reset-password" class="inline-form"><input name="newPassword" type="password" minlength="6" placeholder="Nueva contraseña" required /><button type="submit" class="btn btn-secondary">Resetear contraseña</button></form>
+                  <% if (user.username !== environmentAdminUsername) { %>
+                    <form method="post" action="/admin/users/<%= user.id %>/toggle" class="inline-form"><button type="submit" class="btn <%= user.isActive ? 'btn-danger' : 'btn-secondary' %>"><%= user.isActive ? 'Desactivar' : 'Activar' %></button></form>
+                    <form method="post" action="/admin/users/<%= user.id %>/reset-recovery-code" class="inline-form"><button type="submit" class="btn btn-warning">Regenerar código</button></form>
+                    <form method="post" action="/admin/users/<%= user.id %>/reset-password" class="inline-form"><input name="newPassword" type="password" minlength="6" placeholder="Nueva contraseña" required /><button type="submit" class="btn btn-secondary">Resetear contraseña</button></form>
+                  <% } %>
                   <div class="inline-form"><button type="button" class="btn btn-edit btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Editar datos y acceso</button></div>
 
                   <div class="edit-drawer" id="edit-drawer-<%= user.id %>">

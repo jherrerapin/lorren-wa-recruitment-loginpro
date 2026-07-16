@@ -24,12 +24,23 @@ function sessionAuth(req, res, next) {
   req.userId = req.session?.userId || null;
   req.username = req.session?.username || null;
   req.userSource = req.session?.userSource || null;
+  req.userAccessScope = req.session?.userAccessScope || 'ALL';
   if (!['dev', 'admin'].includes(role)) return res.redirect('/admin');
   return next();
 }
 
 function canManageRecruiterUsers(req) {
-  return req.userSource === 'env' && ['dev', 'admin'].includes(req.userRole);
+  if (req.userSource === 'env' && ['dev', 'admin'].includes(req.userRole)) return true;
+  return req.userSource === 'db'
+    && req.userRole === 'admin'
+    && req.username === 'reclutador-general'
+    && req.userAccessScope === 'ALL';
+}
+
+function isProtectedRecruiterProfile(user = {}) {
+  const environmentAdminUsername = normalize(process.env.ADMIN_USER);
+  return user.username === 'reclutador-general'
+    || Boolean(environmentAdminUsername && user.username === environmentAdminUsername);
 }
 
 function flash(res, type, msg) {
@@ -354,6 +365,9 @@ export function locationsRouter(prisma) {
     });
     if (!user || user.role !== 'ADMIN') {
       return res.redirect(usersRedirect('error', 'Usuario reclutador no encontrado.'));
+    }
+    if (req.userRole !== 'dev' && isProtectedRecruiterProfile(user)) {
+      return res.redirect(usersRedirect('error', 'Solo DEV puede editar este perfil protegido.', user.username));
     }
 
     const accessUpdate = await resolveRecruiterAccessUpdate(prisma, req.body);
