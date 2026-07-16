@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageDirection } from '@prisma/client';
@@ -133,6 +134,17 @@ function createClock(...values) {
   };
 }
 
+function dedupeKeyFor(inputValue) {
+  return createHash('sha256')
+    .update([
+      inputValue.candidateId,
+      inputValue.rawPayload.source,
+      inputValue.rawPayload.action,
+      inputValue.body
+    ].join('\u0000'))
+    .digest('hex');
+}
+
 const baseCandidate = {
   id: 'candidate-delivery-1',
   phone: '573001112233',
@@ -200,7 +212,7 @@ test('un rechazo HTTP confirmado marca FAILED y restaura todo el snapshot previo
     }),
     (error) => {
       assert.equal(error.code, 'manual_outbound_provider_rejected');
-      assert.match(getManualOutboundUserMessage(error), /rechazó el mensaje/i);
+      assert.match(getManualOutboundUserMessage(error), /restaurado al estado anterior/i);
       return true;
     }
   );
@@ -263,6 +275,81 @@ test('bloquea una entrega idéntica reciente después de un envío confirmado', 
 
   assert.equal(harness.calls.sends.length, 1);
   assert.equal(harness.state.messages.length, 1);
+});
+
+test('revalida el duplicado dentro de la transacción y revierte el reclamo tardío', async () => {
+  const harness = createHarness({ candidate: baseCandidate });
+  const originalFindMany = harness.prisma.message.findMany;
+  let reads = 0;
+  harness.prisma.message.findMany = async (args) => {
+    reads += 1;
+    if (reads === 1) return [];
+    if (reads === 2) {
+      return [{
+        id: 'message-concurrent-sent',
+        waMessageId: 'wamid.concurrent.1',
+        createdAt: new Date('2026-07-16T01:24:59.000Z'),
+        rawPayload: {
+          delivery: {
+            state: 'SENT',
+            dedupeKey: dedupeKeyFor(input)
+          }
+        }
+      }];
+    }
+    return originalFindMany(args);
+  };
+
+  await assert.rejects(
+    () => deliverManualOutboundText(harness.prisma, input, {
+      sendText: harness.sendText,
+      now: createClock('2026-07-16T01:25:00.000Z')
+    }),
+    (error) => {
+      assert.equal(error.code, 'manual_outbound_duplicate_recent');
+      return true;
+    }
+  );
+
+  assert.equal(reads, 2);
+  assert.equal(harness.calls.sends.length, 0);
+  assert.equal(harness.state.messages.length, 0);
+  assert.equal(harness.state.candidate.botPaused, baseCandidate.botPaused);
+  assert.equal(harness.state.candidate.botResumeMode, baseCandidate.botResumeMode);
+  assert.equal(harness.state.candidate.reminderState, baseCandidate.reminderState);
+});
+
+test('un rechazo confirmado no afirma restauración cuando falla la persistencia interna', async () => {
+  const harness = createHarness({ candidate: baseCandidate });
+  const originalTransaction = harness.prisma.$transaction;
+  let transactionAttempt = 0;
+  harness.prisma.$transaction = async (callback) => {
+    transactionAttempt += 1;
+    if (transactionAttempt === 2) throw new Error('database_unavailable');
+    return originalTransaction(callback);
+  };
+  const rejection = new Error('Bad Request');
+  rejection.response = { status: 400 };
+
+  await assert.rejects(
+    () => deliverManualOutboundText(harness.prisma, input, {
+      sendText: async () => {
+        harness.calls.order.push('provider:send');
+        throw rejection;
+      },
+      now: createClock('2026-07-16T01:27:00.000Z', '2026-07-16T01:27:01.000Z')
+    }),
+    (error) => {
+      assert.equal(error.code, 'manual_outbound_provider_rejected_unreconciled');
+      assert.match(getManualOutboundUserMessage(error), /no se pudo actualizar el estado interno/i);
+      assert.doesNotMatch(getManualOutboundUserMessage(error), /restaurado al estado anterior/i);
+      return true;
+    }
+  );
+
+  assert.equal(harness.state.messages[0].rawPayload.delivery.state, 'SENDING');
+  assert.equal(harness.state.candidate.botPaused, true);
+  assert.equal(harness.state.candidate.botResumeMode, MANUAL_OUTBOUND_SENDING_MODE);
 });
 
 test('bloquea una entrega ya reclamada antes de contactar al proveedor', async () => {
