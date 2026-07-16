@@ -346,7 +346,8 @@ export function locationsRouter(prisma) {
         id: true,
         username: true,
         role: true,
-        canAccessDispatch: true
+        canAccessDispatch: true,
+        canAccessStatistics: true
       }
     });
     if (!user || user.role !== 'ADMIN') {
@@ -367,6 +368,7 @@ export function locationsRouter(prisma) {
     };
     if (req.userRole === 'dev') {
       data.canAccessDispatch = isChecked(req.body.canAccessDispatch);
+      data.canAccessStatistics = isChecked(req.body.canAccessStatistics);
     }
 
     await prisma.appUser.update({

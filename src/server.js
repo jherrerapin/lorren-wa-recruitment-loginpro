@@ -101,8 +101,7 @@ function currentRequestPath(req = {}) {
 }
 
 function isStatsUser(req = {}) {
-  const role = req.userRole || req.session?.userRole;
-  return role === 'dev' || role === 'admin';
+  return canSeeLorenV2(req);
 }
 
 function isStatsCampaignsPage(req = {}) {

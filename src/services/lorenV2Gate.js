@@ -14,8 +14,12 @@ export function canSeeLorenV2(source = {}, now = new Date()) {
   const role = source.userRole || source.role || null;
   const username = source.username || null;
   const scope = source.userAccessScope || source.accessScope || null;
+  const canAccessStatistics = Boolean(
+    source.canAccessStatistics ?? source.session?.canAccessStatistics
+  );
 
   if (role === 'dev') return true;
+  if (canAccessStatistics) return isLorenV2Released(now);
   if (username === 'reclutador-general' && scope === 'ALL') {
     return isLorenV2Released(now);
   }
