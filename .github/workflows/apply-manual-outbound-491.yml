@@ -1,0 +1,255 @@
+name: Apply manual outbound delivery 491
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 492 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: refactor/491-manual-outbound-delivery
+          fetch-depth: 0
+
+      - name: Apply bounded migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          admin = Path('src/routes/admin.js')
+          source = admin.read_text()
+          source = source.replace(
+              "import {\n  deleteConversationMessagesForCandidate,\n  persistOutboundConversationMessage\n} from '../services/conversationMessageRepository.js';",
+              "import { deleteConversationMessagesForCandidate } from '../services/conversationMessageRepository.js';"
+          )
+          source = source.replace(
+              "import { buildManualInterventionCandidateUpdate } from '../services/adminOutboundPolicy.js';\n",
+              ""
+          )
+          marker = "import { sendTextMessage } from '../services/whatsapp.js';\n"
+          addition = marker + "import {\n  deliverManualOutboundText,\n  getManualOutboundUserMessage\n} from '../services/manualOutboundDeliveryService.js';\n"
+          if marker not in source:
+              raise SystemExit('admin whatsapp import marker not found')
+          source = source.replace(marker, addition, 1)
+
+          old_helper = '''async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
+            const update = buildManualInterventionCandidateUpdate({
+              pausedBy: rawPayload?.sentBy || 'dashboard',
+              reason: rawPayload?.pauseReason || 'Conversacion tomada manualmente desde dashboard'
+            });
+            const preserveExactBody = rawPayload?.preserveExactBody === true;
+            const originalBody = String(body || '');
+            const safety = preserveExactBody
+              ? { reply: originalBody, blocked: false, blockedClaims: [], reason: null }
+              : sanitizeOutboundReply({
+                reply: originalBody || buildSafeFallbackReply(),
+                vacancy: candidate?.vacancy || null,
+                candidate,
+                source: rawPayload?.source || 'admin_outbound'
+              });
+            const finalBody = preserveExactBody ? originalBody : (safety.reply || buildSafeFallbackReply());
+            await sendTextMessage(candidate.phone, finalBody);
+            await prisma.candidate.update({ where: { id: candidate.id }, data: update });
+            const authorizedPayload = {
+              ...rawPayload,
+              actor: rawPayload?.actor === 'ADMIN' ? 'ADMIN' : 'RECRUITER',
+              sourceCategory: 'MANUAL_AUTHORIZED',
+              manualIntervention: true
+            };
+            await persistOutboundConversationMessage(prisma, {
+              candidateId: candidate.id,
+              messageType: MessageType.TEXT,
+              body: finalBody,
+              rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
+            });
+          }'''
+          new_helper = '''async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
+            const preserveExactBody = rawPayload?.preserveExactBody === true;
+            const originalBody = String(body || '');
+            const safety = preserveExactBody
+              ? { reply: originalBody, blocked: false, blockedClaims: [], reason: null }
+              : sanitizeOutboundReply({
+                reply: originalBody || buildSafeFallbackReply(),
+                vacancy: candidate?.vacancy || null,
+                candidate,
+                source: rawPayload?.source || 'admin_outbound'
+              });
+            const finalBody = preserveExactBody ? originalBody : (safety.reply || buildSafeFallbackReply());
+            const authorizedPayload = {
+              ...rawPayload,
+              actor: rawPayload?.actor === 'ADMIN' ? 'ADMIN' : 'RECRUITER',
+              sourceCategory: 'MANUAL_AUTHORIZED',
+              manualIntervention: true
+            };
+            const deliveryPayload = safety.blocked
+              ? {
+                ...authorizedPayload,
+                replySafety: {
+                  blocked: true,
+                  blockedClaims: safety.blockedClaims,
+                  reason: safety.reason
+                }
+              }
+              : authorizedPayload;
+
+            return deliverManualOutboundText(prisma, {
+              candidateId: candidate.id,
+              phone: candidate.phone,
+              body: finalBody,
+              actor: rawPayload?.sentBy || 'dashboard',
+              reason: rawPayload?.pauseReason || 'Conversacion tomada manualmente desde dashboard',
+              rawPayload: deliveryPayload
+            }, {
+              sendText: sendTextMessage
+            });
+          }'''
+          if old_helper not in source:
+              raise SystemExit('sendAdminOutboundMessage exact block not found')
+          source = source.replace(old_helper, new_helper, 1)
+
+          replacements = {
+              "return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible enviar el recordatorio manual.'));":
+                  "return res.redirect(withFlashMessage(returnTo, 'error', getManualOutboundUserMessage(err, 'No fue posible enviar el recordatorio manual.')));",
+              "return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible enviar la información de la vacante.'));":
+                  "return res.redirect(withFlashMessage(returnTo, 'error', getManualOutboundUserMessage(error, 'No fue posible enviar la información de la vacante.')));",
+              "res.redirect(`/admin/candidates/${id}?outboundError=` + encodeURIComponent('Error al enviar el mensaje.'));":
+                  "res.redirect(`/admin/candidates/${id}?outboundError=` + encodeURIComponent(getManualOutboundUserMessage(err, 'Error al enviar el mensaje.')));",
+              "res.redirect(withFlashMessage(returnTo, 'error', 'Error al enviar la solicitud de HV.'));":
+                  "res.redirect(withFlashMessage(returnTo, 'error', getManualOutboundUserMessage(err, 'Error al enviar la solicitud de HV.')));"
+          }
+          for old, new in replacements.items():
+              if old not in source:
+                  raise SystemExit(f'admin error mapping not found: {old}')
+              source = source.replace(old, new, 1)
+          admin.write_text(source)
+
+          mock = Path('test/helpers/mockPrisma.js')
+          mock_source = mock.read_text()
+          old_candidates = "    candidates: clone(initialState.candidates || []),"
+          new_candidates = """    candidates: clone(initialState.candidates || []).map((candidate) => ({
+              botPaused: false,
+              botPausedAt: null,
+              botPausedBy: null,
+              botPauseReason: null,
+              botResumeMode: null,
+              reminderScheduledFor: null,
+              reminderState: 'NONE',
+              lastOutboundAt: null,
+              ...candidate
+            })),"""
+          if old_candidates not in mock_source:
+              raise SystemExit('mock candidates marker not found')
+          mock_source = mock_source.replace(old_candidates, new_candidates, 1)
+          old_return = '''  return {
+              state,
+              candidate: candidateApi,
+              message: messageApi,
+              vacancy: vacancyApi,
+              interviewBooking: bookingApi,
+              interviewSlot: slotApi,
+              botKnowledge: botKnowledgeApi
+            };
+          }'''
+          new_return = '''  const prisma = {
+              state,
+              candidate: candidateApi,
+              message: messageApi,
+              vacancy: vacancyApi,
+              interviewBooking: bookingApi,
+              interviewSlot: slotApi,
+              botKnowledge: botKnowledgeApi
+            };
+            prisma.$transaction = async (callback) => callback(prisma);
+            return prisma;
+          }'''
+          if old_return not in mock_source:
+              raise SystemExit('mock return block not found')
+          mock.write_text(mock_source.replace(old_return, new_return, 1))
+
+          manifest_path = Path('docs/architecture/state-authority-manifest.json')
+          manifest = json.loads(manifest_path.read_text())
+          writers = manifest['models']['candidate']['writers']
+          writer = next(item for item in writers if item['path'] == 'src/services/candidateStateService.js')
+          writer['reason'] = 'Frontera de la autoridad objetivo para reanudación por inbound, pausas administrativas, apertura de WhatsApp y ciclo condicional de entrega manual saliente; Candidate continúa fragmentado'
+          manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
+
+          map_path = Path('docs/architecture/state-authority-map.md')
+          map_source = map_path.read_text()
+          map_source = map_source.replace('### Candidate: tres fronteras migradas', '### Candidate: cuatro fronteras migradas')
+          old_progress = 'La primera frontera centralizada fue la reanudación por mensaje entrante después de una pausa manual. La segunda incorpora los botones explícitos de pausar y reanudar del panel administrativo. La tercera centraliza la intervención implícita al abrir WhatsApp desde el panel: compara el snapshot completo de pausa y, según el rol, también `status` o `devLastSeenAt` antes de pausar, cancelar recordatorios y registrar la apertura. Los casos de uso usan `updateMany`; si otra operación cambió el estado, `count=0` evita sobrescrituras y eventos administrativos falsos.'
+          new_progress = old_progress + '\n\nLa cuarta frontera incorpora la entrega manual saliente. Antes de contactar a Meta, una transacción reclama el snapshot exacto del candidato y crea una intención `Message` con estado `SENDING`. El éxito finaliza `lastOutboundAt` y registra `SENT`; un rechazo HTTP confirmado restaura condicionalmente el snapshot previo y registra `FAILED`; un timeout o resultado no confirmable queda `UNKNOWN`, mantiene el bot pausado y exige revisión humana. No existe reintento automático.'
+          if old_progress not in map_source:
+              raise SystemExit('candidate progress paragraph not found')
+          map_source = map_source.replace(old_progress, new_progress, 1)
+          old_message = '`admin.js` delega la creación de mensajes salientes manuales en `ConversationMessageRepository`, pero conserva el orden histórico de envío, actualización del candidato y persistencia.'
+          new_message = '`admin.js` ya no crea mensajes ni actualiza directamente `Candidate` durante la mensajería manual. `manualOutboundDeliveryService` coordina las autoridades compartidas: persiste primero la intención, ejecuta el efecto externo sin reintento automático y registra `SENT`, `FAILED` o `UNKNOWN` según el resultado.'
+          if old_message in map_source:
+              map_source = map_source.replace(old_message, new_message, 1)
+          map_path.write_text(map_source)
+
+          ci = Path('.github/workflows/ci.yml')
+          ci_source = ci.read_text()
+          old_candidate_gate = 'run: node --test test/candidateStateService.test.js test/candidateAdminPauseStateService.test.js test/candidateWhatsAppOpenStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminCandidatePauseAuthority.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/adminBotPause.test.js'
+          new_candidate_gate = 'run: node --test test/candidateStateService.test.js test/candidateAdminPauseStateService.test.js test/candidateWhatsAppOpenStateService.test.js test/candidateManualOutboundStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminCandidatePauseAuthority.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/adminBotPause.test.js'
+          if old_candidate_gate not in ci_source:
+              raise SystemExit('candidate CI gate not found')
+          ci_source = ci_source.replace(old_candidate_gate, new_candidate_gate, 1)
+          old_admin_gate = 'run: node --test test/adminManualOutbound.test.js'
+          new_admin_gate = 'run: node --test test/manualOutboundDeliveryService.test.js test/adminManualOutboundDeliveryAuthority.test.js test/adminManualOutbound.test.js'
+          if old_admin_gate not in ci_source:
+              raise SystemExit('admin outbound CI gate not found')
+          ci.write_text(ci_source.replace(old_admin_gate, new_admin_gate, 1))
+          PY
+
+      - name: Validate bounded change
+        shell: bash
+        run: |
+          set -euo pipefail
+          allowed='^(src/routes/admin\.js|test/helpers/mockPrisma\.js|docs/architecture/state-authority-manifest\.json|docs/architecture/state-authority-map\.md|\.github/workflows/ci\.yml)$'
+          unexpected=$(git diff --name-only | grep -Ev "$allowed" || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files changed:"
+            echo "$unexpected"
+            exit 1
+          fi
+          node --check src/routes/admin.js
+          node --check test/helpers/mockPrisma.js
+          node --check src/services/candidateStateService.js
+          node --check src/services/conversationMessageRepository.js
+          node --check src/services/manualOutboundDeliveryService.js
+          node --check test/candidateManualOutboundStateService.test.js
+          node --check test/manualOutboundDeliveryService.test.js
+          node --check test/adminManualOutboundDeliveryAuthority.test.js
+          npm ci
+          npm run prisma:generate
+          node --test test/candidateManualOutboundStateService.test.js test/manualOutboundDeliveryService.test.js test/adminManualOutboundDeliveryAuthority.test.js test/adminManualOutbound.test.js test/conversationMessageRepository.test.js
+          node --test test/stateAuthorityManifest.test.js
+          git diff --check
+
+      - name: Publish bounded migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/routes/admin.js test/helpers/mockPrisma.js docs/architecture/state-authority-manifest.json docs/architecture/state-authority-map.md .github/workflows/ci.yml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'refactor: delegate manual outbound delivery lifecycle'
+          git push origin HEAD:refactor/491-manual-outbound-delivery
