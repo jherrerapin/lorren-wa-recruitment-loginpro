@@ -18,8 +18,20 @@ function between(content, start, end) {
   return content.slice(startIndex, endIndex);
 }
 
+function restoreEnvironmentValue(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
 function withWhatsappMock(fn) {
   return async () => {
+    const originalEnvironment = {
+      META_PHONE_NUMBER_ID: process.env.META_PHONE_NUMBER_ID,
+      META_ACCESS_TOKEN: process.env.META_ACCESS_TOKEN,
+      ADMIN_WHATSAPP_NUMBER: process.env.ADMIN_WHATSAPP_NUMBER,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY
+    };
+
     process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
     process.env.META_ACCESS_TOKEN = 'meta-access-token';
     process.env.ADMIN_WHATSAPP_NUMBER = '3052982551';
@@ -36,8 +48,9 @@ function withWhatsappMock(fn) {
       await fn(whatsappMock);
     } finally {
       axios.post = originalPost;
-      delete process.env.ADMIN_WHATSAPP_NUMBER;
-      delete process.env.OPENAI_API_KEY;
+      for (const [name, value] of Object.entries(originalEnvironment)) {
+        restoreEnvironmentValue(name, value);
+      }
     }
   };
 }
