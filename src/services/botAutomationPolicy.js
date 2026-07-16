@@ -1,3 +1,8 @@
+const NON_AUTO_RESUMABLE_MODES = new Set([
+  'manual_outbound_sending',
+  'manual_outbound_delivery_unknown'
+]);
+
 function isManualResumeMode(candidate = {}) {
   const mode = String(candidate?.botResumeMode || '').trim();
   return mode === 'manual_resume_dashboard'
@@ -13,6 +18,8 @@ function isManualPauseReason(candidate = {}) {
 
 export function shouldResumeAutomationOnInbound(candidate = {}) {
   if (!candidate?.botPaused) return false;
+  const mode = String(candidate?.botResumeMode || '').trim();
+  if (NON_AUTO_RESUMABLE_MODES.has(mode)) return false;
   return isManualResumeMode(candidate) || isManualPauseReason(candidate) || Boolean(candidate?.botPausedBy);
 }
 
