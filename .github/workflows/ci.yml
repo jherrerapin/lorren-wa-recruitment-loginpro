@@ -100,7 +100,7 @@ jobs:
         run: node --test test/consentStateService.test.js test/conversationMessageRepository.test.js
 
       - name: Run candidate state authority regressions
-        run: node --test test/candidateStateService.test.js test/candidateAdminPauseStateService.test.js test/candidateWhatsAppOpenStateService.test.js test/candidateManualOutboundStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminCandidatePauseAuthority.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/adminBotPause.test.js
+        run: node --test test/candidateStateService.test.js test/candidateAdminPauseStateService.test.js test/candidateWhatsAppOpenStateService.test.js test/candidateManualOutboundStateService.test.js test/candidateSupervisorReviewStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminCandidatePauseAuthority.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/adminSupervisorCandidateStateAuthority.test.js test/adminBotPause.test.js
 
       - name: Run interview booking authority regressions
         run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js test/interviewBookingAdminStateService.test.js test/interviewBookingDeletionStateService.test.js test/adminInterviewBookingAuthority.test.js test/chatEngineInterviewBookingAuthority.test.js test/webhookInterviewBookingAuthority.test.js
