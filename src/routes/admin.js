@@ -113,7 +113,7 @@ function isProtectedRecruiterProfile(user = {}) {
 
 async function ensureEnvironmentAdminProfile(prisma) {
   const username = environmentAdminUsername();
-  if (!username || !prisma?.appUser?.findUnique || !prisma?.appUser?.create) return null;
+  if (!username) return null;
 
   const existing = await prisma.appUser.findUnique({ where: { username } });
   if (existing) return existing;
