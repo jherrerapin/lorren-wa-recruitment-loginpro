@@ -23,6 +23,24 @@ jobs:
       - name: Apply migration in runner
         run: python scripts/apply-manual-outbound-491.py
 
+      - name: Instrument mock state in runner
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('test/adminManualOutbound.test.js')
+          source = path.read_text()
+          marker = "    const outbound = prisma.state.messages.find((message) => message.direction === 'OUTBOUND');"
+          if marker not in source:
+              raise SystemExit('diagnostic marker not found')
+          source = source.replace(
+              marker,
+              "    console.error('DIAGNOSTIC_MESSAGES=' + JSON.stringify(prisma.state.messages, null, 2));\n" + marker,
+              1
+          )
+          path.write_text(source)
+          PY
+
       - name: Install and generate
         shell: bash
         run: |
