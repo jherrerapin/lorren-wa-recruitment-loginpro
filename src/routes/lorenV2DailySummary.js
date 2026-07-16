@@ -77,8 +77,6 @@ function renderLayout({ title, body }) {
   <nav class="navbar">
     <a href="/admin">Panel</a>
     <a href="/admin/estadisticas">Estadísticas</a>
-    <a href="/admin/estadisticas/campaigns">Campañas</a>
-    <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>

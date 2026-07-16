@@ -398,6 +398,8 @@ model AppUser {
   lastPasswordResetAt DateTime?
   canAccessDispatch   Boolean         @default(false)
   canAccessStatistics Boolean         @default(false)
+  canAccessMetaAds    Boolean         @default(false)
+  canAccessCvAnalysis Boolean         @default(false)
   isActive            Boolean         @default(true)
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
@@ -409,6 +411,8 @@ model AppUser {
   @@index([scopeVacancyId])
   @@index([canAccessDispatch])
   @@index([canAccessStatistics])
+  @@index([canAccessMetaAds])
+  @@index([canAccessCvAnalysis])
 }
 
 model BotKnowledge {

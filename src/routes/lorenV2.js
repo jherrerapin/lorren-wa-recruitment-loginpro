@@ -1,8 +1,33 @@
 import express from 'express';
-import { requireLorenV2 } from '../services/lorenV2Gate.js';
+import {
+  canSeeCvAnalysis,
+  canSeeMetaAds,
+  requireLorenV2,
+  requireMetaAds
+} from '../services/lorenV2Gate.js';
 import { metaAdsStatsRouter } from './metaAdsStats.js';
 
-function renderStatisticsHub() {
+function renderStatisticsHub(req = {}) {
+  const metaAdsLink = canSeeMetaAds(req)
+    ? '<a href="/admin/estadisticas/campaigns">Meta Ads</a>'
+    : '';
+  const cvAnalysisLink = canSeeCvAnalysis(req)
+    ? '<a href="/admin/estadisticas/cv-analysis">Análisis HV</a>'
+    : '';
+  const metaAdsCard = canSeeMetaAds(req)
+    ? `<a href="/admin/estadisticas/campaigns" class="hub-card">
+        <div class="hub-card-icon">📣</div>
+        <div class="hub-card-title">Meta Ads</div>
+        <div class="hub-card-desc">Inversión, resultados del proceso y costo promedio por resultado.</div>
+      </a>`
+    : '';
+  const cvAnalysisCard = canSeeCvAnalysis(req)
+    ? `<a href="/admin/estadisticas/cv-analysis" class="hub-card">
+        <div class="hub-card-icon">🧠</div>
+        <div class="hub-card-title">Análisis de hojas de vida</div>
+        <div class="hub-card-desc">Organiza candidatos según la vacante y el perfil que estás buscando.</div>
+      </a>`
+    : '';
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -33,23 +58,17 @@ function renderStatisticsHub() {
     <a href="/admin">Panel</a>
     <span class="sep">›</span>
     <a href="/admin/estadisticas" class="active">Estadísticas</a>
+    ${metaAdsLink}
+    ${cvAnalysisLink}
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
   <main class="page">
     <h1>Estadísticas — Centro de inteligencia de Lórren</h1>
-    <p class="subtitle">Análisis avanzado de reclutamiento, campañas y calidad de candidatos.</p>
+    <p class="subtitle">Elige la herramienta que necesitas para revisar resultados o candidatos.</p>
     <div class="hub-grid">
-      <a href="/admin/estadisticas/campaigns" class="hub-card">
-        <div class="hub-card-icon">📣</div>
-        <div class="hub-card-title">Anuncios Meta Ads</div>
-        <div class="hub-card-desc">Inventario actual, inversión, embudo de conversión y asociación con vacantes.</div>
-      </a>
-      <a href="/admin/estadisticas/cv-analysis" class="hub-card">
-        <div class="hub-card-icon">🧠</div>
-        <div class="hub-card-title">Análisis de HV</div>
-        <div class="hub-card-desc">Revisión de hojas de vida procesadas por IA.</div>
-      </a>
+      ${metaAdsCard}
+      ${cvAnalysisCard}
     </div>
   </main>
 </body>
@@ -64,11 +83,11 @@ export function lorenV2Router(prisma, dependencies = {}) {
     next();
   });
 
-  router.get('/', requireLorenV2, (_req, res) => {
-    res.send(renderStatisticsHub());
+  router.get('/', requireLorenV2, (req, res) => {
+    res.send(renderStatisticsHub(req));
   });
 
-  router.use(requireLorenV2, metaAdsStatsRouter(prisma, dependencies));
+  router.use(requireMetaAds, metaAdsStatsRouter(prisma, dependencies));
   return router;
 }
 
