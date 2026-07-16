@@ -1,4 +1,7 @@
-import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
+import {
+  buildManualInterventionCandidateUpdate,
+  buildManualWhatsAppOpenCandidateUpdate
+} from './adminOutboundPolicy.js';
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
 
 function requireCandidateClient(client) {
@@ -73,6 +76,13 @@ function normalizeManualWhatsAppOpenSnapshot(expected = {}, role) {
   return {
     ...snapshot,
     status: requireNonEmptyString(expected.status, 'candidate_expected_status')
+  };
+}
+
+function normalizeManualOutboundSnapshot(expected = {}) {
+  return {
+    ...normalizeExpectedPauseSnapshot(expected),
+    lastOutboundAt: normalizeNullableDate(expected.lastOutboundAt, 'candidate_expected_last_outbound_at')
   };
 }
 
@@ -190,6 +200,28 @@ export async function recordManualWhatsAppOpen(client, input = {}) {
     data: buildManualWhatsAppOpenCandidateUpdate({
       now,
       role,
+      pausedBy: actor,
+      reason
+    })
+  });
+}
+
+export async function recordManualOutboundDelivery(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const actor = requireNonEmptyString(input.actor, 'candidate_manual_outbound_actor');
+  const expected = normalizeManualOutboundSnapshot(input.expected);
+  const reason = input.reason === undefined
+    ? 'Conversacion tomada manualmente desde dashboard'
+    : requireNonEmptyString(input.reason, 'candidate_manual_outbound_reason');
+  const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
+  const sentAt = requireValidDate(sentAtInput, 'candidate_manual_outbound_sent_at');
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: buildManualInterventionCandidateUpdate({
+      now: sentAt,
       pausedBy: actor,
       reason
     })
