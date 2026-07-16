@@ -30,55 +30,35 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import json
+          import textwrap
 
           admin = Path('src/routes/admin.js')
           source = admin.read_text()
+
+          old_message_import = "import {\n  deleteConversationMessagesForCandidate,\n  persistOutboundConversationMessage\n} from '../services/conversationMessageRepository.js';"
+          if old_message_import not in source:
+              raise SystemExit('admin message repository import not found')
           source = source.replace(
-              "import {\n  deleteConversationMessagesForCandidate,\n  persistOutboundConversationMessage\n} from '../services/conversationMessageRepository.js';",
-              "import { deleteConversationMessagesForCandidate } from '../services/conversationMessageRepository.js';"
+              old_message_import,
+              "import { deleteConversationMessagesForCandidate } from '../services/conversationMessageRepository.js';",
+              1
           )
-          source = source.replace(
-              "import { buildManualInterventionCandidateUpdate } from '../services/adminOutboundPolicy.js';\n",
-              ""
-          )
+
+          old_policy_import = "import { buildManualInterventionCandidateUpdate } from '../services/adminOutboundPolicy.js';\n"
+          if old_policy_import not in source:
+              raise SystemExit('admin outbound policy import not found')
+          source = source.replace(old_policy_import, '', 1)
+
           marker = "import { sendTextMessage } from '../services/whatsapp.js';\n"
           addition = marker + "import {\n  deliverManualOutboundText,\n  getManualOutboundUserMessage\n} from '../services/manualOutboundDeliveryService.js';\n"
           if marker not in source:
               raise SystemExit('admin whatsapp import marker not found')
           source = source.replace(marker, addition, 1)
 
-          old_helper = '''async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
-            const update = buildManualInterventionCandidateUpdate({
-              pausedBy: rawPayload?.sentBy || 'dashboard',
-              reason: rawPayload?.pauseReason || 'Conversacion tomada manualmente desde dashboard'
-            });
-            const preserveExactBody = rawPayload?.preserveExactBody === true;
-            const originalBody = String(body || '');
-            const safety = preserveExactBody
-              ? { reply: originalBody, blocked: false, blockedClaims: [], reason: null }
-              : sanitizeOutboundReply({
-                reply: originalBody || buildSafeFallbackReply(),
-                vacancy: candidate?.vacancy || null,
-                candidate,
-                source: rawPayload?.source || 'admin_outbound'
-              });
-            const finalBody = preserveExactBody ? originalBody : (safety.reply || buildSafeFallbackReply());
-            await sendTextMessage(candidate.phone, finalBody);
-            await prisma.candidate.update({ where: { id: candidate.id }, data: update });
-            const authorizedPayload = {
-              ...rawPayload,
-              actor: rawPayload?.actor === 'ADMIN' ? 'ADMIN' : 'RECRUITER',
-              sourceCategory: 'MANUAL_AUTHORIZED',
-              manualIntervention: true
-            };
-            await persistOutboundConversationMessage(prisma, {
-              candidateId: candidate.id,
-              messageType: MessageType.TEXT,
-              body: finalBody,
-              rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
-            });
-          }'''
-          new_helper = '''async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
+          helper_start = source.index('async function sendAdminOutboundMessage')
+          helper_end = source.index('\nfunction buildManualInterviewReminderText', helper_start)
+          new_helper = textwrap.dedent('''
+          async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
             const preserveExactBody = rawPayload?.preserveExactBody === true;
             const originalBody = String(body || '');
             const safety = preserveExactBody
@@ -117,10 +97,9 @@ jobs:
             }, {
               sendText: sendTextMessage
             });
-          }'''
-          if old_helper not in source:
-              raise SystemExit('sendAdminOutboundMessage exact block not found')
-          source = source.replace(old_helper, new_helper, 1)
+          }
+          ''').strip()
+          source = source[:helper_start] + new_helper + source[helper_end:]
 
           replacements = {
               "return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible enviar el recordatorio manual.'));":
@@ -141,21 +120,25 @@ jobs:
           mock = Path('test/helpers/mockPrisma.js')
           mock_source = mock.read_text()
           old_candidates = "    candidates: clone(initialState.candidates || []),"
-          new_candidates = """    candidates: clone(initialState.candidates || []).map((candidate) => ({
-              botPaused: false,
-              botPausedAt: null,
-              botPausedBy: null,
-              botPauseReason: null,
-              botResumeMode: null,
-              reminderScheduledFor: null,
-              reminderState: 'NONE',
-              lastOutboundAt: null,
-              ...candidate
-            })),"""
+          new_candidates = textwrap.dedent('''
+              candidates: clone(initialState.candidates || []).map((candidate) => ({
+                botPaused: false,
+                botPausedAt: null,
+                botPausedBy: null,
+                botPauseReason: null,
+                botResumeMode: null,
+                reminderScheduledFor: null,
+                reminderState: 'NONE',
+                lastOutboundAt: null,
+                ...candidate
+              })),
+          ''').rstrip()
           if old_candidates not in mock_source:
               raise SystemExit('mock candidates marker not found')
           mock_source = mock_source.replace(old_candidates, new_candidates, 1)
-          old_return = '''  return {
+
+          old_return = textwrap.dedent('''
+            return {
               state,
               candidate: candidateApi,
               message: messageApi,
@@ -164,8 +147,10 @@ jobs:
               interviewSlot: slotApi,
               botKnowledge: botKnowledgeApi
             };
-          }'''
-          new_return = '''  const prisma = {
+          }
+          ''').strip()
+          new_return = textwrap.dedent('''
+            const prisma = {
               state,
               candidate: candidateApi,
               message: messageApi,
@@ -176,7 +161,8 @@ jobs:
             };
             prisma.$transaction = async (callback) => callback(prisma);
             return prisma;
-          }'''
+          }
+          ''').strip()
           if old_return not in mock_source:
               raise SystemExit('mock return block not found')
           mock.write_text(mock_source.replace(old_return, new_return, 1))
@@ -190,17 +176,20 @@ jobs:
 
           map_path = Path('docs/architecture/state-authority-map.md')
           map_source = map_path.read_text()
-          map_source = map_source.replace('### Candidate: tres fronteras migradas', '### Candidate: cuatro fronteras migradas')
-          old_progress = 'La primera frontera centralizada fue la reanudación por mensaje entrante después de una pausa manual. La segunda incorpora los botones explícitos de pausar y reanudar del panel administrativo. La tercera centraliza la intervención implícita al abrir WhatsApp desde el panel: compara el snapshot completo de pausa y, según el rol, también `status` o `devLastSeenAt` antes de pausar, cancelar recordatorios y registrar la apertura. Los casos de uso usan `updateMany`; si otra operación cambió el estado, `count=0` evita sobrescrituras y eventos administrativos falsos.'
-          new_progress = old_progress + '\n\nLa cuarta frontera incorpora la entrega manual saliente. Antes de contactar a Meta, una transacción reclama el snapshot exacto del candidato y crea una intención `Message` con estado `SENDING`. El éxito finaliza `lastOutboundAt` y registra `SENT`; un rechazo HTTP confirmado restaura condicionalmente el snapshot previo y registra `FAILED`; un timeout o resultado no confirmable queda `UNKNOWN`, mantiene el bot pausado y exige revisión humana. No existe reintento automático.'
-          if old_progress not in map_source:
+          heading = '### Candidate: tres fronteras migradas'
+          if heading not in map_source:
+              raise SystemExit('candidate progress heading not found')
+          map_source = map_source.replace(heading, '### Candidate: cuatro fronteras migradas', 1)
+          progress = 'La primera frontera centralizada fue la reanudación por mensaje entrante después de una pausa manual. La segunda incorpora los botones explícitos de pausar y reanudar del panel administrativo. La tercera migra la intervención implícita al abrir WhatsApp: además del snapshot completo de pausa, compara `status` para reclutadores o `devLastSeenAt` para DEV antes de actualizar. Todos los casos usan `updateMany`; si otra operación cambió el estado, `count=0` evita sobrescribir una intervención concurrente, retroceder el estado de selección, reemplazar una marca DEV más reciente o registrar un evento administrativo falso.'
+          addition_progress = progress + '\n\nLa cuarta frontera incorpora la entrega manual saliente. Antes de contactar a Meta, una transacción reclama el snapshot exacto del candidato y crea una intención `Message` con estado `SENDING`. El éxito finaliza `lastOutboundAt` y registra `SENT`; un rechazo HTTP confirmado restaura condicionalmente el snapshot previo y registra `FAILED`; un timeout o resultado no confirmable queda `UNKNOWN`, mantiene el bot pausado y exige revisión humana. No existe reintento automático.'
+          if progress not in map_source:
               raise SystemExit('candidate progress paragraph not found')
-          map_source = map_source.replace(old_progress, new_progress, 1)
-          old_message = '`admin.js` delega la creación de mensajes salientes manuales en `ConversationMessageRepository`, pero conserva el orden histórico de envío, actualización del candidato y persistencia.'
-          new_message = '`admin.js` ya no crea mensajes ni actualiza directamente `Candidate` durante la mensajería manual. `manualOutboundDeliveryService` coordina las autoridades compartidas: persiste primero la intención, ejecuta el efecto externo sin reintento automático y registra `SENT`, `FAILED` o `UNKNOWN` según el resultado.'
-          if old_message in map_source:
-              map_source = map_source.replace(old_message, new_message, 1)
-          map_path.write_text(map_source)
+          map_source = map_source.replace(progress, addition_progress, 1)
+          old_message = 'La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboundMessage()`, delega su creación saliente y conserva el orden actual —envío al proveedor, actualización del candidato y persistencia—, el cuerpo exacto o saneado y el payload de intervención manual.'
+          new_message = '`admin.js` ya no crea mensajes ni actualiza directamente `Candidate` durante la mensajería manual. `manualOutboundDeliveryService` coordina las autoridades compartidas: persiste primero la intención, ejecuta el efecto externo sin reintento automático y registra `SENT`, `FAILED` o `UNKNOWN` según el resultado, conservando el cuerpo exacto o saneado y el payload autorizado.'
+          if old_message not in map_source:
+              raise SystemExit('manual message authority paragraph not found')
+          map_path.write_text(map_source.replace(old_message, new_message, 1))
 
           ci = Path('.github/workflows/ci.yml')
           ci_source = ci.read_text()
