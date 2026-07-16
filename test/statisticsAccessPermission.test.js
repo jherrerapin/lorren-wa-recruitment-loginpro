@@ -201,4 +201,10 @@ test('interfaz y endpoints auxiliares usan el mismo permiso de Estadísticas', (
   assert.match(usersView, /user\.canAccessStatistics \? 'checked' : ''/);
   assert.match(usersView, /role === 'dev'[\s\S]*name="canAccessStatistics"/);
   assert.match(server, /function isStatsUser\(req = \{\}\) \{\s*return canSeeLorenV2\(req\);\s*\}/);
+
+  const sessionMiddleware = server.indexOf('app.use(session({');
+  const permissionRefresh = server.indexOf('app.use(dispatchAuditMiddleware(prisma));');
+  const statisticsViewPermission = server.indexOf('res.locals.canSeeLorenV2 = canSeeLorenV2(req);');
+  assert.ok(sessionMiddleware < permissionRefresh, 'El refresco requiere una sesión ya disponible.');
+  assert.ok(permissionRefresh < statisticsViewPermission, 'El permiso debe refrescarse antes de renderizar la navegación.');
 });

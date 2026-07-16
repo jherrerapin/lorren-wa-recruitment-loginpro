@@ -454,6 +454,8 @@ app.use(session({
   }
 }));
 
+app.use(dispatchAuditMiddleware(prisma));
+
 app.use((req, res, next) => {
   req.userRole = req.session?.userRole || null;
   req.userId = req.session?.userId || null;
@@ -468,8 +470,6 @@ app.use((req, res, next) => {
   res.locals.canSeeLorenV2 = canSeeLorenV2(req);
   next();
 });
-
-app.use(dispatchAuditMiddleware(prisma));
 
 app.get('/health', async (_req, res) => {
   await prisma.$queryRaw`SELECT 1`;
