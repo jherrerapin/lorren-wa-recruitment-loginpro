@@ -1,5 +1,7 @@
 import { MessageDirection } from '@prisma/client';
 
+const OUTBOUND_DELIVERY_STATES = new Set(['SENDING', 'SENT', 'FAILED', 'UNKNOWN']);
+
 function requireNonEmptyString(value, label) {
   const normalized = String(value ?? '').trim();
   if (!normalized) throw new Error(`${label}_required`);
@@ -28,7 +30,7 @@ function requireJsonObject(value, label) {
 }
 
 function normalizeExistingJsonObject(value) {
-  return value || {};
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
 function requireMessageIds(value) {
@@ -36,6 +38,14 @@ function requireMessageIds(value) {
   const ids = [...new Set(value.map((id) => requireNonEmptyString(id, 'message_id')))];
   if (!ids.length) throw new Error('message_ids_required');
   return ids;
+}
+
+function requireOutboundDeliveryState(value) {
+  const state = requireNonEmptyString(value, 'outbound_delivery_state').toUpperCase();
+  if (!OUTBOUND_DELIVERY_STATES.has(state)) {
+    throw new Error('outbound_delivery_state_invalid');
+  }
+  return state;
 }
 
 function validateInboundContract(prisma) {
@@ -66,6 +76,14 @@ function validatePayloadMergeContract(prisma) {
   return Boolean(
     validatePayloadUpdateContract(prisma)
     && typeof prisma.message.findUnique === 'function'
+  );
+}
+
+function validateOutboundDeliveryReadContract(prisma) {
+  return Boolean(
+    prisma
+    && prisma.message
+    && typeof prisma.message.findMany === 'function'
   );
 }
 
@@ -148,6 +166,107 @@ export async function persistOutboundConversationMessage(prisma, input = {}) {
     created: true,
     message,
     data
+  };
+}
+
+export async function findRecentOutboundConversationDelivery(prisma, input = {}) {
+  if (!validateOutboundDeliveryReadContract(prisma)) {
+    throw new Error('outbound_delivery_read_prisma_contract_invalid');
+  }
+
+  const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
+  const body = requireNonEmptyString(input.body, 'outbound_delivery_body');
+  const dedupeKey = requireNonEmptyString(input.dedupeKey, 'outbound_delivery_dedupe_key');
+  const createdSince = normalizeTimestamp(input.createdSince, 'outbound_delivery_created_since');
+  const rows = await prisma.message.findMany({
+    where: {
+      candidateId,
+      direction: MessageDirection.OUTBOUND,
+      body,
+      createdAt: { gte: createdSince }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: {
+      id: true,
+      waMessageId: true,
+      rawPayload: true,
+      createdAt: true
+    }
+  });
+
+  const message = rows.find((row) => {
+    const delivery = normalizeExistingJsonObject(row?.rawPayload?.delivery);
+    return delivery.dedupeKey === dedupeKey
+      && ['SENDING', 'SENT'].includes(String(delivery.state || '').toUpperCase());
+  }) || null;
+
+  return { found: Boolean(message), message };
+}
+
+export async function updateOutboundConversationDelivery(prisma, input = {}) {
+  if (!validatePayloadMergeContract(prisma)) {
+    throw new Error('outbound_delivery_update_prisma_contract_invalid');
+  }
+
+  const messageId = requireNonEmptyString(input.messageId, 'message_id');
+  const state = requireOutboundDeliveryState(input.state);
+  const occurredAtInput = input.occurredAt === undefined ? new Date() : input.occurredAt;
+  const occurredAt = normalizeTimestamp(occurredAtInput, 'outbound_delivery_occurred_at');
+  const providerMessageId = input.providerMessageId == null
+    ? null
+    : requireNonEmptyString(input.providerMessageId, 'outbound_delivery_provider_message_id');
+  const lastError = input.lastError == null
+    ? null
+    : String(input.lastError).slice(0, 400);
+  const candidateStateCount = input.candidateStateCount == null
+    ? null
+    : Number(input.candidateStateCount);
+
+  if (candidateStateCount !== null && !Number.isInteger(candidateStateCount)) {
+    throw new Error('outbound_delivery_candidate_state_count_invalid');
+  }
+
+  const persisted = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { rawPayload: true }
+  });
+  if (!persisted) throw new Error('message_not_found');
+
+  const existingPayload = normalizeExistingJsonObject(persisted.rawPayload);
+  const existingDelivery = normalizeExistingJsonObject(existingPayload.delivery);
+  const delivery = {
+    ...existingDelivery,
+    state,
+    updatedAt: occurredAt.toISOString(),
+    retryPolicy: 'MANUAL_REVIEW_ONLY'
+  };
+
+  if (state === 'SENT') delivery.sentAt = occurredAt.toISOString();
+  if (state === 'FAILED') delivery.failedAt = occurredAt.toISOString();
+  if (state === 'UNKNOWN') delivery.unknownAt = occurredAt.toISOString();
+  if (providerMessageId) delivery.providerMessageId = providerMessageId;
+  if (lastError !== null) delivery.lastError = lastError;
+  if (candidateStateCount !== null) delivery.candidateStateCount = candidateStateCount;
+
+  const rawPayload = {
+    ...existingPayload,
+    delivery
+  };
+  const data = { rawPayload };
+  if (providerMessageId) data.waMessageId = providerMessageId;
+
+  const message = await prisma.message.update({
+    where: { id: messageId },
+    data
+  });
+
+  return {
+    updated: true,
+    message,
+    messageId,
+    rawPayload,
+    delivery
   };
 }
 
