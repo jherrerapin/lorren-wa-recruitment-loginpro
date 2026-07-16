@@ -1,0 +1,70 @@
+name: Apply error sanitization 492
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 492 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: refactor/491-manual-outbound-delivery
+          fetch-depth: 0
+
+      - name: Apply bounded sanitization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/services/manualOutboundDeliveryService.js')
+          source = path.read_text()
+          import_marker = "import { MessageType } from '@prisma/client';\n"
+          import_line = import_marker + "import { safeErrorMessage } from './cvIntelligence.js';\n"
+          if import_marker not in source:
+              raise SystemExit('message type import marker not found')
+          source = source.replace(import_marker, import_line, 1)
+
+          first = "      error: persistenceError?.message || persistenceError"
+          second = "      error: error?.message || error"
+          if first not in source or second not in source:
+              raise SystemExit('raw error log marker not found')
+          source = source.replace(first, "      error: safeErrorMessage(persistenceError)", 1)
+          source = source.replace(second, "      error: safeErrorMessage(error)", 1)
+          path.write_text(source)
+          PY
+
+      - name: Validate bounded change
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only)
+          test "$changed" = 'src/services/manualOutboundDeliveryService.js'
+          node --check src/services/manualOutboundDeliveryService.js
+          npm ci --silent
+          npm run prisma:generate --silent
+          node --test test/manualOutboundDeliveryService.test.js
+          git diff --check
+
+      - name: Publish sanitized logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/services/manualOutboundDeliveryService.js
+          git commit -m 'fix: sanitize manual outbound persistence logs'
+          git push origin HEAD:refactor/491-manual-outbound-delivery
