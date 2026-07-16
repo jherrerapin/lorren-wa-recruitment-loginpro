@@ -1,6 +1,9 @@
 import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
 
+export const MANUAL_OUTBOUND_SENDING_MODE = 'manual_outbound_sending';
+export const MANUAL_OUTBOUND_UNKNOWN_MODE = 'manual_outbound_delivery_unknown';
+
 function requireCandidateClient(client) {
   if (
     typeof client?.candidate?.updateMany !== 'function'
@@ -76,11 +79,31 @@ function normalizeManualWhatsAppOpenSnapshot(expected = {}, role) {
   };
 }
 
-async function loadCandidateTransitionMiss(client, candidateId) {
+function normalizeManualOutboundSnapshot(expected = {}) {
+  return {
+    ...normalizeExpectedPauseSnapshot(expected),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireNonEmptyString(expected.reminderState, 'candidate_expected_reminder_state'),
+    lastOutboundAt: normalizeNullableDate(expected.lastOutboundAt, 'candidate_expected_last_outbound_at')
+  };
+}
+
+function requireClaimedManualOutboundSnapshot(expected = {}) {
+  const snapshot = normalizeManualOutboundSnapshot(expected);
+  if (!snapshot.botPaused || snapshot.botResumeMode !== MANUAL_OUTBOUND_SENDING_MODE) {
+    throw new TypeError('candidate_manual_outbound_expected_sending_required');
+  }
+  return snapshot;
+}
+
+async function loadCandidateTransitionMiss(client, candidateId, extra = {}) {
   const candidate = await client.candidate.findUnique({
     where: { id: candidateId }
   });
-  return { count: 0, candidate };
+  return { count: 0, candidate, ...extra };
 }
 
 async function applyConditionalCandidatePauseTransition(client, {
@@ -193,5 +216,79 @@ export async function recordManualWhatsAppOpen(client, input = {}) {
       pausedBy: actor,
       reason
     })
+  });
+}
+
+export async function claimManualOutboundDelivery(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeManualOutboundSnapshot(input.expected);
+  const actor = requireNonEmptyString(input.actor, 'candidate_manual_outbound_actor');
+  const reason = requireNonEmptyString(input.reason, 'candidate_manual_outbound_reason');
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_manual_outbound_now');
+
+  if ([MANUAL_OUTBOUND_SENDING_MODE, MANUAL_OUTBOUND_UNKNOWN_MODE].includes(expected.botResumeMode)) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId, {
+      blockedReason: expected.botResumeMode
+    });
+  }
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: {
+      botPaused: true,
+      botPausedAt: now,
+      botPausedBy: actor,
+      botPauseReason: reason,
+      botResumeMode: MANUAL_OUTBOUND_SENDING_MODE,
+      reminderScheduledFor: null,
+      reminderState: 'CANCELLED'
+    }
+  });
+}
+
+export async function finalizeManualOutboundDelivery(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = requireClaimedManualOutboundSnapshot(input.expected);
+  const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
+  const sentAt = requireValidDate(sentAtInput, 'candidate_manual_outbound_sent_at');
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: {
+      lastOutboundAt: sentAt,
+      botResumeMode: 'manual_resume_dashboard'
+    }
+  });
+}
+
+export async function restoreManualOutboundDelivery(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = requireClaimedManualOutboundSnapshot(input.expected);
+  const previous = normalizeManualOutboundSnapshot(input.previous);
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: previous
+  });
+}
+
+export async function markManualOutboundDeliveryUnknown(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = requireClaimedManualOutboundSnapshot(input.expected);
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected,
+    data: {
+      botResumeMode: MANUAL_OUTBOUND_UNKNOWN_MODE
+    }
   });
 }
