@@ -28,13 +28,13 @@ import {
 } from '../services/candidateExport.js';
 import { sendTextMessage } from '../services/whatsapp.js';
 import {
-  deleteConversationMessagesForCandidate,
-  persistOutboundConversationMessage
-} from '../services/conversationMessageRepository.js';
+  deliverManualOutboundText,
+  getManualOutboundUserMessage
+} from '../services/manualOutboundDeliveryService.js';
+import { deleteConversationMessagesForCandidate } from '../services/conversationMessageRepository.js';
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
-import { buildManualInterventionCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import {
   pauseCandidateAutomationFromAdmin,
   recordManualWhatsAppOpen,
@@ -1096,10 +1096,6 @@ function decorateDashboardCandidate(candidate) {
 }
 
 async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}) {
-  const update = buildManualInterventionCandidateUpdate({
-    pausedBy: rawPayload?.sentBy || 'dashboard',
-    reason: rawPayload?.pauseReason || 'Conversacion tomada manualmente desde dashboard'
-  });
   const preserveExactBody = rawPayload?.preserveExactBody === true;
   const originalBody = String(body || '');
   const safety = preserveExactBody
@@ -1111,22 +1107,34 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
       source: rawPayload?.source || 'admin_outbound'
     });
   const finalBody = preserveExactBody ? originalBody : (safety.reply || buildSafeFallbackReply());
-  await sendTextMessage(candidate.phone, finalBody);
-  await prisma.candidate.update({ where: { id: candidate.id }, data: update });
   const authorizedPayload = {
     ...rawPayload,
     actor: rawPayload?.actor === 'ADMIN' ? 'ADMIN' : 'RECRUITER',
     sourceCategory: 'MANUAL_AUTHORIZED',
     manualIntervention: true
   };
-  await persistOutboundConversationMessage(prisma, {
+  const deliveryPayload = safety.blocked
+    ? {
+      ...authorizedPayload,
+      replySafety: {
+        blocked: true,
+        blockedClaims: safety.blockedClaims,
+        reason: safety.reason
+      }
+    }
+    : authorizedPayload;
+
+  return deliverManualOutboundText(prisma, {
     candidateId: candidate.id,
-    messageType: MessageType.TEXT,
+    phone: candidate.phone,
     body: finalBody,
-    rawPayload: safety.blocked ? { ...authorizedPayload, replySafety: { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason } } : authorizedPayload
+    actor: rawPayload?.sentBy || 'dashboard',
+    reason: rawPayload?.pauseReason || 'Conversacion tomada manualmente desde dashboard',
+    rawPayload: deliveryPayload
+  }, {
+    sendText: sendTextMessage
   });
 }
-
 function buildManualInterviewReminderText(booking) {
   const fullName = normalizeString(booking?.candidate?.fullName);
   const firstName = fullName ? fullName.split(/\s+/)[0] : null;
@@ -2259,7 +2267,7 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'success', 'Recordatorio manual enviado correctamente.'));
     } catch (err) {
       console.error('[manual_interview_reminder]', err);
-      return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible enviar el recordatorio manual.'));
+      return res.redirect(withFlashMessage(returnTo, 'error', getManualOutboundUserMessage(err, 'No fue posible enviar el recordatorio manual.')));
     }
   });
 
@@ -2597,7 +2605,7 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'success', 'Información de la vacante enviada correctamente.'));
     } catch (error) {
       console.error('[send_vacancy_info]', error);
-      return res.redirect(withFlashMessage(returnTo, 'error', 'No fue posible enviar la información de la vacante.'));
+      return res.redirect(withFlashMessage(returnTo, 'error', getManualOutboundUserMessage(error, 'No fue posible enviar la información de la vacante.')));
     }
   });
 
@@ -3043,7 +3051,7 @@ export function adminRouter(prisma) {
       res.redirect(`/admin/candidates/${id}?outboundSuccess=` + encodeURIComponent('Mensaje enviado correctamente.'));
     } catch (err) {
       console.error('[outbound]', err);
-      res.redirect(`/admin/candidates/${id}?outboundError=` + encodeURIComponent('Error al enviar el mensaje.'));
+      res.redirect(`/admin/candidates/${id}?outboundError=` + encodeURIComponent(getManualOutboundUserMessage(err, 'Error al enviar el mensaje.')));
     }
   });
 
@@ -3071,7 +3079,7 @@ export function adminRouter(prisma) {
       res.redirect(withFlashMessage(returnTo, 'success', 'Solicitud de HV enviada correctamente.'));
     } catch (err) {
       console.error('[request_hv]', err);
-      res.redirect(withFlashMessage(returnTo, 'error', 'Error al enviar la solicitud de HV.'));
+      res.redirect(withFlashMessage(returnTo, 'error', getManualOutboundUserMessage(err, 'Error al enviar la solicitud de HV.')));
     }
   });
 

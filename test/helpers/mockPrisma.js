@@ -28,15 +28,23 @@ function matchesCondition(value, condition) {
     if (Object.hasOwn(condition, 'not')) {
       return !matchesCondition(value, condition.not);
     }
-    if (Object.hasOwn(condition, 'lte') && normalizeDate(value).getTime() > normalizeDate(condition.lte).getTime()) {
-      return false;
-    }
-    if (Object.hasOwn(condition, 'gte') && normalizeDate(value).getTime() < normalizeDate(condition.gte).getTime()) {
-      return false;
-    }
-    if (Object.hasOwn(condition, 'lte') || Object.hasOwn(condition, 'gte')) {
+
+    const hasDateRange = ['lt', 'lte', 'gt', 'gte'].some((operator) => Object.hasOwn(condition, operator));
+    if (hasDateRange) {
+      const normalizedValue = normalizeDate(value);
+      const valueTime = normalizedValue instanceof Date ? normalizedValue.getTime() : Number.NaN;
+      if (Number.isNaN(valueTime)) return false;
+      if (Object.hasOwn(condition, 'lt') && valueTime >= normalizeDate(condition.lt).getTime()) return false;
+      if (Object.hasOwn(condition, 'lte') && valueTime > normalizeDate(condition.lte).getTime()) return false;
+      if (Object.hasOwn(condition, 'gt') && valueTime <= normalizeDate(condition.gt).getTime()) return false;
+      if (Object.hasOwn(condition, 'gte') && valueTime < normalizeDate(condition.gte).getTime()) return false;
       return true;
     }
+  }
+
+  if (value instanceof Date || condition instanceof Date) {
+    if (value == null || condition == null) return value === condition;
+    return normalizeDate(value).getTime() === normalizeDate(condition).getTime();
   }
 
   return value === condition;
@@ -100,7 +108,18 @@ function enrichVacancy(state, vacancy) {
 
 export function createMockPrisma(initialState = {}) {
   const state = {
-    candidates: clone(initialState.candidates || []),
+
+candidates: clone(initialState.candidates || []).map((candidate) => ({
+  botPaused: false,
+  botPausedAt: null,
+  botPausedBy: null,
+  botPauseReason: null,
+  botResumeMode: null,
+  reminderScheduledFor: null,
+  reminderState: 'NONE',
+  lastOutboundAt: null,
+  ...candidate
+})),
     messages: clone(initialState.messages || []),
     vacancies: clone(initialState.vacancies || []),
     interviewSlots: clone(initialState.interviewSlots || []),
@@ -205,7 +224,10 @@ export function createMockPrisma(initialState = {}) {
       return { count: rows.length };
     },
     async findUnique({ where, select } = {}) {
-      const row = state.messages.find((message) => message.id === where?.id || message.waMessageId === where?.waMessageId) || null;
+      const row = state.messages.find((message) => (
+        (where?.id != null && message.id === where.id)
+        || (where?.waMessageId != null && message.waMessageId === where.waMessageId)
+      )) || null;
       if (!row) return null;
       return applySelect(row, select);
     },
@@ -307,7 +329,7 @@ export function createMockPrisma(initialState = {}) {
     }
   };
 
-  return {
+  const prisma = {
     state,
     candidate: candidateApi,
     message: messageApi,
@@ -316,4 +338,6 @@ export function createMockPrisma(initialState = {}) {
     interviewSlot: slotApi,
     botKnowledge: botKnowledgeApi
   };
+  prisma.$transaction = async (callback) => callback(prisma);
+  return prisma;
 }

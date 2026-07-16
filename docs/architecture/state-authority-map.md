@@ -28,11 +28,13 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 
 ## Progreso de consolidación
 
-### Candidate: tres fronteras migradas
+### Candidate: cuatro fronteras migradas
 
 `CandidateStateService` continúa como autoridad estrecha sin convertir todavía el agregado en canónico. En el manifiesto se declara como `boundary` transitorio porque `ConsentStateService` conserva la autoridad especializada del consentimiento y otros consumidores todavía escriben grupos distintos de `Candidate`.
 
 La primera frontera centralizada fue la reanudación por mensaje entrante después de una pausa manual. La segunda incorpora los botones explícitos de pausar y reanudar del panel administrativo. La tercera migra la intervención implícita al abrir WhatsApp: además del snapshot completo de pausa, compara `status` para reclutadores o `devLastSeenAt` para DEV antes de actualizar. Todos los casos usan `updateMany`; si otra operación cambió el estado, `count=0` evita sobrescribir una intervención concurrente, retroceder el estado de selección, reemplazar una marca DEV más reciente o registrar un evento administrativo falso.
+
+La cuarta frontera incorpora la entrega manual saliente. Antes de contactar a Meta, una transacción reclama el snapshot exacto del candidato y crea una intención `Message` con estado `SENDING`. El éxito finaliza `lastOutboundAt` y registra `SENT`; un rechazo HTTP confirmado restaura condicionalmente el snapshot previo y registra `FAILED`; un timeout o resultado no confirmable queda `UNKNOWN`, mantiene el bot pausado y exige revisión humana. No existe reintento automático.
 
 El inventario permanece en dieciséis escritores porque `admin.js` todavía modifica otros grupos de campos de `Candidate`. El agregado continúa `fragmented` hasta migrar cada frontera y resolver la autoridad final por composición de casos de uso.
 
@@ -60,7 +62,7 @@ La autoridad puede recibir el cliente Prisma principal —abriendo una única tr
 
 `reminder.js` delega la persistencia de sus mensajes y conserva programación, reclamación, ventana de WhatsApp, reservas, estados del candidato y jobs.
 
-La mensajería manual autorizada de `admin.js`, encapsulada en `sendAdminOutboundMessage()`, delega su creación saliente y conserva el orden actual —envío al proveedor, actualización del candidato y persistencia—, el cuerpo exacto o saneado y el payload de intervención manual.
+`admin.js` ya no crea mensajes ni actualiza directamente `Candidate` durante la mensajería manual. `manualOutboundDeliveryService` coordina las autoridades compartidas: persiste primero la intención, ejecuta el efecto externo sin reintento automático y registra `SENT`, `FAILED` o `UNKNOWN` según el resultado, conservando el cuerpo exacto o saneado y el payload autorizado.
 
 `webhook.js` ya no crea ni actualiza `Message` directamente. Sus cinco fronteras de escritura delegan en el repositorio compartido:
 

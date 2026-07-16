@@ -96,7 +96,7 @@
         {
           "path": "src/services/candidateStateService.js",
           "role": "boundary",
-          "reason": "Frontera de la autoridad objetivo para reanudación por inbound, pausa o reanudación explícita y apertura manual de WhatsApp con comparación optimista; Candidate continúa fragmentado"
+          "reason": "Frontera de la autoridad objetivo para reanudación por inbound, pausas administrativas, apertura de WhatsApp y ciclo condicional de entrega manual saliente; Candidate continúa fragmentado"
         }
       ]
     },
