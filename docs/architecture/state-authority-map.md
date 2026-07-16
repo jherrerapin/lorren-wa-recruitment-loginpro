@@ -28,11 +28,11 @@ El manifiesto no autoriza que la dispersión continúe indefinidamente. Describe
 
 ## Progreso de consolidación
 
-### Candidate: dos fronteras migradas
+### Candidate: tres fronteras migradas
 
 `CandidateStateService` continúa como autoridad estrecha sin convertir todavía el agregado en canónico. En el manifiesto se declara como `boundary` transitorio porque `ConsentStateService` conserva la autoridad especializada del consentimiento y otros consumidores todavía escriben grupos distintos de `Candidate`.
 
-La primera frontera centralizada fue la reanudación por mensaje entrante después de una pausa manual. La segunda incorpora los botones explícitos de pausar y reanudar del panel administrativo. Los tres casos de uso comparan el snapshot completo de pausa —ID, marca temporal, actor, motivo y modo de reanudación— mediante `updateMany`. Si otra operación cambió ese estado, `count=0` evita sobrescribir o levantar una intervención concurrente y tampoco permite registrar un evento administrativo falso.
+La primera frontera centralizada fue la reanudación por mensaje entrante después de una pausa manual. La segunda incorpora los botones explícitos de pausar y reanudar del panel administrativo. La tercera migra la intervención implícita al abrir WhatsApp: además del snapshot completo de pausa, compara `status` para reclutadores o `devLastSeenAt` para DEV antes de actualizar. Todos los casos usan `updateMany`; si otra operación cambió el estado, `count=0` evita sobrescribir una intervención concurrente, retroceder el estado de selección, reemplazar una marca DEV más reciente o registrar un evento administrativo falso.
 
 El inventario permanece en dieciséis escritores porque `admin.js` todavía modifica otros grupos de campos de `Candidate`. El agregado continúa `fragmented` hasta migrar cada frontera y resolver la autoridad final por composición de casos de uso.
 
