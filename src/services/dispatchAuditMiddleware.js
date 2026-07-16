@@ -61,8 +61,8 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const isEnvironmentAdmin = source === 'env'
     && req.session?.userRole === 'admin'
     && Boolean(req.session?.username)
-    && req.session.username === process.env.ADMIN_USER;
-  if ((!isDatabaseUser && !isEnvironmentAdmin) || !prisma?.appUser?.findUnique) return;
+    && req.session.username === normalizeString(process.env.ADMIN_USER);
+  if (!isDatabaseUser && !isEnvironmentAdmin) return;
 
   const user = await prisma.appUser.findUnique({
     where: isEnvironmentAdmin
