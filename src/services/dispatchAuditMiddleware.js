@@ -65,15 +65,26 @@ async function refreshDatabaseUserPermissions(prisma, req) {
       accessScope: true,
       scopeCity: true,
       scopeVacancyId: true,
-      canAccessDispatch: true
+      canAccessDispatch: true,
+      canAccessStatistics: true,
+      canAccessMetaAds: true,
+      canAccessCvAnalysis: true
     }
   });
 
   if (!user || !user.isActive) {
     req.session.userRole = null;
     req.session.userId = null;
+    req.session.canAccessDispatch = false;
+    req.session.canAccessStatistics = false;
+    req.session.canAccessMetaAds = false;
+    req.session.canAccessCvAnalysis = false;
     req.userRole = null;
     req.userId = null;
+    req.canAccessDispatch = false;
+    req.canAccessStatistics = false;
+    req.canAccessMetaAds = false;
+    req.canAccessCvAnalysis = false;
     return;
   }
 
@@ -81,16 +92,28 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const accessCity = user.scopeCity || null;
   const accessVacancyId = user.scopeVacancyId || null;
   const canAccessDispatch = Boolean(user.canAccessDispatch);
+  // La migración convierte el permiso general anterior en ambos permisos.
+  // No se usa canAccessStatistics como fallback: si solo uno queda activo,
+  // el permiso general derivado sigue en true y reabriría el otro módulo.
+  const canAccessMetaAds = Boolean(user.canAccessMetaAds);
+  const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis);
+  const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
   req.session.userAccessVacancyId = accessVacancyId;
   req.session.canAccessDispatch = canAccessDispatch;
+  req.session.canAccessStatistics = canAccessStatistics;
+  req.session.canAccessMetaAds = canAccessMetaAds;
+  req.session.canAccessCvAnalysis = canAccessCvAnalysis;
 
   req.userAccessScope = accessScope;
   req.userAccessCity = accessCity;
   req.userAccessVacancyId = accessVacancyId;
   req.canAccessDispatch = canAccessDispatch;
+  req.canAccessStatistics = canAccessStatistics;
+  req.canAccessMetaAds = canAccessMetaAds;
+  req.canAccessCvAnalysis = canAccessCvAnalysis;
 }
 
 export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {

@@ -1,6 +1,12 @@
 import express from 'express';
 import { requireLorenV2 } from '../services/lorenV2Gate.js';
 import { buildLorenV2ReportsWorkbook } from '../services/lorenV2ReportsWorkbook.js';
+import {
+  buildCandidateAccessWhere,
+  buildVacancyAccessWhere,
+  getAccessContext,
+  hasFullAccess
+} from '../services/appUsers.js';
 
 function escapeHtml(value = '') {
   return String(value)
@@ -209,9 +215,6 @@ function renderLayout({ title, body }) {
   <nav class="navbar">
     <a href="/admin">Panel</a>
     <a href="/admin/estadisticas">Estadísticas</a>
-    <a href="/admin/estadisticas/campaigns">Campañas</a>
-    <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
-    <a href="/admin/estadisticas/reports">Reportes</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
@@ -291,14 +294,17 @@ function renderTable(title, headers, rows, renderRow) {
   </section>`;
 }
 
-async function loadReport(prisma, query = {}) {
+async function loadReport(prisma, query = {}, accessContext = {}) {
   const period = query.period === 'month' ? 'month' : 'week';
   const baseDay = toBogotaDay(query.date || new Date());
   const range = rangeFor(period, baseDay);
+  const bookingAccessWhere = hasFullAccess(accessContext)
+    ? {}
+    : { vacancy: { is: buildVacancyAccessWhere(accessContext) } };
 
   const [candidates, bookings] = await Promise.all([
     prisma.candidate.findMany({
-      where: { createdAt: { gte: range.start, lte: range.end } },
+      where: { ...buildCandidateAccessWhere(accessContext), createdAt: { gte: range.start, lte: range.end } },
       orderBy: { createdAt: 'asc' },
       take: 5000,
       include: {
@@ -307,7 +313,7 @@ async function loadReport(prisma, query = {}) {
       }
     }),
     prisma.interviewBooking.findMany({
-      where: { scheduledAt: { gte: range.start, lte: range.end } },
+      where: { ...bookingAccessWhere, scheduledAt: { gte: range.start, lte: range.end } },
       orderBy: { scheduledAt: 'asc' },
       take: 5000,
       include: {
@@ -344,12 +350,12 @@ export function lorenV2ReportsRouter(prisma) {
   router.use(requireLorenV2);
 
   router.get('/', async (req, res) => {
-    const report = await loadReport(prisma, req.query);
+    const report = await loadReport(prisma, req.query, getAccessContext(req));
     res.send(renderLayout({ title: 'Reportes — Estadísticas', body: renderReport(report, isDevRequest(req)) }));
   });
 
   router.get('/json', async (req, res) => {
-    const report = await loadReport(prisma, req.query);
+    const report = await loadReport(prisma, req.query, getAccessContext(req));
     res.json({ ok: true, ...report });
   });
 

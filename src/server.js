@@ -21,14 +21,11 @@ import { dispatchProgrammingNotificationsRouter } from './routes/dispatchProgram
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { lorenV2Router } from './routes/lorenV2.js';
-import { lorenV2DailySummaryRouter } from './routes/lorenV2DailySummary.js';
-import { lorenV2ReportsRouter } from './routes/lorenV2Reports.js';
-import { lorenV2DataConsentsRouter } from './routes/lorenV2DataConsents.js';
 import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
 import { referralAttributionMiddleware } from './services/referralAttribution.js';
-import { canSeeLorenV2 } from './services/lorenV2Gate.js';
+import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
 import { getOpenAiModelConfig } from './services/openAiModelConfig.js';
@@ -100,9 +97,8 @@ function currentRequestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0];
 }
 
-function isStatsUser(req = {}) {
-  const role = req.userRole || req.session?.userRole;
-  return role === 'dev' || role === 'admin';
+function canManageStats(req = {}) {
+  return canManageLorenV2(req);
 }
 
 function isStatsCampaignsPage(req = {}) {
@@ -136,7 +132,7 @@ function isAptForMeta(candidate = {}) {
 }
 
 async function maybeAutoSyncMetaAds(req = {}) {
-  if (!isStatsUser(req) || !isStatsCampaignsPage(req)) return;
+  if (!canManageStats(req) || !isStatsCampaignsPage(req)) return;
   const config = getMetaAdsConfig();
   if (!config.enabled) return;
   const now = Date.now();
@@ -376,7 +372,9 @@ function buildUserSessionPayload(user) {
     userAccessCity: user.scopeCity || null,
     userAccessVacancyId: user.scopeVacancyId || null,
     userSource: 'db',
-    canAccessDispatch: Boolean(user.canAccessDispatch)
+    canAccessDispatch: Boolean(user.canAccessDispatch),
+    canAccessMetaAds: Boolean(user.canAccessMetaAds),
+    canAccessCvAnalysis: Boolean(user.canAccessCvAnalysis)
   };
 }
 
@@ -389,6 +387,9 @@ function applySessionPayload(req, payload) {
   req.session.userAccessVacancyId = payload.userAccessVacancyId || null;
   req.session.userSource = payload.userSource || 'env';
   req.session.canAccessDispatch = Boolean(payload.canAccessDispatch);
+  req.session.canAccessMetaAds = Boolean(payload.canAccessMetaAds);
+  req.session.canAccessCvAnalysis = Boolean(payload.canAccessCvAnalysis);
+  req.session.canAccessStatistics = req.session.canAccessMetaAds || req.session.canAccessCvAnalysis;
 }
 
 app.set('view engine', 'ejs');
@@ -455,6 +456,8 @@ app.use(session({
   }
 }));
 
+app.use(dispatchAuditMiddleware(prisma));
+
 app.use((req, res, next) => {
   req.userRole = req.session?.userRole || null;
   req.userId = req.session?.userId || null;
@@ -464,13 +467,14 @@ app.use((req, res, next) => {
   req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
   req.userSource = req.session?.userSource || null;
   req.canAccessDispatch = Boolean(req.session?.canAccessDispatch);
+  req.canAccessMetaAds = Boolean(req.session?.canAccessMetaAds);
+  req.canAccessCvAnalysis = Boolean(req.session?.canAccessCvAnalysis);
+  req.canAccessStatistics = req.canAccessMetaAds || req.canAccessCvAnalysis;
   res.locals.role = req.userRole;
   res.locals.canAccessDispatch = req.userRole === 'dev' || req.canAccessDispatch;
   res.locals.canSeeLorenV2 = canSeeLorenV2(req);
   next();
 });
-
-app.use(dispatchAuditMiddleware(prisma));
 
 app.get('/health', async (_req, res) => {
   await prisma.$queryRaw`SELECT 1`;
@@ -506,6 +510,8 @@ async function authenticateDatabaseUser(username, password) {
       scopeCity: true,
       scopeVacancyId: true,
       canAccessDispatch: true,
+      canAccessMetaAds: true,
+      canAccessCvAnalysis: true,
       isActive: true
     }
   });
@@ -534,7 +540,9 @@ app.post('/login', async (req, res) => {
         userAccessCity: null,
         userAccessVacancyId: null,
         userSource: 'env',
-        canAccessDispatch: role === 'dev'
+        canAccessDispatch: role === 'dev',
+        canAccessMetaAds: role === 'dev',
+        canAccessCvAnalysis: role === 'dev'
       };
     }
   }
@@ -658,17 +666,17 @@ app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns/:id`, (req, res) => res.redir
 app.post(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns`, (req, res) => res.redirect(308, `${LOREN_STATS_BASE_PATH}/campaigns`));
 app.post(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns/associate`, (req, res) => res.redirect(308, `${LOREN_STATS_BASE_PATH}/campaigns/associate`));
 app.post(`${LOREN_STATS_LEGACY_BASE_PATH}/campaigns/:id/edit`, (req, res) => res.redirect(308, `${LOREN_STATS_BASE_PATH}/campaigns/${encodeURIComponent(req.params.id)}/edit`));
-app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/reports`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/reports`));
-app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/daily-summary`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/daily-summary`));
-app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/data-consents`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/data-consents`));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/reports`, (_req, res) => res.redirect(301, LOREN_STATS_BASE_PATH));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/daily-summary`, (_req, res) => res.redirect(301, LOREN_STATS_BASE_PATH));
+app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/data-consents`, (_req, res) => res.redirect(301, LOREN_STATS_BASE_PATH));
 app.get(`${LOREN_STATS_LEGACY_BASE_PATH}/cv-analysis`, (_req, res) => res.redirect(301, `${LOREN_STATS_BASE_PATH}/cv-analysis`));
 
-app.use(`${LOREN_STATS_BASE_PATH}/daily-summary`, wrapAsyncRouter(lorenV2DailySummaryRouter(prisma)));
-app.use(`${LOREN_STATS_BASE_PATH}/reports`, wrapAsyncRouter(lorenV2ReportsRouter(prisma)));
-app.use(`${LOREN_STATS_BASE_PATH}/data-consents`, wrapAsyncRouter(lorenV2DataConsentsRouter(prisma)));
+app.get(`${LOREN_STATS_BASE_PATH}/daily-summary`, (_req, res) => res.redirect(301, LOREN_STATS_BASE_PATH));
+app.get(`${LOREN_STATS_BASE_PATH}/reports`, (_req, res) => res.redirect(301, LOREN_STATS_BASE_PATH));
+app.get(`${LOREN_STATS_BASE_PATH}/data-consents`, (_req, res) => res.redirect(301, LOREN_STATS_BASE_PATH));
 app.use(`${LOREN_STATS_BASE_PATH}/cv-analysis`, wrapAsyncRouter(lorenV2CvAnalysisRouter(prisma)));
 app.post(`${LOREN_STATS_BASE_PATH}/meta/sync-form`, async (req, res, next) => {
-  if (!isStatsUser(req)) return res.status(403).send('No tienes permisos para sincronizar Meta Ads.');
+  if (!canManageStats(req)) return res.status(403).send('No tienes permisos para sincronizar Meta Ads.');
   const metaConfig = getMetaAdsConfig();
   if (!metaConfig.enabled) return res.redirect(`${LOREN_STATS_BASE_PATH}/campaigns`);
   try {
@@ -683,7 +691,7 @@ app.post(`${LOREN_STATS_BASE_PATH}/meta/sync-form`, async (req, res, next) => {
   }
 });
 app.get(`${LOREN_STATS_BASE_PATH}/meta/summary`, async (req, res) => {
-  if (!isStatsUser(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  if (!canManageStats(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
   try {
     const summary = await loadMetaAdsSummary(req.query || {});
     return res.json(summary);

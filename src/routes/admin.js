@@ -519,10 +519,17 @@ async function ensureVacancyIdAccess(prisma, req, vacancyId, res, returnTo = '/a
 }
 
 function buildManageableUsersWhere(accessContext = {}) {
-  if (accessContext.isDev || accessContext.scope === 'ALL') return { role: 'ADMIN' };
+  const visibilityWhere = accessContext.isDev
+    ? {}
+    : { username: { not: 'reclutador-general' } };
+
+  if (accessContext.isDev || accessContext.scope === 'ALL') {
+    return { role: 'ADMIN', ...visibilityWhere };
+  }
   if (accessContext.scope === 'CITY') {
     return {
       role: 'ADMIN',
+      ...visibilityWhere,
       OR: [
         {
           accessScope: 'CITY',
@@ -539,6 +546,7 @@ function buildManageableUsersWhere(accessContext = {}) {
   }
   return {
     role: 'ADMIN',
+    ...visibilityWhere,
     accessScope: 'VACANCY',
     scopeVacancyId: accessContext.vacancyId || '__OUT_OF_SCOPE__'
   };
@@ -3078,6 +3086,8 @@ export function adminRouter(prisma) {
     }
 
     const canAccessDispatch = req.userRole === 'dev' && req.body.canAccessDispatch === 'true';
+    const canAccessMetaAds = req.userRole === 'dev' && req.body.canAccessMetaAds === 'true';
+    const canAccessCvAnalysis = req.userRole === 'dev' && req.body.canAccessCvAnalysis === 'true';
     const scopeResolution = await resolveRequestedUserScope(prisma, req, req.body);
     if (scopeResolution.error) {
       return res.redirect('/admin/users?error=' + encodeURIComponent(scopeResolution.error));
@@ -3102,6 +3112,9 @@ export function adminRouter(prisma) {
         scopeCity: scopeResolution.scopeCity,
         scopeVacancyId: scopeResolution.scopeVacancyId,
         canAccessDispatch,
+        canAccessStatistics: canAccessMetaAds || canAccessCvAnalysis,
+        canAccessMetaAds,
+        canAccessCvAnalysis,
         recoveryPhone: normalizeString(req.body.recoveryPhone),
         recoveryEmail: normalizeString(req.body.recoveryEmail),
         createdByUsername: req.username || req.userRole || 'system',
