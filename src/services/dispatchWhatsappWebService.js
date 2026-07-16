@@ -54,17 +54,14 @@ function resolveAuthDataPath() {
   return './storage/dispatch-wweb-auth';
 }
 
-function shellQuote(value) {
-  return `'${String(value || '').replace(/'/g, `'\''`)}'`;
-}
-
 function killStaleChromiumProcesses(dataPath) {
   if (!dataPath || process.env.DISPATCH_WWEB_SKIP_STALE_PROCESS_CLEANUP === 'true') return;
   try {
-    execFileSync('sh', ['-c', `pkill -f ${shellQuote(dataPath)} || true`], {
+    execFileSync('pkill', ['-f', dataPath], {
       stdio: ['ignore', 'ignore', 'ignore']
     });
   } catch (error) {
+    if (Number(error?.status) === 1) return;
     console.warn('[dispatch-wa] No fue posible limpiar procesos Chromium anteriores.', error?.message || error);
   }
 }
@@ -214,7 +211,6 @@ async function runDispatchWhatsappWatchdog(reason = 'interval') {
     }
 
     initDispatchWhatsappClient();
-    await getRuntimeStatusView({ autoStart: true });
   } catch (error) {
     console.warn(`[dispatch-wa] Watchdog no pudo verificar la sesión. reason=${reason}`, error?.message || error);
   } finally {
