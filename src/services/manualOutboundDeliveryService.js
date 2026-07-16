@@ -4,6 +4,7 @@ import {
   claimManualOutboundDelivery,
   finalizeManualOutboundDelivery,
   MANUAL_OUTBOUND_SENDING_MODE,
+  MANUAL_OUTBOUND_UNKNOWN_MODE,
   markManualOutboundDeliveryUnknown,
   restoreManualOutboundDelivery
 } from './candidateStateService.js';
@@ -118,6 +119,13 @@ function manualOutboundError(code, userMessage, cause = null) {
   return error;
 }
 
+function duplicateRecentError() {
+  return manualOutboundError(
+    'manual_outbound_duplicate_recent',
+    'Ya existe un envío idéntico reciente para este candidato. No se volvió a enviar.'
+  );
+}
+
 async function loadCandidateForManualOutbound(client, candidateId) {
   return client.candidate.findUnique({
     where: { id: candidateId },
@@ -205,19 +213,15 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
     ? Math.max(1, Number(dependencies.dedupeWindowMs))
     : DEFAULT_DEDUPE_WINDOW_MS;
   const startedAt = now();
-
-  const duplicate = await findRecentOutboundConversationDelivery(prisma, {
+  const duplicateQuery = {
     candidateId,
     body,
     dedupeKey,
     createdSince: new Date(startedAt.getTime() - dedupeWindowMs)
-  });
-  if (duplicate.found) {
-    throw manualOutboundError(
-      'manual_outbound_duplicate_recent',
-      'Ya existe un envío idéntico reciente para este candidato. No se volvió a enviar.'
-    );
-  }
+  };
+
+  const duplicate = await findRecentOutboundConversationDelivery(prisma, duplicateQuery);
+  if (duplicate.found) throw duplicateRecentError();
 
   let preparation;
   try {
@@ -238,11 +242,14 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
 
       if (claim.count !== 1) {
         const blockedMode = claim.blockedReason || claim.candidate?.botResumeMode;
-        const userMessage = [MANUAL_OUTBOUND_SENDING_MODE, 'manual_outbound_delivery_unknown'].includes(blockedMode)
+        const userMessage = [MANUAL_OUTBOUND_SENDING_MODE, MANUAL_OUTBOUND_UNKNOWN_MODE].includes(blockedMode)
           ? 'Ya existe una entrega manual en curso o pendiente de revisión para este candidato.'
           : 'El estado del candidato cambió antes del envío. Actualiza la página e intenta de nuevo.';
         throw manualOutboundError('manual_outbound_candidate_conflict', userMessage);
       }
+
+      const duplicateAfterClaim = await findRecentOutboundConversationDelivery(tx, duplicateQuery);
+      if (duplicateAfterClaim.found) throw duplicateRecentError();
 
       const claimed = candidateSnapshot(claim.candidate);
       const intentPayload = {
@@ -284,7 +291,7 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
   } catch (error) {
     const confirmedRejection = isConfirmedProviderRejection(error);
     const occurredAt = now();
-    await persistProviderFailure(prisma, {
+    const failurePersistence = await persistProviderFailure(prisma, {
       candidateId,
       messageId: preparation.messageId,
       previous: preparation.previous,
@@ -294,11 +301,28 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
       confirmedRejection
     });
 
+    if (!failurePersistence) {
+      throw manualOutboundError(
+        confirmedRejection
+          ? 'manual_outbound_provider_rejected_unreconciled'
+          : 'manual_outbound_provider_unknown_unreconciled',
+        confirmedRejection
+          ? 'WhatsApp rechazó el mensaje, pero no se pudo actualizar el estado interno. Revisa la conversación antes de continuar.'
+          : 'No se pudo confirmar si WhatsApp recibió el mensaje ni actualizar el estado interno. No lo reintentes hasta revisar la conversación.',
+        error
+      );
+    }
+
+    const candidateReconciled = failurePersistence.count === 1;
     throw manualOutboundError(
       confirmedRejection ? 'manual_outbound_provider_rejected' : 'manual_outbound_provider_unknown',
       confirmedRejection
-        ? 'WhatsApp rechazó el mensaje y el candidato fue restaurado al estado anterior.'
-        : 'No se pudo confirmar si WhatsApp recibió el mensaje. No lo reintentes hasta revisar la conversación.',
+        ? (candidateReconciled
+          ? 'WhatsApp rechazó el mensaje y el candidato fue restaurado al estado anterior.'
+          : 'WhatsApp rechazó el mensaje, pero el estado del candidato cambió durante la operación. Revisa la conversación antes de continuar.')
+        : (candidateReconciled
+          ? 'No se pudo confirmar si WhatsApp recibió el mensaje. No lo reintentes hasta revisar la conversación.'
+          : 'No se pudo confirmar si WhatsApp recibió el mensaje y el estado del candidato cambió durante la operación. No lo reintentes hasta revisar la conversación.'),
       error
     );
   }
