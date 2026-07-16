@@ -84,6 +84,7 @@ test('canonical facade restores Railway Nix Chromium discovery and safe stale-pr
   assert.match(source, /find \/nix\/store -path/);
   assert.match(cleanup, /execFileSync\('pkill', \['-f', dataPath\]/);
   assert.match(cleanup, /Number\(error\?\.status\) === 1/);
+  assert.match(cleanup, /error\?\.code === 'ENOENT'/);
   assert.doesNotMatch(cleanup, /execFileSync\('sh'/);
   assert.doesNotMatch(cleanup, /shellQuote/);
   assert.match(source, /prepareRuntimeEnvironment\(\{ cleanupStaleProcesses: true \}\)/);
