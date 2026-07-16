@@ -65,15 +65,20 @@ async function refreshDatabaseUserPermissions(prisma, req) {
       accessScope: true,
       scopeCity: true,
       scopeVacancyId: true,
-      canAccessDispatch: true
+      canAccessDispatch: true,
+      canAccessStatistics: true
     }
   });
 
   if (!user || !user.isActive) {
     req.session.userRole = null;
     req.session.userId = null;
+    req.session.canAccessDispatch = false;
+    req.session.canAccessStatistics = false;
     req.userRole = null;
     req.userId = null;
+    req.canAccessDispatch = false;
+    req.canAccessStatistics = false;
     return;
   }
 
@@ -81,16 +86,19 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const accessCity = user.scopeCity || null;
   const accessVacancyId = user.scopeVacancyId || null;
   const canAccessDispatch = Boolean(user.canAccessDispatch);
+  const canAccessStatistics = Boolean(user.canAccessStatistics);
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
   req.session.userAccessVacancyId = accessVacancyId;
   req.session.canAccessDispatch = canAccessDispatch;
+  req.session.canAccessStatistics = canAccessStatistics;
 
   req.userAccessScope = accessScope;
   req.userAccessCity = accessCity;
   req.userAccessVacancyId = accessVacancyId;
   req.canAccessDispatch = canAccessDispatch;
+  req.canAccessStatistics = canAccessStatistics;
 }
 
 export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {

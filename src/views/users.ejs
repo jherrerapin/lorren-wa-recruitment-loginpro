@@ -219,7 +219,7 @@
                     <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
                   <% } %>
                 </td>
-                <td><%= user.canAccessDispatch ? 'Reclutamiento + Operaciones / Despacho' : 'Reclutamiento' %></td>
+                <td><%= user.canAccessDispatch ? 'Reclutamiento + Operaciones / Despacho' : 'Reclutamiento' %><%= user.canAccessStatistics ? ' + Estadísticas' : '' %></td>
                 <td><span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>"><%= user.isActive ? 'Activo' : 'Inactivo' %></span><small>Último cambio de contraseña: <%= user.lastPasswordResetAt ? user.lastPasswordResetAt.toLocaleString('es-CO', { hour12: false }) : 'Sin registro' %></small></td>
                 <td><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.recoveryEmail || '—' %></small><small>Recuperación disponible desde /recover.</small></td>
                 <td>
@@ -277,7 +277,7 @@
                           </div>
                           <span class="hint">Debes marcar al menos una vacante. Las vacantes nuevas no se habilitarán automáticamente.</span>
                         </div>
-                        <% if (role === 'dev') { %><div class="field full"><label>Permisos adicionales</label><label class="dispatch-row"><input type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label></div><% } %>
+                        <% if (role === 'dev') { %><div class="field full"><label>Permisos adicionales</label><label class="dispatch-row"><input type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label><label class="dispatch-row"><input type="checkbox" name="canAccessStatistics" value="true" <%= user.canAccessStatistics ? 'checked' : '' %> />Acceso al módulo de Estadísticas</label><span class="hint">Este permiso permite consultar Meta Ads y el análisis de hojas de vida, sin cambiar las vacantes asignadas al usuario.</span></div><% } %>
                       </div>
                       <div class="edit-drawer-actions"><button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Cancelar</button><button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button></div>
                     </form>

@@ -1,6 +1,11 @@
 import express from 'express';
 import { requireLorenV2 } from '../services/lorenV2Gate.js';
 import {
+  buildCandidateAccessWhere,
+  buildVacancyAccessWhere,
+  getAccessContext
+} from '../services/appUsers.js';
+import {
   analyzeCandidateCv,
   parseCvAnalysisEvidence,
   reviewVacancyCandidates,
@@ -299,22 +304,28 @@ function errorMessage(reason = '') {
   return messages[reason] || 'No fue posible completar la revisión.';
 }
 
-async function loadVacancies(prisma) {
+async function loadVacancies(prisma, accessContext = {}) {
   return prisma.vacancy.findMany({
+    where: buildVacancyAccessWhere(accessContext),
     orderBy: [{ city: 'asc' }, { title: 'asc' }],
     select: { id: true, title: true, city: true }
   });
 }
 
-async function loadCandidates(prisma, vacancyId) {
+async function loadCandidates(prisma, vacancyId, accessContext = {}) {
   if (!vacancyId) return [];
   return prisma.candidate.findMany({
     where: {
-      vacancyId,
-      OR: [
-        { cvStorageKey: { not: null } },
-        { cvData: { not: null } },
-        { cvOriginalName: { not: null } }
+      AND: [
+        buildCandidateAccessWhere(accessContext),
+        { vacancyId },
+        {
+          OR: [
+            { cvStorageKey: { not: null } },
+            { cvData: { not: null } },
+            { cvOriginalName: { not: null } }
+          ]
+        }
       ]
     },
     orderBy: { updatedAt: 'desc' },
@@ -346,9 +357,10 @@ export function lorenV2CvAnalysisRouter(prisma) {
 
   router.get('/', async (req, res) => {
     const vacancyId = normalizeString(req.query.vacancyId) || '';
+    const accessContext = getAccessContext(req);
     const [vacancies, candidates] = await Promise.all([
-      loadVacancies(prisma),
-      loadCandidates(prisma, vacancyId)
+      loadVacancies(prisma, accessContext),
+      loadCandidates(prisma, vacancyId, accessContext)
     ]);
     res.send(renderPage({
       vacancies,
@@ -360,16 +372,26 @@ export function lorenV2CvAnalysisRouter(prisma) {
 
   router.get('/json', async (req, res) => {
     const vacancyId = normalizeString(req.query.vacancyId) || '';
-    const candidates = await loadCandidates(prisma, vacancyId);
+    const candidates = await loadCandidates(prisma, vacancyId, getAccessContext(req));
     res.json({ ok: true, vacancyId, candidates });
   });
 
   router.post('/run', async (req, res) => {
     const vacancyId = normalizeString(req.body?.vacancyId) || '';
     const desiredProfile = normalizeString(req.body?.desiredProfile)?.slice(0, 4000) || '';
+    const accessContext = getAccessContext(req);
     let vacancies = [];
     try {
-      vacancies = await loadVacancies(prisma);
+      vacancies = await loadVacancies(prisma, accessContext);
+      if (vacancyId && !vacancies.some((vacancy) => vacancy.id === vacancyId)) {
+        return res.status(403).send(renderPage({
+          vacancies,
+          vacancyId: '',
+          desiredProfile,
+          error: 'No tienes acceso a la vacante seleccionada.',
+          showCandidates: false
+        }));
+      }
       const review = await reviewVacancyCandidates(prisma, { vacancyId, desiredProfile });
 
       if (!review.ok) {
@@ -396,6 +418,11 @@ export function lorenV2CvAnalysisRouter(prisma) {
   });
 
   router.post('/:candidateId/analyze', async (req, res) => {
+    const candidate = await prisma.candidate.findFirst({
+      where: { id: req.params.candidateId, ...buildCandidateAccessWhere(getAccessContext(req)) },
+      select: { id: true }
+    });
+    if (!candidate) return res.status(403).send('No tienes acceso a este candidato.');
     const result = await analyzeCandidateCv(prisma, req.params.candidateId);
     const message = result.ok ? 'Hoja de vida analizada.' : `No fue posible analizar la hoja de vida: ${result.reason}`;
     res.redirect(`/admin/estadisticas/cv-analysis?message=${encodeURIComponent(message)}`);

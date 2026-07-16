@@ -7,6 +7,13 @@ import {
 } from '../services/metaRecruitmentStats.js';
 import { getMetaAdsConfig } from '../services/metaAdsClient.js';
 import { syncMetaAdsInsights } from '../services/metaAdsInsightsSync.js';
+import {
+  buildCandidateAccessWhere,
+  buildVacancyAccessWhere,
+  getAccessContext,
+  hasFullAccess
+} from '../services/appUsers.js';
+import { canManageLorenV2 } from '../services/lorenV2Gate.js';
 
 const BASE_PATH = '/admin/estadisticas';
 const DEFAULT_LOOKBACK_DAYS = 90;
@@ -252,11 +259,16 @@ export function currentMetaAdsCampaignWhere({ city = null, vacancyId = null } = 
   return where;
 }
 
-async function loadDashboard(prisma, query = {}) {
+async function loadDashboard(prisma, query = {}, accessContext = {}) {
   const range = dateRange(query);
   const city = normalizeText(query.city);
   const vacancyId = normalizeText(query.vacancyId);
-  const campaignWhere = currentMetaAdsCampaignWhere({ city, vacancyId });
+  const campaignWhere = {
+    ...currentMetaAdsCampaignWhere({ city, vacancyId }),
+    ...(hasFullAccess(accessContext)
+      ? {}
+      : { vacancy: { is: buildVacancyAccessWhere(accessContext) } })
+  };
 
   const [campaigns, candidates, cities, vacancies, account, lastSnapshot] = await Promise.all([
     prisma.campaign.findMany({
@@ -265,7 +277,11 @@ async function loadDashboard(prisma, query = {}) {
       include: { vacancy: true }
     }),
     prisma.candidate.findMany({
-      where: { sourceType: 'META_ADS', createdAt: range.bounds },
+      where: {
+        ...buildCandidateAccessWhere(accessContext),
+        sourceType: 'META_ADS',
+        createdAt: range.bounds
+      },
       select: {
         id: true, phone: true, fullName: true, documentType: true, documentNumber: true,
         age: true, neighborhood: true, locality: true, medicalRestrictions: true,
@@ -278,7 +294,7 @@ async function loadDashboard(prisma, query = {}) {
       }
     }),
     prisma.city.findMany({ where: { usedForRecruitment: true }, orderBy: { name: 'asc' }, select: { name: true } }),
-    prisma.vacancy.findMany({ orderBy: [{ city: 'asc' }, { title: 'asc' }], select: { id: true, title: true, city: true, isActive: true } }),
+    prisma.vacancy.findMany({ where: buildVacancyAccessWhere(accessContext), orderBy: [{ city: 'asc' }, { title: 'asc' }], select: { id: true, title: true, city: true, isActive: true } }),
     prisma.metaAdAccount.findFirst({ where: { isActive: true }, orderBy: { updatedAt: 'desc' } }),
     prisma.metaAdSnapshot.findFirst({ orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } })
   ]);
@@ -334,7 +350,7 @@ function syncPanel(data = {}) {
   const status = configured
     ? `<div class="alert good">Meta Ads está conectado. Lórren combina la inversión de los anuncios con lo que sucede durante el proceso de reclutamiento.</div>`
     : `<div class="alert warn">La conexión con Meta Ads no está completa. Un administrador técnico debe configurar la cuenta y su acceso antes de actualizar los resultados.</div>`;
-  const form = configured
+  const form = configured && data.canManageStatistics
     ? `<form method="post" action="${BASE_PATH}/campaigns/sync" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Actualizando…'"><input type="hidden" name="since" value="${escapeHtml(data.range.since)}"><input type="hidden" name="until" value="${escapeHtml(data.range.until)}"><button class="btn primary" type="submit">↻ Actualizar desde Meta</button></form>`
     : '';
   return `${status}<section class="card"><div class="header" style="margin:0"><div><div class="card-title" style="margin-bottom:4px">Actualización de datos</div><div class="muted-text">Cuenta: ${escapeHtml(data.account?.name || data.account?.accountId || 'No identificada')} · Moneda: ${escapeHtml(data.account?.currency || 'COP')}</div><div class="muted-text">Última actualización: ${escapeHtml(formatDateTime(data.lastSyncedAt, data.account?.timezoneName))}</div>${configured ? '' : '<div class="muted-text">Configuración requerida: META_ADS_ACCESS_TOKEN y META_AD_ACCOUNT_ID.</div>'}</div><div class="actions">${form}</div></div></section>`;
@@ -450,7 +466,8 @@ function adsTable(data = {}) {
 
 async function renderList(prisma, req, res) {
   if (!canAccess(req)) return res.status(403).send('No autorizado.');
-  const data = await loadDashboard(prisma, req.query || {});
+  const data = await loadDashboard(prisma, req.query || {}, getAccessContext(req));
+  data.canManageStatistics = canManageLorenV2(req);
   const missingVacancies = missingVacancyCount(data.metrics);
   const warning = missingVacancies
     ? `<div class="alert warn">Hay ${missingVacancies} anuncio(s) sin una vacante asociada. Relaciónalos para que Lórren pueda identificar correctamente a qué proceso pertenece cada candidato.</div>`
@@ -470,7 +487,8 @@ function candidateRows(metric, currency) {
 async function renderDetail(prisma, req, res) {
   if (!canAccess(req)) return res.status(403).send('No autorizado.');
   const detailQuery = { ...req.query, city: null, vacancyId: null };
-  const data = await loadDashboard(prisma, detailQuery);
+  const data = await loadDashboard(prisma, detailQuery, getAccessContext(req));
+  data.canManageStatistics = canManageLorenV2(req);
   const metric = data.metrics.find((item) => item.campaign.id === req.params.id);
   if (!metric) return res.status(404).send(layout('Anuncio no encontrado', '<div class="alert bad">El anuncio ya no existe en el inventario actual de Meta Ads.</div>'));
   const campaign = metric.campaign;
@@ -478,12 +496,15 @@ async function renderDetail(prisma, req, res) {
   const vacancyOptions = data.vacancies.map((item)=>`<option value="${escapeHtml(item.id)}" ${campaign.vacancyId===item.id?'selected':''}>${escapeHtml(item.title)} — ${escapeHtml(item.city)}${item.isActive?'':' (inactiva)'}</option>`).join('');
   const detailData = { ...data, totals: metric, metrics: [metric] };
   const recommendation = recommendationFor(metric, data.metrics);
-  const body = `<div class="header"><div><a class="btn secondary small" href="${BASE_PATH}/campaigns?from=${encodeURIComponent(data.range.since)}&to=${encodeURIComponent(data.range.until)}">← Volver</a><h1 style="margin-top:10px">${escapeHtml(metric.metaAdName || campaign.name)}</h1><p>${escapeHtml(metric.metaCampaignName || 'Campaña Meta')} · <span class="mono">ad_id ${escapeHtml(metric.metaAdId)}</span></p></div><div>${metaStatusBadge(campaign)}</div></div><div class="alert ${recommendation.cls === 'bad' ? 'bad' : recommendation.cls === 'warn' ? 'warn' : recommendation.cls === 'good' ? 'good' : 'info'}"><strong>${escapeHtml(recommendation.label)}:</strong> ${escapeHtml(recommendation.detail)}</div><section class="card"><div class="card-title">¿A qué vacante pertenece?</div><div class="plain-note">Esta relación no modifica el anuncio en Meta. Le indica a Lórren qué vacante debe usar cuando una persona llega desde este anuncio.</div><form class="association" method="post" action="${BASE_PATH}/campaigns/${escapeHtml(campaign.id)}/edit"><label>Ciudad<select name="city"><option value="">Sin ciudad</option>${cityOptions}</select></label><label>Vacante<select name="vacancyId"><option value="">Sin vacante</option>${vacancyOptions}</select></label><button class="btn primary" type="submit">Guardar asociación</button></form></section>${metaMetrics(metric,data.account?.currency)}${topMetrics(detailData)}${funnel(metric,data.account?.currency)}${insightsPanel(detailData)}<section class="card"><div class="card-title">Personas que llegaron por este anuncio (${metric.candidatesCount})</div>${candidateRows(metric,data.account?.currency||'COP')}</section>`;
+  const associationPanel = data.canManageStatistics
+    ? `<section class="card"><div class="card-title">¿A qué vacante pertenece?</div><div class="plain-note">Esta relación no modifica el anuncio en Meta. Le indica a Lórren qué vacante debe usar cuando una persona llega desde este anuncio.</div><form class="association" method="post" action="${BASE_PATH}/campaigns/${escapeHtml(campaign.id)}/edit"><label>Ciudad<select name="city"><option value="">Sin ciudad</option>${cityOptions}</select></label><label>Vacante<select name="vacancyId"><option value="">Sin vacante</option>${vacancyOptions}</select></label><button class="btn primary" type="submit">Guardar asociación</button></form></section>`
+    : '<section class="card"><div class="plain-note">Tu permiso permite consultar estas estadísticas, pero no cambiar la vacante asociada al anuncio.</div></section>';
+  const body = `<div class="header"><div><a class="btn secondary small" href="${BASE_PATH}/campaigns?from=${encodeURIComponent(data.range.since)}&to=${encodeURIComponent(data.range.until)}">← Volver</a><h1 style="margin-top:10px">${escapeHtml(metric.metaAdName || campaign.name)}</h1><p>${escapeHtml(metric.metaCampaignName || 'Campaña Meta')} · <span class="mono">ad_id ${escapeHtml(metric.metaAdId)}</span></p></div><div>${metaStatusBadge(campaign)}</div></div><div class="alert ${recommendation.cls === 'bad' ? 'bad' : recommendation.cls === 'warn' ? 'warn' : recommendation.cls === 'good' ? 'good' : 'info'}"><strong>${escapeHtml(recommendation.label)}:</strong> ${escapeHtml(recommendation.detail)}</div>${associationPanel}${metaMetrics(metric,data.account?.currency)}${topMetrics(detailData)}${funnel(metric,data.account?.currency)}${insightsPanel(detailData)}<section class="card"><div class="card-title">Personas que llegaron por este anuncio (${metric.candidatesCount})</div>${candidateRows(metric,data.account?.currency||'COP')}</section>`;
   return res.send(layout(`Anuncio: ${metric.metaAdName || campaign.name}`, body));
 }
 
 async function saveClassification(prisma, req, res) {
-  if (!canAccess(req)) return res.status(403).send('No autorizado.');
+  if (!canManageLorenV2(req)) return res.status(403).send('Este perfil solo puede consultar Estadísticas.');
   const requestedVacancyId = normalizeText(req.body?.vacancyId);
   const requestedCity = normalizeText(req.body?.city);
   const campaign = await prisma.campaign.findFirst({
@@ -517,7 +538,7 @@ async function saveClassification(prisma, req, res) {
 
 async function jsonList(prisma, req, res) {
   if (!canAccess(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
-  const data = await loadDashboard(prisma, req.query || {});
+  const data = await loadDashboard(prisma, req.query || {}, getAccessContext(req));
   return res.json({
     ok: true,
     range: { since: data.range.since, until: data.range.until },
@@ -583,7 +604,7 @@ function syncRedirect(result = {}) {
 }
 
 async function runSync(prisma, syncMetaAds, req, res) {
-  if (!canAccess(req)) return res.status(403).send('No autorizado.');
+  if (!canManageLorenV2(req)) return res.status(403).send('Este perfil solo puede consultar Estadísticas.');
   let result;
   try {
     result = await syncMetaAds(prisma, {

@@ -1,5 +1,10 @@
 import express from 'express';
-import { requireLorenV2 } from '../services/lorenV2Gate.js';
+import {
+  canManageLorenV2,
+  requireLorenV2,
+  requireLorenV2Write
+} from '../services/lorenV2Gate.js';
+import { buildCandidateAccessWhere, getAccessContext } from '../services/appUsers.js';
 import { recordCandidateDataConsent } from '../services/consentStateService.js';
 
 const CONSENT_VERSION = 'loren-v2-2026-06-v1';
@@ -103,7 +108,7 @@ function renderMetrics(metrics = {}) {
   </section>`;
 }
 
-function renderCandidateRows(candidates = []) {
+function renderCandidateRows(candidates = [], canManage = false) {
   if (!candidates.length) return '<tr><td colspan="6">No hay candidatos para mostrar.</td></tr>';
   return candidates.map((candidate) => `<tr>
     <td><strong>${escapeHtml(candidate.fullName || 'Sin nombre')}</strong><br><span class="muted">${escapeHtml(candidate.phone || '')}</span></td>
@@ -111,7 +116,7 @@ function renderCandidateRows(candidates = []) {
     <td><span class="badge ${consentClass(candidate.dataConsentStatus)}">${escapeHtml(candidate.dataConsentStatus || 'PENDING')}</span><br><span class="muted">Versión: ${escapeHtml(candidate.dataConsentVersion || 'Sin versión')}</span></td>
     <td>${formatDate(candidate.dataConsentAcceptedAt || candidate.dataConsentRevokedAt)}<br><span class="muted">${escapeHtml(candidate.dataConsentSource || '')}</span></td>
     <td><span class="muted">${escapeHtml(candidate.dataConsentRecordedBy || '')}</span></td>
-    <td>
+    <td>${canManage ? `
       <div class="actions">
         <form method="post" action="/admin/estadisticas/data-consents/${candidate.id}/accept">
           <button class="btn" type="submit">Registrar aceptación</button>
@@ -120,16 +125,18 @@ function renderCandidateRows(candidates = []) {
           <button class="btn btn-danger" type="submit">Revocar</button>
         </form>
       </div>
-    </td>
+    ` : '<span class="muted">Solo consulta</span>'}</td>
   </tr>`).join('');
 }
 
-async function loadConsentDashboard(prisma) {
+async function loadConsentDashboard(prisma, accessContext = {}) {
+  const accessWhere = buildCandidateAccessWhere(accessContext);
   const [pending, accepted, revoked, candidates] = await Promise.all([
-    prisma.candidate.count({ where: { dataConsentStatus: 'PENDING' } }),
-    prisma.candidate.count({ where: { dataConsentStatus: 'ACCEPTED' } }),
-    prisma.candidate.count({ where: { dataConsentStatus: 'REVOKED' } }),
+    prisma.candidate.count({ where: { ...accessWhere, dataConsentStatus: 'PENDING' } }),
+    prisma.candidate.count({ where: { ...accessWhere, dataConsentStatus: 'ACCEPTED' } }),
+    prisma.candidate.count({ where: { ...accessWhere, dataConsentStatus: 'REVOKED' } }),
     prisma.candidate.findMany({
+      where: accessWhere,
       orderBy: [{ dataConsentStatus: 'asc' }, { updatedAt: 'desc' }],
       take: 300,
       include: { vacancy: { select: { id: true, title: true, city: true } } }
@@ -161,7 +168,8 @@ export function lorenV2DataConsentsRouter(prisma) {
   router.use(requireLorenV2);
 
   router.get('/', async (req, res) => {
-    const { metrics, candidates } = await loadConsentDashboard(prisma);
+    const { metrics, candidates } = await loadConsentDashboard(prisma, getAccessContext(req));
+    const canManage = canManageLorenV2(req);
     const message = normalizeString(req.query.message);
     const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
       <section class="card">
@@ -177,24 +185,24 @@ export function lorenV2DataConsentsRouter(prisma) {
         <div style="overflow-x:auto;">
           <table>
             <thead><tr><th>Candidato</th><th>Documento / vacante</th><th>Estado</th><th>Fecha</th><th>Registrado por</th><th>Acciones</th></tr></thead>
-            <tbody>${renderCandidateRows(candidates)}</tbody>
+            <tbody>${renderCandidateRows(candidates, canManage)}</tbody>
           </table>
         </div>
       </section>`;
     res.send(renderLayout({ title: 'Datos personales — Estadísticas', body }));
   });
 
-  router.get('/json', async (_req, res) => {
-    const dashboard = await loadConsentDashboard(prisma);
+  router.get('/json', async (req, res) => {
+    const dashboard = await loadConsentDashboard(prisma, getAccessContext(req));
     res.json({ ok: true, consentVersion: CONSENT_VERSION, consentText: CONSENT_TEXT, ...dashboard });
   });
 
-  router.post('/:candidateId/accept', async (req, res) => {
+  router.post('/:candidateId/accept', requireLorenV2Write, async (req, res) => {
     await recordConsent(prisma, req, req.params.candidateId, 'ACCEPTED');
     res.redirect('/admin/estadisticas/data-consents?message=Autorización registrada.');
   });
 
-  router.post('/:candidateId/revoke', async (req, res) => {
+  router.post('/:candidateId/revoke', requireLorenV2Write, async (req, res) => {
     await recordConsent(prisma, req, req.params.candidateId, 'REVOKED');
     res.redirect('/admin/estadisticas/data-consents?message=Revocatoria registrada.');
   });
