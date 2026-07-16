@@ -175,7 +175,8 @@ export async function findRecentOutboundConversationDelivery(prisma, input = {})
   }
 
   const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
-  const body = requireNonEmptyString(input.body, 'outbound_delivery_body');
+  const body = String(input.body ?? '');
+  if (!body.trim()) throw new Error('outbound_delivery_body_required');
   const dedupeKey = requireNonEmptyString(input.dedupeKey, 'outbound_delivery_dedupe_key');
   const createdSince = normalizeTimestamp(input.createdSince, 'outbound_delivery_created_since');
   const rows = await prisma.message.findMany({
