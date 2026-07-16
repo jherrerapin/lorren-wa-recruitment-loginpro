@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { MessageType } from '@prisma/client';
+import { safeErrorMessage } from './cvIntelligence.js';
 import {
   claimManualOutboundDelivery,
   finalizeManualOutboundDelivery,
@@ -181,7 +182,7 @@ async function persistProviderFailure(prisma, {
       candidateId,
       messageId,
       confirmedRejection,
-      error: persistenceError?.message || persistenceError
+      error: safeErrorMessage(persistenceError)
     });
     return null;
   }
@@ -361,7 +362,7 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
       candidateId,
       messageId: preparation.messageId,
       providerMessageId,
-      error: error?.message || error
+      error: safeErrorMessage(error)
     });
     return {
       sent: true,
