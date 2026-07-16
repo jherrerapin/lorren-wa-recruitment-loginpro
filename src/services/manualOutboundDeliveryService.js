@@ -16,6 +16,7 @@ import {
 } from './conversationMessageRepository.js';
 
 const DEFAULT_DEDUPE_WINDOW_MS = 30_000;
+const PENDING_RECONCILIATION_MESSAGE = 'WhatsApp confirmó el envío, pero la actualización interna quedó pendiente. No reenvíes el mensaje; revisa la conversación y el estado del candidato.';
 
 function requireNonEmptyString(value, label, { preserve = false } = {}) {
   const raw = String(value ?? '');
@@ -100,7 +101,9 @@ function extractProviderMessageId(response) {
 function providerErrorSummary(error) {
   const status = Number(error?.response?.status);
   const code = String(error?.code || '').trim();
-  const message = String(error?.message || 'unknown_provider_error').trim();
+  const message = safeErrorMessage({
+    message: String(error?.message || 'unknown_provider_error').trim()
+  }).split('\n')[0].trim();
   return [Number.isInteger(status) ? `http_${status}` : null, code || null, message || null]
     .filter(Boolean)
     .join(':')
@@ -192,6 +195,19 @@ export function getManualOutboundUserMessage(error, fallback = 'No fue posible e
   return typeof error?.userMessage === 'string' && error.userMessage.trim()
     ? error.userMessage
     : fallback;
+}
+
+export function getManualOutboundCompletionNotice(result, successMessage = 'Mensaje enviado correctamente.') {
+  if (result?.sent === true && result?.persistencePending === true) {
+    return {
+      type: 'error',
+      message: PENDING_RECONCILIATION_MESSAGE
+    };
+  }
+  return {
+    type: 'success',
+    message: successMessage
+  };
 }
 
 export async function deliverManualOutboundText(prismaInput, input = {}, dependencies = {}) {
@@ -348,6 +364,7 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
 
       return candidateResult;
     });
+    const persistencePending = finalization.count !== 1;
 
     return {
       sent: true,
@@ -355,7 +372,7 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
       providerMessageId,
       messageId: preparation.messageId,
       candidateStateCount: finalization.count,
-      persistencePending: false
+      persistencePending
     };
   } catch (error) {
     console.error('[manual_outbound_post_send_persistence]', {
