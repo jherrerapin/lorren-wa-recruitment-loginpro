@@ -10,6 +10,7 @@ import {
   persistOutboundConversationMessage,
   updateConversationMessagePayload
 } from './conversationMessageRepository.js';
+import { completeSupervisorReviewAfterDelivery } from './candidateStateService.js';
 import { OPENAI_SUPERVISOR_REPLY_MODEL } from './openAiModelConfig.js';
 
 const DEFAULT_SUPERVISOR_PHONE = '3052982551';
@@ -122,6 +123,35 @@ async function hasScheduledInterview(prisma, candidate = {}) {
 
 function formatInterviewStatus(hasInterview) {
   return hasInterview ? 'Sí' : 'No';
+}
+
+function candidatePauseSnapshot(candidate = {}) {
+  return {
+    botPaused: candidate.botPaused,
+    botPausedAt: candidate.botPausedAt ?? null,
+    botPausedBy: candidate.botPausedBy ?? null,
+    botPauseReason: candidate.botPauseReason ?? null,
+    botResumeMode: candidate.botResumeMode ?? null,
+    lastOutboundAt: candidate.lastOutboundAt ?? null
+  };
+}
+
+function isoDateOrNull(value) {
+  if (value == null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function candidateStateDiagnostic(candidate = {}) {
+  if (!candidate?.id) return null;
+  return {
+    botPaused: Boolean(candidate.botPaused),
+    botPausedAt: isoDateOrNull(candidate.botPausedAt),
+    botPausedBy: candidate.botPausedBy ?? null,
+    botPauseReason: candidate.botPauseReason ?? null,
+    botResumeMode: candidate.botResumeMode ?? null,
+    lastOutboundAt: isoDateOrNull(candidate.lastOutboundAt)
+  };
 }
 
 async function saveSupervisorOutbound(prisma, candidateId, body, rawPayload = {}) {
@@ -513,6 +543,7 @@ export async function handleSupervisorInbound(prisma, message = {}) {
 
   const { request, candidate } = pending;
   const payload = request.rawPayload || {};
+  const expectedCandidateState = candidatePauseSnapshot(candidate);
 
   const candidateQuestion = payload.inboundText || '';
   const manualOutboundAfterRequest = await hasManualCandidateOutboundAfter(prisma, candidate.id, request.createdAt);
@@ -581,6 +612,7 @@ export async function handleSupervisorInbound(prisma, message = {}) {
   }
 
   await sendTextMessage(candidate.phone, candidateReply);
+  const sentAt = new Date();
   await persistOutboundConversationMessage(prisma, {
     candidateId: candidate.id,
     messageType: MessageType.TEXT,
@@ -593,26 +625,30 @@ export async function handleSupervisorInbound(prisma, message = {}) {
       aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
       aiReason: candidateReplyResult?.reason || null,
       requestMessageId: request.id,
+      deliveredAt: sentAt.toISOString(),
       supervisorDecision
     }
   });
-  await prisma.candidate.update({
-    where: { id: candidate.id },
-    data: {
-      botPaused: false,
-      botPausedAt: null,
-      botPausedBy: null,
-      botPauseReason: null,
-      botResumeMode: null,
-      lastOutboundAt: new Date()
-    }
+  const candidateTransition = await completeSupervisorReviewAfterDelivery(prisma, {
+    candidateId: candidate.id,
+    expected: expectedCandidateState,
+    sentAt
   });
+  const candidateStateApplied = candidateTransition.count === 1;
   await updateConversationMessagePayload(prisma, {
     messageId: request.id,
     rawPayload: {
       ...payload,
       resolved: true,
-      resolvedAt: new Date().toISOString()
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: 'admin_supervisor_answer_delivered',
+      candidateStateApplied,
+      candidateStateConflict: candidateStateApplied
+        ? null
+        : {
+            reason: candidateTransition.blockedReason || 'candidate_snapshot_changed_after_supervisor_delivery',
+            observed: candidateStateDiagnostic(candidateTransition.candidate)
+          }
     }
   });
   await addSupervisorKnowledge(
@@ -621,5 +657,10 @@ export async function handleSupervisorInbound(prisma, message = {}) {
     buildKnowledgeContent({ candidateQuestion, adminInstruction: body, candidateReply }),
     `admin_whatsapp,manual_review${payload.manualReviewType ? `,type:${payload.manualReviewType}` : ''}`
   );
-  return { handled: true, action: 'answered_candidate', candidateId: candidate.id };
+  return {
+    handled: true,
+    action: 'answered_candidate',
+    candidateId: candidate.id,
+    candidateStateApplied
+  };
 }

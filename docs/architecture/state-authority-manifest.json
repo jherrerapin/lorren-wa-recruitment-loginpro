@@ -41,7 +41,7 @@
         {
           "path": "src/services/adminSupervisor.js",
           "role": "admin",
-          "reason": "Intervenciones del supervisor y pausas o reanudaciones; delega todos los mensajes en el repositorio compartido"
+          "reason": "Conserva únicamente el candidato técnico del supervisor y sus timestamps de ventana; la resolución de revisiones delega la pausa y lastOutboundAt en CandidateStateService"
         },
         {
           "path": "src/services/campaignAttribution.js",
@@ -96,7 +96,7 @@
         {
           "path": "src/services/candidateStateService.js",
           "role": "boundary",
-          "reason": "Frontera de la autoridad objetivo para reanudación por inbound, pausas administrativas, apertura de WhatsApp y ciclo condicional de entrega manual saliente; Candidate continúa fragmentado"
+          "reason": "Frontera de la autoridad objetivo para reanudación por inbound, pausas administrativas, apertura de WhatsApp, entrega manual saliente y resolución condicional de revisión del supervisor; Candidate continúa fragmentado"
         }
       ]
     },

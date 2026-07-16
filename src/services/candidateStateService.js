@@ -91,6 +91,13 @@ function normalizeManualOutboundSnapshot(expected = {}) {
   };
 }
 
+function normalizeSupervisorReviewSnapshot(expected = {}) {
+  return {
+    ...normalizeExpectedPauseSnapshot(expected, { requirePaused: true }),
+    lastOutboundAt: normalizeNullableDate(expected.lastOutboundAt, 'candidate_expected_last_outbound_at')
+  };
+}
+
 function millisecondDateFilter(value) {
   if (value == null) return null;
   return {
@@ -104,6 +111,14 @@ function manualOutboundExpectedWhere(snapshot) {
     ...snapshot,
     botPausedAt: millisecondDateFilter(snapshot.botPausedAt),
     reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    lastOutboundAt: millisecondDateFilter(snapshot.lastOutboundAt)
+  };
+}
+
+function supervisorReviewExpectedWhere(snapshot) {
+  return {
+    ...snapshot,
+    botPausedAt: millisecondDateFilter(snapshot.botPausedAt),
     lastOutboundAt: millisecondDateFilter(snapshot.lastOutboundAt)
   };
 }
@@ -306,6 +321,33 @@ export async function markManualOutboundDeliveryUnknown(client, input = {}) {
     expected: manualOutboundExpectedWhere(expected),
     data: {
       botResumeMode: MANUAL_OUTBOUND_UNKNOWN_MODE
+    }
+  });
+}
+
+export async function completeSupervisorReviewAfterDelivery(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeSupervisorReviewSnapshot(input.expected);
+  const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
+  const sentAt = requireValidDate(sentAtInput, 'candidate_supervisor_review_sent_at');
+
+  if ([MANUAL_OUTBOUND_SENDING_MODE, MANUAL_OUTBOUND_UNKNOWN_MODE].includes(expected.botResumeMode)) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId, {
+      blockedReason: expected.botResumeMode
+    });
+  }
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected: supervisorReviewExpectedWhere(expected),
+    data: {
+      botPaused: false,
+      botPausedAt: null,
+      botPausedBy: null,
+      botPauseReason: null,
+      botResumeMode: null,
+      lastOutboundAt: sentAt
     }
   });
 }

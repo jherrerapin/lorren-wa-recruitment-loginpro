@@ -8,7 +8,7 @@ La consolidación será incremental. Cada consumidor conserva la decisión espec
 
 ## Estado actual
 
-El manifiesto registra quince archivos que escriben directamente `Candidate`. Entre ellos existen rutas HTTP, webhook, motores conversacionales, consentimiento, atribución, CV, recordatorios, supervisor e integraciones.
+El manifiesto registra dieciséis archivos que escriben directamente `Candidate`. Entre ellos existen rutas HTTP, webhook, motores conversacionales, consentimiento, atribución, CV, recordatorios, supervisor e integraciones.
 
 `Candidate` permanece en `migrationStage: fragmented` hasta que todas las escrituras rastreadas hayan migrado. La aparición de `CandidateStateService` no vuelve canónico al agregado; únicamente inicia la autoridad objetivo.
 
@@ -136,6 +136,36 @@ El primer contrato de `CandidateStateService`:
 - no informa éxito cuando otra operación cambió la pausa.
 
 Esta operación es una única escritura condicional. No necesita una transacción interactiva; las futuras operaciones que combinen varias escrituras deberán ser cortas, atómicas y reutilizar un `tx` existente cuando corresponda.
+
+## Fronteras adicionales migradas
+
+### Pausa y reanudación administrativa
+
+Los botones explícitos del panel delegan en `pauseCandidateAutomationFromAdmin()` y `resumeCandidateAutomationFromAdmin()`. Ambos comparan el snapshot completo de pausa y solo registran eventos administrativos cuando `count === 1`.
+
+### Apertura manual de WhatsApp
+
+`recordManualWhatsAppOpen()` compara pausa y, según el rol, también `status` o `devLastSeenAt`. Una carrera no abre WhatsApp ni registra una auditoría falsa.
+
+### Entrega manual saliente
+
+El ciclo `claimManualOutboundDelivery()` → proveedor → `finalizeManualOutboundDelivery()` diferencia `SENDING`, `SENT`, `FAILED` y `UNKNOWN`. La evidencia del mensaje existe antes del efecto externo y una entrega incierta no puede reanudarse automáticamente.
+
+### Resolución de revisión manual del supervisor
+
+`completeSupervisorReviewAfterDelivery()` protege la limpieza posterior a una respuesta del supervisor:
+
+- exige una pausa activa;
+- compara pausa completa y `lastOutboundAt` mediante `updateMany`;
+- tolera la precisión de PostgreSQL comparando timestamps en una ventana de un milisegundo;
+- limpia la pausa y registra `sentAt` solo cuando el snapshot coincide;
+- no levanta los modos `manual_outbound_sending` ni `manual_outbound_delivery_unknown`;
+- devuelve el candidato vigente cuando existe conflicto;
+- no abre una transacción anidada.
+
+`adminSupervisor.js` conserva el orden proveedor → evidencia de `Message` → transición condicional de `Candidate` → resolución trazable de la solicitud. Cuando `count === 0`, el mensaje no se reenvía: la solicitud queda resuelta con `candidateStateApplied: false` y el estado observado para conciliación.
+
+El candidato técnico del supervisor continúa fuera de esta frontera. Su `upsert`, `lastInboundAt` y el `lastOutboundAt` del keepalive permanecen como escritores directos explícitos para una fase posterior.
 
 ## Reglas para la autoridad
 
