@@ -1,0 +1,169 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const manifestPath = 'config/candidate-progress-authority.json';
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+function readSource(filePath) {
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+function walkJavaScriptFiles(root) {
+  const files = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...walkJavaScriptFiles(entryPath));
+    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      files.push(entryPath.replaceAll('\\', '/'));
+    }
+  }
+  return files;
+}
+
+function parseConversationSteps(schema) {
+  const match = schema.match(/enum\s+ConversationStep\s*\{([\s\S]*?)\}/);
+  assert.ok(match, 'No se encontró enum ConversationStep en prisma/schema.prisma');
+  return match[1]
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, '').trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/)[0]);
+}
+
+const allowedRoles = new Set([
+  'canonical_schema',
+  'direct_writer',
+  'indirect_writer',
+  'decision_producer',
+  'decision_policy',
+  'decision_schema',
+  'read_only_context',
+  'read_only_projection',
+  'read_only_support'
+]);
+
+const trackedLiteralPattern = /\b(?:currentStep|multilineWindowUntil|multilineBatchVersion)\s*:/;
+
+test('el manifiesto de progreso coincide con el enum canónico de Prisma', () => {
+  const schemaSteps = parseConversationSteps(readSource('prisma/schema.prisma'));
+  assert.deepEqual(manifest.canonicalSteps, schemaSteps);
+  assert.deepEqual(manifest.trackedFields, [
+    'currentStep',
+    'multilineWindowUntil',
+    'multilineBatchVersion'
+  ]);
+  assert.equal(manifest.phase, 'characterization');
+  assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, false);
+  assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
+  assert.equal(manifest.rules.genderLogicInScope, false);
+  assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
+});
+
+test('cada fuente productiva está clasificada y existe en el repositorio', () => {
+  const classifiedPaths = new Set();
+  for (const source of manifest.sourceInventory) {
+    assert.ok(source.path, 'Toda fuente debe declarar path');
+    assert.ok(allowedRoles.has(source.role), `Rol no soportado para ${source.path}: ${source.role}`);
+    assert.equal(fs.existsSync(source.path), true, `No existe la fuente clasificada: ${source.path}`);
+    assert.equal(classifiedPaths.has(source.path), false, `Fuente duplicada: ${source.path}`);
+    classifiedPaths.add(source.path);
+    for (const field of source.trackedFields || []) {
+      assert.ok(manifest.trackedFields.includes(field), `Campo no rastreado en ${source.path}: ${field}`);
+    }
+  }
+
+  const observed = walkJavaScriptFiles('src')
+    .filter((filePath) => trackedLiteralPattern.test(readSource(filePath)));
+
+  const unclassified = observed.filter((filePath) => !classifiedPaths.has(filePath));
+  assert.deepEqual(
+    unclassified,
+    [],
+    `Aparecieron fuentes con literales de progreso sin clasificar: ${unclassified.join(', ')}`
+  );
+});
+
+test('las familias de transición usan pasos conocidos y contratos estrechos', () => {
+  const canonicalSteps = new Set(manifest.canonicalSteps);
+  const trackedFields = new Set(manifest.trackedFields);
+  const sourcePaths = new Set(manifest.sourceInventory.map((source) => source.path));
+  const ids = new Set();
+
+  for (const family of manifest.transitionFamilies) {
+    assert.ok(family.id, 'Cada familia debe tener id');
+    assert.equal(ids.has(family.id), false, `Familia duplicada: ${family.id}`);
+    ids.add(family.id);
+    assert.ok(Array.isArray(family.owners) && family.owners.length > 0, `${family.id} no declara owners`);
+    assert.ok(Array.isArray(family.writers) && family.writers.length > 0, `${family.id} no declara writers`);
+    assert.ok(family.trigger, `${family.id} no declara trigger`);
+    assert.ok(family.concurrency, `${family.id} no documenta concurrencia`);
+    assert.ok(family.idempotency, `${family.id} no documenta idempotencia`);
+
+    for (const filePath of [...family.owners, ...family.writers]) {
+      assert.ok(sourcePaths.has(filePath), `${family.id} referencia una fuente no inventariada: ${filePath}`);
+    }
+    for (const origin of family.origins) {
+      assert.ok(origin === '*' || canonicalSteps.has(origin), `${family.id} usa origen inválido: ${origin}`);
+    }
+    for (const destination of family.destinations) {
+      assert.ok(canonicalSteps.has(destination), `${family.id} usa destino inválido: ${destination}`);
+    }
+    for (const field of family.allowedFields) {
+      assert.ok(trackedFields.has(field), `${family.id} intenta mutar un campo fuera de alcance: ${field}`);
+    }
+    assert.deepEqual(family.allowedFields, ['currentStep'], `${family.id} debe ser un contrato estrecho de currentStep`);
+  }
+});
+
+test('los contratos multilinea preservan el compare-and-set observado', () => {
+  assert.deepEqual(
+    manifest.multilineContracts.map((contract) => contract.id),
+    ['schedule_multiline_window', 'acquire_multiline_batch']
+  );
+
+  for (const contract of manifest.multilineContracts) {
+    assert.equal(contract.owner, 'src/routes/webhook.js');
+    assert.deepEqual(contract.allowedFields, ['multilineWindowUntil', 'multilineBatchVersion']);
+    assert.ok(contract.concurrency);
+    assert.ok(contract.idempotency);
+  }
+
+  const webhook = readSource('src/routes/webhook.js');
+  assert.match(webhook, /async function scheduleMultilineWindow\(prisma, candidateId, context = \{\}\)/);
+  assert.match(webhook, /multilineWindowUntil:\s*windowUntil/);
+  assert.match(webhook, /multilineBatchVersion:\s*\{ increment: 1 \}/);
+  assert.match(webhook, /async function tryAcquireMultilineProcessing\(prisma, candidateId, batchVersion\)/);
+  assert.match(webhook, /multilineBatchVersion:\s*batchVersion/);
+  assert.match(webhook, /multilineWindowUntil:\s*\{ lte: new Date\(\) \}/);
+  assert.match(webhook, /multilineWindowUntil:\s*null/);
+  assert.match(webhook, /return acquired\.count === 1/);
+});
+
+test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
+  const engine = readSource('src/services/conversationEngine.js');
+  const consent = readSource('src/services/consentStateService.js');
+  const vacancyGate = readSource('src/services/vacancyFirstGate.js');
+  const silentCapture = readSource('src/services/silentProfileCapture.js');
+
+  assert.match(engine, /Object\.values\(ConversationStep\)\.includes\(nextStep\)/);
+  assert.match(engine, /pendingUpdate\.currentStep = finalStep/);
+  assert.match(consent, /ALLOWED_CANDIDATE_PATCH_FIELDS/);
+  assert.match(consent, /'currentStep'/);
+  assert.match(consent, /candidate_patch_field_not_allowed/);
+  assert.doesNotMatch(vacancyGate, /prisma\.candidate\.(?:create|upsert|update|updateMany)\s*\(/);
+  assert.doesNotMatch(silentCapture, /prisma\.candidate\.(?:create|upsert|update|updateMany)\s*\(/);
+  assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
+  assert.doesNotMatch(manifest.transitionFamilies.map((family) => family.id).join('|'), /generic|arbitrary|patch/i);
+});
+
+test('la documentación enlaza la matriz y mantiene explícito el alcance de fase 1', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /config\/candidate-progress-authority\.json/);
+  assert.match(documentation, /Fase 1: caracterización del progreso conversacional/);
+  assert.match(documentation, /no cambia el comportamiento runtime/i);
+  assert.match(documentation, /productor de decisión/i);
+  assert.match(documentation, /escritor efectivo/i);
+});
