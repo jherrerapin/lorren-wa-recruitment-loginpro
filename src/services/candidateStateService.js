@@ -91,6 +91,23 @@ function normalizeManualOutboundSnapshot(expected = {}) {
   };
 }
 
+function millisecondDateFilter(value) {
+  if (value == null) return null;
+  return {
+    gte: value,
+    lt: new Date(value.getTime() + 1)
+  };
+}
+
+function manualOutboundExpectedWhere(snapshot) {
+  return {
+    ...snapshot,
+    botPausedAt: millisecondDateFilter(snapshot.botPausedAt),
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    lastOutboundAt: millisecondDateFilter(snapshot.lastOutboundAt)
+  };
+}
+
 function requireClaimedManualOutboundSnapshot(expected = {}) {
   const snapshot = normalizeManualOutboundSnapshot(expected);
   if (!snapshot.botPaused || snapshot.botResumeMode !== MANUAL_OUTBOUND_SENDING_MODE) {
@@ -236,7 +253,7 @@ export async function claimManualOutboundDelivery(client, input = {}) {
 
   return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
-    expected,
+    expected: manualOutboundExpectedWhere(expected),
     data: {
       botPaused: true,
       botPausedAt: now,
@@ -258,7 +275,7 @@ export async function finalizeManualOutboundDelivery(client, input = {}) {
 
   return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
-    expected,
+    expected: manualOutboundExpectedWhere(expected),
     data: {
       lastOutboundAt: sentAt,
       botResumeMode: 'manual_resume_dashboard'
@@ -274,7 +291,7 @@ export async function restoreManualOutboundDelivery(client, input = {}) {
 
   return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
-    expected,
+    expected: manualOutboundExpectedWhere(expected),
     data: previous
   });
 }
@@ -286,7 +303,7 @@ export async function markManualOutboundDeliveryUnknown(client, input = {}) {
 
   return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
-    expected,
+    expected: manualOutboundExpectedWhere(expected),
     data: {
       botResumeMode: MANUAL_OUTBOUND_UNKNOWN_MODE
     }
