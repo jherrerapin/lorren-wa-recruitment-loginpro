@@ -61,22 +61,39 @@ jobs:
           cv.write_text(cv_source.replace(old_function, '', 1))
           PY
 
-      - name: Validate bounded change
+      - name: Validate changed file boundary
         shell: bash
         run: |
           set -euo pipefail
           changed=$(git diff --name-only | sort)
           expected=$(printf '%s\n' src/services/cvIntelligence.js src/services/manualOutboundDeliveryService.js | sort)
           test "$changed" = "$expected"
+
+      - name: Check targeted syntax
+        shell: bash
+        run: |
+          set -euo pipefail
           node --check src/services/errorSanitization.js
           node --check src/services/cvIntelligence.js
           node --check src/services/manualOutboundDeliveryService.js
+
+      - name: Install and generate
+        shell: bash
+        run: |
           npm ci --silent
           npm run prisma:generate --silent
-          node --test test/adminSupervisor.test.js
-          node --test test/manualOutboundDeliveryService.test.js
-          node --test test/attachmentAnalysisContract.test.js
-          git diff --check
+
+      - name: Validate supervisor isolation
+        run: node --test test/adminSupervisor.test.js
+
+      - name: Validate manual outbound delivery
+        run: node --test test/manualOutboundDeliveryService.test.js
+
+      - name: Validate CV sanitization contract
+        run: node --test test/attachmentAnalysisContract.test.js
+
+      - name: Validate formatting
+        run: git diff --check
 
       - name: Publish shared helper migration
         shell: bash
