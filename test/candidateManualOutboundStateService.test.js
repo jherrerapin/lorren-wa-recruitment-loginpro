@@ -17,8 +17,24 @@ function sameValue(left, right) {
   return left === right;
 }
 
+function matchesExpected(value, expected) {
+  if (
+    expected
+    && typeof expected === 'object'
+    && !(expected instanceof Date)
+    && Object.hasOwn(expected, 'gte')
+    && Object.hasOwn(expected, 'lt')
+  ) {
+    if (value == null) return false;
+    const valueTime = new Date(value).getTime();
+    return valueTime >= new Date(expected.gte).getTime()
+      && valueTime < new Date(expected.lt).getTime();
+  }
+  return sameValue(value, expected);
+}
+
 function matchesWhere(candidate, where = {}) {
-  return Object.entries(where).every(([field, expected]) => sameValue(candidate?.[field], expected));
+  return Object.entries(where).every(([field, expected]) => matchesExpected(candidate?.[field], expected));
 }
 
 function createHarness(initialCandidate) {
@@ -77,6 +93,12 @@ function snapshot(candidate) {
   };
 }
 
+function assertOneMillisecondFilter(filter, expectedDate) {
+  assert.ok(filter && typeof filter === 'object');
+  assert.equal(new Date(filter.gte).getTime(), expectedDate.getTime());
+  assert.equal(new Date(filter.lt).getTime(), expectedDate.getTime() + 1);
+}
+
 test('reclama la entrega sin adelantar lastOutboundAt y cancela recordatorios', async () => {
   const harness = createHarness(previous);
   const result = await claimManualOutboundDelivery(harness.client, {
@@ -95,6 +117,15 @@ test('reclama la entrega sin adelantar lastOutboundAt y cancela recordatorios', 
   assert.equal(result.candidate.reminderScheduledFor, null);
   assert.equal(result.candidate.reminderState, 'CANCELLED');
   assert.equal(result.candidate.lastOutboundAt.getTime(), previous.lastOutboundAt.getTime());
+  assertOneMillisecondFilter(
+    harness.calls.updateMany[0].where.reminderScheduledFor,
+    previous.reminderScheduledFor
+  );
+  assertOneMillisecondFilter(
+    harness.calls.updateMany[0].where.lastOutboundAt,
+    previous.lastOutboundAt
+  );
+  assert.equal(harness.calls.updateMany[0].where.botPausedAt, null);
   assert.equal(harness.calls.transactions, 0);
 });
 
@@ -147,6 +178,12 @@ test('finaliza únicamente el reclamo exacto y registra la hora real de envío',
   assert.equal(result.candidate.lastOutboundAt.getTime(), sentAt.getTime());
   assert.equal(result.candidate.botResumeMode, 'manual_resume_dashboard');
   assert.equal(result.candidate.botPaused, true);
+  assertOneMillisecondFilter(harness.calls.updateMany[0].where.botPausedAt, startedAt);
+  assertOneMillisecondFilter(
+    harness.calls.updateMany[0].where.lastOutboundAt,
+    previous.lastOutboundAt
+  );
+  assert.equal(harness.calls.updateMany[0].where.reminderScheduledFor, null);
 });
 
 test('un rechazo confirmado restaura el snapshot previo completo', async () => {
@@ -169,6 +206,8 @@ test('un rechazo confirmado restaura el snapshot previo completo', async () => {
 
   assert.equal(result.count, 1);
   assert.deepEqual(snapshot(result.candidate), snapshot(previous));
+  assertOneMillisecondFilter(harness.calls.updateMany[0].where.botPausedAt, startedAt);
+  assert.ok(harness.calls.updateMany[0].data.lastOutboundAt instanceof Date);
 });
 
 test('un resultado incierto conserva la pausa y exige revisión manual', async () => {
