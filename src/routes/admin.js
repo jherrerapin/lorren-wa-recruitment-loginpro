@@ -33,9 +33,10 @@ import {
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
-import { buildManualInterventionCandidateUpdate, buildManualWhatsAppOpenCandidateUpdate } from '../services/adminOutboundPolicy.js';
+import { buildManualInterventionCandidateUpdate } from '../services/adminOutboundPolicy.js';
 import {
   pauseCandidateAutomationFromAdmin,
+  recordManualWhatsAppOpen,
   resumeCandidateAutomationFromAdmin
 } from '../services/candidateStateService.js';
 import { listOfferableSlots, createBooking, formatInterviewDate } from '../services/interviewScheduler.js';
@@ -2415,6 +2416,12 @@ export function adminRouter(prisma) {
         phone: true,
         status: true,
         vacancyId: true,
+        botPaused: true,
+        botPausedAt: true,
+        botPausedBy: true,
+        botPauseReason: true,
+        botResumeMode: true,
+        devLastSeenAt: true,
         vacancy: { select: { id: true, city: true } }
       }
     });
@@ -2429,13 +2436,30 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'El candidato no tiene un número válido para WhatsApp.'));
     }
 
-    await prisma.candidate.update({
-      where: { id },
-      data: buildManualWhatsAppOpenCandidateUpdate({
-        role: req.userRole,
-        pausedBy: req.username || req.userRole || 'dashboard'
-      })
+    const transition = await recordManualWhatsAppOpen(prisma, {
+      candidateId: candidate.id,
+      role: req.userRole,
+      actor: req.username || req.userRole || 'dashboard',
+      expected: {
+        botPaused: candidate.botPaused,
+        botPausedAt: candidate.botPausedAt ?? null,
+        botPausedBy: candidate.botPausedBy ?? null,
+        botPauseReason: candidate.botPauseReason ?? null,
+        botResumeMode: candidate.botResumeMode ?? null,
+        devLastSeenAt: candidate.devLastSeenAt ?? null,
+        status: candidate.status
+      },
+      now: new Date()
     });
+
+    if (transition.count !== 1) {
+      return res.redirect(withFlashMessage(
+        returnTo,
+        'error',
+        'El estado del candidato cambió mientras se abría WhatsApp. Actualiza la página e intenta de nuevo.'
+      ));
+    }
+
     if (req.userRole !== 'dev' && candidate.status !== 'CONTACTADO') {
       await logCandidateAdminEvent(prisma, {
         candidateId: id,
