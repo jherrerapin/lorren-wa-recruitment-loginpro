@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireLorenV2 } from '../services/lorenV2Gate.js';
+import { canSeeMetaAds, requireCvAnalysis } from '../services/lorenV2Gate.js';
 import {
   buildCandidateAccessWhere,
   buildVacancyAccessWhere,
@@ -40,7 +40,10 @@ function hasCv(candidate = {}) {
   return Boolean(candidate.cvStorageKey || candidate.cvData || candidate.cvOriginalName);
 }
 
-function renderLayout({ title, body }) {
+function renderLayout({ title, body, req = {} }) {
+  const metaAdsLink = canSeeMetaAds(req)
+    ? '<a href="/admin/estadisticas/campaigns">Meta Ads</a>'
+    : '';
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -121,10 +124,7 @@ function renderLayout({ title, body }) {
   <nav class="navbar">
     <a href="/admin">Panel</a>
     <a href="/admin/estadisticas">Estadísticas</a>
-    <a href="/admin/estadisticas/campaigns">Campañas</a>
-    <a href="/admin/estadisticas/daily-summary">Resumen diario</a>
-    <a href="/admin/estadisticas/reports">Reportes</a>
-    <a href="/admin/estadisticas/data-consents">Datos personales</a>
+    ${metaAdsLink}
     <a class="active" href="/admin/estadisticas/cv-analysis">Análisis HV</a>
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
@@ -337,7 +337,7 @@ async function loadCandidates(prisma, vacancyId, accessContext = {}) {
   });
 }
 
-function renderPage({ vacancies, candidates = [], vacancyId = '', desiredProfile = '', review = null, message = '', error = '', showCandidates = true }) {
+function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desiredProfile = '', review = null, message = '', error = '', showCandidates = true }) {
   const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
     ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
     <section class="card hero">
@@ -348,12 +348,12 @@ function renderPage({ vacancies, candidates = [], vacancyId = '', desiredProfile
     ${review
       ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review)}`
       : showCandidates ? renderCandidateTable(candidates, vacancyId) : ''}`;
-  return renderLayout({ title: 'Análisis de hojas de vida — Lórren', body });
+  return renderLayout({ title: 'Análisis de hojas de vida — Lórren', body, req });
 }
 
 export function lorenV2CvAnalysisRouter(prisma) {
   const router = express.Router();
-  router.use(requireLorenV2);
+  router.use(requireCvAnalysis);
 
   router.get('/', async (req, res) => {
     const vacancyId = normalizeString(req.query.vacancyId) || '';
@@ -363,6 +363,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
       loadCandidates(prisma, vacancyId, accessContext)
     ]);
     res.send(renderPage({
+      req,
       vacancies,
       candidates,
       vacancyId,
@@ -385,6 +386,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
       vacancies = await loadVacancies(prisma, accessContext);
       if (vacancyId && !vacancies.some((vacancy) => vacancy.id === vacancyId)) {
         return res.status(403).send(renderPage({
+          req,
           vacancies,
           vacancyId: '',
           desiredProfile,
@@ -396,6 +398,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
 
       if (!review.ok) {
         return res.status(400).send(renderPage({
+          req,
           vacancies,
           vacancyId,
           desiredProfile,
@@ -404,10 +407,11 @@ export function lorenV2CvAnalysisRouter(prisma) {
         }));
       }
 
-      return res.send(renderPage({ vacancies, vacancyId, desiredProfile, review }));
+      return res.send(renderPage({ req, vacancies, vacancyId, desiredProfile, review }));
     } catch (error) {
       console.error('[CV_REVIEW_ERROR]', { vacancyId, error: safeErrorMessage(error) });
       return res.status(500).send(renderPage({
+        req,
         vacancies,
         vacancyId,
         desiredProfile,

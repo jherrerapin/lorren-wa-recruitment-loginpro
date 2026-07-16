@@ -3070,6 +3070,8 @@ export function adminRouter(prisma) {
     }
 
     const canAccessDispatch = req.userRole === 'dev' && req.body.canAccessDispatch === 'true';
+    const canAccessMetaAds = req.userRole === 'dev' && req.body.canAccessMetaAds === 'true';
+    const canAccessCvAnalysis = req.userRole === 'dev' && req.body.canAccessCvAnalysis === 'true';
     const scopeResolution = await resolveRequestedUserScope(prisma, req, req.body);
     if (scopeResolution.error) {
       return res.redirect('/admin/users?error=' + encodeURIComponent(scopeResolution.error));
@@ -3094,6 +3096,9 @@ export function adminRouter(prisma) {
         scopeCity: scopeResolution.scopeCity,
         scopeVacancyId: scopeResolution.scopeVacancyId,
         canAccessDispatch,
+        canAccessStatistics: canAccessMetaAds || canAccessCvAnalysis,
+        canAccessMetaAds,
+        canAccessCvAnalysis,
         recoveryPhone: normalizeString(req.body.recoveryPhone),
         recoveryEmail: normalizeString(req.body.recoveryEmail),
         createdByUsername: req.username || req.userRole || 'system',

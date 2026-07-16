@@ -38,6 +38,14 @@
     .permission-card input { margin-top: 2px; }
     .permission-card strong { display: block; color: #0f766e; font-size: 14px; margin-bottom: 3px; }
     .permission-card small { display: block; color: #0f766e; font-size: 12px; line-height: 1.4; }
+    .permission-stack { display: grid; gap: 10px; }
+    .statistics-permissions { padding: 12px; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 10px; }
+    .statistics-permissions > strong { display: block; color: #1d4ed8; margin-bottom: 3px; }
+    .statistics-permissions > small { display: block; color: #475569; font-size: 12px; line-height: 1.4; margin-bottom: 8px; }
+    .statistics-permissions .dispatch-row { padding: 8px; margin-top: 5px; border-radius: 7px; background: #fff; border: 1px solid #dbeafe; }
+    .statistics-permissions .dispatch-row span { display: grid; gap: 2px; }
+    .statistics-permissions .dispatch-row strong { color: var(--navy); font-size: 13px; }
+    .statistics-permissions .dispatch-row small { color: var(--text-muted); font-size: 11px; font-weight: 500; }
     .form-actions { margin-top: 16px; display: flex; justify-content: flex-end; }
     .alert { padding: 12px 14px; border-radius: var(--radius); font-size: 13px; font-weight: 600; }
     .alert-success { background: var(--green-light); color: var(--green); border: 1px solid #86efac; }
@@ -188,7 +196,7 @@
             <div class="field full" id="vacancyField"><label for="scopeVacancyId">Vacante</label><select id="scopeVacancyId" name="scopeVacancyId"><option value="">Selecciona una vacante</option><% for (const vacancy of allowedVacancies) { %><option value="<%= vacancy.id %>"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></option><% } %></select></div>
           </div>
         </div>
-        <% if (role === 'dev') { %><div class="form-section"><h3 class="form-section-title">Permisos del panel</h3><label class="permission-card" for="canAccessDispatch"><input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" /><span><strong>Permitir acceso a Operaciones / Despacho</strong><small>Permite entrar al panel operativo además del alcance de reclutamiento seleccionado.</small></span></label></div><% } %>
+        <% if (role === 'dev') { %><div class="form-section"><h3 class="form-section-title">Permisos del panel</h3><div class="permission-stack"><label class="permission-card" for="canAccessDispatch"><input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" /><span><strong>Operaciones / Despacho</strong><small>Permite entrar al panel operativo además del alcance de reclutamiento seleccionado.</small></span></label><div class="statistics-permissions"><strong>Estadísticas</strong><small>Marca únicamente las herramientas que podrá usar este usuario.</small><label class="dispatch-row"><input name="canAccessMetaAds" type="checkbox" value="true" /><span><strong>Meta Ads</strong><small>Consulta inversión, resultados y costos de los anuncios.</small></span></label><label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante y el perfil buscado.</small></span></label></div></div></div><% } %>
         <div class="form-actions"><button class="btn btn-primary" type="submit">Crear usuario</button></div>
       </form>
       <p class="hint" style="margin-top:12px;">El username se genera automáticamente como <strong>reclutador-...</strong>. Si ya existe, el sistema agrega un consecutivo.</p>
@@ -219,7 +227,7 @@
                     <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
                   <% } %>
                 </td>
-                <td><%= user.canAccessDispatch ? 'Reclutamiento + Operaciones / Despacho' : 'Reclutamiento' %><%= user.canAccessStatistics ? ' + Estadísticas' : '' %></td>
+                <td>Reclutamiento<% if (user.canAccessDispatch) { %><small>Operaciones / Despacho</small><% } %><% if (user.canAccessMetaAds) { %><small>Estadísticas: Meta Ads</small><% } %><% if (user.canAccessCvAnalysis) { %><small>Estadísticas: Análisis HV</small><% } %></td>
                 <td><span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>"><%= user.isActive ? 'Activo' : 'Inactivo' %></span><small>Último cambio de contraseña: <%= user.lastPasswordResetAt ? user.lastPasswordResetAt.toLocaleString('es-CO', { hour12: false }) : 'Sin registro' %></small></td>
                 <td><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.recoveryEmail || '—' %></small><small>Recuperación disponible desde /recover.</small></td>
                 <td>
@@ -277,7 +285,7 @@
                           </div>
                           <span class="hint">Debes marcar al menos una vacante. Las vacantes nuevas no se habilitarán automáticamente.</span>
                         </div>
-                        <% if (role === 'dev') { %><div class="field full"><label>Permisos adicionales</label><label class="dispatch-row"><input type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label><label class="dispatch-row"><input type="checkbox" name="canAccessStatistics" value="true" <%= user.canAccessStatistics ? 'checked' : '' %> />Acceso al módulo de Estadísticas</label><span class="hint">Este permiso permite consultar Meta Ads y el análisis de hojas de vida, sin cambiar las vacantes asignadas al usuario.</span></div><% } %>
+                        <% if (role === 'dev') { %><div class="field full"><label>Permisos adicionales</label><label class="dispatch-row"><input type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label><div class="statistics-permissions"><strong>Estadísticas</strong><small>Selecciona por separado las herramientas que podrá abrir.</small><label class="dispatch-row"><input type="checkbox" name="canAccessMetaAds" value="true" <%= user.canAccessMetaAds ? 'checked' : '' %> /><span><strong>Meta Ads</strong><small>Inversión, resultados y costos de los anuncios.</small></span></label><label class="dispatch-row"><input type="checkbox" name="canAccessCvAnalysis" value="true" <%= user.canAccessCvAnalysis ? 'checked' : '' %> /><span><strong>Análisis de hojas de vida</strong><small>Revisión y organización de candidatos con IA.</small></span></label></div><span class="hint">Estos permisos no amplían las ciudades ni las vacantes asignadas.</span></div><% } %>
                       </div>
                       <div class="edit-drawer-actions"><button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Cancelar</button><button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button></div>
                     </form>

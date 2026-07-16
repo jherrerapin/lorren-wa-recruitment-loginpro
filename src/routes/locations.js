@@ -347,7 +347,9 @@ export function locationsRouter(prisma) {
         username: true,
         role: true,
         canAccessDispatch: true,
-        canAccessStatistics: true
+        canAccessStatistics: true,
+        canAccessMetaAds: true,
+        canAccessCvAnalysis: true
       }
     });
     if (!user || user.role !== 'ADMIN') {
@@ -368,7 +370,9 @@ export function locationsRouter(prisma) {
     };
     if (req.userRole === 'dev') {
       data.canAccessDispatch = isChecked(req.body.canAccessDispatch);
-      data.canAccessStatistics = isChecked(req.body.canAccessStatistics);
+      data.canAccessMetaAds = isChecked(req.body.canAccessMetaAds);
+      data.canAccessCvAnalysis = isChecked(req.body.canAccessCvAnalysis);
+      data.canAccessStatistics = data.canAccessMetaAds || data.canAccessCvAnalysis;
     }
 
     await prisma.appUser.update({

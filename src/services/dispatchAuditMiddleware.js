@@ -66,7 +66,9 @@ async function refreshDatabaseUserPermissions(prisma, req) {
       scopeCity: true,
       scopeVacancyId: true,
       canAccessDispatch: true,
-      canAccessStatistics: true
+      canAccessStatistics: true,
+      canAccessMetaAds: true,
+      canAccessCvAnalysis: true
     }
   });
 
@@ -75,10 +77,14 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     req.session.userId = null;
     req.session.canAccessDispatch = false;
     req.session.canAccessStatistics = false;
+    req.session.canAccessMetaAds = false;
+    req.session.canAccessCvAnalysis = false;
     req.userRole = null;
     req.userId = null;
     req.canAccessDispatch = false;
     req.canAccessStatistics = false;
+    req.canAccessMetaAds = false;
+    req.canAccessCvAnalysis = false;
     return;
   }
 
@@ -86,19 +92,25 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const accessCity = user.scopeCity || null;
   const accessVacancyId = user.scopeVacancyId || null;
   const canAccessDispatch = Boolean(user.canAccessDispatch);
-  const canAccessStatistics = Boolean(user.canAccessStatistics);
+  const canAccessMetaAds = Boolean(user.canAccessMetaAds ?? user.canAccessStatistics);
+  const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis ?? user.canAccessStatistics);
+  const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
   req.session.userAccessVacancyId = accessVacancyId;
   req.session.canAccessDispatch = canAccessDispatch;
   req.session.canAccessStatistics = canAccessStatistics;
+  req.session.canAccessMetaAds = canAccessMetaAds;
+  req.session.canAccessCvAnalysis = canAccessCvAnalysis;
 
   req.userAccessScope = accessScope;
   req.userAccessCity = accessCity;
   req.userAccessVacancyId = accessVacancyId;
   req.canAccessDispatch = canAccessDispatch;
   req.canAccessStatistics = canAccessStatistics;
+  req.canAccessMetaAds = canAccessMetaAds;
+  req.canAccessCvAnalysis = canAccessCvAnalysis;
 }
 
 export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
