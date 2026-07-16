@@ -130,6 +130,21 @@ function duplicateRecentError() {
   );
 }
 
+function sentPendingReconciliationError({ providerMessageId, messageId, cause = null }) {
+  const error = manualOutboundError(
+    'manual_outbound_sent_pending_reconciliation',
+    PENDING_RECONCILIATION_MESSAGE,
+    cause
+  );
+  error.sent = true;
+  error.deliveryState = 'SENDING';
+  error.providerMessageId = providerMessageId || null;
+  error.messageId = messageId;
+  error.candidateStateCount = 0;
+  error.persistencePending = true;
+  return error;
+}
+
 async function loadCandidateForManualOutbound(client, candidateId) {
   return client.candidate.findUnique({
     where: { id: candidateId },
@@ -195,19 +210,6 @@ export function getManualOutboundUserMessage(error, fallback = 'No fue posible e
   return typeof error?.userMessage === 'string' && error.userMessage.trim()
     ? error.userMessage
     : fallback;
-}
-
-export function getManualOutboundCompletionNotice(result, successMessage = 'Mensaje enviado correctamente.') {
-  if (result?.sent === true && result?.persistencePending === true) {
-    return {
-      type: 'error',
-      message: PENDING_RECONCILIATION_MESSAGE
-    };
-  }
-  return {
-    type: 'success',
-    message: successMessage
-  };
 }
 
 export async function deliverManualOutboundText(prismaInput, input = {}, dependencies = {}) {
@@ -346,8 +348,9 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
 
   const sentAt = now();
   const providerMessageId = extractProviderMessageId(providerResponse);
+  let finalization;
   try {
-    const finalization = await prisma.$transaction(async (tx) => {
+    finalization = await prisma.$transaction(async (tx) => {
       const candidateResult = await finalizeManualOutboundDelivery(tx, {
         candidateId,
         expected: preparation.claimed,
@@ -364,16 +367,6 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
 
       return candidateResult;
     });
-    const persistencePending = finalization.count !== 1;
-
-    return {
-      sent: true,
-      deliveryState: 'SENT',
-      providerMessageId,
-      messageId: preparation.messageId,
-      candidateStateCount: finalization.count,
-      persistencePending
-    };
   } catch (error) {
     console.error('[manual_outbound_post_send_persistence]', {
       candidateId,
@@ -381,13 +374,26 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
       providerMessageId,
       error: safeErrorMessage(error)
     });
-    return {
-      sent: true,
-      deliveryState: 'SENDING',
+    throw sentPendingReconciliationError({
       providerMessageId,
       messageId: preparation.messageId,
-      candidateStateCount: 0,
-      persistencePending: true
-    };
+      cause: error
+    });
   }
+
+  if (finalization.count !== 1) {
+    throw sentPendingReconciliationError({
+      providerMessageId,
+      messageId: preparation.messageId
+    });
+  }
+
+  return {
+    sent: true,
+    deliveryState: 'SENT',
+    providerMessageId,
+    messageId: preparation.messageId,
+    candidateStateCount: finalization.count,
+    persistencePending: false
+  };
 }
