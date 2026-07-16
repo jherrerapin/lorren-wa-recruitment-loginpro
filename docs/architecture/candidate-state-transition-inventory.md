@@ -167,6 +167,79 @@ El ciclo `claimManualOutboundDelivery()` → proveedor → `finalizeManualOutbou
 
 El candidato técnico del supervisor continúa fuera de esta frontera. Su `upsert`, `lastInboundAt` y el `lastOutboundAt` del keepalive permanecen como escritores directos explícitos para una fase posterior.
 
+## Fase 1: caracterización del progreso conversacional
+
+La matriz canónica de esta fase vive en `config/candidate-progress-authority.json`. Es deliberadamente descriptiva: no cambia el comportamiento runtime ni mueve escrituras todavía.
+
+La caracterización separa cuatro responsabilidades que antes podían parecer una sola:
+
+1. **Productor de decisión:** calcula un destino o un objeto `candidateUpdates`, pero no persiste `Candidate`. Ejemplos: `vacancyFirstGate.js`, `silentProfileCapture.js` y `cvFlow.js`.
+2. **Escritor efectivo:** ejecuta `candidate.update` o `candidate.updateMany`. Ejemplos: `conversationEngine.js`, `chatEngine.js`, `webhook.js`, `dataConsentGate.js`, `consentStateService.js` y `admin.js`.
+3. **Esquema o contexto de decisión:** expone `currentStep` a extracción, prompts o políticas sin mutarlo.
+4. **Proyección de solo lectura:** usa el paso en estadísticas, respuestas o recordatorios.
+
+### Enum canónico
+
+Los únicos destinos válidos son los declarados en `ConversationStep` de Prisma:
+
+- `MENU`
+- `GREETING_SENT`
+- `COLLECTING_DATA`
+- `CONFIRMING_DATA`
+- `ASK_CV`
+- `DONE`
+- `SCHEDULING`
+- `SCHEDULED`
+
+Ningún contrato de progreso puede inventar un string adicional.
+
+### Familias observadas
+
+La matriz registra por separado:
+
+- resolución inicial y alternativas de vacante;
+- captura silenciosa de perfil sin vacante;
+- aceptación, revocatoria y reanudación después del consentimiento;
+- decisiones de vacante pausada;
+- reprogramación directa de entrevista;
+- reducción de acciones y `nextStep` en `conversationEngine.act()`;
+- progresión determinística legacy del webhook;
+- correcciones administrativas.
+
+Cada familia documenta propietario de la decisión, escritor real, orígenes, destinos, campos permitidos, efectos externos, estado de concurrencia e idempotencia. La matriz no define una operación genérica de actualización.
+
+### Multilinea
+
+El mecanismo multilinea existente ya tiene una forma de compare-and-set y debe conservarla cuando se migre:
+
+1. `scheduleMultilineWindow()` escribe una fecha futura e incrementa `multilineBatchVersion`.
+2. Cada nuevo inbound invalida al propietario anterior mediante otra versión.
+3. `tryAcquireMultilineProcessing()` exige ID, versión exacta y ventana vencida.
+4. La adquisición limpia la ventana e incrementa otra vez la versión.
+5. Solo `count === 1` autoriza procesar el lote.
+
+Este contrato no es un simple cambio de paso y no debe mezclarse con la reducción de `currentStep`.
+
+### Protección en CI
+
+`test/candidateProgressAuthority.test.js` bloquea:
+
+- divergencia entre la matriz y el enum real de Prisma;
+- archivos con literales de progreso sin clasificación;
+- orígenes o destinos desconocidos;
+- familias que intenten mutar campos fuera de su contrato;
+- pérdida del compare-and-set multilinea;
+- conversión de los productores puros en escritores directos;
+- introducción de una API arbitraria de patch en esta fase.
+
+### Siguiente orden de migración
+
+1. Extraer la adquisición multilinea a un contrato estrecho de `CandidateStateService`.
+2. Migrar la reducción final de `conversationEngine.act()` comparando el paso leído.
+3. Migrar el reflejo de progreso del consentimiento sin absorber la autoridad del evento.
+4. Dividir las ramas legacy de `webhook.js` por familias pequeñas.
+5. Migrar correcciones administrativas con actor, motivo y origen esperado.
+
 ## Reglas para la autoridad
 
 1. No existe `updateCandidate(data)`.
