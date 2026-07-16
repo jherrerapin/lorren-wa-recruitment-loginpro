@@ -5,6 +5,9 @@ import { resolveCandidateCvBuffer } from './cvStorage.js';
 import { extractCvText } from './cvTextExtraction.js';
 import { OPENAI_CV_MODEL } from './openAiModelConfig.js';
 import { normalizeTransportMode } from './transportMode.js';
+import { safeErrorMessage } from './errorSanitization.js';
+
+export { safeErrorMessage };
 
 const AttachmentClassification = Object.freeze({
   CV_VALID: 'CV_VALID',
@@ -153,15 +156,6 @@ function compareCandidateWithCv(candidate = {}, extracted = {}) {
     compareField('Teléfono', candidate.phone, extracted.phone),
     compareField('Localidad', candidate.locality, extracted.locality)
   ].filter(Boolean);
-}
-
-export function safeErrorMessage(error) {
-  const message = error?.message || String(error || 'unknown_error');
-  const stack = error?.stack ? `\nStack: ${error.stack}` : '';
-  return `${message}${stack}`
-    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
-    .replace(/(access_token=)[^&\s]+/gi, '$1[REDACTED]')
-    .slice(0, 1000);
 }
 
 function failureSummary(reason = '') {
