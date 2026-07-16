@@ -1,4 +1,4 @@
-name: Diagnose shared error sanitization 492
+name: Apply shared error sanitization 492
 
 on:
   pull_request:
@@ -9,8 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  apply:
     if: github.event.pull_request.number == 492 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -19,8 +21,9 @@ jobs:
         uses: actions/checkout@v5
         with:
           ref: refactor/491-manual-outbound-delivery
+          fetch-depth: 0
 
-      - name: Apply shared helper migration in runner
+      - name: Apply bounded shared helper migration
         shell: bash
         run: |
           set -euo pipefail
@@ -29,21 +32,21 @@ jobs:
 
           manual = Path('src/services/manualOutboundDeliveryService.js')
           manual_source = manual.read_text()
-          manual.write_text(manual_source.replace(
-            "import { safeErrorMessage } from './cvIntelligence.js';",
-            "import { safeErrorMessage } from './errorSanitization.js';",
-            1
-          ))
+          old_manual_import = "import { safeErrorMessage } from './cvIntelligence.js';"
+          new_manual_import = "import { safeErrorMessage } from './errorSanitization.js';"
+          if old_manual_import not in manual_source:
+              raise SystemExit('manual sanitization import not found')
+          manual.write_text(manual_source.replace(old_manual_import, new_manual_import, 1))
 
           cv = Path('src/services/cvIntelligence.js')
           cv_source = cv.read_text()
-          marker = "import { normalizeTransportMode } from './transportMode.js';\n"
-          cv_source = cv_source.replace(
-            marker,
-            marker + "import { safeErrorMessage } from './errorSanitization.js';\n\nexport { safeErrorMessage };\n",
-            1
-          )
-          old = """export function safeErrorMessage(error) {
+          import_marker = "import { normalizeTransportMode } from './transportMode.js';\n"
+          import_block = import_marker + "import { safeErrorMessage } from './errorSanitization.js';\n\nexport { safeErrorMessage };\n"
+          if import_marker not in cv_source:
+              raise SystemExit('cv import marker not found')
+          cv_source = cv_source.replace(import_marker, import_block, 1)
+
+          old_function = """export function safeErrorMessage(error) {
             const message = error?.message || String(error || 'unknown_error');
             const stack = error?.stack ? `\\nStack: ${error.stack}` : '';
             return `${message}${stack}`
@@ -53,10 +56,88 @@ jobs:
           }
 
           """
-          if old not in cv_source:
-            raise SystemExit('safe error function not found')
-          cv.write_text(cv_source.replace(old, '', 1))
+          if old_function not in cv_source:
+              raise SystemExit('cv safeErrorMessage function not found')
+          cv.write_text(cv_source.replace(old_function, '', 1))
+
+          mock = Path('test/helpers/mockPrisma.js')
+          mock_source = mock.read_text()
+          old_match = """function matchesCondition(value, condition) {
+            if (value instanceof Date || condition instanceof Date) {
+              if (value == null || condition == null) return value === condition;
+              return normalizeDate(value).getTime() === normalizeDate(condition).getTime();
+            }
+
+            if (condition && typeof condition === 'object' && !Array.isArray(condition) && !(condition instanceof Date)) {
+              if (Object.hasOwn(condition, 'in')) {
+                return condition.in.includes(value);
+              }
+              if (Object.hasOwn(condition, 'not')) {
+                return !matchesCondition(value, condition.not);
+              }
+              if (Object.hasOwn(condition, 'lte') && normalizeDate(value).getTime() > normalizeDate(condition.lte).getTime()) {
+                return false;
+              }
+              if (Object.hasOwn(condition, 'gte') && normalizeDate(value).getTime() < normalizeDate(condition.gte).getTime()) {
+                return false;
+              }
+              if (Object.hasOwn(condition, 'lte') || Object.hasOwn(condition, 'gte')) {
+                return true;
+              }
+            }
+
+            return value === condition;
+          }"""
+          new_match = """function matchesCondition(value, condition) {
+            if (condition && typeof condition === 'object' && !Array.isArray(condition) && !(condition instanceof Date)) {
+              if (Object.hasOwn(condition, 'in')) {
+                return condition.in.includes(value);
+              }
+              if (Object.hasOwn(condition, 'not')) {
+                return !matchesCondition(value, condition.not);
+              }
+
+              const hasDateRange = ['lt', 'lte', 'gt', 'gte'].some((operator) => Object.hasOwn(condition, operator));
+              if (hasDateRange) {
+                const normalizedValue = normalizeDate(value);
+                const valueTime = normalizedValue instanceof Date ? normalizedValue.getTime() : Number.NaN;
+                if (Number.isNaN(valueTime)) return false;
+                if (Object.hasOwn(condition, 'lt') && valueTime >= normalizeDate(condition.lt).getTime()) return false;
+                if (Object.hasOwn(condition, 'lte') && valueTime > normalizeDate(condition.lte).getTime()) return false;
+                if (Object.hasOwn(condition, 'gt') && valueTime <= normalizeDate(condition.gt).getTime()) return false;
+                if (Object.hasOwn(condition, 'gte') && valueTime < normalizeDate(condition.gte).getTime()) return false;
+                return true;
+              }
+            }
+
+            if (value instanceof Date || condition instanceof Date) {
+              if (value == null || condition == null) return value === condition;
+              return normalizeDate(value).getTime() === normalizeDate(condition).getTime();
+            }
+
+            return value === condition;
+          }"""
+          if old_match not in mock_source:
+              raise SystemExit('mock matchesCondition block not found')
+          mock.write_text(mock_source.replace(old_match, new_match, 1))
           PY
+
+      - name: Validate changed file boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only | sort)
+          expected=$(printf '%s\n' src/services/cvIntelligence.js src/services/manualOutboundDeliveryService.js test/helpers/mockPrisma.js | sort)
+          test "$changed" = "$expected"
+
+      - name: Check targeted syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/services/errorSanitization.js
+          node --check src/services/cvIntelligence.js
+          node --check src/services/manualOutboundDeliveryService.js
+          node --check test/helpers/mockPrisma.js
 
       - name: Install and generate
         shell: bash
@@ -64,26 +145,24 @@ jobs:
           npm ci --silent
           npm run prisma:generate --silent
 
-      - name: Capture supervisor TAP
-        id: supervisor
+      - name: Validate supervisor isolation
+        run: node --test test/adminSupervisor.test.js
+
+      - name: Validate manual outbound delivery
+        run: node --test test/manualOutboundDeliveryService.test.js
+
+      - name: Validate CV sanitization contract
+        run: node --test test/attachmentAnalysisContract.test.js
+
+      - name: Validate formatting
+        run: git diff --check
+
+      - name: Publish shared helper migration
         shell: bash
         run: |
-          set +e
-          node --test test/adminSupervisor.test.js > admin-supervisor.tap 2>&1
-          code=$?
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload supervisor TAP
-        uses: actions/upload-artifact@v4
-        with:
-          name: admin-supervisor-tap-492
-          path: admin-supervisor.tap
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Enforce supervisor result
-        shell: bash
-        run: |
-          cat admin-supervisor.tap
-          test "${{ steps.supervisor.outputs.exit_code }}" = "0"
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/services/cvIntelligence.js src/services/manualOutboundDeliveryService.js test/helpers/mockPrisma.js
+          git commit -m 'refactor: reuse shared error sanitization'
+          git push origin HEAD:refactor/491-manual-outbound-delivery
