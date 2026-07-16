@@ -111,6 +111,9 @@ jobs:
       - name: Run admin manual outbound regressions
         run: node --test test/manualOutboundDeliveryService.test.js test/manualOutboundDeliveryReconciliation.test.js test/adminManualOutboundDeliveryAuthority.test.js test/adminManualOutbound.test.js
 
+      - name: Run dispatch WhatsApp runtime regressions
+        run: node --test test/dispatchWhatsappRuntimeContracts.test.js
+
       - name: Run webhook message authority regressions
         run: node --test test/webhookMessageAuthority.test.js test/webhookInboundMessageAuthority.test.js test/webhookIdempotency.test.js test/webhookPersistence.test.js test/turnOrchestratorContracts.test.js
 
