@@ -102,6 +102,18 @@ mock = Path('test/helpers/mockPrisma.js')
 mock_source = mock.read_text()
 mock_source = replace_once(
     mock_source,
+    "function matchesCondition(value, condition) {\n  if (condition && typeof condition === 'object' && !Array.isArray(condition) && !(condition instanceof Date)) {",
+    "function matchesCondition(value, condition) {\n  if (value instanceof Date || condition instanceof Date) {\n    if (value == null || condition == null) return value === condition;\n    return normalizeDate(value).getTime() === normalizeDate(condition).getTime();\n  }\n\n  if (condition && typeof condition === 'object' && !Array.isArray(condition) && !(condition instanceof Date)) {",
+    'mock date equality'
+)
+mock_source = replace_once(
+    mock_source,
+    "      const row = state.messages.find((message) => message.id === where?.id || message.waMessageId === where?.waMessageId) || null;",
+    "      const row = state.messages.find((message) => (\n        (where?.id != null && message.id === where.id)\n        || (where?.waMessageId != null && message.waMessageId === where.waMessageId)\n      )) || null;",
+    'mock message identity'
+)
+mock_source = replace_once(
+    mock_source,
     "    candidates: clone(initialState.candidates || []),",
     textwrap.dedent('''
     candidates: clone(initialState.candidates || []).map((candidate) => ({
