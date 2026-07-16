@@ -61,7 +61,7 @@ function killStaleChromiumProcesses(dataPath) {
       stdio: ['ignore', 'ignore', 'ignore']
     });
   } catch (error) {
-    if (Number(error?.status) === 1) return;
+    if (Number(error?.status) === 1 || error?.code === 'ENOENT') return;
     console.warn('[dispatch-wa] No fue posible limpiar procesos Chromium anteriores.', error?.message || error);
   }
 }
