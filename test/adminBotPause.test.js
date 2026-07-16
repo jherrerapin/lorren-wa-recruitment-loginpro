@@ -21,7 +21,6 @@ test('al reanudar sin pendientes no requiere trigger', () => {
   assert.equal(behavior.resumeMode, 'manual_resume_dashboard');
 });
 
-
 test('pausa manual se puede reanudar con el siguiente inbound del candidato', () => {
   const candidate = {
     botPaused: true,
@@ -48,4 +47,21 @@ test('pausa no manual sigue bloqueando automatizacion en inbound', () => {
 
   assert.equal(shouldBlockAutomation(candidate, { direction: 'INBOUND' }), true);
   assert.equal(shouldResumeAutomationOnInbound(candidate), false);
+});
+
+test('entrega manual en curso o incierta no se reanuda por inbound', () => {
+  for (const botResumeMode of [
+    'manual_outbound_sending',
+    'manual_outbound_delivery_unknown'
+  ]) {
+    const candidate = {
+      botPaused: true,
+      botPausedBy: 'dashboard',
+      botPauseReason: 'Conversacion tomada manualmente desde dashboard',
+      botResumeMode
+    };
+
+    assert.equal(shouldResumeAutomationOnInbound(candidate), false, botResumeMode);
+    assert.equal(shouldBlockAutomation(candidate, { direction: 'INBOUND' }), true, botResumeMode);
+  }
 });
