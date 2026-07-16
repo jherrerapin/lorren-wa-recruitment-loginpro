@@ -56,11 +56,20 @@ function targetFor(req) {
 }
 
 async function refreshDatabaseUserPermissions(prisma, req) {
-  if (req.session?.userSource !== 'db' || !req.session?.userId || !prisma?.appUser?.findUnique) return;
+  const source = req.session?.userSource;
+  const isDatabaseUser = source === 'db' && Boolean(req.session?.userId);
+  const isEnvironmentAdmin = source === 'env'
+    && req.session?.userRole === 'admin'
+    && Boolean(req.session?.username)
+    && req.session.username === process.env.ADMIN_USER;
+  if ((!isDatabaseUser && !isEnvironmentAdmin) || !prisma?.appUser?.findUnique) return;
 
   const user = await prisma.appUser.findUnique({
-    where: { id: req.session.userId },
+    where: isEnvironmentAdmin
+      ? { username: req.session.username }
+      : { id: req.session.userId },
     select: {
+      id: true,
       isActive: true,
       accessScope: true,
       scopeCity: true,
@@ -71,6 +80,8 @@ async function refreshDatabaseUserPermissions(prisma, req) {
       canAccessCvAnalysis: true
     }
   });
+
+  if (!user && isEnvironmentAdmin) return;
 
   if (!user || !user.isActive) {
     req.session.userRole = null;
@@ -106,7 +117,9 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.session.canAccessStatistics = canAccessStatistics;
   req.session.canAccessMetaAds = canAccessMetaAds;
   req.session.canAccessCvAnalysis = canAccessCvAnalysis;
+  if (isEnvironmentAdmin) req.session.userId = user.id;
 
+  req.userId = isEnvironmentAdmin ? user.id : req.userId;
   req.userAccessScope = accessScope;
   req.userAccessCity = accessCity;
   req.userAccessVacancyId = accessVacancyId;
@@ -142,8 +155,8 @@ export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
 export function dispatchAuditMiddleware(prisma) {
   return async (req, res, next) => {
     try {
-      // Mantiene los permisos de usuarios de base de datos sincronizados sin
-      // obligarlos a cerrar sesión cuando un administrador cambia su alcance.
+      // Mantiene sincronizados tanto los usuarios de base de datos como el
+      // perfil editable de la cuenta administradora configurada en Railway.
       await refreshDatabaseUserPermissions(prisma, req);
     } catch (error) {
       console.warn('No fue posible refrescar los permisos del usuario.', error);
