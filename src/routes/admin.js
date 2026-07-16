@@ -519,10 +519,17 @@ async function ensureVacancyIdAccess(prisma, req, vacancyId, res, returnTo = '/a
 }
 
 function buildManageableUsersWhere(accessContext = {}) {
-  if (accessContext.isDev || accessContext.scope === 'ALL') return { role: 'ADMIN' };
+  const visibilityWhere = accessContext.isDev
+    ? {}
+    : { username: { not: 'reclutador-general' } };
+
+  if (accessContext.isDev || accessContext.scope === 'ALL') {
+    return { role: 'ADMIN', ...visibilityWhere };
+  }
   if (accessContext.scope === 'CITY') {
     return {
       role: 'ADMIN',
+      ...visibilityWhere,
       OR: [
         {
           accessScope: 'CITY',
@@ -539,6 +546,7 @@ function buildManageableUsersWhere(accessContext = {}) {
   }
   return {
     role: 'ADMIN',
+    ...visibilityWhere,
     accessScope: 'VACANCY',
     scopeVacancyId: accessContext.vacancyId || '__OUT_OF_SCOPE__'
   };

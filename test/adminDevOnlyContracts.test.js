@@ -98,12 +98,23 @@ test('users view has one form with dispatch checkbox and no operations-only form
   assert.match(usersView, /name=["']canAccessDispatch["']/);
   assert.match(usersView, /id=["']canAccessDispatch["']/);
   assert.match(usersView, /value=["']true["']/);
-  assert.match(usersView, /Permitir acceso a Operaciones \/ Despacho/);
+  assert.match(usersView, />Operaciones \/ Despacho</);
   assert.match(usersView, /Permite entrar al panel operativo además del alcance de reclutamiento seleccionado\./);
   assert.match(usersView, /<%\s*if\s*\(role\s*===\s*['\"]dev['\"]\)\s*{\s*%>[\s\S]*id=["']canAccessDispatch["'][\s\S]*<%\s*}\s*%>/);
-  assert.match(usersView, /<%= user\.canAccessDispatch \? 'Operaciones \/ Despacho' : 'Reclutamiento' %>/);
+  assert.match(usersView, /if \(user\.canAccessDispatch\)[\s\S]*Operaciones \/ Despacho/);
   assert.doesNotMatch(usersView, /Crear usuario de Operaciones \/ Despacho/);
   assert.doesNotMatch(usersView, /\/admin\/users\/create-operations/);
+});
+
+test('reclutador-general solo aparece en el listado de usuarios para DEV', () => {
+  const adminSource = readSource('src/routes/admin.js');
+  const start = adminSource.indexOf('function buildManageableUsersWhere');
+  const end = adminSource.indexOf('function isManualAttentionCandidate', start);
+  const visibilityRule = adminSource.slice(start, end);
+
+  assert.ok(start >= 0 && end > start);
+  assert.match(visibilityRule, /accessContext\.isDev\s*\?\s*\{\}\s*:\s*\{\s*username:\s*\{\s*not:\s*'reclutador-general'/);
+  assert.match(visibilityRule, /return \{ role: 'ADMIN', \.\.\.visibilityWhere \}/);
 });
 
 test('operations-only creation routes were removed from server', () => {
