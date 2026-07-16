@@ -6,3 +6,5 @@ export function safeErrorMessage(error) {
     .replace(/(access_token=)[^&\s]+/gi, '$1[REDACTED]')
     .slice(0, 1000);
 }
+
+// Trigger temporal para publicar el parche auditado del PR #492.
