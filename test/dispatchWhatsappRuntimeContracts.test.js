@@ -6,6 +6,14 @@ function readSource(path) {
   return fs.readFileSync(path, 'utf8');
 }
 
+function between(content, start, end) {
+  const startIndex = content.indexOf(start);
+  assert.notEqual(startIndex, -1, `No se encontró el marcador inicial: ${start}`);
+  const endIndex = content.indexOf(end, startIndex + start.length);
+  assert.notEqual(endIndex, -1, `No se encontró el marcador final: ${end}`);
+  return content.slice(startIndex, endIndex);
+}
+
 const LEGACY_SERVICE_PATHS = [
   'src/services/dispatchWhatsappWebServiceV2.js',
   'src/services/dispatchWhatsappWebServiceV3.js',
@@ -26,11 +34,18 @@ test('dispatch WhatsApp exposes one canonical facade for text, media and runtime
 
 test('dispatch WhatsApp watchdog is server-owned and does not depend on the status browser tab', () => {
   const source = readSource('src/services/dispatchWhatsappWebService.js');
+  const watchdog = between(
+    source,
+    "async function runDispatchWhatsappWatchdog(reason = 'interval')",
+    'export function startDispatchWhatsappWatchdog()'
+  );
   assert.match(source, /DISPATCH_WWEB_WATCHDOG_ENABLED/);
   assert.match(source, /setInterval\(\(\) => \{/);
-  assert.match(source, /getRuntimeStatusView\(\{ autoStart: true \}\)/);
   assert.match(source, /startDispatchWhatsappWatchdog\(\);/);
-  assert.match(source, /status\.manualLogoutRequested/);
+  assert.match(watchdog, /const status = getRuntimeStatus\(\)/);
+  assert.match(watchdog, /status\.manualLogoutRequested/);
+  assert.match(watchdog, /initDispatchWhatsappClient\(\);/);
+  assert.doesNotMatch(watchdog, /getRuntimeStatusView/);
 });
 
 test('existing auto-start kill switch also disables the server watchdog', () => {
@@ -57,13 +72,21 @@ test('manual WhatsApp logout is respected by the server watchdog', () => {
   assert.ok(initialize > statusCheck);
 });
 
-test('canonical facade restores Railway Nix Chromium discovery and stale-process cleanup', () => {
+test('canonical facade restores Railway Nix Chromium discovery and safe stale-process cleanup', () => {
   const source = readSource('src/services/dispatchWhatsappWebService.js');
+  const cleanup = between(
+    source,
+    'function killStaleChromiumProcesses(dataPath)',
+    'function findNixChromiumExecutable()'
+  );
   assert.match(source, /import \{ execFileSync \} from 'node:child_process'/);
   assert.match(source, /function findNixChromiumExecutable\(\)/);
   assert.match(source, /find \/nix\/store -path/);
-  assert.match(source, /function killStaleChromiumProcesses\(dataPath\)/);
-  assert.match(source, /pkill -f/);
+  assert.match(cleanup, /execFileSync\('pkill', \['-f', dataPath\]/);
+  assert.match(cleanup, /Number\(error\?\.status\) === 1/);
+  assert.match(cleanup, /error\?\.code === 'ENOENT'/);
+  assert.doesNotMatch(cleanup, /execFileSync\('sh'/);
+  assert.doesNotMatch(cleanup, /shellQuote/);
   assert.match(source, /prepareRuntimeEnvironment\(\{ cleanupStaleProcesses: true \}\)/);
 });
 
