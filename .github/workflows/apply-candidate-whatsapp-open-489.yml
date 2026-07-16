@@ -1,0 +1,60 @@
+name: Apply candidate WhatsApp open authority 489
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 490 && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply scoped migration
+        run: node scripts/apply-candidate-whatsapp-open-authority.mjs
+
+      - name: Check syntax
+        run: |
+          node --check src/services/candidateStateService.js
+          node --check src/routes/admin.js
+
+      - name: Run Candidate WhatsApp open regressions
+        run: node --test test/candidateWhatsAppOpenStateService.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/candidateAdminPauseStateService.test.js test/adminCandidatePauseAuthority.test.js
+
+      - name: Validate state authority manifest
+        run: node --test test/stateAuthorityManifest.test.js
+
+      - name: Publish scoped migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/routes/admin.js \
+            docs/architecture/state-authority-manifest.json \
+            docs/architecture/state-authority-map.md
+          git add -u -- scripts/apply-candidate-whatsapp-open-authority.mjs
+          allowed='^(src/routes/admin.js|docs/architecture/state-authority-manifest.json|docs/architecture/state-authority-map.md|scripts/apply-candidate-whatsapp-open-authority.mjs)$'
+          unexpected=$(git diff --cached --name-only | grep -Ev "$allowed" || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files in scoped migration:"
+            echo "$unexpected"
+            exit 1
+          fi
+          git commit -m "refactor: delegar apertura de WhatsApp en CandidateStateService"
+          git push origin HEAD:${{ github.head_ref }}
