@@ -92,8 +92,11 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const accessCity = user.scopeCity || null;
   const accessVacancyId = user.scopeVacancyId || null;
   const canAccessDispatch = Boolean(user.canAccessDispatch);
-  const canAccessMetaAds = Boolean(user.canAccessMetaAds ?? user.canAccessStatistics);
-  const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis ?? user.canAccessStatistics);
+  // La migración convierte el permiso general anterior en ambos permisos.
+  // No se usa canAccessStatistics como fallback: si solo uno queda activo,
+  // el permiso general derivado sigue en true y reabriría el otro módulo.
+  const canAccessMetaAds = Boolean(user.canAccessMetaAds);
+  const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis);
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
 
   req.session.userAccessScope = accessScope;

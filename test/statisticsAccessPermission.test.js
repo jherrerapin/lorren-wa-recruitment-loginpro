@@ -154,7 +154,23 @@ test('el refresco de una sesión activa aplica cada permiso de Estadísticas por
   await middleware(req, {}, () => {});
   assert.equal(req.canAccessStatistics, false);
 
+  prisma.appUser.findUnique = async () => ({
+    isActive: true,
+    accessScope: 'VACANCY',
+    scopeCity: null,
+    scopeVacancyId: 'vac-1',
+    canAccessDispatch: false,
+    canAccessStatistics: true,
+    canAccessMetaAds: false,
+    canAccessCvAnalysis: false
+  });
+  await middleware(req, {}, () => {});
+  assert.equal(req.canAccessMetaAds, false);
+  assert.equal(req.canAccessCvAnalysis, false);
+  assert.equal(req.canAccessStatistics, false);
+
   isActive = false;
+  prisma.appUser.findUnique = async () => ({ isActive: false });
   req.session.userRole = 'admin';
   req.session.userId = 'user-1';
   req.session.canAccessStatistics = true;
