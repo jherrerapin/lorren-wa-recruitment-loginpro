@@ -1,5 +1,11 @@
 import express from 'express';
 import { requireLorenV2 } from '../services/lorenV2Gate.js';
+import {
+  buildCandidateAccessWhere,
+  buildVacancyAccessWhere,
+  getAccessContext,
+  hasFullAccess
+} from '../services/appUsers.js';
 
 function escapeHtml(value = '') {
   return String(value)
@@ -148,12 +154,15 @@ function renderBookingTable(title, bookings = []) {
   </section>`;
 }
 
-async function loadDailySummary(prisma, dateValue = new Date()) {
+async function loadDailySummary(prisma, dateValue = new Date(), accessContext = {}) {
   const { label, start, end } = bogotaDayRange(dateValue);
+  const bookingAccessWhere = hasFullAccess(accessContext)
+    ? {}
+    : { vacancy: { is: buildVacancyAccessWhere(accessContext) } };
 
   const [todayCandidates, todayBookings] = await Promise.all([
     prisma.candidate.findMany({
-      where: { createdAt: { gte: start, lte: end } },
+      where: { ...buildCandidateAccessWhere(accessContext), createdAt: { gte: start, lte: end } },
       orderBy: { createdAt: 'desc' },
       take: 100,
       include: {
@@ -162,7 +171,7 @@ async function loadDailySummary(prisma, dateValue = new Date()) {
       }
     }),
     prisma.interviewBooking.findMany({
-      where: { scheduledAt: { gte: start, lte: end } },
+      where: { ...bookingAccessWhere, scheduledAt: { gte: start, lte: end } },
       orderBy: { scheduledAt: 'asc' },
       take: 150,
       include: {
@@ -198,7 +207,7 @@ export function lorenV2DailySummaryRouter(prisma) {
   router.use(requireLorenV2);
 
   router.get('/', async (req, res) => {
-    const summary = await loadDailySummary(prisma, req.query.date || new Date());
+    const summary = await loadDailySummary(prisma, req.query.date || new Date(), getAccessContext(req));
     const body = `<section class="card">
       <h1>Resumen diario para reclutadores</h1>
       <p>Fecha operativa: <strong>${escapeHtml(summary.label)}</strong>. Este resumen prioriza tareas accionables del día: candidatos nuevos, HV pendientes, citas y casos que requieren revisión humana.</p>
@@ -212,7 +221,7 @@ export function lorenV2DailySummaryRouter(prisma) {
   });
 
   router.get('/json', async (req, res) => {
-    const summary = await loadDailySummary(prisma, req.query.date || new Date());
+    const summary = await loadDailySummary(prisma, req.query.date || new Date(), getAccessContext(req));
     res.json({ ok: true, ...summary });
   });
 

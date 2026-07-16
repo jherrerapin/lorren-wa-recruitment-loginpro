@@ -19,6 +19,7 @@ export function canSeeLorenV2(source = {}, now = new Date()) {
   );
 
   if (role === 'dev') return true;
+  if (role !== 'admin') return false;
   if (canAccessStatistics) return isLorenV2Released(now);
   if (username === 'reclutador-general' && scope === 'ALL') {
     return isLorenV2Released(now);
@@ -26,9 +27,28 @@ export function canSeeLorenV2(source = {}, now = new Date()) {
   return false;
 }
 
+export function canManageLorenV2(source = {}, now = new Date()) {
+  const role = source.userRole || source.role || null;
+  const username = source.username || null;
+  const scope = source.userAccessScope || source.accessScope || null;
+
+  if (role === 'dev') return true;
+  return role === 'admin'
+    && username === 'reclutador-general'
+    && scope === 'ALL'
+    && isLorenV2Released(now);
+}
+
 export function requireLorenV2(req, res, next) {
   if (!canSeeLorenV2(req)) {
     return res.status(403).send('Modulo no disponible para este perfil.');
+  }
+  return next();
+}
+
+export function requireLorenV2Write(req, res, next) {
+  if (!canManageLorenV2(req)) {
+    return res.status(403).send('Este perfil solo puede consultar Estadísticas.');
   }
   return next();
 }

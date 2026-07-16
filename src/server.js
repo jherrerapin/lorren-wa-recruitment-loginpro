@@ -28,7 +28,7 @@ import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
 import { referralAttributionMiddleware } from './services/referralAttribution.js';
-import { canSeeLorenV2 } from './services/lorenV2Gate.js';
+import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
 import { getOpenAiModelConfig } from './services/openAiModelConfig.js';
@@ -100,8 +100,8 @@ function currentRequestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0];
 }
 
-function isStatsUser(req = {}) {
-  return canSeeLorenV2(req);
+function canManageStats(req = {}) {
+  return canManageLorenV2(req);
 }
 
 function isStatsCampaignsPage(req = {}) {
@@ -135,7 +135,7 @@ function isAptForMeta(candidate = {}) {
 }
 
 async function maybeAutoSyncMetaAds(req = {}) {
-  if (!isStatsUser(req) || !isStatsCampaignsPage(req)) return;
+  if (!canManageStats(req) || !isStatsCampaignsPage(req)) return;
   const config = getMetaAdsConfig();
   if (!config.enabled) return;
   const now = Date.now();
@@ -667,7 +667,7 @@ app.use(`${LOREN_STATS_BASE_PATH}/reports`, wrapAsyncRouter(lorenV2ReportsRouter
 app.use(`${LOREN_STATS_BASE_PATH}/data-consents`, wrapAsyncRouter(lorenV2DataConsentsRouter(prisma)));
 app.use(`${LOREN_STATS_BASE_PATH}/cv-analysis`, wrapAsyncRouter(lorenV2CvAnalysisRouter(prisma)));
 app.post(`${LOREN_STATS_BASE_PATH}/meta/sync-form`, async (req, res, next) => {
-  if (!isStatsUser(req)) return res.status(403).send('No tienes permisos para sincronizar Meta Ads.');
+  if (!canManageStats(req)) return res.status(403).send('No tienes permisos para sincronizar Meta Ads.');
   const metaConfig = getMetaAdsConfig();
   if (!metaConfig.enabled) return res.redirect(`${LOREN_STATS_BASE_PATH}/campaigns`);
   try {
@@ -682,7 +682,7 @@ app.post(`${LOREN_STATS_BASE_PATH}/meta/sync-form`, async (req, res, next) => {
   }
 });
 app.get(`${LOREN_STATS_BASE_PATH}/meta/summary`, async (req, res) => {
-  if (!isStatsUser(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  if (!canManageStats(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
   try {
     const summary = await loadMetaAdsSummary(req.query || {});
     return res.json(summary);

@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import express from 'express';
 import { locationsRouter } from '../src/routes/locations.js';
 import { dispatchAuditMiddleware } from '../src/services/dispatchAuditMiddleware.js';
-import { canSeeLorenV2, requireLorenV2 } from '../src/services/lorenV2Gate.js';
+import {
+  canManageLorenV2,
+  canSeeLorenV2,
+  requireLorenV2,
+  requireLorenV2Write
+} from '../src/services/lorenV2Gate.js';
 
 function readSource(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -49,20 +54,33 @@ test('la guarda permite Estadísticas por permiso explícito sin ampliar las vac
 
   assert.equal(canSeeLorenV2(user, now), true);
   assert.equal(canSeeLorenV2({ ...user, canAccessStatistics: false }, now), false);
+  assert.equal(canSeeLorenV2({ session: { canAccessStatistics: true } }, now), false);
+  assert.equal(canManageLorenV2(user, now), false);
+  assert.equal(canManageLorenV2({ userRole: 'admin', username: 'reclutador-general', userAccessScope: 'ALL' }, now), true);
 
   let nextCalled = false;
   requireLorenV2(user, {
     status: () => ({ send: () => assert.fail('No debe rechazar el permiso explícito') })
   }, () => { nextCalled = true; });
   assert.equal(nextCalled, true);
+
+  let statusCode = null;
+  requireLorenV2Write(user, {
+    status: (status) => {
+      statusCode = status;
+      return { send: () => {} };
+    }
+  }, () => assert.fail('El permiso de consulta no debe habilitar escrituras sensibles'));
+  assert.equal(statusCode, 403);
 });
 
 test('el refresco de una sesión activa aplica asignaciones y revocaciones de Estadísticas', async () => {
   let canAccessStatistics = true;
+  let isActive = true;
   const prisma = {
     appUser: {
       findUnique: async () => ({
-        isActive: true,
+        isActive,
         accessScope: 'VACANCY',
         scopeCity: null,
         scopeVacancyId: 'vac-1',
@@ -85,6 +103,14 @@ test('el refresco de una sesión activa aplica asignaciones y revocaciones de Es
   canAccessStatistics = false;
   await middleware(req, {}, () => {});
   assert.equal(req.canAccessStatistics, false);
+  assert.equal(req.session.canAccessStatistics, false);
+
+  isActive = false;
+  req.session.userRole = 'admin';
+  req.session.userId = 'user-1';
+  req.session.canAccessStatistics = true;
+  await middleware(req, {}, () => {});
+  assert.equal(req.session.userRole, null);
   assert.equal(req.session.canAccessStatistics, false);
 });
 
@@ -195,12 +221,28 @@ test('un administrador que no es DEV no puede alterar el permiso de Estadística
 test('interfaz y endpoints auxiliares usan el mismo permiso de Estadísticas', () => {
   const usersView = readSource('src/views/users.ejs');
   const server = readSource('src/server.js');
+  const cvAnalysis = readSource('src/routes/lorenV2CvAnalysis.js');
+  const dataConsents = readSource('src/routes/lorenV2DataConsents.js');
+  const dailySummary = readSource('src/routes/lorenV2DailySummary.js');
+  const reports = readSource('src/routes/lorenV2Reports.js');
+  const metaAds = readSource('src/routes/metaAdsStats.js');
 
   assert.match(usersView, /name="canAccessStatistics"/);
   assert.match(usersView, /Acceso al módulo de Estadísticas/);
   assert.match(usersView, /user\.canAccessStatistics \? 'checked' : ''/);
   assert.match(usersView, /role === 'dev'[\s\S]*name="canAccessStatistics"/);
-  assert.match(server, /function isStatsUser\(req = \{\}\) \{\s*return canSeeLorenV2\(req\);\s*\}/);
+  assert.match(server, /function canManageStats\(req = \{\}\) \{\s*return canManageLorenV2\(req\);\s*\}/);
+  assert.match(server, /meta\/sync-form[\s\S]*!canManageStats\(req\)/);
+
+  for (const source of [cvAnalysis, dataConsents, dailySummary, reports, metaAds]) {
+    assert.match(source, /getAccessContext/);
+  }
+  for (const source of [cvAnalysis, dataConsents, dailySummary, reports, metaAds]) {
+    assert.match(source, /buildCandidateAccessWhere|buildVacancyAccessWhere/);
+  }
+  assert.match(dataConsents, /post\('\/:candidateId\/accept', requireLorenV2Write/);
+  assert.match(dataConsents, /post\('\/:candidateId\/revoke', requireLorenV2Write/);
+  assert.match(metaAds, /if \(!canManageLorenV2\(req\)\) return res\.status\(403\)/);
 
   const sessionMiddleware = server.indexOf('app.use(session({');
   const permissionRefresh = server.indexOf('app.use(dispatchAuditMiddleware(prisma));');

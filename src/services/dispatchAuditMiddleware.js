@@ -73,8 +73,12 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   if (!user || !user.isActive) {
     req.session.userRole = null;
     req.session.userId = null;
+    req.session.canAccessDispatch = false;
+    req.session.canAccessStatistics = false;
     req.userRole = null;
     req.userId = null;
+    req.canAccessDispatch = false;
+    req.canAccessStatistics = false;
     return;
   }
 
