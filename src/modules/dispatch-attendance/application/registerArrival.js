@@ -137,12 +137,12 @@ function buildExpectedTimestamp(serviceDate, timeText, label) {
 
 function buildExpectedWindow(serviceRequest) {
   const expectedStartAt = buildExpectedTimestamp(
-    serviceRequest?.serviceDate,
-    serviceRequest?.startTime,
+    serviceRequest.serviceDate,
+    serviceRequest.startTime,
     'service_start_time'
   );
 
-  if (!serviceRequest?.endTime) {
+  if (!serviceRequest.endTime) {
     return { expectedStartAt, expectedEndAt: null };
   }
 
@@ -211,6 +211,12 @@ async function resolveDeviceSignals(client, { workerId, installationIdHash, now 
     where: {
       installationIdHash,
       status: 'ACTIVE',
+      revokedAt: null,
+      authorizedFrom: { lte: now },
+      OR: [
+        { authorizedUntil: null },
+        { authorizedUntil: { gte: now } }
+      ],
       workerId: { not: workerId }
     }
   });
@@ -255,7 +261,7 @@ async function registerInsideTransaction(client, input) {
   });
   if (!assignment) throw new Error('attendance_assignment_not_found');
 
-  const operationPoint = assignment.serviceRequest?.operationPoint ?? null;
+  const operationPoint = assignment.serviceRequest.operationPoint ?? null;
   const existingSession = assignment.attendanceSession ?? null;
   const assignmentActive = ACTIVE_ASSIGNMENT_STATUS_SET.has(assignment.status);
   const attendanceEnabled = operationPoint?.attendanceEnabled === true;
@@ -278,8 +284,8 @@ async function registerInsideTransaction(client, input) {
 
   const expectedWindow = existingSession
     ? {
-        expectedStartAt: requiredTimestamp(existingSession.expectedStartAt, 'expected_start_at'),
-        expectedEndAt: optionalTimestamp(existingSession.expectedEndAt, 'expected_end_at')
+        expectedStartAt: existingSession.expectedStartAt,
+        expectedEndAt: existingSession.expectedEndAt
       }
     : buildExpectedWindow(assignment.serviceRequest);
 
