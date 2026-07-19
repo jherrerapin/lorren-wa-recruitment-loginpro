@@ -154,10 +154,9 @@ La autoridad compara el ID, el paso leído y el snapshot completo del recordator
 
 ## Próxima frontera
 
-1. progreso alrededor del consentimiento;
-2. ramas legacy del webhook;
-3. correcciones administrativas con actor, motivo y origen esperado;
-4. agenda y pausas implícitas por familias pequeñas.
+1. ramas legacy del webhook;
+2. correcciones administrativas con actor, motivo y origen esperado;
+3. agenda y pausas implícitas por familias pequeñas.
 
 ## Reglas permanentes
 
@@ -195,3 +194,14 @@ Combinaciones con `pause_bot`, agenda, `mark_female_pipeline` u otros campos per
 La autoridad compara por `updateMany` el snapshot observado de `botPaused`, `botPausedAt`, `botPausedBy`, `botPauseReason`, `botResumeMode`, fecha y estado del recordatorio. No modifica `botPausedBy`, `botResumeMode`, `currentStep`, estado de selección ni agenda. Un candidato ya pausado produce no-op.
 
 `conversationEngine.act()` delega solo la combinación exacta. Cambios de paso, rechazo, falta de interés, agenda, pausas implícitas por falta de slots y `mark_female_pipeline` permanecen fuera. Ante `count=0`, recupera el candidato vigente y `chatEngine` suprime la respuesta mediante `stale_candidate_step`.
+
+
+## Fase 7: currentStep del consentimiento
+
+`ConsentStateService` conserva la autoridad de los campos `dataConsent*` y de `CandidateDataConsentEvent`. Cuando el patch incluye `currentStep`, exige el paso observado y delega exclusivamente esa transición a `transitionCandidateConsentStep()` dentro de la misma transacción.
+
+La autoridad acepta únicamente los destinos producidos por esta frontera: `GREETING_SENT`, `COLLECTING_DATA` o `DONE`. También permite verificar el mismo paso para registrar una nueva decisión de consentimiento sin inventar una transición distinta.
+
+Si `updateMany` devuelve `count=0`, la transacción revierte los campos de consentimiento y el evento. `dataConsentGate` conserva la evidencia inbound ya registrada, pero no captura perfil ni envía respuesta obsoleta. Los registros administrativos que no cambian `currentStep` continúan usando `ConsentStateService` sin exigir snapshot.
+
+Esta fase no modifica interpretación lingüística, textos legales, perfil, CV, agenda, Prisma, permisos, asistencia ni ninguna lógica relacionada con género.

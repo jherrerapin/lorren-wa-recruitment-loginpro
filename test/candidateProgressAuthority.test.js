@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'explicit_pause_authority_migrated');
+  assert.equal(manifest.phase, 'consent_step_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -96,7 +96,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'conversation_engine_simple_step_authority',
     'conversation_engine_no_interest_authority',
     'conversation_engine_requirement_rejection_authority',
-    'conversation_engine_explicit_pause_authority'
+    'conversation_engine_explicit_pause_authority',
+    'consent_step_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -200,8 +201,8 @@ test('CandidateStateService es la autoridad exclusiva de persistencia multilinea
 });
 
 test('CandidateStateService controla las transiciones simples del engine y explicita los compuestos diferidos', () => {
-  assert.equal(manifest.stepContracts.length, 1);
-  const contract = manifest.stepContracts[0];
+  const contract = manifest.stepContracts.find((item) => item.id === 'conversation_engine_simple_step');
+  assert.ok(contract);
   assert.equal(contract.id, 'conversation_engine_simple_step');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
   assert.equal(contract.consumer, 'src/services/conversationEngine.js');
@@ -403,4 +404,39 @@ test('la documentación registra las fases migradas y mantiene el siguiente slic
   assert.match(documentation, /conversationEngine\.act\(\)/);
   assert.match(documentation, /productor de decisión/i);
   assert.match(documentation, /escritor efectivo/i);
+});
+
+
+test('el manifiesto registra el contrato de currentStep del consentimiento', () => {
+  const contract = manifest.stepContracts.find((item) => item.id === 'consent_step_transition');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/consentStateService.js');
+  assert.equal(contract.responseConsumer, 'src/services/dataConsentGate.js');
+  assert.deepEqual(contract.allowedFields, ['currentStep']);
+  assert.equal(contract.status, 'canonical');
+
+  const authority = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'transitionCandidateConsentStep');
+  assert.match(authority, /candidate\.updateMany\s*\(/);
+  assert.match(authority, /currentStep\s*:\s*expectedStep/);
+  assert.match(authority, /data\s*:\s*\{\s*currentStep\s*:\s*nextStep/);
+  assert.doesNotMatch(authority, /dataConsent|status|vacancyId|botPaused|reminder/);
+
+  const consent = readSource('src/services/consentStateService.js');
+  assert.match(consent, /transitionCandidateConsentStep/);
+  assert.match(consent, /CandidateConsentStepConflictError/);
+  assert.match(consent, /candidate_consent_expected_current_step_required/);
+  assert.match(consent, /conflict:\s*true/);
+
+  const gate = readSource('src/services/dataConsentGate.js');
+  assert.match(gate, /expected:\s*\{\s*currentStep:\s*candidate\.currentStep\s*\}/);
+  assert.match(gate, /CONSENT_STEP_CONFLICT/);
+});
+
+test('la documentación registra la fase de consentimiento', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 7: currentStep del consentimiento/);
+  assert.match(documentation, /transitionCandidateConsentStep/);
+  assert.match(documentation, /CandidateDataConsentEvent/);
+  assert.match(documentation, /no captura perfil ni envía respuesta obsoleta/i);
 });

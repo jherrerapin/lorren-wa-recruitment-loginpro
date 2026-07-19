@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 6,
-  "phase": "explicit_pause_authority_migrated",
+  "schemaVersion": 7,
+  "phase": "consent_step_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -31,7 +31,8 @@
     "conversation_engine_simple_step_authority",
     "conversation_engine_no_interest_authority",
     "conversation_engine_requirement_rejection_authority",
-    "conversation_engine_explicit_pause_authority"
+    "conversation_engine_explicit_pause_authority",
+    "consent_step_authority"
   ],
   "sourceInventory": [
     {
@@ -50,7 +51,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del slice multilinea, transiciones simples, falta de interés, rechazo por requisitos y pausa explícita del engine mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del slice multilinea, transiciones simples, falta de interés, rechazo, pausa explícita y currentStep del consentimiento mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -83,7 +84,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "Define reanudación, rechazo y confirmación de vacante alrededor de la frontera de consentimiento."
+      "notes": "Produce decisiones de aceptación, revocatoria y reanudación; delega el currentStep del consentimiento y conserva otras ramas de confirmación de vacante aún no migradas."
     },
     {
       "path": "src/services/consentStateService.js",
@@ -91,7 +92,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "Persiste currentStep únicamente dentro del candidatePatch permitido por el caso de uso de consentimiento."
+      "notes": "Mantiene la autoridad de dataConsent* y CandidateDataConsentEvent; coordina el CAS de currentStep mediante CandidateStateService dentro de la misma transacción."
     },
     {
       "path": "src/routes/admin.js",
@@ -223,8 +224,7 @@
         "src/services/consentStateService.js"
       ],
       "writers": [
-        "src/services/dataConsentGate.js",
-        "src/services/consentStateService.js"
+        "src/services/candidateStateService.js"
       ],
       "origins": [
         "MENU",
@@ -243,8 +243,8 @@
         "currentStep"
       ],
       "trigger": "Aceptación, revocatoria o reanudación contextual después de la decisión de tratamiento de datos.",
-      "concurrency": "ConsentStateService limita campos, pero la actualización de Candidate no compara el currentStep observado.",
-      "idempotency": "Los eventos de consentimiento aportan trazabilidad; la mutación de progreso aún no usa una clave de idempotencia propia.",
+      "concurrency": "ConsentStateService coordina una transacción interactiva; CandidateStateService compara id y currentStep. count cero revierte campos dataConsent*, evento y respuesta.",
+      "idempotency": "El mismo destino puede verificarse para registrar un nuevo evento; un snapshot obsoleto no crea evento ni reemplaza un paso más nuevo.",
       "externalEffects": [
         "consent_event",
         "reply_message"
@@ -459,7 +459,6 @@
     }
   ],
   "nextMigrationSlices": [
-    "migrar las transiciones de consentimiento manteniendo ConsentStateService como autoridad del evento",
     "migrar las ramas legacy de webhook por familias pequeñas",
     "migrar correcciones administrativas con actor, motivo y origen esperado"
   ],
@@ -495,6 +494,28 @@
         "reminderScheduledFor",
         "reminderState"
       ]
+    },
+    {
+      "id": "consent_step_transition",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/services/consentStateService.js",
+      "responseConsumer": "src/services/dataConsentGate.js",
+      "status": "canonical",
+      "allowedFields": [
+        "currentStep"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "currentStep esperado válido",
+        "destino limitado a GREETING_SENT, COLLECTING_DATA o DONE",
+        "candidatePatch con currentStep exige snapshot explícito"
+      ],
+      "mutation": {
+        "currentStep": "nextStep"
+      },
+      "concurrency": "updateMany compara id y currentStep dentro de la transacción del consentimiento.",
+      "idempotency": "Permite el mismo paso para registrar un nuevo evento; un snapshot obsoleto devuelve count cero.",
+      "conflictPolicy": "ConsentStateService revierte candidato y evento; dataConsentGate no captura perfil ni envía respuesta obsoleta."
     }
   ],
   "compositeContracts": [
