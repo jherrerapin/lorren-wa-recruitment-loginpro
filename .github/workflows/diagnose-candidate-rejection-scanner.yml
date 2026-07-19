@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - refactor/519-candidate-rejection-authority
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -24,5 +27,10 @@ jobs:
           node scripts/fix-generated-candidate-rejection-scanner.mjs
       - name: Print generated rejection scanner block
         run: grep -n -A45 -B5 "contrato compuesto de rechazo" test/candidateProgressAuthority.test.js
+      - name: Upload generated scanner
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-candidate-progress-scanner
+          path: test/candidateProgressAuthority.test.js
       - name: Check generated scanner syntax
         run: node --check test/candidateProgressAuthority.test.js
