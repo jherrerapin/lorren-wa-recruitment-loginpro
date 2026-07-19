@@ -48,13 +48,26 @@ jobs:
       - name: Apply exact authority patch
         run: node scripts/apply-candidate-simple-step-authority.mjs
 
-      - name: Validate focused contracts
+      - name: Validate JavaScript syntax
         run: |
           node --check src/services/candidateStateService.js
           node --check src/services/conversationEngine.js
           node --check src/services/chatEngine.js
-          node --test test/candidateConversationStepStateService.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
-          git diff --check
+
+      - name: Validate Candidate step service
+        run: node --test test/candidateConversationStepStateService.test.js
+
+      - name: Validate conversationEngine integration
+        run: node --test test/conversationEngineStepAuthority.test.js
+
+      - name: Validate historical engine guardrails
+        run: node --test test/conversationEngineGuardRails.test.js
+
+      - name: Validate progress authority scanner
+        run: node --test test/candidateProgressAuthority.test.js
+
+      - name: Validate patch formatting
+        run: git diff --check
 
       - name: Commit clean result
         run: |
