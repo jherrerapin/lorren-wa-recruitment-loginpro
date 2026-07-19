@@ -58,3 +58,7 @@ for (const [before, after] of replacements) {
 }
 
 fs.writeFileSync(path, source);
+
+const documentationPath = 'docs/architecture/candidate-state-transition-inventory.md';
+const documentation = fs.readFileSync(documentationPath, 'utf8');
+fs.writeFileSync(documentationPath, `${documentation.trimEnd()}\n`);
