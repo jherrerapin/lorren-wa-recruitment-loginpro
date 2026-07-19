@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "phase": "characterization",
+  "schemaVersion": 2,
+  "phase": "multiline_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -19,19 +19,28 @@
     "SCHEDULED"
   ],
   "rules": {
-    "runtimeChangesAllowedInThisPhase": false,
+    "runtimeChangesAllowedInThisPhase": true,
     "allowArbitraryCandidatePatch": false,
     "requireExplicitSourceClassification": true,
     "requireKnownOriginAndDestination": true,
     "requireConcurrencyDescription": true,
     "genderLogicInScope": false
   },
+  "completedSlices": [
+    "multiline_window_authority"
+  ],
   "sourceInventory": [
     {
       "path": "prisma/schema.prisma",
       "role": "canonical_schema",
       "trackedFields": ["currentStep"],
       "notes": "Declara el enum ConversationStep y los tipos persistidos."
+    },
+    {
+      "path": "src/services/candidateStateService.js",
+      "role": "direct_writer",
+      "trackedFields": ["multilineWindowUntil", "multilineBatchVersion"],
+      "notes": "Autoridad canónica del slice multilinea: programa la ventana e intenta adquirir una versión vencida mediante contratos estrechos."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -48,8 +57,8 @@
     {
       "path": "src/routes/webhook.js",
       "role": "direct_writer",
-      "trackedFields": ["currentStep", "multilineWindowUntil", "multilineBatchVersion"],
-      "notes": "Orquesta el flujo determinístico legacy y contiene la adquisición optimista del lote multilinea."
+      "trackedFields": ["currentStep", "multilineBatchVersion"],
+      "notes": "Continúa escribiendo currentStep en el flujo legacy. Para multilinea solo calcula la duración, pasa el snapshot de versión y delega la persistencia a CandidateStateService."
     },
     {
       "path": "src/services/dataConsentGate.js",
@@ -213,31 +222,34 @@
   "multilineContracts": [
     {
       "id": "schedule_multiline_window",
-      "owner": "src/routes/webhook.js",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/routes/webhook.js",
+      "status": "canonical",
       "allowedFields": ["multilineWindowUntil", "multilineBatchVersion"],
-      "preconditions": ["candidateId requerido", "windowMs finito y no negativo"],
+      "preconditions": ["candidateId requerido", "windowMs finito y no negativo", "now válido"],
       "mutation": {
-        "multilineWindowUntil": "fecha futura calculada por getMultilineWindowMs",
+        "multilineWindowUntil": "fecha futura calculada con now más windowMs",
         "multilineBatchVersion": "incrementar en uno"
       },
-      "concurrency": "Cada mensaje extiende la ventana e invalida propietarios anteriores al incrementar la versión.",
+      "concurrency": "Cada mensaje extiende la ventana e invalida propietarios anteriores al incrementar atómicamente la versión.",
       "idempotency": "No es idempotente por diseño: cada inbound nuevo crea una versión distinta."
     },
     {
       "id": "acquire_multiline_batch",
-      "owner": "src/routes/webhook.js",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/routes/webhook.js",
+      "status": "canonical",
       "allowedFields": ["multilineWindowUntil", "multilineBatchVersion"],
-      "preconditions": ["id coincide", "multilineBatchVersion coincide", "multilineWindowUntil venció"],
+      "preconditions": ["candidateId requerido", "multilineBatchVersion esperada válida", "multilineWindowUntil venció", "now válido"],
       "mutation": {
         "multilineWindowUntil": null,
         "multilineBatchVersion": "incrementar en uno"
       },
-      "concurrency": "updateMany funciona como compare-and-set; solo un procesador obtiene count igual a uno.",
+      "concurrency": "updateMany funciona como compare-and-set por ID, versión y vencimiento; solo un procesador obtiene count igual a uno.",
       "idempotency": "Una segunda adquisición con la versión anterior devuelve count igual a cero."
     }
   ],
   "nextMigrationSlices": [
-    "extraer la adquisición multilinea a CandidateStateService sin cambiar tiempos ni consolidación",
     "migrar la reducción final de conversationEngine.act() con snapshot de currentStep",
     "migrar las transiciones de consentimiento manteniendo ConsentStateService como autoridad del evento",
     "migrar las ramas legacy de webhook por familias pequeñas",
