@@ -15,7 +15,9 @@ on:
       - test/candidateMultilineStateService.test.js
       - test/candidateConversationStepStateService.test.js
       - test/candidateNoInterestStateService.test.js
+      - test/candidateRequirementRejectionStateService.test.js
       - test/conversationEngineNoInterestAuthority.test.js
+      - test/conversationEngineRequirementRejectionAuthority.test.js
       - test/conversationEngineStepAuthority.test.js
       - test/conversationEngineGuardRails.test.js
       - test/candidateProgressAuthority.test.js
@@ -34,7 +36,9 @@ on:
       - test/candidateMultilineStateService.test.js
       - test/candidateConversationStepStateService.test.js
       - test/candidateNoInterestStateService.test.js
+      - test/candidateRequirementRejectionStateService.test.js
       - test/conversationEngineNoInterestAuthority.test.js
+      - test/conversationEngineRequirementRejectionAuthority.test.js
       - test/conversationEngineStepAuthority.test.js
       - test/conversationEngineGuardRails.test.js
       - test/candidateProgressAuthority.test.js
@@ -72,4 +76,4 @@ jobs:
         run: npm run prisma:generate
 
       - name: Validate Candidate progress authority
-        run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/candidateNoInterestStateService.test.js test/conversationEngineNoInterestAuthority.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
+        run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/candidateNoInterestStateService.test.js test/candidateRequirementRejectionStateService.test.js test/conversationEngineNoInterestAuthority.test.js test/conversationEngineRequirementRejectionAuthority.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
