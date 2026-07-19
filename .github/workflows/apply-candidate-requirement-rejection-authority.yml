@@ -44,6 +44,9 @@ jobs:
       - name: Apply exact rejection patch
         run: node scripts/apply-candidate-requirement-rejection-authority.mjs
 
+      - name: Fix generated scanner escapes
+        run: node scripts/fix-generated-candidate-rejection-scanner.mjs
+
       - name: Check CandidateStateService syntax
         run: node --check src/services/candidateStateService.js
 
