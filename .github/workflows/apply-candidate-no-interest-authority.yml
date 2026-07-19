@@ -73,8 +73,29 @@ jobs:
       - name: Validate historical engine guardrails
         run: node --test test/conversationEngineGuardRails.test.js
 
-      - name: Validate progress authority scanner
-        run: node --test test/candidateProgressAuthority.test.js
+      - name: Validate scanner manifest
+        run: node --test --test-name-pattern="el manifiesto" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner inventory
+        run: node --test --test-name-pattern="cada fuente" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner transition families
+        run: node --test --test-name-pattern="familias de transición" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner multiline authority
+        run: node --test --test-name-pattern="persistencia multilinea" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner simple-step authority
+        run: node --test --test-name-pattern="transiciones simples" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner no-interest authority
+        run: node --test --test-name-pattern="cierre exacto por falta de interés" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner generic patch guard
+        run: node --test --test-name-pattern="sin una API genérica" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner documentation
+        run: node --test --test-name-pattern="documentación registra" test/candidateProgressAuthority.test.js
 
       - name: Validate patch formatting
         run: git diff --check
