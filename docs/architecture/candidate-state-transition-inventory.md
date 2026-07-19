@@ -222,7 +222,7 @@ La primera frontera runtime del grupo ya pertenece a `CandidateStateService`:
 
 Este contrato no modifica `currentStep`, no abre transacciones y no cambia tiempos, consolidación ni mensajes.
 
-### Protección en CI### Protección en CI
+### Protección en CI
 
 `test/candidateProgressAuthority.test.js` bloquea:
 
