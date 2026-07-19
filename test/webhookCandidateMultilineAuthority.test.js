@@ -46,14 +46,22 @@ test('los wrappers multilinea no escriben Candidate directamente', () => {
 
 test('el webhook conserva tiempos, espera y consolidación fuera de la autoridad', () => {
   const schedulingCall = source.indexOf('const scheduling = await scheduleMultilineWindow');
-  const sleepCall = source.indexOf('await sleep(scheduling.windowMs)', schedulingCall);
-  const acquireCall = source.indexOf('const stillOwner = await tryAcquireMultilineProcessing', sleepCall);
-  const pendingBatchCall = source.indexOf('const pendingBatch = await fetchPendingTextBatch', acquireCall);
-  const consolidateCall = source.indexOf('const consolidatedText = consolidateTextMessages', pendingBatchCall);
+  assert.ok(schedulingCall >= 0, 'No se encontró la programación de la ventana multilinea.');
 
-  assert.ok(schedulingCall >= 0);
-  assert.ok(sleepCall > schedulingCall);
-  assert.ok(acquireCall > sleepCall);
-  assert.ok(pendingBatchCall > acquireCall);
-  assert.ok(consolidateCall > pendingBatchCall);
+  const sleepCall = source.indexOf('await sleep(scheduling.windowMs)', schedulingCall);
+  assert.ok(sleepCall >= 0, 'No se encontró la espera de la ventana multilinea.');
+
+  const acquireCall = source.indexOf('const stillOwner = await tryAcquireMultilineProcessing', sleepCall);
+  assert.ok(acquireCall >= 0, 'No se encontró la adquisición del lote multilinea.');
+
+  const pendingBatchCall = source.indexOf('const pendingBatch = await fetchPendingTextBatch', acquireCall);
+  assert.ok(pendingBatchCall >= 0, 'No se encontró la carga del lote pendiente.');
+
+  const consolidateCall = source.indexOf('const consolidatedText = consolidateTextMessages', pendingBatchCall);
+  assert.ok(consolidateCall >= 0, 'No se encontró la consolidación del lote pendiente.');
+
+  assert.ok(sleepCall > schedulingCall, 'La espera debe ocurrir después de programar la ventana.');
+  assert.ok(acquireCall > sleepCall, 'La adquisición debe ocurrir después de la espera.');
+  assert.ok(pendingBatchCall > acquireCall, 'La lectura del lote debe ocurrir después de adquirirlo.');
+  assert.ok(consolidateCall > pendingBatchCall, 'La consolidación debe ocurrir después de leer el lote.');
 });
