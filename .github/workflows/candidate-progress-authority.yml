@@ -20,8 +20,11 @@ on:
       - test/candidateRequirementRejectionStateService.test.js
       - test/candidateExplicitPauseStateService.test.js
       - test/candidateConsentStepStateService.test.js
+      - test/candidateVacancyFirstGateStateService.test.js
       - test/consentStateService.test.js
       - test/dataConsentGateConsentStepAuthority.test.js
+      - test/webhookVacancyFirstGateAuthority.test.js
+      - test/turnOrchestratorContracts.test.js
       - test/conversationEngineNoInterestAuthority.test.js
       - test/conversationEngineRequirementRejectionAuthority.test.js
       - test/conversationEngineExplicitPauseAuthority.test.js
@@ -48,8 +51,11 @@ on:
       - test/candidateRequirementRejectionStateService.test.js
       - test/candidateExplicitPauseStateService.test.js
       - test/candidateConsentStepStateService.test.js
+      - test/candidateVacancyFirstGateStateService.test.js
       - test/consentStateService.test.js
       - test/dataConsentGateConsentStepAuthority.test.js
+      - test/webhookVacancyFirstGateAuthority.test.js
+      - test/turnOrchestratorContracts.test.js
       - test/conversationEngineNoInterestAuthority.test.js
       - test/conversationEngineRequirementRejectionAuthority.test.js
       - test/conversationEngineExplicitPauseAuthority.test.js
@@ -90,4 +96,4 @@ jobs:
         run: npm run prisma:generate
 
       - name: Validate Candidate progress authority
-        run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/candidateNoInterestStateService.test.js test/candidateRequirementRejectionStateService.test.js test/candidateExplicitPauseStateService.test.js test/candidateConsentStepStateService.test.js test/consentStateService.test.js test/dataConsentGateConsentStepAuthority.test.js test/conversationEngineNoInterestAuthority.test.js test/conversationEngineRequirementRejectionAuthority.test.js test/conversationEngineExplicitPauseAuthority.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
+        run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/candidateNoInterestStateService.test.js test/candidateRequirementRejectionStateService.test.js test/candidateExplicitPauseStateService.test.js test/candidateConsentStepStateService.test.js test/candidateVacancyFirstGateStateService.test.js test/consentStateService.test.js test/dataConsentGateConsentStepAuthority.test.js test/webhookVacancyFirstGateAuthority.test.js test/turnOrchestratorContracts.test.js test/conversationEngineNoInterestAuthority.test.js test/conversationEngineRequirementRejectionAuthority.test.js test/conversationEngineExplicitPauseAuthority.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js

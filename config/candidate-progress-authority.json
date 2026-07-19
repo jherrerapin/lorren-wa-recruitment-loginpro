@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 7,
-  "phase": "consent_step_authority_migrated",
+  "schemaVersion": 8,
+  "phase": "vacancy_first_gate_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -32,7 +32,8 @@
     "conversation_engine_no_interest_authority",
     "conversation_engine_requirement_rejection_authority",
     "conversation_engine_explicit_pause_authority",
-    "consent_step_authority"
+    "consent_step_authority",
+    "vacancy_first_gate_authority"
   ],
   "sourceInventory": [
     {
@@ -51,7 +52,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del slice multilinea, transiciones simples, falta de interés, rechazo, pausa explícita y currentStep del consentimiento mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento y aplicación de decisiones de vacancyFirstGate mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -76,7 +77,7 @@
         "currentStep",
         "multilineBatchVersion"
       ],
-      "notes": "Continúa escribiendo currentStep en el flujo legacy. Para multilinea solo calcula la duración, pasa el snapshot de versión y delega la persistencia a CandidateStateService."
+      "notes": "Delega multilinea y vacancyFirstGate a CandidateStateService; conserva otras ramas legacy y la captura silenciosa aún no migradas."
     },
     {
       "path": "src/services/dataConsentGate.js",
@@ -166,7 +167,7 @@
         "src/services/vacancyFirstGate.js"
       ],
       "writers": [
-        "src/routes/webhook.js"
+        "src/services/candidateStateService.js"
       ],
       "origins": [
         "MENU",
@@ -178,14 +179,16 @@
       ],
       "destinations": [
         "GREETING_SENT",
-        "COLLECTING_DATA"
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV"
       ],
       "allowedFields": [
         "currentStep"
       ],
       "trigger": "Resolución, rechazo, alternativa o aceptación de una vacante antes de entrar al flujo de captura.",
-      "concurrency": "La decisión se produce sobre un snapshot; el consumidor actual aplica candidate.update sin comparación del paso leído.",
-      "idempotency": "Repetir una decisión equivalente conserva el mismo destino, aunque la escritura no está protegida por compare-and-set.",
+      "concurrency": "CandidateStateService compara ID, paso, vacante, modo y recordatorio. count cero preserva el estado vigente y el webhook suprime la respuesta.",
+      "idempotency": "Permite conservar el mismo paso cuando cambia otro campo permitido; un snapshot obsoleto no aplica un patch parcial ni responde.",
       "externalEffects": [
         "reply_message"
       ]
@@ -459,7 +462,7 @@
     }
   ],
   "nextMigrationSlices": [
-    "migrar las ramas legacy de webhook por familias pequeñas",
+    "migrar la captura silenciosa y las demás ramas legacy del webhook por familias pequeñas",
     "migrar correcciones administrativas con actor, motivo y origen esperado"
   ],
   "stepContracts": [
@@ -642,6 +645,44 @@
         "confirm_booking",
         "reschedule",
         "implicit_scheduling_pause"
+      ]
+    },
+    {
+      "id": "vacancy_first_gate_decision",
+      "owner": "src/services/candidateStateService.js",
+      "decisionProducer": "src/services/vacancyFirstGate.js",
+      "consumer": "src/routes/webhook.js",
+      "responseConsumer": "src/routes/webhook.js",
+      "status": "canonical",
+      "allowedFields": [
+        "currentStep",
+        "vacancyId",
+        "botResumeMode",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "observedFields": [
+        "currentStep",
+        "vacancyId",
+        "botResumeMode",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "destinations": [
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV"
+      ],
+      "concurrency": "updateMany compara el snapshot completo antes de aplicar la decisión del gate.",
+      "idempotency": "El mismo paso puede conservarse; count cero suprime respuesta y no reintenta.",
+      "conflictPolicy": "webhook registra silencio intencional STALE_CANDIDATE_VACANCY_FIRST_GATE y no envía la respuesta obsoleta.",
+      "excludedCombinations": [
+        "silent_profile_capture",
+        "consent",
+        "cv_storage",
+        "interview_booking",
+        "gender_logic"
       ]
     }
   ]
