@@ -10,45 +10,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-506-patch:
-    name: Apply issue 506 patch
-    if: github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Check out feature branch
-        uses: actions/checkout@v5
-        with:
-          ref: refactor/506-candidate-multiline-authority
-          fetch-depth: 0
-
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v5
-        with:
-          node-version: "20"
-
-      - name: Apply deterministic patch when present
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f scripts/apply-506-candidate-multiline-authority.mjs
-          node scripts/apply-506-candidate-multiline-authority.mjs
-          rm scripts/apply-506-candidate-multiline-authority.mjs
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git diff --cached --check
-          git commit -m 'refactor: centralizar ventana multilinea de Candidate'
-          git push origin HEAD:refactor/506-candidate-multiline-authority
-
   state-authority:
     name: Validate state authorities
     runs-on: ubuntu-latest
@@ -133,6 +101,9 @@ jobs:
 
       - name: Run candidate state authority regressions
         run: node --test test/candidateStateService.test.js test/candidateAdminPauseStateService.test.js test/candidateWhatsAppOpenStateService.test.js test/candidateManualOutboundStateService.test.js test/candidateSupervisorReviewStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminCandidatePauseAuthority.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/adminSupervisorCandidateStateAuthority.test.js test/adminBotPause.test.js
+
+      - name: Run candidate multiline state authority regressions
+        run: node --test test/candidateMultilineStateService.test.js test/webhookCandidateMultilineAuthority.test.js
 
       - name: Validate candidate progress authority inventory
         run: node --test test/candidateProgressAuthority.test.js
