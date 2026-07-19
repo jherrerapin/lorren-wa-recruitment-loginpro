@@ -115,6 +115,7 @@ La misma instalación vinculada a otro auxiliar genera una señal de dispositivo
 La suite específica cubre:
 
 - distancia y geocerca;
+- coordenadas iguales, inválidas y antípodas;
 - auto-validación confiable;
 - dispositivo nuevo;
 - repetición de la misma clave;
@@ -125,6 +126,8 @@ La suite específica cubre:
 - recuperación del ganador `P2002`;
 - inventario de estados activos.
 
+La ejecución local combinada aprobó 14 pruebas y no presentó fallos.
+
 ## Rollback
 
-Revertir los cuatro archivos de esta entrega. Al no existir rutas ni consumidores, el servicio permanece inalcanzable en producción.
+Revertir los cinco archivos de esta entrega. Al no existir rutas ni consumidores, el servicio permanece inalcanzable en producción.
