@@ -10,6 +10,9 @@ function completeCandidate(overrides = {}) {
     id: 1,
     vacancyId: 10,
     currentStep: ConversationStep.ASK_CV,
+    status: 'REGISTRADO',
+    rejectionReason: null,
+    rejectionDetails: null,
     fullName: 'Fredy Granados',
     documentType: 'CC',
     documentNumber: '1000788203',
@@ -217,7 +220,8 @@ test('mark_rejected solo rechaza con evidencia real de incumplimiento de requisi
     actions: [{ type: 'mark_rejected', data: { reason: 'No cumple requisitos' } }]
   });
 
-  const update = prisma.updates.at(-1).data;
+  const update = prisma.stepUpdates.at(-1).data;
+  assert.equal(result.stepTransition.contract, 'requirement_rejection');
   assert.equal(update.status, 'RECHAZADO');
   assert.match(update.rejectionReason, /edad/i);
   assert.match(update.rejectionDetails, /age_below_min/);

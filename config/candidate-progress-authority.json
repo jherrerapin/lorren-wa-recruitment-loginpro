@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 4,
-  "phase": "no_interest_authority_migrated",
+  "schemaVersion": 5,
+  "phase": "requirement_rejection_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -29,7 +29,8 @@
   "completedSlices": [
     "multiline_window_authority",
     "conversation_engine_simple_step_authority",
-    "conversation_engine_no_interest_authority"
+    "conversation_engine_no_interest_authority",
+    "conversation_engine_requirement_rejection_authority"
   ],
   "sourceInventory": [
     {
@@ -48,7 +49,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del slice multilinea, transiciones simples de currentStep y cierre compuesto por falta de interés mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del slice multilinea, transiciones simples, cierre por falta de interés y rechazo por requisitos mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -56,7 +57,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "act() conserva la reducción determinística. Delega transiciones simples y el cierre exacto por falta de interés; rechazo, pausa y agenda siguen temporalmente unidos."
+      "notes": "act() conserva la reducción determinística. Delega transiciones simples, falta de interés y rechazo exacto; pausa y agenda siguen temporalmente unidas."
     },
     {
       "path": "src/services/chatEngine.js",
@@ -331,8 +332,8 @@
         "currentStep"
       ],
       "trigger": "Reducción determinística de acciones, guardas de readiness y nextStep propuesto por el modelo.",
-      "concurrency": "Las transiciones simples comparan id y currentStep. mark_no_interest compara además reminderScheduledFor y reminderState. Rechazo, pausa y agenda permanecen temporalmente en candidate.update.",
-      "idempotency": "No escribe cuando finalStep coincide con currentStep. Carreras simples o de falta de interés devuelven count cero y preservan el estado observado.",
+      "concurrency": "Las transiciones simples comparan id y currentStep. Falta de interés compara recordatorio. Rechazo por requisitos compara además status, razón y detalle observados. Pausa y agenda permanecen temporalmente en candidate.update.",
+      "idempotency": "No escribe cuando el paso simple no cambia. Carreras simples, de falta de interés o de rechazo devuelven count cero y preservan el estado observado.",
       "externalEffects": [
         "candidate_fields",
         "interview_booking_transition"
@@ -457,7 +458,7 @@
     }
   ],
   "nextMigrationSlices": [
-    "migrar mark_rejected como contrato compuesto separado sin absorber pausa ni agenda",
+    "migrar pause_bot como contrato compuesto separado sin absorber agenda ni lógica relacionada con género",
     "migrar las transiciones de consentimiento manteniendo ConsentStateService como autoridad del evento",
     "migrar las ramas legacy de webhook por familias pequeñas",
     "migrar correcciones administrativas con actor, motivo y origen esperado"
@@ -525,6 +526,46 @@
       "conflictPolicy": "chatEngine reutiliza stale_candidate_step y suprime la respuesta calculada sobre el snapshot obsoleto.",
       "excludedCombinations": [
         "mark_rejected",
+        "pause_bot",
+        "mark_female_pipeline",
+        "offer_interview",
+        "reschedule"
+      ]
+    },
+    {
+      "id": "conversation_engine_requirement_rejection",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/services/conversationEngine.js",
+      "responseConsumer": "src/services/chatEngine.js",
+      "status": "canonical",
+      "allowedFields": [
+        "currentStep",
+        "status",
+        "rejectionReason",
+        "rejectionDetails",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "decisión de rechazo ya autorizada por rejectionPolicy",
+        "snapshot completo de paso, estado, trazabilidad y recordatorio",
+        "razón y detalle no vacíos",
+        "pendingUpdate contiene exactamente los campos permitidos"
+      ],
+      "mutation": {
+        "currentStep": "DONE",
+        "status": "RECHAZADO",
+        "rejectionReason": "razón canónica de la política",
+        "rejectionDetails": "evidencia canónica de la política",
+        "reminderScheduledFor": null,
+        "reminderState": "SKIPPED"
+      },
+      "concurrency": "updateMany compara id, currentStep, status, razón, detalle y recordatorio; count cero preserva el estado vigente.",
+      "idempotency": "Un candidato ya rechazado produce no-op y un snapshot obsoleto no sobrescribe trazabilidad o recordatorios más recientes.",
+      "conflictPolicy": "chatEngine reutiliza stale_candidate_step y suprime la respuesta calculada sobre el snapshot obsoleto.",
+      "excludedCombinations": [
+        "mark_no_interest",
         "pause_bot",
         "mark_female_pipeline",
         "offer_interview",

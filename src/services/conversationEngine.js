@@ -32,6 +32,7 @@ import { applyRejectionMemoryPolicy, buildRequirementRejectionDecision } from '.
 import { OPENAI_CONVERSATION_MODEL } from './openAiModelConfig.js';
 import {
   completeCandidateNoInterestTransition,
+  completeCandidateRequirementRejection,
   transitionCandidateConversationStep
 } from './candidateStateService.js';
 
@@ -872,6 +873,7 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
 
   const normalizedActions = Array.isArray(actions) ? actions : [];
   const hasMarkNoInterestAction = normalizedActions.some((action) => action?.type === 'mark_no_interest');
+  const hasMarkRejectedAction = normalizedActions.some((action) => action?.type === 'mark_rejected');
   const mergedRawFields = Object.keys(candidateFields || {}).length
     ? candidateFields
     : extractEngineCandidateFields(normalizedActions, extractedFields);
@@ -1162,6 +1164,28 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   }
 
   const pendingUpdateKeys = Object.keys(pendingUpdate);
+  const requirementRejectionUpdateFields = [
+    'status',
+    'rejectionReason',
+    'rejectionDetails',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  const requirementRejectionPendingFields = hasStepTransition
+    ? [...requirementRejectionUpdateFields, 'currentStep']
+    : requirementRejectionUpdateFields;
+  const hasRequirementRejectionTransition = finalStep === ConversationStep.DONE
+    && hasMarkRejectedAction
+    && !hasMarkNoInterestAction
+    && pendingUpdateKeys.length === requirementRejectionPendingFields.length
+    && requirementRejectionPendingFields.every((field) => pendingUpdateKeys.includes(field))
+    && pendingUpdate.status === CandidateStatus.RECHAZADO
+    && typeof pendingUpdate.rejectionReason === 'string'
+    && Boolean(pendingUpdate.rejectionReason.trim())
+    && typeof pendingUpdate.rejectionDetails === 'string'
+    && Boolean(pendingUpdate.rejectionDetails.trim())
+    && pendingUpdate.reminderScheduledFor === null
+    && pendingUpdate.reminderState === ReminderState.SKIPPED;
   const noInterestUpdateFields = ['currentStep', 'reminderScheduledFor', 'reminderState'];
   const hasNoInterestTransition = hasStepTransition
     && finalStep === ConversationStep.DONE
@@ -1175,7 +1199,43 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     && pendingUpdateKeys[0] === 'currentStep';
   let stepTransition = null;
 
-  if (hasNoInterestTransition) {
+  if (hasRequirementRejectionTransition) {
+    const rejectionReason = pendingUpdate.rejectionReason;
+    const rejectionDetails = pendingUpdate.rejectionDetails;
+    for (const field of requirementRejectionUpdateFields) delete pendingUpdate[field];
+    if (hasStepTransition) delete pendingUpdate.currentStep;
+
+    stepTransition = await completeCandidateRequirementRejection(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        currentStep: candidate.currentStep,
+        status: candidate.status,
+        rejectionReason: candidate.rejectionReason ?? null,
+        rejectionDetails: candidate.rejectionDetails ?? null,
+        reminderScheduledFor: candidate.reminderScheduledFor,
+        reminderState: candidate.reminderState
+      },
+      reason: rejectionReason,
+      details: rejectionDetails
+    }).catch((error) => {
+      console.error('[ACT_REQUIREMENT_REJECTION_ERROR]', error?.message);
+      return {
+        count: 0,
+        candidate: null,
+        error: error?.message || 'candidate_requirement_rejection_error'
+      };
+    });
+
+    const transitionApplied = stepTransition.count === 1;
+    const observedStep = stepTransition.candidate?.currentStep || candidate.currentStep;
+    stepTransition = {
+      ...stepTransition,
+      contract: 'requirement_rejection',
+      conflict: !transitionApplied,
+      observedStep
+    };
+    if (!transitionApplied) finalStep = observedStep;
+  } else if (hasNoInterestTransition) {
     delete pendingUpdate.currentStep;
     delete pendingUpdate.reminderScheduledFor;
     delete pendingUpdate.reminderState;
