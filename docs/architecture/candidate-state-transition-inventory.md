@@ -210,17 +210,19 @@ Cada familia documenta propietario de la decisión, escritor real, orígenes, de
 
 ### Multilinea
 
-El mecanismo multilinea existente ya tiene una forma de compare-and-set y debe conservarla cuando se migre:
+La primera frontera runtime del grupo ya pertenece a `CandidateStateService`:
 
-1. `scheduleMultilineWindow()` escribe una fecha futura e incrementa `multilineBatchVersion`.
-2. Cada nuevo inbound invalida al propietario anterior mediante otra versión.
-3. `tryAcquireMultilineProcessing()` exige ID, versión exacta y ventana vencida.
-4. La adquisición limpia la ventana e incrementa otra vez la versión.
-5. Solo `count === 1` autoriza procesar el lote.
+1. `scheduleMultilineWindow()` conserva en el webhook el cálculo de `windowMs` y la fecha futura.
+2. `scheduleCandidateMultilineWindow()` persiste únicamente `multilineWindowUntil` e incrementa `multilineBatchVersion`.
+3. Cada nuevo inbound invalida al propietario anterior mediante otra versión.
+4. `tryAcquireMultilineProcessing()` conserva la decisión de orquestación y delega la comparación.
+5. `acquireCandidateMultilineBatch()` exige ID, versión exacta y ventana vencida.
+6. La adquisición limpia la ventana e incrementa otra vez la versión.
+7. Solo `count === 1` autoriza procesar el lote.
 
-Este contrato no es un simple cambio de paso y no debe mezclarse con la reducción de `currentStep`.
+Este contrato no modifica `currentStep`, no abre transacciones y no cambia tiempos, consolidación ni mensajes.
 
-### Protección en CI
+### Protección en CI### Protección en CI
 
 `test/candidateProgressAuthority.test.js` bloquea:
 
@@ -234,11 +236,22 @@ Este contrato no es un simple cambio de paso y no debe mezclarse con la reducci�
 
 ### Siguiente orden de migración
 
-1. Extraer la adquisición multilinea a un contrato estrecho de `CandidateStateService`.
-2. Migrar la reducción final de `conversationEngine.act()` comparando el paso leído.
-3. Migrar el reflejo de progreso del consentimiento sin absorber la autoridad del evento.
-4. Dividir las ramas legacy de `webhook.js` por familias pequeñas.
-5. Migrar correcciones administrativas con actor, motivo y origen esperado.
+1. Migrar la reducción final de `conversationEngine.act()` comparando el paso leído.
+2. Migrar el reflejo de progreso del consentimiento sin absorber la autoridad del evento.
+3. Dividir las ramas legacy de `webhook.js` por familias pequeñas.
+4. Migrar correcciones administrativas con actor, motivo y origen esperado.
+
+## Fase 2: autoridad de ventana multilinea
+
+La persistencia de la ventana multilinea se extrajo sin mover la orquestación del webhook:
+
+- `scheduleCandidateMultilineWindow()` valida candidato y fecha, escribe solo los dos campos permitidos y devuelve la versión persistida;
+- `acquireCandidateMultilineBatch()` valida candidato, versión y fecha de adquisición, y conserva el compare-and-set mediante `updateMany`;
+- una versión obsoleta o una ventana todavía abierta devuelve `count === 0`;
+- los wrappers del webhook ya no ejecutan `candidate.update` ni `candidate.updateMany` directamente;
+- no cambian `sleep`, consolidación, mensajes, replays ni la lógica relacionada con género.
+
+`Candidate` continúa en estado `fragmented` porque `currentStep` y los demás grupos todavía tienen escritores distribuidos.
 
 ## Reglas para la autoridad
 

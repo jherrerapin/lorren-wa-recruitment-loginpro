@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "phase": "characterization",
+  "schemaVersion": 2,
+  "phase": "multiline_boundary",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -19,225 +19,433 @@
     "SCHEDULED"
   ],
   "rules": {
-    "runtimeChangesAllowedInThisPhase": false,
+    "runtimeChangesAllowedInThisPhase": true,
     "allowArbitraryCandidatePatch": false,
     "requireExplicitSourceClassification": true,
     "requireKnownOriginAndDestination": true,
     "requireConcurrencyDescription": true,
-    "genderLogicInScope": false
+    "genderLogicInScope": false,
+    "multilineRuntimeMigrated": true
   },
   "sourceInventory": [
     {
       "path": "prisma/schema.prisma",
       "role": "canonical_schema",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Declara el enum ConversationStep y los tipos persistidos."
     },
     {
       "path": "src/services/conversationEngine.js",
       "role": "direct_writer",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "act() reduce acciones, guardas y nextStep del modelo a un finalStep persistido."
     },
     {
       "path": "src/services/chatEngine.js",
       "role": "direct_writer",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Escribe reprogramación y decisiones determinísticas de vacante pausada; delega la reducción general en act()."
     },
     {
       "path": "src/routes/webhook.js",
       "role": "direct_writer",
-      "trackedFields": ["currentStep", "multilineWindowUntil", "multilineBatchVersion"],
-      "notes": "Orquesta el flujo determinístico legacy y contiene la adquisición optimista del lote multilinea."
+      "trackedFields": [
+        "currentStep"
+      ],
+      "notes": "Orquesta el flujo determinístico legacy; los dos contratos multilinea delegan su persistencia en CandidateStateService."
+    },
+    {
+      "path": "src/services/candidateStateService.js",
+      "role": "direct_writer",
+      "trackedFields": [
+        "multilineWindowUntil",
+        "multilineBatchVersion"
+      ],
+      "notes": "Autoridad estrecha para programar y adquirir lotes multilinea; no modifica currentStep."
     },
     {
       "path": "src/services/dataConsentGate.js",
       "role": "direct_writer",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Define reanudación, rechazo y confirmación de vacante alrededor de la frontera de consentimiento."
     },
     {
       "path": "src/services/consentStateService.js",
       "role": "indirect_writer",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Persiste currentStep únicamente dentro del candidatePatch permitido por el caso de uso de consentimiento."
     },
     {
       "path": "src/routes/admin.js",
       "role": "direct_writer",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Contiene operaciones administrativas explícitas que pueden corregir o reiniciar el paso."
     },
     {
       "path": "src/services/vacancyFirstGate.js",
       "role": "decision_producer",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Produce candidateUpdates para selección de vacante, alternativas y registro futuro; no persiste Candidate."
     },
     {
       "path": "src/services/silentProfileCapture.js",
       "role": "decision_producer",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Produce la actualización de captura silenciosa sin persistirla."
     },
     {
       "path": "src/services/cvFlow.js",
       "role": "decision_policy",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Calcula el siguiente paso después de datos o CV; el consumidor realiza la escritura."
     },
     {
       "path": "src/ai/extractRecruitmentTurn.js",
       "role": "decision_schema",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Expone currentStep al contrato de extracción; no escribe Candidate."
     },
     {
       "path": "src/services/contextualReply.js",
       "role": "read_only_context",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Usa el paso para contextualizar respuestas; no persiste progreso."
     },
     {
       "path": "src/routes/metaAdsStats.js",
       "role": "read_only_projection",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Proyecta el paso en estadísticas; no decide ni persiste transiciones."
     },
     {
       "path": "src/services/reminder.js",
       "role": "read_only_support",
-      "trackedFields": ["currentStep"],
+      "trackedFields": [
+        "currentStep"
+      ],
       "notes": "Lee el paso para textos y elegibilidad de recordatorios, sin modificarlo."
     }
   ],
   "transitionFamilies": [
     {
       "id": "vacancy_first_gate_decision",
-      "owners": ["src/services/vacancyFirstGate.js"],
-      "writers": ["src/routes/webhook.js"],
-      "origins": ["MENU", "GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV", "DONE"],
-      "destinations": ["GREETING_SENT", "COLLECTING_DATA"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/services/vacancyFirstGate.js"
+      ],
+      "writers": [
+        "src/routes/webhook.js"
+      ],
+      "origins": [
+        "MENU",
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV",
+        "DONE"
+      ],
+      "destinations": [
+        "GREETING_SENT",
+        "COLLECTING_DATA"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Resolución, rechazo, alternativa o aceptación de una vacante antes de entrar al flujo de captura.",
       "concurrency": "La decisión se produce sobre un snapshot; el consumidor actual aplica candidate.update sin comparación del paso leído.",
       "idempotency": "Repetir una decisión equivalente conserva el mismo destino, aunque la escritura no está protegida por compare-and-set.",
-      "externalEffects": ["reply_message"]
+      "externalEffects": [
+        "reply_message"
+      ]
     },
     {
       "id": "silent_profile_capture_decision",
-      "owners": ["src/services/silentProfileCapture.js"],
-      "writers": ["src/routes/webhook.js"],
-      "origins": ["GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV"],
-      "destinations": ["GREETING_SENT"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/services/silentProfileCapture.js"
+      ],
+      "writers": [
+        "src/routes/webhook.js"
+      ],
+      "origins": [
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV"
+      ],
+      "destinations": [
+        "GREETING_SENT"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Recepción de datos materiales sin vacante mientras existe un modo de registro futuro o alternativa pendiente.",
       "concurrency": "El productor no escribe; el consumidor actual aplica el objeto resultante sin snapshot condicional.",
       "idempotency": "El destino es estable y no asigna vacante, pero las correcciones de perfil pertenecen a otra autoridad.",
-      "externalEffects": ["reply_message"]
+      "externalEffects": [
+        "reply_message"
+      ]
     },
     {
       "id": "consent_resume_or_stop",
-      "owners": ["src/services/dataConsentGate.js", "src/services/consentStateService.js"],
-      "writers": ["src/services/dataConsentGate.js", "src/services/consentStateService.js"],
-      "origins": ["MENU", "GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV", "DONE"],
-      "destinations": ["GREETING_SENT", "COLLECTING_DATA", "DONE"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/services/dataConsentGate.js",
+        "src/services/consentStateService.js"
+      ],
+      "writers": [
+        "src/services/dataConsentGate.js",
+        "src/services/consentStateService.js"
+      ],
+      "origins": [
+        "MENU",
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV",
+        "DONE"
+      ],
+      "destinations": [
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "DONE"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Aceptación, revocatoria o reanudación contextual después de la decisión de tratamiento de datos.",
       "concurrency": "ConsentStateService limita campos, pero la actualización de Candidate no compara el currentStep observado.",
       "idempotency": "Los eventos de consentimiento aportan trazabilidad; la mutación de progreso aún no usa una clave de idempotencia propia.",
-      "externalEffects": ["consent_event", "reply_message"]
+      "externalEffects": [
+        "consent_event",
+        "reply_message"
+      ]
     },
     {
       "id": "paused_vacancy_guard",
-      "owners": ["src/services/chatEngine.js"],
-      "writers": ["src/services/chatEngine.js"],
-      "origins": ["MENU", "GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV", "DONE"],
-      "destinations": ["GREETING_SENT", "COLLECTING_DATA", "DONE"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/services/chatEngine.js"
+      ],
+      "writers": [
+        "src/services/chatEngine.js"
+      ],
+      "origins": [
+        "MENU",
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV",
+        "DONE"
+      ],
+      "destinations": [
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "DONE"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Oferta, aceptación o rechazo del registro para una vacante pausada.",
       "concurrency": "Usa candidate.update por id y puede sobrescribir un paso cambiado después de cargar el candidato.",
       "idempotency": "La decisión es determinística para el mismo consentimiento, pero no existe compare-and-set del snapshot.",
-      "externalEffects": ["reply_message"]
+      "externalEffects": [
+        "reply_message"
+      ]
     },
     {
       "id": "appointment_reschedule_direct",
-      "owners": ["src/services/chatEngine.js"],
-      "writers": ["src/services/chatEngine.js"],
-      "origins": ["SCHEDULING", "SCHEDULED"],
-      "destinations": ["SCHEDULING"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/services/chatEngine.js"
+      ],
+      "writers": [
+        "src/services/chatEngine.js"
+      ],
+      "origins": [
+        "SCHEDULING",
+        "SCHEDULED"
+      ],
+      "destinations": [
+        "SCHEDULING"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Solicitud explícita de reprogramación sobre una reserva activa.",
       "concurrency": "La reserva usa su autoridad especializada; el currentStep se actualiza después por id sin validar el paso leído.",
       "idempotency": "La acción de reserva evita transiciones inválidas, pero el reflejo en Candidate todavía no es condicional.",
-      "externalEffects": ["interview_booking_transition", "reply_message"]
+      "externalEffects": [
+        "interview_booking_transition",
+        "reply_message"
+      ]
     },
     {
       "id": "engine_action_reducer",
-      "owners": ["src/services/conversationEngine.js"],
-      "writers": ["src/services/conversationEngine.js"],
-      "origins": ["*"],
-      "destinations": ["MENU", "GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV", "DONE", "SCHEDULING", "SCHEDULED"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/services/conversationEngine.js"
+      ],
+      "writers": [
+        "src/services/conversationEngine.js"
+      ],
+      "origins": [
+        "*"
+      ],
+      "destinations": [
+        "MENU",
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV",
+        "DONE",
+        "SCHEDULING",
+        "SCHEDULED"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Reducción determinística de acciones, guardas de readiness y nextStep propuesto por el modelo.",
       "concurrency": "Calcula finalStep con el snapshot cargado y lo persiste por id; no compara currentStep ni los hechos de readiness utilizados.",
       "idempotency": "No escribe cuando finalStep coincide con candidate.currentStep; los efectos de reserva se delegan a InterviewBookingStateService.",
-      "externalEffects": ["candidate_fields", "interview_booking_transition"]
+      "externalEffects": [
+        "candidate_fields",
+        "interview_booking_transition"
+      ]
     },
     {
       "id": "webhook_legacy_progression",
-      "owners": ["src/routes/webhook.js", "src/services/cvFlow.js"],
-      "writers": ["src/routes/webhook.js"],
-      "origins": ["MENU", "GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV", "DONE", "SCHEDULING", "SCHEDULED"],
-      "destinations": ["GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV", "DONE", "SCHEDULING", "SCHEDULED"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/routes/webhook.js",
+        "src/services/cvFlow.js"
+      ],
+      "writers": [
+        "src/routes/webhook.js"
+      ],
+      "origins": [
+        "MENU",
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV",
+        "DONE",
+        "SCHEDULING",
+        "SCHEDULED"
+      ],
+      "destinations": [
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV",
+        "DONE",
+        "SCHEDULING",
+        "SCHEDULED"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Ramas determinísticas de vacante, captura de datos, confirmación, CV, descarte, cierre y agenda.",
       "concurrency": "Las ramas actuales realizan varios candidate.update por id durante el mismo turno y no protegen el origen leído.",
       "idempotency": "La persistencia de Message evita reprocesar el mismo waMessageId; las escrituras de progreso no tienen una operación canónica única.",
-      "externalEffects": ["inbound_message", "outbound_message", "cv_storage", "interview_booking_transition"]
+      "externalEffects": [
+        "inbound_message",
+        "outbound_message",
+        "cv_storage",
+        "interview_booking_transition"
+      ]
     },
     {
       "id": "admin_progress_override",
-      "owners": ["src/routes/admin.js"],
-      "writers": ["src/routes/admin.js"],
-      "origins": ["*"],
-      "destinations": ["MENU", "GREETING_SENT", "COLLECTING_DATA", "CONFIRMING_DATA", "ASK_CV", "DONE", "SCHEDULING", "SCHEDULED"],
-      "allowedFields": ["currentStep"],
+      "owners": [
+        "src/routes/admin.js"
+      ],
+      "writers": [
+        "src/routes/admin.js"
+      ],
+      "origins": [
+        "*"
+      ],
+      "destinations": [
+        "MENU",
+        "GREETING_SENT",
+        "COLLECTING_DATA",
+        "CONFIRMING_DATA",
+        "ASK_CV",
+        "DONE",
+        "SCHEDULING",
+        "SCHEDULED"
+      ],
+      "allowedFields": [
+        "currentStep"
+      ],
       "trigger": "Corrección o reinicio explícito realizado desde el panel administrativo.",
       "concurrency": "La autorización de acceso se valida, pero la corrección de progreso aún no exige el snapshot anterior.",
       "idempotency": "Repetir el mismo valor converge; una futura autoridad debe registrar actor, origen esperado y motivo.",
-      "externalEffects": ["admin_audit"]
+      "externalEffects": [
+        "admin_audit"
+      ]
     }
   ],
   "multilineContracts": [
     {
       "id": "schedule_multiline_window",
-      "owner": "src/routes/webhook.js",
-      "allowedFields": ["multilineWindowUntil", "multilineBatchVersion"],
-      "preconditions": ["candidateId requerido", "windowMs finito y no negativo"],
+      "owner": "src/services/candidateStateService.js",
+      "allowedFields": [
+        "multilineWindowUntil",
+        "multilineBatchVersion"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "windowUntil válido"
+      ],
       "mutation": {
         "multilineWindowUntil": "fecha futura calculada por getMultilineWindowMs",
         "multilineBatchVersion": "incrementar en uno"
       },
-      "concurrency": "Cada mensaje extiende la ventana e invalida propietarios anteriores al incrementar la versión.",
-      "idempotency": "No es idempotente por diseño: cada inbound nuevo crea una versión distinta."
+      "concurrency": "Cada programación usa candidate.update, extiende la ventana e invalida propietarios anteriores al incrementar la versión.",
+      "idempotency": "No es idempotente por diseño: cada inbound nuevo crea una versión distinta.",
+      "orchestrator": "src/routes/webhook.js"
     },
     {
       "id": "acquire_multiline_batch",
-      "owner": "src/routes/webhook.js",
-      "allowedFields": ["multilineWindowUntil", "multilineBatchVersion"],
-      "preconditions": ["id coincide", "multilineBatchVersion coincide", "multilineWindowUntil venció"],
+      "owner": "src/services/candidateStateService.js",
+      "allowedFields": [
+        "multilineWindowUntil",
+        "multilineBatchVersion"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "versión esperada entera",
+        "multilineWindowUntil venció"
+      ],
       "mutation": {
         "multilineWindowUntil": null,
         "multilineBatchVersion": "incrementar en uno"
       },
       "concurrency": "updateMany funciona como compare-and-set; solo un procesador obtiene count igual a uno.",
-      "idempotency": "Una segunda adquisición con la versión anterior devuelve count igual a cero."
+      "idempotency": "Una segunda adquisición con la versión anterior devuelve count igual a cero.",
+      "orchestrator": "src/routes/webhook.js"
     }
   ],
   "nextMigrationSlices": [
-    "extraer la adquisición multilinea a CandidateStateService sin cambiar tiempos ni consolidación",
     "migrar la reducción final de conversationEngine.act() con snapshot de currentStep",
     "migrar las transiciones de consentimiento manteniendo ConsentStateService como autoridad del evento",
     "migrar las ramas legacy de webhook por familias pequeñas",

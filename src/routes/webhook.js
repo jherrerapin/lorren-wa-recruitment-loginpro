@@ -21,7 +21,11 @@ import { detectConversationIntent, isPostCompletionAck } from '../services/conve
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
 import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitizer.js';
 import { shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../services/botAutomationPolicy.js';
-import { resumeCandidateAutomationOnInbound } from '../services/candidateStateService.js';
+import {
+  acquireCandidateMultilineBatch,
+  resumeCandidateAutomationOnInbound,
+  scheduleCandidateMultilineWindow
+} from '../services/candidateStateService.js';
 import { runChatEngine } from '../services/chatEngine.js';
 import { think, extractEngineCandidateFields } from '../services/conversationEngine.js';
 import { storeCandidateCv } from '../services/cvStorage.js';
@@ -2574,16 +2578,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 async function scheduleMultilineWindow(prisma, candidateId, context = {}) {
   const windowMs = getMultilineWindowMs(context);
   const windowUntil = new Date(Date.now() + windowMs);
-  const updated = await prisma.candidate.update({
-    where: { id: candidateId },
-    data: {
-      multilineWindowUntil: windowUntil,
-      multilineBatchVersion: { increment: 1 }
-    },
-    select: { multilineBatchVersion: true }
+  const transition = await scheduleCandidateMultilineWindow(prisma, {
+    candidateId,
+    windowUntil
   });
 
-  return { windowMs, batchVersion: updated.multilineBatchVersion };
+  return { windowMs, batchVersion: transition.batchVersion };
 }
 
 async function fetchPendingTextBatch(prisma, candidateId) {
@@ -2600,16 +2600,10 @@ async function fetchPendingTextBatch(prisma, candidateId) {
 }
 
 async function tryAcquireMultilineProcessing(prisma, candidateId, batchVersion) {
-  const acquired = await prisma.candidate.updateMany({
-    where: {
-      id: candidateId,
-      multilineBatchVersion: batchVersion,
-      multilineWindowUntil: { lte: new Date() }
-    },
-    data: {
-      multilineWindowUntil: null,
-      multilineBatchVersion: { increment: 1 }
-    }
+  const acquired = await acquireCandidateMultilineBatch(prisma, {
+    candidateId,
+    expectedBatchVersion: batchVersion,
+    now: new Date()
   });
   return acquired.count === 1;
 }

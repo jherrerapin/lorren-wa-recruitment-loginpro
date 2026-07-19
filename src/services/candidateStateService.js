@@ -14,6 +14,16 @@ function requireCandidateClient(client) {
   return client;
 }
 
+function requireCandidateMultilineClient(client) {
+  if (
+    typeof client?.candidate?.update !== 'function'
+    || typeof client?.candidate?.updateMany !== 'function'
+  ) {
+    throw new TypeError('candidate_multiline_state_client_required');
+  }
+  return client;
+}
+
 function requireCandidateId(candidateId) {
   const normalized = String(candidateId || '').trim();
   if (!normalized) throw new TypeError('candidate_id_required');
@@ -41,6 +51,13 @@ function requireValidDate(value, fieldName) {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) throw new TypeError(`${fieldName}_invalid`);
   return date;
+}
+
+function requireMultilineBatchVersion(value) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError('candidate_multiline_batch_version_invalid');
+  }
+  return value;
 }
 
 function normalizeNullableDate(value, fieldName) {
@@ -159,6 +176,48 @@ async function applyConditionalCandidatePauseTransition(client, {
     count: Number(result?.count || 0),
     candidate
   };
+}
+
+export async function scheduleCandidateMultilineWindow(client, input = {}) {
+  const candidateClient = requireCandidateMultilineClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const windowUntil = requireValidDate(input.windowUntil, 'candidate_multiline_window_until');
+
+  const updated = await candidateClient.candidate.update({
+    where: { id: candidateId },
+    data: {
+      multilineWindowUntil: windowUntil,
+      multilineBatchVersion: { increment: 1 }
+    },
+    select: { multilineBatchVersion: true }
+  });
+
+  return {
+    windowUntil,
+    batchVersion: requireMultilineBatchVersion(updated?.multilineBatchVersion)
+  };
+}
+
+export async function acquireCandidateMultilineBatch(client, input = {}) {
+  const candidateClient = requireCandidateMultilineClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expectedBatchVersion = requireMultilineBatchVersion(input.expectedBatchVersion);
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_multiline_acquire_now');
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      multilineBatchVersion: expectedBatchVersion,
+      multilineWindowUntil: { lte: now }
+    },
+    data: {
+      multilineWindowUntil: null,
+      multilineBatchVersion: { increment: 1 }
+    }
+  });
+
+  return { count: Number(result?.count || 0) };
 }
 
 export async function resumeCandidateAutomationOnInbound(client, input = {}) {

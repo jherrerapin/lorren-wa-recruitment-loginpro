@@ -55,8 +55,9 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'characterization');
-  assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, false);
+  assert.equal(manifest.phase, 'multiline_boundary');
+  assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
+  assert.equal(manifest.rules.multilineRuntimeMigrated, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
@@ -118,28 +119,31 @@ test('las familias de transición usan pasos conocidos y contratos estrechos', (
   }
 });
 
-test('los contratos multilinea preservan el compare-and-set observado', () => {
+test('los contratos multilinea pertenecen a CandidateStateService y preservan el compare-and-set', () => {
   assert.deepEqual(
     manifest.multilineContracts.map((contract) => contract.id),
     ['schedule_multiline_window', 'acquire_multiline_batch']
   );
 
   for (const contract of manifest.multilineContracts) {
-    assert.equal(contract.owner, 'src/routes/webhook.js');
+    assert.equal(contract.owner, 'src/services/candidateStateService.js');
+    assert.equal(contract.orchestrator, 'src/routes/webhook.js');
     assert.deepEqual(contract.allowedFields, ['multilineWindowUntil', 'multilineBatchVersion']);
     assert.ok(contract.concurrency);
     assert.ok(contract.idempotency);
   }
 
+  const authority = readSource('src/services/candidateStateService.js');
   const webhook = readSource('src/routes/webhook.js');
-  assert.match(webhook, /async\s+function\s+scheduleMultilineWindow\s*\(\s*prisma\s*,\s*candidateId\s*,\s*context\s*=\s*\{\s*\}\s*\)/);
-  assert.match(webhook, /multilineWindowUntil\s*:\s*windowUntil/);
-  assert.match(webhook, /multilineBatchVersion\s*:\s*\{\s*increment\s*:\s*1\s*,?\s*\}/);
-  assert.match(webhook, /async\s+function\s+tryAcquireMultilineProcessing\s*\(\s*prisma\s*,\s*candidateId\s*,\s*batchVersion\s*\)/);
-  assert.match(webhook, /multilineBatchVersion\s*:\s*batchVersion/);
-  assert.match(webhook, /multilineWindowUntil\s*:\s*\{\s*lte\s*:\s*new\s+Date\(\s*\)\s*\}/);
-  assert.match(webhook, /multilineWindowUntil\s*:\s*null/);
-  assert.match(webhook, /return\s+acquired\.count\s*===\s*1/);
+  assert.match(authority, /exports+asyncs+functions+scheduleCandidateMultilineWindow/);
+  assert.match(authority, /multilineWindowUntils*:s*windowUntil/);
+  assert.match(authority, /multilineBatchVersions*:s*{s*increments*:s*1s*,?s*}/);
+  assert.match(authority, /exports+asyncs+functions+acquireCandidateMultilineBatch/);
+  assert.match(authority, /multilineBatchVersions*:s*expectedBatchVersion/);
+  assert.match(authority, /multilineWindowUntils*:s*{s*ltes*:s*nows*}/);
+  assert.match(authority, /multilineWindowUntils*:s*null/);
+  assert.match(webhook, /scheduleCandidateMultilineWindow(prisma,s*{/);
+  assert.match(webhook, /acquireCandidateMultilineBatch(prisma,s*{/);
 });
 
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
@@ -166,4 +170,7 @@ test('la documentación enlaza la matriz y mantiene explícito el alcance de fas
   assert.match(documentation, /no cambia el comportamiento runtime/i);
   assert.match(documentation, /productor de decisión/i);
   assert.match(documentation, /escritor efectivo/i);
+  assert.match(documentation, /Fase 2: autoridad de ventana multilinea/);
+  assert.match(documentation, /scheduleCandidateMultilineWindow/);
+  assert.match(documentation, /acquireCandidateMultilineBatch/);
 });
