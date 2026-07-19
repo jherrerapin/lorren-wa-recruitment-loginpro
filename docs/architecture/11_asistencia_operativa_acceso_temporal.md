@@ -8,21 +8,20 @@ El perfil protegido `reclutador-general` puede recibir acceso temporal mediante 
 
 ## Estado inicial
 
-El interruptor se conserva en `BotKnowledge` con la clave:
+El interruptor es temporal y se representa mediante eventos append-only en `DevAuditEvent`:
 
-```text
-feature.attendance.recruiter_general.enabled
-```
+- `ATTENDANCE_RECRUITER_GENERAL_ENABLED`;
+- `ATTENDANCE_RECRUITER_GENERAL_DISABLED`.
 
-La ausencia de la clave, un valor desconocido o cualquier valor diferente de `true` se interpreta como deshabilitado.
+La consulta toma únicamente el evento más reciente de la familia exacta `FEATURE_ACCESS` y la etiqueta `Asistencia operativa para reclutador-general`.
 
-Por tanto, después del despliegue:
+La ausencia de eventos se interpreta como deshabilitado. Por tanto, después del despliegue:
 
 - `dev`: acceso permitido;
 - `reclutador-general`: acceso denegado;
 - otros perfiles: acceso denegado.
 
-No se requiere migración para este control temporal.
+No se requiere migración para este control temporal y no se utiliza `BotKnowledge`, porque esa tabla pertenece al contexto curado del bot.
 
 ## Autoridad
 
@@ -35,7 +34,8 @@ No se requiere migración para este control temporal.
 1. `dev` siempre puede entrar;
 2. solo el username exacto `reclutador-general` puede heredar el interruptor;
 3. el usuario debe existir, estar activo y conservar rol `ADMIN`;
-4. los demás perfiles se rechazan sin consultar el interruptor.
+4. los demás perfiles se rechazan sin consultar eventos ni usuarios adicionales;
+5. si falla la persistencia, el middleware niega el acceso.
 
 ### Actualización
 
@@ -44,8 +44,9 @@ No se requiere migración para este control temporal.
 - exige un booleano real;
 - exige actor con rol `dev`;
 - comprueba la existencia del perfil protegido;
-- actualiza la clave dentro de una transacción;
-- crea un `DevAuditEvent` con estado anterior, estado nuevo, actor, IP, ruta y agente de usuario.
+- lee el estado anterior dentro de la transacción;
+- agrega un nuevo `DevAuditEvent` con estado anterior, estado nuevo, actor, IP, ruta y agente de usuario;
+- nunca modifica el rol, el alcance o los demás permisos del usuario.
 
 ## Protección en servidor
 
@@ -98,4 +99,4 @@ Revertir:
 - el gate agregado en `src/routes/dispatchBridge.js`;
 - las pruebas y este documento.
 
-La clave temporal puede permanecer en `BotKnowledge` sin consumidores. No requiere eliminación destructiva.
+Los eventos históricos pueden conservarse como auditoría aunque la autoridad temporal deje de utilizarse.
