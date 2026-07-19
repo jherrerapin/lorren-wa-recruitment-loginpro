@@ -25,12 +25,26 @@ jobs:
         run: |
           node scripts/apply-candidate-requirement-rejection-authority.mjs
           node scripts/fix-generated-candidate-rejection-scanner.mjs
-      - name: Print generated rejection scanner block
-        run: grep -n -A45 -B5 "contrato compuesto de rechazo" test/candidateProgressAuthority.test.js
-      - name: Upload generated scanner
+      - name: Capture generated scanner syntax result
+        id: syntax
+        shell: bash
+        run: |
+          set +e
+          node --version > scanner-syntax.txt 2>&1
+          node --check test/candidateProgressAuthority.test.js >> scanner-syntax.txt 2>&1
+          status=$?
+          echo "exit_code=$status" >> scanner-syntax.txt
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload generated scanner and syntax output
         uses: actions/upload-artifact@v4
         with:
-          name: generated-candidate-progress-scanner
-          path: test/candidateProgressAuthority.test.js
-      - name: Check generated scanner syntax
-        run: node --check test/candidateProgressAuthority.test.js
+          name: generated-candidate-progress-diagnostic
+          path: |
+            test/candidateProgressAuthority.test.js
+            scanner-syntax.txt
+      - name: Fail when syntax check failed
+        if: steps.syntax.outputs.status != '0'
+        run: |
+          cat scanner-syntax.txt
+          exit 1
