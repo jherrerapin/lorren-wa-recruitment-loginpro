@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 5,
-  "phase": "requirement_rejection_authority_migrated",
+  "schemaVersion": 6,
+  "phase": "explicit_pause_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -30,7 +30,8 @@
     "multiline_window_authority",
     "conversation_engine_simple_step_authority",
     "conversation_engine_no_interest_authority",
-    "conversation_engine_requirement_rejection_authority"
+    "conversation_engine_requirement_rejection_authority",
+    "conversation_engine_explicit_pause_authority"
   ],
   "sourceInventory": [
     {
@@ -49,7 +50,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del slice multilinea, transiciones simples, cierre por falta de interés y rechazo por requisitos mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del slice multilinea, transiciones simples, falta de interés, rechazo por requisitos y pausa explícita del engine mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -57,7 +58,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "act() conserva la reducción determinística. Delega transiciones simples, falta de interés y rechazo exacto; pausa y agenda siguen temporalmente unidas."
+      "notes": "act() conserva la reducción determinística. Delega transiciones simples, falta de interés, rechazo exacto y pause_bot explícito; agenda y pausas implícitas permanecen temporalmente unidas."
     },
     {
       "path": "src/services/chatEngine.js",
@@ -332,8 +333,8 @@
         "currentStep"
       ],
       "trigger": "Reducción determinística de acciones, guardas de readiness y nextStep propuesto por el modelo.",
-      "concurrency": "Las transiciones simples comparan id y currentStep. Falta de interés compara recordatorio. Rechazo por requisitos compara además status, razón y detalle observados. Pausa y agenda permanecen temporalmente en candidate.update.",
-      "idempotency": "No escribe cuando el paso simple no cambia. Carreras simples, de falta de interés o de rechazo devuelven count cero y preservan el estado observado.",
+      "concurrency": "Las transiciones simples comparan id y currentStep. Falta de interés compara recordatorio. Rechazo compara status y trazabilidad. pause_bot explícito compara el snapshot completo de pausa y recordatorio. Agenda y pausas implícitas permanecen en candidate.update.",
+      "idempotency": "Carreras simples, de falta de interés, rechazo o pausa explícita devuelven count cero y preservan el estado observado; un candidato ya pausado no se reescribe.",
       "externalEffects": [
         "candidate_fields",
         "interview_booking_transition"
@@ -458,7 +459,6 @@
     }
   ],
   "nextMigrationSlices": [
-    "migrar pause_bot como contrato compuesto separado sin absorber agenda ni lógica relacionada con género",
     "migrar las transiciones de consentimiento manteniendo ConsentStateService como autoridad del evento",
     "migrar las ramas legacy de webhook por familias pequeñas",
     "migrar correcciones administrativas con actor, motivo y origen esperado"
@@ -570,6 +570,57 @@
         "mark_female_pipeline",
         "offer_interview",
         "reschedule"
+      ]
+    },
+    {
+      "id": "conversation_engine_explicit_pause",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/services/conversationEngine.js",
+      "responseConsumer": "src/services/chatEngine.js",
+      "status": "canonical",
+      "allowedFields": [
+        "botPaused",
+        "botPausedAt",
+        "botPauseReason",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "observedFields": [
+        "botPaused",
+        "botPausedAt",
+        "botPausedBy",
+        "botPauseReason",
+        "botResumeMode",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "pause_bot explícito presente",
+        "snapshot completo de pausa y recordatorio",
+        "candidato observado no pausado",
+        "razón y fecha de pausa válidas",
+        "pendingUpdate contiene exactamente los cinco campos permitidos"
+      ],
+      "mutation": {
+        "botPaused": true,
+        "botPausedAt": "pausedAt",
+        "botPauseReason": "reason",
+        "reminderScheduledFor": null,
+        "reminderState": "CANCELLED"
+      },
+      "concurrency": "updateMany compara id y los siete campos observados de pausa y recordatorio; count cero preserva el estado vigente.",
+      "idempotency": "Un candidato ya pausado produce no-op y una segunda ejecución con el snapshot anterior devuelve count cero.",
+      "conflictPolicy": "chatEngine reutiliza stale_candidate_step y suprime la respuesta calculada sobre el snapshot obsoleto.",
+      "excludedCombinations": [
+        "currentStep_change",
+        "mark_no_interest",
+        "mark_rejected",
+        "mark_female_pipeline",
+        "offer_interview",
+        "confirm_booking",
+        "reschedule",
+        "implicit_scheduling_pause"
       ]
     }
   ]

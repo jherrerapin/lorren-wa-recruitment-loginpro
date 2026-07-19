@@ -140,7 +140,7 @@ Aceptan el cliente Prisma raíz o un `tx` existente y no crean transacciones ani
 
 `conversationEngine.act()` conserva la reducción de acciones, readiness y guardas. Solo delega cuando `pendingUpdate` contiene exclusivamente `currentStep`. Si otra operación cambió el paso, la autoridad devuelve `count=0`, `act()` conserva el paso observado y `chatEngine` suprime la respuesta con razón `stale_candidate_step`. No se reintenta ni se sobrescribe el estado más nuevo.
 
-El cierre exacto por falta de interés deja de formar parte de esa deuda. Rechazo, pausa y agenda permanecen temporalmente unidos en `act()`; no se ocultan dentro de un método genérico ni se separan antes de definir su atomicidad funcional.
+El cierre exacto por falta de interés deja de formar parte de esa deuda. El rechazo y el `pause_bot` explícito también tienen contratos propios; agenda y pausas implícitas permanecen temporalmente unidas en `act()`.
 
 ## Fase 4: cierre por falta de interés
 
@@ -154,10 +154,10 @@ La autoridad compara el ID, el paso leído y el snapshot completo del recordator
 
 ## Próxima frontera
 
-1. migrar `mark_rejected` como contrato compuesto separado;
-2. progreso alrededor del consentimiento;
-3. ramas legacy del webhook;
-4. correcciones administrativas con actor, motivo y origen esperado.
+1. progreso alrededor del consentimiento;
+2. ramas legacy del webhook;
+3. correcciones administrativas con actor, motivo y origen esperado;
+4. agenda y pausas implícitas por familias pequeñas.
 
 ## Reglas permanentes
 
@@ -180,4 +180,18 @@ La transición producida por `mark_rejected` delega en `completeCandidateRequire
 
 La política de rechazo sigue siendo el **productor de decisión**. `CandidateStateService` es el **escritor efectivo** y no infiere motivos: compara el snapshot completo mediante `updateMany`, escribe `DONE / RECHAZADO / SKIPPED` y recupera el candidato vigente. Un conflicto devuelve `count=0` y `chatEngine` reutiliza `stale_candidate_step` para no enviar una respuesta construida sobre estado obsoleto.
 
-Combinaciones con `pause_bot`, agenda, `mark_female_pipeline` u otros campos permanecen fuera del contrato. La próxima frontera recomendada es la pausa conversacional explícita, separada de cualquier lógica relacionada con género.
+Combinaciones con `pause_bot`, agenda, `mark_female_pipeline` u otros campos permanecen fuera del contrato de rechazo. La pausa conversacional explícita se migra en una fase separada, sin alterar ninguna lógica relacionada con género.
+
+## Fase 6: pausa conversacional explícita
+
+`pauseCandidateAutomationFromConversationEngine()` controla únicamente el `pause_bot` explícito cuando `pendingUpdate` contiene exactamente:
+
+- `botPaused: true`;
+- `botPausedAt`;
+- `botPauseReason`;
+- `reminderScheduledFor: null`;
+- `reminderState: CANCELLED`.
+
+La autoridad compara por `updateMany` el snapshot observado de `botPaused`, `botPausedAt`, `botPausedBy`, `botPauseReason`, `botResumeMode`, fecha y estado del recordatorio. No modifica `botPausedBy`, `botResumeMode`, `currentStep`, estado de selección ni agenda. Un candidato ya pausado produce no-op.
+
+`conversationEngine.act()` delega solo la combinación exacta. Cambios de paso, rechazo, falta de interés, agenda, pausas implícitas por falta de slots y `mark_female_pipeline` permanecen fuera. Ante `count=0`, recupera el candidato vigente y `chatEngine` suprime la respuesta mediante `stale_candidate_step`.

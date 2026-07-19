@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'requirement_rejection_authority_migrated');
+  assert.equal(manifest.phase, 'explicit_pause_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -95,7 +95,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multiline_window_authority',
     'conversation_engine_simple_step_authority',
     'conversation_engine_no_interest_authority',
-    'conversation_engine_requirement_rejection_authority'
+    'conversation_engine_requirement_rejection_authority',
+    'conversation_engine_explicit_pause_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -233,7 +234,7 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 2);
+  assert.equal(manifest.compositeContracts.length, 3);
   const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
@@ -322,6 +323,48 @@ test('conversationEngine delega únicamente el rechazo exacto', () => {
   assert.match(actSource, /contract:\s*['"]requirement_rejection['"]/);
 });
 
+test('el manifiesto registra el contrato compuesto de pause_bot explícito', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_explicit_pause');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/conversationEngine.js');
+  assert.equal(contract.responseConsumer, 'src/services/chatEngine.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, [
+    'botPaused',
+    'botPausedAt',
+    'botPauseReason',
+    'reminderScheduledFor',
+    'reminderState'
+  ]);
+  assert.ok(contract.observedFields.includes('botPausedBy'));
+  assert.ok(contract.observedFields.includes('botResumeMode'));
+  assert.ok(contract.excludedCombinations.includes('mark_female_pipeline'));
+  assert.ok(contract.excludedCombinations.includes('offer_interview'));
+});
+
+test('CandidateStateService implementa la pausa explícita exacta', () => {
+  const transition = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'pauseCandidateAutomationFromConversationEngine'
+  );
+  assert.match(transition, /applyConditionalCandidatePauseTransition\s*\(/);
+  assert.match(transition, /botPaused\s*:\s*true/);
+  assert.match(transition, /botPausedAt\s*:\s*pausedAt/);
+  assert.match(transition, /botPauseReason\s*:\s*reason/);
+  assert.match(transition, /reminderScheduledFor\s*:\s*null/);
+  assert.match(transition, /reminderState\s*:\s*ReminderState\.CANCELLED/);
+  assert.doesNotMatch(transition, /currentStep|status|gender|vacancyId/);
+});
+
+test('conversationEngine delega únicamente pause_bot exacto', () => {
+  const actSource = extractFunctionSource(readSource('src/services/conversationEngine.js'), 'act');
+  assert.match(actSource, /hasExplicitPauseTransition/);
+  assert.match(actSource, /explicitPauseUpdateFields\.every/);
+  assert.match(actSource, /pauseCandidateAutomationFromConversationEngine\s*\(\s*prisma/);
+  assert.match(actSource, /contract:\s*['"]explicit_pause['"]/);
+});
+
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
   const engine = readSource('src/services/conversationEngine.js');
   const consent = readSource('src/services/consentStateService.js');
@@ -347,11 +390,15 @@ test('la documentación registra las fases migradas y mantiene el siguiente slic
   assert.match(documentation, /Fase 3: transiciones simples del engine/);
   assert.match(documentation, /Fase 4: cierre por falta de interés/);
   assert.match(documentation, /Fase 5: rechazo por requisitos/);
+  assert.match(documentation, /Fase 6: pausa conversacional explícita/);
+  assert.match(documentation, /Fase 6: pausa conversacional explícita/);
   assert.match(documentation, /scheduleCandidateMultilineWindow/);
   assert.match(documentation, /acquireCandidateMultilineBatch/);
   assert.match(documentation, /transitionCandidateConversationStep/);
   assert.match(documentation, /completeCandidateNoInterestTransition/);
   assert.match(documentation, /completeCandidateRequirementRejection/);
+  assert.match(documentation, /pauseCandidateAutomationFromConversationEngine/);
+  assert.match(documentation, /pauseCandidateAutomationFromConversationEngine/);
   assert.match(documentation, /stale_candidate_step/);
   assert.match(documentation, /conversationEngine\.act\(\)/);
   assert.match(documentation, /productor de decisión/i);

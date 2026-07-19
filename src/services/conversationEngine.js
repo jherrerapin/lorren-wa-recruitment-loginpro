@@ -33,6 +33,7 @@ import { OPENAI_CONVERSATION_MODEL } from './openAiModelConfig.js';
 import {
   completeCandidateNoInterestTransition,
   completeCandidateRequirementRejection,
+  pauseCandidateAutomationFromConversationEngine,
   transitionCandidateConversationStep
 } from './candidateStateService.js';
 
@@ -905,7 +906,20 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   const blockedActions = [];
   const hasExclusiveTerminalAction = normalizedActions.some((action) => ['mark_no_interest', 'mark_rejected'].includes(action?.type));
   const explicitPauseAction = normalizedActions.find((action) => action?.type === 'pause_bot');
-  const explicitPauseReason = explicitPauseAction?.data?.reason || null;
+  const explicitPauseReason = typeof explicitPauseAction?.data?.reason === 'string'
+    ? explicitPauseAction.data.reason.trim()
+    : '';
+  const explicitPauseExcludedActionTypes = new Set([
+    'mark_no_interest',
+    'mark_rejected',
+    'mark_female_pipeline',
+    'offer_interview',
+    'confirm_booking',
+    'reschedule'
+  ]);
+  const hasExplicitPauseExcludedCombination = normalizedActions.some((action) => (
+    explicitPauseExcludedActionTypes.has(action?.type)
+  ));
   const blockScheduling = (actionType, reason, options = {}) => {
     blockedActions.push({ action: actionType, reason });
     console.warn('[ACT_SCHEDULING_BLOCKED]', { action: actionType, reason, candidateId: candidate.id });
@@ -1068,7 +1082,7 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
         case 'pause_bot':
           pendingUpdate.botPaused = true;
           pendingUpdate.botPausedAt = new Date();
-          pendingUpdate.botPauseReason = action.data?.reason || 'Requiere atencion humana';
+          pendingUpdate.botPauseReason = explicitPauseReason || 'Requiere atencion humana';
           pendingUpdate.reminderScheduledFor = null;
           pendingUpdate.reminderState = 'CANCELLED';
           break;
@@ -1186,6 +1200,24 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     && Boolean(pendingUpdate.rejectionDetails.trim())
     && pendingUpdate.reminderScheduledFor === null
     && pendingUpdate.reminderState === ReminderState.SKIPPED;
+  const explicitPauseUpdateFields = [
+    'botPaused',
+    'botPausedAt',
+    'botPauseReason',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  const hasExplicitPauseTransition = Boolean(explicitPauseAction)
+    && !hasExplicitPauseExcludedCombination
+    && pendingUpdateKeys.length === explicitPauseUpdateFields.length
+    && explicitPauseUpdateFields.every((field) => pendingUpdateKeys.includes(field))
+    && pendingUpdate.botPaused === true
+    && pendingUpdate.botPausedAt instanceof Date
+    && !Number.isNaN(pendingUpdate.botPausedAt.getTime())
+    && typeof pendingUpdate.botPauseReason === 'string'
+    && Boolean(pendingUpdate.botPauseReason.trim())
+    && pendingUpdate.reminderScheduledFor === null
+    && pendingUpdate.reminderState === ReminderState.CANCELLED;
   const noInterestUpdateFields = ['currentStep', 'reminderScheduledFor', 'reminderState'];
   const hasNoInterestTransition = hasStepTransition
     && finalStep === ConversationStep.DONE
@@ -1231,6 +1263,42 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     stepTransition = {
       ...stepTransition,
       contract: 'requirement_rejection',
+      conflict: !transitionApplied,
+      observedStep
+    };
+    if (!transitionApplied) finalStep = observedStep;
+  } else if (hasExplicitPauseTransition) {
+    const pausedAt = pendingUpdate.botPausedAt;
+    const pauseReason = pendingUpdate.botPauseReason;
+    for (const field of explicitPauseUpdateFields) delete pendingUpdate[field];
+
+    stepTransition = await pauseCandidateAutomationFromConversationEngine(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        botPaused: Boolean(candidate.botPaused),
+        botPausedAt: candidate.botPausedAt ?? null,
+        botPausedBy: candidate.botPausedBy ?? null,
+        botPauseReason: candidate.botPauseReason ?? null,
+        botResumeMode: candidate.botResumeMode ?? null,
+        reminderScheduledFor: candidate.reminderScheduledFor ?? null,
+        reminderState: candidate.reminderState
+      },
+      reason: pauseReason,
+      pausedAt
+    }).catch((error) => {
+      console.error('[ACT_EXPLICIT_PAUSE_ERROR]', error?.message);
+      return {
+        count: 0,
+        candidate: null,
+        error: error?.message?.trim() || 'candidate_engine_pause_error'
+      };
+    });
+
+    const transitionApplied = stepTransition.count === 1;
+    const observedStep = stepTransition.candidate?.currentStep || candidate.currentStep;
+    stepTransition = {
+      ...stepTransition,
+      contract: 'explicit_pause',
       conflict: !transitionApplied,
       observedStep
     };
