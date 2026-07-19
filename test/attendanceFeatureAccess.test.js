@@ -1,25 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ATTENDANCE_RECRUITER_GENERAL_FLAG_KEY,
+  ATTENDANCE_ACCESS_DISABLED_ACTION,
+  ATTENDANCE_ACCESS_ENABLED_ACTION,
+  ATTENDANCE_ACCESS_ENTITY_LABEL,
+  ATTENDANCE_ACCESS_ENTITY_TYPE,
   getRecruiterGeneralAttendanceEnabled,
   resolveAttendanceFeatureAccess,
   setRecruiterGeneralAttendanceEnabled
 } from '../src/services/attendanceFeatureAccess.js';
 
-function flagPrisma(value = null) {
+function accessEventPrisma(event = null) {
   return {
-    botKnowledge: {
-      async findUnique() {
-        return value === null ? null : { value };
+    devAuditEvent: {
+      async findFirst() {
+        return event;
       }
     }
   };
 }
 
-test('missing temporary flag denies recruiter-general by default', async () => {
+test('missing temporary access event denies recruiter-general by default', async () => {
   const prisma = {
-    ...flagPrisma(null),
+    ...accessEventPrisma(null),
     appUser: {
       async findUnique() {
         return { id: 'user-1', role: 'ADMIN', isActive: true };
@@ -37,11 +40,11 @@ test('missing temporary flag denies recruiter-general by default', async () => {
   assert.equal(access.reason, 'recruiter_general_disabled');
 });
 
-test('dev always has access while seeing the current recruiter-general flag', async () => {
-  const access = await resolveAttendanceFeatureAccess(flagPrisma('true'), {
-    userRole: 'dev',
-    username: 'devloginpro'
-  });
+test('dev always has access while seeing the current recruiter-general state', async () => {
+  const access = await resolveAttendanceFeatureAccess(
+    accessEventPrisma({ action: ATTENDANCE_ACCESS_ENABLED_ACTION }),
+    { userRole: 'dev', username: 'devloginpro' }
+  );
 
   assert.deepEqual(access, {
     allowed: true,
@@ -50,9 +53,9 @@ test('dev always has access while seeing the current recruiter-general flag', as
   });
 });
 
-test('only exact active recruiter-general can use an enabled flag', async () => {
+test('only exact active recruiter-general can use an enabled event', async () => {
   const prisma = {
-    ...flagPrisma(' TRUE '),
+    ...accessEventPrisma({ action: ATTENDANCE_ACCESS_ENABLED_ACTION }),
     appUser: {
       async findUnique({ where }) {
         assert.deepEqual(where, { username: 'reclutador-general' });
@@ -70,10 +73,16 @@ test('only exact active recruiter-general can use an enabled flag', async () => 
   assert.equal(access.reason, 'recruiter_general_enabled');
 });
 
-test('another recruiter stays denied even when the flag is enabled', async () => {
+test('another recruiter stays denied even when the feature is enabled', async () => {
   let userLookupCalled = false;
+  let eventLookupCalled = false;
   const prisma = {
-    ...flagPrisma('true'),
+    devAuditEvent: {
+      async findFirst() {
+        eventLookupCalled = true;
+        return { action: ATTENDANCE_ACCESS_ENABLED_ACTION };
+      }
+    },
     appUser: {
       async findUnique() {
         userLookupCalled = true;
@@ -90,11 +99,12 @@ test('another recruiter stays denied even when the flag is enabled', async () =>
   assert.equal(access.allowed, false);
   assert.equal(access.reason, 'role_not_allowed');
   assert.equal(userLookupCalled, false);
+  assert.equal(eventLookupCalled, false);
 });
 
 test('inactive recruiter-general stays denied', async () => {
   const prisma = {
-    ...flagPrisma('true'),
+    ...accessEventPrisma({ action: ATTENDANCE_ACCESS_ENABLED_ACTION }),
     appUser: {
       async findUnique() {
         return { id: 'user-1', role: 'ADMIN', isActive: false };
@@ -110,11 +120,40 @@ test('inactive recruiter-general stays denied', async () => {
   assert.equal(access.allowed, false);
 });
 
-test('stored flag accepts only explicit true text', async () => {
-  assert.equal(await getRecruiterGeneralAttendanceEnabled(flagPrisma('true')), true);
-  assert.equal(await getRecruiterGeneralAttendanceEnabled(flagPrisma('1')), false);
-  assert.equal(await getRecruiterGeneralAttendanceEnabled(flagPrisma('yes')), false);
-  assert.equal(await getRecruiterGeneralAttendanceEnabled(flagPrisma('false')), false);
+test('latest enable and disable events resolve deterministically', async () => {
+  assert.equal(
+    await getRecruiterGeneralAttendanceEnabled(
+      accessEventPrisma({ action: ATTENDANCE_ACCESS_ENABLED_ACTION })
+    ),
+    true
+  );
+  assert.equal(
+    await getRecruiterGeneralAttendanceEnabled(
+      accessEventPrisma({ action: ATTENDANCE_ACCESS_DISABLED_ACTION })
+    ),
+    false
+  );
+  assert.equal(await getRecruiterGeneralAttendanceEnabled(accessEventPrisma(null)), false);
+});
+
+test('access query uses only the dedicated audited feature event family', async () => {
+  const prisma = {
+    devAuditEvent: {
+      async findFirst(query) {
+        assert.deepEqual(query.where, {
+          entityType: ATTENDANCE_ACCESS_ENTITY_TYPE,
+          entityLabel: ATTENDANCE_ACCESS_ENTITY_LABEL,
+          action: {
+            in: [ATTENDANCE_ACCESS_ENABLED_ACTION, ATTENDANCE_ACCESS_DISABLED_ACTION]
+          }
+        });
+        assert.deepEqual(query.orderBy, [{ createdAt: 'desc' }, { id: 'desc' }]);
+        return null;
+      }
+    }
+  };
+
+  assert.equal(await getRecruiterGeneralAttendanceEnabled(prisma), false);
 });
 
 test('only a dev actor can change the temporary access', async () => {
@@ -137,7 +176,7 @@ test('setter requires an explicit boolean', async () => {
   );
 });
 
-test('dev toggle persists the flag and creates an audit event atomically', async () => {
+test('dev toggle appends a new audit event atomically', async () => {
   const calls = [];
   const tx = {
     appUser: {
@@ -145,17 +184,10 @@ test('dev toggle persists the flag and creates an audit event atomically', async
         return { id: 'user-1', username: 'reclutador-general', role: 'ADMIN', isActive: true };
       }
     },
-    botKnowledge: {
-      async findUnique({ where }) {
-        assert.deepEqual(where, { key: ATTENDANCE_RECRUITER_GENERAL_FLAG_KEY });
-        return { value: 'false' };
-      },
-      async upsert(input) {
-        calls.push(['upsert', input]);
-        return input;
-      }
-    },
     devAuditEvent: {
+      async findFirst() {
+        return { action: ATTENDANCE_ACCESS_DISABLED_ACTION };
+      },
       async create(input) {
         calls.push(['audit', input]);
         return input;
@@ -182,10 +214,10 @@ test('dev toggle persists the flag and creates an audit event atomically', async
   assert.equal(result.enabled, true);
   assert.equal(result.previousEnabled, false);
   assert.equal(calls[0][0], 'transaction');
-  assert.equal(calls[1][0], 'upsert');
-  assert.equal(calls[1][1].create.value, 'true');
-  assert.equal(calls[2][0], 'audit');
-  assert.equal(calls[2][1].data.action, 'ATTENDANCE_RECRUITER_GENERAL_ENABLED');
-  assert.deepEqual(calls[2][1].data.fromValue, { enabled: false });
-  assert.deepEqual(calls[2][1].data.toValue, { enabled: true });
+  assert.equal(calls[1][0], 'audit');
+  assert.equal(calls[1][1].data.action, ATTENDANCE_ACCESS_ENABLED_ACTION);
+  assert.deepEqual(calls[1][1].data.fromValue, { enabled: false });
+  assert.deepEqual(calls[1][1].data.toValue, { enabled: true });
+  assert.equal(calls[1][1].data.metadata.targetUsername, 'reclutador-general');
+  assert.equal(calls[1][1].data.metadata.temporaryFeatureGate, true);
 });
