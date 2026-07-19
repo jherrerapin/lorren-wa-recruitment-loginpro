@@ -1,0 +1,46 @@
+name: Trigger attendance point UI patch
+
+on:
+  push:
+    branches:
+      - feat/527-attendance-point-config-ui
+    paths:
+      - .github/workflows/apply-attendance-ui-trigger.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/527-attendance-point-config-ui
+          fetch-depth: 0
+      - name: Run embedded patch
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/apply-attendance-point-config-ui.yml').read_text(encoding='utf-8')
+          marker_start = "          from pathlib import Path\n"
+          marker_end = "          PY\n\n      - name: Validate generated files"
+          start = workflow.index(marker_start)
+          end = workflow.index(marker_end, start)
+          block = workflow[start:end]
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines())
+          exec(compile(code, 'attendance_ui_patch.py', 'exec'))
+          Path('.github/workflows/apply-attendance-ui-trigger.yml').unlink()
+          PY
+      - name: Validate generated files
+        run: |
+          node --check src/routes/dispatchAttendancePointConfig.js
+          node --check src/routes/dispatchBridge.js
+          node --test test/dispatchAttendancePointConfigUiContracts.test.js
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: integrar configuración administrativa de asistencia"
+          git push origin HEAD:feat/527-attendance-point-config-ui
