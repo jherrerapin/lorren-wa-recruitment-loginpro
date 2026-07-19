@@ -60,7 +60,7 @@ test('conversationEngine delega el cierre exacto por falta de interés', () => {
   assert.match(actSource, /hasNoInterestTransition/);
   assert.match(actSource, /noInterestUpdateFields\\.every/);
   assert.match(actSource, /completeCandidateNoInterestTransition\\s*\\(\\s*prisma/);
-  assert.match(actSource, /contract:\s*['"]no_interest['"]/);
+  assert.match(actSource, /contract:\\s*['"]no_interest['"]/);
 });`;
 
 const index = source.indexOf(before);
