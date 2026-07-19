@@ -546,10 +546,13 @@ export async function runChatEngine({
     prisma,
   });
 
-  const progressReply = buildDeterministicProgressReply(actResult);
-  const guardedReply = actResult?.blockedActions?.length
-    ? buildMissingFieldReply(actResult.readiness)
-    : (progressReply || result.reply);
+  const staleStepConflict = Boolean(actResult?.stepTransition?.conflict);
+  const progressReply = staleStepConflict ? null : buildDeterministicProgressReply(actResult);
+  const guardedReply = staleStepConflict
+    ? null
+    : (actResult?.blockedActions?.length
+      ? buildMissingFieldReply(actResult.readiness)
+      : (progressReply || result.reply));
   const profileScopeGuard = guardReplyAgainstReadinessDrift(
     guardedReply,
     actResult?.readiness || readiness
@@ -562,14 +565,17 @@ export async function runChatEngine({
     currentStep,
     source: 'engine'
   });
-  const hasSilentManualPause = !String(safeReply.reply || '').trim()
+  const effectiveReply = staleStepConflict ? null : safeReply.reply;
+  const hasSilentManualPause = !String(effectiveReply || '').trim()
     && actions.some((action) => action?.type === 'pause_bot');
-  const noUsefulReply = !String(safeReply.reply || '').trim()
+  const noUsefulReply = staleStepConflict || (
+    !String(effectiveReply || '').trim()
     && actions.length
-    && (hasSilentManualPause || actions.every((action) => action?.type === 'nothing'));
+    && (hasSilentManualPause || actions.every((action) => action?.type === 'nothing'))
+  );
 
   return {
-    reply: safeReply.reply,
+    reply: effectiveReply,
     actions,
     nextStep: result.nextStep,
     extractedFields: sanitized.fields,
@@ -590,8 +596,10 @@ export async function runChatEngine({
     loopGuardApplied: Boolean(result.loopGuardApplied),
     usage: result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
     suppressed: noUsefulReply,
-    suppressedReason: noUsefulReply
-      ? (hasSilentManualPause ? 'engine_pause_bot_no_reply' : 'engine_nothing_no_reply')
-      : null,
+    suppressedReason: staleStepConflict
+      ? 'stale_candidate_step'
+      : (noUsefulReply
+        ? (hasSilentManualPause ? 'engine_pause_bot_no_reply' : 'engine_nothing_no_reply')
+        : null),
   };
 }

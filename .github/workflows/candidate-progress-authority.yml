@@ -7,10 +7,15 @@ on:
     paths:
       - prisma/schema.prisma
       - src/services/candidateStateService.js
+      - src/services/conversationEngine.js
+      - src/services/chatEngine.js
       - src/routes/webhook.js
       - config/candidate-progress-authority.json
       - docs/architecture/candidate-state-transition-inventory.md
       - test/candidateMultilineStateService.test.js
+      - test/candidateConversationStepStateService.test.js
+      - test/conversationEngineStepAuthority.test.js
+      - test/conversationEngineGuardRails.test.js
       - test/candidateProgressAuthority.test.js
       - .github/workflows/candidate-progress-authority.yml
   push:
@@ -19,10 +24,15 @@ on:
     paths:
       - prisma/schema.prisma
       - src/services/candidateStateService.js
+      - src/services/conversationEngine.js
+      - src/services/chatEngine.js
       - src/routes/webhook.js
       - config/candidate-progress-authority.json
       - docs/architecture/candidate-state-transition-inventory.md
       - test/candidateMultilineStateService.test.js
+      - test/candidateConversationStepStateService.test.js
+      - test/conversationEngineStepAuthority.test.js
+      - test/conversationEngineGuardRails.test.js
       - test/candidateProgressAuthority.test.js
       - .github/workflows/candidate-progress-authority.yml
   workflow_dispatch:
@@ -37,7 +47,7 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -57,5 +67,5 @@ jobs:
       - name: Generate Prisma Client
         run: npm run prisma:generate
 
-      - name: Validate Candidate multiline authority
-        run: node --test test/candidateMultilineStateService.test.js test/candidateProgressAuthority.test.js
+      - name: Validate Candidate progress authority
+        run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js

@@ -134,15 +134,20 @@ Aceptan el cliente Prisma raíz o un `tx` existente y no crean transacciones ani
 - productores puros convertidos en escritores;
 - APIs arbitrarias de patch.
 
+## Fase 3: transiciones simples del engine
+
+`transitionCandidateConversationStep()` controla las transiciones donde `currentStep` es el único campo pendiente. Compara `candidateId + currentStep` mediante `updateMany`, escribe exclusivamente el siguiente paso y recupera el candidato vigente.
+
+`conversationEngine.act()` conserva la reducción de acciones, readiness y guardas. Solo delega cuando `pendingUpdate` contiene exclusivamente `currentStep`. Si otra operación cambió el paso, la autoridad devuelve `count=0`, `act()` conserva el paso observado y `chatEngine` suprime la respuesta con razón `stale_candidate_step`. No se reintenta ni se sobrescribe el estado más nuevo.
+
+Las transiciones compuestas que también incluyen rechazo, pausa, recordatorios o agenda permanecen temporalmente unidas en `act()`. Esta deuda es explícita: no se oculta dentro de un método genérico ni se separa antes de definir su atomicidad funcional.
+
 ## Próxima frontera
 
-El siguiente slice es la reducción final de `conversationEngine.act()`. Debe comparar el `currentStep` leído, conservar sus guardas determinísticas y no absorber las autoridades de perfil ni de `InterviewBooking`.
-
-Luego seguirán, una familia por PR:
-
-1. progreso alrededor del consentimiento;
-2. ramas legacy del webhook;
-3. correcciones administrativas con actor, motivo y origen esperado.
+1. caracterizar y migrar las transiciones compuestas de `conversationEngine.act()`;
+2. progreso alrededor del consentimiento;
+3. ramas legacy del webhook;
+4. correcciones administrativas con actor, motivo y origen esperado.
 
 ## Reglas permanentes
 

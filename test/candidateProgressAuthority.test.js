@@ -87,11 +87,14 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'multiline_authority_migrated');
+  assert.equal(manifest.phase, 'simple_step_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
-  assert.deepEqual(manifest.completedSlices, ['multiline_window_authority']);
+  assert.deepEqual(manifest.completedSlices, [
+    'multiline_window_authority',
+    'conversation_engine_simple_step_authority'
+  ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
 
@@ -193,6 +196,40 @@ test('CandidateStateService es la autoridad exclusiva de persistencia multilinea
   assert.match(webhook, /tryAcquireMultilineProcessing\(prisma,\s*candidate\.id,\s*scheduling\)/);
 });
 
+test('CandidateStateService controla las transiciones simples del engine y explicita los compuestos diferidos', () => {
+  assert.equal(manifest.stepContracts.length, 1);
+  const contract = manifest.stepContracts[0];
+  assert.equal(contract.id, 'conversation_engine_simple_step');
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/conversationEngine.js');
+  assert.equal(contract.responseConsumer, 'src/services/chatEngine.js');
+  assert.equal(contract.status, 'canonical_simple_only');
+  assert.deepEqual(contract.allowedFields, ['currentStep']);
+  assert.ok(contract.deferredCompositeFields.includes('status'));
+  assert.ok(contract.deferredCompositeFields.includes('botPaused'));
+  assert.ok(contract.deferredCompositeFields.includes('reminderState'));
+
+  const authority = readSource('src/services/candidateStateService.js');
+  const transition = extractFunctionSource(authority, 'transitionCandidateConversationStep');
+  assert.match(transition, /candidate\.updateMany\s*\(/);
+  assert.match(transition, /currentStep\s*:\s*expectedStep/);
+  assert.match(transition, /data\s*:\s*\{\s*currentStep\s*:\s*nextStep/);
+  assert.doesNotMatch(transition, /status|botPaused|reminderState|rejectionReason/);
+
+  const engine = readSource('src/services/conversationEngine.js');
+  const actSource = extractFunctionSource(engine, 'act');
+  assert.match(actSource, /hasSimpleStepTransition/);
+  assert.match(actSource, /pendingUpdateKeys\.length\s*===\s*1/);
+  assert.match(actSource, /transitionCandidateConversationStep\s*\(\s*prisma/);
+  assert.match(actSource, /conflict:\s*!transitionApplied/);
+  assert.match(actSource, /if\s*\(\s*!transitionApplied\s*\)\s*finalStep\s*=\s*observedStep/);
+
+  const chatEngine = readSource('src/services/chatEngine.js');
+  assert.match(chatEngine, /staleStepConflict/);
+  assert.match(chatEngine, /stale_candidate_step/);
+  assert.match(chatEngine, /effectiveReply\s*=\s*staleStepConflict\s*\?\s*null/);
+});
+
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
   const engine = readSource('src/services/conversationEngine.js');
   const consent = readSource('src/services/consentStateService.js');
@@ -215,8 +252,11 @@ test('la documentación registra la fase multilinea y mantiene el siguiente slic
   assert.match(documentation, /config\/candidate-progress-authority\.json/);
   assert.match(documentation, /Fase 1: caracterización del progreso conversacional/);
   assert.match(documentation, /Fase 2: autoridad multilinea migrada/);
+  assert.match(documentation, /Fase 3: transiciones simples del engine/);
   assert.match(documentation, /scheduleCandidateMultilineWindow/);
   assert.match(documentation, /acquireCandidateMultilineBatch/);
+  assert.match(documentation, /transitionCandidateConversationStep/);
+  assert.match(documentation, /stale_candidate_step/);
   assert.match(documentation, /conversationEngine\.act\(\)/);
   assert.match(documentation, /productor de decisión/i);
   assert.match(documentation, /escritor efectivo/i);
