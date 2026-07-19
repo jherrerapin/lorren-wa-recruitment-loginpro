@@ -1,0 +1,66 @@
+name: Apply Candidate no-interest null snapshot fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/apply-candidate-no-interest-null-snapshot-fix.mjs
+      - .github/workflows/apply-candidate-no-interest-null-snapshot-fix.yml
+  push:
+    branches:
+      - refactor/512-candidate-no-interest-authority
+    paths:
+      - scripts/apply-candidate-no-interest-null-snapshot-fix.mjs
+      - .github/workflows/apply-candidate-no-interest-null-snapshot-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-candidate-no-interest-null-snapshot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v5
+        with:
+          ref: refactor/512-candidate-no-interest-authority
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply defensive snapshot patch
+        run: node scripts/apply-candidate-no-interest-null-snapshot-fix.mjs
+
+      - name: Validate focused and structural contracts
+        run: |
+          node --check src/services/candidateStateService.js
+          node --test test/candidateNoInterestStateService.test.js test/conversationEngineNoInterestAuthority.test.js test/candidateProgressAuthority.test.js
+          git diff --check
+
+      - name: Create validated commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/candidateStateService.js
+          git add test/candidateNoInterestStateService.test.js
+          git commit -m "fix: validar snapshot de falta de interés"
+
+      - name: Push validated commit
+        run: git push origin HEAD:refactor/512-candidate-no-interest-authority
