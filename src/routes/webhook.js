@@ -23,6 +23,7 @@ import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitiz
 import { shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../services/botAutomationPolicy.js';
 import {
   acquireCandidateMultilineBatch,
+  applyCandidateVacancyFirstGateDecision,
   resumeCandidateAutomationOnInbound,
   scheduleCandidateMultilineWindow
 } from '../services/candidateStateService.js';
@@ -1863,11 +1864,44 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     resolutionReason: vacancyFirstGateDecision.resolution?.reason || null
   };
 
+  const buildVacancyFirstGateExpected = () => ({
+    currentStep: candidate.currentStep,
+    vacancyId: candidate.vacancyId ?? null,
+    botResumeMode: candidate.botResumeMode ?? null,
+    reminderScheduledFor: candidate.reminderScheduledFor ?? null,
+    reminderState: candidate.reminderState ?? 'NONE'
+  });
+
   const applyVacancyFirstGateUpdates = async (updates = {}) => {
-    if (!updates || !Object.keys(updates).length) return candidate;
-    candidate = await prisma.candidate.update({ where: { id: candidate.id }, data: updates });
+    if (!updates || !Object.keys(updates).length) return { applied: true, candidate };
+
+    const transition = await applyCandidateVacancyFirstGateDecision(prisma, {
+      candidateId: candidate.id,
+      expected: buildVacancyFirstGateExpected(),
+      update: updates
+    });
+
+    if (transition.count !== 1) {
+      candidate = transition.candidate || candidate;
+      debugTrace.vacancy_first_gate = {
+        ...(debugTrace.vacancy_first_gate || {}),
+        conflict: true,
+        observedStep: candidate.currentStep || null,
+        observedVacancyId: candidate.vacancyId || null
+      };
+      await recordIntentionalSilence(prisma, candidate, cleanText, {
+        reason: 'STALE_CANDIDATE_VACANCY_FIRST_GATE',
+        gate: 'vacancy_first_gate',
+        action: vacancyFirstGateDecision.action,
+        replyKind: vacancyFirstGateDecision.replyKind || null,
+        vacancyId: candidate.vacancyId || vacancyFirstGateDecision.vacancyId || null
+      });
+      return { applied: false, candidate };
+    }
+
+    candidate = transition.candidate || candidate;
     if (updates.vacancyId) currentVacancy = await loadVacancyContext(prisma, updates.vacancyId);
-    return candidate;
+    return { applied: true, candidate };
   };
 
   const maybeSilentCaptureProfileData = async (reason = 'silent_profile_capture', replyKind = null) => {
@@ -1919,7 +1953,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY) {
-    await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
+    const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
+    if (!applied.applied) return;
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -1929,7 +1964,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT) {
-    await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
+    const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
+    if (!applied.applied) return;
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -1939,9 +1975,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.INACTIVE_VACANCY_REPLY) {
-    await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates || {
+    const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates || {
       currentStep: ConversationStep.GREETING_SENT
     });
+    if (!applied.applied) return;
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -1955,10 +1992,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     const nextStep = candidate.currentStep === ConversationStep.MENU
       ? ConversationStep.GREETING_SENT
       : candidate.currentStep;
-    candidate = await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: { vacancyId: vacancyFirstGateDecision.vacancyId, currentStep: nextStep }
+    const applied = await applyVacancyFirstGateUpdates({
+      vacancyId: vacancyFirstGateDecision.vacancyId,
+      currentStep: nextStep
     });
+    if (!applied.applied) return;
     currentVacancy = vacancyFirstGateDecision.vacancy || await loadVacancyContext(prisma, vacancyFirstGateDecision.vacancyId);
     normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
     debugTrace.normalized_fields = normalizedData;

@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'consent_step_authority_migrated');
+  assert.equal(manifest.phase, 'vacancy_first_gate_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -97,7 +97,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'conversation_engine_no_interest_authority',
     'conversation_engine_requirement_rejection_authority',
     'conversation_engine_explicit_pause_authority',
-    'consent_step_authority'
+    'consent_step_authority',
+    'vacancy_first_gate_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -235,7 +236,7 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 3);
+  assert.equal(manifest.compositeContracts.length, 4);
   const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
@@ -439,4 +440,44 @@ test('la documentación registra la fase de consentimiento', () => {
   assert.match(documentation, /transitionCandidateConsentStep/);
   assert.match(documentation, /CandidateDataConsentEvent/);
   assert.match(documentation, /no captura perfil ni envía respuesta obsoleta/i);
+});
+
+
+test('el manifiesto registra la autoridad de vacancyFirstGate', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'vacancy_first_gate_decision');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.decisionProducer, 'src/services/vacancyFirstGate.js');
+  assert.equal(contract.consumer, 'src/routes/webhook.js');
+  assert.deepEqual(contract.allowedFields, [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ]);
+  assert.ok(contract.excludedCombinations.includes('silent_profile_capture'));
+  assert.ok(contract.excludedCombinations.includes('gender_logic'));
+
+  const authoritySource = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'applyCandidateVacancyFirstGateDecision'
+  );
+  assert.match(authoritySource, /candidate\.updateMany\s*\(/);
+  assert.match(authoritySource, /vacancyFirstGateExpectedWhere\(expected\)/);
+  assert.match(authoritySource, /data:\s*update/);
+
+  const webhook = readSource('src/routes/webhook.js');
+  const processText = extractFunctionSource(webhook, 'processText');
+  assert.match(processText, /applyCandidateVacancyFirstGateDecision/);
+  assert.match(processText, /STALE_CANDIDATE_VACANCY_FIRST_GATE/);
+  assert.match(processText, /if\s*\(!applied\.applied\)\s*return;/);
+});
+
+test('la documentación registra la fase de vacancyFirstGate', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 8: autoridad de vacancyFirstGate/);
+  assert.match(documentation, /applyCandidateVacancyFirstGateDecision/);
+  assert.match(documentation, /STALE_CANDIDATE_VACANCY_FIRST_GATE/);
+  assert.match(documentation, /captura silenciosa permanece fuera/i);
 });

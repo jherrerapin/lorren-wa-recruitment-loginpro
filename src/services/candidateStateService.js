@@ -816,3 +816,132 @@ export async function transitionCandidateConsentStep(client, input = {}) {
     nextStep
   };
 }
+
+
+const VACANCY_FIRST_GATE_DESTINATIONS = new Set([
+  ConversationStep.GREETING_SENT,
+  ConversationStep.COLLECTING_DATA,
+  ConversationStep.CONFIRMING_DATA,
+  ConversationStep.ASK_CV
+]);
+
+const VACANCY_FIRST_GATE_UPDATE_FIELDS = new Set([
+  'currentStep',
+  'vacancyId',
+  'botResumeMode',
+  'reminderScheduledFor',
+  'reminderState'
+]);
+
+function normalizeVacancyFirstGateSnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_vacancy_first_gate_snapshot_required');
+  }
+
+  return {
+    currentStep: requireConversationStep(expected.currentStep, 'candidate_vacancy_first_gate_expected_step'),
+    vacancyId: requireNullableSnapshotString(expected.vacancyId, 'candidate_vacancy_first_gate_expected_vacancy_id'),
+    botResumeMode: requireNullableSnapshotString(expected.botResumeMode, 'candidate_vacancy_first_gate_expected_resume_mode'),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_vacancy_first_gate_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_vacancy_first_gate_expected_reminder_state'
+    )
+  };
+}
+
+function normalizeVacancyFirstGateUpdate(update) {
+  if (!update || typeof update !== 'object' || Array.isArray(update)) {
+    throw new TypeError('candidate_vacancy_first_gate_update_required');
+  }
+  const fields = Object.keys(update);
+  if (!fields.length || !Object.hasOwn(update, 'currentStep')) {
+    throw new TypeError('candidate_vacancy_first_gate_current_step_required');
+  }
+  const invalidField = fields.find((field) => !VACANCY_FIRST_GATE_UPDATE_FIELDS.has(field));
+  if (invalidField) {
+    throw new TypeError(`candidate_vacancy_first_gate_update_field_not_allowed:${invalidField}`);
+  }
+
+  const currentStep = requireConversationStep(update.currentStep, 'candidate_vacancy_first_gate_next_step');
+  if (!VACANCY_FIRST_GATE_DESTINATIONS.has(currentStep)) {
+    throw new TypeError('candidate_vacancy_first_gate_next_step_invalid');
+  }
+
+  const normalized = { currentStep };
+  if (Object.hasOwn(update, 'vacancyId')) {
+    normalized.vacancyId = requireNullableSnapshotString(
+      update.vacancyId,
+      'candidate_vacancy_first_gate_vacancy_id'
+    );
+  }
+  if (Object.hasOwn(update, 'botResumeMode')) {
+    normalized.botResumeMode = requireNullableSnapshotString(
+      update.botResumeMode,
+      'candidate_vacancy_first_gate_resume_mode'
+    );
+  }
+  if (Object.hasOwn(update, 'reminderScheduledFor')) {
+    normalized.reminderScheduledFor = normalizeNullableDate(
+      update.reminderScheduledFor,
+      'candidate_vacancy_first_gate_reminder_scheduled_for'
+    );
+  }
+  if (Object.hasOwn(update, 'reminderState')) {
+    normalized.reminderState = requireReminderState(
+      update.reminderState,
+      'candidate_vacancy_first_gate_reminder_state'
+    );
+  }
+  return normalized;
+}
+
+function vacancyFirstGateExpectedWhere(expected) {
+  return {
+    currentStep: expected.currentStep,
+    vacancyId: expected.vacancyId,
+    botResumeMode: expected.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(expected.reminderScheduledFor),
+    reminderState: expected.reminderState
+  };
+}
+
+export async function applyCandidateVacancyFirstGateDecision(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeVacancyFirstGateSnapshot(input.expected);
+  const update = normalizeVacancyFirstGateUpdate(input.update);
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...vacancyFirstGateExpectedWhere(expected)
+    },
+    data: update
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    update
+  };
+}

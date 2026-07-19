@@ -154,7 +154,7 @@ La autoridad compara el ID, el paso leído y el snapshot completo del recordator
 
 ## Próxima frontera
 
-1. ramas legacy del webhook;
+1. captura silenciosa y demás ramas legacy del webhook;
 2. correcciones administrativas con actor, motivo y origen esperado;
 3. agenda y pausas implícitas por familias pequeñas.
 
@@ -205,3 +205,14 @@ La autoridad acepta únicamente los destinos producidos por esta frontera: `GREE
 Si `updateMany` devuelve `count=0`, la transacción revierte los campos de consentimiento y el evento. `dataConsentGate` conserva la evidencia inbound ya registrada, pero no captura perfil ni envía respuesta obsoleta. Los registros administrativos que no cambian `currentStep` continúan usando `ConsentStateService` sin exigir snapshot.
 
 Esta fase no modifica interpretación lingüística, textos legales, perfil, CV, agenda, Prisma, permisos, asistencia ni ninguna lógica relacionada con género.
+
+
+## Fase 8: autoridad de vacancyFirstGate
+
+`vacancyFirstGate` conserva la decisión de negocio y no escribe `Candidate`. El webhook entrega a `applyCandidateVacancyFirstGateDecision()` el snapshot observado de `currentStep`, `vacancyId`, `botResumeMode`, `reminderScheduledFor` y `reminderState`.
+
+La autoridad permite únicamente `currentStep`, `vacancyId`, `botResumeMode`, `reminderScheduledFor` y `reminderState`. El destino debe permanecer dentro del intake: `GREETING_SENT`, `COLLECTING_DATA`, `CONFIRMING_DATA` o `ASK_CV`. El mismo paso es válido cuando la decisión modifica otro campo permitido.
+
+`updateMany` compara el snapshot completo. Si devuelve `count=0`, el webhook recupera el candidato vigente, registra `STALE_CANDIDATE_VACANCY_FIRST_GATE` como silencio intencional y no envía la respuesta calculada sobre el estado obsoleto. No reintenta ni aplica parcialmente.
+
+La captura silenciosa permanece fuera de este slice. Consentimiento, CV, agenda, reservas, perfil, permisos, asistencia y la lógica relacionada con género no cambian.
