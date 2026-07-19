@@ -87,6 +87,33 @@
                       <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar operación</button></div>
                     </form>
                   </details>
+                  <details class="crud-details attendance-config">
+                    <summary>Configurar asistencia</summary>
+                    <div class="item-meta" style="margin:10px 0 14px;">
+                      <span><strong>Asistencia:</strong> <span class="pill <%= op.attendanceEnabled ? 'pill-green' : 'pill-amber' %>"><%= op.attendanceEnabled ? 'Habilitada' : 'Deshabilitada' %></span></span>
+                      <span><strong>Zona horaria:</strong> <%= op.attendanceTimezone || 'America/Bogota' %></span>
+                      <span><strong>Fotografía:</strong> <%= op.attendancePhotoPolicy === 'ALWAYS' ? 'Siempre' : op.attendancePhotoPolicy === 'NEVER' ? 'Nunca' : 'Solo ante riesgo' %></span>
+                    </div>
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/asistencia" class="form-grid compact-form" autocomplete="off">
+                      <input type="hidden" name="attendanceEnabledFallback" value="false" />
+                      <input type="hidden" name="manualAttendanceAllowedFallback" value="false" />
+                      <div class="field full">
+                        <label><input type="checkbox" name="attendanceEnabled" value="true" <%= op.attendanceEnabled ? 'checked' : '' %> /> Habilitar control de asistencia en este punto</label>
+                        <small class="muted">La activación exige coordenadas, radio y precisión válidos. Esta opción no publica todavía un enlace de marcación.</small>
+                      </div>
+                      <div class="field"><label>Latitud</label><input type="number" name="attendanceLatitude" min="-90" max="90" step="0.0000001" value="<%= op.attendanceLatitude == null ? '' : op.attendanceLatitude %>" placeholder="4.6097100" /></div>
+                      <div class="field"><label>Longitud</label><input type="number" name="attendanceLongitude" min="-180" max="180" step="0.0000001" value="<%= op.attendanceLongitude == null ? '' : op.attendanceLongitude %>" placeholder="-74.0817500" /></div>
+                      <div class="field"><label>Radio de geocerca (m)</label><input type="number" name="geofenceRadiusMeters" min="20" max="2000" step="1" value="<%= op.geofenceRadiusMeters == null ? '' : op.geofenceRadiusMeters %>" /></div>
+                      <div class="field"><label>Precisión máxima GPS (m)</label><input type="number" name="maxLocationAccuracyMeters" min="5" max="500" step="1" value="<%= op.maxLocationAccuracyMeters == null ? '' : op.maxLocationAccuracyMeters %>" /></div>
+                      <div class="field"><label>Ventana anticipada (min)</label><input type="number" name="earlyArrivalWindowMinutes" min="0" max="240" step="1" required value="<%= op.earlyArrivalWindowMinutes %>" /></div>
+                      <div class="field"><label>Tolerancia de tardanza (min)</label><input type="number" name="lateToleranceMinutes" min="0" max="240" step="1" required value="<%= op.lateToleranceMinutes %>" /></div>
+                      <div class="field"><label>Declarar ausencia después de (min)</label><input type="number" name="absenceGraceMinutes" min="0" max="240" step="1" required value="<%= op.absenceGraceMinutes %>" /></div>
+                      <div class="field"><label>Zona horaria</label><select name="attendanceTimezone" required><option value="America/Bogota" selected>America/Bogota</option></select></div>
+                      <div class="field"><label>Política de fotografía</label><select name="attendancePhotoPolicy" required><option value="NEVER" <%= op.attendancePhotoPolicy === 'NEVER' ? 'selected' : '' %>>Nunca</option><option value="RISK_ONLY" <%= op.attendancePhotoPolicy === 'RISK_ONLY' ? 'selected' : '' %>>Solo ante riesgo</option><option value="ALWAYS" <%= op.attendancePhotoPolicy === 'ALWAYS' ? 'selected' : '' %>>Siempre</option></select></div>
+                      <div class="field"><label><input type="checkbox" name="manualAttendanceAllowed" value="true" <%= op.manualAttendanceAllowed ? 'checked' : '' %> /> Permitir corrección o registro manual auditado</label></div>
+                      <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar asistencia</button></div>
+                    </form>
+                  </details>
                   <div class="actions stack-actions">
                     <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/toggle"><button class="btn" type="submit"><%= op.isActive ? 'Desactivar' : 'Reactivar' %></button></form>
                     <form method="post" action="/operaciones/admin-delete/clientes/<%= client.id %>/operaciones/<%= op.id %>"><button class="btn" type="submit">Eliminar</button></form>
