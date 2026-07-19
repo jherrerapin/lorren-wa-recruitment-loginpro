@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - prisma/schema.prisma
       - src/services/candidateStateService.js
       - src/routes/webhook.js
       - config/candidate-progress-authority.json
@@ -16,6 +17,7 @@ on:
     branches:
       - main
     paths:
+      - prisma/schema.prisma
       - src/services/candidateStateService.js
       - src/routes/webhook.js
       - config/candidate-progress-authority.json
