@@ -21,7 +21,7 @@ const resumeFunction = between(
 test('webhook importa y delega la reanudación en CandidateStateService', () => {
   assert.match(
     source,
-    /import \{ resumeCandidateAutomationOnInbound \} from '\.\.\/services\/candidateStateService\.js';/
+    /import\s*\{[^}]*resumeCandidateAutomationOnInbound[^}]*\}\s*from '\.\.\/services\/candidateStateService\.js';/
   );
   assert.match(resumeFunction, /resumeCandidateAutomationOnInbound\(prisma,\s*\{/);
   assert.match(resumeFunction, /candidateId:\s*candidate\.id/);
