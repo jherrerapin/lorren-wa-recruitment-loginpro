@@ -25,7 +25,9 @@ export const ATTENDANCE_RISK_FLAG = Object.freeze({
 });
 
 function finiteNumber(value, fallback) {
-  if (value === null || value === undefined || value === '') return fallback;
+  const isSupportedType = typeof value === 'number' || typeof value === 'string';
+  if (!isSupportedType || value === '') return fallback;
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
@@ -68,6 +70,10 @@ function rejectedResult(flag) {
  * confiable.
  */
 export function evaluateArrivalValidation(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return rejectedResult(ATTENDANCE_RISK_FLAG.ASSIGNMENT_NOT_ACTIVE);
+  }
+
   if (input.assignmentActive !== true) {
     return rejectedResult(ATTENDANCE_RISK_FLAG.ASSIGNMENT_NOT_ACTIVE);
   }
@@ -91,9 +97,7 @@ export function evaluateArrivalValidation(input = {}) {
   if (input.hasConfiguredGeofence !== true) {
     riskFlags.push(ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED);
     riskScore += 30;
-  }
-
-  if (input.withinGeofence !== true && input.withinGeofence !== false) {
+  } else if (input.withinGeofence !== true && input.withinGeofence !== false) {
     riskFlags.push(ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE);
     riskScore += 50;
   } else if (input.withinGeofence === false) {
