@@ -6,9 +6,9 @@ const source = fs.readFileSync('src/routes/webhook.js', 'utf8');
 
 function between(content, start, end) {
   const startIndex = content.indexOf(start);
-  assert.notEqual(startIndex, -1, 'No se encontró el marcador inicial: ' + start);
+  assert.notEqual(startIndex, -1, `No se encontró el marcador inicial: ${start}`);
   const endIndex = content.indexOf(end, startIndex + start.length);
-  assert.notEqual(endIndex, -1, 'No se encontró el marcador final: ' + end);
+  assert.notEqual(endIndex, -1, `No se encontró el marcador final: ${end}`);
   return content.slice(startIndex, endIndex);
 }
 
@@ -24,20 +24,22 @@ const acquireFunction = between(
 );
 
 test('webhook importa y delega ambos contratos multilinea', () => {
-  assert.match(source, /acquireCandidateMultilineBatch/);
-  assert.match(source, /scheduleCandidateMultilineWindow/);
-  assert.match(scheduleFunction, /getMultilineWindowMs(context)/);
-  assert.match(scheduleFunction, /scheduleCandidateMultilineWindow(prisma,s*{/);
-  assert.match(scheduleFunction, /candidateId/);
+  assert.match(
+    source,
+    /import\s*\{[\s\S]*acquireCandidateMultilineBatch[\s\S]*scheduleCandidateMultilineWindow[\s\S]*\}\s*from '\.\.\/services\/candidateStateService\.js';/
+  );
+  assert.match(scheduleFunction, /getMultilineWindowMs\s*\(\s*context\s*\)/);
+  assert.match(scheduleFunction, /scheduleCandidateMultilineWindow\s*\(\s*prisma\s*,\s*\{/);
+  assert.match(scheduleFunction, /candidateId\s*,/);
   assert.match(scheduleFunction, /windowUntil/);
-  assert.match(acquireFunction, /acquireCandidateMultilineBatch(prisma,s*{/);
-  assert.match(acquireFunction, /expectedBatchVersion:s*batchVersion/);
-  assert.match(acquireFunction, /now:s*new Date()/);
-  assert.match(acquireFunction, /acquired.count === 1/);
+  assert.match(acquireFunction, /acquireCandidateMultilineBatch\s*\(\s*prisma\s*,\s*\{/);
+  assert.match(acquireFunction, /expectedBatchVersion\s*:\s*batchVersion/);
+  assert.match(acquireFunction, /now\s*:\s*new\s+Date\s*\(\s*\)/);
+  assert.match(acquireFunction, /return\s+acquired\.count\s*===\s*1/);
 });
 
 test('los wrappers multilinea no escriben Candidate directamente', () => {
-  const directWrite = /prisma.candidate.(?:create|createMany|upsert|update|updateMany|delete|deleteMany)s*(/;
+  const directWrite = /prisma\.candidate\.(?:create|createMany|upsert|update|updateMany|delete|deleteMany)\s*\(/;
   assert.doesNotMatch(scheduleFunction, directWrite);
   assert.doesNotMatch(acquireFunction, directWrite);
 });
