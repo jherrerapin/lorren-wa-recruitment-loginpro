@@ -37,14 +37,30 @@ function extractFunctionSource(source, functionName) {
   const signature = new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${functionName}\\s*\\(`);
   const match = signature.exec(source);
   assert.ok(match, `No se encontró la función ${functionName}`);
-  const openingBrace = source.indexOf('{', match.index);
+
+  const parametersStart = source.indexOf('(', match.index);
+  assert.notEqual(parametersStart, -1, `No se encontraron los parámetros de ${functionName}`);
+
+  let parameterDepth = 0;
+  let parametersEnd = -1;
+  for (let index = parametersStart; index < source.length; index += 1) {
+    if (source[index] === '(') parameterDepth += 1;
+    if (source[index] === ')') parameterDepth -= 1;
+    if (parameterDepth === 0) {
+      parametersEnd = index;
+      break;
+    }
+  }
+  assert.notEqual(parametersEnd, -1, `Parámetros incompletos para ${functionName}`);
+
+  const openingBrace = source.indexOf('{', parametersEnd + 1);
   assert.notEqual(openingBrace, -1, `No se encontró el cuerpo de ${functionName}`);
 
-  let depth = 0;
+  let bodyDepth = 0;
   for (let index = openingBrace; index < source.length; index += 1) {
-    if (source[index] === '{') depth += 1;
-    if (source[index] === '}') depth -= 1;
-    if (depth === 0) return source.slice(match.index, index + 1);
+    if (source[index] === '{') bodyDepth += 1;
+    if (source[index] === '}') bodyDepth -= 1;
+    if (bodyDepth === 0) return source.slice(match.index, index + 1);
   }
   throw new Error(`Cuerpo incompleto para ${functionName}`);
 }
