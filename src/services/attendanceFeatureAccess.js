@@ -82,6 +82,7 @@ export async function setRecruiterGeneralAttendanceEnabled(prisma, input = {}) {
 
   return prisma.$transaction(async (tx) => {
     requirePrismaModel(tx, 'appUser', 'findUnique');
+    requirePrismaModel(tx, 'botKnowledge', 'findUnique');
     requirePrismaModel(tx, 'botKnowledge', 'upsert');
 
     const recruiterGeneral = await tx.appUser.findUnique({
