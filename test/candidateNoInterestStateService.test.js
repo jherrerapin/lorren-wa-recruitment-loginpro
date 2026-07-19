@@ -135,6 +135,9 @@ test('rechaza clientes y snapshots inválidos antes de escribir', async () => {
   const valid = transitionInput(snapshot);
   const cases = [
     [{}, valid, /candidate_state_client_required/],
+    [createClient(snapshot), { ...valid, expected: null }, /candidate_no_interest_reminder_scheduled_for_required/],
+    [createClient(snapshot), { ...valid, expected: [] }, /candidate_no_interest_reminder_scheduled_for_required/],
+    [createClient(snapshot), { ...valid, expected: 'invalid' }, /candidate_no_interest_reminder_scheduled_for_required/],
     [createClient(snapshot), { ...valid, candidateId: '' }, /candidate_id_required/],
     [createClient(snapshot), { ...valid, expected: { ...valid.expected, currentStep: 'INVALID' } }, /candidate_no_interest_current_step_invalid/],
     [createClient(snapshot), { ...valid, expected: { ...valid.expected, currentStep: ConversationStep.DONE } }, /candidate_no_interest_already_done/],

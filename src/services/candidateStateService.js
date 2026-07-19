@@ -489,7 +489,10 @@ function requireReminderState(value, fieldName) {
   return value;
 }
 
-function normalizeNoInterestSnapshot(expected = {}) {
+function normalizeNoInterestSnapshot(expected) {
+  if (!expected || typeof expected !== 'object' || Array.isArray(expected)) {
+    throw new TypeError('candidate_no_interest_reminder_scheduled_for_required');
+  }
   if (!Object.hasOwn(expected, 'reminderScheduledFor')) {
     throw new TypeError('candidate_no_interest_reminder_scheduled_for_required');
   }
