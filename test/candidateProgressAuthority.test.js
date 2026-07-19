@@ -220,9 +220,9 @@ test('CandidateStateService controla las transiciones simples del engine y expli
   const actSource = extractFunctionSource(engine, 'act');
   assert.match(actSource, /hasSimpleStepTransition/);
   assert.match(actSource, /pendingUpdateKeys\.length\s*===\s*1/);
-  assert.match(actSource, /transitionCandidateConversationStep\(prisma/);
+  assert.match(actSource, /transitionCandidateConversationStep\s*\(\s*prisma/);
   assert.match(actSource, /conflict:\s*!transitionApplied/);
-  assert.match(actSource, /if\s*\(!transitionApplied\)\s*finalStep\s*=\s*observedStep/);
+  assert.match(actSource, /if\s*\(\s*!transitionApplied\s*\)\s*finalStep\s*=\s*observedStep/);
 
   const chatEngine = readSource('src/services/chatEngine.js');
   assert.match(chatEngine, /staleStepConflict/);
