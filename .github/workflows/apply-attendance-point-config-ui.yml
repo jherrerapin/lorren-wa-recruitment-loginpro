@@ -1,0 +1,274 @@
+name: Apply attendance point config UI
+
+on:
+  push:
+    branches:
+      - feat/527-attendance-point-config-ui
+    paths:
+      - .github/workflows/apply-attendance-point-config-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/527-attendance-point-config-ui
+          fetch-depth: 0
+
+      - name: Apply exact attendance UI patch
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          bridge_path = Path('src/routes/dispatchBridge.js')
+          bridge = bridge_path.read_text(encoding='utf-8')
+          import_anchor = "import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../services/transportMode.js';\n"
+          import_line = "import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';\n"
+          if import_line not in bridge:
+              if import_anchor not in bridge:
+                  raise SystemExit('dispatchBridge import anchor not found')
+              bridge = bridge.replace(import_anchor, import_anchor + import_line, 1)
+
+          router_anchor = "export function dispatchBridgeRouter() {\n  const router = express.Router();\n"
+          router_mount = "export function dispatchBridgeRouter() {\n  const router = express.Router();\n  router.use('/clientes/:clientId/operaciones/:operationId/asistencia', requireOps, dispatchAttendancePointConfigRouter(prisma));\n"
+          if "dispatchAttendancePointConfigRouter(prisma)" not in bridge:
+              if router_anchor not in bridge:
+                  raise SystemExit('dispatchBridge router anchor not found')
+              bridge = bridge.replace(router_anchor, router_mount, 1)
+          bridge_path.write_text(bridge, encoding='utf-8')
+
+          router_content = r'''import express from 'express';
+import { updateDispatchAttendancePointConfig } from '../modules/dispatch-attendance/application/updatePointConfig.js';
+
+const CONFIG_ERROR_MESSAGES = Object.freeze({
+  attendance_operation_point_not_found: 'La operación no existe o no pertenece al cliente.',
+  attendance_point_inactive: 'Activa primero la operación antes de habilitar su asistencia.',
+  attendance_geofence_coordinates_required: 'Ingresa latitud y longitud antes de habilitar la asistencia.',
+  attendance_geofence_radius_required: 'Ingresa el radio de geocerca antes de habilitar la asistencia.',
+  attendance_location_accuracy_required: 'Ingresa la precisión máxima antes de habilitar la asistencia.',
+  location_accuracy_exceeds_geofence_radius: 'La precisión máxima no puede ser mayor que el radio de geocerca.',
+  absence_grace_before_late_tolerance: 'La ausencia no puede declararse antes de terminar la tolerancia de tardanza.',
+  attendance_photo_policy_not_allowed: 'Selecciona una política de fotografía válida.',
+  attendance_timezone_not_allowed: 'Selecciona una zona horaria válida.'
+});
+
+function explicitCheckbox(body, fieldName) {
+  const fallbackName = `${fieldName}Fallback`;
+  if (body?.[fallbackName] !== 'false') throw new Error(`${fieldName}_fallback_invalid`);
+  const value = body?.[fieldName];
+  if (value === undefined) return 'false';
+  if (value !== 'true') throw new Error(`${fieldName}_invalid`);
+  return 'true';
+}
+
+function clientOperationsPath(clientId, message) {
+  const suffix = message ? `?message=${encodeURIComponent(message)}` : '';
+  return `/admin/operaciones/clientes/${encodeURIComponent(clientId)}/operaciones${suffix}`;
+}
+
+function configurationErrorMessage(error) {
+  const code = typeof error?.message === 'string' ? error.message : '';
+  if (CONFIG_ERROR_MESSAGES[code]) return CONFIG_ERROR_MESSAGES[code];
+  if (code.endsWith('_invalid') || code.endsWith('_required') || code.endsWith('_not_allowed')) {
+    return 'Revisa los valores de asistencia e intenta nuevamente.';
+  }
+  return 'No fue posible guardar la configuración de asistencia.';
+}
+
+export function dispatchAttendancePointConfigRouter(prisma) {
+  const router = express.Router({ mergeParams: true });
+
+  router.post('/', async (req, res) => {
+    const clientId = req.params.clientId;
+    const operationPointId = req.params.operationId;
+
+    try {
+      await updateDispatchAttendancePointConfig(prisma, {
+        clientId,
+        operationPointId,
+        attendanceEnabled: explicitCheckbox(req.body, 'attendanceEnabled'),
+        attendanceLatitude: req.body.attendanceLatitude,
+        attendanceLongitude: req.body.attendanceLongitude,
+        geofenceRadiusMeters: req.body.geofenceRadiusMeters,
+        maxLocationAccuracyMeters: req.body.maxLocationAccuracyMeters,
+        earlyArrivalWindowMinutes: req.body.earlyArrivalWindowMinutes,
+        lateToleranceMinutes: req.body.lateToleranceMinutes,
+        absenceGraceMinutes: req.body.absenceGraceMinutes,
+        attendanceTimezone: req.body.attendanceTimezone,
+        attendancePhotoPolicy: req.body.attendancePhotoPolicy,
+        manualAttendanceAllowed: explicitCheckbox(req.body, 'manualAttendanceAllowed')
+      });
+      return res.redirect(clientOperationsPath(clientId, 'Configuración de asistencia guardada.'));
+    } catch (error) {
+      console.warn('[ATTENDANCE_POINT_CONFIG]', error?.message || error);
+      return res.redirect(clientOperationsPath(clientId, configurationErrorMessage(error)));
+    }
+  });
+
+  return router;
+}
+'''
+          Path('src/routes/dispatchAttendancePointConfig.js').write_text(router_content, encoding='utf-8')
+
+          view_path = Path('src/views/operacionesClienteOperaciones.ejs')
+          view = view_path.read_text(encoding='utf-8')
+          view_anchor = '''                  </details>
+                  <div class="actions stack-actions">'''
+          attendance_section = '''                  </details>
+                  <details class="crud-details attendance-config">
+                    <summary>Configurar asistencia</summary>
+                    <div class="item-meta" style="margin:10px 0 14px;">
+                      <span><strong>Asistencia:</strong> <span class="pill <%= op.attendanceEnabled ? 'pill-green' : 'pill-amber' %>"><%= op.attendanceEnabled ? 'Habilitada' : 'Deshabilitada' %></span></span>
+                      <span><strong>Zona horaria:</strong> <%= op.attendanceTimezone || 'America/Bogota' %></span>
+                      <span><strong>Fotografía:</strong> <%= op.attendancePhotoPolicy === 'ALWAYS' ? 'Siempre' : op.attendancePhotoPolicy === 'NEVER' ? 'Nunca' : 'Solo ante riesgo' %></span>
+                    </div>
+                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/asistencia" class="form-grid compact-form" autocomplete="off">
+                      <input type="hidden" name="attendanceEnabledFallback" value="false" />
+                      <input type="hidden" name="manualAttendanceAllowedFallback" value="false" />
+                      <div class="field full">
+                        <label><input type="checkbox" name="attendanceEnabled" value="true" <%= op.attendanceEnabled ? 'checked' : '' %> /> Habilitar control de asistencia en este punto</label>
+                        <small class="muted">La activación exige coordenadas, radio y precisión válidos. Esta opción no publica todavía un enlace de marcación.</small>
+                      </div>
+                      <div class="field"><label>Latitud</label><input type="number" name="attendanceLatitude" min="-90" max="90" step="0.0000001" value="<%= op.attendanceLatitude == null ? '' : op.attendanceLatitude %>" placeholder="4.6097100" /></div>
+                      <div class="field"><label>Longitud</label><input type="number" name="attendanceLongitude" min="-180" max="180" step="0.0000001" value="<%= op.attendanceLongitude == null ? '' : op.attendanceLongitude %>" placeholder="-74.0817500" /></div>
+                      <div class="field"><label>Radio de geocerca (m)</label><input type="number" name="geofenceRadiusMeters" min="20" max="2000" step="1" value="<%= op.geofenceRadiusMeters == null ? '' : op.geofenceRadiusMeters %>" /></div>
+                      <div class="field"><label>Precisión máxima GPS (m)</label><input type="number" name="maxLocationAccuracyMeters" min="5" max="500" step="1" value="<%= op.maxLocationAccuracyMeters == null ? '' : op.maxLocationAccuracyMeters %>" /></div>
+                      <div class="field"><label>Ventana anticipada (min)</label><input type="number" name="earlyArrivalWindowMinutes" min="0" max="240" step="1" required value="<%= op.earlyArrivalWindowMinutes %>" /></div>
+                      <div class="field"><label>Tolerancia de tardanza (min)</label><input type="number" name="lateToleranceMinutes" min="0" max="240" step="1" required value="<%= op.lateToleranceMinutes %>" /></div>
+                      <div class="field"><label>Declarar ausencia después de (min)</label><input type="number" name="absenceGraceMinutes" min="0" max="240" step="1" required value="<%= op.absenceGraceMinutes %>" /></div>
+                      <div class="field"><label>Zona horaria</label><select name="attendanceTimezone" required><option value="America/Bogota" selected>America/Bogota</option></select></div>
+                      <div class="field"><label>Política de fotografía</label><select name="attendancePhotoPolicy" required><option value="NEVER" <%= op.attendancePhotoPolicy === 'NEVER' ? 'selected' : '' %>>Nunca</option><option value="RISK_ONLY" <%= op.attendancePhotoPolicy === 'RISK_ONLY' ? 'selected' : '' %>>Solo ante riesgo</option><option value="ALWAYS" <%= op.attendancePhotoPolicy === 'ALWAYS' ? 'selected' : '' %>>Siempre</option></select></div>
+                      <div class="field"><label><input type="checkbox" name="manualAttendanceAllowed" value="true" <%= op.manualAttendanceAllowed ? 'checked' : '' %> /> Permitir corrección o registro manual auditado</label></div>
+                      <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar asistencia</button></div>
+                    </form>
+                  </details>
+                  <div class="actions stack-actions">'''
+          if 'name="attendanceLatitude"' not in view:
+              if view_anchor not in view:
+                  raise SystemExit('operations view anchor not found')
+              view = view.replace(view_anchor, attendance_section, 1)
+          view_path.write_text(view, encoding='utf-8')
+
+          test_content = r'''import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const router = fs.readFileSync('src/routes/dispatchAttendancePointConfig.js', 'utf8');
+const bridge = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+const view = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
+
+test('la configuración administrativa usa una autoridad aislada', () => {
+  assert.match(router, /updateDispatchAttendancePointConfig\(prisma,/);
+  assert.doesNotMatch(router, /dispatchOperationPoint\.update/);
+  assert.match(router, /express\.Router\(\{ mergeParams: true \}\)/);
+  assert.match(router, /router\.post\('\/'/);
+});
+
+test('dispatchBridge monta la ruta bajo el permiso de Operaciones', () => {
+  assert.match(bridge, /dispatchAttendancePointConfigRouter/);
+  assert.match(bridge, /router\.use\('\/clientes\/:clientId\/operaciones\/:operationId\/asistencia', requireOps, dispatchAttendancePointConfigRouter\(prisma\)\)/);
+});
+
+test('el formulario envía booleanos explícitos y límites coherentes', () => {
+  assert.match(view, /attendanceEnabledFallback/);
+  assert.match(view, /manualAttendanceAllowedFallback/);
+  assert.match(view, /name="attendanceLatitude" min="-90" max="90" step="0\.0000001"/);
+  assert.match(view, /name="attendanceLongitude" min="-180" max="180" step="0\.0000001"/);
+  assert.match(view, /name="geofenceRadiusMeters" min="20" max="2000" step="1"/);
+  assert.match(view, /name="maxLocationAccuracyMeters" min="5" max="500" step="1"/);
+  assert.match(view, /name="earlyArrivalWindowMinutes" min="0" max="240" step="1"/);
+  assert.match(view, /name="lateToleranceMinutes" min="0" max="240" step="1"/);
+  assert.match(view, /name="absenceGraceMinutes" min="0" max="240" step="1"/);
+});
+
+test('la fase no expone marcación pública', () => {
+  assert.doesNotMatch(router, /registerDispatchArrival/);
+  assert.doesNotMatch(router, /\/public|\/marcar|\/llegada/);
+  assert.match(view, /no publica todavía un enlace de marcación/);
+});
+'''
+          Path('test/dispatchAttendancePointConfigUiContracts.test.js').write_text(test_content, encoding='utf-8')
+
+          docs_content = r'''# Asistencia operativa: configuración administrativa por punto
+
+## Estado
+
+Implementación relacionada con los issues #509 y #527. Consume la autoridad integrada en #522 y parte del `main` corregido por #524.
+
+## Alcance
+
+La pantalla **Clientes → Operaciones** incorpora una sección de configuración de asistencia dentro de cada punto. La escritura se realiza por un router modular que delega exclusivamente en `updateDispatchAttendancePointConfig()`.
+
+No existe todavía una ruta pública para marcar llegada, una PWA, captura GPS desde el auxiliar ni carga de fotografías.
+
+## Ruta
+
+```text
+POST /admin/operaciones/clientes/:clientId/operaciones/:operationId/asistencia
+```
+
+La ruta se monta dentro de `dispatchBridgeRouter` y pasa por `requireOps`, conservando el permiso vigente del módulo de Operaciones.
+
+## Campos
+
+- activación de asistencia;
+- latitud y longitud;
+- radio de geocerca;
+- precisión máxima;
+- ventana anticipada;
+- tolerancia de tardanza;
+- minutos para declarar ausencia;
+- zona horaria;
+- política de fotografía;
+- permiso de registro manual.
+
+## Validación
+
+El navegador usa `type="number"`, `min`, `max` y `step` para mejorar la captura. La autoridad del servidor sigue siendo definitiva y valida pertenencia, límites y combinaciones de negocio.
+
+Los checkboxes usan un campo oculto separado con valor `false`. El router acepta únicamente el valor explícito `true` del checkbox y genera siempre `true` o `false` para la autoridad.
+
+## Errores
+
+Los códigos internos conocidos se traducen a mensajes operativos y se redirige a la página del cliente. Los errores no conocidos no exponen detalles técnicos.
+
+## Seguridad funcional
+
+- la ruta requiere acceso a Operaciones;
+- el cliente y el punto se validan conjuntamente;
+- el router no escribe Prisma directamente;
+- ningún punto se activa automáticamente;
+- no se modifica `DispatchAssignment.status`;
+- no se crea una superficie pública de marcación.
+
+## Próximo paso
+
+Después del piloto administrativo de configuración, la siguiente entrega será la activación y registro del dispositivo principal del auxiliar. La ruta pública de llegada solo se incorporará después de autenticación, sesión segura e idempotencia extremo a extremo.
+
+## Rollback
+
+Retirar el montaje, router, formulario y prueba contractual. El esquema y la autoridad pueden permanecer sin consumidores.
+'''
+          Path('docs/architecture/07_asistencia_operativa_configuracion_admin.md').write_text(docs_content, encoding='utf-8')
+
+          Path('.github/workflows/apply-attendance-point-config-ui.yml').unlink()
+          PY
+
+      - name: Validate generated files
+        run: |
+          node --check src/routes/dispatchAttendancePointConfig.js
+          node --check src/routes/dispatchBridge.js
+          node --test test/dispatchAttendancePointConfigUiContracts.test.js
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: integrar configuración administrativa de asistencia"
+          git push origin HEAD:feat/527-attendance-point-config-ui
