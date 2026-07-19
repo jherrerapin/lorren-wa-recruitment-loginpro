@@ -1,5 +1,6 @@
 name: Apply Candidate simple step authority
 
+# Trigger propietario para aplicar el parche exacto y retirar esta automatización.
 on:
   push:
     branches:
