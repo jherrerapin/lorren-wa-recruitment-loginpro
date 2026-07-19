@@ -63,8 +63,11 @@ jobs:
       - name: Validate conversationEngine no-interest integration
         run: node --test test/conversationEngineNoInterestAuthority.test.js
 
-      - name: Validate historical engine authority
-        run: node --test test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js
+      - name: Validate historical step authority
+        run: node --test test/conversationEngineStepAuthority.test.js
+
+      - name: Validate historical engine guardrails
+        run: node --test test/conversationEngineGuardRails.test.js
 
       - name: Validate progress authority scanner
         run: node --test test/candidateProgressAuthority.test.js
