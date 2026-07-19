@@ -110,15 +110,15 @@ export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = fal
 
   if (!allowed) {
     output = output.replace(
-      /\s*<details class="crud-details attendance-config">[\s\S]*?<\/details>/g,
+      /\s*<details\s+[^>]*class=["'][^"']*\battendance-config\b[^"']*["'][^>]*>[\s\S]*?<\/details>/gi,
       ''
     );
   }
 
   if (isDev && !output.includes('data-attendance-dev-control')) {
     output = output.replace(
-      '<main class="page">',
-      `<main class="page">${attendanceDevControlHtml(recruiterGeneralEnabled)}`
+      /(<main\s+[^>]*class=["'][^"']*\bpage\b[^"']*["'][^>]*>)/i,
+      `$1${attendanceDevControlHtml(recruiterGeneralEnabled)}`
     );
   }
 
@@ -127,14 +127,22 @@ export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = fal
 
 function installAttendanceRenderGate(req, res, next) {
   const originalRender = res.render.bind(res);
-  res.render = (view, locals = {}, callback) => {
-    if (view !== 'operacionesClienteOperaciones') {
-      return originalRender(view, locals, callback);
+  res.render = (view, locals, callback) => {
+    let renderLocals = locals || {};
+    let renderCallback = callback;
+
+    if (typeof locals === 'function') {
+      renderCallback = locals;
+      renderLocals = {};
     }
 
-    return originalRender(view, locals, (error, html) => {
+    if (view !== 'operacionesClienteOperaciones') {
+      return originalRender(view, renderLocals, renderCallback);
+    }
+
+    return originalRender(view, renderLocals, (error, html) => {
       if (error) {
-        if (typeof callback === 'function') return callback(error);
+        if (typeof renderCallback === 'function') return renderCallback(error);
         return next(error);
       }
 
@@ -144,7 +152,7 @@ function installAttendanceRenderGate(req, res, next) {
         recruiterGeneralEnabled: Boolean(req.recruiterGeneralAttendanceEnabled)
       });
 
-      if (typeof callback === 'function') return callback(null, output);
+      if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
     });
   };
