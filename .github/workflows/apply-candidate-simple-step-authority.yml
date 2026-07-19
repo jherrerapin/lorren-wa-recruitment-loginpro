@@ -51,9 +51,11 @@ jobs:
         run: |
           cp scripts/apply-candidate-simple-step-authority.mjs /tmp/apply-candidate-simple-step-authority.mjs
           cp .github/workflows/apply-candidate-simple-step-authority.yml /tmp/apply-candidate-simple-step-authority.yml
+          cp .github/workflows/candidate-progress-authority.yml /tmp/candidate-progress-authority.yml
           node scripts/apply-candidate-simple-step-authority.mjs
           cp /tmp/apply-candidate-simple-step-authority.mjs scripts/apply-candidate-simple-step-authority.mjs
           cp /tmp/apply-candidate-simple-step-authority.yml .github/workflows/apply-candidate-simple-step-authority.yml
+          cp /tmp/candidate-progress-authority.yml .github/workflows/candidate-progress-authority.yml
 
       - name: Validate JavaScript syntax
         run: |
@@ -80,7 +82,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git status --short
           git add -A
           git commit -m "refactor: centralizar transiciones simples de currentStep"
 
