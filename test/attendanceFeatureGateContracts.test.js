@@ -23,6 +23,19 @@ const sampleHtml = `<!doctype html>
 </body>
 </html>`;
 
+const reformattedHtml = `<!doctype html>
+<html>
+<body>
+<main id="operations" data-view="client" class="layout page wide">
+  <section>Operaciones</section>
+  <details data-module="attendance" class='attendance-config crud-details extra'>
+    <summary>Configurar asistencia</summary>
+    <form><button>Guardar asistencia</button></form>
+  </details>
+</main>
+</body>
+</html>`;
+
 test('una persona sin acceso no ve la configuracion de asistencia', () => {
   const output = filterAttendanceFeatureHtml(sampleHtml, {
     allowed: false,
@@ -33,6 +46,17 @@ test('una persona sin acceso no ve la configuracion de asistencia', () => {
   assert.doesNotMatch(output, /attendance-config/);
   assert.doesNotMatch(output, /Guardar asistencia/);
   assert.doesNotMatch(output, /data-attendance-dev-control/);
+});
+
+test('el ocultamiento tolera atributos, comillas y clases reordenadas', () => {
+  const output = filterAttendanceFeatureHtml(reformattedHtml, {
+    allowed: false,
+    isDev: false,
+    recruiterGeneralEnabled: false
+  });
+
+  assert.doesNotMatch(output, /attendance-config/);
+  assert.doesNotMatch(output, /Guardar asistencia/);
 });
 
 test('dev conserva la configuracion y recibe el boton de activacion', () => {
@@ -46,6 +70,17 @@ test('dev conserva la configuracion y recibe el boton de activacion', () => {
   assert.match(output, /data-attendance-dev-control/);
   assert.match(output, /Activar para reclutador-general/);
   assert.match(output, /name="enabled" value="true"/);
+});
+
+test('el control DEV se inserta aunque main tenga otros atributos o clases', () => {
+  const output = filterAttendanceFeatureHtml(reformattedHtml, {
+    allowed: true,
+    isDev: true,
+    recruiterGeneralEnabled: false
+  });
+
+  assert.match(output, /data-attendance-dev-control/);
+  assert.match(output, /layout page wide/);
 });
 
 test('dev recibe boton de desactivacion cuando el acceso ya esta habilitado', () => {
@@ -97,11 +132,20 @@ test('el interruptor exige DEV y valores booleanos explicitos', () => {
     routeSource,
     /\/asistencia-acceso\/reclutador-general[\s\S]*?requireDev/
   );
-  assert.match(routeSource, /\['true', 'false'\]\.includes\(enabled\)/);
+  assert.match(
+    routeSource,
+    /\[\s*['"]true['"]\s*,\s*['"]false['"]\s*\]\s*\.\s*includes\(\s*enabled\s*\)/
+  );
 });
 
 test('el control se carga con denegacion segura cuando falla la persistencia', () => {
   assert.match(routeSource, /ATTENDANCE_FEATURE_ACCESS_LOAD_FAILED/);
-  assert.match(routeSource, /req\.canAccessAttendanceFeature = false/);
-  assert.match(routeSource, /res\.locals\.canAccessAttendanceFeature = false/);
+  assert.match(routeSource, /req\s*\.\s*canAccessAttendanceFeature\s*=\s*false/);
+  assert.match(routeSource, /res\s*\.\s*locals\s*\.\s*canAccessAttendanceFeature\s*=\s*false/);
+});
+
+test('el wrapper normaliza la firma res.render(view, callback)', () => {
+  assert.match(routeSource, /typeof\s+locals\s*===\s*['"]function['"]/);
+  assert.match(routeSource, /renderCallback\s*=\s*locals/);
+  assert.match(routeSource, /renderLocals\s*=\s*\{\s*\}/);
 });
