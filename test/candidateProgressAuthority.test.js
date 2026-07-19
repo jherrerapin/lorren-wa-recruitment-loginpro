@@ -33,6 +33,22 @@ function parseConversationSteps(schema) {
     .map((line) => line.split(/\s+/)[0]);
 }
 
+function extractFunctionSource(source, functionName) {
+  const signature = new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${functionName}\\s*\\(`);
+  const match = signature.exec(source);
+  assert.ok(match, `No se encontró la función ${functionName}`);
+  const openingBrace = source.indexOf('{', match.index);
+  assert.notEqual(openingBrace, -1, `No se encontró el cuerpo de ${functionName}`);
+
+  let depth = 0;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}') depth -= 1;
+    if (depth === 0) return source.slice(match.index, index + 1);
+  }
+  throw new Error(`Cuerpo incompleto para ${functionName}`);
+}
+
 const allowedRoles = new Set([
   'canonical_schema',
   'direct_writer',
@@ -55,10 +71,11 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'characterization');
-  assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, false);
+  assert.equal(manifest.phase, 'multiline_authority_migrated');
+  assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
+  assert.deepEqual(manifest.completedSlices, ['multiline_window_authority']);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
 
@@ -118,28 +135,46 @@ test('las familias de transición usan pasos conocidos y contratos estrechos', (
   }
 });
 
-test('los contratos multilinea preservan el compare-and-set observado', () => {
+test('CandidateStateService es la autoridad exclusiva de persistencia multilinea', () => {
   assert.deepEqual(
     manifest.multilineContracts.map((contract) => contract.id),
     ['schedule_multiline_window', 'acquire_multiline_batch']
   );
 
   for (const contract of manifest.multilineContracts) {
-    assert.equal(contract.owner, 'src/routes/webhook.js');
+    assert.equal(contract.owner, 'src/services/candidateStateService.js');
+    assert.equal(contract.consumer, 'src/routes/webhook.js');
+    assert.equal(contract.status, 'canonical');
     assert.deepEqual(contract.allowedFields, ['multilineWindowUntil', 'multilineBatchVersion']);
     assert.ok(contract.concurrency);
     assert.ok(contract.idempotency);
   }
 
+  const authority = readSource('src/services/candidateStateService.js');
+  const scheduleAuthority = extractFunctionSource(authority, 'scheduleCandidateMultilineWindow');
+  const acquireAuthority = extractFunctionSource(authority, 'acquireCandidateMultilineBatch');
+
+  assert.match(scheduleAuthority, /candidate\.update\s*\(/);
+  assert.match(scheduleAuthority, /multilineWindowUntil\s*:\s*windowUntil/);
+  assert.match(scheduleAuthority, /multilineBatchVersion\s*:\s*\{\s*increment\s*:\s*1\s*,?\s*\}/);
+  assert.match(acquireAuthority, /candidate\.updateMany\s*\(/);
+  assert.match(acquireAuthority, /multilineBatchVersion\s*:\s*batchVersion/);
+  assert.match(acquireAuthority, /multilineWindowUntil\s*:\s*\{\s*lte\s*:\s*now\s*\}/);
+  assert.match(acquireAuthority, /multilineWindowUntil\s*:\s*null/);
+  assert.match(acquireAuthority, /return\s+\{\s*count\s*:/);
+
   const webhook = readSource('src/routes/webhook.js');
-  assert.match(webhook, /async\s+function\s+scheduleMultilineWindow\s*\(\s*prisma\s*,\s*candidateId\s*,\s*context\s*=\s*\{\s*\}\s*\)/);
-  assert.match(webhook, /multilineWindowUntil\s*:\s*windowUntil/);
-  assert.match(webhook, /multilineBatchVersion\s*:\s*\{\s*increment\s*:\s*1\s*,?\s*\}/);
-  assert.match(webhook, /async\s+function\s+tryAcquireMultilineProcessing\s*\(\s*prisma\s*,\s*candidateId\s*,\s*batchVersion\s*\)/);
-  assert.match(webhook, /multilineBatchVersion\s*:\s*batchVersion/);
-  assert.match(webhook, /multilineWindowUntil\s*:\s*\{\s*lte\s*:\s*new\s+Date\(\s*\)\s*\}/);
-  assert.match(webhook, /multilineWindowUntil\s*:\s*null/);
-  assert.match(webhook, /return\s+acquired\.count\s*===\s*1/);
+  const scheduleConsumer = extractFunctionSource(webhook, 'scheduleMultilineWindow');
+  const acquireConsumer = extractFunctionSource(webhook, 'tryAcquireMultilineProcessing');
+
+  assert.match(webhook, /scheduleCandidateMultilineWindow/);
+  assert.match(webhook, /acquireCandidateMultilineBatch/);
+  assert.match(scheduleConsumer, /return\s+scheduleCandidateMultilineWindow\s*\(/);
+  assert.doesNotMatch(scheduleConsumer, /prisma\.candidate\.(?:update|updateMany)\s*\(/);
+  assert.match(acquireConsumer, /await\s+acquireCandidateMultilineBatch\s*\(/);
+  assert.match(acquireConsumer, /return\s+acquired\.count\s*===\s*1/);
+  assert.doesNotMatch(acquireConsumer, /prisma\.candidate\.(?:update|updateMany)\s*\(/);
+  assert.match(webhook, /tryAcquireMultilineProcessing\(prisma,\s*candidate\.id,\s*scheduling\)/);
 });
 
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
@@ -159,11 +194,14 @@ test('la reducción del engine y el consentimiento permanecen caracterizados sin
   assert.doesNotMatch(manifest.transitionFamilies.map((family) => family.id).join('|'), /generic|arbitrary|patch/i);
 });
 
-test('la documentación enlaza la matriz y mantiene explícito el alcance de fase 1', () => {
+test('la documentación registra la fase multilinea y mantiene el siguiente slice acotado', () => {
   const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
   assert.match(documentation, /config\/candidate-progress-authority\.json/);
   assert.match(documentation, /Fase 1: caracterización del progreso conversacional/);
-  assert.match(documentation, /no cambia el comportamiento runtime/i);
+  assert.match(documentation, /Fase 2: autoridad multilinea migrada/);
+  assert.match(documentation, /scheduleCandidateMultilineWindow/);
+  assert.match(documentation, /acquireCandidateMultilineBatch/);
+  assert.match(documentation, /conversationEngine\.act\(\)/);
   assert.match(documentation, /productor de decisión/i);
   assert.match(documentation, /escritor efectivo/i);
 });
