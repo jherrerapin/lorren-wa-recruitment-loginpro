@@ -774,3 +774,45 @@ export async function completeCandidateRequirementRejection(client, input = {}) 
     nextReminderState: ReminderState.SKIPPED
   };
 }
+
+
+const CONSENT_STEP_DESTINATIONS = new Set([
+  ConversationStep.COLLECTING_DATA,
+  ConversationStep.GREETING_SENT,
+  ConversationStep.DONE
+]);
+
+export async function transitionCandidateConsentStep(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expectedStep = requireConversationStep(
+    input.expected?.currentStep,
+    'candidate_consent_expected_current_step'
+  );
+  const nextStep = requireConversationStep(input.nextStep, 'candidate_consent_next_step');
+
+  if (!CONSENT_STEP_DESTINATIONS.has(nextStep)) {
+    throw new TypeError('candidate_consent_next_step_invalid');
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      currentStep: expectedStep
+    },
+    data: {
+      currentStep: nextStep
+    }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expectedStep,
+    nextStep
+  };
+}

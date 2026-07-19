@@ -588,9 +588,10 @@ async function recordConsent(prisma, req, candidate, status, resumeUpdate = {}) 
       lastInboundAt: now,
       ...(accepted ? resumeUpdate : {})
     },
+    expected: { currentStep: candidate.currentStep },
     now
   });
-  return result.candidate;
+  return result;
 }
 
 async function handleCampaignVacancyConfirmation(prisma, candidate, message, from, body) {
@@ -667,7 +668,16 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   if (shouldRecordConsentRejection(body, { consentPromptPending: context.pending })) {
     await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
-    await recordConsent(prisma, req, candidate, 'REVOKED');
+    const consentResult = await recordConsent(prisma, req, candidate, 'REVOKED');
+    if (consentResult.conflict) {
+      console.warn('[CONSENT_STEP_CONFLICT]', {
+        candidateId: candidate.id,
+        expectedStep: candidate.currentStep,
+        observedStep: consentResult.candidate?.currentStep || null,
+        status: 'REVOKED'
+      });
+      return true;
+    }
     await sendAndStore(prisma, candidate.id, from, CONSENT_REVOKED_REPLY, 'data_consent_revoked');
     return true;
   }
@@ -675,7 +685,17 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
   if (shouldRecordConsentAcceptance(body, { consentPromptPending: context.pending })) {
     await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'ACCEPTED');
     const resumeContext = await resolveConsentResumeContext(prisma, context.resumeMode);
-    const consentedCandidate = await recordConsent(prisma, req, candidate, 'ACCEPTED', resumeContext.resumeUpdate);
+    const consentResult = await recordConsent(prisma, req, candidate, 'ACCEPTED', resumeContext.resumeUpdate);
+    if (consentResult.conflict) {
+      console.warn('[CONSENT_STEP_CONFLICT]', {
+        candidateId: candidate.id,
+        expectedStep: candidate.currentStep,
+        observedStep: consentResult.candidate?.currentStep || null,
+        status: 'ACCEPTED'
+      });
+      return true;
+    }
+    const consentedCandidate = consentResult.candidate;
 
     if (resumeContext.alternativeUnavailable) {
       const reply = [questionReply, ALTERNATIVE_VACANCY_UNAVAILABLE_REPLY].filter(Boolean).join('\n\n');

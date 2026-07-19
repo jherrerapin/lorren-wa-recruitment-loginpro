@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { ConversationStep } from '@prisma/client';
 import {
   buildConsentStateMutation,
   recordCandidateDataConsent
@@ -18,78 +19,98 @@ const BASE_INPUT = Object.freeze({
   now: FIXED_NOW
 });
 
-function createPersistenceDelegates(calls) {
+function createPersistenceDelegates(calls, {
+  persistedStep = ConversationStep.GREETING_SENT,
+  stepUpdateCount = 1
+} = {}) {
+  let currentStep = persistedStep;
   return {
     candidate: {
-      update: ({ where, data }) => {
+      updateMany: async ({ where, data }) => {
+        calls.stepUpdates.push({ where, data });
+        if (stepUpdateCount === 1) currentStep = data.currentStep;
+        return { count: stepUpdateCount };
+      },
+      findUnique: async ({ where }) => ({ id: where.id, currentStep }),
+      update: async ({ where, data }) => {
         calls.candidateUpdates.push({ where, data });
-        return Promise.resolve({ id: where.id, ...data });
+        return { id: where.id, currentStep, ...data };
       }
     },
     candidateDataConsentEvent: {
-      create: ({ data }) => {
+      create: async ({ data }) => {
         calls.consentEvents.push(data);
-        return Promise.resolve({ id: 'consent-event-test-1', ...data });
+        return { id: 'consent-event-test-1', ...data };
       }
     }
   };
 }
 
-function createPrismaMock() {
+function createPrismaMock(options = {}) {
   const calls = {
     candidateUpdates: [],
+    stepUpdates: [],
     consentEvents: [],
     transactions: []
   };
-  const delegates = createPersistenceDelegates(calls);
+  const delegates = createPersistenceDelegates(calls, options);
   const prisma = {
     ...delegates,
-    $transaction: async (operations) => {
-      calls.transactions.push(operations);
-      return Promise.all(operations);
+    $transaction: async (operation) => {
+      calls.transactions.push(operation);
+      return operation(delegates);
     }
   };
 
   return { prisma, calls };
 }
 
-function createTransactionClientMock() {
+function createTransactionClientMock(options = {}) {
   const calls = {
     candidateUpdates: [],
+    stepUpdates: [],
     consentEvents: []
   };
   return {
-    transactionClient: createPersistenceDelegates(calls),
+    transactionClient: createPersistenceDelegates(calls, options),
     calls
   };
 }
 
-test('ACCEPTED actualiza candidato y crea evento dentro de una sola transacción', async () => {
+test('ACCEPTED coordina currentStep, candidato y evento en una sola transacción', async () => {
   const { prisma, calls } = createPrismaMock();
 
   const result = await recordCandidateDataConsent(prisma, {
     ...BASE_INPUT,
     status: 'accepted',
+    expected: { currentStep: ConversationStep.GREETING_SENT },
     candidatePatch: {
-      currentStep: 'COLLECTING_DATA',
+      currentStep: ConversationStep.COLLECTING_DATA,
       botResumeMode: null,
       lastInboundAt: FIXED_NOW
     }
   });
 
   assert.equal(calls.transactions.length, 1);
-  assert.equal(calls.transactions[0].length, 2);
+  assert.equal(calls.stepUpdates.length, 1);
   assert.equal(calls.candidateUpdates.length, 1);
   assert.equal(calls.consentEvents.length, 1);
 
+  assert.deepEqual(calls.stepUpdates[0], {
+    where: {
+      id: BASE_INPUT.candidateId,
+      currentStep: ConversationStep.GREETING_SENT
+    },
+    data: { currentStep: ConversationStep.COLLECTING_DATA }
+  });
+
   const candidateData = calls.candidateUpdates[0].data;
-  assert.equal(calls.candidateUpdates[0].where.id, BASE_INPUT.candidateId);
+  assert.equal(Object.hasOwn(candidateData, 'currentStep'), false);
   assert.equal(candidateData.dataConsentStatus, 'ACCEPTED');
   assert.equal(candidateData.dataConsentVersion, BASE_INPUT.version);
   assert.equal(candidateData.dataConsentText, BASE_INPUT.text);
   assert.equal(candidateData.dataConsentSource, BASE_INPUT.source);
   assert.equal(candidateData.dataConsentRecordedBy, 'test-operator');
-  assert.equal(candidateData.currentStep, 'COLLECTING_DATA');
   assert.equal(candidateData.botResumeMode, null);
   assert.equal(candidateData.dataConsentAcceptedAt.toISOString(), FIXED_NOW.toISOString());
   assert.equal(candidateData.dataConsentRevokedAt, null);
@@ -105,8 +126,47 @@ test('ACCEPTED actualiza candidato y crea evento dentro de una sola transacción
   assert.equal(eventData.userAgent, 'test-agent');
   assert.equal(eventData.note, 'nota de prueba');
   assert.equal(result.recordedAt.toISOString(), FIXED_NOW.toISOString());
-  assert.equal(result.candidate.dataConsentStatus, 'ACCEPTED');
+  assert.equal(result.candidate.currentStep, ConversationStep.COLLECTING_DATA);
   assert.equal(result.event.status, 'ACCEPTED');
+  assert.equal(result.stepTransition.count, 1);
+  assert.equal(result.conflict, false);
+});
+
+test('permite registrar consentimiento cuando el destino coincide con el paso actual', async () => {
+  const { prisma, calls } = createPrismaMock({ persistedStep: ConversationStep.COLLECTING_DATA });
+
+  const result = await recordCandidateDataConsent(prisma, {
+    ...BASE_INPUT,
+    status: 'ACCEPTED',
+    expected: { currentStep: ConversationStep.COLLECTING_DATA },
+    candidatePatch: { currentStep: ConversationStep.COLLECTING_DATA }
+  });
+
+  assert.equal(result.conflict, false);
+  assert.equal(result.stepTransition.count, 1);
+  assert.equal(calls.candidateUpdates.length, 1);
+  assert.equal(calls.consentEvents.length, 1);
+});
+
+test('una carrera de currentStep revierte consentimiento y evento', async () => {
+  const { prisma, calls } = createPrismaMock({
+    persistedStep: ConversationStep.ASK_CV,
+    stepUpdateCount: 0
+  });
+
+  const result = await recordCandidateDataConsent(prisma, {
+    ...BASE_INPUT,
+    status: 'ACCEPTED',
+    expected: { currentStep: ConversationStep.GREETING_SENT },
+    candidatePatch: { currentStep: ConversationStep.COLLECTING_DATA }
+  });
+
+  assert.equal(result.conflict, true);
+  assert.equal(result.event, null);
+  assert.equal(result.candidate.currentStep, ConversationStep.ASK_CV);
+  assert.equal(result.stepTransition.count, 0);
+  assert.equal(calls.candidateUpdates.length, 0);
+  assert.equal(calls.consentEvents.length, 0);
 });
 
 test('la autoridad usa un cliente tx existente sin abrir una transacción anidada', async () => {
@@ -115,24 +175,27 @@ test('la autoridad usa un cliente tx existente sin abrir una transacción anidad
   const result = await recordCandidateDataConsent(transactionClient, {
     ...BASE_INPUT,
     status: 'ACCEPTED',
-    candidatePatch: { currentStep: 'COLLECTING_DATA' }
+    expected: { currentStep: ConversationStep.GREETING_SENT },
+    candidatePatch: { currentStep: ConversationStep.COLLECTING_DATA }
   });
 
   assert.equal(Object.hasOwn(transactionClient, '$transaction'), false);
+  assert.equal(calls.stepUpdates.length, 1);
   assert.equal(calls.candidateUpdates.length, 1);
   assert.equal(calls.consentEvents.length, 1);
-  assert.equal(result.candidate.currentStep, 'COLLECTING_DATA');
+  assert.equal(result.candidate.currentStep, ConversationStep.COLLECTING_DATA);
   assert.equal(result.event.status, 'ACCEPTED');
 });
 
-test('REVOKED limpia aceptación y registra una única fecha de revocatoria', async () => {
+test('REVOKED coordina el destino DONE y mantiene la trazabilidad', async () => {
   const { prisma, calls } = createPrismaMock();
 
   await recordCandidateDataConsent(prisma, {
     ...BASE_INPUT,
     status: 'REVOKED',
+    expected: { currentStep: ConversationStep.GREETING_SENT },
     candidatePatch: {
-      currentStep: 'DONE',
+      currentStep: ConversationStep.DONE,
       status: 'NUEVO'
     }
   });
@@ -141,9 +204,43 @@ test('REVOKED limpia aceptación y registra una única fecha de revocatoria', as
   assert.equal(candidateData.dataConsentStatus, 'REVOKED');
   assert.equal(candidateData.dataConsentAcceptedAt, null);
   assert.equal(candidateData.dataConsentRevokedAt.toISOString(), FIXED_NOW.toISOString());
-  assert.equal(candidateData.currentStep, 'DONE');
+  assert.equal(Object.hasOwn(candidateData, 'currentStep'), false);
   assert.equal(candidateData.status, 'NUEVO');
+  assert.equal(calls.stepUpdates[0].data.currentStep, ConversationStep.DONE);
   assert.equal(calls.consentEvents[0].status, 'REVOKED');
+});
+
+test('un registro administrativo sin currentStep no exige snapshot', async () => {
+  const { prisma, calls } = createPrismaMock();
+
+  const result = await recordCandidateDataConsent(prisma, {
+    ...BASE_INPUT,
+    status: 'ACCEPTED'
+  });
+
+  assert.equal(calls.stepUpdates.length, 0);
+  assert.equal(calls.candidateUpdates.length, 1);
+  assert.equal(calls.consentEvents.length, 1);
+  assert.equal(result.stepTransition, null);
+  assert.equal(result.conflict, false);
+});
+
+test('currentStep en candidatePatch exige expected antes de persistir', async () => {
+  const { prisma, calls } = createPrismaMock();
+
+  await assert.rejects(
+    () => recordCandidateDataConsent(prisma, {
+      ...BASE_INPUT,
+      status: 'ACCEPTED',
+      candidatePatch: { currentStep: ConversationStep.COLLECTING_DATA }
+    }),
+    /candidate_consent_expected_current_step_required/
+  );
+
+  assert.equal(calls.transactions.length, 0);
+  assert.equal(calls.stepUpdates.length, 0);
+  assert.equal(calls.candidateUpdates.length, 0);
+  assert.equal(calls.consentEvents.length, 0);
 });
 
 test('los campos canónicos de consentimiento no pueden sobreescribirse desde candidatePatch', () => {

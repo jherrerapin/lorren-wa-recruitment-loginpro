@@ -1,3 +1,5 @@
+import { transitionCandidateConsentStep } from './candidateStateService.js';
+
 const VALID_CONSENT_STATUSES = new Set(['ACCEPTED', 'REVOKED']);
 const ALLOWED_CANDIDATE_PATCH_FIELDS = new Set([
   'botResumeMode',
@@ -6,6 +8,15 @@ const ALLOWED_CANDIDATE_PATCH_FIELDS = new Set([
   'status',
   'vacancyId'
 ]);
+
+class CandidateConsentStepConflictError extends Error {
+  constructor(stepTransition) {
+    super('candidate_consent_step_conflict');
+    this.name = 'CandidateConsentStepConflictError';
+    this.stepTransition = stepTransition;
+    this.candidate = stepTransition?.candidate || null;
+  }
+}
 
 function requireNonEmptyString(value, label) {
   const normalized = String(value ?? '').trim();
@@ -59,11 +70,41 @@ function validatePrismaContract(prisma) {
   );
 }
 
-async function executeConsentOperations(prisma, operations) {
+async function executeConsentOperations(prisma, operation) {
   if (typeof prisma.$transaction === 'function') {
-    return prisma.$transaction(operations);
+    return prisma.$transaction(operation);
   }
-  return Promise.all(operations);
+  return operation(prisma);
+}
+
+function splitConsentStepTransition(candidateData, expected) {
+  if (!Object.hasOwn(candidateData, 'currentStep')) {
+    return {
+      candidateData,
+      stepTransitionInput: null
+    };
+  }
+
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || !Object.hasOwn(expected, 'currentStep')
+  ) {
+    throw new Error('candidate_consent_expected_current_step_required');
+  }
+
+  const nextStep = candidateData.currentStep;
+  const candidateDataWithoutStep = { ...candidateData };
+  delete candidateDataWithoutStep.currentStep;
+
+  return {
+    candidateData: candidateDataWithoutStep,
+    stepTransitionInput: {
+      expected: { currentStep: expected.currentStep },
+      nextStep
+    }
+  };
 }
 
 export function buildConsentStateMutation({
@@ -118,6 +159,7 @@ export async function recordCandidateDataConsent(prisma, {
   userAgent = null,
   note = null,
   candidatePatch = {},
+  expected = null,
   now = new Date()
 } = {}) {
   if (!validatePrismaContract(prisma)) {
@@ -134,27 +176,55 @@ export async function recordCandidateDataConsent(prisma, {
     candidatePatch,
     now
   });
-  const operations = [
-    prisma.candidate.update({
-      where: { id: normalizedCandidateId },
-      data: mutation.candidateData
-    }),
-    prisma.candidateDataConsentEvent.create({
-      data: {
-        candidateId: normalizedCandidateId,
-        ...mutation.eventData,
-        ipAddress: normalizeNullableString(ipAddress),
-        userAgent: normalizeNullableString(userAgent),
-        note: normalizeNullableString(note)
+  const split = splitConsentStepTransition(mutation.candidateData, expected);
+
+  try {
+    return await executeConsentOperations(prisma, async (transactionClient) => {
+      let stepTransition = null;
+
+      if (split.stepTransitionInput) {
+        stepTransition = await transitionCandidateConsentStep(transactionClient, {
+          candidateId: normalizedCandidateId,
+          ...split.stepTransitionInput
+        });
+
+        if (stepTransition.count !== 1) {
+          throw new CandidateConsentStepConflictError(stepTransition);
+        }
       }
-    })
-  ];
 
-  const [candidate, event] = await executeConsentOperations(prisma, operations);
+      const candidate = await transactionClient.candidate.update({
+        where: { id: normalizedCandidateId },
+        data: split.candidateData
+      });
+      const event = await transactionClient.candidateDataConsentEvent.create({
+        data: {
+          candidateId: normalizedCandidateId,
+          ...mutation.eventData,
+          ipAddress: normalizeNullableString(ipAddress),
+          userAgent: normalizeNullableString(userAgent),
+          note: normalizeNullableString(note)
+        }
+      });
 
-  return {
-    candidate,
-    event,
-    recordedAt: mutation.recordedAt
-  };
+      return {
+        candidate,
+        event,
+        recordedAt: mutation.recordedAt,
+        stepTransition,
+        conflict: false
+      };
+    });
+  } catch (error) {
+    if (error instanceof CandidateConsentStepConflictError) {
+      return {
+        candidate: error.candidate,
+        event: null,
+        recordedAt: mutation.recordedAt,
+        stepTransition: error.stepTransition,
+        conflict: true
+      };
+    }
+    throw error;
+  }
 }
