@@ -13,7 +13,6 @@ permissions:
 
 jobs:
   apply:
-    if: github.actor == 'jherrerapin'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
