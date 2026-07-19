@@ -1,0 +1,43 @@
+name: Apply Candidate multiline validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/apply-candidate-multiline-validation.mjs
+      - .github/workflows/apply-candidate-multiline-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v5
+        with:
+          ref: refactor/501-candidate-multiline-authority
+          persist-credentials: true
+
+      - name: Apply exact patch
+        run: node scripts/apply-candidate-multiline-validation.mjs
+
+      - name: Validate contracts
+        run: |
+          npm ci
+          npm run prisma:generate
+          node --check src/services/candidateStateService.js
+          node --test test/candidateMultilineStateService.test.js test/candidateProgressAuthority.test.js test/webhookCandidateStateAuthority.test.js
+          git diff --check
+
+      - name: Commit clean result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: endurecer contratos multilinea de Candidate"
+          git push origin HEAD:refactor/501-candidate-multiline-authority
