@@ -561,6 +561,7 @@ model DispatchWorker {
   assignments       DispatchAssignment[]
   incidents         DispatchIncident[]
   devices           DispatchWorkerDevice[]
+  activations       DispatchWorkerActivation[]
 
   @@index([candidateId])
   @@index([documentNumber])
@@ -673,11 +674,36 @@ model DispatchWorkerDevice {
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
   attendanceMarks      DispatchAttendanceMark[]
+  consumedActivations  DispatchWorkerActivation[]
 
   @@unique([workerId, installationIdHash])
   @@index([installationIdHash, status])
   @@index([workerId, status])
   @@index([authorizedUntil])
+}
+
+model DispatchWorkerActivation {
+  id                   String                @id @default(cuid())
+  workerId             String
+  worker               DispatchWorker        @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  purpose              String
+  tokenHash            String                @unique
+  status               String                @default("PENDING")
+  expiresAt            DateTime
+  consumedAt           DateTime?
+  consumedByDeviceId   String?
+  consumedByDevice     DispatchWorkerDevice? @relation(fields: [consumedByDeviceId], references: [id], onDelete: SetNull)
+  revokedAt            DateTime?
+  revokedByUsername    String?
+  revocationReason     String?
+  createdByUsername    String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([workerId, purpose, status])
+  @@index([status, expiresAt])
+  @@index([consumedByDeviceId])
+  @@index([workerId, createdAt])
 }
 
 model DispatchAttendanceSession {
