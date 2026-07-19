@@ -504,25 +504,37 @@ model DispatchClientService {
 }
 
 model DispatchOperationPoint {
-  id                String                   @id @default(cuid())
-  clientId          String
-  client            DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name              String
-  cityName          String?
-  address           String?
-  contactName       String?
-  contactPhone      String?
-  publicToken       String                   @unique
-  isActive          Boolean                  @default(true)
-  notes             String?
-  createdByUsername String?
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
-  serviceRequests   DispatchServiceRequest[]
+  id                          String                   @id @default(cuid())
+  clientId                    String
+  client                      DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name                        String
+  cityName                    String?
+  address                     String?
+  contactName                 String?
+  contactPhone                String?
+  publicToken                 String                   @unique
+  isActive                    Boolean                  @default(true)
+  notes                       String?
+  createdByUsername           String?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  attendanceEnabled           Boolean                  @default(false)
+  attendanceLatitude          Decimal?                 @db.Decimal(10, 7)
+  attendanceLongitude         Decimal?                 @db.Decimal(10, 7)
+  geofenceRadiusMeters        Int?
+  maxLocationAccuracyMeters   Int?
+  earlyArrivalWindowMinutes   Int                      @default(60)
+  lateToleranceMinutes        Int                      @default(10)
+  absenceGraceMinutes         Int                      @default(15)
+  attendanceTimezone          String                   @default("America/Bogota")
+  attendancePhotoPolicy       String                   @default("RISK_ONLY")
+  manualAttendanceAllowed     Boolean                  @default(true)
+  serviceRequests             DispatchServiceRequest[]
 
   @@index([clientId])
   @@index([cityName])
   @@index([isActive])
+  @@index([attendanceEnabled])
 }
 
 model DispatchWorker {
@@ -548,6 +560,7 @@ model DispatchWorker {
   vacancies         DispatchWorkerVacancy[]
   assignments       DispatchAssignment[]
   incidents         DispatchIncident[]
+  devices           DispatchWorkerDevice[]
 
   @@index([candidateId])
   @@index([documentNumber])
@@ -622,23 +635,127 @@ model DispatchServiceRequest {
 }
 
 model DispatchAssignment {
-  id                String                 @id @default(cuid())
-  serviceRequestId  String
-  serviceRequest    DispatchServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
-  workerId          String
-  worker            DispatchWorker         @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  status            String                 @default("ASSIGNED")
-  notes             String?
-  createdByUsername String?
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-  incidents         DispatchIncident[]
+  id                    String                    @id @default(cuid())
+  serviceRequestId      String
+  serviceRequest        DispatchServiceRequest    @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  workerId              String
+  worker                DispatchWorker            @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  status                String                    @default("ASSIGNED")
+  notes                 String?
+  createdByUsername     String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  incidents             DispatchIncident[]
   whatsappConfirmations DispatchWhatsappConfirmation[]
+  attendanceSession     DispatchAttendanceSession?
 
   @@unique([serviceRequestId, workerId])
   @@index([serviceRequestId])
   @@index([workerId])
   @@index([status])
+}
+
+model DispatchWorkerDevice {
+  id                   String                   @id @default(cuid())
+  workerId             String
+  worker               DispatchWorker           @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  installationIdHash   String
+  authorizationType    String                   @default("PRIMARY")
+  status               String                   @default("ACTIVE")
+  authorizedFrom       DateTime                 @default(now())
+  authorizedUntil      DateTime?
+  lastSeenAt           DateTime?
+  revokedAt            DateTime?
+  revokedByUsername    String?
+  revocationReason     String?
+  userAgent            String?
+  platform             String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  attendanceMarks      DispatchAttendanceMark[]
+
+  @@unique([workerId, installationIdHash])
+  @@index([installationIdHash, status])
+  @@index([workerId, status])
+  @@index([authorizedUntil])
+}
+
+model DispatchAttendanceSession {
+  id                   String                     @id @default(cuid())
+  assignmentId         String                     @unique
+  assignment           DispatchAssignment         @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  expectedStartAt      DateTime
+  expectedEndAt        DateTime?
+  attendanceStatus     String                     @default("PENDING")
+  validationStatus     String                     @default("PENDING")
+  punctualityStatus    String?
+  riskScore            Int                        @default(0)
+  riskFlags            Json?
+  arrivalReportedAt    DateTime?
+  arrivalValidatedAt   DateTime?
+  departureReportedAt  DateTime?
+  departureValidatedAt DateTime?
+  workedMinutes        Int?
+  source               String                     @default("SYSTEM")
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  marks                DispatchAttendanceMark[]
+  reviews              DispatchAttendanceReview[]
+
+  @@index([expectedStartAt])
+  @@index([attendanceStatus, expectedStartAt])
+  @@index([validationStatus, expectedStartAt])
+}
+
+model DispatchAttendanceMark {
+  id                    String                    @id @default(cuid())
+  attendanceSessionId   String
+  attendanceSession     DispatchAttendanceSession @relation(fields: [attendanceSessionId], references: [id], onDelete: Restrict)
+  workerDeviceId        String?
+  workerDevice          DispatchWorkerDevice?     @relation(fields: [workerDeviceId], references: [id], onDelete: SetNull)
+  markType              String
+  idempotencyKey        String                    @unique
+  serverReceivedAt      DateTime                  @default(now())
+  clientCapturedAt      DateTime?
+  latitude              Decimal?                  @db.Decimal(10, 7)
+  longitude             Decimal?                  @db.Decimal(10, 7)
+  accuracyMeters        Decimal?                  @db.Decimal(10, 2)
+  distanceToPointMeters Decimal?                  @db.Decimal(12, 2)
+  insideGeofence        Boolean?
+  installationIdHash    String?
+  ipAddress             String?
+  userAgent             String?
+  evidenceStorageKey    String?
+  evidenceMimeType      String?
+  decision              String                    @default("PENDING")
+  riskScore             Int                       @default(0)
+  riskFlags             Json?
+  createdAt             DateTime                  @default(now())
+
+  @@index([attendanceSessionId, markType, serverReceivedAt])
+  @@index([workerDeviceId, serverReceivedAt])
+  @@index([decision, serverReceivedAt])
+}
+
+model DispatchAttendanceReview {
+  id                       String                    @id @default(cuid())
+  attendanceSessionId      String
+  attendanceSession        DispatchAttendanceSession @relation(fields: [attendanceSessionId], references: [id], onDelete: Restrict)
+  action                   String
+  previousAttendanceStatus String?
+  newAttendanceStatus      String?
+  previousValidationStatus String?
+  newValidationStatus      String?
+  reason                   String
+  notes                    String?
+  actorUsername            String
+  actorRole                String?
+  metadata                 Json?
+  createdAt                DateTime                  @default(now())
+
+  @@index([attendanceSessionId, createdAt])
+  @@index([actorUsername, createdAt])
+  @@index([action, createdAt])
 }
 
 model DispatchWhatsappConfirmation {
