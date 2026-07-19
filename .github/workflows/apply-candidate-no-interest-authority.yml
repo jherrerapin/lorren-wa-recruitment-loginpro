@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/apply-candidate-no-interest-authority.mjs
       - scripts/apply-candidate-no-interest-guardrails-fix.mjs
+      - scripts/split-candidate-no-interest-scanner.mjs
       - test/candidateNoInterestStateService.test.js
       - test/conversationEngineNoInterestAuthority.test.js
       - .github/workflows/apply-candidate-no-interest-authority.yml
@@ -16,6 +17,7 @@ on:
     paths:
       - scripts/apply-candidate-no-interest-authority.mjs
       - scripts/apply-candidate-no-interest-guardrails-fix.mjs
+      - scripts/split-candidate-no-interest-scanner.mjs
       - test/candidateNoInterestStateService.test.js
       - test/conversationEngineNoInterestAuthority.test.js
       - .github/workflows/apply-candidate-no-interest-authority.yml
@@ -55,6 +57,7 @@ jobs:
         run: |
           node scripts/apply-candidate-no-interest-authority.mjs
           node scripts/apply-candidate-no-interest-guardrails-fix.mjs
+          node scripts/split-candidate-no-interest-scanner.mjs
 
       - name: Validate JavaScript syntax
         run: |
@@ -88,8 +91,14 @@ jobs:
       - name: Validate scanner simple-step authority
         run: node --test --test-name-pattern="transiciones simples" test/candidateProgressAuthority.test.js
 
-      - name: Validate scanner no-interest authority
-        run: node --test --test-name-pattern="cierre exacto por falta de interés" test/candidateProgressAuthority.test.js
+      - name: Validate scanner no-interest manifest
+        run: node --test --test-name-pattern="manifiesto registra el contrato compuesto" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner no-interest service
+        run: node --test --test-name-pattern="CandidateStateService implementa el cierre exacto" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner no-interest engine
+        run: node --test --test-name-pattern="conversationEngine delega el cierre exacto" test/candidateProgressAuthority.test.js
 
       - name: Validate scanner generic patch guard
         run: node --test --test-name-pattern="sin una API genérica" test/candidateProgressAuthority.test.js
