@@ -35,12 +35,21 @@ function nextSlot() {
 
 function prismaMock() {
   const updates = [];
+  const stepUpdates = [];
   const bookings = [];
+  let persistedStep = null;
   return {
     updates,
+    stepUpdates,
     bookings,
     candidate: {
-      update: async (args) => { updates.push(args); return { id: args.where.id, ...args.data }; }
+      update: async (args) => { updates.push(args); return { id: args.where.id, ...args.data }; },
+      updateMany: async (args) => {
+        stepUpdates.push(args);
+        persistedStep = args.data.currentStep;
+        return { count: 1 };
+      },
+      findUnique: async (args) => ({ id: args.where.id, currentStep: persistedStep })
     },
     interviewBooking: {
       findFirst: async () => null,

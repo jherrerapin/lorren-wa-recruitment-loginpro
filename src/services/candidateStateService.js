@@ -1,3 +1,4 @@
+import { ConversationStep } from '@prisma/client';
 import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
 
@@ -436,4 +437,47 @@ export async function acquireCandidateMultilineBatch(client, input = {}) {
   });
 
   return { count: Number(result?.count || 0) };
+}
+
+
+function requireConversationStep(value, fieldName) {
+  if (typeof value !== 'string' || !Object.values(ConversationStep).includes(value)) {
+    throw new TypeError(`${fieldName}_invalid`);
+  }
+  return value;
+}
+
+export async function transitionCandidateConversationStep(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expectedStep = requireConversationStep(
+    input.expected?.currentStep,
+    'candidate_expected_current_step'
+  );
+  const nextStep = requireConversationStep(input.nextStep, 'candidate_next_step');
+
+  if (expectedStep === nextStep) {
+    throw new TypeError('candidate_conversation_step_noop');
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      currentStep: expectedStep
+    },
+    data: {
+      currentStep: nextStep
+    }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expectedStep,
+    nextStep
+  };
 }

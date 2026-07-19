@@ -30,6 +30,7 @@ import {
 import { applyCommuteAdvisoryToReply } from './commuteAdvisoryPolicy.js';
 import { applyRejectionMemoryPolicy, buildRequirementRejectionDecision } from './rejectionPolicy.js';
 import { OPENAI_CONVERSATION_MODEL } from './openAiModelConfig.js';
+import { transitionCandidateConversationStep } from './candidateStateService.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla el motor conversacional legacy/chat-completions:
@@ -1150,8 +1151,43 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     finalStep = readinessAfterMerge.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA;
   }
 
-  if (finalStep && finalStep !== candidate.currentStep) {
+  const requestedFinalStep = finalStep;
+  const hasStepTransition = Boolean(finalStep && finalStep !== candidate.currentStep);
+  if (hasStepTransition) {
     pendingUpdate.currentStep = finalStep;
+  }
+
+  const pendingUpdateKeys = Object.keys(pendingUpdate);
+  const hasSimpleStepTransition = hasStepTransition
+    && pendingUpdateKeys.length === 1
+    && pendingUpdateKeys[0] === 'currentStep';
+  let stepTransition = null;
+
+  if (hasSimpleStepTransition) {
+    delete pendingUpdate.currentStep;
+    stepTransition = await transitionCandidateConversationStep(prisma, {
+      candidateId: candidate.id,
+      expected: { currentStep: candidate.currentStep },
+      nextStep: finalStep
+    }).catch((error) => {
+      console.error('[ACT_STEP_TRANSITION_ERROR]', error?.message);
+      return {
+        count: 0,
+        candidate: null,
+        expectedStep: candidate.currentStep,
+        nextStep: finalStep,
+        error: error?.message || 'candidate_step_transition_error'
+      };
+    });
+
+    const transitionApplied = stepTransition.count === 1;
+    const observedStep = stepTransition.candidate?.currentStep || candidate.currentStep;
+    stepTransition = {
+      ...stepTransition,
+      conflict: !transitionApplied,
+      observedStep
+    };
+    if (!transitionApplied) finalStep = observedStep;
   }
 
   if (Object.keys(pendingUpdate).length) {
@@ -1161,7 +1197,13 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     }).catch((error) => console.error('[ACT_STEP_UPDATE_ERROR]', error?.message));
   }
 
-  return { readiness: readinessAfterMerge, blockedActions, finalStep };
+  return {
+    readiness: readinessAfterMerge,
+    blockedActions,
+    finalStep,
+    requestedFinalStep,
+    stepTransition
+  };
 }
 
 export function sanitizeEngineReplyForVacancy(context = {}) {
