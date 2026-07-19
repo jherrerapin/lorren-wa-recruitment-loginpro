@@ -220,6 +220,14 @@ test('rechaza clientes, ids, duraciones, versiones y fechas inválidas', async (
     /candidate_multiline_window_ms_invalid/
   );
   await assert.rejects(
+    () => scheduleCandidateMultilineWindow(client, { candidateId: initialCandidate.id, windowMs: [2500] }),
+    /candidate_multiline_window_ms_invalid/
+  );
+  await assert.rejects(
+    () => scheduleCandidateMultilineWindow(client, { candidateId: initialCandidate.id, windowMs: { value: 2500 } }),
+    /candidate_multiline_window_ms_invalid/
+  );
+  await assert.rejects(
     () => scheduleCandidateMultilineWindow(client, { candidateId: initialCandidate.id, windowMs: 1000, now: null }),
     /candidate_multiline_schedule_now_invalid/
   );
@@ -234,6 +242,20 @@ test('rechaza clientes, ids, duraciones, versiones y fechas inválidas', async (
     () => acquireCandidateMultilineBatch(client, {
       candidateId: initialCandidate.id,
       expected: { multilineBatchVersion: 1.5 }
+    }),
+    /candidate_multiline_batch_version_invalid/
+  );
+  await assert.rejects(
+    () => acquireCandidateMultilineBatch(client, {
+      candidateId: initialCandidate.id,
+      expected: { multilineBatchVersion: [4] }
+    }),
+    /candidate_multiline_batch_version_invalid/
+  );
+  await assert.rejects(
+    () => acquireCandidateMultilineBatch(client, {
+      candidateId: initialCandidate.id,
+      expected: { multilineBatchVersion: { value: 4 } }
     }),
     /candidate_multiline_batch_version_invalid/
   );

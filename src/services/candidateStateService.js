@@ -368,7 +368,10 @@ function requireCandidateMultilineAcquireClient(client) {
 }
 
 function requireMultilineWindowMs(value) {
-  if (value === null || typeof value === 'boolean' || String(value).trim() === '') {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string')
+    || (typeof value === 'string' && value.trim() === '')
+  ) {
     throw new TypeError('candidate_multiline_window_ms_invalid');
   }
   const windowMs = Number(value);
@@ -379,7 +382,10 @@ function requireMultilineWindowMs(value) {
 }
 
 function requireMultilineBatchVersion(value) {
-  if (value === null || typeof value === 'boolean' || String(value).trim() === '') {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string')
+    || (typeof value === 'string' && value.trim() === '')
+  ) {
     throw new TypeError('candidate_multiline_batch_version_invalid');
   }
   const version = Number(value);
