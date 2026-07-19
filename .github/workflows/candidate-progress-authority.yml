@@ -1,0 +1,61 @@
+name: Candidate progress authority
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - prisma/schema.prisma
+      - src/services/candidateStateService.js
+      - src/routes/webhook.js
+      - config/candidate-progress-authority.json
+      - docs/architecture/candidate-state-transition-inventory.md
+      - test/candidateMultilineStateService.test.js
+      - test/candidateProgressAuthority.test.js
+      - .github/workflows/candidate-progress-authority.yml
+  push:
+    branches:
+      - main
+    paths:
+      - prisma/schema.prisma
+      - src/services/candidateStateService.js
+      - src/routes/webhook.js
+      - config/candidate-progress-authority.json
+      - docs/architecture/candidate-state-transition-inventory.md
+      - test/candidateMultilineStateService.test.js
+      - test/candidateProgressAuthority.test.js
+      - .github/workflows/candidate-progress-authority.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-progress-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Validate Candidate multiline authority
+        run: node --test test/candidateMultilineStateService.test.js test/candidateProgressAuthority.test.js

@@ -351,3 +351,89 @@ export async function completeSupervisorReviewAfterDelivery(client, input = {}) 
     }
   });
 }
+
+
+function requireCandidateMultilineScheduleClient(client) {
+  if (typeof client?.candidate?.update !== 'function') {
+    throw new TypeError('candidate_multiline_schedule_client_required');
+  }
+  return client;
+}
+
+function requireCandidateMultilineAcquireClient(client) {
+  if (typeof client?.candidate?.updateMany !== 'function') {
+    throw new TypeError('candidate_multiline_acquire_client_required');
+  }
+  return client;
+}
+
+function requireMultilineWindowMs(value) {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string')
+    || (typeof value === 'string' && value.trim() === '')
+  ) {
+    throw new TypeError('candidate_multiline_window_ms_invalid');
+  }
+  const windowMs = Number(value);
+  if (!Number.isFinite(windowMs) || windowMs < 0) {
+    throw new TypeError('candidate_multiline_window_ms_invalid');
+  }
+  return windowMs;
+}
+
+function requireMultilineBatchVersion(value) {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string')
+    || (typeof value === 'string' && value.trim() === '')
+  ) {
+    throw new TypeError('candidate_multiline_batch_version_invalid');
+  }
+  const version = Number(value);
+  if (!Number.isSafeInteger(version) || version < 0) {
+    throw new TypeError('candidate_multiline_batch_version_invalid');
+  }
+  return version;
+}
+
+export async function scheduleCandidateMultilineWindow(client, input = {}) {
+  const candidateClient = requireCandidateMultilineScheduleClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const windowMs = requireMultilineWindowMs(input.windowMs);
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_multiline_schedule_now');
+  const windowUntil = new Date(now.getTime() + windowMs);
+
+  const updated = await candidateClient.candidate.update({
+    where: { id: candidateId },
+    data: {
+      multilineWindowUntil: windowUntil,
+      multilineBatchVersion: { increment: 1 }
+    },
+    select: { multilineBatchVersion: true }
+  });
+  const batchVersion = requireMultilineBatchVersion(updated?.multilineBatchVersion);
+
+  return { windowMs, windowUntil, batchVersion };
+}
+
+export async function acquireCandidateMultilineBatch(client, input = {}) {
+  const candidateClient = requireCandidateMultilineAcquireClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const batchVersion = requireMultilineBatchVersion(input.expected?.multilineBatchVersion);
+  const nowInput = input.now === undefined ? new Date() : input.now;
+  const now = requireValidDate(nowInput, 'candidate_multiline_acquire_now');
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      multilineBatchVersion: batchVersion,
+      multilineWindowUntil: { lte: now }
+    },
+    data: {
+      multilineWindowUntil: null,
+      multilineBatchVersion: { increment: 1 }
+    }
+  });
+
+  return { count: Number(result?.count || 0) };
+}
