@@ -104,10 +104,12 @@ Solo cuando `count === 1` limpia la ventana e incrementa nuevamente la versión.
 Los contratos rechazan antes de escribir:
 
 - IDs vacíos;
-- duraciones negativas, no finitas, vacías o booleanas;
-- versiones negativas, no enteras, vacías o booleanas;
+- duraciones negativas, no finitas, vacías, booleanas, arreglos u objetos;
+- versiones negativas, no enteras, vacías, booleanas, arreglos u objetos;
 - fechas nulas, booleanas o inválidas;
 - clientes Prisma sin `update` o `updateMany` según corresponda.
+
+Las duraciones y versiones aceptan exclusivamente valores de tipo `number` o `string` no vacío; no dependen de coerciones implícitas de estructuras complejas.
 
 Aceptan el cliente Prisma raíz o un `tx` existente y no crean transacciones anidadas.
 
@@ -120,7 +122,7 @@ Aceptan el cliente Prisma raíz o un `tx` existente y no crean transacciones ani
 
 ## Protección en CI
 
-`test/candidateMultilineStateService.test.js` cubre programación, invalidación de versiones, adquisición única, carreras, ventana no vencida, validaciones y ausencia de transacciones anidadas.
+`test/candidateMultilineStateService.test.js` cubre programación, invalidación de versiones, adquisición única, carreras, ventana no vencida, validaciones de tipo y ausencia de transacciones anidadas.
 
 `test/candidateProgressAuthority.test.js` bloquea:
 
