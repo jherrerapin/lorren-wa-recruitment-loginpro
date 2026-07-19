@@ -1,0 +1,91 @@
+name: Apply Candidate requirement rejection authority
+
+on:
+  push:
+    branches:
+      - refactor/519-candidate-rejection-authority
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-candidate-rejection-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v5
+        with:
+          ref: refactor/519-candidate-rejection-authority
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply exact rejection patch
+        run: node scripts/apply-candidate-requirement-rejection-authority.mjs
+
+      - name: Validate JavaScript syntax
+        run: |
+          node --check src/services/candidateStateService.js
+          node --check src/services/conversationEngine.js
+          node --check test/candidateRequirementRejectionStateService.test.js
+          node --check test/conversationEngineRequirementRejectionAuthority.test.js
+          node --check test/candidateProgressAuthority.test.js
+          node --check test/conversationEngineGuardRails.test.js
+
+      - name: Validate rejection state service
+        run: node --test test/candidateRequirementRejectionStateService.test.js
+
+      - name: Validate conversationEngine rejection integration
+        run: node --test test/conversationEngineRequirementRejectionAuthority.test.js
+
+      - name: Validate historical engine guardrails
+        run: node --test test/conversationEngineGuardRails.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineNoInterestAuthority.test.js
+
+      - name: Validate Candidate progress scanner
+        run: node --test test/candidateProgressAuthority.test.js
+
+      - name: Validate patch formatting
+        run: git diff --check
+
+      - name: Create validated commit
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/services/candidateStateService.js \
+            src/services/conversationEngine.js \
+            config/candidate-progress-authority.json \
+            docs/architecture/candidate-state-transition-inventory.md \
+            test/candidateProgressAuthority.test.js \
+            test/conversationEngineGuardRails.test.js
+          if git diff --cached --quiet; then
+            echo "No permanent changes to commit"
+          else
+            git commit -m "refactor: centralizar rechazo por requisitos"
+          fi
+
+      - name: Push validated commit
+        if: github.event_name == 'push'
+        run: git push origin HEAD:refactor/519-candidate-rejection-authority
