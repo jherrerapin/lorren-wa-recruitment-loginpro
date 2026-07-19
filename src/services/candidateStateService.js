@@ -1,4 +1,4 @@
-import { ConversationStep, ReminderState } from '@prisma/client';
+import { CandidateStatus, ConversationStep, ReminderState } from '@prisma/client';
 import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
 
@@ -551,6 +551,133 @@ export async function completeCandidateNoInterestTransition(client, input = {}) 
     candidate,
     expected,
     nextStep: ConversationStep.DONE,
+    nextReminderState: ReminderState.SKIPPED
+  };
+}
+
+function requireCandidateStatus(value, fieldName) {
+  if (typeof value !== 'string' || !Object.values(CandidateStatus).includes(value)) {
+    throw new TypeError(`${fieldName}_invalid`);
+  }
+  return value;
+}
+
+function requireNullableSnapshotString(value, fieldName) {
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new TypeError(`${fieldName}_invalid`);
+  return value;
+}
+
+function requireStrictDecisionString(value, fieldName) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${fieldName}_required`);
+  }
+  return value;
+}
+
+function normalizeRequirementRejectionSnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'status',
+    'rejectionReason',
+    'rejectionDetails',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_requirement_rejection_snapshot_required');
+  }
+
+  return {
+    currentStep: requireConversationStep(
+      expected.currentStep,
+      'candidate_requirement_rejection_current_step'
+    ),
+    status: requireCandidateStatus(
+      expected.status,
+      'candidate_requirement_rejection_status'
+    ),
+    rejectionReason: requireNullableSnapshotString(
+      expected.rejectionReason,
+      'candidate_requirement_rejection_expected_reason'
+    ),
+    rejectionDetails: requireNullableSnapshotString(
+      expected.rejectionDetails,
+      'candidate_requirement_rejection_expected_details'
+    ),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_requirement_rejection_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_requirement_rejection_reminder_state'
+    )
+  };
+}
+
+function requirementRejectionExpectedWhere(snapshot) {
+  return {
+    currentStep: snapshot.currentStep,
+    status: snapshot.status,
+    rejectionReason: snapshot.rejectionReason,
+    rejectionDetails: snapshot.rejectionDetails,
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function completeCandidateRequirementRejection(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeRequirementRejectionSnapshot(input.expected);
+  const reason = requireStrictDecisionString(
+    input.reason,
+    'candidate_requirement_rejection_reason'
+  );
+  const details = requireStrictDecisionString(
+    input.details,
+    'candidate_requirement_rejection_details'
+  );
+
+  if (expected.status === CandidateStatus.RECHAZADO) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId, {
+      blockedReason: 'already_rejected'
+    });
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...requirementRejectionExpectedWhere(expected)
+    },
+    data: {
+      currentStep: ConversationStep.DONE,
+      status: CandidateStatus.RECHAZADO,
+      rejectionReason: reason,
+      rejectionDetails: details,
+      reminderScheduledFor: null,
+      reminderState: ReminderState.SKIPPED
+    }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    reason,
+    details,
+    nextStep: ConversationStep.DONE,
+    nextStatus: CandidateStatus.RECHAZADO,
     nextReminderState: ReminderState.SKIPPED
   };
 }

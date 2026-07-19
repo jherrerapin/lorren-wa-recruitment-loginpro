@@ -166,3 +166,18 @@ La autoridad compara el ID, el paso leído y el snapshot completo del recordator
 3. Consentimiento, CV, atribución y recordatorios conservan autoridades especializadas.
 4. `Candidate` solo será canónico cuando todos sus grupos tengan una autoridad única.
 5. La modernización no modifica la lógica existente relacionada con género.
+
+## Fase 5: rechazo por requisitos
+
+La transición producida por `mark_rejected` delega en `completeCandidateRequirementRejection()` únicamente cuando `conversationEngine.act()` ha obtenido una decisión permitida de `buildRequirementRejectionDecision()` y el objeto pendiente contiene exactamente:
+
+- `currentStep`;
+- `status`;
+- `rejectionReason`;
+- `rejectionDetails`;
+- `reminderScheduledFor`;
+- `reminderState`.
+
+La política de rechazo sigue siendo el **productor de decisión**. `CandidateStateService` es el **escritor efectivo** y no infiere motivos: compara el snapshot completo mediante `updateMany`, escribe `DONE / RECHAZADO / SKIPPED` y recupera el candidato vigente. Un conflicto devuelve `count=0` y `chatEngine` reutiliza `stale_candidate_step` para no enviar una respuesta construida sobre estado obsoleto.
+
+Combinaciones con `pause_bot`, agenda, `mark_female_pipeline` u otros campos permanecen fuera del contrato. La próxima frontera recomendada es la pausa conversacional explícita, separada de cualquier lógica relacionada con género.

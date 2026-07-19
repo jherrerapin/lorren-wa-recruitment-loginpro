@@ -87,14 +87,15 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'no_interest_authority_migrated');
+  assert.equal(manifest.phase, 'requirement_rejection_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
   assert.deepEqual(manifest.completedSlices, [
     'multiline_window_authority',
     'conversation_engine_simple_step_authority',
-    'conversation_engine_no_interest_authority'
+    'conversation_engine_no_interest_authority',
+    'conversation_engine_requirement_rejection_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -232,8 +233,8 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 1);
-  const contract = manifest.compositeContracts[0];
+  assert.equal(manifest.compositeContracts.length, 2);
+  const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
   assert.equal(contract.consumer, 'src/services/conversationEngine.js');
@@ -281,6 +282,46 @@ test('conversationEngine delega el cierre exacto por falta de interés', () => {
   assert.match(actSource, /contract:\s*['"]no_interest['"]/);
 });
 
+test('el manifiesto registra el contrato compuesto de rechazo por requisitos', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_requirement_rejection');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/conversationEngine.js');
+  assert.equal(contract.responseConsumer, 'src/services/chatEngine.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, [
+    'currentStep',
+    'status',
+    'rejectionReason',
+    'rejectionDetails',
+    'reminderScheduledFor',
+    'reminderState'
+  ]);
+  assert.ok(contract.excludedCombinations.includes('pause_bot'));
+  assert.ok(contract.excludedCombinations.includes('mark_female_pipeline'));
+});
+
+test('CandidateStateService implementa el rechazo exacto por requisitos', () => {
+  const authority = readSource('src/services/candidateStateService.js');
+  const transition = extractFunctionSource(authority, 'completeCandidateRequirementRejection');
+  assert.match(transition, /candidate\.updateMany\s*\(/);
+  assert.match(transition, /currentStep\s*:\s*ConversationStep\.DONE/);
+  assert.match(transition, /status\s*:\s*CandidateStatus\.RECHAZADO/);
+  assert.match(transition, /rejectionReason\s*:\s*reason/);
+  assert.match(transition, /rejectionDetails\s*:\s*details/);
+  assert.match(transition, /reminderScheduledFor\s*:\s*null/);
+  assert.match(transition, /reminderState\s*:\s*ReminderState\.SKIPPED/);
+  assert.doesNotMatch(transition, /botPaused|botPausedAt|botPauseReason|gender|vacancyId/);
+});
+
+test('conversationEngine delega únicamente el rechazo exacto', () => {
+  const actSource = extractFunctionSource(readSource('src/services/conversationEngine.js'), 'act');
+  assert.match(actSource, /hasRequirementRejectionTransition/);
+  assert.match(actSource, /requirementRejectionPendingFields\.every/);
+  assert.match(actSource, /completeCandidateRequirementRejection\s*\(\s*prisma/);
+  assert.match(actSource, /contract:\s*['"]requirement_rejection['"]/);
+});
+
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
   const engine = readSource('src/services/conversationEngine.js');
   const consent = readSource('src/services/consentStateService.js');
@@ -305,10 +346,12 @@ test('la documentación registra las fases migradas y mantiene el siguiente slic
   assert.match(documentation, /Fase 2: autoridad multilinea migrada/);
   assert.match(documentation, /Fase 3: transiciones simples del engine/);
   assert.match(documentation, /Fase 4: cierre por falta de interés/);
+  assert.match(documentation, /Fase 5: rechazo por requisitos/);
   assert.match(documentation, /scheduleCandidateMultilineWindow/);
   assert.match(documentation, /acquireCandidateMultilineBatch/);
   assert.match(documentation, /transitionCandidateConversationStep/);
   assert.match(documentation, /completeCandidateNoInterestTransition/);
+  assert.match(documentation, /completeCandidateRequirementRejection/);
   assert.match(documentation, /stale_candidate_step/);
   assert.match(documentation, /conversationEngine\.act\(\)/);
   assert.match(documentation, /productor de decisión/i);
