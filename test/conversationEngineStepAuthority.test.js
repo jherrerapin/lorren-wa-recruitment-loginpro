@@ -149,7 +149,12 @@ test('una carrera conserva el paso vigente y marca conflicto explícito', async 
 });
 
 test('una transición compuesta conserva temporalmente su escritura unida', async () => {
-  const candidate = baseCandidate({ currentStep: ConversationStep.ASK_CV });
+  const candidate = baseCandidate({
+    currentStep: ConversationStep.ASK_CV,
+    cvStorageKey: 'cv/candidate-engine-step-1.pdf',
+    cvOriginalName: 'hoja-de-vida.pdf',
+    cvMimeType: 'application/pdf'
+  });
   const prisma = createPrismaHarness(candidate);
 
   const result = await act({
