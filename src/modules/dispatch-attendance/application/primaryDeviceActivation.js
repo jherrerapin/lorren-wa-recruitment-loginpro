@@ -5,13 +5,9 @@ import {
   hashActivationToken,
   hashInstallationId,
   normalizeActivationToken,
-  normalizeInstallationId
+  normalizeInstallationId,
+  requiredString
 } from '../domain/deviceActivationPolicy.js';
-
-function requiredString(value, fieldName) {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`${fieldName}_required`);
-  return value.trim();
-}
 
 function requiredRepositoryMethod(repository, methodName) {
   if (!repository || typeof repository[methodName] !== 'function') {
@@ -97,6 +93,6 @@ export async function activatePrimaryDevice({
     workerId: result.workerId,
     deviceId: result.deviceId,
     authorizationType: 'PRIMARY',
-    activatedAt: result.activatedAt instanceof Date ? result.activatedAt : now
+    activatedAt: result.activatedAt instanceof Date && !Number.isNaN(result.activatedAt.getTime()) ? result.activatedAt : now
   };
 }
