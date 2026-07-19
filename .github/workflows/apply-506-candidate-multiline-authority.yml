@@ -1,11 +1,19 @@
 name: Apply issue 506 patch
 
 on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
   push:
     branches:
       - refactor/506-candidate-multiline-authority
     paths:
       - scripts/apply-506-candidate-multiline-authority.mjs
+      - .github/workflows/apply-506-candidate-multiline-authority.yml
 
 permissions:
   contents: write
