@@ -1,7 +1,12 @@
 name: Apply Candidate simple step authority
 
-# Trigger propietario para aplicar el parche exacto y retirar esta automatización.
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/apply-candidate-simple-step-authority.mjs
+      - .github/workflows/apply-candidate-simple-step-authority.yml
   push:
     branches:
       - refactor/501-candidate-simple-step-authority
@@ -13,7 +18,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: apply-candidate-simple-step-authority
+  group: apply-candidate-simple-step-authority-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
