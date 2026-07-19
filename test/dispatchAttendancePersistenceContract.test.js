@@ -18,7 +18,7 @@ async function readContracts() {
 }
 
 function modelBlock(schema, modelName) {
-  const expression = new RegExp(`model ${modelName} \\{([\\s\\S]*?)\\n\\}`, 'm');
+  const expression = new RegExp(`model\\s+${modelName}\\s*\\{([\\s\\S]*?)\\n\\}`, 'm');
   const match = schema.match(expression);
   assert.ok(match, `Debe existir el modelo ${modelName}`);
   return match[1];
@@ -28,11 +28,11 @@ test('la asistencia queda desactivada por defecto en los puntos existentes', asy
   const { schema, migration } = await readContracts();
   const operationPoint = modelBlock(schema, 'DispatchOperationPoint');
 
-  assert.match(operationPoint, /attendanceEnabled\s+Boolean\s+@default\(false\)/);
-  assert.match(operationPoint, /attendanceLatitude\s+Decimal\?\s+@db\.Decimal\(10, 7\)/);
-  assert.match(operationPoint, /attendanceLongitude\s+Decimal\?\s+@db\.Decimal\(10, 7\)/);
-  assert.match(operationPoint, /attendanceTimezone\s+String\s+@default\("America\/Bogota"\)/);
-  assert.match(migration, /"attendanceEnabled" BOOLEAN NOT NULL DEFAULT false/);
+  assert.match(operationPoint, /attendanceEnabled\s+Boolean\s+@default\(\s*false\s*\)/);
+  assert.match(operationPoint, /attendanceLatitude\s+Decimal\?\s+@db\.Decimal\(\s*10\s*,\s*7\s*\)/);
+  assert.match(operationPoint, /attendanceLongitude\s+Decimal\?\s+@db\.Decimal\(\s*10\s*,\s*7\s*\)/);
+  assert.match(operationPoint, /attendanceTimezone\s+String\s+@default\(\s*["']America\/Bogota["']\s*\)/);
+  assert.match(migration, /"attendanceEnabled"\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+false/i);
 });
 
 test('la sesión de asistencia es independiente y única por asignación', async () => {
@@ -42,9 +42,9 @@ test('la sesión de asistencia es independiente y única por asignación', async
 
   assert.match(assignment, /attendanceSession\s+DispatchAttendanceSession\?/);
   assert.match(session, /assignmentId\s+String\s+@unique/);
-  assert.match(session, /assignment\s+DispatchAssignment\s+@relation\([^\n]*onDelete: Restrict\)/);
-  assert.match(session, /attendanceStatus\s+String\s+@default\("PENDING"\)/);
-  assert.match(session, /validationStatus\s+String\s+@default\("PENDING"\)/);
+  assert.match(session, /assignment\s+DispatchAssignment\s+@relation\([\s\S]*?onDelete:\s*Restrict[\s\S]*?\)/);
+  assert.match(session, /attendanceStatus\s+String\s+@default\(\s*["']PENDING["']\s*\)/);
+  assert.match(session, /validationStatus\s+String\s+@default\(\s*["']PENDING["']\s*\)/);
   assert.match(migration, /DispatchAttendanceSession_assignmentId_key/);
 });
 
@@ -53,11 +53,11 @@ test('las marcaciones tienen idempotencia persistente y no guardan imágenes en 
   const mark = modelBlock(schema, 'DispatchAttendanceMark');
 
   assert.match(mark, /idempotencyKey\s+String\s+@unique/);
-  assert.match(mark, /serverReceivedAt\s+DateTime\s+@default\(now\(\)\)/);
+  assert.match(mark, /serverReceivedAt\s+DateTime\s+@default\(\s*now\(\s*\)\s*\)/);
   assert.match(mark, /evidenceStorageKey\s+String\?/);
   assert.doesNotMatch(mark, /\bBytes\b/);
   assert.match(migration, /DispatchAttendanceMark_idempotencyKey_key/);
-  assert.match(migration, /"evidenceStorageKey" TEXT/);
+  assert.match(migration, /"evidenceStorageKey"\s+TEXT/);
 });
 
 test('los dispositivos permiten detectar uso compartido sin imponer unicidad global', async () => {
@@ -67,9 +67,9 @@ test('los dispositivos permiten detectar uso compartido sin imponer unicidad glo
 
   assert.match(worker, /devices\s+DispatchWorkerDevice\[\]/);
   assert.match(device, /installationIdHash\s+String/);
-  assert.match(device, /@@unique\(\[workerId, installationIdHash\]\)/);
+  assert.match(device, /@@unique\(\[\s*workerId\s*,\s*installationIdHash\s*\]\)/);
   assert.doesNotMatch(device, /installationIdHash\s+String\s+@unique/);
-  assert.match(device, /@@index\(\[installationIdHash, status\]\)/);
+  assert.match(device, /@@index\(\[\s*installationIdHash\s*,\s*status\s*\]\)/);
 });
 
 test('las revisiones conservan historial y relaciones restrictivas', async () => {
@@ -80,8 +80,8 @@ test('las revisiones conservan historial y relaciones restrictivas', async () =>
   assert.match(review, /newAttendanceStatus\s+String\?/);
   assert.match(review, /reason\s+String/);
   assert.match(review, /actorUsername\s+String/);
-  assert.match(review, /onDelete: Restrict/);
-  assert.match(migration, /ON DELETE RESTRICT ON UPDATE CASCADE/);
+  assert.match(review, /onDelete:\s*Restrict/);
+  assert.match(migration, /ON\s+DELETE\s+RESTRICT\s+ON\s+UPDATE\s+CASCADE/i);
 });
 
 test('la migración es expansiva y no contiene operaciones destructivas', async () => {
@@ -98,8 +98,8 @@ test('la migración es expansiva y no contiene operaciones destructivas', async 
     assert.doesNotMatch(migration, pattern);
   }
 
-  assert.match(migration, /CREATE TABLE "DispatchWorkerDevice"/);
-  assert.match(migration, /CREATE TABLE "DispatchAttendanceSession"/);
-  assert.match(migration, /CREATE TABLE "DispatchAttendanceMark"/);
-  assert.match(migration, /CREATE TABLE "DispatchAttendanceReview"/);
+  assert.match(migration, /CREATE\s+TABLE\s+"DispatchWorkerDevice"/i);
+  assert.match(migration, /CREATE\s+TABLE\s+"DispatchAttendanceSession"/i);
+  assert.match(migration, /CREATE\s+TABLE\s+"DispatchAttendanceMark"/i);
+  assert.match(migration, /CREATE\s+TABLE\s+"DispatchAttendanceReview"/i);
 });
