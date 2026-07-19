@@ -1,0 +1,59 @@
+name: Apply Candidate simple step authority
+
+on:
+  push:
+    branches:
+      - refactor/501-candidate-simple-step-authority
+    paths:
+      - scripts/apply-candidate-simple-step-authority.mjs
+      - .github/workflows/apply-candidate-simple-step-authority.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-candidate-simple-step-authority
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v5
+        with:
+          ref: refactor/501-candidate-simple-step-authority
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply exact authority patch
+        run: node scripts/apply-candidate-simple-step-authority.mjs
+
+      - name: Validate focused contracts
+        run: |
+          node --check src/services/candidateStateService.js
+          node --check src/services/conversationEngine.js
+          node --check src/services/chatEngine.js
+          node --test test/candidateConversationStepStateService.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
+          git diff --check
+
+      - name: Commit clean result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: centralizar transiciones simples de currentStep"
+          git push origin HEAD:refactor/501-candidate-simple-step-authority
