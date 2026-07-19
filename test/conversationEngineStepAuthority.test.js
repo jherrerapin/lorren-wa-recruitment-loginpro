@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { ConversationStep, Gender } from '@prisma/client';
+import { ConversationStep, Gender, ReminderState } from '@prisma/client';
 import { act } from '../src/services/conversationEngine.js';
 
 function baseCandidate(overrides = {}) {
@@ -20,6 +20,8 @@ function baseCandidate(overrides = {}) {
     cvStorageKey: null,
     cvOriginalName: null,
     cvMimeType: null,
+    reminderScheduledFor: null,
+    reminderState: ReminderState.NONE,
     ...overrides
   };
 }
@@ -148,7 +150,7 @@ test('una carrera conserva el paso vigente y marca conflicto explícito', async 
   assert.equal(prisma.getState().currentStep, ConversationStep.CONFIRMING_DATA);
 });
 
-test('una transición compuesta conserva temporalmente su escritura unida', async () => {
+test('mark_no_interest usa el primer contrato compuesto del engine', async () => {
   const candidate = baseCandidate({
     currentStep: ConversationStep.ASK_CV,
     cvStorageKey: 'cv/candidate-engine-step-1.pdf',
@@ -165,13 +167,14 @@ test('una transición compuesta conserva temporalmente su escritura unida', asyn
   });
 
   assert.equal(result.finalStep, ConversationStep.DONE);
-  assert.equal(result.stepTransition, null);
-  assert.equal(prisma.calls.updateMany.length, 0);
-  assert.equal(prisma.calls.update.length, 1);
-  assert.deepEqual(prisma.calls.update[0].data, {
+  assert.equal(result.stepTransition.contract, 'no_interest');
+  assert.equal(result.stepTransition.count, 1);
+  assert.equal(prisma.calls.updateMany.length, 1);
+  assert.equal(prisma.calls.update.length, 0);
+  assert.deepEqual(prisma.calls.updateMany[0].data, {
+    currentStep: ConversationStep.DONE,
     reminderScheduledFor: null,
-    reminderState: 'SKIPPED',
-    currentStep: ConversationStep.DONE
+    reminderState: ReminderState.SKIPPED
   });
 });
 

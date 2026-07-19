@@ -30,7 +30,10 @@ import {
 import { applyCommuteAdvisoryToReply } from './commuteAdvisoryPolicy.js';
 import { applyRejectionMemoryPolicy, buildRequirementRejectionDecision } from './rejectionPolicy.js';
 import { OPENAI_CONVERSATION_MODEL } from './openAiModelConfig.js';
-import { transitionCandidateConversationStep } from './candidateStateService.js';
+import {
+  completeCandidateNoInterestTransition,
+  transitionCandidateConversationStep
+} from './candidateStateService.js';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 // OPENAI_MODEL controla el motor conversacional legacy/chat-completions:
@@ -865,9 +868,10 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
 export async function act({ actions, candidate, vacancy = null, extractedFields = {}, candidateFields = {}, nextStep, nextSlot, prisma }) {
   const { normalizeCandidateFields } = await import('./candidateData.js');
   const { cancelCandidateBookings, createBooking } = await import('./interviewScheduler.js');
-  const { CandidateStatus, ConversationStep, Gender } = await import('@prisma/client');
+  const { CandidateStatus, ConversationStep, Gender, ReminderState } = await import('@prisma/client');
 
   const normalizedActions = Array.isArray(actions) ? actions : [];
+  const hasMarkNoInterestAction = normalizedActions.some((action) => action?.type === 'mark_no_interest');
   const mergedRawFields = Object.keys(candidateFields || {}).length
     ? candidateFields
     : extractEngineCandidateFields(normalizedActions, extractedFields);
@@ -1158,12 +1162,49 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   }
 
   const pendingUpdateKeys = Object.keys(pendingUpdate);
+  const noInterestUpdateFields = ['currentStep', 'reminderScheduledFor', 'reminderState'];
+  const hasNoInterestTransition = hasStepTransition
+    && finalStep === ConversationStep.DONE
+    && hasMarkNoInterestAction
+    && pendingUpdateKeys.length === noInterestUpdateFields.length
+    && noInterestUpdateFields.every((field) => pendingUpdateKeys.includes(field))
+    && pendingUpdate.reminderScheduledFor === null
+    && pendingUpdate.reminderState === ReminderState.SKIPPED;
   const hasSimpleStepTransition = hasStepTransition
     && pendingUpdateKeys.length === 1
     && pendingUpdateKeys[0] === 'currentStep';
   let stepTransition = null;
 
-  if (hasSimpleStepTransition) {
+  if (hasNoInterestTransition) {
+    delete pendingUpdate.currentStep;
+    delete pendingUpdate.reminderScheduledFor;
+    delete pendingUpdate.reminderState;
+    stepTransition = await completeCandidateNoInterestTransition(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        currentStep: candidate.currentStep,
+        reminderScheduledFor: candidate.reminderScheduledFor,
+        reminderState: candidate.reminderState
+      }
+    }).catch((error) => {
+      console.error('[ACT_NO_INTEREST_TRANSITION_ERROR]', error?.message);
+      return {
+        count: 0,
+        candidate: null,
+        error: error?.message || 'candidate_no_interest_transition_error'
+      };
+    });
+
+    const transitionApplied = stepTransition.count === 1;
+    const observedStep = stepTransition.candidate?.currentStep || candidate.currentStep;
+    stepTransition = {
+      ...stepTransition,
+      contract: 'no_interest',
+      conflict: !transitionApplied,
+      observedStep
+    };
+    if (!transitionApplied) finalStep = observedStep;
+  } else if (hasSimpleStepTransition) {
     delete pendingUpdate.currentStep;
     stepTransition = await transitionCandidateConversationStep(prisma, {
       candidateId: candidate.id,
@@ -1184,6 +1225,7 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     const observedStep = stepTransition.candidate?.currentStep || candidate.currentStep;
     stepTransition = {
       ...stepTransition,
+      contract: 'simple_step',
       conflict: !transitionApplied,
       observedStep
     };

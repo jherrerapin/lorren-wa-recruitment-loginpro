@@ -87,13 +87,14 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'simple_step_authority_migrated');
+  assert.equal(manifest.phase, 'no_interest_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
   assert.deepEqual(manifest.completedSlices, [
     'multiline_window_authority',
-    'conversation_engine_simple_step_authority'
+    'conversation_engine_simple_step_authority',
+    'conversation_engine_no_interest_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -230,6 +231,56 @@ test('CandidateStateService controla las transiciones simples del engine y expli
   assert.match(chatEngine, /effectiveReply\s*=\s*staleStepConflict\s*\?\s*null/);
 });
 
+test('el manifiesto registra el contrato compuesto de falta de interés', () => {
+  assert.equal(manifest.compositeContracts.length, 1);
+  const contract = manifest.compositeContracts[0];
+  assert.equal(contract.id, 'conversation_engine_no_interest');
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/conversationEngine.js');
+  assert.equal(contract.responseConsumer, 'src/services/chatEngine.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, ['currentStep', 'reminderScheduledFor', 'reminderState']);
+  assert.ok(contract.excludedCombinations.includes('mark_rejected'));
+  assert.ok(contract.excludedCombinations.includes('pause_bot'));
+});
+
+test('CandidateStateService usa updateMany para el cierre por falta de interés', () => {
+  const transition = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'completeCandidateNoInterestTransition');
+  assert.match(transition, /candidate\.updateMany\s*\(/);
+});
+
+test('CandidateStateService fija DONE en el cierre por falta de interés', () => {
+  const authority = readSource('src/services/candidateStateService.js');
+  assert.match(
+    authority,
+    /function\s+completeCandidateNoInterestTransition[\s\S]*?data\s*:\s*\{[\s\S]*?currentStep\s*:\s*ConversationStep\.DONE/
+  );
+});
+
+test('CandidateStateService limpia la fecha del recordatorio por falta de interés', () => {
+  const transition = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'completeCandidateNoInterestTransition');
+  assert.match(transition, /reminderScheduledFor\s*:\s*null/);
+});
+
+test('CandidateStateService marca SKIPPED por falta de interés', () => {
+  const transition = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'completeCandidateNoInterestTransition');
+  assert.match(transition, /reminderState\s*:\s*ReminderState\.SKIPPED/);
+});
+
+test('CandidateStateService no absorbe campos ajenos en falta de interés', () => {
+  const transition = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'completeCandidateNoInterestTransition');
+  assert.doesNotMatch(transition, /status|botPaused|rejectionReason|rejectionDetails/);
+});
+
+test('conversationEngine delega el cierre exacto por falta de interés', () => {
+  const engine = readSource('src/services/conversationEngine.js');
+  const actSource = extractFunctionSource(engine, 'act');
+  assert.match(actSource, /hasNoInterestTransition/);
+  assert.match(actSource, /noInterestUpdateFields\.every/);
+  assert.match(actSource, /completeCandidateNoInterestTransition\s*\(\s*prisma/);
+  assert.match(actSource, /contract:\s*['"]no_interest['"]/);
+});
+
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
   const engine = readSource('src/services/conversationEngine.js');
   const consent = readSource('src/services/consentStateService.js');
@@ -247,15 +298,17 @@ test('la reducción del engine y el consentimiento permanecen caracterizados sin
   assert.doesNotMatch(manifest.transitionFamilies.map((family) => family.id).join('|'), /generic|arbitrary|patch/i);
 });
 
-test('la documentación registra la fase multilinea y mantiene el siguiente slice acotado', () => {
+test('la documentación registra las fases migradas y mantiene el siguiente slice acotado', () => {
   const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
   assert.match(documentation, /config\/candidate-progress-authority\.json/);
   assert.match(documentation, /Fase 1: caracterización del progreso conversacional/);
   assert.match(documentation, /Fase 2: autoridad multilinea migrada/);
   assert.match(documentation, /Fase 3: transiciones simples del engine/);
+  assert.match(documentation, /Fase 4: cierre por falta de interés/);
   assert.match(documentation, /scheduleCandidateMultilineWindow/);
   assert.match(documentation, /acquireCandidateMultilineBatch/);
   assert.match(documentation, /transitionCandidateConversationStep/);
+  assert.match(documentation, /completeCandidateNoInterestTransition/);
   assert.match(documentation, /stale_candidate_step/);
   assert.match(documentation, /conversationEngine\.act\(\)/);
   assert.match(documentation, /productor de decisión/i);

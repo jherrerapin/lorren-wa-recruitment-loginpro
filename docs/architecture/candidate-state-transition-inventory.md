@@ -140,11 +140,21 @@ Aceptan el cliente Prisma raíz o un `tx` existente y no crean transacciones ani
 
 `conversationEngine.act()` conserva la reducción de acciones, readiness y guardas. Solo delega cuando `pendingUpdate` contiene exclusivamente `currentStep`. Si otra operación cambió el paso, la autoridad devuelve `count=0`, `act()` conserva el paso observado y `chatEngine` suprime la respuesta con razón `stale_candidate_step`. No se reintenta ni se sobrescribe el estado más nuevo.
 
-Las transiciones compuestas que también incluyen rechazo, pausa, recordatorios o agenda permanecen temporalmente unidas en `act()`. Esta deuda es explícita: no se oculta dentro de un método genérico ni se separa antes de definir su atomicidad funcional.
+El cierre exacto por falta de interés deja de formar parte de esa deuda. Rechazo, pausa y agenda permanecen temporalmente unidos en `act()`; no se ocultan dentro de un método genérico ni se separan antes de definir su atomicidad funcional.
+
+## Fase 4: cierre por falta de interés
+
+`completeCandidateNoInterestTransition()` controla únicamente la combinación producida por `mark_no_interest` cuando `pendingUpdate` contiene exactamente:
+
+- `currentStep: DONE`;
+- `reminderScheduledFor: null`;
+- `reminderState: SKIPPED`.
+
+La autoridad compara el ID, el paso leído y el snapshot completo del recordatorio. Una carrera por cambio de paso, estado o fecha devuelve `count=0`, recupera el candidato vigente y activa la supresión `stale_candidate_step`. No reintenta, no crea reservas y no absorbe combinaciones con rechazo o pausa.
 
 ## Próxima frontera
 
-1. caracterizar y migrar las transiciones compuestas de `conversationEngine.act()`;
+1. migrar `mark_rejected` como contrato compuesto separado;
 2. progreso alrededor del consentimiento;
 3. ramas legacy del webhook;
 4. correcciones administrativas con actor, motivo y origen esperado.

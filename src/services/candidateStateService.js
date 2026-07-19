@@ -1,4 +1,4 @@
-import { ConversationStep } from '@prisma/client';
+import { ConversationStep, ReminderState } from '@prisma/client';
 import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
 
@@ -479,5 +479,78 @@ export async function transitionCandidateConversationStep(client, input = {}) {
     candidate,
     expectedStep,
     nextStep
+  };
+}
+
+function requireReminderState(value, fieldName) {
+  if (typeof value !== 'string' || !Object.values(ReminderState).includes(value)) {
+    throw new TypeError(`${fieldName}_invalid`);
+  }
+  return value;
+}
+
+function normalizeNoInterestSnapshot(expected) {
+  if (!expected || typeof expected !== 'object' || Array.isArray(expected)) {
+    throw new TypeError('candidate_no_interest_reminder_scheduled_for_required');
+  }
+  if (!Object.hasOwn(expected, 'reminderScheduledFor')) {
+    throw new TypeError('candidate_no_interest_reminder_scheduled_for_required');
+  }
+
+  return {
+    currentStep: requireConversationStep(
+      expected.currentStep,
+      'candidate_no_interest_current_step'
+    ),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_no_interest_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_no_interest_reminder_state'
+    )
+  };
+}
+
+function noInterestExpectedWhere(snapshot) {
+  return {
+    currentStep: snapshot.currentStep,
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function completeCandidateNoInterestTransition(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeNoInterestSnapshot(input.expected);
+
+  if (expected.currentStep === ConversationStep.DONE) {
+    throw new TypeError('candidate_no_interest_already_done');
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...noInterestExpectedWhere(expected)
+    },
+    data: {
+      currentStep: ConversationStep.DONE,
+      reminderScheduledFor: null,
+      reminderState: ReminderState.SKIPPED
+    }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    nextStep: ConversationStep.DONE,
+    nextReminderState: ReminderState.SKIPPED
   };
 }
