@@ -1,4 +1,5 @@
 name: Trigger attendance point UI patch
+# second push trigger
 
 on:
   push:
