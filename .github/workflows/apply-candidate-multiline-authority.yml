@@ -1,0 +1,42 @@
+name: Apply Candidate multiline authority
+
+on:
+  push:
+    branches:
+      - refactor/501-candidate-multiline-authority
+    paths:
+      - scripts/apply-candidate-multiline-authority.mjs
+      - .github/workflows/apply-candidate-multiline-authority.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor == 'jherrerapin'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+
+      - name: Apply exact source patch
+        run: node scripts/apply-candidate-multiline-authority.mjs
+
+      - name: Validate patched sources
+        run: |
+          node --check src/services/candidateStateService.js
+          node --check src/routes/webhook.js
+          node --test test/candidateMultilineStateService.test.js
+          git diff --check
+
+      - name: Commit patched sources and remove temporary automation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: centralizar ventana multilinea de Candidate"
+          git push origin HEAD:refactor/501-candidate-multiline-authority
