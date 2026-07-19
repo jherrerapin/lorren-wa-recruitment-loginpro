@@ -115,3 +115,38 @@ test('no habilita marcaciones en puntos donde asistencia sigue desactivada', () 
   assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
   assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.ATTENDANCE_NOT_ENABLED]);
 });
+
+test('rechaza entradas nulas o primitivas sin producir TypeError', () => {
+  for (const invalidInput of [null, true, 42, 'invalid', []]) {
+    const result = evaluateArrivalValidation(invalidInput);
+
+    assert.equal(result.canRecordArrival, false);
+    assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
+    assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.ASSIGNMENT_NOT_ACTIVE]);
+  }
+});
+
+test('un punto sin geocerca no inventa una ausencia de ubicación si recibió precisión válida', () => {
+  const result = evaluateArrivalValidation(trustedArrival({
+    hasConfiguredGeofence: false,
+    withinGeofence: undefined,
+    accuracyMeters: 15
+  }));
+
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED);
+  assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED]);
+  assert.equal(result.riskScore, 30);
+});
+
+test('rechaza booleanos y estructuras complejas como valores numéricos', () => {
+  const result = evaluateArrivalValidation(trustedArrival({
+    minutesLate: true,
+    toleranceMinutes: [],
+    accuracyMeters: {},
+    maxAccuracyMeters: false
+  }));
+
+  assert.equal(result.reportedPunctuality, ATTENDANCE_STATUS.ON_TIME);
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED);
+  assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE));
+});
