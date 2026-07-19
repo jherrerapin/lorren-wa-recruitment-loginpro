@@ -49,6 +49,7 @@ const trackedLiteralPattern = /\b(?:currentStep|multilineWindowUntil|multilineBa
 
 test('el manifiesto de progreso coincide con el enum canónico de Prisma', () => {
   const schemaSteps = parseConversationSteps(readSource('prisma/schema.prisma'));
+  assert.equal(manifest.schemaVersion, 2);
   assert.deepEqual(manifest.canonicalSteps, schemaSteps);
   assert.deepEqual(manifest.trackedFields, [
     'currentStep',
@@ -135,15 +136,15 @@ test('los contratos multilinea pertenecen a CandidateStateService y preservan el
 
   const authority = readSource('src/services/candidateStateService.js');
   const webhook = readSource('src/routes/webhook.js');
-  assert.match(authority, /exports+asyncs+functions+scheduleCandidateMultilineWindow/);
-  assert.match(authority, /multilineWindowUntils*:s*windowUntil/);
-  assert.match(authority, /multilineBatchVersions*:s*{s*increments*:s*1s*,?s*}/);
-  assert.match(authority, /exports+asyncs+functions+acquireCandidateMultilineBatch/);
-  assert.match(authority, /multilineBatchVersions*:s*expectedBatchVersion/);
-  assert.match(authority, /multilineWindowUntils*:s*{s*ltes*:s*nows*}/);
-  assert.match(authority, /multilineWindowUntils*:s*null/);
-  assert.match(webhook, /scheduleCandidateMultilineWindow(prisma,s*{/);
-  assert.match(webhook, /acquireCandidateMultilineBatch(prisma,s*{/);
+  assert.match(authority, /export\s+async\s+function\s+scheduleCandidateMultilineWindow/);
+  assert.match(authority, /multilineWindowUntil\s*:\s*windowUntil/);
+  assert.match(authority, /multilineBatchVersion\s*:\s*\{\s*increment\s*:\s*1\s*,?\s*\}/);
+  assert.match(authority, /export\s+async\s+function\s+acquireCandidateMultilineBatch/);
+  assert.match(authority, /multilineBatchVersion\s*:\s*expectedBatchVersion/);
+  assert.match(authority, /multilineWindowUntil\s*:\s*\{\s*lte\s*:\s*now\s*\}/);
+  assert.match(authority, /multilineWindowUntil\s*:\s*null/);
+  assert.match(webhook, /scheduleCandidateMultilineWindow\s*\(\s*prisma\s*,\s*\{/);
+  assert.match(webhook, /acquireCandidateMultilineBatch\s*\(\s*prisma\s*,\s*\{/);
 });
 
 test('la reducción del engine y el consentimiento permanecen caracterizados sin una API genérica', () => {
@@ -163,7 +164,7 @@ test('la reducción del engine y el consentimiento permanecen caracterizados sin
   assert.doesNotMatch(manifest.transitionFamilies.map((family) => family.id).join('|'), /generic|arbitrary|patch/i);
 });
 
-test('la documentación enlaza la matriz y mantiene explícito el alcance de fase 1', () => {
+test('la documentación enlaza la matriz y mantiene explícito el alcance de ambas fases', () => {
   const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
   assert.match(documentation, /config\/candidate-progress-authority\.json/);
   assert.match(documentation, /Fase 1: caracterización del progreso conversacional/);
