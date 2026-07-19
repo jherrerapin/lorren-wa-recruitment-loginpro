@@ -6,12 +6,14 @@ on:
       - main
     paths:
       - scripts/apply-candidate-simple-step-authority.mjs
+      - test/conversationEngineStepAuthority.test.js
       - .github/workflows/apply-candidate-simple-step-authority.yml
   push:
     branches:
       - refactor/501-candidate-simple-step-authority
     paths:
       - scripts/apply-candidate-simple-step-authority.mjs
+      - test/conversationEngineStepAuthority.test.js
       - .github/workflows/apply-candidate-simple-step-authority.yml
 
 permissions:
