@@ -172,6 +172,23 @@ test('el mismo UUID produce hashes distintos con peppers diferentes', () => {
   assert.notEqual(first, second);
 });
 
+test('usa la hora del servidor cuando el repositorio devuelve una fecha inválida', async () => {
+  const rawToken = generateActivationToken(deterministicBytes);
+  const repository = {
+    async claimActivationAndAuthorizePrimaryDevice() {
+      return { workerId: 'worker-1', deviceId: 'device-invalid-date', activatedAt: new Date(Number.NaN) };
+    }
+  };
+  const result = await activatePrimaryDevice({
+    repository,
+    rawToken,
+    installationId: INSTALLATION_ID,
+    installationPepper: PEPPER,
+    now: NOW
+  });
+  assert.equal(result.activatedAt, NOW);
+});
+
 test('exige puertos transaccionales explícitos del repositorio', async () => {
   await assert.rejects(
     issuePrimaryDeviceActivation({ repository: {}, workerId: 'worker-1', now: NOW }),
