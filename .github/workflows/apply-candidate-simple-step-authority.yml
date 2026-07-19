@@ -48,7 +48,12 @@ jobs:
         run: npm run prisma:generate
 
       - name: Apply exact authority patch
-        run: node scripts/apply-candidate-simple-step-authority.mjs
+        run: |
+          cp scripts/apply-candidate-simple-step-authority.mjs /tmp/apply-candidate-simple-step-authority.mjs
+          cp .github/workflows/apply-candidate-simple-step-authority.yml /tmp/apply-candidate-simple-step-authority.yml
+          node scripts/apply-candidate-simple-step-authority.mjs
+          cp /tmp/apply-candidate-simple-step-authority.mjs scripts/apply-candidate-simple-step-authority.mjs
+          cp /tmp/apply-candidate-simple-step-authority.yml .github/workflows/apply-candidate-simple-step-authority.yml
 
       - name: Validate JavaScript syntax
         run: |
@@ -71,7 +76,7 @@ jobs:
       - name: Validate patch formatting
         run: git diff --check
 
-      - name: Commit clean result
+      - name: Commit validated patch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
