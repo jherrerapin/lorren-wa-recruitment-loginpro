@@ -1,0 +1,28 @@
+name: Diagnose Candidate rejection scanner
+
+on:
+  push:
+    branches:
+      - refactor/519-candidate-rejection-authority
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/519-candidate-rejection-authority
+          persist-credentials: false
+      - name: Apply text transformations
+        run: |
+          node scripts/apply-candidate-requirement-rejection-authority.mjs
+          node scripts/fix-generated-candidate-rejection-scanner.mjs
+      - name: Print generated rejection scanner block
+        run: grep -n -A45 -B5 "contrato compuesto de rechazo" test/candidateProgressAuthority.test.js
+      - name: Check generated scanner syntax
+        run: node --check test/candidateProgressAuthority.test.js
