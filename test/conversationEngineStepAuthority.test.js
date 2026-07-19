@@ -179,5 +179,5 @@ test('chatEngine suprime la respuesta calculada sobre un paso obsoleto', () => {
   const source = fs.readFileSync('src/services/chatEngine.js', 'utf8');
   assert.match(source, /staleStepConflict/);
   assert.match(source, /effectiveReply\s*=\s*staleStepConflict\s*\?\s*null/);
-  assert.match(source, /suppressedReason:\s*staleStepConflict\s*\?\s*'stale_candidate_step'/);
+  assert.match(source, /suppressedReason:\s*staleStepConflict\s*\?\s*['"]stale_candidate_step['"]/);
 });
