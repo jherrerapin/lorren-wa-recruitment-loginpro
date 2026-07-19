@@ -19,18 +19,21 @@ const after = `test('CandidateStateService usa updateMany para el cierre por fal
 });
 
 test('CandidateStateService fija DONE en el cierre por falta de interés', () => {
-  const transition = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'completeCandidateNoInterestTransition');
-  assert.match(transition, /currentStep\\s*:\s*ConversationStep\\.DONE/);
+  const authority = readSource('src/services/candidateStateService.js');
+  assert.match(
+    authority,
+    /function\\s+completeCandidateNoInterestTransition[\\s\\S]*?data\\s*:\\s*\\{[\\s\\S]*?currentStep\\s*:\\s*ConversationStep\\.DONE/
+  );
 });
 
 test('CandidateStateService limpia la fecha del recordatorio por falta de interés', () => {
   const transition = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'completeCandidateNoInterestTransition');
-  assert.match(transition, /reminderScheduledFor\\s*:\s*null/);
+  assert.match(transition, /reminderScheduledFor\\s*:\\s*null/);
 });
 
 test('CandidateStateService marca SKIPPED por falta de interés', () => {
   const transition = extractFunctionSource(readSource('src/services/candidateStateService.js'), 'completeCandidateNoInterestTransition');
-  assert.match(transition, /reminderState\\s*:\s*ReminderState\\.SKIPPED/);
+  assert.match(transition, /reminderState\\s*:\\s*ReminderState\\.SKIPPED/);
 });
 
 test('CandidateStateService no absorbe campos ajenos en falta de interés', () => {
