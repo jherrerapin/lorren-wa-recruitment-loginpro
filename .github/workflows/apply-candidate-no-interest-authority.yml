@@ -8,6 +8,7 @@ on:
       - scripts/apply-candidate-no-interest-authority.mjs
       - scripts/apply-candidate-no-interest-guardrails-fix.mjs
       - scripts/split-candidate-no-interest-scanner.mjs
+      - scripts/split-candidate-no-interest-service-scanner.mjs
       - test/candidateNoInterestStateService.test.js
       - test/conversationEngineNoInterestAuthority.test.js
       - .github/workflows/apply-candidate-no-interest-authority.yml
@@ -18,6 +19,7 @@ on:
       - scripts/apply-candidate-no-interest-authority.mjs
       - scripts/apply-candidate-no-interest-guardrails-fix.mjs
       - scripts/split-candidate-no-interest-scanner.mjs
+      - scripts/split-candidate-no-interest-service-scanner.mjs
       - test/candidateNoInterestStateService.test.js
       - test/conversationEngineNoInterestAuthority.test.js
       - .github/workflows/apply-candidate-no-interest-authority.yml
@@ -58,6 +60,7 @@ jobs:
           node scripts/apply-candidate-no-interest-authority.mjs
           node scripts/apply-candidate-no-interest-guardrails-fix.mjs
           node scripts/split-candidate-no-interest-scanner.mjs
+          node scripts/split-candidate-no-interest-service-scanner.mjs
 
       - name: Validate JavaScript syntax
         run: |
@@ -94,8 +97,20 @@ jobs:
       - name: Validate scanner no-interest manifest
         run: node --test --test-name-pattern="manifiesto registra el contrato compuesto" test/candidateProgressAuthority.test.js
 
-      - name: Validate scanner no-interest service
-        run: node --test --test-name-pattern="CandidateStateService implementa el cierre exacto" test/candidateProgressAuthority.test.js
+      - name: Validate scanner no-interest updateMany
+        run: node --test --test-name-pattern="usa updateMany para el cierre" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner no-interest DONE
+        run: node --test --test-name-pattern="fija DONE en el cierre" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner no-interest reminder date
+        run: node --test --test-name-pattern="limpia la fecha del recordatorio" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner no-interest SKIPPED
+        run: node --test --test-name-pattern="marca SKIPPED" test/candidateProgressAuthority.test.js
+
+      - name: Validate scanner no-interest narrow fields
+        run: node --test --test-name-pattern="no absorbe campos ajenos" test/candidateProgressAuthority.test.js
 
       - name: Validate scanner no-interest engine
         run: node --test --test-name-pattern="conversationEngine delega el cierre exacto" test/candidateProgressAuthority.test.js
