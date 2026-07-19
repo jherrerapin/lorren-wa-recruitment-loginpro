@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
-import { ConversationStep, Gender } from '@prisma/client';
+import { ConversationStep, Gender, ReminderState } from '@prisma/client';
 import { alignCandidateLocationFields } from '../src/services/candidateData.js';
 import { act, buildCandidateStateForModel, parseEngineJson, think } from '../src/services/conversationEngine.js';
 
@@ -21,6 +21,8 @@ function completeCandidate(overrides = {}) {
     cvStorageKey: 'cv/1.pdf',
     cvOriginalName: 'cv.pdf',
     cvMimeType: 'application/pdf',
+    reminderScheduledFor: null,
+    reminderState: ReminderState.NONE,
     ...overrides
   };
 }
@@ -296,7 +298,7 @@ test('act produce el mismo cierre, update y bloqueos con acciones equivalentes e
   });
 
   assert.equal(resultA.finalStep, resultB.finalStep);
-  assert.deepEqual(first.updates.at(-1).data, second.updates.at(-1).data);
+  assert.deepEqual(first.stepUpdates.at(-1).data, second.stepUpdates.at(-1).data);
   assert.deepEqual(resultA.blockedActions, resultB.blockedActions);
 });
 
@@ -316,7 +318,8 @@ test('mark_no_interest + confirm_booking nunca crea booking', async () => {
 
     assert.equal(prisma.bookings.length, 0);
     assert.equal(result.finalStep, ConversationStep.DONE);
-    assert.equal(prisma.updates.at(-1).data.currentStep, ConversationStep.DONE);
+    assert.equal(result.stepTransition.contract, 'no_interest');
+    assert.equal(prisma.stepUpdates.at(-1).data.currentStep, ConversationStep.DONE);
   }
 });
 
@@ -353,7 +356,7 @@ test('save_fields se persiste independientemente del orden junto a cierre por no
     });
 
     assert.equal(prisma.updates[0].data.medicalRestrictions, 'Sin restricciones médicas');
-    assert.equal(prisma.updates.at(-1).data.currentStep, ConversationStep.DONE);
+    assert.equal(prisma.stepUpdates.at(-1).data.currentStep, ConversationStep.DONE);
   }
 });
 

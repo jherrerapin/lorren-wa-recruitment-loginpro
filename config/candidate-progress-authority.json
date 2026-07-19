@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 3,
-  "phase": "simple_step_authority_migrated",
+  "schemaVersion": 4,
+  "phase": "no_interest_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -28,7 +28,8 @@
   },
   "completedSlices": [
     "multiline_window_authority",
-    "conversation_engine_simple_step_authority"
+    "conversation_engine_simple_step_authority",
+    "conversation_engine_no_interest_authority"
   ],
   "sourceInventory": [
     {
@@ -47,7 +48,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del slice multilinea y de las transiciones simples de currentStep mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del slice multilinea, transiciones simples de currentStep y cierre compuesto por falta de interés mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -55,7 +56,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "act() conserva la reducción determinística. Las transiciones simples delegan en CandidateStateService; las compuestas con otros campos siguen temporalmente unidas."
+      "notes": "act() conserva la reducción determinística. Delega transiciones simples y el cierre exacto por falta de interés; rechazo, pausa y agenda siguen temporalmente unidos."
     },
     {
       "path": "src/services/chatEngine.js",
@@ -330,8 +331,8 @@
         "currentStep"
       ],
       "trigger": "Reducción determinística de acciones, guardas de readiness y nextStep propuesto por el modelo.",
-      "concurrency": "Las transiciones simples comparan id y currentStep mediante updateMany. Las transiciones compuestas con rechazo, pausa, recordatorios o agenda permanecen temporalmente en candidate.update y están explícitamente diferidas.",
-      "idempotency": "No escribe cuando finalStep coincide con candidate.currentStep. Una carrera simple devuelve count cero y el paso observado; los compuestos conservan la semántica previa.",
+      "concurrency": "Las transiciones simples comparan id y currentStep. mark_no_interest compara además reminderScheduledFor y reminderState. Rechazo, pausa y agenda permanecen temporalmente en candidate.update.",
+      "idempotency": "No escribe cuando finalStep coincide con currentStep. Carreras simples o de falta de interés devuelven count cero y preservan el estado observado.",
       "externalEffects": [
         "candidate_fields",
         "interview_booking_transition"
@@ -456,7 +457,7 @@
     }
   ],
   "nextMigrationSlices": [
-    "caracterizar y migrar transiciones compuestas de conversationEngine.act() sin romper atomicidad funcional",
+    "migrar mark_rejected como contrato compuesto separado sin absorber pausa ni agenda",
     "migrar las transiciones de consentimiento manteniendo ConsentStateService como autoridad del evento",
     "migrar las ramas legacy de webhook por familias pequeñas",
     "migrar correcciones administrativas con actor, motivo y origen esperado"
@@ -492,6 +493,42 @@
         "botPauseReason",
         "reminderScheduledFor",
         "reminderState"
+      ]
+    }
+  ],
+  "compositeContracts": [
+    {
+      "id": "conversation_engine_no_interest",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/services/conversationEngine.js",
+      "responseConsumer": "src/services/chatEngine.js",
+      "status": "canonical",
+      "allowedFields": [
+        "currentStep",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "currentStep esperado válido y distinto de DONE",
+        "reminderScheduledFor esperado explícito y válido",
+        "reminderState esperado válido",
+        "pendingUpdate contiene exactamente los tres campos permitidos"
+      ],
+      "mutation": {
+        "currentStep": "DONE",
+        "reminderScheduledFor": null,
+        "reminderState": "SKIPPED"
+      },
+      "concurrency": "updateMany compara id, currentStep, reminderScheduledFor y reminderState; count cero preserva el estado vigente.",
+      "idempotency": "Una segunda ejecución con el snapshot anterior devuelve count cero y no altera el cierre o recordatorio actual.",
+      "conflictPolicy": "chatEngine reutiliza stale_candidate_step y suprime la respuesta calculada sobre el snapshot obsoleto.",
+      "excludedCombinations": [
+        "mark_rejected",
+        "pause_bot",
+        "mark_female_pipeline",
+        "offer_interview",
+        "reschedule"
       ]
     }
   ]
