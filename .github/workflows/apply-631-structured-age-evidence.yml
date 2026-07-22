@@ -30,11 +30,17 @@ jobs:
       - name: Apply exact structured age patch
         run: node scripts/apply-631-structured-age-evidence.mjs
 
-      - name: Validate syntax
+      - name: Validate age evidence syntax
+        run: node --check src/services/ageEvidence.js
+
+      - name: Validate candidate parser syntax
+        run: node --check src/services/candidateData.js
+
+      - name: Validate webhook syntax
+        run: node --check src/routes/webhook.js
+
+      - name: Validate test syntax
         run: |
-          node --check src/services/ageEvidence.js
-          node --check src/services/candidateData.js
-          node --check src/routes/webhook.js
           node --check test/structuredAgeEvidence.test.js
           node --check test/structuredAgeHarnessIntegration.test.js
 
