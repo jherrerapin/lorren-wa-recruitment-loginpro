@@ -30,28 +30,10 @@ jobs:
       - name: Merge current main
         shell: bash
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          set +e
           git merge --no-edit origin/main
-          status=$?
-          if [ "$status" -ne 0 ]; then
-            {
-              echo "Archivos en conflicto:"
-              git diff --name-only --diff-filter=U
-              echo
-              for file in $(git diff --name-only --diff-filter=U); do
-                echo "===== $file ====="
-                sed -n '1,260p' "$file"
-              done
-            } > issue-591-sync-conflict.txt
-            git merge --abort
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add issue-591-sync-conflict.txt
-            git commit -m "chore: registrar conflicto de sincronización #591 [skip ci]"
-            git push origin HEAD:fix/591-exclude-test-worker
-            exit "$status"
-          fi
 
       - name: Remove temporary workflow
         run: rm -f .github/workflows/sync-main-591.yml issue-591-sync-conflict.txt
@@ -77,8 +59,6 @@ jobs:
 
       - name: Commit workflow cleanup and push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit --amend --no-edit
           git push --force-with-lease origin HEAD:fix/591-exclude-test-worker
