@@ -1,0 +1,84 @@
+name: Validate harness reminder state repair
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-characterize:
+    if: github.head_ref == 'test/602-harness-reminder-state'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply exact fixture repair
+        run: node scripts/apply-602-harness-reminder-state.mjs
+
+      - name: Validate fixture contract
+        run: |
+          node --check test/fixtures/conversationCases.js
+          node --check test/conversationHarnessFixtureContract.test.js
+          node --test test/conversationHarnessFixtureContract.test.js
+
+      - name: Commit fixture repair
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add test/fixtures/conversationCases.js
+            git commit -m "test: alinear ReminderState del harness"
+            git push origin "HEAD:${HEAD_REF}"
+          fi
+
+      - name: Characterize remaining harness failures
+        run: |
+          mkdir -p diagnostics
+          set +e
+          node --test test/conversation-harness.test.js > diagnostics/602-harness.tap 2>&1
+          status=$?
+          set -e
+          if grep -E 'candidate_.*reminder_state_invalid' diagnostics/602-harness.tap; then
+            echo "ReminderState authority errors remain after fixture repair."
+            exit 1
+          fi
+          grep -E '^    not ok [0-9]+ - ' diagnostics/602-harness.tap | sed 's/^    //' > diagnostics/602-remaining-failures.txt || true
+          count=$(wc -l < diagnostics/602-remaining-failures.txt | tr -d ' ')
+          printf 'status=%s\nremaining_failures=%s\nprevious_failures=29\n' "$status" "$count" > diagnostics/602-harness-summary.txt
+          if [ "$count" -ge 29 ]; then
+            echo "The first repair did not reduce the failing corpus."
+            exit 1
+          fi
+
+      - name: Commit characterization
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add diagnostics/602-harness.tap diagnostics/602-remaining-failures.txt diagnostics/602-harness-summary.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "test: caracterizar fallos restantes del harness #602"
+            git push origin "HEAD:${HEAD_REF}"
+          fi
+
+      - name: Run conversation replays
+        run: |
+          node --test test/conversationReplayFixtures.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js test/conversationReplayIntegral.test.js test/conversationReplayRecovery.test.js
