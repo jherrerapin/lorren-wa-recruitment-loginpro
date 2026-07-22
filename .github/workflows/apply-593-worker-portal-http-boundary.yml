@@ -38,31 +38,39 @@ jobs:
           node --check test/workerPortalActivationRouter.test.js
           node --check test/workerPortalActivationAbuseGuard.test.js
 
-      - name: Run focused portal regressions
-        run: |
-          node --test test/workerPortalActivationAbuseGuard.test.js
-          node --test test/workerPortalActivationRouter.test.js
-          node --test test/workerPortalSessionPolicy.test.js test/activateWorkerPortalSession.test.js test/prismaWorkerPortalSessionRepository.test.js
-
-      - name: Run dispatch and server regressions
-        run: |
-          node --test test/dispatchWhatsappRuntimeContracts.test.js
-          node --test test/dispatchClientsOperationsContracts.test.js
-
-      - name: Run conversation replays
-        run: |
-          node --test test/conversationReplayFixtures.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js test/conversationReplayIntegral.test.js test/conversationReplayRecovery.test.js
-
       - name: Commit generated hotfix
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          if git diff --quiet; then
-            echo "No generated changes to commit."
-            exit 0
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/server.js src/routes/workerPortal.js src/services/workerPortalActivationAbuseGuard.js test/workerPortalActivationRouter.test.js test/workerPortalActivationAbuseGuard.test.js docs/architecture/14_asistencia_operativa_activacion_http_portal.md
+            git commit -m "fix: asegurar frontera HTTP del Portal del Auxiliar"
+            git push origin "HEAD:${HEAD_REF}"
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/server.js src/routes/workerPortal.js src/services/workerPortalActivationAbuseGuard.js test/workerPortalActivationRouter.test.js test/workerPortalActivationAbuseGuard.test.js docs/architecture/14_asistencia_operativa_activacion_http_portal.md
-          git commit -m "fix: asegurar frontera HTTP del Portal del Auxiliar"
-          git push origin "HEAD:${HEAD_REF}"
+
+      - name: Run abuse guard regressions
+        run: node --test test/workerPortalActivationAbuseGuard.test.js
+
+      - name: Run portal HTTP regressions
+        run: node --test test/workerPortalActivationRouter.test.js
+
+      - name: Run portal session regressions
+        run: node --test test/workerPortalSessionPolicy.test.js
+
+      - name: Run portal activation service regressions
+        run: node --test test/activateWorkerPortalSession.test.js
+
+      - name: Run portal repository regressions
+        run: node --test test/prismaWorkerPortalSessionRepository.test.js
+
+      - name: Run dispatch runtime regressions
+        run: node --test test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Run server routing regressions
+        run: node --test test/dispatchClientsOperationsContracts.test.js
+
+      - name: Run conversation replays
+        run: |
+          node --test test/conversationReplayFixtures.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js test/conversationReplayIntegral.test.js test/conversationReplayRecovery.test.js
