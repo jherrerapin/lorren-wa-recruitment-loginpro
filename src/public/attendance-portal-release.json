@@ -1,0 +1,6 @@
+{
+  "service": "lorren-attendance-portal",
+  "release": "attendance-portal-2026-07-22-r2",
+  "legacyAdminRedirect": true,
+  "publicPortalPath": "/operaciones/portal"
+}

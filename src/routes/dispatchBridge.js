@@ -8,6 +8,9 @@ import {
   setRecruiterGeneralAttendanceEnabled
 } from '../services/attendanceFeatureAccess.js';
 
+export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-22-r2';
+export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -160,8 +163,36 @@ function installAttendanceRenderGate(req, res, next) {
   return next();
 }
 
+function applyRedirectNoStore(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+}
+
 export function dispatchBridgeRouter() {
   const router = express.Router();
+
+  // Alias administrativo exclusivo de DEV para corregir enlaces o marcadores antiguos.
+  // El acceso público del auxiliar continúa siendo /operaciones/portal.
+  router.get('/portal', requireDev, (_req, res) => {
+    applyRedirectNoStore(res);
+    return res.redirect(302, WORKER_PORTAL_PUBLIC_PATH);
+  });
+
+  router.get('/portal/activar', requireDev, (_req, res) => {
+    applyRedirectNoStore(res);
+    return res.redirect(302, `${WORKER_PORTAL_PUBLIC_PATH}/activar`);
+  });
+
+  router.get('/portal-release', requireDev, (_req, res) => {
+    applyRedirectNoStore(res);
+    return res.status(200).json({
+      service: 'lorren-attendance-portal',
+      release: ATTENDANCE_PORTAL_RELEASE_ID,
+      legacyAdminRedirect: true,
+      publicPortalPath: WORKER_PORTAL_PUBLIC_PATH
+    });
+  });
 
   router.use(loadAttendanceFeatureAccess);
   router.use(installAttendanceRenderGate);
