@@ -8,6 +8,7 @@ import {
   filterDispatchServiceRequestsByDate,
   normalizeDispatchDateParam
 } from './dispatchDate.js';
+import { deriveDispatchRequestOperationalState, operationalAssignments } from './dispatchOperationalCoverage.js';
 
 const execFileAsync = promisify(execFile);
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
@@ -55,7 +56,11 @@ function formatBogotaDateTime(value = new Date()) {
 }
 
 function activeAssignments(request) {
-  return (request.assignments || []).filter((assignment) => ACTIVE_ASSIGNMENT_STATUSES.includes(assignment.status));
+  return operationalAssignments(request);
+}
+
+function effectiveRequestStatus(request) {
+  return deriveDispatchRequestOperationalState(request).status;
 }
 
 function workerDocumentLabel(worker) {
@@ -145,7 +150,7 @@ export async function loadProgrammingRequests(prisma, selectedDate, options = {}
 
 export function buildProgrammingCompletionSummary(requests) {
   const totalRequests = requests.length;
-  const completedRequests = requests.filter((request) => request.status === COMPLETE_REQUEST_STATUS).length;
+  const completedRequests = requests.filter((request) => effectiveRequestStatus(request) === COMPLETE_REQUEST_STATUS).length;
   const requiredWorkers = requests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
   const assignedWorkers = requests.reduce((sum, request) => sum + activeAssignments(request).length, 0);
   return {
@@ -160,7 +165,7 @@ export function buildProgrammingCompletionSummary(requests) {
 export function selectProgrammingRequests(requests = [], options = {}) {
   const includePending = normalizeProgrammingIncludePending(options.includePending, true);
   if (options.requestId || includePending) return [...requests];
-  return requests.filter((request) => request.status === COMPLETE_REQUEST_STATUS);
+  return requests.filter((request) => effectiveRequestStatus(request) === COMPLETE_REQUEST_STATUS);
 }
 
 function buildWorkersHtml(request) {
@@ -190,7 +195,7 @@ function buildHtml({ selectedDate, requests, managedBy, includePending, overallS
         <div class="block-title">
           <div><span>Bloque ${index + 1}</span><strong>${escapeHtml(buildScheduleLabel(request))}</strong></div>
           <div class="block-status">
-            <span class="request-status ${requestStatusClass(request.status)}">${escapeHtml(requestStatusLabel(request.status))}</span>
+            <span class="request-status ${requestStatusClass(effectiveRequestStatus(request))}">${escapeHtml(requestStatusLabel(effectiveRequestStatus(request)))}</span>
             <div class="coverage">${activeAssignments(request).length}/${Number(request.requiredWorkers || 0)} auxiliares</div>
           </div>
         </div>

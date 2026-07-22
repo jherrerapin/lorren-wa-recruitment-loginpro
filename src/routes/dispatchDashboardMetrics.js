@@ -6,6 +6,7 @@ import {
   filterDispatchServiceRequestsByDate,
   normalizeDispatchDateParam
 } from '../services/dispatchDate.js';
+import { confirmedOperationalAssignments, deriveDispatchRequestOperationalState, operationalAssignments } from '../services/dispatchOperationalCoverage.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
@@ -42,11 +43,11 @@ function selectedDateFromQuery(query = {}) {
 }
 
 function activeAssignments(request) {
-  return (request.assignments || []).filter((assignment) => ACTIVE_ASSIGNMENT_STATUSES.includes(assignment.status));
+  return operationalAssignments(request);
 }
 
 function confirmedAssignments(request) {
-  return (request.assignments || []).filter((assignment) => assignment.status === CONFIRMED_ASSIGNMENT_STATUS);
+  return confirmedOperationalAssignments(request);
 }
 
 function statusLabel(value) {
@@ -192,7 +193,10 @@ async function loadServiceRequestsForDate(prisma, selectedDate) {
     orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
   });
 
-  return filterDispatchServiceRequestsByDate(requests, selectedDate);
+  return filterDispatchServiceRequestsByDate(requests, selectedDate).map((request) => ({
+    ...request,
+    status: deriveDispatchRequestOperationalState(request).status
+  }));
 }
 
 function applyTitle(worksheet, title, subtitle, columnCount) {

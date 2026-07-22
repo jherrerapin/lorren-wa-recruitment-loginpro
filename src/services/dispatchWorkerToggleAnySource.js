@@ -1,5 +1,6 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import { recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 
 const BASE_PATH = '/admin/operaciones';
 const TOGGLE_PATH_PATTERN = /^\/admin\/operaciones\/personal\/([^/]+)\/toggle$/;
@@ -39,18 +40,7 @@ function addMessage(pathValue, message) { const [pathname, query = ''] = String(
 function safeBack(req) { const referer = req.get?.('referer'); if (!referer) return '/admin/operaciones/personal'; try { const parsed = new URL(referer); const origin = `${req.protocol}://${req.get('host')}`; if (parsed.origin === origin && parsed.pathname.startsWith('/admin/operaciones/personal')) return `${parsed.pathname}${parsed.search}`; } catch (_error) {} return '/admin/operaciones/personal'; }
 
 async function recalculateRequest(prismaClient, serviceRequestId) {
-  const serviceRequest = await prismaClient.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } });
-  if (!serviceRequest) return null;
-  const [activeCount, confirmedCount] = await Promise.all([
-    prismaClient.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }),
-    prismaClient.dispatchAssignment.count({ where: { serviceRequestId, status: CONFIRMED_ASSIGNMENT_STATUS } })
-  ]);
-  let status = 'PENDING_ASSIGNMENT';
-  if (confirmedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
-  else if (activeCount >= serviceRequest.requiredWorkers) status = 'PENDING_CONFIRMATION';
-  else if (activeCount > 0) status = 'ASSIGNMENT_PARTIAL';
-  await prismaClient.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
-  return status;
+  return recalculateDispatchServiceRequestStatus(prismaClient, serviceRequestId);
 }
 
 async function cancelAssignments(prismaClient, workerId, reasonLabel) {
