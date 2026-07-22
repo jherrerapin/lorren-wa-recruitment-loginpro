@@ -21,6 +21,7 @@ const STALLED_INITIALIZATION_TIMEOUT_MS = Math.max(60000, Number(process.env.DIS
 const STALLED_RECOVERY_PROBE_MS = Math.max(1000, Number(process.env.DISPATCH_WWEB_STALLED_RECOVERY_PROBE_MS || 3000));
 const STALE_LINK_CLEANUP_LIMIT = Math.max(50, Number(process.env.DISPATCH_WA_STALE_LINK_CLEANUP_LIMIT || 1000));
 const SENDABLE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
+const EXPIRABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'];
 
 let watchdogTimer = null;
 let watchdogStartTimer = null;
@@ -32,6 +33,13 @@ function buildOperationalError(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+}
+
+function normalizePhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return `57${digits}`;
+  return digits;
 }
 
 function hourLabel(value) {
@@ -121,11 +129,12 @@ function scheduleStalledRecoveryProbe() {
   timer.unref?.();
 }
 
-async function validateOutgoingAssignmentContext(context = {}) {
+async function validateOutgoingAssignmentContext(context = {}, phone = '') {
   const assignmentId = String(context?.assignmentId || '').trim();
   const serviceRequestId = String(context?.serviceRequestId || '').trim();
-  if (!assignmentId && !serviceRequestId) return;
-  if (!assignmentId || !serviceRequestId) {
+  const workerId = String(context?.workerId || '').trim();
+  if (!assignmentId && !serviceRequestId && !workerId) return undefined;
+  if (!assignmentId || !serviceRequestId || !workerId) {
     throw buildOperationalError('No se puede registrar la confirmación porque falta el contexto completo de la asignación.', 400);
   }
 
@@ -133,16 +142,25 @@ async function validateOutgoingAssignmentContext(context = {}) {
     where: {
       id: assignmentId,
       serviceRequestId,
+      workerId,
       status: { in: SENDABLE_ASSIGNMENT_STATUSES }
     },
     select: {
       id: true,
+      workerId: true,
+      worker: { select: { phone: true } },
       serviceRequest: { select: { serviceDate: true } }
     }
   });
 
   if (!assignment) {
-    throw buildOperationalError('La asignación ya no está pendiente o no corresponde a la solicitud indicada.', 409);
+    throw buildOperationalError('La asignación ya no está pendiente o no corresponde a la solicitud y auxiliar indicados.', 409);
+  }
+
+  const recipientPhone = normalizePhone(phone);
+  const assignmentPhone = normalizePhone(assignment.worker?.phone);
+  if (!recipientPhone || !assignmentPhone || recipientPhone !== assignmentPhone) {
+    throw buildOperationalError('El número indicado no corresponde al auxiliar de esta asignación.', 409);
   }
 
   const serviceDate = dispatchServiceDateKey(assignment.serviceRequest?.serviceDate);
@@ -150,12 +168,14 @@ async function validateOutgoingAssignmentContext(context = {}) {
   if (!serviceDate || serviceDate < today) {
     throw buildOperationalError('No se puede solicitar confirmación para una asignación de una fecha anterior.', 409);
   }
+
+  return { ...context, assignmentId, serviceRequestId, workerId };
 }
 
 async function expirePastConfirmationLinks(reason = 'watchdog') {
   const today = todayIsoDateCO();
   const links = await prisma.dispatchWhatsappConfirmation.findMany({
-    where: { status: 'PENDING' },
+    where: { status: { in: EXPIRABLE_CONFIRMATION_LINK_STATUSES } },
     select: {
       id: true,
       assignment: {
@@ -177,7 +197,7 @@ async function expirePastConfirmationLinks(reason = 'watchdog') {
 
   if (!staleIds.length) return 0;
   const result = await prisma.dispatchWhatsappConfirmation.updateMany({
-    where: { id: { in: staleIds }, status: 'PENDING' },
+    where: { id: { in: staleIds }, status: { in: EXPIRABLE_CONFIRMATION_LINK_STATUSES } },
     data: { status: 'EXPIRED' }
   });
   console.log(`[dispatch-wa] Contextos antiguos de confirmación expirados=${result.count} reason=${reason} fechaCorte=${today}.`);
@@ -263,8 +283,8 @@ export async function closeDispatchWhatsappSession() {
 }
 
 export async function sendDispatchWhatsappMessage(args = {}) {
-  await validateOutgoingAssignmentContext(args.context);
-  return sendRuntimeTextMessage({ ...args, message: labelHours(args.message) });
+  const context = await validateOutgoingAssignmentContext(args.context, args.phone);
+  return sendRuntimeTextMessage({ ...args, context, message: labelHours(args.message) });
 }
 
 export { sendDispatchWhatsappMediaMessage };
