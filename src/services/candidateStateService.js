@@ -1,6 +1,7 @@
 import { CandidateStatus, ConversationStep, ReminderState } from '@prisma/client';
 import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
 import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
+import { hasMaterialProfileData, isSilentProfileCaptureMode } from './silentProfileCapture.js';
 
 export const MANUAL_OUTBOUND_SENDING_MODE = 'manual_outbound_sending';
 export const MANUAL_OUTBOUND_UNKNOWN_MODE = 'manual_outbound_delivery_unknown';
@@ -943,5 +944,248 @@ export async function applyCandidateVacancyFirstGateDecision(client, input = {})
     candidate,
     expected,
     update
+  };
+}
+
+
+
+const SILENT_PROFILE_CAPTURE_PROFILE_FIELDS = new Set([
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'locality',
+  'neighborhood',
+  'medicalRestrictions',
+  'transportMode',
+  'experienceInfo',
+  'experienceTime',
+  'experienceSummary',
+  'gender'
+]);
+
+const SILENT_PROFILE_CAPTURE_UPDATE_FIELDS = new Set([
+  ...SILENT_PROFILE_CAPTURE_PROFILE_FIELDS,
+  'currentStep',
+  'botResumeMode',
+  'reminderScheduledFor',
+  'reminderState'
+]);
+
+const SILENT_PROFILE_CAPTURE_GENDERS = new Set(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']);
+
+function normalizeSilentProfileExpectedValue(field, value) {
+  if (field === 'age') {
+    if (value === null) return null;
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError('candidate_silent_profile_capture_expected_age_invalid');
+    }
+    return value;
+  }
+
+  if (field === 'gender') {
+    if (value === null) return null;
+    if (typeof value !== 'string' || !SILENT_PROFILE_CAPTURE_GENDERS.has(value)) {
+      throw new TypeError('candidate_silent_profile_capture_expected_gender_invalid');
+    }
+    return value;
+  }
+
+  return requireNullableSnapshotString(
+    value,
+    `candidate_silent_profile_capture_expected_${field}`
+  );
+}
+
+function normalizeSilentProfileUpdateValue(field, value) {
+  if (field === 'age') {
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError('candidate_silent_profile_capture_age_invalid');
+    }
+    return value;
+  }
+
+  if (field === 'gender') {
+    if (typeof value !== 'string' || !SILENT_PROFILE_CAPTURE_GENDERS.has(value)) {
+      throw new TypeError('candidate_silent_profile_capture_gender_invalid');
+    }
+    return value;
+  }
+
+  return requireStrictDecisionString(
+    value,
+    `candidate_silent_profile_capture_${field}`
+  );
+}
+
+function normalizeSilentProfileCaptureUpdate(update) {
+  if (!update || typeof update !== 'object' || Array.isArray(update)) {
+    throw new TypeError('candidate_silent_profile_capture_update_required');
+  }
+
+  const fields = Object.keys(update);
+  const requiredFields = ['currentStep', 'reminderScheduledFor', 'reminderState'];
+  if (requiredFields.some((field) => !Object.hasOwn(update, field))) {
+    throw new TypeError('candidate_silent_profile_capture_progress_update_required');
+  }
+
+  const invalidField = fields.find((field) => !SILENT_PROFILE_CAPTURE_UPDATE_FIELDS.has(field));
+  if (invalidField) {
+    throw new TypeError(`candidate_silent_profile_capture_update_field_not_allowed:${invalidField}`);
+  }
+
+  const currentStep = requireConversationStep(
+    update.currentStep,
+    'candidate_silent_profile_capture_next_step'
+  );
+  if (currentStep !== ConversationStep.GREETING_SENT) {
+    throw new TypeError('candidate_silent_profile_capture_next_step_invalid');
+  }
+  if (update.reminderScheduledFor !== null) {
+    throw new TypeError('candidate_silent_profile_capture_reminder_scheduled_for_must_be_null');
+  }
+
+  const reminderState = requireReminderState(
+    update.reminderState,
+    'candidate_silent_profile_capture_reminder_state'
+  );
+  if (reminderState !== ReminderState.SKIPPED) {
+    throw new TypeError('candidate_silent_profile_capture_reminder_state_invalid');
+  }
+
+  const normalized = {
+    currentStep,
+    reminderScheduledFor: null,
+    reminderState
+  };
+
+  if (Object.hasOwn(update, 'botResumeMode')) {
+    normalized.botResumeMode = requireNullableSnapshotString(
+      update.botResumeMode,
+      'candidate_silent_profile_capture_resume_mode'
+    );
+  }
+
+  const profileFields = fields.filter((field) => SILENT_PROFILE_CAPTURE_PROFILE_FIELDS.has(field));
+  for (const field of profileFields) {
+    normalized[field] = normalizeSilentProfileUpdateValue(field, update[field]);
+  }
+
+  if (!hasMaterialProfileData(normalized)) {
+    throw new TypeError('candidate_silent_profile_capture_material_profile_required');
+  }
+
+  return { update: normalized, profileFields };
+}
+
+function normalizeSilentProfileCaptureSnapshot(expected, profileFields) {
+  const requiredFields = [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_silent_profile_capture_snapshot_required');
+  }
+
+  const vacancyId = requireNullableSnapshotString(
+    expected.vacancyId,
+    'candidate_silent_profile_capture_expected_vacancy_id'
+  );
+  if (vacancyId !== null) {
+    throw new TypeError('candidate_silent_profile_capture_vacancy_must_be_null');
+  }
+
+  const botResumeMode = requireNullableSnapshotString(
+    expected.botResumeMode,
+    'candidate_silent_profile_capture_expected_resume_mode'
+  );
+  if (!isSilentProfileCaptureMode(botResumeMode)) {
+    throw new TypeError('candidate_silent_profile_capture_mode_invalid');
+  }
+
+  const snapshot = {
+    currentStep: requireConversationStep(
+      expected.currentStep,
+      'candidate_silent_profile_capture_expected_step'
+    ),
+    vacancyId,
+    botResumeMode,
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_silent_profile_capture_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_silent_profile_capture_expected_reminder_state'
+    )
+  };
+
+  for (const field of profileFields) {
+    if (!Object.hasOwn(expected, field)) {
+      throw new TypeError(`candidate_silent_profile_capture_expected_field_required:${field}`);
+    }
+    snapshot[field] = normalizeSilentProfileExpectedValue(field, expected[field]);
+  }
+
+  return snapshot;
+}
+
+function silentProfileCaptureExpectedWhere(expected, profileFields) {
+  const where = {
+    currentStep: expected.currentStep,
+    vacancyId: expected.vacancyId,
+    botResumeMode: expected.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(expected.reminderScheduledFor),
+    reminderState: expected.reminderState
+  };
+
+  for (const field of profileFields) {
+    where[field] = expected[field];
+  }
+
+  return where;
+}
+
+export async function applyCandidateSilentProfileCapture(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const normalized = normalizeSilentProfileCaptureUpdate(input.update);
+  const expected = normalizeSilentProfileCaptureSnapshot(
+    input.expected,
+    normalized.profileFields
+  );
+
+  if (
+    Object.hasOwn(normalized.update, 'botResumeMode')
+    && normalized.update.botResumeMode !== expected.botResumeMode
+  ) {
+    throw new TypeError('candidate_silent_profile_capture_resume_mode_must_be_preserved');
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...silentProfileCaptureExpectedWhere(expected, normalized.profileFields)
+    },
+    data: normalized.update
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    update: normalized.update,
+    profileFields: normalized.profileFields
   };
 }

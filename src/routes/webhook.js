@@ -23,6 +23,7 @@ import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitiz
 import { shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../services/botAutomationPolicy.js';
 import {
   acquireCandidateMultilineBatch,
+  applyCandidateSilentProfileCapture,
   applyCandidateVacancyFirstGateDecision,
   resumeCandidateAutomationOnInbound,
   scheduleCandidateMultilineWindow
@@ -1909,15 +1910,55 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     const updateData = buildSilentProfileCaptureUpdate({ candidate, normalizedData });
     delete updateData.vacancyId;
+    const progressFields = new Set([
+      'currentStep',
+      'botResumeMode',
+      'reminderScheduledFor',
+      'reminderState'
+    ]);
+    const profileFields = Object.keys(updateData).filter((field) => !progressFields.has(field));
+    const expectedProfile = Object.fromEntries(
+      profileFields.map((field) => [field, candidate[field] ?? null])
+    );
 
-    candidate = await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: updateData
+    const transition = await applyCandidateSilentProfileCapture(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        currentStep: candidate.currentStep,
+        vacancyId: candidate.vacancyId ?? null,
+        botResumeMode: candidate.botResumeMode ?? null,
+        reminderScheduledFor: candidate.reminderScheduledFor ?? null,
+        reminderState: candidate.reminderState ?? 'NONE',
+        ...expectedProfile
+      },
+      update: updateData
     });
 
+    if (transition.count !== 1) {
+      candidate = transition.candidate || candidate;
+      debugTrace.silent_profile_capture = {
+        applied: false,
+        conflict: true,
+        fields: profileFields,
+        reason,
+        replyKind,
+        observedStep: candidate.currentStep || null,
+        observedVacancyId: candidate.vacancyId || null
+      };
+      await recordIntentionalSilence(prisma, candidate, cleanText, {
+        reason: 'STALE_CANDIDATE_SILENT_PROFILE_CAPTURE',
+        gate: 'silent_profile_capture',
+        action: reason,
+        replyKind,
+        vacancyId: candidate.vacancyId || null
+      });
+      return true;
+    }
+
+    candidate = transition.candidate || candidate;
     debugTrace.silent_profile_capture = {
       applied: true,
-      fields: Object.keys(normalizedData),
+      fields: transition.profileFields,
       reason,
       replyKind
     };

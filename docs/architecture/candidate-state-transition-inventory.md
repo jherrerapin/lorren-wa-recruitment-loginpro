@@ -154,7 +154,7 @@ La autoridad compara el ID, el paso leído y el snapshot completo del recordator
 
 ## Próxima frontera
 
-1. captura silenciosa y demás ramas legacy del webhook;
+1. demás ramas legacy del webhook;
 2. correcciones administrativas con actor, motivo y origen esperado;
 3. agenda y pausas implícitas por familias pequeñas.
 
@@ -216,3 +216,16 @@ La autoridad permite únicamente `currentStep`, `vacancyId`, `botResumeMode`, `r
 `updateMany` compara el snapshot completo. Si devuelve `count=0`, el webhook recupera el candidato vigente, registra `STALE_CANDIDATE_VACANCY_FIRST_GATE` como silencio intencional y no envía la respuesta calculada sobre el estado obsoleto. No reintenta ni aplica parcialmente.
 
 La captura silenciosa permanece fuera de este slice. Consentimiento, CV, agenda, reservas, perfil, permisos, asistencia y la lógica relacionada con género no cambian.
+
+
+## Fase 9: autoridad de captura silenciosa
+
+`silentProfileCapture.js` continúa como **productor de decisión**: determina cuándo existen datos materiales sin vacante y construye el patch y la respuesta. `CandidateStateService` pasa a ser el **escritor efectivo** mediante `applyCandidateSilentProfileCapture()`.
+
+La autoridad compara `currentStep`, ausencia de `vacancyId`, `botResumeMode`, fecha y estado del recordatorio. También compara el valor anterior de cada campo de perfil que la decisión intenta escribir. El contrato permite únicamente los campos que ya entrega `normalizeCandidateFields`, exige al menos un dato material y fija `GREETING_SENT / null / SKIPPED`.
+
+El campo `gender` se conserva como dato normalizado cuando acompaña otro dato material, exactamente como antes de la migración. Esta fase no modifica detección, inferencia, filtros, rutas ni decisiones relacionadas con género.
+
+Si `updateMany` devuelve `count=0`, el webhook recupera el candidato vigente, registra `STALE_CANDIDATE_SILENT_PROFILE_CAPTURE` y no envía la respuesta construida sobre el snapshot obsoleto. No reintenta, no asigna vacante y no aplica parcialmente.
+
+Consentimiento, CV, atribución, agenda, reservas, permisos, asistencia, textos y Prisma permanecen fuera de este slice.

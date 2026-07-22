@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'vacancy_first_gate_authority_migrated');
+  assert.equal(manifest.phase, 'silent_profile_capture_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -98,7 +98,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'conversation_engine_requirement_rejection_authority',
     'conversation_engine_explicit_pause_authority',
     'consent_step_authority',
-    'vacancy_first_gate_authority'
+    'vacancy_first_gate_authority',
+    'silent_profile_capture_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -236,7 +237,7 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 4);
+  assert.equal(manifest.compositeContracts.length, 5);
   const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
@@ -480,4 +481,43 @@ test('la documentación registra la fase de vacancyFirstGate', () => {
   assert.match(documentation, /applyCandidateVacancyFirstGateDecision/);
   assert.match(documentation, /STALE_CANDIDATE_VACANCY_FIRST_GATE/);
   assert.match(documentation, /captura silenciosa permanece fuera/i);
+});
+
+
+
+test('el manifiesto registra la autoridad de captura silenciosa', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'silent_profile_capture_decision');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.decisionProducer, 'src/services/silentProfileCapture.js');
+  assert.equal(contract.consumer, 'src/routes/webhook.js');
+  assert.equal(contract.status, 'canonical');
+  assert.ok(contract.allowedFields.includes('fullName'));
+  assert.ok(contract.allowedFields.includes('experienceSummary'));
+  assert.ok(contract.allowedFields.includes('gender'));
+  assert.ok(contract.observedFields.includes('vacancyId'));
+  assert.ok(contract.excludedCombinations.includes('gender_policy_change'));
+
+  const family = manifest.transitionFamilies.find((item) => item.id === 'silent_profile_capture_decision');
+  assert.deepEqual(family.writers, ['src/services/candidateStateService.js']);
+
+  const authority = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'applyCandidateSilentProfileCapture'
+  );
+  assert.match(authority, /candidate\.updateMany\s*\(/);
+  assert.match(authority, /silentProfileCaptureExpectedWhere\(expected,\s*normalized\.profileFields\)/);
+  assert.match(authority, /data:\s*normalized\.update/);
+
+  const webhook = extractFunctionSource(readSource('src/routes/webhook.js'), 'processText');
+  assert.match(webhook, /applyCandidateSilentProfileCapture/);
+  assert.match(webhook, /STALE_CANDIDATE_SILENT_PROFILE_CAPTURE/);
+});
+
+test('la documentación registra la fase de captura silenciosa', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 9: autoridad de captura silenciosa/);
+  assert.match(documentation, /applyCandidateSilentProfileCapture/);
+  assert.match(documentation, /STALE_CANDIDATE_SILENT_PROFILE_CAPTURE/);
+  assert.match(documentation, /no modifica detección, inferencia, filtros, rutas ni decisiones relacionadas con género/i);
 });
