@@ -1,11 +1,6 @@
 name: Kick issue 549 implementation
 
 on:
-  push:
-    branches:
-      - feat/549-worker-contract-autoassignment
-    paths:
-      - .github/workflows/kick-issue-549.yml
   pull_request:
     types: [opened, reopened, synchronize]
     branches:
@@ -15,6 +10,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: issue-549-apply
+  cancel-in-progress: true
 
 jobs:
   apply:
@@ -45,15 +44,18 @@ jobs:
         run: rm .github/workflows/apply-issue-549.yml .github/workflows/kick-issue-549.yml
       - name: Install dependencies
         run: npm ci
-      - name: Validate implementation
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Check JavaScript syntax
         run: |
-          npx prisma validate
-          npx prisma generate
           node --check src/services/dispatchAutoAssignment.js
           node --check src/routes/dispatchMultiShiftRequests.js
           node --check src/routes/dispatchOpsExtras.js
           node --check src/routes/publicDispatchClient.js
-          node --test test/dispatchWorkerContractAutoAssignment.test.js
+      - name: Run focused regressions
+        run: node --test test/dispatchWorkerContractAutoAssignment.test.js
       - name: Commit implementation
         shell: bash
         run: |
