@@ -149,7 +149,7 @@ test('flujo integral asocia la inactiva y ofrece registro para futura apertura',
     const lastReply = whatsappMock.sentMessages.at(-1)?.body || '';
     assert.equal(finalCandidate.vacancyId, 'vac-iba-inactive');
     assert.equal(finalCandidate.currentStep, 'GREETING_SENT');
-    assert.match(lastReply, /no esta activa/i);
+    assert.match(lastReply, /no est[aá] activa/i);
     assert.match(lastReply, /dejar tu perfil registrado/i);
   } finally {
     restoreAxios();
