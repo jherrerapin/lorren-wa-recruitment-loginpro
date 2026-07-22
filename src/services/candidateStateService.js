@@ -873,6 +873,155 @@ export async function completeCandidateRequirementRejection(client, input = {}) 
 
 
 
+
+export const CANDIDATE_PAUSED_VACANCY_ACTIONS = Object.freeze({
+  REGISTRATION_OFFERED: 'REGISTRATION_OFFERED',
+  FUTURE_PROFILE_ACCEPTED: 'FUTURE_PROFILE_ACCEPTED',
+  FUTURE_PROFILE_DECLINED: 'FUTURE_PROFILE_DECLINED'
+});
+
+const PAUSED_VACANCY_WAITING_MODE = 'paused_vacancy';
+const PAUSED_VACANCY_CAPTURE_MODE = 'paused_vacancy_capture';
+
+const CANDIDATE_PAUSED_VACANCY_DESTINATIONS = Object.freeze({
+  [CANDIDATE_PAUSED_VACANCY_ACTIONS.REGISTRATION_OFFERED]: Object.freeze({
+    currentStep: ConversationStep.GREETING_SENT,
+    botResumeMode: PAUSED_VACANCY_WAITING_MODE,
+    reminderScheduledFor: null,
+    reminderState: ReminderState.SKIPPED
+  }),
+  [CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_ACCEPTED]: Object.freeze({
+    currentStep: ConversationStep.COLLECTING_DATA,
+    botResumeMode: PAUSED_VACANCY_CAPTURE_MODE,
+    reminderScheduledFor: null,
+    reminderState: ReminderState.SKIPPED
+  }),
+  [CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_DECLINED]: Object.freeze({
+    currentStep: ConversationStep.DONE,
+    botResumeMode: null,
+    reminderScheduledFor: null,
+    reminderState: ReminderState.SKIPPED
+  })
+});
+
+function requireCandidatePausedVacancyAction(value) {
+  const action = String(value || '').trim();
+  if (!Object.hasOwn(CANDIDATE_PAUSED_VACANCY_DESTINATIONS, action)) {
+    throw new TypeError('candidate_paused_vacancy_action_invalid');
+  }
+  return action;
+}
+
+function normalizeCandidatePausedVacancySnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_paused_vacancy_snapshot_required');
+  }
+
+  return {
+    currentStep: requireConversationStep(
+      expected.currentStep,
+      'candidate_paused_vacancy_expected_step'
+    ),
+    vacancyId: requireNullableSnapshotString(
+      expected.vacancyId,
+      'candidate_paused_vacancy_expected_vacancy_id'
+    ),
+    botResumeMode: requireNullableSnapshotString(
+      expected.botResumeMode,
+      'candidate_paused_vacancy_expected_resume_mode'
+    ),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_paused_vacancy_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_paused_vacancy_expected_reminder_state'
+    )
+  };
+}
+
+function candidatePausedVacancyExpectedWhere(expected) {
+  return {
+    currentStep: expected.currentStep,
+    vacancyId: expected.vacancyId,
+    botResumeMode: expected.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(expected.reminderScheduledFor),
+    reminderState: expected.reminderState
+  };
+}
+
+function validateCandidatePausedVacancyOrigin(action, expected) {
+  const requiresWaitingMode = action === CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_ACCEPTED
+    || action === CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_DECLINED;
+  if (requiresWaitingMode && expected.botResumeMode !== PAUSED_VACANCY_WAITING_MODE) {
+    throw new TypeError('candidate_paused_vacancy_waiting_mode_required');
+  }
+  if (
+    action === CANDIDATE_PAUSED_VACANCY_ACTIONS.REGISTRATION_OFFERED
+    && expected.botResumeMode === PAUSED_VACANCY_CAPTURE_MODE
+  ) {
+    throw new TypeError('candidate_paused_vacancy_capture_mode_not_offerable');
+  }
+}
+
+export async function applyCandidatePausedVacancyDecision(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const action = requireCandidatePausedVacancyAction(input.action);
+
+  if (
+    Object.hasOwn(input, 'nextStep')
+    || Object.hasOwn(input, 'nextResumeMode')
+    || Object.hasOwn(input, 'nextReminderState')
+  ) {
+    throw new TypeError('candidate_paused_vacancy_next_state_not_allowed');
+  }
+  if (
+    Object.hasOwn(input, 'update')
+    || Object.hasOwn(input, 'data')
+    || Object.hasOwn(input, 'patch')
+  ) {
+    throw new TypeError('candidate_paused_vacancy_patch_not_allowed');
+  }
+
+  const expected = normalizeCandidatePausedVacancySnapshot(input.expected);
+  validateCandidatePausedVacancyOrigin(action, expected);
+  const destination = CANDIDATE_PAUSED_VACANCY_DESTINATIONS[action];
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...candidatePausedVacancyExpectedWhere(expected)
+    },
+    data: destination
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    action,
+    expected,
+    nextStep: destination.currentStep,
+    nextResumeMode: destination.botResumeMode,
+    nextReminderState: destination.reminderState
+  };
+}
+
 function normalizeCandidateInterviewCancellationReminderSnapshot(expected) {
   const requiredFields = [
     'reminderScheduledFor',
