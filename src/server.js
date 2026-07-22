@@ -355,10 +355,6 @@ function injectLorenV2NavbarLink(html, req) {
   );
 }
 
-function injectMetaAdsSyncButton(html) {
-  return html;
-}
-
 function mapDbRoleToSessionRole(role) {
   return role === 'DEV' ? 'dev' : 'admin';
 }
@@ -401,7 +397,6 @@ app.use((req, res, next) => {
     let output = body;
     if (shouldReplaceLorenV2UiLabel(output, res)) {
       output = replaceLorenV2UiLabel(output);
-      output = injectMetaAdsSyncButton(output, req);
     }
     return originalSend(output);
   };
