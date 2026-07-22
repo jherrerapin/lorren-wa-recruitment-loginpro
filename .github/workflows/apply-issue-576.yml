@@ -1,0 +1,166 @@
+name: Apply issue 576 WhatsApp recovery
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/576-whatsapp-stuck-recovery'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out correction branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/576-whatsapp-stuck-recovery
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply exact recovery corrections
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, old, new):
+              file_path = Path(path)
+              content = file_path.read_text(encoding='utf-8')
+              if new in content and old not in content:
+                  return
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: se esperaba una coincidencia y se encontraron {count}')
+              file_path.write_text(content.replace(old, new, 1), encoding='utf-8')
+
+          view_path = 'src/views/operacionesWhatsappEstado.ejs'
+          replace_exact(
+              view_path,
+              """    .storage-box { border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 11px 13px; display: grid; gap: 3px; font-size: 12px; }\n    .storage-box.persistent { border-color: #86efac; background: #f0fdf4; color: #166534; }\n    .storage-box.ephemeral { border-color: #fdba74; background: #fff7ed; color: #9a3412; }\n""",
+              ''
+          )
+          replace_exact(
+              view_path,
+              """        <% if (role === 'dev') { %><div class=\"storage-box <%= authStoragePersistent ? 'persistent' : 'ephemeral' %>\" id=\"storageBox\"><strong id=\"storageLabel\"><%= authStoragePersistent ? 'Sesión persistente' : 'Sesión en almacenamiento efímero' %></strong><span id=\"storageText\"><%= authStoragePersistent ? 'LocalAuth está dentro de almacenamiento persistente.' : (authStorageWarning || 'La sesión puede perderse al reiniciar o desplegar.') %></span></div><% } %>\n""",
+              ''
+          )
+          replace_exact(
+              view_path,
+              """    const storageBox = document.getElementById('storageBox');\n    const storageLabel = document.getElementById('storageLabel');\n    const storageText = document.getElementById('storageText');\n""",
+              ''
+          )
+          replace_exact(
+              view_path,
+              """    function renderStorageStatus(data) {\n      const persistent = Boolean(data.authStoragePersistent);\n      if (storageBox) storageBox.className = 'storage-box ' + (persistent ? 'persistent' : 'ephemeral');\n      if (storageLabel) storageLabel.textContent = persistent ? 'Sesión persistente' : 'Sesión en almacenamiento efímero';\n      if (storageText) storageText.textContent = persistent ? 'LocalAuth está dentro de almacenamiento persistente.' : (data.authStorageWarning || 'La sesión puede perderse al reiniciar o desplegar.');\n    }\n""",
+              ''
+          )
+          replace_exact(view_path, "      renderStorageStatus(data);\n", '')
+          replace_exact(
+              view_path,
+              """    async function refreshStatus() {\n      const response = await fetch('/admin/operaciones/whatsapp/estado', { cache: 'no-store' });\n      if (!response.ok) return;\n      renderStatus(await response.json());\n    }\n    document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);\n    renderReadyAt(readyAtText?.dataset.rawReadyAt || readyAtText?.textContent || '');\n    window.setInterval(refreshStatus, 3000);\n""",
+              """    function renderStatusError() {\n      renderStatus({\n        ready: false,\n        initializing: false,\n        reconnecting: false,\n        qrImage: null,\n        lastError: fallbackOperationalError,\n        technicalLastError: null,\n        lastReadyAt: null\n      });\n    }\n    async function refreshStatus() {\n      try {\n        const response = await fetch('/admin/operaciones/whatsapp/estado', {\n          cache: 'no-store',\n          credentials: 'same-origin',\n          headers: { Accept: 'application/json' }\n        });\n        if (!response.ok) throw new Error(`Estado HTTP ${response.status}`);\n        renderStatus(await response.json());\n      } catch (error) {\n        console.error('No fue posible consultar el estado de WhatsApp despacho.', error);\n        renderStatusError();\n      }\n    }\n    document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);\n    renderReadyAt(readyAtText?.dataset.rawReadyAt || readyAtText?.textContent || '');\n    refreshStatus();\n    window.setInterval(refreshStatus, 3000);\n"""
+          )
+
+          runtime_path = 'src/services/dispatchWhatsappWebServiceV6.js'
+          replace_exact(
+              runtime_path,
+              "const CATCHUP_MIN_INTERVAL_MS = Number(process.env.DISPATCH_WA_CATCHUP_MIN_INTERVAL_MS || 60000);\n",
+              "const CATCHUP_MIN_INTERVAL_MS = Number(process.env.DISPATCH_WA_CATCHUP_MIN_INTERVAL_MS || 60000);\nconst CLIENT_DESTROY_TIMEOUT_MS = Math.max(1000, Number(process.env.DISPATCH_WWEB_DESTROY_TIMEOUT_MS || 5000));\n"
+          )
+          replace_exact(
+              runtime_path,
+              """function resetClientReference() {\n  stopPendingConfirmationReconciliation();\n  const oldClient = client;\n  client = null;\n  initializing = false;\n  ready = false;\n  lastQr = null;\n  if (oldClient) oldClient.destroy().catch((error) => console.warn('No fue posible cerrar completamente el cliente anterior de WhatsApp despacho.', error));\n}\n\nasync function getReadyClient() {\n""",
+              """function resetClientReference() {\n  stopPendingConfirmationReconciliation();\n  const oldClient = client;\n  client = null;\n  initializing = false;\n  ready = false;\n  lastQr = null;\n  if (oldClient) oldClient.destroy().catch((error) => console.warn('No fue posible cerrar completamente el cliente anterior de WhatsApp despacho.', error));\n}\n\nasync function destroyClientWithoutLogout(activeClient) {\n  if (!activeClient) return;\n  let timeoutId = null;\n  try {\n    await Promise.race([\n      Promise.resolve(activeClient.destroy()),\n      new Promise((resolve) => {\n        timeoutId = setTimeout(resolve, CLIENT_DESTROY_TIMEOUT_MS);\n        timeoutId.unref?.();\n      })\n    ]);\n  } catch (error) {\n    console.warn('[dispatch-wa] No fue posible destruir completamente el cliente durante la recuperación.', error?.message || error);\n  } finally {\n    if (timeoutId) clearTimeout(timeoutId);\n  }\n}\n\nexport async function restartDispatchWhatsappClient(reason = 'recuperación automática') {\n  if (manualLogoutRequested) return getDispatchWhatsappStatus();\n  clearReconnectTimer();\n  stopPendingConfirmationReconciliation();\n  const oldClient = client;\n  client = null;\n  initializing = false;\n  ready = false;\n  lastQr = null;\n  lastError = null;\n  await destroyClientWithoutLogout(oldClient);\n  const dataPath = ensureAuthDataPath();\n  cleanupChromiumProfileLocks(dataPath);\n  console.warn(`[dispatch-wa] Reiniciando cliente sin cerrar la sesión persistida. reason=${reason}`);\n  initDispatchWhatsappClient();\n  return getDispatchWhatsappStatus();\n}\n\nasync function getReadyClient() {\n"""
+          )
+
+          facade_path = 'src/services/dispatchWhatsappWebService.js'
+          replace_exact(
+              facade_path,
+              """  initDispatchWhatsappClient as initRuntimeClient,\n  sendDispatchWhatsappMediaMessage,\n""",
+              """  initDispatchWhatsappClient as initRuntimeClient,\n  restartDispatchWhatsappClient as restartRuntimeClient,\n  sendDispatchWhatsappMediaMessage,\n"""
+          )
+          replace_exact(
+              facade_path,
+              "const STALLED_RECOVERY_PROBE_MS = Math.max(1000, Number(process.env.DISPATCH_WWEB_STALLED_RECOVERY_PROBE_MS || 3000));\n",
+              ''
+          )
+          replace_exact(
+              facade_path,
+              """function scheduleStalledRecoveryProbe() {\n  const timer = setTimeout(() => {\n    runDispatchWhatsappWatchdog('stalled_recovery').catch(() => {});\n  }, STALLED_RECOVERY_PROBE_MS);\n  timer.unref?.();\n}\n\n""",
+              ''
+          )
+          replace_exact(
+              facade_path,
+              """        console.warn('[dispatch-wa] Watchdog detectó una inicialización atascada. Limpiando Chromium para permitir la recuperación.');\n        killStaleChromiumProcesses(status.authDataPath || resolveAuthDataPath());\n        initializingSeenAtMs = now;\n        scheduleStalledRecoveryProbe();\n        return;\n""",
+              """        console.warn('[dispatch-wa] Watchdog detectó una inicialización atascada. Reiniciando el cliente sin cerrar la sesión persistida.');\n        initializingSeenAtMs = null;\n        await restartDispatchWhatsappClient(`watchdog:${reason}`);\n        return;\n"""
+          )
+          replace_exact(
+              facade_path,
+              """export async function closeDispatchWhatsappSession() {\n  stopDispatchWhatsappWatchdog();\n""",
+              """export async function restartDispatchWhatsappClient(reason = 'recuperación automática') {\n  if (!runtimeEnvironmentPrepared) prepareRuntimeEnvironment({ cleanupStaleProcesses: true });\n  const status = getRuntimeStatus();\n  killStaleChromiumProcesses(status.authDataPath || resolveAuthDataPath());\n  return restartRuntimeClient(reason);\n}\n\nexport async function closeDispatchWhatsappSession() {\n  stopDispatchWhatsappWatchdog();\n"""
+          )
+
+          route_path = 'src/routes/dispatchWaRouterV2.js'
+          replace_exact(
+              route_path,
+              "import { closeDispatchWhatsappSession, getDispatchWhatsappStatusView, initDispatchWhatsappClient, sendDispatchWhatsappMessage } from '../services/dispatchWhatsappWebService.js';\n",
+              "import { closeDispatchWhatsappSession, getDispatchWhatsappStatusView, initDispatchWhatsappClient, restartDispatchWhatsappClient, sendDispatchWhatsappMessage } from '../services/dispatchWhatsappWebService.js';\n"
+          )
+          replace_exact(
+              route_path,
+              """  closeDispatchWhatsappSession()\n    .catch((error) => console.warn('[dispatch-wa] No fue posible cerrar completamente el cliente atascado.', error?.message || error))\n    .finally(() => {\n      recoveryInProgress = false;\n      initDispatchWhatsappClient();\n    });\n""",
+              """  restartDispatchWhatsappClient('estado atascado detectado desde el panel')\n    .catch((error) => console.warn('[dispatch-wa] No fue posible reiniciar el cliente atascado.', error?.message || error))\n    .finally(() => {\n      recoveryInProgress = false;\n    });\n"""
+          )
+
+          test_path = 'test/dispatchWhatsappRuntimeContracts.test.js'
+          replace_exact(
+              test_path,
+              """  assert.match(watchdog, /killStaleChromiumProcesses\\(status\\.authDataPath \\|\\| resolveAuthDataPath\\(\\)\\)/);\n  assert.match(source, /scheduleStalledRecoveryProbe\\(\\)/);\n  assert.doesNotMatch(source, /closeRuntimeSession\\(\\)\\.catch/);\n""",
+              """  assert.match(watchdog, /await restartDispatchWhatsappClient\\(`watchdog:\\$\\{reason\\}`\\)/);\n  assert.doesNotMatch(source, /scheduleStalledRecoveryProbe/);\n  assert.doesNotMatch(watchdog, /closeDispatchWhatsappSession|closeRuntimeSession/);\n"""
+          )
+          replace_exact(
+              test_path,
+              """test('WhatsApp storage diagnostics remain restricted to DEV', () => {\n  const view = readSource('src/views/operacionesWhatsappEstado.ejs');\n  assert.match(view, /<% if \\(role === 'dev'\\) \\{ %><div class=\"storage-box/);\n  assert.match(view, /id=\"storageBox\"/);\n  assert.match(view, /Sesión persistente/);\n  assert.match(view, /Sesión en almacenamiento efímero/);\n  assert.match(view, /renderStorageStatus\\(data\\)/);\n});\n""",
+              """test('WhatsApp status view omits storage implementation details and surfaces polling failures', () => {\n  const view = readSource('src/views/operacionesWhatsappEstado.ejs');\n  assert.doesNotMatch(view, /storage-box|storageBox|storageLabel|storageText/);\n  assert.doesNotMatch(view, /Sesión persistente|Sesión en almacenamiento efímero|LocalAuth|renderStorageStatus/);\n  assert.match(view, /function renderStatusError\\(\\)/);\n  assert.match(view, /catch \\(error\\)/);\n  assert.match(view, /renderStatusError\\(\\)/);\n  assert.match(view, /refreshStatus\\(\\);\\s*window\\.setInterval\\(refreshStatus, 3000\\)/);\n});\n\ntest('stalled recovery releases the client without deleting LocalAuth session data', () => {\n  const runtime = readSource('src/services/dispatchWhatsappWebServiceV6.js');\n  const restart = between(runtime, 'export async function restartDispatchWhatsappClient', 'async function getReadyClient');\n  assert.match(restart, /client = null/);\n  assert.match(restart, /initializing = false/);\n  assert.match(restart, /destroyClientWithoutLogout\\(oldClient\\)/);\n  assert.match(restart, /cleanupChromiumProfileLocks\\(dataPath\\)/);\n  assert.match(restart, /initDispatchWhatsappClient\\(\\)/);\n  assert.doesNotMatch(restart, /logout\\(/);\n});\n\ntest('panel stalled recovery uses non-destructive restart instead of manual logout', () => {\n  const route = readSource('src/routes/dispatchWaRouterV2.js');\n  const recovery = between(route, 'function recoverStalledInitialization()', 'async function getStatusForViewer');\n  assert.match(route, /restartDispatchWhatsappClient/);\n  assert.match(recovery, /restartDispatchWhatsappClient\\('estado atascado detectado desde el panel'\\)/);\n  assert.doesNotMatch(recovery, /closeDispatchWhatsappSession\\(/);\n});\n"""
+          )
+          PY
+
+      - name: Remove temporary workflow
+        run: rm -f .github/workflows/apply-issue-576.yml
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate syntax and focused regressions
+        run: |
+          node --check src/routes/dispatchWaRouterV2.js
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check src/services/dispatchWhatsappWebServiceV6.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
+          node --test test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Commit canonical correction
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: recuperar conexión WhatsApp atascada (#576)"
+          git push origin HEAD:fix/576-whatsapp-stuck-recovery
