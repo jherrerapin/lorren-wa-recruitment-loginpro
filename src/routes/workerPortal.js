@@ -60,7 +60,10 @@ function requestUserAgent(req) {
 }
 
 function errorCode(error) {
-  return typeof error?.message === 'string' ? error.message : 'unknown';
+  const candidate = typeof error?.code === 'string'
+    ? error.code
+    : (typeof error?.message === 'string' ? error.message : 'unknown');
+  return /^[A-Za-z0-9_]{1,80}$/.test(candidate) ? candidate : 'worker_portal_error';
 }
 
 function isConfigurationError(error) {
@@ -96,23 +99,32 @@ export function applyWorkerPortalSecurityHeaders(res, nonce = null) {
   );
 }
 
-export function ensureWorkerPortalInstallationId(req, res, randomUUIDFn = randomUUID) {
+export function resolveWorkerPortalInstallationId(req, randomUUIDFn = randomUUID) {
   const current = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
   if (current) {
     try {
-      return normalizeInstallationId(current);
+      return {
+        installationId: normalizeInstallationId(current),
+        shouldSetCookie: false
+      };
     } catch {
-      // Replace malformed or legacy values with a new UUID v4.
+      // Replace malformed or legacy values only after a successful activation.
     }
   }
 
-  const installationId = normalizeInstallationId(randomUUIDFn());
+  return {
+    installationId: normalizeInstallationId(randomUUIDFn()),
+    shouldSetCookie: true
+  };
+}
+
+export function setWorkerPortalInstallationCookie(res, installationId) {
+  const normalized = normalizeInstallationId(installationId);
   res.cookie(
     WORKER_PORTAL_INSTALLATION_COOKIE_NAME,
-    installationId,
+    normalized,
     workerPortalCookieOptions(WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS)
   );
-  return installationId;
 }
 
 export function buildWorkerPortalActivationUrl(origin, rawActivationToken) {
@@ -167,13 +179,16 @@ export function workerPortalRouter(prisma, options = {}) {
     applyWorkerPortalSecurityHeaders(res);
 
     try {
+      if (req.get?.('x-requested-with') !== 'worker-portal') {
+        throw new Error('worker_portal_activation_request_invalid');
+      }
       const now = nowFn();
       if (!validDate(now)) throw new Error('worker_portal_activation_now_invalid');
-      const installationId = ensureWorkerPortalInstallationId(req, res, randomUUIDFn);
+      const installation = resolveWorkerPortalInstallationId(req, randomUUIDFn);
       const result = await activateSessionFn({
         repository,
         rawActivationToken: req.body?.activationToken,
-        installationId,
+        installationId: installation.installationId,
         installationPepper,
         now,
         sessionTtlMinutes,
@@ -183,6 +198,9 @@ export function workerPortalRouter(prisma, options = {}) {
         ipAddress: requestIp(req)
       });
 
+      if (installation.shouldSetCookie) {
+        setWorkerPortalInstallationCookie(res, installation.installationId);
+      }
       res.cookie(result.cookie.name, result.rawSessionToken, result.cookie.options);
       return res.status(200).json({ ok: true, redirectTo: WORKER_PORTAL_HOME_PATH });
     } catch (error) {
