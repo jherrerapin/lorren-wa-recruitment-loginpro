@@ -10,7 +10,7 @@ function normalizeComparableReplyText(value = '') {
 
 const REQUEST_VERB_PATTERN = /\b(?:adjunta|adjuntar|envia|enviar|enviame|comparte|comparteme|confirma|confirmame|indica|indicame|dime|corrige|corrigeme|responde|necesito|falta|faltan|me falta|me faltan)\b/;
 const CV_PATTERN = /\b(?:hoja de vida|hv|curriculum|cv)\b/;
-const DATA_PATTERN = /\b(?:datos?|informacion|nombre|documento|cedula|edad|localidad|barrio|residencia|restricciones|transporte)\b/;
+const DATA_PATTERN = /\b(?:datos?|nombre|documento|cedula|edad|localidad|barrio|residencia|restricciones|transporte)\b/;
 const VACANCY_PATTERN = /\b(?:vacante|cargo|operacion)\b/;
 const CONFIRMATION_PATTERN = /\b(?:confirm\w*|correct\w*|esta bien|responde si|correccion\w*|corrige\w*)\b/;
 const FUTURE_PROFILE_PATTERN = /\b(?:perfil|registro|registrad[oa])\b/;
@@ -22,6 +22,7 @@ export function detectReplyFollowUpTargets(value = '') {
   if (!normalized) return [];
 
   const requestsAction = REQUEST_VERB_PATTERN.test(normalized);
+  const mentionsVacancy = VACANCY_PATTERN.test(normalized);
 
   if (CV_PATTERN.test(normalized) && (requestsAction || /\b(?:solo me falta|para continuar|para cerrar|para finalizar)\b/.test(normalized))) {
     targets.add('cv_upload');
@@ -31,11 +32,11 @@ export function detectReplyFollowUpTargets(value = '') {
     targets.add('candidate_data');
   }
 
-  if (VACANCY_PATTERN.test(normalized) && CONFIRMATION_PATTERN.test(normalized)) {
+  if (mentionsVacancy && CONFIRMATION_PATTERN.test(normalized)) {
     targets.add('vacancy_confirmation');
   }
 
-  if (CONFIRMATION_PATTERN.test(normalized) && /\b(?:datos?|informacion|todo|resumen)\b/.test(normalized)) {
+  if (!mentionsVacancy && CONFIRMATION_PATTERN.test(normalized) && /\b(?:datos?|informacion|todo|resumen)\b/.test(normalized)) {
     targets.add('candidate_confirmation');
   }
 
