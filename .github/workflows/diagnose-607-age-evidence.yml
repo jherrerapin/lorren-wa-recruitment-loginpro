@@ -1,0 +1,43 @@
+name: Diagnose structural age evidence
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'fix/607-age-evidence'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Apply patch and capture focused TAP
+        run: |
+          node scripts/apply-607-age-evidence.mjs
+          mkdir -p diagnostics
+          set +e
+          node --test test/candidateAgeEvidence.test.js > diagnostics/607-focused.tap 2>&1
+          status=$?
+          printf 'status=%s\n' "$status" > diagnostics/607-focused.status
+          exit 0
+      - name: Commit diagnostic
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add diagnostics/607-focused.tap diagnostics/607-focused.status
+          if ! git diff --cached --quiet; then
+            git commit -m "test: capturar diagnóstico enfocado de edad #607"
+            git push origin "HEAD:${HEAD_REF}"
+          fi
