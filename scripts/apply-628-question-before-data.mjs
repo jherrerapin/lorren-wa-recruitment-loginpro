@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const file = 'src/routes/webhook.js';
-let source = readFileSync(file, 'utf8');
+const webhookFile = 'src/routes/webhook.js';
+let webhookSource = readFileSync(webhookFile, 'utf8');
 
 const oldBlock = `  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE) {
     const nextStep = candidate.currentStep === ConversationStep.MENU
@@ -62,11 +62,24 @@ const newBlock = `  if (vacancyFirstGateDecision.action === VacancyFirstGateActi
     });
   }`;
 
-if (!source.includes(newBlock)) {
-  const count = source.split(oldBlock).length - 1;
+if (!webhookSource.includes(newBlock)) {
+  const count = webhookSource.split(oldBlock).length - 1;
   if (count !== 1) throw new Error(`assign vacancy block count=${count}`);
-  source = source.replace(oldBlock, newBlock);
+  webhookSource = webhookSource.replace(oldBlock, newBlock);
 }
 
-writeFileSync(file, source, 'utf8');
-console.log('Question-before-data transition patch applied for #628.');
+writeFileSync(webhookFile, webhookSource, 'utf8');
+
+const safetyFile = 'src/services/replySafety.js';
+let safetySource = readFileSync(safetyFile, 'utf8');
+const oldAliases = `    obra_labor: ['obra labor', 'obra o labor'],`;
+const newAliases = `    obra_labor: ['obra labor', 'obra o labor', 'contrato por obra'],`;
+
+if (!safetySource.includes(newAliases)) {
+  const count = safetySource.split(oldAliases).length - 1;
+  if (count !== 1) throw new Error(`obra_labor alias count=${count}`);
+  safetySource = safetySource.replace(oldAliases, newAliases);
+}
+
+writeFileSync(safetyFile, safetySource, 'utf8');
+console.log('Question-before-data transition and registered contract support applied for #628.');
