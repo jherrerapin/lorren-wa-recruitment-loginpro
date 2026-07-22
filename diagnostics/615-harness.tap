@@ -1,0 +1,744 @@
+TAP version 13
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:50.385Z"}
+# Subtest: conversation harness regression cases
+    # Subtest: greeting-not-name
+    ok 1 - greeting-not-name
+      ---
+      duration_ms: 142.951904
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:50.450Z"}
+    # Subtest: age-not-experience
+    ok 2 - age-not-experience
+      ---
+      duration_ms: 62.965901
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:50.538Z"}
+    # Subtest: experience-headcount-number-does-not-trigger-age-rejection
+    ok 3 - experience-headcount-number-does-not-trigger-age-rejection
+      ---
+      duration_ms: 88.078942
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:50.593Z"}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: fragmented-data-consolidation
+    ok 4 - fragmented-data-consolidation
+      ---
+      duration_ms: 322.025121
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:50.926Z"}
+    # Subtest: greeting-not-name-or-neighborhood
+    ok 5 - greeting-not-name-or-neighborhood
+      ---
+      duration_ms: 64.970935
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:50.977Z"}
+    # Subtest: bike-variants-recognized
+    ok 6 - bike-variants-recognized
+      ---
+      duration_ms: 50.903466
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.037Z"}
+    # Subtest: car-recognized
+    ok 7 - car-recognized
+      ---
+      duration_ms: 59.142231
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.088Z"}
+    # Subtest: city-with-multiple-vacancies-asks-which-one
+    ok 8 - city-with-multiple-vacancies-asks-which-one
+      ---
+      duration_ms: 50.929817
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.146Z"}
+    # Subtest: city-only-does-not-auto-assign-even-with-single-active-city-vacancy
+    ok 9 - city-only-does-not-auto-assign-even-with-single-active-city-vacancy
+      ---
+      duration_ms: 57.798579
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.330Z"}
+    # Subtest: inactive-vacancy-offers-registration-for-future-openings
+    not ok 10 - inactive-vacancy-offers-registration-for-future-openings
+      ---
+      duration_ms: 185.545302
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        inactive-vacancy-offers-registration-for-future-openings: vacancyId no coincide
+        + actual - expected
+        
+        + 'vac-post'
+        - 'vac-iba-inactive'
+               ^
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'vac-iba-inactive'
+      actual: 'vac-post'
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.393Z"}
+    # Subtest: bus-and-independent-recognized
+    ok 11 - bus-and-independent-recognized
+      ---
+      duration_ms: 61.026479
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_REPLY_SAFETY_BLOCKED] {"candidateId":"candidate-1","blockedClaims":["obra_labor"],"reason":"unsupported_sensitive_vacancy_claim"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.446Z"}
+    # Subtest: answer-question-before-data
+    not ok 12 - answer-question-before-data
+      ---
+      duration_ms: 52.61456
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        answer-question-before-data: currentStep no coincide
+        + actual - expected
+        
+        + 'GREETING_SENT'
+        - 'COLLECTING_DATA'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'COLLECTING_DATA'
+      actual: 'GREETING_SENT'
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: no-interest-closes
+    ok 13 - no-interest-closes
+      ---
+      duration_ms: 82.856774
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.590Z"}
+    # Subtest: natural-correction-in-confirmation
+    ok 14 - natural-correction-in-confirmation
+      ---
+      duration_ms: 61.11817
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.677Z"}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:51.805Z"}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: ibague-flow-name-correction-and-transport-list
+    not ok 15 - ibague-flow-name-correction-and-transport-list
+      ---
+      duration_ms: 422.671776
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        ibague-flow-name-correction-and-transport-list: age no coincide
+        
+        null !== 24
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 24
+      actual: ~
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.063Z"}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: madrid-city-role-fragments-do-not-become-name
+    ok 16 - madrid-city-role-fragments-do-not-become-name
+      ---
+      duration_ms: 152.126901
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.253Z"}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: funza-bodega-city-does-not-become-name-and-resolves-vacancy
+    ok 17 - funza-bodega-city-does-not-become-name-and-resolves-vacancy
+      ---
+      duration_ms: 144.066265
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.370Z"}
+    # Subtest: bodega-data-block-keeps-name-doc-and-transport
+    not ok 18 - bodega-data-block-keeps-name-doc-and-transport
+      ---
+      duration_ms: 60.207789
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        bodega-data-block-keeps-name-doc-and-transport: currentStep no coincide
+        + actual - expected
+        
+        + 'CONFIRMING_DATA'
+        - 'COLLECTING_DATA'
+             ^
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'COLLECTING_DATA'
+      actual: 'CONFIRMING_DATA'
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.417Z"}
+    # Subtest: single-missing-medical-restrictions-accepts-natural-no
+    ok 19 - single-missing-medical-restrictions-accepts-natural-no
+      ---
+      duration_ms: 46.680691
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.480Z"}
+    # Subtest: medical-restrictions-confusion-gets-clear-explanation
+    ok 20 - medical-restrictions-confusion-gets-clear-explanation
+      ---
+      duration_ms: 62.654208
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.534Z"}
+    # Subtest: future-birthday-keeps-current-age-and-does-not-repeat-transport
+    not ok 21 - future-birthday-keeps-current-age-and-does-not-repeat-transport
+      ---
+      duration_ms: 54.08133
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        future-birthday-keeps-current-age-and-does-not-repeat-transport: age no coincide
+        
+        null !== 18
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 18
+      actual: ~
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.689Z"}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: ibague-greeting-interest-does-not-become-name-and-name-correction-advances
+    not ok 22 - ibague-greeting-interest-does-not-become-name-and-name-correction-advances
+      ---
+      duration_ms: 394.738174
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        ibague-greeting-interest-does-not-become-name-and-name-correction-advances: neighborhood no coincide
+        
+        null !== 'Salado'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'Salado'
+      actual: ~
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:52.994Z"}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+    # Subtest: ibague-pdf-phrase-does-not-become-name-or-reopen-confirmation
+    not ok 23 - ibague-pdf-phrase-does-not-become-name-or-reopen-confirmation
+      ---
+      duration_ms: 660.909471
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        ibague-pdf-phrase-does-not-become-name-or-reopen-confirmation: neighborhood no coincide
+        
+        null !== 'Salado'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'Salado'
+      actual: ~
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:53.646Z"}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"Buenas noches","currentStep":"GREETING_SENT","vacancyId":null,"reason":"REPEAT_PREVENTED","gate":"vacancy_first_gate","action":"SUPPRESS_REPLY","replyKind":"ASK_CITY_AND_ROLE","recentReplyKind":"ASK_CITY_AND_ROLE","createdAt":"2026-07-22T22:35:53.790Z"}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: ibague-role-phrase-does-not-become-name-and-name-correction-sticks
+    not ok 24 - ibague-role-phrase-does-not-become-name-and-name-correction-sticks
+      ---
+      duration_ms: 538.246646
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        ibague-role-phrase-does-not-become-name-and-name-correction-sticks: age no coincide
+        
+        null !== 30
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 30
+      actual: ~
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.220Z"}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+    # Subtest: bogota-calle-80-does-not-become-age-or-trigger-rejection
+    ok 25 - bogota-calle-80-does-not-become-age-or-trigger-rejection
+      ---
+      duration_ms: 157.083212
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.339Z"}
+    # Subtest: human-intervention-pauses-bot
+    not ok 26 - human-intervention-pauses-bot
+      ---
+      duration_ms: 53.603769
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        human-intervention-pauses-bot: botPaused no coincide
+        
+        false !== true
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: true
+      actual: false
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.430Z"}
+    # Subtest: cv-first-then-city-vacancy
+    ok 27 - cv-first-then-city-vacancy
+      ---
+      duration_ms: 91.186661
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.492Z"}
+    # Subtest: foreigner-with-ppt-not-rejected
+    not ok 28 - foreigner-with-ppt-not-rejected
+      ---
+      duration_ms: 61.982889
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        foreigner-with-ppt-not-rejected: transportMode no coincide
+        + actual - expected
+        
+        + 'Publico'
+        - 'Bus'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'Bus'
+      actual: 'Publico'
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.547Z"}
+    # Subtest: yes-please-not-name
+    ok 29 - yes-please-not-name
+      ---
+      duration_ms: 54.823355
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.608Z"}
+    # Subtest: female-contextual-interest-not-name-or-neighborhood
+    ok 30 - female-contextual-interest-not-name-or-neighborhood
+      ---
+      duration_ms: 60.204325
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.663Z"}
+    # Subtest: no-multiple-templates-mixed
+    not ok 31 - no-multiple-templates-mixed
+      ---
+      duration_ms: 55.626066
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: 'no-multiple-templates-mixed: la respuesta final no contiene "requisitos registrados"'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected:
+      actual: 'perfecto, continuamos con esta vacante. para avanzar, comparteme nombre completo, tipo de documento, numero de documento, edad, el barrio, restricciones medicas, medio de transporte.'
+      operator: 'match'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:117:12)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:54.723Z"}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
+    # Subtest: no-infinite-confirmation
+    ok 32 - no-infinite-confirmation
+      ---
+      duration_ms: 142.400857
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"si","currentStep":"CONFIRMING_DATA","vacancyId":"vac-post","reason":"Candidate main flow is complete and the new message is only contextual closure.","gate":"chat_engine","action":"SUPPRESSED","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T22:35:54.861Z"}
+# [BOT_SUPPRESSED] {"phone":"573001112233","candidateId":"candidate-1","reason":"Candidate main flow is complete and the new message is only contextual closure."}
+    # Subtest: female-pipeline-after-cv
+    not ok 33 - female-pipeline-after-cv
+      ---
+      duration_ms: 55.413066
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        female-pipeline-after-cv: currentStep no coincide
+        + actual - expected
+        
+        + 'CONFIRMING_DATA'
+        - 'DONE'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'DONE'
+      actual: 'CONFIRMING_DATA'
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"listo","currentStep":"ASK_CV","vacancyId":"vac-sched","reason":"Candidate main flow is complete and the new message is only contextual closure.","gate":"chat_engine","action":"SUPPRESSED","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T22:35:54.920Z"}
+# [BOT_SUPPRESSED] {"phone":"573001112233","candidateId":"candidate-1","reason":"Candidate main flow is complete and the new message is only contextual closure."}
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"no puedo, otro horario","currentStep":"ASK_CV","vacancyId":"vac-sched","reason":"Candidate has no real pending action; suppressing automatic flow continuation.","gate":"contextual_response_gate","action":"NO_REPLY","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T22:35:54.966Z"}
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_REPLY_STATE_GUARD_BLOCKED] {"candidateId":"candidate-1","reasons":["resolved_cv_requested_again"]}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T00:35:55.111Z"}
+    # Subtest: scheduling-offer-reschedule-confirm
+    not ok 34 - scheduling-offer-reschedule-confirm
+      ---
+      duration_ms: 249.134137
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        scheduling-offer-reschedule-confirm: currentStep no coincide
+        + actual - expected
+        
+        + 'ASK_CV'
+        - 'SCHEDULED'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 'SCHEDULED'
+      actual: 'ASK_CV'
+      operator: 'deepStrictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:97:14)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_MANUAL_REVIEW_SILENT] {"candidateId":"candidate-1","reason":"Consulta documental pendiente de validacion manual","inboundPreview":"Perdi la cedula original y solo tengo la cedula digital"}
+    # Subtest: document-exception-pauses-for-manual-review
+    not ok 35 - document-exception-pauses-for-manual-review
+      ---
+      duration_ms: 47.908289
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        document-exception-pauses-for-manual-review: cantidad de salidas inesperada
+        
+        1 !== 0
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 0
+      actual: 1
+      operator: 'strictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:134:12)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: done-step-followup-about-previous-application-gets-status-ack
+    not ok 36 - done-step-followup-about-previous-application-gets-status-ack
+      ---
+      duration_ms: 76.93237
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: 'done-step-followup-about-previous-application-gets-status-ack: la respuesta final no contiene "postulación ya está registrada"'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected:
+      actual: 'con ese contexto, te doy la informacion vigente de auxiliar de cargue y descargue ibague.'
+      operator: 'match'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:117:12)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+    # Subtest: done-step-answers-vacancy-question-naturally
+    ok 37 - done-step-answers-vacancy-question-naturally
+      ---
+      duration_ms: 44.605089
+      ...
+# [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_MANUAL_REVIEW_SILENT] {"candidateId":"candidate-1","reason":"Duda posterior requiere intervencion manual","inboundPreview":"mi esposa tambien puede entrar conmigo a la operacion?"}
+    # Subtest: ask-cv-out-of-scope-question-pauses-for-dev-review
+    not ok 38 - ask-cv-out-of-scope-question-pauses-for-dev-review
+      ---
+      duration_ms: 52.846433
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        ask-cv-out-of-scope-question-pauses-for-dev-review: cantidad de salidas inesperada
+        
+        1 !== 0
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 0
+      actual: 1
+      operator: 'strictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:134:12)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_MANUAL_REVIEW_SILENT] {"candidateId":"candidate-1","reason":"Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.","inboundPreview":"Ola buenos días 👋 Que pena la verdad tuve un inconveniente es que la verdad no conozco muy bien la ciudad y PS me tocó transbordar y me per"}
+    # Subtest: scheduled-arrival-problem-pauses-for-manual-review-without-reply
+    not ok 39 - scheduled-arrival-problem-pauses-for-manual-review-without-reply
+      ---
+      duration_ms: 69.194279
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: |-
+        scheduled-arrival-problem-pauses-for-manual-review-without-reply: cantidad de salidas inesperada
+        
+        2 !== 0
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 0
+      actual: 2
+      operator: 'strictEqual'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:134:12)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"cual es la direccion exacta de la entrevista?","currentStep":"SCHEDULED","vacancyId":"vac-sched","reason":"Candidate has no real pending action; suppressing automatic flow continuation.","gate":"contextual_response_gate","action":"NO_REPLY","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T22:35:55.452Z"}
+    # Subtest: scheduled-question-uses-context-instead-of-repeating-flow
+    not ok 40 - scheduled-question-uses-context-instead-of-repeating-flow
+      ---
+      duration_ms: 49.00556
+      location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
+      failureType: 'testCodeFailure'
+      error: 'scheduled-question-uses-context-instead-of-repeating-flow: la respuesta final no contiene "direccion de entrevista"'
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected:
+      actual: ''
+      operator: 'match'
+      stack: |-
+        assertCaseExpectations (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:117:12)
+        runConversationCase (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:157:5)
+        process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:171:7)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:5)
+        async Test.run (node:internal/test_runner/test:797:9)
+        async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+    1..40
+not ok 1 - conversation harness regression cases
+  ---
+  duration_ms: 5208.996705
+  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:168:1'
+  failureType: 'subtestsFailed'
+  error: '18 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 41
+# suites 0
+# pass 22
+# fail 19
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5784.939351
