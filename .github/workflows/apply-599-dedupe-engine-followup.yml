@@ -1,4 +1,4 @@
-name: Diagnose engine follow-up deduplication
+name: Compare conversation harness with main
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  diagnose-harness:
+  compare-harness:
     if: github.head_ref == 'fix/599-dedupe-engine-followup'
     runs-on: ubuntu-latest
     steps:
@@ -27,23 +27,35 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Capture conversation harness output
+      - name: Compare harness results
         run: |
           mkdir -p diagnostics
           set +e
-          node --test test/conversation-harness.test.js > diagnostics/599-conversation-harness.tap 2>&1
-          status=$?
-          echo "$status" > diagnostics/599-conversation-harness.status
+          node --test test/conversation-harness.test.js > diagnostics/599-head-harness.tap 2>&1
+          head_status=$?
+
+          git worktree add /tmp/lorren-main-harness origin/main
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/lorren-main-harness/node_modules
+          (
+            cd /tmp/lorren-main-harness
+            node --test test/conversation-harness.test.js > "$GITHUB_WORKSPACE/diagnostics/599-main-harness.tap" 2>&1
+          )
+          main_status=$?
+
+          printf 'head=%s\nmain=%s\n' "$head_status" "$main_status" > diagnostics/599-harness-status.txt
+          grep -E '^    not ok [0-9]+ - ' diagnostics/599-head-harness.tap | sed 's/^    //' > diagnostics/599-head-failures.txt || true
+          grep -E '^    not ok [0-9]+ - ' diagnostics/599-main-harness.tap | sed 's/^    //' > diagnostics/599-main-failures.txt || true
+          diff -u diagnostics/599-main-failures.txt diagnostics/599-head-failures.txt > diagnostics/599-failure-diff.txt || true
           exit 0
 
-      - name: Commit harness diagnostic
+      - name: Commit comparison
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add diagnostics/599-conversation-harness.tap diagnostics/599-conversation-harness.status
+          git add diagnostics/599-head-harness.tap diagnostics/599-main-harness.tap diagnostics/599-harness-status.txt diagnostics/599-head-failures.txt diagnostics/599-main-failures.txt diagnostics/599-failure-diff.txt
           if ! git diff --cached --quiet; then
-            git commit -m "test: capturar divergencia del harness #599"
+            git commit -m "test: comparar harness de #599 con main"
             git push origin "HEAD:${HEAD_REF}"
           fi
