@@ -1,0 +1,53 @@
+name: Patch 595 worker portal
+
+on:
+  push:
+    branches:
+      - fix/595-worker-portal-public-stability
+    paths:
+      - '.github/workflows/patch-595-worker-portal.yml'
+      - '.github/scripts/patch-595-server.mjs'
+      - '.github/patch-595-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/595-worker-portal-public-stability
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply exact server patch
+        run: node .github/scripts/patch-595-server.mjs
+      - name: Validate syntax and mount order
+        run: |
+          node --check src/server.js
+          node --check src/routes/workerPortal.js
+          node --check test/workerPortalPublicStability.test.js
+          node - <<'NODE'
+          const fs = require('fs');
+          const source = fs.readFileSync('src/server.js', 'utf8');
+          const mount = "app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));";
+          const parser = "app.use(express.json({ limit: '2mb' }));";
+          if ((source.split(mount).length - 1) !== 1 || source.indexOf(mount) > source.indexOf(parser)) process.exit(1);
+          NODE
+      - name: Remove temporary automation
+        run: rm -f .github/scripts/patch-595-server.mjs .github/workflows/patch-595-worker-portal.yml .github/patch-595-trigger.txt
+      - name: Commit functional patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/server.js .github
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix: montar portal antes del parser JSON global'
+          git push origin HEAD:fix/595-worker-portal-public-stability
