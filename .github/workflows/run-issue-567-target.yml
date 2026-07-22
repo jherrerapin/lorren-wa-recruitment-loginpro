@@ -1,0 +1,83 @@
+name: Run issue 567 target
+
+on:
+  pull_request_target:
+    branches:
+      - automation/567-operational-labels-runner
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'fix/567-operational-labels'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out trusted runner
+        uses: actions/checkout@v4
+        with:
+          ref: automation/567-operational-labels-runner
+          path: trusted-runner
+          fetch-depth: 1
+
+      - name: Check out correction branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/567-operational-labels
+          path: source
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Apply exact UI corrections
+        working-directory: source
+        run: python3 ../trusted-runner/.github/scripts/apply-issue-567.py
+
+      - name: Install locked dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Check test syntax
+        working-directory: source
+        run: |
+          node --check test/dispatchClientsOperationsContracts.test.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Run focused regressions
+        working-directory: source
+        run: node --test test/dispatchClientsOperationsContracts.test.js test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Commit canonical correction
+        working-directory: source
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'La corrección ya estaba aplicada.'
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/views/operacionesWhatsappEstado.ejs \
+            src/views/operacionesDashboard.ejs \
+            src/views/operacionesClientes.ejs \
+            src/views/operacionesAsignacionesConfirmacion.ejs \
+            src/views/operacionesAsignaciones.ejs \
+            src/views/operacionesClienteOperaciones.ejs \
+            test/dispatchClientsOperationsContracts.test.js \
+            test/dispatchWhatsappRuntimeContracts.test.js
+          git commit -m "fix: aclarar acciones del módulo de despacho (#567)"
+          git push origin HEAD:fix/567-operational-labels
