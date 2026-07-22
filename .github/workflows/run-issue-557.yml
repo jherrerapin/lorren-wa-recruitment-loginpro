@@ -57,7 +57,19 @@ jobs:
           script = workflow[start + len(start_marker):end]
           Path('/tmp/apply-issue-557.py').write_text(textwrap.dedent(script), encoding='utf-8')
           PY
-          python3 /tmp/apply-issue-557.py
+          set +e
+          python3 /tmp/apply-issue-557.py > issue-557-application-diagnostic.txt 2>&1
+          status=$?
+          cat issue-557-application-diagnostic.txt
+          if [ "$status" -ne 0 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add issue-557-application-diagnostic.txt
+            git commit -m "chore: registrar diagnóstico de aplicación #557" || true
+            git push origin HEAD:fix/557-persistent-dispatch-whatsapp
+            exit "$status"
+          fi
+          rm -f issue-557-application-diagnostic.txt
       - name: Remove temporary workflows
         if: steps.recipe.outputs.available == 'true'
         run: rm -f .github/workflows/apply-issue-557.yml .github/workflows/kick-issue-557.yml
