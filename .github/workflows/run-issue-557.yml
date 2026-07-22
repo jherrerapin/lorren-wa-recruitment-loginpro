@@ -45,7 +45,6 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
-          import textwrap
 
           workflow = Path('.github/workflows/apply-issue-557.yml').read_text(encoding='utf-8')
           start_marker = "          python3 <<'PY'\n"
@@ -54,8 +53,12 @@ jobs:
           end = workflow.find(end_marker, start + len(start_marker))
           if start < 0 or end < 0:
               raise SystemExit('No se encontró la receta preparada del issue #557.')
-          script = workflow[start + len(start_marker):end]
-          Path('/tmp/apply-issue-557.py').write_text(textwrap.dedent(script), encoding='utf-8')
+          raw_script = workflow[start + len(start_marker):end]
+          script = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in raw_script.splitlines()
+          )
+          Path('/tmp/apply-issue-557.py').write_text(script + '\n', encoding='utf-8')
           PY
           set +e
           python3 /tmp/apply-issue-557.py > issue-557-application-diagnostic.txt 2>&1
