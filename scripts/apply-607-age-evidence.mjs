@@ -86,13 +86,6 @@ const sanitizerFile = 'src/services/fieldSanitizer.js';
 
 replaceFunction(
   sanitizerFile,
-  'hasAgeEvidence',
-  'hasExperienceEvidence',
-  ''
-);
-
-replaceFunction(
-  sanitizerFile,
   'sanitizeAge',
   'evaluateField',
   `function sanitizeAge(value, text, context = {}) {
