@@ -4,7 +4,8 @@ import {
   buildProgrammingPdfBuffer,
   buildProgrammingCompletionSummary,
   loadProgrammingRequests,
-  normalizeProgrammingDate
+  normalizeProgrammingDate,
+  normalizeProgrammingIncludePending
 } from '../services/dispatchProgrammingPdfService.js';
 import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebService.js';
 
@@ -107,14 +108,18 @@ function requireOps(req, res, next) {
   return next();
 }
 
-function buildCaption({ selectedDate, summary, managedBy }) {
+function buildCaption({ selectedDate, summary, includedSummary, managedBy, includePending }) {
   const manager = normalizeString(managedBy) || 'Julián Herrera';
   return [
-    'Hola, compartimos la programación operativa completa.',
+    includePending
+      ? 'Hola, compartimos la programación operativa del día, incluyendo solicitudes pendientes o por confirmar.'
+      : 'Hola, compartimos la programación operativa confirmada del día.',
     '',
     `Fecha de servicio: ${selectedDate}`,
-    `Solicitudes completas: ${summary.completedRequests}/${summary.totalRequests}`,
-    `Auxiliares asignados: ${summary.assignedWorkers}/${summary.requiredWorkers}`,
+    `Alcance: ${includePending ? 'completas y pendientes' : 'solo solicitudes completas'}`,
+    `Solicitudes incluidas: ${includedSummary.totalRequests}`,
+    `Estado general: ${summary.completedRequests}/${summary.totalRequests} solicitudes completas`,
+    `Auxiliares incluidos: ${includedSummary.assignedWorkers}/${includedSummary.requiredWorkers}`,
     '',
     `Gestionado por: ${manager}`,
     'LoginPro Operaciones'
@@ -129,8 +134,10 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const selectedDate = normalizeProgrammingDate(req.query.fecha || req.query.date);
     const requestId = normalizeString(req.query.requestId);
     const managedBy = normalizeString(req.query.managedBy) || 'Julián Herrera';
-    const result = await buildProgrammingPdfBuffer(prisma, { fecha: selectedDate, requestId, managedBy });
-    const filename = buildProgrammingFilename(result.selectedDate, requestId ? 'solicitud' : 'completa');
+    const includePending = normalizeProgrammingIncludePending(req.query.includePending, true);
+    const result = await buildProgrammingPdfBuffer(prisma, { fecha: selectedDate, requestId, managedBy, includePending });
+    const suffix = requestId ? 'solicitud' : (includePending ? 'con-pendientes' : 'confirmada');
+    const filename = buildProgrammingFilename(result.selectedDate, suffix);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(result.buffer);
@@ -145,18 +152,16 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   router.post('/programacion/whatsapp', async (req, res) => {
     const selectedDate = normalizeProgrammingDate(req.body?.fecha || req.body?.date);
     const managedBy = normalizeString(req.body?.managedBy) || 'Julián Herrera';
-    const { requests } = await loadProgrammingRequests(prisma, selectedDate);
-    const summary = buildProgrammingCompletionSummary(requests);
-    if (!summary.isComplete) {
-      return res.status(400).json({
-        ok: false,
-        message: `La programación aún no está completa: ${summary.completedRequests}/${summary.totalRequests} solicitudes completas.`
-      });
-    }
-
-    const pdf = await buildProgrammingPdfBuffer(prisma, { fecha: selectedDate, managedBy });
-    const filename = buildProgrammingFilename(pdf.selectedDate, 'completa');
-    const caption = buildCaption({ selectedDate: pdf.selectedDate, summary: pdf.summary, managedBy });
+    const includePending = normalizeProgrammingIncludePending(req.body?.includePending, false);
+    const pdf = await buildProgrammingPdfBuffer(prisma, { fecha: selectedDate, managedBy, includePending });
+    const filename = buildProgrammingFilename(pdf.selectedDate, includePending ? 'con-pendientes' : 'confirmada');
+    const caption = buildCaption({
+      selectedDate: pdf.selectedDate,
+      summary: pdf.summary,
+      includedSummary: pdf.includedSummary,
+      managedBy,
+      includePending
+    });
     const recipients = loadProgrammingWhatsappRecipients(req);
     const results = [];
 
@@ -176,7 +181,13 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     }
 
     const failed = results.filter((item) => !item.ok);
-    return res.status(failed.length ? 207 : 200).json({ ok: !failed.length, selectedDate: pdf.selectedDate, results });
+    return res.status(failed.length ? 207 : 200).json({
+      ok: !failed.length,
+      selectedDate: pdf.selectedDate,
+      includePending,
+      includedRequests: pdf.includedSummary.totalRequests,
+      results
+    });
   });
 
   return router;
