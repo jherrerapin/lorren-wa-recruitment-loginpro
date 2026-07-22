@@ -2,85 +2,465 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Portal del Auxiliar · Lórren</title>
   <style>
     :root { color-scheme: light; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f4f6f8; color: #17212b; }
-    main { width: min(100%, 440px); background: #fff; border: 1px solid #dfe4ea; border-radius: 18px; padding: 28px; box-shadow: 0 16px 44px rgba(23, 33, 43, .09); }
-    .brand { margin: 0 0 20px; font-size: 14px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-    h1 { margin: 0 0 12px; font-size: clamp(26px, 8vw, 34px); line-height: 1.08; }
+    body { margin: 0; min-height: 100vh; padding: max(20px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom)); background: #f4f6f8; color: #17212b; }
+    main { width: min(100%, 540px); margin: 0 auto; }
+    .shell { background: #fff; border: 1px solid #dfe4ea; border-radius: 20px; padding: 26px; box-shadow: 0 16px 44px rgba(23, 33, 43, .09); }
+    .brand { margin: 0 0 18px; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #4d5b69; }
+    h1 { margin: 0 0 10px; font-size: clamp(27px, 8vw, 36px); line-height: 1.08; }
+    h2 { margin: 0; font-size: 20px; line-height: 1.2; }
     p { margin: 0; color: #4d5b69; line-height: 1.55; }
-    .status { margin-top: 20px; padding: 16px; border-radius: 12px; background: #f2f5f7; font-weight: 650; color: #263645; }
+    button { font: inherit; }
+    .status { margin-top: 18px; padding: 15px; border-radius: 12px; background: #f2f5f7; font-weight: 650; color: #263645; }
     .ok { background: #eaf8ef; color: #176c36; }
     .warning { background: #fff6df; color: #76520b; }
-    .meta { margin-top: 18px; font-size: 13px; color: #72808e; }
+    .danger { background: #fdecec; color: #8f2525; }
+    .meta { margin-top: 16px; font-size: 13px; color: #72808e; }
+    .portal-header { display: flex; gap: 14px; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+    .session-chip { flex: 0 0 auto; padding: 8px 10px; border-radius: 999px; background: #eaf8ef; color: #176c36; font-size: 12px; font-weight: 800; }
+    .assignment-list { display: grid; gap: 14px; }
+    .assignment-card { background: #fff; border: 1px solid #dfe4ea; border-radius: 18px; padding: 18px; box-shadow: 0 8px 26px rgba(23, 33, 43, .06); }
+    .assignment-date { margin-bottom: 8px; color: #176c36; font-size: 13px; font-weight: 800; text-transform: capitalize; }
+    .assignment-time { margin-top: 5px; color: #263645; font-weight: 750; }
+    .assignment-details { display: grid; gap: 7px; margin: 16px 0; font-size: 14px; }
+    .detail-row { display: grid; grid-template-columns: 92px 1fr; gap: 10px; }
+    .detail-label { color: #72808e; }
+    .detail-value { color: #263645; font-weight: 600; overflow-wrap: anywhere; }
+    .arrival-button, .primary-button, .secondary-button { width: 100%; border: 0; border-radius: 12px; padding: 14px 16px; font-weight: 800; cursor: pointer; }
+    .arrival-button, .primary-button { background: #176c36; color: #fff; }
+    .secondary-button { background: #edf1f4; color: #263645; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .empty-state { padding: 24px; border: 1px dashed #cfd7df; border-radius: 16px; text-align: center; background: #fff; }
+    dialog { width: min(calc(100% - 24px), 520px); max-height: calc(100vh - 28px); border: 0; border-radius: 20px; padding: 0; box-shadow: 0 24px 70px rgba(23, 33, 43, .28); }
+    dialog::backdrop { background: rgba(12, 21, 29, .62); }
+    .dialog-body { padding: 22px; overflow-y: auto; max-height: calc(100vh - 28px); }
+    .dialog-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+    .icon-button { width: 38px; height: 38px; border: 0; border-radius: 999px; background: #edf1f4; color: #263645; font-size: 22px; cursor: pointer; }
+    .step { margin-top: 16px; padding: 15px; border-radius: 14px; background: #f5f7f9; }
+    .step-title { margin-bottom: 6px; font-weight: 800; color: #263645; }
+    .step-copy { font-size: 14px; }
+    video, .photo-preview { display: block; width: 100%; margin-top: 12px; border-radius: 14px; background: #101820; aspect-ratio: 3 / 4; object-fit: cover; }
+    .photo-preview[hidden], video[hidden] { display: none; }
+    .camera-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .camera-actions button { padding: 12px; border: 0; border-radius: 10px; font-weight: 750; cursor: pointer; }
+    .file-fallback { margin-top: 12px; font-size: 14px; }
+    .consent { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; font-size: 13px; color: #4d5b69; }
+    .consent input { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; }
+    .dialog-actions { display: grid; gap: 10px; margin-top: 16px; }
+    .fine-print { margin-top: 14px; font-size: 12px; color: #72808e; }
+    @media (max-width: 420px) {
+      body { padding-left: 12px; padding-right: 12px; }
+      .shell { padding: 22px 19px; }
+      .portal-header { display: block; }
+      .session-chip { display: inline-block; margin-top: 12px; }
+      .detail-row { grid-template-columns: 78px 1fr; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <p class="brand">Lórren · Operaciones</p>
-
     <% if (mode === 'activation') { %>
-      <h1>Activando este dispositivo</h1>
-      <p>Estamos validando el enlace seguro. No cierres esta pantalla.</p>
-      <div id="activation-status" class="status" role="status" aria-live="polite">Validando acceso…</div>
+      <section class="shell">
+        <p class="brand">Lórren · Operaciones</p>
+        <h1>Activando este dispositivo</h1>
+        <p>Estamos validando el enlace seguro. No cierres esta pantalla.</p>
+        <div id="activation-status" class="status" role="status" aria-live="polite">Validando acceso…</div>
+        <script nonce="<%= nonce %>">
+          (() => {
+            const status = document.getElementById('activation-status');
+            const queryParams = new URLSearchParams(window.location.search);
+            const fragment = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+            const fragmentParams = new URLSearchParams(fragment);
+            const activationToken = queryParams.get('token')
+              || fragmentParams.get('token')
+              || (fragment.includes('=') ? '' : fragment);
+
+            window.history.replaceState(null, document.title, window.location.pathname);
+
+            if (!/^[A-Za-z0-9_-]{43}$/.test(activationToken || '')) {
+              status.textContent = 'El enlace no es válido o está incompleto. Solicita uno nuevo.';
+              status.classList.add('warning');
+              return;
+            }
+
+            fetch('/operaciones/portal/activar', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'worker-portal'
+              },
+              body: JSON.stringify({ activationToken })
+            })
+              .then(async (response) => {
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || !payload.ok) throw new Error('activation_rejected');
+                status.textContent = 'Dispositivo activado. Abriendo tu portal…';
+                status.classList.add('ok');
+                window.location.replace(payload.redirectTo || '/operaciones/portal');
+              })
+              .catch(() => {
+                status.textContent = 'No fue posible activar este dispositivo. El enlace puede haber vencido o ya fue utilizado.';
+                status.classList.add('warning');
+              });
+          })();
+        </script>
+    </section>
+    <% } else if (mode === 'active') { %>
+      <% const portalAssignments = Array.isArray(assignments) ? assignments : []; %>
+      <header class="portal-header">
+        <div>
+          <p class="brand">Lórren · Portal del Auxiliar</p>
+          <h1>Mi jornada</h1>
+          <p>Consulta tu programación y registra tu llegada desde este celular.</p>
+        </div>
+        <span class="session-chip">Dispositivo verificado</span>
+      </header>
+
+      <% if (portalAssignments.length) { %>
+        <section class="assignment-list" aria-label="Asignaciones activas">
+          <% portalAssignments.forEach((assignment) => { %>
+            <article class="assignment-card">
+              <p class="assignment-date"><%= assignment.dateLabel %></p>
+              <h2><%= assignment.clientName %></h2>
+              <p class="assignment-time"><%= assignment.timeLabel %></p>
+              <div class="assignment-details">
+                <div class="detail-row"><span class="detail-label">Operación</span><span class="detail-value"><%= assignment.operationPointName %></span></div>
+                <div class="detail-row"><span class="detail-label">Ciudad</span><span class="detail-value"><%= assignment.cityName %></span></div>
+                <div class="detail-row"><span class="detail-label">Dirección</span><span class="detail-value"><%= assignment.address %></span></div>
+              </div>
+              <button
+                type="button"
+                class="arrival-button"
+                data-assignment-id="<%= assignment.id %>"
+                data-photo-required="<%= assignment.photoRequired ? 'true' : 'false' %>"
+                <%= assignment.canRegisterArrival ? '' : 'disabled' %>
+              ><%= assignment.actionLabel %></button>
+            </article>
+          <% }); %>
+        </section>
+      <% } else { %>
+        <section class="empty-state">
+          <h2>No tienes asignaciones activas</h2>
+          <p class="meta">Cuando Operaciones te programe un servicio, aparecerá aquí automáticamente.</p>
+        </section>
+      <% } %>
+
+      <% if (expiresAt) { %>
+        <p class="meta">Tu sesión permanece en este dispositivo y puede revocarse desde Lórren.</p>
+      <% } %>
+
+      <dialog id="arrival-dialog" aria-labelledby="arrival-title">
+        <div class="dialog-body">
+          <div class="dialog-head">
+            <div>
+              <p class="brand">Registro seguro</p>
+              <h2 id="arrival-title">Confirmar mi llegada</h2>
+            </div>
+            <button type="button" class="icon-button" id="close-arrival" aria-label="Cerrar">×</button>
+          </div>
+
+          <div class="step">
+            <p class="step-title">1. Ubicación actual</p>
+            <p id="location-status" class="step-copy" role="status">Preparando el GPS…</p>
+          </div>
+
+          <div class="step" id="camera-step" hidden>
+            <p class="step-title">2. Selfie de evidencia</p>
+            <p class="step-copy">Toma una foto en este momento. No realizamos reconocimiento facial automático.</p>
+            <video id="camera-video" playsinline muted hidden></video>
+            <img id="photo-preview" class="photo-preview" alt="Vista previa de la selfie" hidden>
+            <canvas id="camera-canvas" hidden></canvas>
+            <div class="camera-actions">
+              <button type="button" id="capture-photo" disabled>Tomar foto</button>
+              <button type="button" id="retry-photo" disabled>Repetir</button>
+            </div>
+            <label class="file-fallback" id="file-fallback" hidden>
+              Cámara no disponible. Selecciona una foto tomada ahora:
+              <input type="file" id="fallback-photo" accept="image/jpeg,image/png,image/webp" capture="user">
+            </label>
+          </div>
+
+          <label class="consent" id="photo-consent-wrap" hidden>
+            <input type="checkbox" id="photo-consent">
+            <span>Autorizo el uso de esta fotografía únicamente como evidencia de la marcación y para revisión de asistencia.</span>
+          </label>
+
+          <div id="arrival-result" class="status" role="status" aria-live="polite" hidden></div>
+          <div class="dialog-actions">
+            <button type="button" class="primary-button" id="submit-arrival" disabled>Registrar llegada</button>
+            <button type="button" class="secondary-button" id="cancel-arrival">Cancelar</button>
+          </div>
+          <p class="fine-print">La hora oficial es la recibida por Lórren. El GPS y la fotografía se usan solo para validar esta marcación.</p>
+        </div>
+      </dialog>
+
       <script nonce="<%= nonce %>">
         (() => {
-          const status = document.getElementById('activation-status');
-          const queryParams = new URLSearchParams(window.location.search);
-          const fragment = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
-          const fragmentParams = new URLSearchParams(fragment);
-          const activationToken = queryParams.get('token')
-            || fragmentParams.get('token')
-            || (fragment.includes('=') ? '' : fragment);
+          const dialog = document.getElementById('arrival-dialog');
+          const locationStatus = document.getElementById('location-status');
+          const cameraStep = document.getElementById('camera-step');
+          const cameraVideo = document.getElementById('camera-video');
+          const cameraCanvas = document.getElementById('camera-canvas');
+          const photoPreview = document.getElementById('photo-preview');
+          const capturePhotoButton = document.getElementById('capture-photo');
+          const retryPhotoButton = document.getElementById('retry-photo');
+          const fileFallback = document.getElementById('file-fallback');
+          const fallbackPhoto = document.getElementById('fallback-photo');
+          const photoConsentWrap = document.getElementById('photo-consent-wrap');
+          const photoConsent = document.getElementById('photo-consent');
+          const submitButton = document.getElementById('submit-arrival');
+          const resultBox = document.getElementById('arrival-result');
+          const closeButton = document.getElementById('close-arrival');
+          const cancelButton = document.getElementById('cancel-arrival');
 
-          window.history.replaceState(null, document.title, window.location.pathname);
+          let assignmentId = null;
+          let photoRequired = false;
+          let locationEvidence = null;
+          let photoBlob = null;
+          let photoUrl = null;
+          let cameraStream = null;
+          let idempotencyKey = null;
 
-          if (!/^[A-Za-z0-9_-]{43}$/.test(activationToken || '')) {
-            status.textContent = 'El enlace no es válido o está incompleto. Solicita uno nuevo.';
-            status.classList.add('warning');
-            return;
+          function newIdempotencyKey() {
+            if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+            return `arrival_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
           }
 
-          fetch('/operaciones/portal/activar', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Requested-With': 'worker-portal'
-            },
-            body: JSON.stringify({ activationToken })
-          })
-            .then(async (response) => {
-              const payload = await response.json().catch(() => ({}));
-              if (!response.ok || !payload.ok) throw new Error('activation_rejected');
-              status.textContent = 'Dispositivo activado. Abriendo tu portal…';
-              status.classList.add('ok');
-              window.location.replace(payload.redirectTo || '/operaciones/portal');
-            })
-            .catch(() => {
-              status.textContent = 'No fue posible activar este dispositivo. El enlace puede haber vencido o ya fue utilizado.';
-              status.classList.add('warning');
+          function stopCamera() {
+            if (cameraStream) cameraStream.getTracks().forEach((track) => track.stop());
+            cameraStream = null;
+            cameraVideo.srcObject = null;
+          }
+
+          function clearPhotoUrl() {
+            if (photoUrl) URL.revokeObjectURL(photoUrl);
+            photoUrl = null;
+          }
+
+          function updateSubmitState() {
+            const hasPhoto = !photoRequired || Boolean(photoBlob);
+            const hasConsent = !photoBlob || photoConsent.checked;
+            submitButton.disabled = !locationEvidence || !hasPhoto || !hasConsent;
+          }
+
+          function showResult(message, className) {
+            resultBox.hidden = false;
+            resultBox.className = `status ${className || ''}`.trim();
+            resultBox.textContent = message;
+          }
+
+          function resetDialog() {
+            stopCamera();
+            clearPhotoUrl();
+            locationEvidence = null;
+            photoBlob = null;
+            photoConsent.checked = false;
+            resultBox.hidden = true;
+            resultBox.textContent = '';
+            locationStatus.textContent = 'Solicitando permiso de ubicación…';
+            cameraStep.hidden = !photoRequired;
+            photoConsentWrap.hidden = !photoRequired;
+            cameraVideo.hidden = true;
+            photoPreview.hidden = true;
+            capturePhotoButton.disabled = true;
+            retryPhotoButton.disabled = true;
+            fileFallback.hidden = true;
+            fallbackPhoto.value = '';
+            submitButton.disabled = true;
+          }
+
+          function requestLocation() {
+            if (!navigator.geolocation) {
+              locationStatus.textContent = 'Este navegador no permite obtener la ubicación.';
+              showResult('No es posible registrar la llegada sin ubicación. Comunícate con Operaciones.', 'warning');
+              return;
+            }
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                locationEvidence = {
+                  latitude: position.coords.latitude,
+                  longitude: position.coords.longitude,
+                  accuracyMeters: position.coords.accuracy,
+                  clientCapturedAt: new Date(position.timestamp || Date.now()).toISOString()
+                };
+                locationStatus.textContent = `Ubicación obtenida con precisión aproximada de ${Math.round(position.coords.accuracy)} metros.`;
+                updateSubmitState();
+              },
+              (error) => {
+                const denied = error?.code === 1;
+                locationStatus.textContent = denied
+                  ? 'Permiso de ubicación rechazado.'
+                  : 'No fue posible obtener una ubicación confiable.';
+                showResult('Activa la ubicación y concede el permiso para registrar la llegada.', 'warning');
+              },
+              { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+            );
+          }
+
+          async function startCamera() {
+            if (!photoRequired) return;
+            if (!navigator.mediaDevices?.getUserMedia) {
+              fileFallback.hidden = false;
+              return;
+            }
+            try {
+              cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } },
+                audio: false
+              });
+              cameraVideo.srcObject = cameraStream;
+              cameraVideo.hidden = false;
+              await cameraVideo.play();
+              capturePhotoButton.disabled = false;
+            } catch {
+              fileFallback.hidden = false;
+              showResult('No se pudo abrir la cámara. Usa la opción de foto disponible en esta pantalla.', 'warning');
+            }
+          }
+
+          function setPhoto(blob) {
+            clearPhotoUrl();
+            photoBlob = blob;
+            photoUrl = URL.createObjectURL(blob);
+            photoPreview.src = photoUrl;
+            photoPreview.hidden = false;
+            cameraVideo.hidden = true;
+            capturePhotoButton.disabled = true;
+            retryPhotoButton.disabled = false;
+            stopCamera();
+            updateSubmitState();
+          }
+
+          capturePhotoButton.addEventListener('click', () => {
+            const sourceWidth = cameraVideo.videoWidth || 720;
+            const sourceHeight = cameraVideo.videoHeight || 960;
+            const scale = Math.min(1, 720 / sourceWidth);
+            cameraCanvas.width = Math.round(sourceWidth * scale);
+            cameraCanvas.height = Math.round(sourceHeight * scale);
+            const context = cameraCanvas.getContext('2d');
+            context.drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            cameraCanvas.toBlob((blob) => {
+              if (blob) setPhoto(blob);
+              else showResult('No fue posible tomar la fotografía. Intenta nuevamente.', 'warning');
+            }, 'image/jpeg', 0.82);
+          });
+
+          retryPhotoButton.addEventListener('click', async () => {
+            clearPhotoUrl();
+            photoBlob = null;
+            photoPreview.hidden = true;
+            retryPhotoButton.disabled = true;
+            updateSubmitState();
+            await startCamera();
+          });
+
+          fallbackPhoto.addEventListener('change', () => {
+            const file = fallbackPhoto.files?.[0];
+            if (!file) return;
+            if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024) {
+              fallbackPhoto.value = '';
+              showResult('La fotografía debe ser JPG, PNG o WEBP y pesar máximo 3 MB.', 'warning');
+              return;
+            }
+            setPhoto(file);
+          });
+
+          photoConsent.addEventListener('change', updateSubmitState);
+
+          document.querySelectorAll('.arrival-button:not(:disabled)').forEach((button) => {
+            button.addEventListener('click', () => {
+              assignmentId = button.dataset.assignmentId;
+              photoRequired = button.dataset.photoRequired === 'true';
+              idempotencyKey = newIdempotencyKey();
+              resetDialog();
+              if (typeof dialog.showModal === 'function') dialog.showModal();
+              else dialog.setAttribute('open', '');
+              requestLocation();
+              startCamera();
             });
+          });
+
+          async function submitArrival() {
+            if (!assignmentId || !locationEvidence || (photoRequired && !photoBlob)) return;
+            submitButton.disabled = true;
+            submitButton.textContent = 'Registrando…';
+            resultBox.hidden = true;
+
+            const form = new FormData();
+            form.set('idempotencyKey', idempotencyKey);
+            form.set('latitude', String(locationEvidence.latitude));
+            form.set('longitude', String(locationEvidence.longitude));
+            form.set('accuracyMeters', String(locationEvidence.accuracyMeters));
+            form.set('clientCapturedAt', locationEvidence.clientCapturedAt);
+            form.set('photoConsent', photoBlob && photoConsent.checked ? 'true' : 'false');
+            if (photoBlob) form.set('selfie', photoBlob, 'selfie-llegada.jpg');
+
+            try {
+              const response = await fetch(`/operaciones/portal/asignaciones/${encodeURIComponent(assignmentId)}/llegada`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'worker-portal' },
+                body: form
+              });
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok || !payload.ok) {
+                const messages = {
+                  arrival_window_not_open: 'La ventana para registrar la llegada todavía no está abierta.',
+                  arrival_already_registered: 'Esta llegada ya había sido registrada.',
+                  attendance_not_enabled: 'La marcación no está habilitada para esta operación.',
+                  selfie_required: 'Debes tomar la selfie de evidencia.',
+                  photo_consent_required: 'Debes aceptar el uso de la fotografía para continuar.',
+                  portal_session_required: 'Tu sesión venció. Solicita un nuevo enlace de activación.',
+                  arrival_temporarily_unavailable: 'El registro está temporalmente no disponible. Intenta nuevamente.'
+                };
+                throw new Error(messages[payload.error] || 'No fue posible registrar la llegada. Revisa los permisos e intenta nuevamente.');
+              }
+              showResult(payload.message || 'Llegada registrada correctamente.', payload.requiresReview ? 'warning' : 'ok');
+              stopCamera();
+              setTimeout(() => window.location.reload(), 1400);
+            } catch (error) {
+              showResult(error?.message || 'No fue posible registrar la llegada.', 'danger');
+              submitButton.disabled = false;
+              submitButton.textContent = 'Registrar llegada';
+            }
+          }
+
+          submitButton.addEventListener('click', submitArrival);
+
+          function closeDialog() {
+            stopCamera();
+            clearPhotoUrl();
+            if (typeof dialog.close === 'function') dialog.close();
+            else dialog.removeAttribute('open');
+          }
+
+          closeButton.addEventListener('click', closeDialog);
+          cancelButton.addEventListener('click', closeDialog);
+          dialog.addEventListener('cancel', (event) => {
+            event.preventDefault();
+            closeDialog();
+          });
         })();
       </script>
-    <% } else if (mode === 'active') { %>
-      <h1>Dispositivo activado</h1>
-      <p>Tu sesión del Portal del Auxiliar está vigente. Las asignaciones y la marcación de llegada se habilitarán en la siguiente fase.</p>
-      <div class="status ok">Sesión segura activa</div>
-      <% if (expiresAt) { %>
-        <p class="meta">La sesión tiene vencimiento automático y puede revocarse desde Lórren.</p>
-      <% } %>
     <% } else if (mode === 'unavailable') { %>
-      <h1>Portal temporalmente no disponible</h1>
-      <p>No pudimos validar la sesión en este momento. Tu dispositivo no fue desactivado.</p>
-      <div class="status warning">Intenta abrir el portal nuevamente en unos minutos</div>
+      <section class="shell">
+        <p class="brand">Lórren · Operaciones</p>
+        <h1>Portal temporalmente no disponible</h1>
+        <p>No pudimos validar la sesión en este momento. Tu dispositivo no fue desactivado.</p>
+        <div class="status warning">Intenta abrir el portal nuevamente en unos minutos</div>
+      </section>
     <% } else { %>
-      <h1>Acceso no activo</h1>
-      <p>Este dispositivo no tiene una sesión vigente. Abre el enlace seguro enviado por Lórren o solicita uno nuevo.</p>
-      <div class="status warning">Se requiere activación</div>
+      <section class="shell">
+        <p class="brand">Lórren · Operaciones</p>
+        <h1>Acceso no activo</h1>
+        <p>Este dispositivo no tiene una sesión vigente. Abre el enlace seguro enviado por Lórren o solicita uno nuevo.</p>
+        <div class="status warning">Se requiere activación</div>
+      </section>
     <% } %>
   </main>
 </body>
