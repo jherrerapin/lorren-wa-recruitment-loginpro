@@ -113,6 +113,7 @@ test('contrato y autoasignación quedan conectados al flujo real', async () => {
     migration,
     form,
     board,
+    personnelList,
     opsRoute,
     publicRoute,
     multiShiftRoute,
@@ -122,6 +123,7 @@ test('contrato y autoasignación quedan conectados al flujo real', async () => {
     readFile(new URL('../prisma/migrations/20260722010000_add_dispatch_worker_contract_type/migration.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/views/operacionesPersonalNuevo.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/operacionesPersonal.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/routes/dispatchOpsExtras.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/routes/publicDispatchClient.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/routes/dispatchMultiShiftRequests.js', import.meta.url), 'utf8'),
@@ -134,8 +136,12 @@ test('contrato y autoasignación quedan conectados al flujo real', async () => {
   assert.match(form, /name="contractType"/);
   assert.match(form, />Directo</);
   assert.match(form, />Contratista</);
-  assert.match(board, /contractLabel\(worker\.contractType\)/);
-  assert.match(board, /contractLabel\(assignment\.worker\.contractType\)/);
+  assert.match(board, /worker-heading[\s\S]*contractLabel\(worker\.contractType\)/);
+  assert.match(board, /worker-heading[\s\S]*contractLabel\(assignment\.worker\.contractType\)/);
+  assert.match(board, /background:#f8fafc;color:#475569/);
+  assert.doesNotMatch(board, /background:#f3e8ff;color:#6b21a8/);
+  assert.match(personnelList, /<th>Contrato<\/th>/);
+  assert.match(personnelList, /w\.contractType === 'CONTRATISTA' \? 'Contratista' : 'Directo'/);
   assert.match(opsRoute, /contractType:\s*normalizeDispatchContractType\(body\.contractType\)/);
   assert.match(publicRoute, /contractType:\s*normalizeDispatchContractType\(body\.contractType\)/);
   assert.match(multiShiftRoute, /autoAssignServiceRequests\(prisma, createdRequests/);

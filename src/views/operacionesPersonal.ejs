@@ -50,7 +50,7 @@
     .bulk-bar span { font-size: 13px; font-weight: 700; color: #92400e; }
     #bulk-bar { display: none; }
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+    table { width: 100%; border-collapse: collapse; min-width: 1180px; }
     th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid #eaecef; vertical-align: middle; }
     th { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
     td { color: var(--text); font-size: 13px; }
@@ -68,6 +68,7 @@
     .pill-purple { color: var(--purple); background: var(--purple-light); }
     .pill-red { color: var(--red); background: var(--red-light); }
     .pill-gray { color: var(--muted); background: #f3f4f6; }
+    .pill-contract { color: #475569; background: #f8fafc; border: 1px solid #dbe3ec; padding: 2px 7px; }
     .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
     .empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 6px; }
@@ -175,13 +176,14 @@
       <% } else { %>
         <div class="table-wrap">
           <table id="workers-table">
-            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes / perfiles</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Contrato</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes / perfiles</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               <% workers.forEach((w) => { %>
                 <% const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; const isActive = w.operationalStatus === 'CONTRATADO'; %>
                 <tr data-id="<%= w.id %>" class="<%= !isActive ? 'row-inactive' : '' %>">
                   <td class="check-col"><input type="checkbox" class="row-check" value="<%= w.id %>" /></td>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
+                  <td><span class="pill pill-contract"><%= w.contractType === 'CONTRATISTA' ? 'Contratista' : 'Directo' %></span></td>
                   <td><%= w.phone || '-' %></td>
                   <td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
                   <td><%= w.residenceCity || w.residenceLocality || '-' %></td>
