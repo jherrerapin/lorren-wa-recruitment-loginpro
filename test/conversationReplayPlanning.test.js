@@ -76,6 +76,12 @@ function assertAuthorityEvidence(intent, replay, label) {
     assert.deepEqual(replay.evidence.fieldPolicy.blocked, [], `${label}: la corrección no debe quedar bloqueada`);
     assert.deepEqual(replay.evidence.fieldPolicy.reviewQueue, [], `${label}: la corrección no debe ir a revisión por baja confianza`);
   }
+
+  if (intent === 'PROVIDE_CANDIDATE_DATA') {
+    assert.equal(replay.evidence.fieldPolicy.persistedFields.fullName, 'José Ángel Peña', `${label}: el nombre sustentado debe quedar autorizado`);
+    assert.deepEqual(replay.evidence.fieldPolicy.blocked, [], `${label}: el nombre no debe quedar bloqueado`);
+    assert.deepEqual(replay.evidence.fieldPolicy.reviewQueue, [], `${label}: el nombre no debe ir a revisión`);
+  }
 }
 
 test('el replay determinístico reproduce acciones, escrituras y transiciones protegidas', async (t) => {

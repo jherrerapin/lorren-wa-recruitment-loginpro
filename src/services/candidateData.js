@@ -610,9 +610,8 @@ function detectLeadingName(text = '') {
   if (!compact) return null;
 
   const explicitLabel = compact.match(
-    /\b(?:nombre\s+completo|nombre)(?:\s+es)?\s*[:\-]?\s+([A-Za-zÃÃ‰ÃÃ“ÃšÃ‘Ã¡Ã©ÃÃ³ÃºÃ±][A-Za-zÃÃ‰ÃÃ“ÃšÃ‘Ã¡Ã©ÃÃ³ÃºÃ±'\-.\s]{3,60})/i
-  );
-  if (explicitLabel?.[1]) {
+    /\b(?:nombre\s+completo|nombre)(?:\s+es)?\s*[:\-]?\s+([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.\s]{3,60})/i
+  );  if (explicitLabel?.[1]) {
     const labeledName = capitalizeWords(sanitizeNameCandidate(explicitLabel[1]));
     if (!isSuspiciousFullName(labeledName)) return labeledName;
   }

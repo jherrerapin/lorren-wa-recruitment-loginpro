@@ -3,6 +3,7 @@ import { replayFixturePlanning } from './planningReplay.js';
 
 const RESPONSE_ONLY_ACTIONS = new Set([
   'ACKNOWLEDGE_CORRECTION',
+  'ACKNOWLEDGE_DATA',
   'ANSWER_VACANCY_QUESTION',
   'CONTINUE_DATA_COLLECTION',
   'REJECT_PRECONSENT_ATTACHMENT',
@@ -60,6 +61,14 @@ function correctionAcknowledgement(plan) {
   return `Gracias, corregí ${naturalList(corrections)}.`;
 }
 
+function dataAcknowledgement(plan) {
+  const saveAction = plan.actions.find((action) => action.type === 'SAVE_CANDIDATE_FIELDS');
+  if (!saveAction) throw new Error('acknowledgement_without_candidate_data');
+  const saved = Object.entries(saveAction.data.fields)
+    .map(([field, value]) => `${fieldLabel(field)} como ${value}`);
+  return `Gracias, registré ${naturalList(saved)}.`;
+}
+
 function appendEvidenceReply(parts, value, errorCode) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(errorCode);
   parts.push(value);
@@ -88,6 +97,10 @@ function composeReply(planningReplay) {
     }
     if (action.type === 'ACKNOWLEDGE_CORRECTION') {
       parts.push(correctionAcknowledgement(plan));
+      continue;
+    }
+    if (action.type === 'ACKNOWLEDGE_DATA') {
+      parts.push(dataAcknowledgement(plan));
       continue;
     }
     if (action.type === 'RESUME_PENDING_FIELD') {
@@ -149,7 +162,7 @@ function executeCandidateActions({ fixture, planningReplay, adapters }) {
       continue;
     }
 
-    if (action.type === 'UPDATE_CANDIDATE_FIELDS') {
+    if (['UPDATE_CANDIDATE_FIELDS', 'SAVE_CANDIDATE_FIELDS'].includes(action.type)) {
       const fields = action.data.fields;
       for (const field of Object.keys(fields)) assertWriteAllowed(plan, `candidate.${field}`);
       adapters.updateCandidate({
@@ -159,6 +172,15 @@ function executeCandidateActions({ fixture, planningReplay, adapters }) {
         source: action.type
       });
       appliedWrites.push(...Object.keys(fields).map((field) => `candidate.${field}`));
+      if (action.type === 'SAVE_CANDIDATE_FIELDS') {
+        assertWriteAllowed(plan, 'conversation.pendingFields');
+        adapters.updateConversationPendingFields({
+          tenantContext: fixture.tenantContext,
+          pendingFields: planningReplay.finalState.pendingFields,
+          source: action.type
+        });
+        appliedWrites.push('conversation.pendingFields');
+      }
       continue;
     }
 

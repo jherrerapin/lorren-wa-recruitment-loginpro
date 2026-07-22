@@ -289,6 +289,44 @@ function planCandidateCorrection(fixture, state, interpretation) {
   };
 }
 
+function planCandidateData(fixture, state, interpretation) {
+  const fieldEvidence = fixture.providerStubs.aiResult.extraction.fieldEvidence || {};
+  const fieldPolicy = applyFieldPolicy({
+    fields: interpretation.providedFields,
+    fieldEvidence
+  }, state.candidate);
+  const persistedFields = fieldPolicy.persistedFields;
+  const fieldEntries = Object.entries(persistedFields);
+  if (!fieldEntries.length) {
+    throw new Error(`${fixture.id}: la política de campos no autorizó ningún dato provisto`);
+  }
+
+  Object.assign(state.candidate, persistedFields);
+  state.pendingFields = state.pendingFields.filter((field) => !Object.hasOwn(persistedFields, field));
+  const actions = [
+    { type: 'SAVE_CANDIDATE_FIELDS', data: { fields: persistedFields } },
+    { type: 'ACKNOWLEDGE_DATA' }
+  ];
+  const pendingField = state.pendingFields[0] || null;
+  const resumeAction = pendingFieldAction(state);
+  if (resumeAction) actions.push(resumeAction);
+
+  const allowedWrites = fieldEntries.map(([field]) => `candidate.${field}`);
+  allowedWrites.push('conversation.pendingFields');
+  appendOutboundWrites(allowedWrites);
+
+  return {
+    plan: {
+      actions,
+      allowedWrites,
+      nextStep: state.candidate.currentStep,
+      ...(pendingField ? { pendingField } : {})
+    },
+    finalState: buildFinalState(state),
+    evidence: { fieldPolicy }
+  };
+}
+
 export function replayFixturePlanning(fixture, interpretationReplay) {
   const state = clonePlanningState(fixture);
   const interpretation = interpretationReplay.interpretation;
@@ -307,6 +345,9 @@ export function replayFixturePlanning(fixture, interpretationReplay) {
   }
   if (interpretation.intent === 'CORRECT_CANDIDATE_DATA') {
     return planCandidateCorrection(fixture, state, interpretation);
+  }
+  if (interpretation.intent === 'PROVIDE_CANDIDATE_DATA') {
+    return planCandidateData(fixture, state, interpretation);
   }
 
   throw new Error(`${fixture.id}: intención sin adaptador de planificación: ${interpretation.intent}`);

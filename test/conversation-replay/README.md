@@ -48,7 +48,9 @@ La validación del webhook, la resolución productiva del tenant y la descarga f
 - rechazo explícito del tratamiento de datos;
 - documento enviado antes de autorización;
 - pregunta sobre la vacante durante recolección;
-- corrección de un dato durante recolección.
+- corrección de un dato durante recolección;
+- nombre completo etiquetado con tildes o eñe;
+- nombre enviado después de que Lórren lo solicita.
 
 La aceptación y el rechazo crean un único evento versionado y trazable. Un documento enviado antes de autorización conserva únicamente sus metadatos dentro del inbox; no genera `cvData`, `cvStorageKey`, descarga ni registro de archivo.
 

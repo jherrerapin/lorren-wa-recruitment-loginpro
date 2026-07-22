@@ -358,3 +358,17 @@ test('usa localidad como residencia principal para vacantes de Bogota', () => {
   assert.equal(aligned.neighborhood, null);
   assert.equal(getCandidateResidenceValue({ locality: 'Suba' }, { city: 'Bogota' }), 'Suba');
 });
+
+test('captura nombre completo etiquetado con tildes y eñe', () => {
+  const parsed = parseNaturalData('Nombre completo: José Ángel Peña');
+  const normalized = normalizeCandidateFields(parsed);
+
+  assert.equal(normalized.fullName, 'José Ángel Peña');
+});
+
+test('captura un nombre acentuado enviado como respuesta aislada', () => {
+  const parsed = parseNaturalData('José Ángel Peña');
+  const normalized = normalizeCandidateFields(parsed);
+
+  assert.equal(normalized.fullName, 'José Ángel Peña');
+});
