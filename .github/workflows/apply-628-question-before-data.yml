@@ -44,17 +44,15 @@ jobs:
           set -e
           printf 'status=%s\n' "$status" > diagnostics/628-target-summary.txt
 
-      - name: Commit generated patch and target diagnostic
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/routes/webhook.js diagnostics/628-target.tap diagnostics/628-target-summary.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "test: diagnosticar transición antes de datos"
-            git push origin "HEAD:${HEAD_REF}"
-          fi
+      - name: Upload target diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: question-before-data-target
+          path: |
+            diagnostics/628-target.tap
+            diagnostics/628-target-summary.txt
+          if-no-files-found: error
 
       - name: Validate explicit interest and question transition
         run: |
@@ -72,6 +70,18 @@ jobs:
 
       - name: Run gate and webhook authority regressions
         run: node --test test/vacancyFirstGate.test.js test/webhookVacancyFirstGateAuthority.test.js test/turnOrchestratorContracts.test.js test/webhookConversationFlow.test.js
+
+      - name: Commit generated runtime patch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/routes/webhook.js
+            git commit -m "fix: responder duda y entrar a recolección"
+            git push origin "HEAD:${HEAD_REF}"
+          fi
 
       - name: Characterize harness after transition repair
         run: |
@@ -91,17 +101,16 @@ jobs:
             exit 1
           fi
 
-      - name: Commit harness characterization
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add diagnostics/628-harness.tap diagnostics/628-remaining-failures.txt diagnostics/628-harness-summary.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "test: caracterizar harness después de #628"
-            git push origin "HEAD:${HEAD_REF}"
-          fi
+      - name: Upload harness diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: question-before-data-harness
+          path: |
+            diagnostics/628-harness.tap
+            diagnostics/628-remaining-failures.txt
+            diagnostics/628-harness-summary.txt
+          if-no-files-found: ignore
 
       - name: Run conversation replays
         run: |
