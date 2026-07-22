@@ -1,14 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import express from 'express';
+import { once } from 'node:events';
 import {
   WORKER_PORTAL_ACTIVATION_PATH,
   WORKER_PORTAL_HOME_PATH,
   WORKER_PORTAL_INSTALLATION_COOKIE_NAME,
   applyWorkerPortalSecurityHeaders,
+  createWorkerPortalActivationAttemptMiddleware,
   buildWorkerPortalActivationUrl,
   resolveWorkerPortalInstallationId,
   setWorkerPortalInstallationCookie,
+  workerPortalActivationJsonErrorHandler,
   workerPortalCookieOptions,
   workerPortalRouter
 } from '../src/routes/workerPortal.js';
@@ -89,8 +93,8 @@ function routeHandler(router, path, method) {
   return layer.route.stack.at(-1).handle;
 }
 
-function buildRouter(options = {}) {
-  return workerPortalRouter({}, {
+function workerPortalTestOptions(options = {}) {
+  return {
     repository: {},
     installationPepper: PEPPER,
     nowFn: () => NOW,
@@ -105,8 +109,143 @@ function buildRouter(options = {}) {
     }),
     resolveSessionFn: async () => null,
     ...options
-  });
+  };
 }
+
+function buildRouter(options = {}) {
+  return workerPortalRouter({}, workerPortalTestOptions(options));
+}
+
+async function withPortalServer(options, callback) {
+  const app = express();
+  const globalErrors = [];
+  app.use('/operaciones/portal', workerPortalRouter({}, workerPortalTestOptions(options)));
+  app.use((error, _req, res, _next) => {
+    globalErrors.push(error);
+    return res.status(500).json({ error: 'global_error' });
+  });
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    return await callback({ origin, globalErrors });
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+}
+
+test('el límite se aplica antes de interpretar el JSON y de consultar la autoridad', async () => {
+  let activationCalls = 0;
+  const errorLogs = [];
+  const originalError = console.error;
+  console.error = (...args) => errorLogs.push(args);
+  try {
+    await withPortalServer({
+      activateSessionFn: async () => {
+        activationCalls += 1;
+        throw new Error('must_not_run');
+      }
+    }, async ({ origin, globalErrors }) => {
+      const response = await fetch(`${origin}/operaciones/portal/activar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'worker-portal'
+        },
+        body: JSON.stringify({ activationToken: 'A'.repeat(5_000) })
+      });
+      assert.equal(response.status, 413);
+      assert.deepEqual(await response.json(), { ok: false, error: 'activation_invalid_or_expired' });
+      assert.equal(activationCalls, 0);
+      assert.deepEqual(globalErrors, []);
+      assert.deepEqual(errorLogs, []);
+    });
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('JSON malformado no llega al logger global ni expone el token', async () => {
+  let activationCalls = 0;
+  const errorLogs = [];
+  const originalError = console.error;
+  console.error = (...args) => errorLogs.push(args);
+  try {
+    await withPortalServer({
+      activateSessionFn: async () => {
+        activationCalls += 1;
+        throw new Error('must_not_run');
+      }
+    }, async ({ origin, globalErrors }) => {
+      const malformedBody = `{\"activationToken\":\"${ACTIVATION_TOKEN}\"`;
+      const response = await fetch(`${origin}/operaciones/portal/activar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'worker-portal'
+        },
+        body: malformedBody
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { ok: false, error: 'activation_invalid_or_expired' });
+      assert.equal(activationCalls, 0);
+      assert.deepEqual(globalErrors, []);
+      assert.deepEqual(errorLogs, []);
+      assert.equal(JSON.stringify(errorLogs).includes(ACTIVATION_TOKEN), false);
+    });
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('el guard devuelve 429 antes del parser y de PostgreSQL', async () => {
+  let activationCalls = 0;
+  let guardCalls = 0;
+  await withPortalServer({
+    activationAttemptGuard: {
+      consume() {
+        guardCalls += 1;
+        return { allowed: false, retryAfterSeconds: 45 };
+      }
+    },
+    activateSessionFn: async () => {
+      activationCalls += 1;
+      throw new Error('must_not_run');
+    }
+  }, async ({ origin, globalErrors }) => {
+    const response = await fetch(`${origin}/operaciones/portal/activar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'worker-portal'
+      },
+      body: '{not-json'
+    });
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get('retry-after'), '45');
+    assert.deepEqual(await response.json(), { ok: false, error: 'activation_temporarily_limited' });
+    assert.equal(guardCalls, 1);
+    assert.equal(activationCalls, 0);
+    assert.deepEqual(globalErrors, []);
+  });
+});
+
+test('middleware y error handler rechazan dependencias o errores ajenos', () => {
+  assert.throws(
+    () => createWorkerPortalActivationAttemptMiddleware(null),
+    /worker_portal_activation_attempt_guard_required/
+  );
+
+  const { res } = responseDouble();
+  const unrelated = new Error('unrelated');
+  let forwarded;
+  workerPortalActivationJsonErrorHandler(unrelated, requestDouble(), res, (error) => {
+    forwarded = error;
+  });
+  assert.equal(forwarded, unrelated);
+});
 
 test('las cookies del portal son Secure, HttpOnly, Strict y limitadas al portal', () => {
   assert.deepEqual(workerPortalCookieOptions(60_000), {
@@ -258,10 +397,10 @@ test('POST sin cabecera del portal se rechaza antes de consumir la activación',
   }
 });
 
-test('los logs sanitizan mensajes arbitrarios y nunca incluyen el token', async () => {
-  const originalWarn = console.warn;
+test('los errores inesperados se registran con código sanitizado y nunca incluyen el token', async () => {
+  const originalError = console.error;
   let observedLog;
-  console.warn = (...args) => { observedLog = args; };
+  console.error = (...args) => { observedLog = args; };
   try {
     const router = buildRouter({
       activateSessionFn: async () => {
@@ -273,12 +412,39 @@ test('los logs sanitizan mensajes arbitrarios y nunca incluyen el token', async 
     await routeHandler(router, '/activar', 'post')(activationRequest(), res);
 
     assert.deepEqual(observedLog, [
-      '[WORKER_PORTAL_ACTIVATION_REJECTED]',
+      '[WORKER_PORTAL_ACTIVATION_ERROR]',
       { code: 'worker_portal_error' }
     ]);
     assert.equal(JSON.stringify(observedLog).includes(ACTIVATION_TOKEN), false);
   } finally {
+    console.error = originalError;
+  }
+});
+
+test('rechazos esperados de activación no generan warnings ni errores por solicitud', async () => {
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const warnings = [];
+  const errors = [];
+  console.warn = (...args) => warnings.push(args);
+  console.error = (...args) => errors.push(args);
+  try {
+    const router = buildRouter({
+      activateSessionFn: async () => {
+        throw new Error('worker_portal_session_repository_result_invalid');
+      }
+    });
+    const { res, state } = responseDouble();
+
+    await routeHandler(router, '/activar', 'post')(activationRequest(), res);
+
+    assert.equal(state.statusCode, 400);
+    assert.deepEqual(state.json, { ok: false, error: 'activation_invalid_or_expired' });
+    assert.deepEqual(warnings, []);
+    assert.deepEqual(errors, []);
+  } finally {
     console.warn = originalWarn;
+    console.error = originalError;
   }
 });
 
@@ -342,7 +508,8 @@ test('server monta el router público antes del router general de operaciones', 
   const mountStatement = "app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));";
   assert.match(server, new RegExp(importStatement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(server, new RegExp(mountStatement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.ok(server.indexOf(mountStatement) < server.indexOf("app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));"));
+  assert.ok(server.indexOf(mountStatement) < server.indexOf("app.use(express.json({ limit: '2mb' }));"));
+  assert.equal(server.split(mountStatement).length - 1, 1);
 });
 
 test('las cabeceras sin nonce bloquean scripts y framing', () => {
