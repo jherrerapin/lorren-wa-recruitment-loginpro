@@ -247,6 +247,117 @@ test('middleware y error handler rechazan dependencias o errores ajenos', () => 
   assert.equal(forwarded, unrelated);
 });
 
+test('el límite se aplica antes de interpretar el JSON y de consultar la autoridad', async () => {
+  let activationCalls = 0;
+  const errorLogs = [];
+  const originalError = console.error;
+  console.error = (...args) => errorLogs.push(args);
+  try {
+    await withPortalServer({
+      activateSessionFn: async () => {
+        activationCalls += 1;
+        throw new Error('must_not_run');
+      }
+    }, async ({ origin, globalErrors }) => {
+      const response = await fetch(`${origin}/operaciones/portal/activar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'worker-portal'
+        },
+        body: JSON.stringify({ activationToken: 'A'.repeat(5_000) })
+      });
+      assert.equal(response.status, 413);
+      assert.deepEqual(await response.json(), { ok: false, error: 'activation_invalid_or_expired' });
+      assert.equal(activationCalls, 0);
+      assert.deepEqual(globalErrors, []);
+      assert.deepEqual(errorLogs, []);
+    });
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('JSON malformado no llega al logger global ni expone el token', async () => {
+  let activationCalls = 0;
+  const errorLogs = [];
+  const originalError = console.error;
+  console.error = (...args) => errorLogs.push(args);
+  try {
+    await withPortalServer({
+      activateSessionFn: async () => {
+        activationCalls += 1;
+        throw new Error('must_not_run');
+      }
+    }, async ({ origin, globalErrors }) => {
+      const malformedBody = `{\"activationToken\":\"${ACTIVATION_TOKEN}\"`;
+      const response = await fetch(`${origin}/operaciones/portal/activar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'worker-portal'
+        },
+        body: malformedBody
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { ok: false, error: 'activation_invalid_or_expired' });
+      assert.equal(activationCalls, 0);
+      assert.deepEqual(globalErrors, []);
+      assert.deepEqual(errorLogs, []);
+      assert.equal(JSON.stringify(errorLogs).includes(ACTIVATION_TOKEN), false);
+    });
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('el guard devuelve 429 antes del parser y de PostgreSQL', async () => {
+  let activationCalls = 0;
+  let guardCalls = 0;
+  await withPortalServer({
+    activationAttemptGuard: {
+      consume() {
+        guardCalls += 1;
+        return { allowed: false, retryAfterSeconds: 45 };
+      }
+    },
+    activateSessionFn: async () => {
+      activationCalls += 1;
+      throw new Error('must_not_run');
+    }
+  }, async ({ origin, globalErrors }) => {
+    const response = await fetch(`${origin}/operaciones/portal/activar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'worker-portal'
+      },
+      body: '{not-json'
+    });
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get('retry-after'), '45');
+    assert.deepEqual(await response.json(), { ok: false, error: 'activation_temporarily_limited' });
+    assert.equal(guardCalls, 1);
+    assert.equal(activationCalls, 0);
+    assert.deepEqual(globalErrors, []);
+  });
+});
+
+test('middleware y error handler rechazan dependencias o errores ajenos', () => {
+  assert.throws(
+    () => createWorkerPortalActivationAttemptMiddleware(null),
+    /worker_portal_activation_attempt_guard_required/
+  );
+
+  const { res } = responseDouble();
+  const unrelated = new Error('unrelated');
+  let forwarded;
+  workerPortalActivationJsonErrorHandler(unrelated, requestDouble(), res, (error) => {
+    forwarded = error;
+  });
+  assert.equal(forwarded, unrelated);
+});
+
 test('las cookies del portal son Secure, HttpOnly, Strict y limitadas al portal', () => {
   assert.deepEqual(workerPortalCookieOptions(60_000), {
     httpOnly: true,
