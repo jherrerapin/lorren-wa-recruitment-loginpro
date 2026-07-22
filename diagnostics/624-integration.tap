@@ -2,56 +2,40 @@ TAP version 13
 # Subtest: vacante inactiva específica vence coincidencia activa genérica
 ok 1 - vacante inactiva específica vence coincidencia activa genérica # SKIP test name does not match pattern
   ---
-  duration_ms: 1.147421
+  duration_ms: 1.259005
   ...
 # Subtest: empate de cargo conserva prioridad de la vacante activa
 ok 2 - empate de cargo conserva prioridad de la vacante activa # SKIP test name does not match pattern
   ---
-  duration_ms: 0.122973
+  duration_ms: 0.119425
   ...
 # Subtest: cargo genérico operaciones no abre una vacante inactiva específica
 ok 3 - cargo genérico operaciones no abre una vacante inactiva específica # SKIP test name does not match pattern
   ---
-  duration_ms: 0.096514
+  duration_ms: 0.10695
   ...
 # Subtest: una solicitud de otra ciudad nunca cruza a la vacante inactiva
 ok 4 - una solicitud de otra ciudad nunca cruza a la vacante inactiva # SKIP test name does not match pattern
   ---
-  duration_ms: 0.106579
+  duration_ms: 0.102272
   ...
 # Subtest: la compuerta incluye vacancyId en la decisión de vacante inactiva
 ok 5 - la compuerta incluye vacancyId en la decisión de vacante inactiva # SKIP test name does not match pattern
   ---
-  duration_ms: 0.153308
+  duration_ms: 0.256803
   ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # Subtest: flujo integral asocia la inactiva y ofrece registro para futura apertura
-not ok 6 - flujo integral asocia la inactiva y ofrece registro para futura apertura
+ok 6 - flujo integral asocia la inactiva y ofrece registro para futura apertura
   ---
-  duration_ms: 176.836487
-  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/inactiveVacancySpecificity.test.js:109:1'
-  failureType: 'testCodeFailure'
-  error: |-
-    The input did not match the regular expression /no esta activa/i. Input:
-    
-    'En este momento la convocatoria de Coordinador de Operaciones Ibague en Ibague no está activa para recibir postulaciones. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo con tus datos si me confirmas que deseas ese registro.'
-    
-  code: 'ERR_ASSERTION'
-  name: 'AssertionError'
-  expected:
-  actual: 'En este momento la convocatoria de Coordinador de Operaciones Ibague en Ibague no está activa para recibir postulaciones. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo avanzo con tus datos si me confirmas que deseas ese registro.'
-  operator: 'match'
-  stack: |-
-    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/inactiveVacancySpecificity.test.js:152:12)
-    async Test.run (node:internal/test_runner/test:797:9)
-    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  duration_ms: 170.000406
   ...
 1..6
 # tests 6
 # suites 0
-# pass 0
-# fail 1
+# pass 1
+# fail 0
 # cancelled 0
 # skipped 5
 # todo 0
-# duration_ms 706.278022
+# duration_ms 719.184353
