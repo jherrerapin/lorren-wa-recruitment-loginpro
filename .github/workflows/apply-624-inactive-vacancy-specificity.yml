@@ -47,27 +47,37 @@ jobs:
       - name: Validate city boundary
         run: node --test --test-name-pattern="otra ciudad nunca cruza" test/inactiveVacancySpecificity.test.js
 
-      - name: Validate integral future registration
-        run: node --test --test-name-pattern="flujo integral asocia" test/inactiveVacancySpecificity.test.js
+      - name: Capture integral future registration result
+        run: |
+          mkdir -p diagnostics
+          set +e
+          node --test --test-name-pattern="flujo integral asocia" test/inactiveVacancySpecificity.test.js > diagnostics/624-integration.tap 2>&1
+          status=$?
+          set -e
+          printf 'status=%s\n' "$status" > diagnostics/624-integration-summary.txt
 
-      - name: Run existing vacancy resolver regressions
-        run: node --test test/vacancyResolver.test.js test/leaderVacancyResolution.test.js test/cityVacancyCrossAssignment.test.js
-
-      - name: Commit generated resolver patch
+      - name: Commit generated patch and integration diagnostic
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/services/vacancyResolver.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/vacancyResolver.js diagnostics/624-integration.tap diagnostics/624-integration-summary.txt
+          if ! git diff --cached --quiet; then
             git commit -m "fix: priorizar vacante inactiva específica"
             git push origin "HEAD:${HEAD_REF}"
           fi
 
+      - name: Validate integral future registration
+        run: |
+          cat diagnostics/624-integration.tap
+          grep -q '^status=0$' diagnostics/624-integration-summary.txt
+
+      - name: Run existing vacancy resolver regressions
+        run: node --test test/vacancyResolver.test.js test/leaderVacancyResolution.test.js test/cityVacancyCrossAssignment.test.js
+
       - name: Characterize harness after resolver repair
         run: |
-          mkdir -p diagnostics
           set +e
           node --test test/conversation-harness.test.js > diagnostics/624-harness.tap 2>&1
           status=$?
