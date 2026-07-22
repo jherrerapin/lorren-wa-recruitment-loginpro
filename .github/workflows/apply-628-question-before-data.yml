@@ -35,8 +35,17 @@ jobs:
           node --check src/routes/webhook.js
           node --check test/activeVacancyQuestionIntake.test.js
 
-      - name: Run focused transition regressions
-        run: node --test test/activeVacancyQuestionIntake.test.js
+      - name: Validate explicit interest and question transition
+        run: node --test --test-name-pattern="interés explícito y pregunta" test/activeVacancyQuestionIntake.test.js
+
+      - name: Validate informational question boundary
+        run: node --test --test-name-pattern="consulta informativa sin interés" test/activeVacancyQuestionIntake.test.js
+
+      - name: Validate interest without question boundary
+        run: node --test --test-name-pattern="interés sin pregunta" test/activeVacancyQuestionIntake.test.js
+
+      - name: Validate city-only boundary
+        run: node --test --test-name-pattern="solo ciudad" test/activeVacancyQuestionIntake.test.js
 
       - name: Run gate and webhook authority regressions
         run: node --test test/vacancyFirstGate.test.js test/webhookVacancyFirstGateAuthority.test.js test/turnOrchestratorContracts.test.js test/webhookConversationFlow.test.js
