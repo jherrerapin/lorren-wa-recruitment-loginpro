@@ -160,7 +160,7 @@ export function buildWorkerPortalActivationUrl(origin, rawActivationToken) {
   const token = normalizeActivationToken(rawActivationToken);
   const url = new URL(WORKER_PORTAL_ACTIVATION_PATH, origin);
   if (url.protocol !== 'https:') throw new Error('worker_portal_activation_origin_https_required');
-  url.hash = `token=${token}`;
+  url.searchParams.set('token', token);
   return url.toString();
 }
 
