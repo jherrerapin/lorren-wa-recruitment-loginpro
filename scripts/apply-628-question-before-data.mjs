@@ -82,4 +82,43 @@ if (!safetySource.includes(newAliases)) {
 }
 
 writeFileSync(safetyFile, safetySource, 'utf8');
-console.log('Question-before-data transition and registered contract support applied for #628.');
+
+const gateFile = 'src/services/vacancyFirstGate.js';
+let gateSource = readFileSync(gateFile, 'utf8');
+const oldInactiveUpdates = `      candidateUpdates: { vacancyId: resolution.vacancy.id, currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },`;
+const newInactiveUpdates = `      candidateUpdates: {
+        ...(resolution.reason === 'matched_inactive_vacancy' ? { vacancyId: resolution.vacancy.id } : {}),
+        currentStep: GREETING_SENT,
+        botResumeMode: PAUSED_VACANCY_OFFER_MODE,
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      },`;
+
+if (!gateSource.includes(newInactiveUpdates)) {
+  const count = gateSource.split(oldInactiveUpdates).length - 1;
+  if (count !== 1) throw new Error(`inactive candidate updates count=${count}`);
+  gateSource = gateSource.replace(oldInactiveUpdates, newInactiveUpdates);
+}
+
+writeFileSync(gateFile, gateSource, 'utf8');
+
+const gateTestFile = 'test/vacancyFirstGate.test.js';
+let gateTestSource = readFileSync(gateTestFile, 'utf8');
+const oldExplicitTest = `test('vacante inactiva explícita en Siberia responde oferta futura sin candidateUpdates.vacancyId', async () => {`;
+const newExplicitTest = `test('vacante inactiva explícita en Siberia persiste candidateUpdates.vacancyId', async () => {`;
+const oldExplicitAssertion = `  assert.equal(decision.candidateUpdates.vacancyId, undefined);\n  assert.equal(decision.vacancyId, undefined);`;
+const newExplicitAssertion = `  assert.equal(decision.candidateUpdates.vacancyId, 'vac-siberia-inactive-explicit');\n  assert.equal(decision.vacancyId, undefined);\n  assert.equal(decision.resolution.reason, 'matched_inactive_vacancy');`;
+
+if (!gateTestSource.includes(newExplicitTest)) {
+  const titleCount = gateTestSource.split(oldExplicitTest).length - 1;
+  if (titleCount !== 1) throw new Error(`explicit inactive test title count=${titleCount}`);
+  gateTestSource = gateTestSource.replace(oldExplicitTest, newExplicitTest);
+}
+if (!gateTestSource.includes(newExplicitAssertion)) {
+  const assertionCount = gateTestSource.split(oldExplicitAssertion).length - 1;
+  if (assertionCount !== 1) throw new Error(`explicit inactive assertion count=${assertionCount}`);
+  gateTestSource = gateTestSource.replace(oldExplicitAssertion, newExplicitAssertion);
+}
+
+writeFileSync(gateTestFile, gateTestSource, 'utf8');
+console.log('Question-before-data, safety, and inactive metadata boundary patches applied for #628.');
