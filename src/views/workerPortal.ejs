@@ -29,9 +29,12 @@
       <script nonce="<%= nonce %>">
         (() => {
           const status = document.getElementById('activation-status');
+          const queryParams = new URLSearchParams(window.location.search);
           const fragment = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
-          const params = new URLSearchParams(fragment);
-          const activationToken = params.get('token') || (fragment.includes('=') ? '' : fragment);
+          const fragmentParams = new URLSearchParams(fragment);
+          const activationToken = queryParams.get('token')
+            || fragmentParams.get('token')
+            || (fragment.includes('=') ? '' : fragment);
 
           window.history.replaceState(null, document.title, window.location.pathname);
 
