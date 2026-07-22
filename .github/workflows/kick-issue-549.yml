@@ -1,0 +1,58 @@
+name: Kick issue 549 implementation
+
+on:
+  push:
+    branches:
+      - feat/549-worker-contract-autoassignment
+    paths:
+      - .github/workflows/kick-issue-549.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/549-worker-contract-autoassignment
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Extract and apply prepared patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-issue-549.yml').read_text(encoding='utf-8').splitlines()
+          marker = next(index for index, line in enumerate(source) if line.strip() == "python3 <<'PY'")
+          prefix = source[marker][:len(source[marker]) - len(source[marker].lstrip())]
+          end = next(index for index in range(marker + 1, len(source)) if source[index].strip() == 'PY')
+          script = '\n'.join(line[len(prefix):] if line.startswith(prefix) else line for line in source[marker + 1:end]) + '\n'
+          Path('/tmp/apply-issue-549.py').write_text(script, encoding='utf-8')
+          PY
+          python3 /tmp/apply-issue-549.py
+      - name: Remove temporary workflows
+        run: rm .github/workflows/apply-issue-549.yml .github/workflows/kick-issue-549.yml
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate implementation
+        run: |
+          npx prisma validate
+          npx prisma generate
+          node --check src/services/dispatchAutoAssignment.js
+          node --check src/routes/dispatchMultiShiftRequests.js
+          node --check src/routes/dispatchOpsExtras.js
+          node --check src/routes/publicDispatchClient.js
+          node --test test/dispatchWorkerContractAutoAssignment.test.js
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: agregar contrato y autoasignación histórica (#549)"
+          git push origin HEAD:feat/549-worker-contract-autoassignment
