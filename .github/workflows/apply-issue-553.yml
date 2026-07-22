@@ -1,0 +1,106 @@
+name: Apply issue 553 contract label fix
+
+on:
+  push:
+    branches:
+      - fix/contract-label-all-workers
+    paths:
+      - .github/workflows/apply-issue-553.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/contract-label-all-workers
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply focused UI patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected one match, found {text.count(old)}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          board = 'src/views/operacionesAsignacionesConfirmacion.ejs'
+          replace_once(
+              board,
+              ".contract-value{display:inline-flex;align-items:center;border-radius:999px;padding:1px 6px;background:#f3e8ff;color:#6b21a8;font-size:9px;font-weight:900;line-height:1.15}",
+              ".worker-heading{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}.worker-heading strong{margin-bottom:0;min-width:0}.contract-value{display:inline-flex;align-items:center;flex:0 0 auto;border:1px solid #dbe3ec;border-radius:999px;padding:1px 5px;background:#f8fafc;color:#475569;font-size:8.5px;font-weight:800;line-height:1.1;white-space:nowrap}"
+          )
+          replace_once(
+              board,
+              '<div class="worker-main"><strong><%= worker.fullName %></strong><div class="meta"><span class="contract-value"><%= contractLabel(worker.contractType) %></span><% if(worker.transportMode){ %><span>Transporte: <%= worker.transportMode %></span><% } %></div>',
+              '<div class="worker-main"><div class="worker-heading"><strong><%= worker.fullName %></strong><span class="contract-value" title="Tipo de contrato"><%= contractLabel(worker.contractType) %></span></div><div class="meta"><% if(worker.transportMode){ %><span>Transporte: <%= worker.transportMode %></span><% } %></div>'
+          )
+          replace_once(
+              board,
+              '<div class="assigned-main"><strong><%= assignment.worker.fullName %></strong><div class="meta"><span><%= assignment.worker.phone || \'Sin teléfono\' %></span><span class="contract-value"><%= contractLabel(assignment.worker.contractType) %></span>',
+              '<div class="assigned-main"><div class="worker-heading"><strong><%= assignment.worker.fullName %></strong><span class="contract-value" title="Tipo de contrato"><%= contractLabel(assignment.worker.contractType) %></span></div><div class="meta"><span><%= assignment.worker.phone || \'Sin teléfono\' %></span>'
+          )
+
+          personnel = 'src/views/operacionesPersonal.ejs'
+          replace_once(personnel, 'table { width: 100%; border-collapse: collapse; min-width: 1100px; }', 'table { width: 100%; border-collapse: collapse; min-width: 1180px; }')
+          replace_once(
+              personnel,
+              '    .pill-gray { color: var(--muted); background: #f3f4f6; }',
+              '    .pill-gray { color: var(--muted); background: #f3f4f6; }\n    .pill-contract { color: #475569; background: #f8fafc; border: 1px solid #dbe3ec; padding: 2px 7px; }'
+          )
+          replace_once(
+              personnel,
+              '<th>Nombre</th><th>Teléfono</th>',
+              '<th>Nombre</th><th>Contrato</th><th>Teléfono</th>'
+          )
+          replace_once(
+              personnel,
+              '<td><span class="worker-name"><%= w.fullName %></span></td>\n                  <td><%= w.phone || \'-\' %></td>',
+              '<td><span class="worker-name"><%= w.fullName %></span></td>\n                  <td><span class="pill pill-contract"><%= w.contractType === \'CONTRATISTA\' ? \'Contratista\' : \'Directo\' %></span></td>\n                  <td><%= w.phone || \'-\' %></td>'
+          )
+
+          test_file = 'test/dispatchWorkerContractAutoAssignment.test.js'
+          replace_once(
+              test_file,
+              '    form,\n    board,\n    opsRoute,',
+              '    form,\n    board,\n    personnelList,\n    opsRoute,'
+          )
+          replace_once(
+              test_file,
+              "    readFile(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8'),\n    readFile(new URL('../src/routes/dispatchOpsExtras.js', import.meta.url), 'utf8'),",
+              "    readFile(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8'),\n    readFile(new URL('../src/views/operacionesPersonal.ejs', import.meta.url), 'utf8'),\n    readFile(new URL('../src/routes/dispatchOpsExtras.js', import.meta.url), 'utf8'),"
+          )
+          replace_once(
+              test_file,
+              '  assert.match(board, /contractLabel\\(worker\\.contractType\\)/);\n  assert.match(board, /contractLabel\\(assignment\\.worker\\.contractType\\)/);',
+              "  assert.match(board, /worker-heading[\\s\\S]*contractLabel\\(worker\\.contractType\\)/);\n  assert.match(board, /worker-heading[\\s\\S]*contractLabel\\(assignment\\.worker\\.contractType\\)/);\n  assert.match(board, /background:#f8fafc;color:#475569/);\n  assert.doesNotMatch(board, /background:#f3e8ff;color:#6b21a8/);\n  assert.match(personnelList, /<th>Contrato<\\/th>/);\n  assert.match(personnelList, /w\\.contractType === 'CONTRATISTA' \\? 'Contratista' : 'Directo'/);"
+          )
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/apply-issue-553.yml
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate focused change
+        run: |
+          node --test test/dispatchWorkerContractAutoAssignment.test.js
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: mostrar contrato en todos los auxiliares (#553)"
+          git push origin HEAD:fix/contract-label-all-workers
