@@ -63,7 +63,21 @@ jobs:
 
       - name: Run focused regressions
         working-directory: source
-        run: node --test test/dispatchClientsOperationsContracts.test.js test/dispatchWhatsappRuntimeContracts.test.js
+        shell: bash
+        run: |
+          set +e
+          node --test test/dispatchClientsOperationsContracts.test.js test/dispatchWhatsappRuntimeContracts.test.js > issue-567-test-diagnostic.txt 2>&1
+          status=$?
+          cat issue-567-test-diagnostic.txt
+          if [ "$status" -ne 0 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add issue-567-test-diagnostic.txt
+            git commit -m "chore: registrar diagnóstico de pruebas #567" || true
+            git push origin HEAD:fix/567-operational-labels
+            exit "$status"
+          fi
+          rm -f issue-567-test-diagnostic.txt
 
       - name: Commit canonical correction
         working-directory: source
