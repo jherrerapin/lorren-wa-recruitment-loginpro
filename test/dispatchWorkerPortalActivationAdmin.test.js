@@ -62,26 +62,25 @@ async function runRoute(router, path, method, req, res) {
   return next();
 }
 
+function workerFixture(overrides = {}) {
+  return {
+    id: WORKER_ID,
+    fullName: 'Auxiliar Prueba',
+    contractType: 'DIRECTO',
+    operationalStatus: 'CONTRATADO',
+    isTestProfile: false,
+    ...overrides
+  };
+}
+
 function buildRouter(options = {}) {
   return dispatchWorkerPortalActivationAdminRouter({}, {
     repository: {},
     env: { RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app' },
     ttlMinutes: 30,
     nowFn: () => NOW,
-    loadWorkersFn: async () => [{
-      id: WORKER_ID,
-      fullName: 'Auxiliar Prueba',
-      documentNumber: '1234567890',
-      operationalStatus: 'CONTRATADO',
-      isTestProfile: false
-    }],
-    findWorkerFn: async () => ({
-      id: WORKER_ID,
-      fullName: 'Auxiliar Prueba',
-      documentNumber: '1234567890',
-      operationalStatus: 'CONTRATADO',
-      isTestProfile: false
-    }),
+    loadWorkersFn: async () => [workerFixture()],
+    findWorkerFn: async () => workerFixture(),
     issueActivationFn: async () => ({
       activationId: 'activation-1',
       workerId: WORKER_ID,
@@ -130,16 +129,43 @@ test('GET exige DEV y nunca muestra la pantalla a reclutadores', async () => {
   assert.equal(state.render, null);
 });
 
-test('GET DEV lista solo el modelo sanitizado y aplica no-store', async () => {
+test('GET DEV muestra tipo de contrato y no expone documento', async () => {
   const router = buildRouter();
   const { res, state } = responseDouble();
   await runRoute(router, '/', 'get', requestDouble(), res);
   assert.equal(state.statusCode, 200);
   assert.equal(state.render.view, 'operacionesPortalActivaciones');
   assert.equal(state.render.locals.workers[0].id, WORKER_ID);
-  assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · 7890');
+  assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · Directo');
+  assert.equal(state.render.locals.workers[0].contractType, 'Directo');
   assert.equal(state.render.locals.workers[0].documentNumber, undefined);
   assert.match(state.headers['Cache-Control'], /no-store/);
+});
+
+test('la consulta predeterminada replica Personal operativo: solo CONTRATADO de DispatchWorker', async () => {
+  let observedQuery;
+  const prisma = {
+    dispatchWorker: {
+      async findMany(query) {
+        observedQuery = query;
+        return [workerFixture({ contractType: 'CONTRATISTA' })];
+      }
+    }
+  };
+  const router = dispatchWorkerPortalActivationAdminRouter(prisma, {
+    repository: {},
+    env: { RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app' },
+    ttlMinutes: 30,
+    nowFn: () => NOW
+  });
+  const { res, state } = responseDouble();
+
+  await runRoute(router, '/', 'get', requestDouble(), res);
+
+  assert.deepEqual(observedQuery.where, { operationalStatus: 'CONTRATADO' });
+  assert.equal(observedQuery.select.contractType, true);
+  assert.equal(observedQuery.select.documentNumber, undefined);
+  assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · Contratista');
 });
 
 test('POST rechaza solicitudes sin cabecera personalizada antes de emitir', async () => {
@@ -158,7 +184,7 @@ test('POST rechaza solicitudes sin cabecera personalizada antes de emitir', asyn
   assert.equal(issueCalls, 0);
 });
 
-test('POST DEV emite un enlace con fragmento y registra el actor sin devolver token separado', async () => {
+test('POST DEV emite enlace, registra actor y devuelve tipo de contrato sin token separado', async () => {
   let observedInput;
   const router = buildRouter({
     issueActivationFn: async (input) => {
@@ -187,6 +213,7 @@ test('POST DEV emite un enlace con fragmento y registra el actor sin devolver to
   assert.equal(observedInput.createdByUsername, 'dev-principal');
   assert.equal(observedInput.ttlMinutes, 30);
   assert.equal(state.json.ok, true);
+  assert.equal(state.json.worker.contractType, 'Directo');
   assert.equal(state.json.activationUrl, `https://lorren.example.up.railway.app/operaciones/portal/activar#token=${TOKEN}`);
   assert.equal(state.json.rawToken, undefined);
   assert.equal(state.json.expiresAt, EXPIRES_AT.toISOString());
@@ -217,22 +244,26 @@ test('un origen público faltante falla cerrado sin filtrar el token', async () 
   }
 });
 
-test('la pantalla copia únicamente mediante clic y conserva alternativa manual', () => {
+test('la pantalla explica la fuente, muestra contrato y copia únicamente mediante clic', () => {
   const view = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
   const copyListenerIndex = view.indexOf("copyButton?.addEventListener('click'");
   const clipboardIndex = view.indexOf('navigator.clipboard.writeText');
   assert.ok(copyListenerIndex >= 0);
   assert.ok(clipboardIndex > copyListenerIndex);
+  assert.match(view, /únicamente los auxiliares con estado <strong>Contratado<\/strong> que aparecen en Personal operativo/);
+  assert.match(view, /Directo<\/strong> o <strong>Contratista/);
+  assert.match(view, /payload\.worker\.contractType/);
   assert.match(view, /activationUrl\.focus\(\)/);
   assert.match(view, /activationUrl\.select\(\)/);
   assert.match(view, /No abras este enlace en tu computador/);
   assert.doesNotMatch(view, /window\.open\(|location\.href\s*=\s*activationUrl/);
 });
 
-test('dispatchBridge monta la ruta bajo DEV y muestra el botón en el control temporal', () => {
-  const source = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
-  assert.match(source, /dispatchWorkerPortalActivationAdminRouter/);
-  assert.match(source, /'\/portal-activaciones',[\s\S]*requireDev,[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/);
-  assert.match(source, /href="\/admin\/operaciones\/portal-activaciones"/);
-  assert.match(source, /Activar Portal del Auxiliar/);
+test('la ruta permanece bajo DEV y el botón visible está en Personal operativo', () => {
+  const bridgeSource = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+  const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
+  assert.match(bridgeSource, /dispatchWorkerPortalActivationAdminRouter/);
+  assert.match(bridgeSource, /'\/portal-activaciones',[\s\S]*requireDev,[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/);
+  assert.doesNotMatch(bridgeSource, /href="\/admin\/operaciones\/portal-activaciones"/);
+  assert.match(personalView, /<% if \(role === 'dev'\) \{ %>[\s\S]*href="\/admin\/operaciones\/portal-activaciones"[\s\S]*Activar Portal del Auxiliar/);
 });
