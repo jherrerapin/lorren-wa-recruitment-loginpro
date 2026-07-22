@@ -39,13 +39,14 @@ async function streamToBuffer(body) {
   return Buffer.concat(chunks);
 }
 
-export async function uploadBufferToR2(key, buffer, contentType) {
+export async function uploadBufferToR2(key, buffer, contentType, options = {}) {
   const s3 = getStorageClient();
   await s3.send(new PutObjectCommand({
     Bucket: process.env.R2_BUCKET,
     Key: key,
     Body: buffer,
-    ContentType: contentType
+    ContentType: contentType,
+    ...(options.ifNoneMatch ? { IfNoneMatch: options.ifNoneMatch } : {})
   }));
 }
 
