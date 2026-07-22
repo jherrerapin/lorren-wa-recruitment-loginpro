@@ -17,6 +17,7 @@ const CATCHUP_DELAY_MS = Number(process.env.DISPATCH_WA_CATCHUP_DELAY_MS || 4000
 const CATCHUP_CHAT_LIMIT = Number(process.env.DISPATCH_WA_CATCHUP_CHAT_LIMIT || 80);
 const CATCHUP_MESSAGES_PER_CHAT = Number(process.env.DISPATCH_WA_CATCHUP_MESSAGES_PER_CHAT || 8);
 const CATCHUP_MIN_INTERVAL_MS = Number(process.env.DISPATCH_WA_CATCHUP_MIN_INTERVAL_MS || 60000);
+const CLIENT_DESTROY_TIMEOUT_MS = Math.max(1000, Number(process.env.DISPATCH_WWEB_DESTROY_TIMEOUT_MS || 5000));
 const PENDING_RECONCILIATION_INTERVAL_MS = Math.max(15000, Number(process.env.DISPATCH_WA_RECONCILE_INTERVAL_MS || 60000));
 const PENDING_RECONCILIATION_LIMIT = Math.max(1, Number(process.env.DISPATCH_WA_RECONCILE_LIMIT || 200));
 const PENDING_RECONCILIATION_MESSAGES_PER_CHAT = Math.max(1, Number(process.env.DISPATCH_WA_RECONCILE_MESSAGES_PER_CHAT || 20));
@@ -501,6 +502,42 @@ function resetClientReference() {
   ready = false;
   lastQr = null;
   if (oldClient) oldClient.destroy().catch((error) => console.warn('No fue posible cerrar completamente el cliente anterior de WhatsApp despacho.', error));
+}
+
+async function destroyClientWithoutLogout(activeClient) {
+  if (!activeClient) return;
+  let timeoutId = null;
+  try {
+    await Promise.race([
+      Promise.resolve(activeClient.destroy()),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(resolve, CLIENT_DESTROY_TIMEOUT_MS);
+        timeoutId.unref?.();
+      })
+    ]);
+  } catch (error) {
+    console.warn('[dispatch-wa] No fue posible destruir completamente el cliente durante la recuperación.', error?.message || error);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+export async function restartDispatchWhatsappClient(reason = 'recuperación automática') {
+  if (manualLogoutRequested) return getDispatchWhatsappStatus();
+  clearReconnectTimer();
+  stopPendingConfirmationReconciliation();
+  const oldClient = client;
+  client = null;
+  initializing = false;
+  ready = false;
+  lastQr = null;
+  lastError = null;
+  await destroyClientWithoutLogout(oldClient);
+  const dataPath = ensureAuthDataPath();
+  cleanupChromiumProfileLocks(dataPath);
+  console.warn(`[dispatch-wa] Reiniciando cliente sin cerrar la sesión persistida. reason=${reason}`);
+  initDispatchWhatsappClient();
+  return getDispatchWhatsappStatus();
 }
 
 async function getReadyClient() {

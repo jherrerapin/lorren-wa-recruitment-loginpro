@@ -1,9 +1,0 @@
-/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/.github/scripts/apply-issue-576.py:248: SyntaxWarning: invalid escape sequence '\('
-  """  assert.match(watchdog, /killStaleChromiumProcesses\(status\.authDataPath \|\| resolveAuthDataPath\(\)\)/);
-/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/.github/scripts/apply-issue-576.py:252: SyntaxWarning: invalid escape sequence '\('
-  """  assert.match(watchdog, /await restartDispatchWhatsappClient\(`watchdog:\$\{reason\}`\)/);
-/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/.github/scripts/apply-issue-576.py:259: SyntaxWarning: invalid escape sequence '\('
-  """test('WhatsApp storage diagnostics remain restricted to DEV', () => {
-/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/.github/scripts/apply-issue-576.py:268: SyntaxWarning: invalid escape sequence '\('
-  """test('WhatsApp status view omits storage implementation details and surfaces polling failures', () => {
-test/dispatchWhatsappRuntimeContracts.test.js: se esperaba una coincidencia y se encontraron 0
