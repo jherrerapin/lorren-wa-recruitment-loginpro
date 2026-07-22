@@ -699,7 +699,7 @@ export async function resolveVacancyFirstGate({
       reason: 'INACTIVE_VACANCY_RESOLVED',
       replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
       vacancy: resolution.vacancy,
-      candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
+      candidateUpdates: { vacancyId: resolution.vacancy.id, currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
       reply: buildInactiveVacancyReply(resolution.vacancy, resolution.city, inboundText),
       resolution
     }, { recentMessages, inboundText, city: resolution.city, currentStep });
