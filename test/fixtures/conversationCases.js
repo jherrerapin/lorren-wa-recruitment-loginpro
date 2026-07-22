@@ -99,7 +99,7 @@ export const conversationCases = [
     expect: {
       absentFields: ['fullName'],
       candidate: { currentStep: 'GREETING_SENT' },
-      lastReplyIncludes: ['Desde que ciudad', 'vacante o cargo']
+      lastReplyIncludes: ['Desde que ciudad', 'para que vacante']
     }
   },
   {
@@ -193,7 +193,7 @@ export const conversationCases = [
     ],
     operations: [OP_IBA, OP_BOG],
     expect: {
-      lastReplyIncludes: ['Ya tengo la ciudad: Ibague', 'cargo o la vacante que te interesa'],
+      lastReplyIncludes: ['gracias por contarme desde donde escribes', 'para que vacante o cargo'],
       lastReplyNotIncludes: ['Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones Ibague', 'enviame por favor estos datos', 'cuentame desde que ciudad']
     }
   },
@@ -206,7 +206,7 @@ export const conversationCases = [
         currentStep: 'GREETING_SENT',
         vacancyId: null
       },
-      lastReplyIncludes: ['Ya tengo la ciudad: Ibague', 'cargo o la vacante que te interesa'],
+      lastReplyIncludes: ['gracias por contarme desde donde escribes', 'para que vacante o cargo'],
       lastReplyNotIncludes: ['Auxiliar de Cargue y Descargue Ibague', 'Coordinador de Operaciones', 'enviame tus datos', 'te solicitare tus datos']
     }
   },
@@ -246,7 +246,7 @@ export const conversationCases = [
     steps: ['independiente - bus'],
     candidate: candidateDefaults({ currentStep: 'COLLECTING_DATA', vacancyId: 'vac-post' }),
     expect: {
-      candidate: { transportMode: 'Bus' }
+      candidate: { transportMode: 'Publico' }
     }
   },
   {
