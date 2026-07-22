@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  filterAssignmentsForServiceDate,
   rankHistoricalWorkers,
   selectAutoAssignmentCandidates,
   timeRangesOverlap
@@ -44,6 +45,18 @@ test('detecta cruces reales y permite turnos consecutivos', () => {
       { startTime: '08:00', endTime: '12:00' }
     ),
     true
+  );
+});
+
+test('descarta asignaciones de una fecha operativa diferente', () => {
+  const assignments = [
+    { workerId: 'hoy', serviceRequest: { serviceDate: '2026-07-22T05:00:00.000Z' } },
+    { workerId: 'manana-legacy', serviceRequest: { serviceDate: '2026-07-23T00:00:00.000Z' } }
+  ];
+
+  assert.deepEqual(
+    filterAssignmentsForServiceDate(assignments, '2026-07-22T05:00:00.000Z').map((item) => item.workerId),
+    ['hoy']
   );
 });
 
