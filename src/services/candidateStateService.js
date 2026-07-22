@@ -448,6 +448,100 @@ export async function pauseCandidateAutomationFromConversationEngine(client, inp
   };
 }
 
+
+function normalizeManualReviewPauseSnapshot(expected) {
+  const requiredFields = [
+    'botPaused',
+    'botPausedAt',
+    'botPausedBy',
+    'botPauseReason',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_manual_review_pause_snapshot_required');
+  }
+
+  const pauseSnapshot = normalizeExpectedPauseSnapshot(expected);
+  return {
+    botPaused: pauseSnapshot.botPaused,
+    botPausedAt: pauseSnapshot.botPausedAt,
+    botPausedBy: requireNullableSnapshotString(
+      expected.botPausedBy,
+      'candidate_manual_review_pause_expected_bot_paused_by'
+    ),
+    botPauseReason: requireNullableSnapshotString(
+      expected.botPauseReason,
+      'candidate_manual_review_pause_expected_reason'
+    ),
+    botResumeMode: requireNullableSnapshotString(
+      expected.botResumeMode,
+      'candidate_manual_review_pause_expected_resume_mode'
+    ),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_manual_review_pause_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_manual_review_pause_reminder_state'
+    )
+  };
+}
+
+function manualReviewPauseExpectedWhere(snapshot) {
+  return {
+    botPaused: snapshot.botPaused,
+    botPausedAt: millisecondDateFilter(snapshot.botPausedAt),
+    botPausedBy: snapshot.botPausedBy,
+    botPauseReason: snapshot.botPauseReason,
+    botResumeMode: snapshot.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function pauseCandidateAutomationForManualReview(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeManualReviewPauseSnapshot(input.expected);
+  const reason = requireNonEmptyString(input.reason, 'candidate_manual_review_pause_reason');
+  const pausedAtInput = input.pausedAt === undefined ? new Date() : input.pausedAt;
+  const pausedAt = requireValidDate(pausedAtInput, 'candidate_manual_review_pause_at');
+
+  if (expected.botPaused) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId, {
+      blockedReason: 'already_paused'
+    });
+  }
+
+  const transition = await applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected: manualReviewPauseExpectedWhere(expected),
+    data: {
+      botPaused: true,
+      botPausedAt: pausedAt,
+      botPauseReason: reason,
+      reminderScheduledFor: null,
+      reminderState: ReminderState.CANCELLED
+    }
+  });
+
+  return {
+    ...transition,
+    expected,
+    pausedAt,
+    reason,
+    nextReminderState: ReminderState.CANCELLED
+  };
+}
+
 function requireCandidateMultilineScheduleClient(client) {
   if (typeof client?.candidate?.update !== 'function') {
     throw new TypeError('candidate_multiline_schedule_client_required');

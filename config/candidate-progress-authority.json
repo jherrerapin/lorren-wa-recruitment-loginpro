@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 10,
-  "phase": "admin_interview_progress_authority_migrated",
+  "schemaVersion": 11,
+  "phase": "manual_review_pause_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -35,7 +35,8 @@
     "consent_step_authority",
     "vacancy_first_gate_authority",
     "silent_profile_capture_authority",
-    "admin_interview_progress_authority"
+    "admin_interview_progress_authority",
+    "manual_review_pause_authority"
   ],
   "sourceInventory": [
     {
@@ -54,7 +55,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa y reflejos administrativos de entrevista mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista y pausa por revisión manual mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -79,7 +80,7 @@
         "currentStep",
         "multilineBatchVersion"
       ],
-      "notes": "Delega multilinea, vacancyFirstGate y captura silenciosa a CandidateStateService; conserva otras ramas legacy aún no migradas."
+      "notes": "Delega multilinea, vacancyFirstGate, captura silenciosa y pausa por revisión manual a CandidateStateService; conserva otras ramas legacy aún no migradas."
     },
     {
       "path": "src/services/dataConsentGate.js",
@@ -766,6 +767,52 @@
         "cv_storage",
         "interview_booking",
         "gender_policy_change"
+      ]
+    },
+    {
+      "id": "manual_review_pause_authority",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/routes/webhook.js",
+      "responseConsumer": "src/routes/webhook.js",
+      "status": "canonical",
+      "allowedFields": [
+        "botPaused",
+        "botPausedAt",
+        "botPauseReason",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "observedFields": [
+        "botPaused",
+        "botPausedAt",
+        "botPausedBy",
+        "botPauseReason",
+        "botResumeMode",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "snapshot completo de pausa y recordatorio",
+        "candidato observado no pausado",
+        "razón no vacía",
+        "fecha de pausa válida"
+      ],
+      "mutation": {
+        "botPaused": true,
+        "botPausedAt": "pausedAt",
+        "botPauseReason": "reason",
+        "reminderScheduledFor": null,
+        "reminderState": "CANCELLED"
+      },
+      "concurrency": "updateMany compara id y los siete campos observados; count cero conserva la pausa y el recordatorio vigentes.",
+      "idempotency": "Un candidato ya pausado produce no-op y una carrera no notifica al supervisor ni reintenta.",
+      "conflictPolicy": "El webhook registra STALE_CANDIDATE_MANUAL_REVIEW_PAUSE como silencio intencional y suprime la notificación al supervisor.",
+      "excludedCombinations": [
+        "implicit_scheduling_pause",
+        "attachment_volume_pause",
+        "confirmation_blocked_pause",
+        "gender_logic"
       ]
     }
   ]
