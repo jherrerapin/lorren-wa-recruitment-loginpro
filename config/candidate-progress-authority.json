@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 12,
-  "phase": "interview_reschedule_progress_authority_migrated",
+  "schemaVersion": 13,
+  "phase": "interview_cancellation_reminder_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -37,7 +37,8 @@
     "silent_profile_capture_authority",
     "admin_interview_progress_authority",
     "manual_review_pause_authority",
-    "interview_reschedule_progress_authority"
+    "interview_reschedule_progress_authority",
+    "interview_cancellation_reminder_authority"
   ],
   "sourceInventory": [
     {
@@ -56,7 +57,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista, pausa por revisión manual y reflejo de reprogramación mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista, pausa por revisión manual, reprogramación y limpieza de recordatorio por cancelación mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -72,7 +73,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "Delega el reflejo de reprogramación en CandidateStateService y la reducción general en act(); conserva escrituras determinísticas de vacante pausada y otras ramas aún no migradas."
+      "notes": "Delega los reflejos de reprogramación y cancelación en CandidateStateService y la reducción general en act(); conserva escrituras determinísticas de vacante pausada y otras ramas aún no migradas."
     },
     {
       "path": "src/routes/webhook.js",
@@ -462,7 +463,7 @@
   ],
   "nextMigrationSlices": [
     "migrar las demás ramas legacy del webhook por familias pequeñas",
-    "migrar cancelación de entrevista y decisiones de vacante pausada en chatEngine"
+    "migrar decisiones de vacante pausada y pausas implícitas restantes en chatEngine"
   ],
   "stepContracts": [
     {
@@ -853,6 +854,42 @@
       "excludedCombinations": [
         "confirm_attendance",
         "cancel_interview",
+        "new_booking_creation",
+        "paused_vacancy",
+        "gender_logic"
+      ]
+    },
+    {
+      "id": "interview_cancellation_reminder_reflection",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/services/chatEngine.js",
+      "responseConsumer": "src/services/chatEngine.js",
+      "status": "canonical",
+      "allowedFields": [
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "observedFields": [
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "cancelación ya aceptada por InterviewBookingStateService",
+        "snapshot explícito de fecha y estado del recordatorio",
+        "next state y patch arbitrario prohibidos"
+      ],
+      "mutation": {
+        "reminderScheduledFor": null,
+        "reminderState": "SKIPPED"
+      },
+      "concurrency": "updateMany compara id, reminderScheduledFor y reminderState; count cero conserva el recordatorio concurrente.",
+      "idempotency": "Una segunda ejecución con el snapshot anterior devuelve count cero sin modificar la cancelación canónica de la reserva.",
+      "conflictPolicy": "chatEngine registra STALE_CANDIDATE_CANCELLATION_REMINDER, marca conflicto interno y conserva la respuesta de cancelación porque la reserva sí cambió.",
+      "excludedCombinations": [
+        "currentStep_change",
+        "confirm_attendance",
+        "reschedule_interview",
         "new_booking_creation",
         "paused_vacancy",
         "gender_logic"
