@@ -1,0 +1,589 @@
+TAP version 13
+# Subtest: dispatch clients operations contracts
+not ok 1 - dispatch clients operations contracts
+  ---
+  duration_ms: 3.536994
+  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/source/test/dispatchClientsOperationsContracts.test.js:5:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /get\('\/clientes'/. Input:
+    
+    "import express from 'express';\n" +
+      "import { prisma } from '../lib/prisma.js';\n" +
+      "import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';\n" +
+      "import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBridgeCore.js';\n" +
+      'import {\n' +
+      '  resolveAttendanceFeatureAccess,\n' +
+      '  setRecruiterGeneralAttendanceEnabled\n' +
+      "} from '../services/attendanceFeatureAccess.js';\n" +
+      '\n' +
+      'function normalizeString(value) {\n' +
+      "  if (typeof value !== 'string') return null;\n" +
+      '  const trimmed = value.trim();\n' +
+      '  return trimmed.length ? trimmed : null;\n' +
+      '}\n' +
+      '\n' +
+      'function isOpsUser(req) {\n' +
+      '  const username = normalizeString(req.session?.username || req.username);\n' +
+      "  return Boolean(username?.startsWith('operaciones-despacho'));\n" +
+      '}\n' +
+      '\n' +
+      'function canUseOps(req) {\n' +
+      '  const role = req.session?.userRole || req.userRole;\n' +
+      '  const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch);\n' +
+      "  return role === 'dev' || canAccessDispatch || isOpsUser(req);\n" +
+      '}\n' +
+      '\n' +
+      'function requireOps(req, res, next) {\n' +
+      '  const role = req.session?.userRole || req.userRole;\n' +
+      "  if (!role) return res.redirect('/login');\n" +
+      "  if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');\n" +
+      '  return next();\n' +
+      '}\n' +
+      '\n' +
+      'function requireDev(req, res, next) {\n' +
+      '  const role = req.session?.userRole || req.userRole;\n' +
+      "  if (role !== 'dev') return res.status(403).send('Acceso restringido a DEV');\n" +
+      '  return next();\n' +
+      '}\n' +
+      '\n' +
+      'function requireAttendanceAccess(req, res, next) {\n' +
+      '  if (!req.canAccessAttendanceFeature) {\n' +
+      "    return res.status(403).send('La asistencia operativa esta habilitada temporalmente solo para DEV.');\n" +
+      '  }\n' +
+      '  return next();\n' +
+      '}\n' +
+      '\n' +
+      'function requestIpDetails(req) {\n' +
+      "  const forwardedFor = normalizeString(req.get?.('x-forwarded-for'));\n" +
+      '  const forwardedIp = forwardedFor\n' +
+      "    ? forwardedFor.split(',').map((entry) => entry.trim()).find(Boolean)\n" +
+      '    : null;\n' +
+      '  return {\n' +
+      '    ipAddress: forwardedIp || req.ip || req.socket?.remoteAddress || null,\n' +
+      '    forwardedFor,\n' +
+      "    userAgent: normalizeString(req.get?.('user-agent'))\n" +
+      '  };\n' +
+      '}\n' +
+      '\n' +
+      'async function loadAttendanceFeatureAccess(req, res, next) {\n' +
+      '  try {\n' +
+      '    const access = await resolveAttendanceFeatureAccess(prisma, {\n' +
+      '      userRole: req.session?.userRole || req.userRole,\n' +
+      '      username: req.session?.username || req.username\n' +
+      '    });\n' +
+      '    req.canAccessAttendanceFeature = access.allowed;\n' +
+      '    req.recruiterGeneralAttendanceEnabled = access.recruiterGeneralEnabled;\n' +
+      '    res.locals.canAccessAttendanceFeature = access.allowed;\n' +
+      '    res.locals.recruiterGeneralAttendanceEnabled = access.recruiterGeneralEnabled;\n' +
+      '  } catch (error) {\n' +
+      "    console.error('[ATTENDANCE_FEATURE_ACCESS_LOAD_FAILED]', error);\n" +
+      '    req.canAccessAttendanceFeature = false;\n' +
+      '    req.recruiterGeneralAttendanceEnabled = false;\n' +
+      '    res.locals.canAccessAttendanceFeature = false;\n' +
+      '    res.locals.recruiterGeneralAttendanceEnabled = false;\n' +
+      '  }\n' +
+      '  return next();\n' +
+      '}\n' +
+      '\n' +
+      'function attendanceDevControlHtml(enabled) {\n' +
+      "  const nextEnabled = enabled ? 'false' : 'true';\n" +
+      '  const actionLabel = enabled\n' +
+      "    ? 'Desactivar para reclutador-general'\n" +
+      "    : 'Activar para reclutador-general';\n" +
+      "  const buttonClass = enabled ? 'btn' : 'btn btn-primary';\n" +
+      "  const statusClass = enabled ? 'pill pill-green' : 'pill pill-amber';\n" +
+      "  const statusLabel = enabled ? 'Habilitada' : 'Solo DEV';\n" +
+      '\n' +
+      '  return `\n' +
+      '    <section class="card" data-attendance-dev-control style="margin-bottom:18px;">\n' +
+      '      <div class="card-head">\n' +
+      '        <div>\n' +
+      '          <div class="eyebrow">Control temporal DEV</div>\n' +
+      '          <h2>Acceso a asistencia operativa</h2>\n' +
+      '          <p>La configuracion de asistencia permanece bloqueada para todos los reclutadores. Puedes habilitarla temporalmente solo para el perfil protegido <strong>reclutador-general</strong>.</p>\n' +
+      '        </div>\n' +
+      '        <span class="${statusClass}">${statusLabel}</span>\n' +
+      '      </div>\n' +
+      '      <div class="card-body">\n' +
+      '        <form method="post" action="/admin/operaciones/asistencia-acceso/reclutador-general">\n' +
+      '          <input type="hidden" name="enabled" value="${nextEnabled}" />\n' +
+      '          <button class="${buttonClass}" type="submit">${actionLabel}</button>\n' +
+      '        </form>\n' +
+      '      </div>\n' +
+      '    </section>`;\n' +
+      '}\n' +
+      '\n' +
+      'export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = false, recruiterGeneralEnabled = false } = {}) {\n' +
+      "  if (typeof html !== 'string') return html;\n" +
+      '  let output = html;\n' +
+      '\n' +
+      '  if (!allowed) {\n' +
+      '    output = output.replace(\n' +
+      `      /\\s*<details\\s+[^>]*class=["'][^"']*\\battendance-config\\b[^"']*["'][^>]*>[\\s\\S]*?<\\/details>/gi,\n` +
+      "      ''\n" +
+      '    );\n' +
+      '  }\n' +
+      '\n' +
+      "  if (isDev && !output.includes('data-attendance-dev-control')) {\n" +
+      '    output = output.replace(\n' +
+      `      /(<main\\s+[^>]*class=["'][^"']*\\bpage\\b[^"']*["'][^>]*>)/i,\n` +
+      '      `$1${attendanceDevControlHtml(recruiterGeneralEnabled)}`\n' +
+      '    );\n' +
+      '  }\n' +
+      '\n' +
+      '  return output;\n' +
+      '}\n' +
+      '\n' +
+      'function installAttendanceRenderGate(req, res, next) {\n' +
+      '  const originalRender = res.render.bind(res);\n' +
+      '  res.render = (view, locals, callback) => {\n' +
+      '    let renderLocals = locals || {};\n' +
+      '    let renderCallback = callback;\n' +
+      '\n' +
+      "    if (typeof locals === 'function') {\n" +
+      '      renderCallback = locals;\n' +
+      '      renderLocals = {};\n' +
+      '    }\n' +
+      '\n' +
+      "    if (view !== 'operacionesClienteOperaciones') {\n" +
+      '      return originalRender(view, renderLocals, renderCallback);\n' +
+      '    }\n' +
+      '\n' +
+      '    return originalRender(view, renderLocals, (error, html) => {\n' +
+      '      if (error) {\n' +
+      "        if (typeof renderCallback === 'function') return renderCallback(error);\n" +
+      '        return next(error);\n' +
+      '      }\n' +
+      '\n' +
+      '      const output = filterAttendanceFeatureHtml(html, {\n' +
+      '        allowed: Boolean(req.canAccessAttendanceFeature),\n' +
+      "        isDev: (req.session?.userRole || req.userRole) === 'dev',\n" +
+      '        recruiterGeneralEnabled: Boolean(req.recruiterGeneralAttendanceEnabled)\n' +
+      '      });\n' +
+      '\n' +
+      "      if (typeof renderCallback === 'function') return renderCallback(null, output);\n" +
+      '      return res.send(output);\n' +
+      '    });\n' +
+      '  };\n' +
+      '  return next();\n' +
+      '}\n' +
+      '\n' +
+      'export function dispatchBridgeRouter() {\n' +
+      '  const router = express.Router();\n' +
+      '\n' +
+      '  router.use(loadAttendanceFeatureAccess);\n' +
+      '  router.use(installAttendanceRenderGate);\n' +
+      '\n' +
+      '  router.post(\n' +
+      "    '/asistencia-acceso/reclutador-general',\n" +
+      '    requireDev,\n' +
+      '    express.urlencoded({ extended: true }),\n' +
+      '    async (req, res) => {\n' +
+      '      const enabled = normalizeString(req.body.enabled);\n' +
+      "      if (!['true', 'false'].includes(enabled)) {\n" +
+      "        return res.redirect('/admin/users?error=' + encodeURIComponent('Selecciona un estado valido para la asistencia.'));\n" +
+      '      }\n' +
+      '\n' +
+      '      try {\n' +
+      '        const ipDetails = requestIpDetails(req);\n' +
+      '        const result = await setRecruiterGeneralAttendanceEnabled(prisma, {\n' +
+      "          enabled: enabled === 'true',\n" +
+      "          actorUsername: req.session?.username || req.username || 'dev',\n" +
+      '          actorRole: req.session?.userRole || req.userRole,\n' +
+      '          actorSource: req.session?.userSource || req.userSource,\n' +
+      '          ipAddress: ipDetails.ipAddress,\n' +
+      '          forwardedFor: ipDetails.forwardedFor,\n' +
+      '          userAgent: ipDetails.userAgent,\n' +
+      '          method: req.method,\n' +
+      '          path: req.originalUrl || req.url\n' +
+      '        });\n' +
+      '        const message = result.enabled\n' +
+      "          ? 'Asistencia habilitada para reclutador-general.'\n" +
+      "          : 'Asistencia deshabilitada para reclutador-general. Solo DEV conserva acceso.';\n" +
+      "        return res.redirect('/admin/users?success=' + encodeURIComponent(message) + '&username=reclutador-general');\n" +
+      '      } catch (error) {\n' +
+      "        console.error('[ATTENDANCE_FEATURE_ACCESS_UPDATE_FAILED]', error);\n" +
+      "        const message = error?.message === 'attendance_access_recruiter_general_not_found'\n" +
+      "          ? 'No existe el perfil reclutador-general en la base de datos.'\n" +
+      "          : 'No fue posible actualizar el acceso temporal de asistencia.';\n" +
+      "        return res.redirect('/admin/users?error=' + encodeURIComponent(message));\n" +
+      '      }\n' +
+      '    }\n' +
+      '  );\n' +
+      '\n' +
+      '  router.use(\n' +
+      "    '/clientes/:clientId/operaciones/:operationId/asistencia',\n" +
+      '    requireOps,\n' +
+      '    requireAttendanceAccess,\n' +
+      '    dispatchAttendancePointConfigRouter(prisma)\n' +
+      '  );\n' +
+      '  router.use(dispatchBridgeCoreRouter());\n' +
+      '  return router;\n' +
+      '}\n'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: |-
+    import express from 'express';
+    import { prisma } from '../lib/prisma.js';
+    import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';
+    import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBridgeCore.js';
+    import {
+      resolveAttendanceFeatureAccess,
+      setRecruiterGeneralAttendanceEnabled
+    } from '../services/attendanceFeatureAccess.js';
+    
+    function normalizeString(value) {
+      if (typeof value !== 'string') return null;
+      const trimmed = value.trim();
+      return trimmed.length ? trimmed : null;
+    }
+    
+    function isOpsUser(req) {
+      const username = normalizeString(req.session?.username || req.username);
+      return Boolean(username?.startsWith('operaciones-despacho'));
+    }
+    
+    function canUseOps(req) {
+      const role = req.session?.userRole || req.userRole;
+      const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch);
+      return role === 'dev' || canAccessDispatch || isOpsUser(req);
+    }
+    
+    function requireOps(req, res, next) {
+      const role = req.session?.userRole || req.userRole;
+      if (!role) return res.redirect('/login');
+      if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
+      return next();
+    }
+    
+    function requireDev(req, res, next) {
+      const role = req.session?.userRole || req.userRole;
+      if (role !== 'dev') return res.status(403).send('Acceso restringido a DEV');
+      return next();
+    }
+    
+    function requireAttendanceAccess(req, res, next) {
+      if (!req.canAccessAttendanceFeature) {
+        return res.status(403).send('La asistencia operativa esta habilitada temporalmente solo para DEV.');
+      }
+      return next();
+    }
+    
+    function requestIpDetails(req) {
+      const forwardedFor = normalizeString(req.get?.('x-forwarded-for'));
+      const forwardedIp = forwardedFor
+        ? forwardedFor.split(',').map((entry) => entry.trim()).find(Boolean)
+        : null;
+      return {
+        ipAddress: forwardedIp || req.ip || req.socket?.remoteAddress || null,
+        forwardedFor,
+        userAgent: normalizeString(req.get?.('user-agent'))
+      };
+    }
+    
+    async function loadAttendanceFeatureAccess(req, res, next) {
+      try {
+        const access = await resolveAttendanceFeatureAccess(prisma, {
+          userRole: req.session?.userRole || req.userRole,
+          username: req.session?.username || req.username
+        });
+        req.canAccessAttendanceFeature = access.allowed;
+        req.recruiterGeneralAttendanceEnabled = access.recruiterGeneralEnabled;
+        res.locals.canAccessAttendanceFeature = access.allowed;
+        res.locals.recruiterGeneralAttendanceEnabled = access.recruiterGeneralEnabled;
+      } catch (error) {
+        console.error('[ATTENDANCE_FEATURE_ACCESS_LOAD_FAILED]', error);
+        req.canAccessAttendanceFeature = false;
+        req.recruiterGeneralAttendanceEnabled = false;
+        res.locals.canAccessAttendanceFeature = false;
+        res.locals.recruiterGeneralAttendanceEnabled = false;
+      }
+      return next();
+    }
+    
+    function attendanceDevControlHtml(enabled) {
+      const nextEnabled = enabled ? 'false' : 'true';
+      const actionLabel = enabled
+        ? 'Desactivar para reclutador-general'
+        : 'Activar para reclutador-general';
+      const buttonClass = enabled ? 'btn' : 'btn btn-primary';
+      const statusClass = enabled ? 'pill pill-green' : 'pill pill-amber';
+      const statusLabel = enabled ? 'Habilitada' : 'Solo DEV';
+    
+      return `
+        <section class="card" data-attendance-dev-control style="margin-bottom:18px;">
+          <div class="card-head">
+            <div>
+              <div class="eyebrow">Control temporal DEV</div>
+              <h2>Acceso a asistencia operativa</h2>
+              <p>La configuracion de asistencia permanece bloqueada para todos los reclutadores. Puedes habilitarla temporalmente solo para el perfil protegido <strong>reclutador-general</strong>.</p>
+            </div>
+            <span class="${statusClass}">${statusLabel}</span>
+          </div>
+          <div class="card-body">
+            <form method="post" action="/admin/operaciones/asistencia-acceso/reclutador-general">
+              <input type="hidden" name="enabled" value="${nextEnabled}" />
+              <button class="${buttonClass}" type="submit">${actionLabel}</button>
+            </form>
+          </div>
+        </section>`;
+    }
+    
+    export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = false, recruiterGeneralEnabled = false } = {}) {
+      if (typeof html !== 'string') return html;
+      let output = html;
+    
+      if (!allowed) {
+        output = output.replace(
+          /\s*<details\s+[^>]*class=["'][^"']*\battendance-config\b[^"']*["'][^>]*>[\s\S]*?<\/details>/gi,
+          ''
+        );
+      }
+    
+      if (isDev && !output.includes('data-attendance-dev-control')) {
+        output = output.replace(
+          /(<main\s+[^>]*class=["'][^"']*\bpage\b[^"']*["'][^>]*>)/i,
+          `$1${attendanceDevControlHtml(recruiterGeneralEnabled)}`
+        );
+      }
+    
+      return output;
+    }
+    
+    function installAttendanceRenderGate(req, res, next) {
+      const originalRender = res.render.bind(res);
+      res.render = (view, locals, callback) => {
+        let renderLocals = locals || {};
+        let renderCallback = callback;
+    
+        if (typeof locals === 'function') {
+          renderCallback = locals;
+          renderLocals = {};
+        }
+    
+        if (view !== 'operacionesClienteOperaciones') {
+          return originalRender(view, renderLocals, renderCallback);
+        }
+    
+        return originalRender(view, renderLocals, (error, html) => {
+          if (error) {
+            if (typeof renderCallback === 'function') return renderCallback(error);
+            return next(error);
+          }
+    
+          const output = filterAttendanceFeatureHtml(html, {
+            allowed: Boolean(req.canAccessAttendanceFeature),
+            isDev: (req.session?.userRole || req.userRole) === 'dev',
+            recruiterGeneralEnabled: Boolean(req.recruiterGeneralAttendanceEnabled)
+          });
+    
+          if (typeof renderCallback === 'function') return renderCallback(null, output);
+          return res.send(output);
+        });
+      };
+      return next();
+    }
+    
+    export function dispatchBridgeRouter() {
+      const router = express.Router();
+    
+      router.use(loadAttendanceFeatureAccess);
+      router.use(installAttendanceRenderGate);
+    
+      router.post(
+        '/asistencia-acceso/reclutador-general',
+        requireDev,
+        express.urlencoded({ extended: true }),
+        async (req, res) => {
+          const enabled = normalizeString(req.body.enabled);
+          if (!['true', 'false'].includes(enabled)) {
+            return res.redirect('/admin/users?error=' + encodeURIComponent('Selecciona un estado valido para la asistencia.'));
+          }
+    
+          try {
+            const ipDetails = requestIpDetails(req);
+            const result = await setRecruiterGeneralAttendanceEnabled(prisma, {
+              enabled: enabled === 'true',
+              actorUsername: req.session?.username || req.username || 'dev',
+              actorRole: req.session?.userRole || req.userRole,
+              actorSource: req.session?.userSource || req.userSource,
+              ipAddress: ipDetails.ipAddress,
+              forwardedFor: ipDetails.forwardedFor,
+              userAgent: ipDetails.userAgent,
+              method: req.method,
+              path: req.originalUrl || req.url
+            });
+            const message = result.enabled
+              ? 'Asistencia habilitada para reclutador-general.'
+              : 'Asistencia deshabilitada para reclutador-general. Solo DEV conserva acceso.';
+            return res.redirect('/admin/users?success=' + encodeURIComponent(message) + '&username=reclutador-general');
+          } catch (error) {
+            console.error('[ATTENDANCE_FEATURE_ACCESS_UPDATE_FAILED]', error);
+            const message = error?.message === 'attendance_access_recruiter_general_not_found'
+              ? 'No existe el perfil reclutador-general en la base de datos.'
+              : 'No fue posible actualizar el acceso temporal de asistencia.';
+            return res.redirect('/admin/users?error=' + encodeURIComponent(message));
+          }
+        }
+      );
+    
+      router.use(
+        '/clientes/:clientId/operaciones/:operationId/asistencia',
+        requireOps,
+        requireAttendanceAccess,
+        dispatchAttendancePointConfigRouter(prisma)
+      );
+      router.use(dispatchBridgeCoreRouter());
+      return router;
+    }
+    
+  operator: 'match'
+  stack: |-
+    file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/source/test/dispatchClientsOperationsContracts.test.js:21:28
+    Array.forEach (<anonymous>)
+    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/source/test/dispatchClientsOperationsContracts.test.js:21:6)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    node:internal/test_runner/harness:255:12
+    node:internal/process/task_queues:140:7
+    AsyncResource.runInAsyncScope (node:async_hooks:206:9)
+    AsyncResource.runMicrotask (node:internal/process/task_queues:137:8)
+  ...
+# Subtest: dispatch action labels describe their actual destinations
+ok 2 - dispatch action labels describe their actual destinations
+  ---
+  duration_ms: 0.569916
+  ...
+# Subtest: dispatch WhatsApp exposes one canonical facade for text, media and runtime status
+ok 3 - dispatch WhatsApp exposes one canonical facade for text, media and runtime status
+  ---
+  duration_ms: 0.952521
+  ...
+# Subtest: dispatch WhatsApp watchdog is server-owned and does not depend on the status browser tab
+ok 4 - dispatch WhatsApp watchdog is server-owned and does not depend on the status browser tab
+  ---
+  duration_ms: 0.20883
+  ...
+# Subtest: existing auto-start kill switch also disables the server watchdog
+ok 5 - existing auto-start kill switch also disables the server watchdog
+  ---
+  duration_ms: 0.193684
+  ...
+# Subtest: watchdog recovers a stalled Chromium initialization without logging out the WhatsApp account
+ok 6 - watchdog recovers a stalled Chromium initialization without logging out the WhatsApp account
+  ---
+  duration_ms: 0.119098
+  ...
+# Subtest: manual WhatsApp logout is respected by the server watchdog
+ok 7 - manual WhatsApp logout is respected by the server watchdog
+  ---
+  duration_ms: 0.134584
+  ...
+# Subtest: canonical facade restores Railway Nix Chromium discovery and safe stale-process cleanup
+ok 8 - canonical facade restores Railway Nix Chromium discovery and safe stale-process cleanup
+  ---
+  duration_ms: 0.119107
+  ...
+# Subtest: assignment and programming routes share the canonical WhatsApp service
+ok 9 - assignment and programming routes share the canonical WhatsApp service
+  ---
+  duration_ms: 0.146943
+  ...
+# Subtest: historical dispatch WhatsApp service variants are removed
+ok 10 - historical dispatch WhatsApp service variants are removed
+  ---
+  duration_ms: 0.17763
+  ...
+# Subtest: active WhatsApp engine keeps persistent Railway auth, LID mapping and restart-safe confirmation links
+ok 11 - active WhatsApp engine keeps persistent Railway auth, LID mapping and restart-safe confirmation links
+  ---
+  duration_ms: 0.2743
+  ...
+# Subtest: active WhatsApp engine supports reconnect and recent-message catchup
+ok 12 - active WhatsApp engine supports reconnect and recent-message catchup
+  ---
+  duration_ms: 0.939819
+  ...
+# Subtest: current confirmation variants remain accepted
+ok 13 - current confirmation variants remain accepted
+  ---
+  duration_ms: 0.198085
+  ...
+# Subtest: confirmation contexts from past service dates are excluded without changing assignment history
+ok 14 - confirmation contexts from past service dates are excluded without changing assignment history
+  ---
+  duration_ms: 0.125447
+  ...
+# Subtest: canonical text sender preserves the existing AM and PM message formatting
+ok 15 - canonical text sender preserves the existing AM and PM message formatting
+  ---
+  duration_ms: 0.111659
+  ...
+# Subtest: service request summary does not render the all requests toolbar button
+ok 16 - service request summary does not render the all requests toolbar button
+  ---
+  duration_ms: 0.145926
+  ...
+# Subtest: assignment board sends canonical context without a global fetch interception patch
+ok 17 - assignment board sends canonical context without a global fetch interception patch
+  ---
+  duration_ms: 0.180937
+  ...
+# Subtest: server validates that assignment worker and recipient phone are the same
+ok 18 - server validates that assignment worker and recipient phone are the same
+  ---
+  duration_ms: 0.138167
+  ...
+# Subtest: confirmation context is persisted before WhatsApp send and uncertain delivery remains recoverable
+ok 19 - confirmation context is persisted before WhatsApp send and uncertain delivery remains recoverable
+  ---
+  duration_ms: 0.160227
+  ...
+# Subtest: persistent reconciliation targets exact pending assignments and runs without dashboard polling
+ok 20 - persistent reconciliation targets exact pending assignments and runs without dashboard polling
+  ---
+  duration_ms: 0.218336
+  ...
+# Subtest: confirmation text policy and pending target selection behave deterministically
+ok 21 - confirmation text policy and pending target selection behave deterministically
+  ---
+  duration_ms: 62.76202
+  ...
+# Subtest: runtime reports whether LocalAuth storage is persistent
+ok 22 - runtime reports whether LocalAuth storage is persistent
+  ---
+  duration_ms: 0.371672
+  ...
+# Subtest: automatic thanks failures remain persisted and are retried without confirming twice
+ok 23 - automatic thanks failures remain persisted and are retried without confirming twice
+  ---
+  duration_ms: 0.330631
+  ...
+# Subtest: runtime identifies only an auth directory inside the Railway volume as persistent
+ok 24 - runtime identifies only an auth directory inside the Railway volume as persistent
+  ---
+  duration_ms: 9.51539
+  ...
+# Subtest: WhatsApp storage diagnostics remain restricted to DEV
+ok 25 - WhatsApp storage diagnostics remain restricted to DEV
+  ---
+  duration_ms: 0.26546
+  ...
+# Subtest: stale cleanup includes uncertain delivery and pending automatic replies
+ok 26 - stale cleanup includes uncertain delivery and pending automatic replies
+  ---
+  duration_ms: 0.130334
+  ...
+1..26
+# tests 26
+# suites 0
+# pass 25
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 167.860031
