@@ -24,6 +24,11 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeDispatchContractType(value) {
+  const normalized = normalizeString(value);
+  return ['DIRECTO', 'CONTRATISTA'].includes(normalized) ? normalized : 'DIRECTO';
+}
+
 function normalizeStringList(value) {
   if (Array.isArray(value)) return value.map((item) => normalizeString(item)).filter(Boolean);
   const single = normalizeString(value);
@@ -95,6 +100,7 @@ function buildWorkerData(body) {
     residenceCity: normalizeString(body.residenceCity),
     residenceLocality: normalizeString(body.residenceLocality),
     transportMode: normalizeTransportMode(body.transportMode),
+    contractType: normalizeDispatchContractType(body.contractType),
     operationalStatus: normalizeString(body.operationalStatus) || 'ACTIVE',
     notes: normalizeString(body.notes)
   };
