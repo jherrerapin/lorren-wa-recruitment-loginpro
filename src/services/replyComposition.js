@@ -12,7 +12,7 @@ const REQUEST_VERB_PATTERN = /\b(?:adjunta|adjuntar|envia|enviar|enviame|compart
 const CV_PATTERN = /\b(?:hoja de vida|hv|curriculum|cv)\b/;
 const DATA_PATTERN = /\b(?:datos?|informacion|nombre|documento|cedula|edad|localidad|barrio|residencia|restricciones|transporte)\b/;
 const VACANCY_PATTERN = /\b(?:vacante|cargo|operacion)\b/;
-const CONFIRMATION_PATTERN = /\b(?:confirm|correct|esta bien|responde si|responde s[ií]|correccion|corrige)\b/;
+const CONFIRMATION_PATTERN = /\b(?:confirm\w*|correct\w*|esta bien|responde si|correccion\w*|corrige\w*)\b/;
 const FUTURE_PROFILE_PATTERN = /\b(?:perfil|registro|registrad[oa])\b/;
 const FUTURE_OPENING_PATTERN = /\b(?:futura|futuras|cuando se abra|cuando reabra|cuando vuelva a abrir|si se vuelve a abrir|proxima apertura)\b/;
 
