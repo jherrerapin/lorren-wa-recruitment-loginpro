@@ -8,12 +8,13 @@ export const SUPPORTED_ATTENDANCE_TIMEZONES = Object.freeze([
   'America/Bogota'
 ]);
 
+export const DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS = 100;
+export const DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS = 50;
+
 const PHOTO_POLICIES = new Set(Object.values(ATTENDANCE_PHOTO_POLICY));
 const TIMEZONES = new Set(SUPPORTED_ATTENDANCE_TIMEZONES);
 
 const LIMITS = Object.freeze({
-  geofenceRadiusMeters: { min: 20, max: 2_000 },
-  maxLocationAccuracyMeters: { min: 5, max: 500 },
   earlyArrivalWindowMinutes: { min: 0, max: 240 },
   lateToleranceMinutes: { min: 0, max: 240 },
   absenceGraceMinutes: { min: 0, max: 240 }
@@ -103,18 +104,12 @@ function normalizedConfig(existing, input) {
     existing.attendanceLongitude === null ? null : Number(existing.attendanceLongitude),
     { min: -180, max: 180 }
   );
-  const geofenceRadiusMeters = parseOptionalFiniteNumber(
-    input.geofenceRadiusMeters,
-    'geofence_radius_meters',
-    existing.geofenceRadiusMeters,
-    { ...LIMITS.geofenceRadiusMeters, integer: true }
-  );
-  const maxLocationAccuracyMeters = parseOptionalFiniteNumber(
-    input.maxLocationAccuracyMeters,
-    'max_location_accuracy_meters',
-    existing.maxLocationAccuracyMeters,
-    { ...LIMITS.maxLocationAccuracyMeters, integer: true }
-  );
+  const geofenceRadiusMeters = attendanceEnabled
+    ? DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS
+    : existing.geofenceRadiusMeters;
+  const maxLocationAccuracyMeters = attendanceEnabled
+    ? DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS
+    : existing.maxLocationAccuracyMeters;
   const earlyArrivalWindowMinutes = parseRequiredInteger(
     input.earlyArrivalWindowMinutes,
     'early_arrival_window_minutes',
@@ -150,21 +145,11 @@ function normalizedConfig(existing, input) {
     throw new Error('absence_grace_before_late_tolerance');
   }
 
-  if (
-    geofenceRadiusMeters !== null
-    && maxLocationAccuracyMeters !== null
-    && maxLocationAccuracyMeters > geofenceRadiusMeters
-  ) {
-    throw new Error('location_accuracy_exceeds_geofence_radius');
-  }
-
   if (attendanceEnabled) {
     if (existing.isActive !== true) throw new Error('attendance_point_inactive');
     if (attendanceLatitude === null || attendanceLongitude === null) {
       throw new Error('attendance_geofence_coordinates_required');
     }
-    if (geofenceRadiusMeters === null) throw new Error('attendance_geofence_radius_required');
-    if (maxLocationAccuracyMeters === null) throw new Error('attendance_location_accuracy_required');
   }
 
   return {
