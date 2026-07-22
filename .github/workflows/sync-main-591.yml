@@ -1,0 +1,63 @@
+name: Sync main for issue 591
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.head_ref == 'fix/591-exclude-test-worker'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out correction branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/591-exclude-test-worker
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge current main
+        run: |
+          git fetch origin main
+          git merge --no-edit origin/main
+
+      - name: Remove temporary workflow
+        run: rm -f .github/workflows/sync-main-591.yml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate synchronized correction
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/dispatchOperationalCoverage.js
+          node --test test/dispatchTestWorkerExclusion.test.js
+          node --test test/dispatchWorkerContractAutoAssignment.test.js
+          node --test test/dispatchProgrammingPartialSend.test.js
+          node --test test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Commit workflow cleanup and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --amend --no-edit
+          git push --force-with-lease origin HEAD:fix/591-exclude-test-worker
