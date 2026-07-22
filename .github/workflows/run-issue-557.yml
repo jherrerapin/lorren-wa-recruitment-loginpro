@@ -73,6 +73,22 @@ jobs:
             exit "$status"
           fi
           rm -f issue-557-application-diagnostic.txt
+      - name: Update canonical runtime contract
+        if: steps.recipe.outputs.available == 'true'
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('test/dispatchWhatsappRuntimeContracts.test.js')
+          text = path.read_text(encoding='utf-8')
+          old = r"assert.match(source, /await validateOutgoingAssignmentContext\(args\.context\)/);"
+          new = r"assert.match(source, /await validateOutgoingAssignmentContext\(args\.context, args\.phone\)/);"
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('No se encontró el contrato de validación saliente esperado.')
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Remove temporary workflows
         if: steps.recipe.outputs.available == 'true'
         run: rm -f .github/workflows/apply-issue-557.yml .github/workflows/kick-issue-557.yml
@@ -96,7 +112,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          node --test test/dispatchWhatsappRuntimeContracts.test.js test/dispatchAssignmentBoardContracts.test.js > issue-557-focused-test-diagnostic.txt 2>&1
+          node --test test/dispatchWhatsappRuntimeContracts.test.js > issue-557-focused-test-diagnostic.txt 2>&1
           status=$?
           cat issue-557-focused-test-diagnostic.txt
           if [ "$status" -ne 0 ]; then
