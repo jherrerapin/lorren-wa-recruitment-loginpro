@@ -49,6 +49,10 @@
     .manager-row label { display: block; color: var(--navy); font-size: 12px; font-weight: 900; margin-bottom: 4px; }
     .manager-row select, .manager-row input { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; font: inherit; background: #fff; color: var(--navy); }
     .manager-row .btn { height: 39px; }
+    .programming-options { display: flex; align-items: center; gap: 8px; padding: 11px 12px; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 12px; color: #1e3a8a; }
+    .programming-options input { width: 17px; height: 17px; accent-color: var(--teal); cursor: pointer; }
+    .programming-options label { cursor: pointer; font-size: 13px; font-weight: 800; }
+    .programming-options small { display: block; color: #475569; font-size: 11px; font-weight: 500; margin-top: 2px; }
     .programming-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .programming-actions .btn[disabled] { opacity: .55; cursor: not-allowed; }
     .programming-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -120,11 +124,11 @@
       </form>
     </section>
 
-    <section class="programming-card <%= programmingComplete ? 'complete' : '' %>" aria-label="Programación completa del día">
+    <section class="programming-card <%= programmingComplete ? 'complete' : '' %>" aria-label="Programación del día">
       <div class="programming-head">
         <div>
-          <h2>Programación completa del día</h2>
-          <p>Genera la programación operativa en PDF con clientes, horarios y auxiliares asignados. El correo se abre manualmente y el PDF debe adjuntarse de forma manual.</p>
+          <h2>Programación del día</h2>
+          <p>Genera la programación operativa en PDF con clientes, horarios, auxiliares y el estado actual de cada solicitud incluida.</p>
         </div>
         <span class="programming-pill <%= programmingComplete ? 'complete' : '' %>"><%= programmingComplete ? 'Programación completa' : `Faltan ${Math.max(totalRequests - completedRequests, 0)} solicitud(es)` %></span>
       </div>
@@ -139,13 +143,17 @@
           <input id="customProgramManager" type="text" maxlength="80" placeholder="Nombre de quien gestionó" />
         </div>
       </div>
+      <div class="programming-options">
+        <input id="includePendingProgramming" type="checkbox" />
+        <label for="includePendingProgramming">Incluir solicitudes pendientes o por confirmar<small>Marcado: incluye asignación pendiente, parcial y pendientes de confirmación. Sin marcar: envía únicamente solicitudes completas.</small></label>
+      </div>
       <div class="programming-actions">
-        <a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>">Descargar PDF</a>
+        <a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>&includePending=false">Descargar PDF</a>
         <a class="btn" id="programEmailLink" href="#" target="_blank" rel="noopener">Abrir correo</a>
-        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp" <%= programmingComplete ? '' : 'disabled' %>>Enviar PDF por WhatsApp</button>
+        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp">Enviar PDF por WhatsApp</button>
       </div>
       <div class="programming-note">
-        <strong>Estado:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas para la fecha seleccionada. El envío por WhatsApp se habilita cuando todas estén completas. El PDF solo incluye nombre completo y documento del auxiliar.
+        <strong>Estado del día:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas. El envío está siempre disponible. Sin marcar la opción se envían solo las completas; al marcarla también se muestran las pendientes y lo que falta por confirmar.
       </div>
     </section>
 
@@ -159,11 +167,11 @@
   <div class="async-toast" id="asyncToast" role="status" aria-live="polite"></div>
   <script>
     const selectedDate = <%- JSON.stringify(selectedDate) %>;
-    const programmingComplete = <%= programmingComplete ? 'true' : 'false' %>;
     const managerSelect = document.getElementById('programManagedBy');
     const addManagerButton = document.getElementById('addProgramManager');
     const customManagerWrap = document.getElementById('customProgramManagerWrap');
     const customManagerInput = document.getElementById('customProgramManager');
+    const includePendingCheckbox = document.getElementById('includePendingProgramming');
     const pdfLink = document.getElementById('programPdfLink');
     const emailLink = document.getElementById('programEmailLink');
     const whatsappButton = document.getElementById('sendProgramWhatsapp');
@@ -175,10 +183,11 @@
 
     function showToast(message){if(!toast)return;toast.textContent=message;toast.classList.add('show');window.clearTimeout(showToast._t);showToast._t=window.setTimeout(()=>toast.classList.remove('show'),3000);}
     function currentManager(){return managerSelect?.value || 'Julián Herrera';}
+    function includePendingRequests(){return Boolean(includePendingCheckbox?.checked);}
     function loadManagers(){try{return JSON.parse(localStorage.getItem(MANAGERS_KEY)||'[]');}catch(_error){return[];}}
     function saveManager(name){const clean=String(name||'').trim();if(!clean)return;const managers=[...new Set(['Julián Herrera',...loadManagers(),clean])];localStorage.setItem(MANAGERS_KEY,JSON.stringify(managers.filter((item)=>item!=='Julián Herrera')));renderManagers(clean);}
     function renderManagers(selected='Julián Herrera'){if(!managerSelect)return;const managers=[...new Set(['Julián Herrera',...loadManagers()])];managerSelect.innerHTML=managers.map((name)=>`<option value="${name.replace(/"/g,'&quot;')}">${name}</option>`).join('');managerSelect.value=managers.includes(selected)?selected:'Julián Herrera';refreshProgrammingLinks();}
-    function refreshProgrammingLinks(){const manager=currentManager();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(emailLink){const subject='Programación operativa completa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa completa para la fecha '+selectedDate+'.','','Gestionado por: '+manager].join('\n');emailLink.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
+    function refreshProgrammingLinks(){const manager=currentManager();const includePending=includePendingRequests();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager,includePending:String(includePending)});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(emailLink){const scope=includePending?'incluyendo solicitudes pendientes o por confirmar':'con las solicitudes completas';const subject='Programación operativa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa para la fecha '+selectedDate+', '+scope+'.','','Gestionado por: '+manager].join('\n');emailLink.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
     function setDispatchSessionState(state, hint){
       if(!dispatchSessionAction||!dispatchSessionButton||!dispatchSessionHint)return;
       dispatchSessionAction.classList.remove('session-online','session-offline','session-checking');
@@ -208,7 +217,8 @@
     customManagerInput?.addEventListener('keydown',(event)=>{if(event.key==='Enter'){event.preventDefault();saveManager(customManagerInput.value);customManagerInput.value='';customManagerWrap.hidden=true;}});
     customManagerInput?.addEventListener('blur',()=>{if(customManagerInput.value.trim()){saveManager(customManagerInput.value);customManagerInput.value='';}customManagerWrap.hidden=true;});
     managerSelect?.addEventListener('change',refreshProgrammingLinks);
-    whatsappButton?.addEventListener('click',async()=>{if(!programmingComplete){showToast('La programación aún no está completa.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando PDF...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager()})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name}: ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar el PDF.');}showToast('PDF enviado por WhatsApp.');}catch(error){showToast(error.message||'No fue posible enviar el PDF.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
+    includePendingCheckbox?.addEventListener('change',refreshProgrammingLinks);
+    whatsappButton?.addEventListener('click',async()=>{const includePending=includePendingRequests();whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando PDF...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager(),includePending})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name}: ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar el PDF.');}showToast(includePending?'PDF enviado con solicitudes completas y pendientes.':'PDF enviado con las solicitudes completas.');}catch(error){showToast(error.message||'No fue posible enviar el PDF.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
     renderManagers();
     refreshDispatchSessionState();
     window.setInterval(refreshDispatchSessionState,30000);
