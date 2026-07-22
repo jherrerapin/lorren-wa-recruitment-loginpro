@@ -1,0 +1,53 @@
+TAP version 13
+# Subtest: vacante inactiva específica vence coincidencia activa genérica
+ok 1 - vacante inactiva específica vence coincidencia activa genérica # SKIP test name does not match pattern
+  ---
+  duration_ms: 1.127539
+  ...
+# Subtest: empate de cargo conserva prioridad de la vacante activa
+ok 2 - empate de cargo conserva prioridad de la vacante activa # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.121138
+  ...
+# Subtest: cargo genérico operaciones no abre una vacante inactiva específica
+ok 3 - cargo genérico operaciones no abre una vacante inactiva específica # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.090944
+  ...
+# Subtest: una solicitud de otra ciudad nunca cruza a la vacante inactiva
+ok 4 - una solicitud de otra ciudad nunca cruza a la vacante inactiva # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.100909
+  ...
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# Subtest: flujo integral asocia la inactiva y ofrece registro para futura apertura
+not ok 5 - flujo integral asocia la inactiva y ofrece registro para futura apertura
+  ---
+  duration_ms: 400.749119
+  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/inactiveVacancySpecificity.test.js:87:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + null
+    - 'vac-iba-inactive'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'vac-iba-inactive'
+  actual: ~
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/inactiveVacancySpecificity.test.js:128:12)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 4
+# todo 0
+# duration_ms 932.166897

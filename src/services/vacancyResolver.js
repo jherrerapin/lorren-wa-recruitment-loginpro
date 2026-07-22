@@ -421,6 +421,13 @@ function canUseInactiveMatch(inactiveMatch, context = {}) {
   );
 }
 
+function shouldPreferSpecificInactiveMatch(activeMatch, inactiveMatch, context = {}) {
+  if (!canUseInactiveMatch(inactiveMatch, context)) return false;
+  const activeRoleScore = Number(activeMatch?.best?.roleScore || 0);
+  const inactiveRoleScore = Number(inactiveMatch?.best?.roleScore || 0);
+  return inactiveRoleScore >= activeRoleScore + 0.75;
+}
+
 function baseVacancyResolution(overrides = {}) {
   return { vacancy: null, requiresRelocation: false, ambiguous: false, options: [], source: 'text_inference_fallback', fallback: true, ...overrides };
 }
@@ -523,9 +530,13 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
 
   if (city && !roleHint && matchingCityVacancies.length) return { resolved: false, vacancy: null, city, roleHint, reason: 'city_with_active_vacancies', source: 'text_inference_fallback', fallback: true };
 
-  const { best, runnerUp, margin } = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint, operationZones });
+  const activeMatch = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint, operationZones });
+  const { best, runnerUp, margin } = activeMatch;
   const effectiveThreshold = roleHint ? threshold : 6;
   const activeHasRoleEvidence = hasEnoughRoleEvidence({ best }, roleHint);
+  if (shouldPreferSpecificInactiveMatch(activeMatch, inactiveMatch, inactiveContext)) {
+    return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
+  }
   if (!best || best.score < effectiveThreshold || !activeHasRoleEvidence) {
     if (canUseInactiveMatch(inactiveMatch, inactiveContext) && (!best || !activeHasRoleEvidence)) {
       return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
