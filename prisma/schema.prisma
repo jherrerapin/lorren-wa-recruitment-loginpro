@@ -568,6 +568,7 @@ model DispatchWorker {
   incidents         DispatchIncident[]
   devices           DispatchWorkerDevice[]
   activations       DispatchWorkerActivation[]
+  portalSessions    DispatchWorkerPortalSession[]
 
   @@index([candidateId])
   @@index([documentNumber])
@@ -681,6 +682,7 @@ model DispatchWorkerDevice {
   updatedAt            DateTime                 @updatedAt
   attendanceMarks      DispatchAttendanceMark[]
   consumedActivations  DispatchWorkerActivation[]
+  portalSessions       DispatchWorkerPortalSession[]
 
   @@unique([workerId, installationIdHash])
   @@index([installationIdHash, status])
@@ -705,11 +707,40 @@ model DispatchWorkerActivation {
   createdByUsername    String?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+  portalSession         DispatchWorkerPortalSession?
 
   @@index([workerId, purpose, status])
   @@index([status, expiresAt])
   @@index([consumedByDeviceId])
   @@index([workerId, createdAt])
+}
+
+model DispatchWorkerPortalSession {
+  id                  String                   @id @default(cuid())
+  workerId            String
+  worker              DispatchWorker           @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  workerDeviceId      String
+  workerDevice        DispatchWorkerDevice      @relation(fields: [workerDeviceId], references: [id], onDelete: Restrict)
+  activationId        String                   @unique
+  activation          DispatchWorkerActivation @relation(fields: [activationId], references: [id], onDelete: Restrict)
+  sessionTokenHash    String                   @unique
+  status              String                   @default("ACTIVE")
+  issuedAt            DateTime                 @default(now())
+  expiresAt           DateTime
+  lastSeenAt          DateTime?
+  revokedAt           DateTime?
+  revokedByUsername   String?
+  revocationReason    String?
+  ipAddress           String?
+  userAgent           String?
+  platform            String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  @@index([workerId, status, expiresAt])
+  @@index([workerDeviceId, status, expiresAt])
+  @@index([status, expiresAt])
+  @@index([lastSeenAt])
 }
 
 model DispatchAttendanceSession {
