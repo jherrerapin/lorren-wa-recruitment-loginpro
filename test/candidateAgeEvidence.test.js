@@ -57,8 +57,8 @@ test('sanitizer rechaza 56 cuando el número está ligado a trabajadores', () =>
   ]);
 });
 
-test('sanitizer rechaza 12 cuando el número está ligado a experiencia', () => {
-  const result = sanitizeAge({ value: 12, text: 'Cuento con 12 años de experiencia en logística' });
+test('sanitizer rechaza una duración laboral dentro del rango de edad', () => {
+  const result = sanitizeAge({ value: 22, text: 'Cuento con 22 años de experiencia en logística' });
 
   assert.equal(result.fields.age, undefined);
   assert.equal(result.rejectedFields[0].reason, 'experience_number_not_age');
