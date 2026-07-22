@@ -40,11 +40,17 @@ jobs:
       - name: Run focused age evidence regressions
         run: node --test test/candidateAgeEvidence.test.js
 
-      - name: Run existing parser and sanitizer regressions
-        run: |
-          node --test test/candidateData.test.js
-          node --test test/fieldSanitizer.test.js
-          node --test test/conversationUnderstanding.test.js test/conversationNormalizationCharacterization.test.js
+      - name: Run candidate parser regressions
+        run: node --test test/candidateData.test.js
+
+      - name: Run field sanitizer regressions
+        run: node --test test/fieldSanitizer.test.js
+
+      - name: Run conversation understanding regressions
+        run: node --test test/conversationUnderstanding.test.js
+
+      - name: Run normalization characterization
+        run: node --test test/conversationNormalizationCharacterization.test.js
 
       - name: Commit generated runtime patch
         env:
