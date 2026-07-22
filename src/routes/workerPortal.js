@@ -23,6 +23,14 @@ export const WORKER_PORTAL_RATE_LIMIT_MAX_ENTRIES = 5000;
 
 const GENERIC_ACTIVATION_ERROR = 'activation_invalid_or_expired';
 const GENERIC_REQUEST_ERROR = 'activation_request_invalid';
+const EXPECTED_ACTIVATION_REJECTION_CODES = new Set([
+  'activation_token_required',
+  'activation_token_invalid',
+  'worker_portal_session_repository_result_invalid',
+  'worker_portal_session_repository_expiry_invalid',
+  'worker_portal_session_repository_expired',
+  'worker_portal_activation_request_invalid'
+]);
 const CONFIGURATION_ERROR_CODES = new Set([
   'installation_pepper_required',
   'installation_pepper_too_short',
@@ -301,6 +309,9 @@ export function workerPortalRouter(prisma, options = {}) {
     handleWorkerPortalActivationBodyError,
     async (req, res) => {
       try {
+        if (req.get?.('x-requested-with') !== 'worker-portal') {
+          throw new Error('worker_portal_activation_request_invalid');
+        }
         const now = nowFn();
         if (!validDate(now)) throw new Error('worker_portal_activation_now_invalid');
         const installation = resolveWorkerPortalInstallationId(req, randomUUIDFn);
@@ -327,6 +338,9 @@ export function workerPortalRouter(prisma, options = {}) {
         if (isConfigurationError(error)) {
           console.error('[WORKER_PORTAL_CONFIGURATION_ERROR]', { code });
           return res.status(503).json({ ok: false, error: 'portal_temporarily_unavailable' });
+        }
+        if (!EXPECTED_ACTIVATION_REJECTION_CODES.has(code)) {
+          console.warn('[WORKER_PORTAL_ACTIVATION_REJECTED]', { code });
         }
         return res.status(400).json({ ok: false, error: GENERIC_ACTIVATION_ERROR });
       }
