@@ -33,6 +33,9 @@ const EXPECTED_ACTIVATION_REJECTION_CODES = new Set([
   'worker_portal_session_repository_expiry_invalid',
   'worker_portal_session_repository_expired'
 ]);
+const INVALID_SESSION_COOKIE_CODES = new Set([
+  'worker_portal_session_token_invalid'
+]);
 
 function validDate(value) {
   return value instanceof Date && !Number.isNaN(value.getTime());
@@ -78,11 +81,17 @@ function errorCode(error) {
 
 function isConfigurationError(error) {
   const code = errorCode(error);
-  return CONFIGURATION_ERROR_CODES.has(code) || code.startsWith('worker_portal_session_prisma_');
+  return CONFIGURATION_ERROR_CODES.has(code)
+    || code.startsWith('worker_portal_session_prisma_')
+    || code === 'worker_portal_repository_unavailable';
 }
 
 function isExpectedActivationRejection(error) {
   return EXPECTED_ACTIVATION_REJECTION_CODES.has(errorCode(error));
+}
+
+function isInvalidSessionCookie(error) {
+  return INVALID_SESSION_COOKIE_CODES.has(errorCode(error));
 }
 
 function isActivationBodyParserError(error) {
@@ -197,7 +206,8 @@ export function workerPortalActivationJsonErrorHandler(error, _req, res, next) {
 
 export function workerPortalRouter(prisma, options = {}) {
   const router = express.Router();
-  const repository = options.repository || createPrismaWorkerPortalSessionRepository(prisma);
+  const repositoryFactory = options.repositoryFactory || (() => createPrismaWorkerPortalSessionRepository(prisma));
+  let repository = options.repository || null;
   const activateSessionFn = options.activateSessionFn || activateWorkerPortalSession;
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
   const installationPepper = options.installationPepper ?? process.env.ATTENDANCE_INSTALLATION_PEPPER;
@@ -211,6 +221,12 @@ export function workerPortalRouter(prisma, options = {}) {
   const activationAttemptGuard = options.activationAttemptGuard || createWorkerPortalActivationAbuseGuard();
   const activationAttemptMiddleware = createWorkerPortalActivationAttemptMiddleware(activationAttemptGuard);
   const activationJsonParser = express.json({ limit: '4kb', strict: true, type: 'application/json' });
+
+  function getRepository() {
+    if (!repository) repository = repositoryFactory();
+    if (!repository) throw new Error('worker_portal_repository_unavailable');
+    return repository;
+  }
 
   router.use(cookieParser());
 
@@ -231,7 +247,7 @@ export function workerPortalRouter(prisma, options = {}) {
       if (!validDate(now)) throw new Error('worker_portal_activation_now_invalid');
       const installation = resolveWorkerPortalInstallationId(req, randomUUIDFn);
       const result = await activateSessionFn({
-        repository,
+        repository: getRepository(),
         rawActivationToken: req.body?.activationToken,
         installationId: installation.installationId,
         installationPepper,
@@ -273,16 +289,19 @@ export function workerPortalRouter(prisma, options = {}) {
     try {
       const now = nowFn();
       if (!validDate(now)) throw new Error('worker_portal_resolution_now_invalid');
-      const session = await resolveSessionFn({ repository, rawSessionToken, now });
+      const session = await resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
       if (!session) {
         clearWorkerPortalSessionCookie(res);
         return renderPortal(res, 'inactive', nonce);
       }
       return renderPortal(res, 'active', nonce, session.expiresAt);
     } catch (error) {
-      console.warn('[WORKER_PORTAL_SESSION_REJECTED]', { code: errorCode(error) });
-      clearWorkerPortalSessionCookie(res);
-      return renderPortal(res, 'inactive', nonce);
+      if (isInvalidSessionCookie(error)) {
+        clearWorkerPortalSessionCookie(res);
+        return renderPortal(res, 'inactive', nonce);
+      }
+      console.error('[WORKER_PORTAL_AVAILABILITY_ERROR]', { code: errorCode(error) });
+      return renderPortal(res, 'unavailable', nonce);
     }
   });
 

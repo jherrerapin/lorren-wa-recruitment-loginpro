@@ -70,6 +70,10 @@
       <% if (expiresAt) { %>
         <p class="meta">La sesión tiene vencimiento automático y puede revocarse desde Lórren.</p>
       <% } %>
+    <% } else if (mode === 'unavailable') { %>
+      <h1>Portal temporalmente no disponible</h1>
+      <p>No pudimos validar la sesión en este momento. Tu dispositivo no fue desactivado.</p>
+      <div class="status warning">Intenta abrir el portal nuevamente en unos minutos</div>
     <% } else { %>
       <h1>Acceso no activo</h1>
       <p>Este dispositivo no tiene una sesión vigente. Abre el enlace seguro enviado por Lórren o solicita uno nuevo.</p>
