@@ -25,6 +25,7 @@ import {
   acquireCandidateMultilineBatch,
   applyCandidateSilentProfileCapture,
   applyCandidateVacancyFirstGateDecision,
+  pauseCandidateAutomationForManualReview,
   resumeCandidateAutomationOnInbound,
   scheduleCandidateMultilineWindow
 } from '../services/candidateStateService.js';
@@ -1161,8 +1162,43 @@ export async function recordIntentionalSilence(prisma, candidate = {}, inboundTe
 }
 
 async function pauseSilentlyForManualReview(prisma, candidate, reason, inboundText = '', options = {}) {
-  await pauseInterviewFlow(prisma, candidate.id, reason);
-  await notifySupervisorManualReview(prisma, candidate, {
+  const transition = await pauseCandidateAutomationForManualReview(prisma, {
+    candidateId: candidate.id,
+    expected: {
+      botPaused: candidate.botPaused,
+      botPausedAt: candidate.botPausedAt ?? null,
+      botPausedBy: candidate.botPausedBy ?? null,
+      botPauseReason: candidate.botPauseReason ?? null,
+      botResumeMode: candidate.botResumeMode ?? null,
+      reminderScheduledFor: candidate.reminderScheduledFor ?? null,
+      reminderState: candidate.reminderState
+    },
+    reason,
+    pausedAt: new Date()
+  });
+
+  if (transition.count !== 1) {
+    const observedCandidate = transition.candidate || candidate;
+    await recordIntentionalSilence(prisma, observedCandidate, inboundText, {
+      reason: 'STALE_CANDIDATE_MANUAL_REVIEW_PAUSE',
+      gate: 'manual_review_pause',
+      action: 'SUPPRESSED',
+      vacancyId: observedCandidate?.vacancyId || candidate?.vacancyId || null
+    });
+    console.warn('[STALE_CANDIDATE_MANUAL_REVIEW_PAUSE]', JSON.stringify({
+      candidateId: candidate.id,
+      reason,
+      observedPaused: observedCandidate?.botPaused ?? null,
+      observedReminderState: observedCandidate?.reminderState || null
+    }));
+    return {
+      paused: false,
+      conflict: true,
+      candidate: observedCandidate
+    };
+  }
+
+  await notifySupervisorManualReview(prisma, transition.candidate || candidate, {
     reason,
     inboundText,
     reviewType: options.reviewType || 'question',
@@ -1173,6 +1209,11 @@ async function pauseSilentlyForManualReview(prisma, candidate, reason, inboundTe
     reason,
     inboundPreview: String(inboundText || '').slice(0, 140)
   }));
+  return {
+    paused: true,
+    conflict: false,
+    candidate: transition.candidate || candidate
+  };
 }
 
 async function pauseForManualQuestionReview(prisma, candidate, from, inboundText = '') {

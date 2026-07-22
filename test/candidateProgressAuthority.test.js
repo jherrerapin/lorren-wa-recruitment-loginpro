@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'admin_interview_progress_authority_migrated');
+  assert.equal(manifest.phase, 'manual_review_pause_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -100,7 +100,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'consent_step_authority',
     'vacancy_first_gate_authority',
     'silent_profile_capture_authority',
-    'admin_interview_progress_authority'
+    'admin_interview_progress_authority',
+    'manual_review_pause_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -238,7 +239,7 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 5);
+  assert.equal(manifest.compositeContracts.length, 6);
   const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
@@ -562,4 +563,53 @@ test('la documentación registra la fase administrativa de entrevistas', () => {
   assert.match(documentation, /MANUAL_BOOKING_CREATED/);
   assert.match(documentation, /LAST_BOOKING_DELETED/);
   assert.match(documentation, /actor, motivo y origen esperado/i);
+});
+
+
+test('el manifiesto registra la autoridad de pausa por revisión manual', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'manual_review_pause_authority');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/routes/webhook.js');
+  assert.equal(contract.responseConsumer, 'src/routes/webhook.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, [
+    'botPaused',
+    'botPausedAt',
+    'botPauseReason',
+    'reminderScheduledFor',
+    'reminderState'
+  ]);
+  assert.ok(contract.observedFields.includes('botPausedBy'));
+  assert.ok(contract.observedFields.includes('botResumeMode'));
+  assert.ok(contract.excludedCombinations.includes('gender_logic'));
+
+  const authority = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'pauseCandidateAutomationForManualReview'
+  );
+  assert.match(authority, /applyConditionalCandidatePauseTransition\s*\(/);
+  assert.match(authority, /botPaused\s*:\s*true/);
+  assert.match(authority, /botPausedAt\s*:\s*pausedAt/);
+  assert.match(authority, /botPauseReason\s*:\s*reason/);
+  assert.match(authority, /reminderScheduledFor\s*:\s*null/);
+  assert.match(authority, /reminderState\s*:\s*ReminderState\.CANCELLED/);
+  assert.doesNotMatch(authority, /currentStep|status|gender|vacancyId|interviewBooking/);
+});
+
+test('el webhook suprime la notificación si la pausa manual queda obsoleta', () => {
+  const webhook = readSource('src/routes/webhook.js');
+  const consumer = extractFunctionSource(webhook, 'pauseSilentlyForManualReview');
+  assert.match(consumer, /pauseCandidateAutomationForManualReview/);
+  assert.match(consumer, /STALE_CANDIDATE_MANUAL_REVIEW_PAUSE/);
+  assert.match(consumer, /recordIntentionalSilence/);
+  assert.doesNotMatch(consumer, /pauseInterviewFlow\s*\(/);
+});
+
+test('la documentación registra la fase de pausa por revisión manual', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 11: pausa por revisión manual/);
+  assert.match(documentation, /pauseCandidateAutomationForManualReview/);
+  assert.match(documentation, /STALE_CANDIDATE_MANUAL_REVIEW_PAUSE/);
+  assert.match(documentation, /no notifica al\s+supervisor ni reintenta/i);
 });

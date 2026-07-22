@@ -256,3 +256,25 @@ asignación manual ya creada.
 Esta fase no modifica disponibilidad, reservas, textos al candidato, consentimiento,
 CV, perfil, recordatorios, permisos, asistencia ni ninguna lógica relacionada con
 género.
+
+
+## Fase 11: pausa por revisión manual
+
+`pauseSilentlyForManualReview()` dejó de delegar en la escritura genérica por ID de
+`pauseInterviewFlow()`. La decisión de escalar una pregunta o situación sigue en el
+webhook, mientras `pauseCandidateAutomationForManualReview()` controla exclusivamente
+la persistencia de la pausa.
+
+La autoridad compara `botPaused`, `botPausedAt`, `botPausedBy`, `botPauseReason`,
+`botResumeMode`, `reminderScheduledFor` y `reminderState`. Solo escribe
+`botPaused=true`, la fecha y razón observadas, limpia la fecha del recordatorio y fija
+`CANCELLED`; `botPausedBy` y `botResumeMode` se preservan.
+
+Si `updateMany` devuelve `count=0`, el webhook recupera el candidato vigente, registra
+`STALE_CANDIDATE_MANUAL_REVIEW_PAUSE` como silencio intencional y no notifica al
+supervisor ni reintenta. Solo una pausa aplicada permite la notificación de revisión
+manual.
+
+Las pausas por agenda, bloqueo de confirmación, volumen de adjuntos y otros usos de
+`pauseInterviewFlow()` permanecen fuera. No cambian textos, perfil, CV, reservas,
+permisos, asistencia ni ninguna lógica relacionada con género.
