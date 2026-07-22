@@ -221,3 +221,11 @@ El envío automático por WhatsApp debe permanecer en una fase posterior, despu�
 Revertir el router, su montaje, la vista, las pruebas y este documento.
 
 La tabla `DispatchWorkerPortalSession` de #586 puede permanecer sin consumidores. Este PR no crea migraciones ni transforma datos.
+
+## Frontera HTTP reforzada
+
+La ruta del portal se monta antes de los parsers JSON globales. `POST /activar` aplica su propio límite de 4 KB, captura localmente JSON inválido o demasiado grande y no propaga el cuerpo al logger global.
+
+Antes del parser y de PostgreSQL se ejecuta un guard de intentos por dirección de red. La implementación predeterminada mantiene una ventana acotada, un número máximo de intentos y un máximo de claves; expulsa entradas vencidas o menos recientes. El guard es inyectable para sustituirlo por un adaptador compartido cuando el servicio opere con múltiples réplicas.
+
+Los rechazos esperados de tokens inválidos, vencidos, consumidos o revocados no generan un warning por solicitud. Los errores inesperados o de configuración se registran únicamente mediante códigos sanitizados.

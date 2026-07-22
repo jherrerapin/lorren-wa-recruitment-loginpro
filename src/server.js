@@ -423,6 +423,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use(morgan('combined'));
+app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -646,7 +647,6 @@ app.use('/webhook', campaignAttributionMiddleware(prisma));
 app.use('/webhook', referralAttributionMiddleware(prisma));
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
-app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));
 app.use('/operaciones', dispatchErrorHandler('/admin/operaciones'));
 app.use('/admin/operaciones', wrapAsyncRouter(dispatchDashboardMetricsRouter(prisma)));
