@@ -43,8 +43,8 @@ function normalizeContext(context) {
 }
 
 function validateAssignmentContext(context) {
-  if (!context?.assignmentId || !context?.serviceRequestId) {
-    const error = new Error('No se envió WhatsApp porque falta contexto de asignación. Recarga la pantalla e intenta nuevamente.');
+  if (!context?.assignmentId || !context?.serviceRequestId || !context?.workerId) {
+    const error = new Error('No se envió WhatsApp porque falta el contexto completo de la asignación. Recarga la pantalla e intenta nuevamente.');
     error.statusCode = 400;
     throw error;
   }

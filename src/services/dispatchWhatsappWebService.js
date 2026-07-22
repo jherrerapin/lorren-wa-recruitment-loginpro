@@ -34,6 +34,13 @@ function buildOperationalError(message, statusCode = 400) {
   return error;
 }
 
+function normalizePhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return `57${digits}`;
+  return digits;
+}
+
 function hourLabel(value) {
   const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
   if (!match) return String(value || '');
@@ -121,11 +128,12 @@ function scheduleStalledRecoveryProbe() {
   timer.unref?.();
 }
 
-async function validateOutgoingAssignmentContext(context = {}) {
+async function validateOutgoingAssignmentContext(context = {}, phone = '') {
   const assignmentId = String(context?.assignmentId || '').trim();
   const serviceRequestId = String(context?.serviceRequestId || '').trim();
-  if (!assignmentId && !serviceRequestId) return;
-  if (!assignmentId || !serviceRequestId) {
+  const workerId = String(context?.workerId || '').trim();
+  if (!assignmentId && !serviceRequestId && !workerId) return undefined;
+  if (!assignmentId || !serviceRequestId || !workerId) {
     throw buildOperationalError('No se puede registrar la confirmación porque falta el contexto completo de la asignación.', 400);
   }
 
@@ -133,16 +141,25 @@ async function validateOutgoingAssignmentContext(context = {}) {
     where: {
       id: assignmentId,
       serviceRequestId,
+      workerId,
       status: { in: SENDABLE_ASSIGNMENT_STATUSES }
     },
     select: {
       id: true,
+      workerId: true,
+      worker: { select: { phone: true } },
       serviceRequest: { select: { serviceDate: true } }
     }
   });
 
   if (!assignment) {
-    throw buildOperationalError('La asignación ya no está pendiente o no corresponde a la solicitud indicada.', 409);
+    throw buildOperationalError('La asignación ya no está pendiente o no corresponde a la solicitud y auxiliar indicados.', 409);
+  }
+
+  const recipientPhone = normalizePhone(phone);
+  const assignmentPhone = normalizePhone(assignment.worker?.phone);
+  if (!recipientPhone || !assignmentPhone || recipientPhone !== assignmentPhone) {
+    throw buildOperationalError('El número indicado no corresponde al auxiliar de esta asignación.', 409);
   }
 
   const serviceDate = dispatchServiceDateKey(assignment.serviceRequest?.serviceDate);
@@ -150,6 +167,8 @@ async function validateOutgoingAssignmentContext(context = {}) {
   if (!serviceDate || serviceDate < today) {
     throw buildOperationalError('No se puede solicitar confirmación para una asignación de una fecha anterior.', 409);
   }
+
+  return { ...context, assignmentId, serviceRequestId, workerId };
 }
 
 async function expirePastConfirmationLinks(reason = 'watchdog') {
@@ -263,8 +282,8 @@ export async function closeDispatchWhatsappSession() {
 }
 
 export async function sendDispatchWhatsappMessage(args = {}) {
-  await validateOutgoingAssignmentContext(args.context);
-  return sendRuntimeTextMessage({ ...args, message: labelHours(args.message) });
+  const context = await validateOutgoingAssignmentContext(args.context, args.phone);
+  return sendRuntimeTextMessage({ ...args, context, message: labelHours(args.message) });
 }
 
 export { sendDispatchWhatsappMediaMessage };
