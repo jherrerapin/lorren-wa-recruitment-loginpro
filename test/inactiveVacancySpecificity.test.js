@@ -5,6 +5,7 @@ import { createWhatsappMock } from './helpers/mockWhatsapp.js';
 import { installOpenAIMock } from './helpers/mockOpenAI.js';
 import { baseOperations, conversationCases } from './fixtures/conversationCases.js';
 import { resolveVacancyFromText } from '../src/services/vacancyResolver.js';
+import { resolveVacancyFirstGate, VacancyFirstGateAction } from '../src/services/vacancyFirstGate.js';
 
 process.env.NODE_ENV = 'test';
 process.env.OPENAI_API_KEY = 'test-openai-key';
@@ -82,6 +83,27 @@ test('una solicitud de otra ciudad nunca cruza a la vacante inactiva', async () 
   assert.equal(resolution.resolved, false);
   assert.equal(resolution.city, 'Bogota');
   assert.equal(resolution.vacancy, null);
+});
+
+test('la compuerta incluye vacancyId en la decisión de vacante inactiva', async () => {
+  const { active, inactive } = targetVacancies();
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: { ...targetCase.candidate },
+    currentVacancy: null,
+    inboundText: targetCase.steps[0],
+    currentStep: targetCase.candidate.currentStep,
+    recentMessages: [],
+    vacancyHints: {
+      activeVacancies: [active],
+      allVacancies: [active, inactive]
+    }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.INACTIVE_VACANCY_REPLY);
+  assert.equal(decision.vacancy.id, inactive.id);
+  assert.equal(decision.candidateUpdates.vacancyId, inactive.id);
+  assert.equal(decision.candidateUpdates.currentStep, 'GREETING_SENT');
 });
 
 test('flujo integral asocia la inactiva y ofrece registro para futura apertura', async () => {
