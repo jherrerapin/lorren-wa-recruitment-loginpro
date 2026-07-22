@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python3 .github/scripts/apply-issue-576.py > issue-576-application-diagnostic.txt 2>&1
+          python3 .github/scripts/apply-issue-576-v2.py > issue-576-application-diagnostic.txt 2>&1
           status=$?
           cat issue-576-application-diagnostic.txt
           if [ "$status" -ne 0 ]; then
@@ -51,7 +51,7 @@ jobs:
           rm -f issue-576-application-diagnostic.txt
 
       - name: Remove temporary files
-        run: rm -f .github/issue-576-trigger .github/scripts/apply-issue-576.py .github/workflows/apply-issue-576.yml
+        run: rm -f .github/issue-576-trigger .github/scripts/apply-issue-576.py .github/scripts/apply-issue-576-v2.py .github/workflows/apply-issue-576.yml issue-576-application-diagnostic.txt
 
       - name: Install locked dependencies
         run: npm ci
