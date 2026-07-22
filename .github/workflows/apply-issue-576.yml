@@ -34,7 +34,21 @@ jobs:
           cache: npm
 
       - name: Apply exact recovery corrections
-        run: python3 .github/scripts/apply-issue-576.py
+        shell: bash
+        run: |
+          set +e
+          python3 .github/scripts/apply-issue-576.py > issue-576-application-diagnostic.txt 2>&1
+          status=$?
+          cat issue-576-application-diagnostic.txt
+          if [ "$status" -ne 0 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add issue-576-application-diagnostic.txt
+            git commit -m "chore: registrar diagnóstico de aplicación #576" || true
+            git push origin HEAD:fix/576-whatsapp-stuck-recovery
+            exit "$status"
+          fi
+          rm -f issue-576-application-diagnostic.txt
 
       - name: Remove temporary files
         run: rm -f .github/issue-576-trigger .github/scripts/apply-issue-576.py .github/workflows/apply-issue-576.yml
