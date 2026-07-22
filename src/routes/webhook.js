@@ -43,6 +43,7 @@ import { detectInterviewIntent } from '../services/interviewLifecycle.js';
 import { applyInterviewReminderResponse } from '../services/interviewBookingStateService.js';
 import { buildInterviewDocumentsSentence, buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
+import { appendUniqueReplySegment } from '../services/replyComposition.js';
 import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
@@ -953,7 +954,7 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     body = await buildInterviewConfirmationReply(candidateAfterActions, vacancy, nextSlot);
     source = 'interview_booking_confirmation';
   } else if (shouldForceFlowFollowUp(body, candidateAfterActions, primaryAction)) {
-    body = `${body} ${buildVacancyContinuePrompt(candidateAfterActions, vacancy)}`.trim();
+    body = appendUniqueReplySegment(body, buildVacancyContinuePrompt(candidateAfterActions, vacancy));
   }
 
   const rawPayload = source.startsWith('interview_')
