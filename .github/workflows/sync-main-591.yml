@@ -36,7 +36,7 @@ jobs:
           git merge --no-edit origin/main
 
       - name: Remove temporary workflow
-        run: rm -f .github/workflows/sync-main-591.yml issue-591-sync-conflict.txt
+        run: rm -f .github/workflows/sync-main-591.yml issue-591-sync-conflict.txt issue-591-sync-validation.txt
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -48,14 +48,29 @@ jobs:
         run: npm ci
 
       - name: Validate synchronized correction
+        shell: bash
         run: |
-          npx prisma validate
-          npm run prisma:generate
-          node --check src/services/dispatchOperationalCoverage.js
-          node --test test/dispatchTestWorkerExclusion.test.js
-          node --test test/dispatchWorkerContractAutoAssignment.test.js
-          node --test test/dispatchProgrammingPartialSend.test.js
-          node --test test/dispatchWhatsappRuntimeContracts.test.js
+          set +e
+          diagnostic="$(mktemp)"
+          {
+            npx prisma validate
+            npm run prisma:generate
+            node --check src/services/dispatchOperationalCoverage.js
+            node --test test/dispatchTestWorkerExclusion.test.js
+            node --test test/dispatchWorkerContractAutoAssignment.test.js
+            node --test test/dispatchProgrammingPartialSend.test.js
+            node --test test/dispatchWhatsappRuntimeContracts.test.js
+          } >"$diagnostic" 2>&1
+          status=$?
+          cat "$diagnostic"
+          if [ "$status" -ne 0 ]; then
+            git reset --hard HEAD^1
+            cp "$diagnostic" issue-591-sync-validation.txt
+            git add issue-591-sync-validation.txt
+            git commit -m "chore: registrar validación de sincronización #591 [skip ci]"
+            git push origin HEAD:fix/591-exclude-test-worker
+            exit "$status"
+          fi
 
       - name: Commit workflow cleanup and push
         run: |
