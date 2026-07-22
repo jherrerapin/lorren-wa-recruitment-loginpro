@@ -2,47 +2,47 @@ TAP version 13
 # Subtest: parser no convierte duración laboral ni cantidad de personal en edad
 ok 1 - parser no convierte duración laboral ni cantidad de personal en edad
   ---
-  duration_ms: 15.559404
+  duration_ms: 16.002828
   ...
 # Subtest: parser separa edad explícita, experiencia y cantidad de personal
 ok 2 - parser separa edad explícita, experiencia y cantidad de personal
   ---
-  duration_ms: 5.622437
+  duration_ms: 5.794409
   ...
 # Subtest: parser conserva corrección explícita de edad
 ok 3 - parser conserva corrección explícita de edad
   ---
-  duration_ms: 3.70843
+  duration_ms: 3.91196
   ...
 # Subtest: parser conserva respuesta numérica corta
 ok 4 - parser conserva respuesta numérica corta
   ---
-  duration_ms: 0.92837
+  duration_ms: 0.916537
   ...
 # Subtest: sanitizer rechaza 56 cuando el número está ligado a trabajadores
 ok 5 - sanitizer rechaza 56 cuando el número está ligado a trabajadores
   ---
-  duration_ms: 1.880184
+  duration_ms: 2.228653
   ...
 # Subtest: sanitizer rechaza una duración laboral dentro del rango de edad
 ok 6 - sanitizer rechaza una duración laboral dentro del rango de edad
   ---
-  duration_ms: 0.845956
+  duration_ms: 0.937228
   ...
 # Subtest: sanitizer acepta la edad explícita aunque el mensaje incluya experiencia
 ok 7 - sanitizer acepta la edad explícita aunque el mensaje incluya experiencia
   ---
-  duration_ms: 0.439318
+  duration_ms: 0.462951
   ...
 # Subtest: sanitizer acepta respuesta corta cuando edad está pendiente
 ok 8 - sanitizer acepta respuesta corta cuando edad está pendiente
   ---
-  duration_ms: 0.308295
+  duration_ms: 0.341016
   ...
 # Subtest: sanitizer no acepta un número suelto sin contexto de edad
 ok 9 - sanitizer no acepta un número suelto sin contexto de edad
   ---
-  duration_ms: 0.508797
+  duration_ms: 0.524053
   ...
 1..9
 # tests 9
@@ -52,4 +52,4 @@ ok 9 - sanitizer no acepta un número suelto sin contexto de edad
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 103.346207
+# duration_ms 110.850544
