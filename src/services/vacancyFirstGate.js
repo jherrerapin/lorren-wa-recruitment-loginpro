@@ -28,6 +28,7 @@ export const PAUSED_VACANCY_OFFER_MODE = 'paused_vacancy';
 export const PAUSED_VACANCY_CAPTURE_MODE = 'paused_vacancy_capture';
 export const ALTERNATIVE_VACANCY_OFFER_MODE = 'alternative_vacancy_offer';
 export const ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE = 'alternative_vacancy_prequalification';
+export const VACANCY_CHANGE_OFFER_MODE = 'vacancy_change_offer';
 
 const START_OR_INTAKE_STEPS = new Set([MENU, GREETING_SENT, COLLECTING_DATA, CONFIRMING_DATA, ASK_CV]);
 const CLOSED_OR_REGISTERED_STATUSES = new Set(['REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO', 'CONTRATADO']);
@@ -203,7 +204,7 @@ function isFutureProfileOfferMode(mode = '') {
 
 function parseAlternativeMode(mode = '') {
   const [kind, vacancyId] = String(mode || '').split(':');
-  if (![ALTERNATIVE_VACANCY_OFFER_MODE, ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE].includes(kind)) return { active: false, kind: null, vacancyId: null };
+  if (![ALTERNATIVE_VACANCY_OFFER_MODE, ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE, VACANCY_CHANGE_OFFER_MODE].includes(kind)) return { active: false, kind: null, vacancyId: null };
   return { active: true, kind, vacancyId: vacancyId || null };
 }
 
@@ -254,6 +255,25 @@ function isAlternativeVacancyQuestion(text = '') {
 function buildAlternativeVacancyInfoReply(vacancy = {}, inboundText = '') {
   const answer = buildVacancyInformationAnswer(vacancy, inboundText);
   return `${answer} Si esta opción te interesa, respóndeme que deseas continuar y te pido los datos necesarios.`;
+}
+
+function buildVacancyChangeOfferReply(vacancy = {}) {
+  const title = vacancyTitle(vacancy);
+  const city = vacancyCity(vacancy);
+  const location = city ? ` en ${city}` : '';
+  return `Encontré la vacante ${title}${location}. Tu proceso actual no cambiará todavía. Confírmame si deseas cambiar a esta vacante.`;
+}
+
+function buildVacancyChangeInfoReply(vacancy = {}, inboundText = '') {
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText);
+  return [answer, 'Si deseas cambiar tu proceso a esta vacante, confírmamelo.'].filter(Boolean).join(' ');
+}
+
+function buildVacancyChangeTargetPrompt(resolution = {}) {
+  if (resolution?.city && !resolution?.roleHint) {
+    return `Ya tengo la ciudad ${resolution.city}. Para cambiar tu proceso sin perder la vacante actual, dime el cargo exacto de la nueva vacante.`;
+  }
+  return 'Para cambiar tu proceso sin perder la vacante actual, indícame la ciudad y el cargo exactos de la nueva vacante.';
 }
 
 function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMessages = [] } = {}) {
@@ -364,16 +384,29 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
   const alternativeMode = parseAlternativeMode(candidate?.botResumeMode);
   if (!alternativeMode.active) return null;
 
+  const isVacancyChange = alternativeMode.kind === VACANCY_CHANGE_OFFER_MODE;
+  const offerReplyKind = isVacancyChange
+    ? 'VACANCY_CHANGE_OFFER'
+    : (alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_PROMPT' : 'ALTERNATIVE_VACANCY_OFFER');
   const intent = detectAffirmationIntent(inboundText);
   if (intent.passiveAck) {
     return {
       action: VacancyFirstGateAction.SUPPRESS_REPLY,
-      reason: 'PASSIVE_ACK_AFTER_ALTERNATIVE_OFFER',
-      replyKind: alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_PROMPT' : 'ALTERNATIVE_VACANCY_OFFER'
+      reason: isVacancyChange ? 'PASSIVE_ACK_AFTER_VACANCY_CHANGE_OFFER' : 'PASSIVE_ACK_AFTER_ALTERNATIVE_OFFER',
+      replyKind: offerReplyKind
     };
   }
 
   if (detectNegativeAlternativeIntent(inboundText)) {
+    if (isVacancyChange) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ASSIGNED_VACANCY_CHANGE_DECLINED',
+        replyKind: 'VACANCY_CHANGE_RETAINED',
+        candidateUpdates: { currentStep: candidate.currentStep, botResumeMode: null, reminderScheduledFor: null, reminderState: 'SKIPPED' },
+        reply: 'Entendido. Mantengo tu proceso en la vacante que ya tenías asociada.'
+      };
+    }
     return {
       action: VacancyFirstGateAction.REPLY,
       reason: 'ALTERNATIVE_VACANCY_DECLINED',
@@ -389,23 +422,34 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
     if (isAlternativeVacancyQuestion(inboundText) && vacancy && isOpenVacancy(vacancy)) {
       return {
         action: VacancyFirstGateAction.REPLY,
-        reason: 'ALTERNATIVE_VACANCY_INFO_REQUEST',
-        replyKind: alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_PROMPT' : 'ALTERNATIVE_VACANCY_OFFER',
+        reason: isVacancyChange ? 'ASSIGNED_VACANCY_CHANGE_INFO_REQUEST' : 'ALTERNATIVE_VACANCY_INFO_REQUEST',
+        replyKind: offerReplyKind,
         vacancyId: vacancy.id,
         vacancy,
         candidateUpdates: {
-          currentStep: GREETING_SENT,
+          currentStep: candidate.currentStep,
           botResumeMode: buildAlternativeMode(alternativeMode.kind, vacancy.id),
           reminderScheduledFor: null,
           reminderState: 'SKIPPED'
         },
-        reply: buildAlternativeVacancyInfoReply(vacancy, inboundText)
+        reply: isVacancyChange
+          ? buildVacancyChangeInfoReply(vacancy, inboundText)
+          : buildAlternativeVacancyInfoReply(vacancy, inboundText)
       };
     }
     return null;
   }
 
   if (!vacancy || !isOpenVacancy(vacancy)) {
+    if (isVacancyChange) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ASSIGNED_VACANCY_CHANGE_NOT_AVAILABLE',
+        replyKind: 'VACANCY_CHANGE_RETAINED',
+        candidateUpdates: { currentStep: candidate.currentStep, botResumeMode: null, reminderScheduledFor: null, reminderState: 'SKIPPED' },
+        reply: 'Esa nueva vacante ya no está disponible. Mantengo tu proceso en la vacante que ya tenías asociada.'
+      };
+    }
     return {
       action: VacancyFirstGateAction.REPLY,
       reason: 'ALTERNATIVE_VACANCY_NOT_AVAILABLE',
@@ -417,12 +461,101 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
 
   return {
     action: VacancyFirstGateAction.REPLY,
-    reason: alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_ACCEPTED' : 'ALTERNATIVE_VACANCY_ACCEPTED',
+    reason: isVacancyChange
+      ? 'ASSIGNED_VACANCY_CHANGE_ACCEPTED'
+      : (alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_ACCEPTED' : 'ALTERNATIVE_VACANCY_ACCEPTED'),
     replyKind: 'ACTIVE_VACANCY_DATA_PROMPT',
     vacancyId: vacancy.id,
     vacancy,
     candidateUpdates: buildCollectingDataUpdates(vacancy.id),
     reply: buildActiveDataPrompt(candidate, vacancy)
+  };
+}
+
+function isExplicitAssignedVacancyChange(text = '', currentStep = null) {
+  if (!START_OR_INTAKE_STEPS.has(currentStep)) return false;
+  const turn = analyzeConversationTurn(text, { currentStep });
+  const hasMaterialCorrection = turn.correction && Boolean(
+    detectCityFromText(text)
+    || detectRoleHintFromText(text)
+    || detectOperationZoneEvidence(text).length
+  );
+  return turn.primaryIntent === 'change_intent' || hasMaterialCorrection;
+}
+
+async function evaluateAssignedVacancyChange({
+  prisma,
+  candidate = {},
+  currentVacancy = null,
+  inboundText = '',
+  currentStep = candidate?.currentStep,
+  vacancyHints = {}
+} = {}) {
+  if (!candidate?.vacancyId || !isExplicitAssignedVacancyChange(inboundText, currentStep)) return null;
+
+  const currentText = String(inboundText || '').trim();
+  const resolution = await resolveVacancyFromText(prisma, currentText, {
+    allVacancies: vacancyHints?.allVacancies,
+    activeVacancies: vacancyHints?.activeVacancies
+  });
+
+  if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
+    if (resolution.vacancy.id === candidate.vacancyId) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ASSIGNED_VACANCY_CHANGE_SAME_VACANCY',
+        replyKind: 'CURRENT_VACANCY_ALREADY_ASSOCIATED',
+        vacancyId: candidate.vacancyId,
+        vacancy: currentVacancy || resolution.vacancy,
+        resolution,
+        reply: 'La vacante que mencionas ya es la que tienes asociada. Mantengo tu proceso actual.'
+      };
+    }
+
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'ASSIGNED_VACANCY_CHANGE_OFFERED',
+      replyKind: 'VACANCY_CHANGE_OFFER',
+      vacancyId: resolution.vacancy.id,
+      vacancy: resolution.vacancy,
+      candidateUpdates: {
+        currentStep: GREETING_SENT,
+        botResumeMode: buildAlternativeMode(VACANCY_CHANGE_OFFER_MODE, resolution.vacancy.id),
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      },
+      resolution,
+      reply: buildVacancyChangeOfferReply(resolution.vacancy)
+    };
+  }
+
+  if (resolution.resolved && resolution.vacancy && !isOpenVacancy(resolution.vacancy)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'ASSIGNED_VACANCY_CHANGE_TARGET_NOT_ACTIVE',
+      replyKind: 'VACANCY_CHANGE_RETAINED',
+      vacancy: resolution.vacancy,
+      resolution,
+      reply: 'La nueva vacante que mencionas no está activa. Mantengo tu proceso en la vacante que ya tienes asociada.'
+    };
+  }
+
+  if (['city_without_active_vacancies', 'no_active_vacancies'].includes(resolution.reason)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'ASSIGNED_VACANCY_CHANGE_TARGET_NOT_AVAILABLE',
+      replyKind: 'VACANCY_CHANGE_RETAINED',
+      resolution,
+      reply: 'No encontré esa nueva vacante activa. Mantengo tu proceso en la vacante que ya tienes asociada.'
+    };
+  }
+
+  return {
+    action: VacancyFirstGateAction.REPLY,
+    reason: 'ASSIGNED_VACANCY_CHANGE_NEEDS_TARGET',
+    replyKind: 'ASK_VACANCY_CHANGE_TARGET',
+    resolution,
+    reply: buildVacancyChangeTargetPrompt(resolution)
   };
 }
 
@@ -476,12 +609,27 @@ export async function resolveVacancyFirstGate({
   }
 
   if (isAlternativeOfferMode(botResumeMode)) {
-    return { action: VacancyFirstGateAction.SUPPRESS_REPLY, reason: 'WAITING_FOR_ALTERNATIVE_DECISION', replyKind: 'ALTERNATIVE_VACANCY_OFFER' };
+    const pendingAlternative = parseAlternativeMode(botResumeMode);
+    return {
+      action: VacancyFirstGateAction.SUPPRESS_REPLY,
+      reason: pendingAlternative.kind === VACANCY_CHANGE_OFFER_MODE ? 'WAITING_FOR_VACANCY_CHANGE_DECISION' : 'WAITING_FOR_ALTERNATIVE_DECISION',
+      replyKind: pendingAlternative.kind === VACANCY_CHANGE_OFFER_MODE ? 'VACANCY_CHANGE_OFFER' : 'ALTERNATIVE_VACANCY_OFFER'
+    };
   }
 
   if (isRegisteredCompleteWithoutVacancy(candidate, effectiveReadiness)) {
     return { action: VacancyFirstGateAction.REPLY, reason: 'REGISTERED_COMPLETE_WITHOUT_VACANCY', replyKind: 'REGISTERED_PROFILE_CONTEXT', reply: buildRegisteredWithoutVacancyReply(candidate) };
   }
+
+  const assignedVacancyChangeDecision = await evaluateAssignedVacancyChange({
+    prisma,
+    candidate,
+    currentVacancy,
+    inboundText,
+    currentStep,
+    vacancyHints
+  });
+  if (assignedVacancyChangeDecision) return assignedVacancyChangeDecision;
 
   if (currentVacancy || candidate?.vacancyId) {
     if (currentVacancy && !isOpenVacancy(currentVacancy)) {
