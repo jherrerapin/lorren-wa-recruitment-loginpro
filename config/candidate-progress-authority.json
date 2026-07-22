@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 11,
-  "phase": "manual_review_pause_authority_migrated",
+  "schemaVersion": 12,
+  "phase": "interview_reschedule_progress_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -36,7 +36,8 @@
     "vacancy_first_gate_authority",
     "silent_profile_capture_authority",
     "admin_interview_progress_authority",
-    "manual_review_pause_authority"
+    "manual_review_pause_authority",
+    "interview_reschedule_progress_authority"
   ],
   "sourceInventory": [
     {
@@ -55,7 +56,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista y pausa por revisión manual mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista, pausa por revisión manual y reflejo de reprogramación mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -71,7 +72,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "Escribe reprogramación y decisiones determinísticas de vacante pausada; delega la reducción general en act()."
+      "notes": "Delega el reflejo de reprogramación en CandidateStateService y la reducción general en act(); conserva escrituras determinísticas de vacante pausada y otras ramas aún no migradas."
     },
     {
       "path": "src/routes/webhook.js",
@@ -288,12 +289,12 @@
       ]
     },
     {
-      "id": "appointment_reschedule_direct",
+      "id": "appointment_reschedule_progress_reflection",
       "owners": [
         "src/services/chatEngine.js"
       ],
       "writers": [
-        "src/services/chatEngine.js"
+        "src/services/candidateStateService.js"
       ],
       "origins": [
         "SCHEDULING",
@@ -305,9 +306,9 @@
       "allowedFields": [
         "currentStep"
       ],
-      "trigger": "Solicitud explícita de reprogramación sobre una reserva activa.",
-      "concurrency": "La reserva usa su autoridad especializada; el currentStep se actualiza después por id sin validar el paso leído.",
-      "idempotency": "La acción de reserva evita transiciones inválidas, pero el reflejo en Candidate todavía no es condicional.",
+      "trigger": "Solicitud explícita de reprogramación ya aceptada por la autoridad canónica de InterviewBooking.",
+      "concurrency": "CandidateStateService compara id, currentStep, fecha y estado del recordatorio; count cero conserva el candidato vigente y chatEngine suprime la respuesta obsoleta.",
+      "idempotency": "La reserva conserva su transición canónica; repetir con el snapshot anterior devuelve count cero y no aplica un patch parcial.",
       "externalEffects": [
         "interview_booking_transition",
         "reply_message"
@@ -461,7 +462,7 @@
   ],
   "nextMigrationSlices": [
     "migrar las demás ramas legacy del webhook por familias pequeñas",
-    "migrar reflejos de agenda y vacantes pausadas en chatEngine"
+    "migrar cancelación de entrevista y decisiones de vacante pausada en chatEngine"
   ],
   "stepContracts": [
     {
@@ -812,6 +813,48 @@
         "implicit_scheduling_pause",
         "attachment_volume_pause",
         "confirmation_blocked_pause",
+        "gender_logic"
+      ]
+    },
+    {
+      "id": "interview_reschedule_progress_reflection",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/services/chatEngine.js",
+      "responseConsumer": "src/services/chatEngine.js",
+      "status": "canonical",
+      "allowedFields": [
+        "currentStep",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "observedFields": [
+        "currentStep",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "origins": [
+        "SCHEDULING",
+        "SCHEDULED"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "reserva ya transicionada por InterviewBookingStateService",
+        "snapshot explícito de paso y recordatorio",
+        "nextStep y patch arbitrario prohibidos"
+      ],
+      "mutation": {
+        "currentStep": "SCHEDULING",
+        "reminderScheduledFor": null,
+        "reminderState": "SKIPPED"
+      },
+      "concurrency": "updateMany compara id, currentStep, reminderScheduledFor y reminderState; count cero conserva el estado vigente.",
+      "idempotency": "Una segunda ejecución con el snapshot anterior devuelve count cero sin revertir ni duplicar la transición de la reserva.",
+      "conflictPolicy": "chatEngine registra STALE_CANDIDATE_RESCHEDULE_PROGRESS y devuelve silencio controlado antes de construir la respuesta final.",
+      "excludedCombinations": [
+        "confirm_attendance",
+        "cancel_interview",
+        "new_booking_creation",
+        "paused_vacancy",
         "gender_logic"
       ]
     }

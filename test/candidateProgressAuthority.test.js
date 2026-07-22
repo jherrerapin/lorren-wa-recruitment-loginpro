@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'manual_review_pause_authority_migrated');
+  assert.equal(manifest.phase, 'interview_reschedule_progress_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -101,7 +101,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'vacancy_first_gate_authority',
     'silent_profile_capture_authority',
     'admin_interview_progress_authority',
-    'manual_review_pause_authority'
+    'manual_review_pause_authority',
+    'interview_reschedule_progress_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -239,7 +240,7 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 6);
+  assert.equal(manifest.compositeContracts.length, 7);
   const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
@@ -612,4 +613,67 @@ test('la documentación registra la fase de pausa por revisión manual', () => {
   assert.match(documentation, /pauseCandidateAutomationForManualReview/);
   assert.match(documentation, /STALE_CANDIDATE_MANUAL_REVIEW_PAUSE/);
   assert.match(documentation, /no notifica al\s+supervisor ni reintenta/i);
+});
+
+
+
+test('el manifiesto registra la autoridad del reflejo de reprogramación', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'interview_reschedule_progress_reflection');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/chatEngine.js');
+  assert.equal(contract.responseConsumer, 'src/services/chatEngine.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, [
+    'currentStep',
+    'reminderScheduledFor',
+    'reminderState'
+  ]);
+  assert.deepEqual(contract.origins, ['SCHEDULING', 'SCHEDULED']);
+  assert.ok(contract.excludedCombinations.includes('cancel_interview'));
+  assert.ok(contract.excludedCombinations.includes('gender_logic'));
+
+  const family = manifest.transitionFamilies.find((item) => item.id === 'appointment_reschedule_progress_reflection');
+  assert.ok(family);
+  assert.deepEqual(family.writers, ['src/services/candidateStateService.js']);
+  assert.deepEqual(family.destinations, ['SCHEDULING']);
+
+  const authority = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'reflectCandidateInterviewRescheduleProgress'
+  );
+  assert.match(authority, /candidate\.updateMany\s*\(/);
+  assert.match(authority, /candidateInterviewRescheduleProgressExpectedWhere\(expected\)/);
+  assert.match(authority, /currentStep:\s*ConversationStep\.SCHEDULING/);
+  assert.match(authority, /reminderScheduledFor:\s*null/);
+  assert.match(authority, /reminderState:\s*ReminderState\.SKIPPED/);
+  assert.match(authority, /candidate_interview_reschedule_next_step_not_allowed/);
+  assert.match(authority, /candidate_interview_reschedule_patch_not_allowed/);
+  assert.doesNotMatch(authority, /InterviewBooking|interviewBooking|gender|vacancyId|botPaused/);
+});
+
+test('chatEngine delega la reprogramación y suprime respuestas sobre snapshots obsoletos', () => {
+  const handler = extractFunctionSource(readSource('src/services/chatEngine.js'), 'handleAppointmentIntentDirectly');
+  const rescheduleStart = handler.indexOf("if (intent === 'reschedule_interview')");
+  assert.ok(rescheduleStart >= 0);
+  const rescheduleBranch = handler.slice(rescheduleStart);
+
+  assert.match(rescheduleBranch, /reflectCandidateInterviewRescheduleProgress/);
+  assert.match(rescheduleBranch, /STALE_CANDIDATE_RESCHEDULE_PROGRESS/);
+  assert.match(rescheduleBranch, /suppressedReason:\s*['"]stale_candidate_reschedule_progress['"]/);
+  assert.doesNotMatch(rescheduleBranch, /prisma\.candidate\.update\s*\(/);
+
+  const transitionIndex = handler.indexOf('applyInterviewReminderResponse');
+  const reflectionIndex = handler.indexOf('reflectCandidateInterviewRescheduleProgress');
+  const replyIndex = rescheduleBranch.indexOf('const reply =');
+  assert.ok(transitionIndex >= 0 && reflectionIndex > transitionIndex);
+  assert.ok(replyIndex > rescheduleBranch.indexOf('reflectCandidateInterviewRescheduleProgress'));
+});
+
+test('la documentación registra la fase del reflejo de reprogramación', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 12: reflejo de reprogramación/);
+  assert.match(documentation, /reflectCandidateInterviewRescheduleProgress/);
+  assert.match(documentation, /STALE_CANDIDATE_RESCHEDULE_PROGRESS/);
+  assert.match(documentation, /no construye ni envía la respuesta obsoleta/i);
 });

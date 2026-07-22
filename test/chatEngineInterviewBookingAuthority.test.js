@@ -35,18 +35,33 @@ test('una carrera no informa una transición de entrevista como aplicada', () =>
   assert.match(handler, /return\s+null/);
 });
 
-test('la reprogramación conserva la reserva y busca alternativa antes de cambiar el paso', () => {
+test('la reprogramación conserva la reserva, busca alternativa y delega el reflejo del candidato', () => {
   assert.doesNotMatch(handler, /status:\s*['"]RESCHEDULED['"]/);
 
   const rescheduleStart = handler.indexOf("if (intent === 'reschedule_interview')");
   assert.ok(rescheduleStart >= 0, 'No se encontró la rama de reprogramación.');
   const rescheduleBranch = handler.slice(rescheduleStart);
   const alternativeIndex = rescheduleBranch.indexOf('getNextAvailableSlotAfter');
-  const candidateUpdateIndex = rescheduleBranch.indexOf('prisma.candidate.update');
+  const progressIndex = rescheduleBranch.indexOf('reflectCandidateInterviewRescheduleProgress');
+  const replyIndex = rescheduleBranch.indexOf('const reply =');
 
   assert.ok(alternativeIndex >= 0, 'No se encontró la búsqueda del horario alternativo.');
-  assert.ok(candidateUpdateIndex >= 0, 'No se encontró la actualización del paso del candidato.');
-  assert.ok(alternativeIndex < candidateUpdateIndex, 'La alternativa debe resolverse antes de cambiar el paso.');
+  assert.ok(progressIndex >= 0, 'No se encontró la autoridad de progreso del candidato.');
+  assert.ok(replyIndex >= 0, 'No se encontró la construcción de la respuesta final.');
+  assert.ok(alternativeIndex < progressIndex, 'La búsqueda de alternativa debe conservar su orden previo.');
+  assert.ok(progressIndex < replyIndex, 'El CAS debe resolverse antes de construir la respuesta final.');
+  assert.doesNotMatch(rescheduleBranch, /prisma\.candidate\.update\s*\(/);
+});
+
+test('la reserva se transiciona antes del CAS y un conflicto suprime la respuesta', () => {
+  const bookingTransitionIndex = handler.indexOf('applyInterviewReminderResponse');
+  const progressIndex = handler.indexOf('reflectCandidateInterviewRescheduleProgress');
+
+  assert.ok(bookingTransitionIndex >= 0 && progressIndex > bookingTransitionIndex);
+  assert.match(handler, /STALE_CANDIDATE_RESCHEDULE_PROGRESS/);
+  assert.match(handler, /suppressed:\s*true/);
+  assert.match(handler, /suppressedReason:\s*['"]stale_candidate_reschedule_progress['"]/);
+  assert.match(handler, /candidateProgressConflict:\s*true/);
 });
 
 test('cancelación conserva la limpieza de recordatorio del candidato', () => {

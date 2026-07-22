@@ -3,6 +3,7 @@ import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
 import { getNextAvailableSlotAfter, formatInterviewDate } from './interviewScheduler.js';
 import { applyInterviewReminderResponse } from './interviewBookingStateService.js';
+import { reflectCandidateInterviewRescheduleProgress } from './candidateStateService.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { guardReplyAgainstReadinessDrift, sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
@@ -174,14 +175,37 @@ async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inb
         ? await getNextAvailableSlotAfter(prisma, vacancy.id, lastInboundAt, booking, now).catch(() => null)
         : null);
 
-    await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: {
-        currentStep: ConversationStep.SCHEDULING,
-        reminderScheduledFor: null,
-        reminderState: 'SKIPPED'
+    const progressTransition = await reflectCandidateInterviewRescheduleProgress(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        currentStep,
+        reminderScheduledFor: candidate.reminderScheduledFor ?? null,
+        reminderState: candidate.reminderState
       }
     });
+
+    if (progressTransition.count !== 1) {
+      const observedCandidate = progressTransition.candidate || candidate;
+      console.warn('[STALE_CANDIDATE_RESCHEDULE_PROGRESS]', JSON.stringify({
+        candidateId: candidate.id,
+        bookingId: booking.id,
+        expectedStep: currentStep,
+        observedStep: observedCandidate?.currentStep || null,
+        expectedReminderState: candidate.reminderState || null,
+        observedReminderState: observedCandidate?.reminderState || null
+      }));
+      return {
+        ...buildEngineHandledResult({
+          reply: null,
+          currentStep: observedCandidate?.currentStep || currentStep,
+          intent,
+          classification
+        }),
+        suppressed: true,
+        suppressedReason: 'stale_candidate_reschedule_progress',
+        candidateProgressConflict: true
+      };
+    }
 
     const reply = alternative?.slot
       ? `Listo, dejé marcada la solicitud de reprogramación. Te puedo ofrecer ${alternative.formattedDate}; si te sirve, respóndeme confirmando ese horario.`

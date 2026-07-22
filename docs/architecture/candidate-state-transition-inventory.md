@@ -278,3 +278,27 @@ manual.
 Las pausas por agenda, bloqueo de confirmación, volumen de adjuntos y otros usos de
 `pauseInterviewFlow()` permanecen fuera. No cambian textos, perfil, CV, reservas,
 permisos, asistencia ni ninguna lógica relacionada con género.
+
+
+
+## Fase 12: reflejo de reprogramación
+
+`handleAppointmentIntentDirectly()` conserva la clasificación de intención y entrega
+primero la solicitud a `InterviewBookingStateService`. Cuando la reserva acepta la
+transición de reprogramación, `reflectCandidateInterviewRescheduleProgress()` pasa a
+ser el escritor exclusivo del reflejo en `Candidate`.
+
+La autoridad exige un snapshot explícito de `currentStep`, `reminderScheduledFor` y
+`reminderState`, limita los orígenes a `SCHEDULING` o `SCHEDULED` y fija únicamente
+`SCHEDULING / null / SKIPPED`. No acepta `nextStep`, `data` ni un patch arbitrario y
+reutiliza Prisma raíz o un cliente transaccional sin abrir otra transacción.
+
+La búsqueda del horario alternativo conserva su comportamiento. El CAS se resuelve
+antes de construir la respuesta final. Si `updateMany` devuelve `count=0`, la reserva
+mantiene su transición canónica, `chatEngine` registra
+`STALE_CANDIDATE_RESCHEDULE_PROGRESS` y no construye ni envía la respuesta obsoleta.
+No reintenta ni aplica parcialmente.
+
+Confirmación, cancelación, creación de una nueva reserva, disponibilidad, vacantes
+pausadas, webhook, consentimiento, CV, perfil, permisos, asistencia, Prisma y cualquier
+lógica relacionada con género permanecen fuera de esta fase.
