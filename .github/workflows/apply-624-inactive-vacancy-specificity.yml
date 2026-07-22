@@ -35,8 +35,20 @@ jobs:
           node --check src/services/vacancyResolver.js
           node --check test/inactiveVacancySpecificity.test.js
 
-      - name: Run focused specificity regressions
-        run: node --test test/inactiveVacancySpecificity.test.js
+      - name: Validate specific inactive preference
+        run: node --test --test-name-pattern="vacante inactiva específica vence" test/inactiveVacancySpecificity.test.js
+
+      - name: Validate active tie priority
+        run: node --test --test-name-pattern="empate de cargo conserva" test/inactiveVacancySpecificity.test.js
+
+      - name: Validate generic role safety
+        run: node --test --test-name-pattern="cargo genérico operaciones" test/inactiveVacancySpecificity.test.js
+
+      - name: Validate city boundary
+        run: node --test --test-name-pattern="otra ciudad nunca cruza" test/inactiveVacancySpecificity.test.js
+
+      - name: Validate integral future registration
+        run: node --test --test-name-pattern="flujo integral asocia" test/inactiveVacancySpecificity.test.js
 
       - name: Run existing vacancy resolver regressions
         run: node --test test/vacancyResolver.test.js test/leaderVacancyResolution.test.js test/cityVacancyCrossAssignment.test.js
