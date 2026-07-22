@@ -36,6 +36,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Synchronize current main
+        working-directory: source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,7 +58,7 @@ jobs:
 
       - name: Remove temporary files
         working-directory: source
-        run: rm -f .github/issue-567-trigger issue-567-test-diagnostic.txt
+        run: rm -f .github/issue-567-trigger .github/issue-567-sync-trigger issue-567-test-diagnostic.txt
 
       - name: Install locked dependencies
         working-directory: source
@@ -69,16 +78,12 @@ jobs:
         working-directory: source
         run: node --test test/dispatchWhatsappRuntimeContracts.test.js
 
-      - name: Commit canonical correction
+      - name: Commit and push canonical correction
         working-directory: source
         shell: bash
         run: |
-          if git diff --quiet; then
-            echo 'La corrección ya estaba aplicada.'
-            exit 0
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "fix: aclarar acciones del módulo de despacho (#567)"
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix: aclarar acciones del módulo de despacho (#567)"
           git push origin HEAD:fix/567-operational-labels
