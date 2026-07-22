@@ -65,8 +65,8 @@ jobs:
       - name: Run dispatch runtime regressions
         run: node --test test/dispatchWhatsappRuntimeContracts.test.js
 
-      - name: Run server routing regressions
-        run: node --test test/dispatchClientsOperationsContracts.test.js
+      - name: Run operations UI regressions
+        run: node --test test/dispatchOperationsUxRulesContracts.test.js
 
       - name: Run conversation replays
         run: |
