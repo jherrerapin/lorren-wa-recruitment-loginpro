@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import { prisma } from '../lib/prisma.js';
+import { recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 
 const MAX_MESSAGE_LENGTH = 3500;
 const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
@@ -556,18 +557,7 @@ async function getRecipientId(activeClient, phone) {
 }
 
 async function recalculateServiceRequestStatus(serviceRequestId) {
-  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } });
-  if (!serviceRequest) return null;
-  const [activeCount, confirmedCount] = await Promise.all([
-    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }),
-    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: CONFIRMED_ASSIGNMENT_STATUS } })
-  ]);
-  let status = 'PENDING_ASSIGNMENT';
-  if (confirmedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
-  else if (activeCount >= serviceRequest.requiredWorkers) status = 'PENDING_CONFIRMATION';
-  else if (activeCount > 0) status = 'ASSIGNMENT_PARTIAL';
-  await prisma.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
-  return { status, activeCount, confirmedCount, requiredWorkers: serviceRequest.requiredWorkers };
+  return recalculateDispatchServiceRequestStatus(prisma, serviceRequestId);
 }
 
 function isMessageAfterPendingContext(message = {}, pending = {}) {

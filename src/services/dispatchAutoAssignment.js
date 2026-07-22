@@ -2,6 +2,7 @@ import {
   buildDispatchServiceDateWhere,
   dispatchServiceDateKey
 } from './dispatchDate.js';
+import { operationalAssignments, recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
@@ -71,7 +72,7 @@ export function rankHistoricalWorkers(historyAssignments = []) {
   for (const assignment of historyAssignments) {
     const worker = assignment?.worker;
     const workerId = assignment?.workerId || worker?.id;
-    if (!workerId || !worker || worker.operationalStatus !== 'CONTRATADO') continue;
+    if (!workerId || !worker || worker.operationalStatus !== 'CONTRATADO' || worker.isTestProfile) continue;
 
     const confirmedAt = new Date(assignment.updatedAt || assignment.createdAt || 0);
     const timestamp = Number.isNaN(confirmedAt.getTime()) ? 0 : confirmedAt.getTime();
@@ -125,32 +126,7 @@ export function selectAutoAssignmentCandidates({
 }
 
 async function recalculateRequestStatus(prisma, serviceRequestId) {
-  const request = await prisma.dispatchServiceRequest.findUnique({
-    where: { id: serviceRequestId },
-    select: { requiredWorkers: true }
-  });
-  if (!request) return null;
-
-  const [activeCount, confirmedCount] = await Promise.all([
-    prisma.dispatchAssignment.count({
-      where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } }
-    }),
-    prisma.dispatchAssignment.count({
-      where: { serviceRequestId, status: CONFIRMED_ASSIGNMENT_STATUS }
-    })
-  ]);
-
-  let status = 'PENDING_ASSIGNMENT';
-  if (confirmedCount >= request.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
-  else if (activeCount >= request.requiredWorkers) status = 'PENDING_CONFIRMATION';
-  else if (activeCount > 0) status = 'ASSIGNMENT_PARTIAL';
-
-  await prisma.dispatchServiceRequest.update({
-    where: { id: serviceRequestId },
-    data: { status }
-  });
-
-  return { status, activeCount, confirmedCount, requiredWorkers: request.requiredWorkers };
+  return recalculateDispatchServiceRequestStatus(prisma, serviceRequestId);
 }
 
 export async function autoAssignServiceRequest(prisma, serviceRequestId, options = {}) {
@@ -159,7 +135,11 @@ export async function autoAssignServiceRequest(prisma, serviceRequestId, options
     include: {
       assignments: {
         where: { status: { in: ACTIVE_ASSIGNMENT_STATUSES } },
-        select: { workerId: true, status: true }
+        select: {
+          workerId: true,
+          status: true,
+          worker: { select: { isTestProfile: true } }
+        }
       }
     }
   });
@@ -167,7 +147,7 @@ export async function autoAssignServiceRequest(prisma, serviceRequestId, options
   if (!request?.operationPointId) return { assignedCount: 0, reason: 'missing_operation_point' };
 
   const remainingSlots = Math.max(
-    Number(request.requiredWorkers || 0) - (request.assignments || []).length,
+    Number(request.requiredWorkers || 0) - operationalAssignments(request).length,
     0
   );
   if (!remainingSlots) {
@@ -180,7 +160,7 @@ export async function autoAssignServiceRequest(prisma, serviceRequestId, options
       status: CONFIRMED_ASSIGNMENT_STATUS,
       serviceRequestId: { not: request.id },
       serviceRequest: { operationPointId: request.operationPointId },
-      worker: { operationalStatus: 'CONTRATADO' }
+      worker: { operationalStatus: 'CONTRATADO', isTestProfile: false }
     },
     select: {
       workerId: true,
@@ -192,6 +172,7 @@ export async function autoAssignServiceRequest(prisma, serviceRequestId, options
           fullName: true,
           residenceCity: true,
           operationalStatus: true,
+          isTestProfile: true,
           cities: {
             select: {
               city: { select: { name: true } }

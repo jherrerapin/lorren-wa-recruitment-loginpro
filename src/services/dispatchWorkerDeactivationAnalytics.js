@@ -1,6 +1,7 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
+import { recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 
 const BASE_PATH = '/admin/operaciones';
 const TOGGLE_PATH_PATTERN = /^\/admin\/operaciones\/personal\/([^/]+)\/toggle$/;
@@ -82,24 +83,7 @@ function safePersonalRedirect(req, fallback = '/admin/operaciones/personal') {
 }
 
 async function recalculateServiceRequestStatus(prismaClient, serviceRequestId) {
-  const serviceRequest = await prismaClient.dispatchServiceRequest.findUnique({
-    where: { id: serviceRequestId },
-    select: { id: true, requiredWorkers: true }
-  });
-  if (!serviceRequest) return null;
-
-  const [activeCount, confirmedCount] = await Promise.all([
-    prismaClient.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }),
-    prismaClient.dispatchAssignment.count({ where: { serviceRequestId, status: CONFIRMED_ASSIGNMENT_STATUS } })
-  ]);
-
-  let status = 'PENDING_ASSIGNMENT';
-  if (confirmedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
-  else if (activeCount >= serviceRequest.requiredWorkers) status = 'PENDING_CONFIRMATION';
-  else if (activeCount > 0) status = 'ASSIGNMENT_PARTIAL';
-
-  await prismaClient.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
-  return status;
+  return recalculateDispatchServiceRequestStatus(prismaClient, serviceRequestId);
 }
 
 async function cancelWorkerActiveAssignments(prismaClient, workerId, reasonLabel) {

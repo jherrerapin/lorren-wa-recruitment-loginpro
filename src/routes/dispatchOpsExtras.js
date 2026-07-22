@@ -4,6 +4,7 @@ import ExcelJS from 'exceljs';
 import { sendDispatchCompletionEmail } from '../services/dispatchCompletionEmail.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
+import { recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
 
 const TEMPLATE_KEY = 'DISPATCH_ASSIGNMENT_WHATSAPP';
 const DEFAULT_ASSIGNMENT_TEMPLATE = 'Hola {{nombre}}, te confirmamos asignacion para {{fecha}} en {{operacion}}. Direccion: {{direccion}}. Horario: {{horaInicio}} - {{horaFin}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
@@ -157,18 +158,7 @@ async function loadActiveClientsForServiceRequestForm(prisma) {
   });
 }
 async function recalculateServiceRequestStatus(prisma, serviceRequestId) {
-  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } });
-  if (!serviceRequest) return null;
-  const [activeCount, confirmedCount] = await Promise.all([
-    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }),
-    prisma.dispatchAssignment.count({ where: { serviceRequestId, status: CONFIRMED_ASSIGNMENT_STATUS } })
-  ]);
-  let status = 'PENDING_ASSIGNMENT';
-  if (confirmedCount >= serviceRequest.requiredWorkers) status = 'ASSIGNMENT_COMPLETE';
-  else if (activeCount >= serviceRequest.requiredWorkers) status = 'PENDING_CONFIRMATION';
-  else if (activeCount > 0) status = 'ASSIGNMENT_PARTIAL';
-  await prisma.dispatchServiceRequest.update({ where: { id: serviceRequestId }, data: { status } });
-  return { status, activeCount, confirmedCount, requiredWorkers: serviceRequest.requiredWorkers };
+  return recalculateDispatchServiceRequestStatus(prisma, serviceRequestId);
 }
 async function resolveActorEmail(prisma, username) {
   if (!username) return null;

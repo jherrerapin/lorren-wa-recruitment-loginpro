@@ -554,6 +554,7 @@ model DispatchWorker {
   residenceLocality String?
   transportMode     String?
   contractType      DispatchContractType    @default(DIRECTO)
+  isTestProfile    Boolean                 @default(false)
   cvOriginalName    String?
   cvMimeType        String?
   cvData            Bytes?
