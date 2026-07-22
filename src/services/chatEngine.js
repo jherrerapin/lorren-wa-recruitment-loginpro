@@ -4,6 +4,8 @@ import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } 
 import { getNextAvailableSlotAfter, formatInterviewDate } from './interviewScheduler.js';
 import { applyInterviewReminderResponse } from './interviewBookingStateService.js';
 import {
+  CANDIDATE_PAUSED_VACANCY_ACTIONS,
+  applyCandidatePausedVacancyDecision,
   reflectCandidateInterviewCancellationReminder,
   reflectCandidateInterviewRescheduleProgress
 } from './candidateStateService.js';
@@ -331,6 +333,54 @@ async function guardPausedVacancy({ prisma, candidate, vacancy, inboundText, rec
   if (!vacancy || isOpenVacancy(vacancy)) return null;
   if (candidate?.botResumeMode === PAUSED_VACANCY_CAPTURE) return null;
 
+  const applyDecision = async (action, consent = null) => {
+    const transition = await applyCandidatePausedVacancyDecision(prisma, {
+      candidateId: candidate.id,
+      action,
+      expected: {
+        currentStep,
+        vacancyId: candidate?.vacancyId ?? null,
+        botResumeMode: candidate?.botResumeMode ?? null,
+        reminderScheduledFor: candidate?.reminderScheduledFor ?? null,
+        reminderState: candidate?.reminderState ?? 'NONE'
+      }
+    });
+
+    if (transition.count === 1) {
+      return { applied: true, candidate: transition.candidate || candidate };
+    }
+
+    const observedCandidate = transition.candidate || candidate;
+    console.warn('[STALE_CANDIDATE_PAUSED_VACANCY_DECISION]', JSON.stringify({
+      candidateId: candidate.id,
+      action,
+      expectedVacancyId: candidate?.vacancyId ?? null,
+      observedVacancyId: observedCandidate?.vacancyId ?? null,
+      expectedStep: currentStep,
+      observedStep: observedCandidate?.currentStep ?? null,
+      expectedResumeMode: candidate?.botResumeMode ?? null,
+      observedResumeMode: observedCandidate?.botResumeMode ?? null,
+      expectedReminderState: candidate?.reminderState ?? 'NONE',
+      observedReminderState: observedCandidate?.reminderState ?? null
+    }));
+
+    return {
+      applied: false,
+      result: {
+        ...buildBypassResult({
+          reply: null,
+          nextStep: observedCandidate?.currentStep || currentStep,
+          reason: 'stale_candidate_paused_vacancy_decision',
+          consent
+        }),
+        suppressed: true,
+        suppressedReason: 'stale_candidate_paused_vacancy_decision',
+        pausedVacancyDecisionConflict: true,
+        pausedVacancyAction: action
+      }
+    };
+  };
+
   const waiting = candidate?.botResumeMode === PAUSED_VACANCY_FLAG;
 
   if (waiting) {
@@ -338,18 +388,14 @@ async function guardPausedVacancy({ prisma, candidate, vacancy, inboundText, rec
     const highConfidence = consent.confidence >= 0.68;
 
     if (highConfidence && consent.decision === 'accept') {
-      await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: {
-          currentStep: ConversationStep.COLLECTING_DATA,
-          botResumeMode: PAUSED_VACANCY_CAPTURE,
-          reminderScheduledFor: null,
-          reminderState: 'SKIPPED'
-        }
-      });
+      const applied = await applyDecision(
+        CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_ACCEPTED,
+        consent
+      );
+      if (!applied.applied) return applied.result;
 
       return buildBypassResult({
-        reply: pausedRegistrationMessage(candidate, vacancy),
+        reply: pausedRegistrationMessage(applied.candidate, vacancy),
         nextStep: ConversationStep.COLLECTING_DATA,
         reason: 'accepted',
         consent
@@ -357,15 +403,11 @@ async function guardPausedVacancy({ prisma, candidate, vacancy, inboundText, rec
     }
 
     if (highConfidence && consent.decision === 'decline') {
-      await prisma.candidate.update({
-        where: { id: candidate.id },
-        data: {
-          currentStep: ConversationStep.DONE,
-          botResumeMode: null,
-          reminderScheduledFor: null,
-          reminderState: 'SKIPPED'
-        }
-      });
+      const applied = await applyDecision(
+        CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_DECLINED,
+        consent
+      );
+      if (!applied.applied) return applied.result;
 
       return buildBypassResult({
         reply: 'Entendido, gracias por escribirnos. Puedes volver a escribirnos más adelante para revisar nuevas aperturas.',
@@ -383,15 +425,8 @@ async function guardPausedVacancy({ prisma, candidate, vacancy, inboundText, rec
     });
   }
 
-  await prisma.candidate.update({
-    where: { id: candidate.id },
-    data: {
-      currentStep: ConversationStep.GREETING_SENT,
-      botResumeMode: PAUSED_VACANCY_FLAG,
-      reminderScheduledFor: null,
-      reminderState: 'SKIPPED'
-    }
-  });
+  const applied = await applyDecision(CANDIDATE_PAUSED_VACANCY_ACTIONS.REGISTRATION_OFFERED);
+  if (!applied.applied) return applied.result;
 
   return buildBypassResult({
     reply: pausedVacancyMessage(vacancy),

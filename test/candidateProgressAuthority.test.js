@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'interview_cancellation_reminder_authority_migrated');
+  assert.equal(manifest.phase, 'paused_vacancy_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -103,7 +103,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'admin_interview_progress_authority',
     'manual_review_pause_authority',
     'interview_reschedule_progress_authority',
-    'interview_cancellation_reminder_authority'
+    'interview_cancellation_reminder_authority',
+    'paused_vacancy_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -241,7 +242,7 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 8);
+  assert.equal(manifest.compositeContracts.length, 9);
   const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
@@ -730,4 +731,69 @@ test('la documentación registra la fase de recordatorio cancelado', () => {
   assert.match(documentation, /reflectCandidateInterviewCancellationReminder/);
   assert.match(documentation, /STALE_CANDIDATE_CANCELLATION_REMINDER/);
   assert.match(documentation, /conserva la\s+respuesta de cancelación/i);
+});
+
+
+
+test('el manifiesto registra la autoridad de decisiones de vacante pausada', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'paused_vacancy_decision');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/chatEngine.js');
+  assert.equal(contract.responseConsumer, 'src/services/chatEngine.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, [
+    'currentStep',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ]);
+  assert.deepEqual(contract.observedFields, [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ]);
+  assert.deepEqual(contract.actions, [
+    'REGISTRATION_OFFERED',
+    'FUTURE_PROFILE_ACCEPTED',
+    'FUTURE_PROFILE_DECLINED'
+  ]);
+  assert.ok(contract.excludedCombinations.includes('gender_logic'));
+
+  const family = manifest.transitionFamilies.find((item) => item.id === 'paused_vacancy_guard');
+  assert.ok(family);
+  assert.deepEqual(family.writers, ['src/services/candidateStateService.js']);
+  assert.deepEqual(family.destinations, ['GREETING_SENT', 'COLLECTING_DATA', 'DONE']);
+
+  const authority = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'applyCandidatePausedVacancyDecision'
+  );
+  assert.match(authority, /candidate\.updateMany\s*\(/);
+  assert.match(authority, /candidatePausedVacancyExpectedWhere\(expected\)/);
+  assert.match(authority, /CANDIDATE_PAUSED_VACANCY_DESTINATIONS\[action\]/);
+  assert.match(authority, /candidate_paused_vacancy_next_state_not_allowed/);
+  assert.match(authority, /candidate_paused_vacancy_patch_not_allowed/);
+  assert.doesNotMatch(authority, /gender|InterviewBooking|interviewBooking|status|vacancyId\s*:/);
+});
+
+test('chatEngine delega vacante pausada y suprime respuestas sobre snapshots obsoletos', () => {
+  const guard = extractFunctionSource(readSource('src/services/chatEngine.js'), 'guardPausedVacancy');
+  assert.match(guard, /applyCandidatePausedVacancyDecision/);
+  assert.match(guard, /STALE_CANDIDATE_PAUSED_VACANCY_DECISION/);
+  assert.match(guard, /suppressedReason:\s*['"]stale_candidate_paused_vacancy_decision['"]/);
+  assert.match(guard, /pausedVacancyDecisionConflict:\s*true/);
+  assert.doesNotMatch(guard, /prisma\.candidate\.(?:update|updateMany)\s*\(/);
+  assert.match(guard, /consent\.confidence\s*>=\s*0\.68/);
+  assert.match(guard, /if\s*\(!applied\.applied\)\s*return\s+applied\.result/);
+});
+
+test('la documentación registra la fase de vacante pausada', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 14: decisiones de vacante pausada/);
+  assert.match(documentation, /applyCandidatePausedVacancyDecision/);
+  assert.match(documentation, /STALE_CANDIDATE_PAUSED_VACANCY_DECISION/);
+  assert.match(documentation, /no construye ni envía\s+la respuesta obsoleta/i);
 });

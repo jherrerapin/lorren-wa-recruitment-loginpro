@@ -326,3 +326,31 @@ que sí fue aplicada. No reintenta ni aplica parcialmente.
 Confirmación, reprogramación, `currentStep`, creación de reservas, disponibilidad,
 vacantes pausadas, webhook, consentimiento, CV, perfil, permisos, asistencia, Prisma y
 cualquier lógica relacionada con género permanecen fuera de esta fase.
+
+
+
+## Fase 14: decisiones de vacante pausada
+
+`guardPausedVacancy()` conserva el clasificador estructurado, el umbral de confianza y
+los textos visibles existentes, pero deja de persistir `Candidate` directamente.
+`applyCandidatePausedVacancyDecision()` expone únicamente tres acciones canónicas:
+
+- `REGISTRATION_OFFERED` fija `GREETING_SENT / paused_vacancy / null / SKIPPED`;
+- `FUTURE_PROFILE_ACCEPTED` fija `COLLECTING_DATA / paused_vacancy_capture / null / SKIPPED`;
+- `FUTURE_PROFILE_DECLINED` fija `DONE / null / null / SKIPPED`.
+
+La autoridad exige un snapshot de `currentStep`, `vacancyId`, `botResumeMode`,
+`reminderScheduledFor` y `reminderState`. La vacante se compara, pero no se modifica,
+para impedir que una decisión calculada sobre una asociación anterior se aplique tras
+una reasignación concurrente. Los destinos se derivan exclusivamente desde la acción;
+no se aceptan `nextStep`, modos siguientes ni patches arbitrarios.
+
+Si `updateMany` devuelve `count=0`, `chatEngine` registra
+`STALE_CANDIDATE_PAUSED_VACANCY_DECISION`, conserva el candidato observado y devuelve
+silencio controlado. No reintenta, no aplica parcialmente y no construye ni envía
+la respuesta obsoleta. El resultado no permite que el engine general continúe en el
+mismo turno.
+
+El clasificador OpenAI, consentimiento legal, captura de perfil, asignación de vacante,
+agenda, webhook, CV, permisos, Meta Ads, asistencia, Prisma, migraciones y cualquier
+lógica relacionada con género permanecen fuera de esta fase.

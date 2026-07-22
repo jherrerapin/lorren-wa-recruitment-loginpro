@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 13,
-  "phase": "interview_cancellation_reminder_authority_migrated",
+  "schemaVersion": 14,
+  "phase": "paused_vacancy_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -38,7 +38,8 @@
     "admin_interview_progress_authority",
     "manual_review_pause_authority",
     "interview_reschedule_progress_authority",
-    "interview_cancellation_reminder_authority"
+    "interview_cancellation_reminder_authority",
+    "paused_vacancy_authority"
   ],
   "sourceInventory": [
     {
@@ -57,7 +58,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista, pausa por revisión manual, reprogramación y limpieza de recordatorio por cancelación mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista, pausa por revisión manual, reprogramación, cancelación y decisiones de vacante pausada mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -73,7 +74,7 @@
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "Delega los reflejos de reprogramación y cancelación en CandidateStateService y la reducción general en act(); conserva escrituras determinísticas de vacante pausada y otras ramas aún no migradas."
+      "notes": "Delega reprogramación, cancelación y las tres decisiones de vacante pausada en CandidateStateService; conserva otras escrituras determinísticas aún no migradas."
     },
     {
       "path": "src/routes/webhook.js",
@@ -264,7 +265,7 @@
         "src/services/chatEngine.js"
       ],
       "writers": [
-        "src/services/chatEngine.js"
+        "src/services/candidateStateService.js"
       ],
       "origins": [
         "MENU",
@@ -283,8 +284,8 @@
         "currentStep"
       ],
       "trigger": "Oferta, aceptación o rechazo del registro para una vacante pausada.",
-      "concurrency": "Usa candidate.update por id y puede sobrescribir un paso cambiado después de cargar el candidato.",
-      "idempotency": "La decisión es determinística para el mismo consentimiento, pero no existe compare-and-set del snapshot.",
+      "concurrency": "CandidateStateService compara id, currentStep, vacancyId, botResumeMode, reminderScheduledFor y reminderState; count cero conserva el candidato vigente y chatEngine suprime la respuesta obsoleta.",
+      "idempotency": "Cada acción deriva un destino fijo; repetir con el snapshot anterior devuelve count cero y no aplica un patch parcial.",
       "externalEffects": [
         "reply_message"
       ]
@@ -463,7 +464,7 @@
   ],
   "nextMigrationSlices": [
     "migrar las demás ramas legacy del webhook por familias pequeñas",
-    "migrar decisiones de vacante pausada y pausas implícitas restantes en chatEngine"
+    "migrar pausas implícitas y confirmación de agenda restantes en chatEngine"
   ],
   "stepContracts": [
     {
@@ -892,6 +893,55 @@
         "reschedule_interview",
         "new_booking_creation",
         "paused_vacancy",
+        "gender_logic"
+      ]
+    },
+    {
+      "id": "paused_vacancy_decision",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/services/chatEngine.js",
+      "responseConsumer": "src/services/chatEngine.js",
+      "status": "canonical",
+      "allowedFields": [
+        "currentStep",
+        "botResumeMode",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "observedFields": [
+        "currentStep",
+        "vacancyId",
+        "botResumeMode",
+        "reminderScheduledFor",
+        "reminderState"
+      ],
+      "actions": [
+        "REGISTRATION_OFFERED",
+        "FUTURE_PROFILE_ACCEPTED",
+        "FUTURE_PROFILE_DECLINED"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "acción canónica conocida",
+        "snapshot completo de progreso, vacante, modo y recordatorio",
+        "aceptación y rechazo exigen modo paused_vacancy",
+        "destinos, modos y recordatorio derivados exclusivamente desde la acción",
+        "next state y patch arbitrario prohibidos"
+      ],
+      "mutation": {
+        "REGISTRATION_OFFERED": "GREETING_SENT / paused_vacancy / null / SKIPPED",
+        "FUTURE_PROFILE_ACCEPTED": "COLLECTING_DATA / paused_vacancy_capture / null / SKIPPED",
+        "FUTURE_PROFILE_DECLINED": "DONE / null / null / SKIPPED",
+        "vacancyId": "observado pero no modificado"
+      },
+      "concurrency": "updateMany compara id y los cinco campos observados; count cero conserva la vacante, progreso, modo y recordatorio vigentes.",
+      "idempotency": "Una segunda ejecución con el snapshot anterior devuelve count cero sin reintentar ni aplicar parcialmente.",
+      "conflictPolicy": "chatEngine registra STALE_CANDIDATE_PAUSED_VACANCY_DECISION y devuelve silencio controlado antes de construir la respuesta.",
+      "excludedCombinations": [
+        "consent_legal",
+        "profile_capture",
+        "vacancy_assignment",
+        "interview_booking",
         "gender_logic"
       ]
     }
