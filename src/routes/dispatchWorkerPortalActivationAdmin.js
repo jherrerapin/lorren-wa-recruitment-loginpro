@@ -3,7 +3,7 @@ import { issuePrimaryDeviceActivation } from '../modules/dispatch-attendance/app
 import { createPrismaPrimaryDeviceActivationRepository } from '../modules/dispatch-attendance/infrastructure/prismaPrimaryDeviceActivationRepository.js';
 import { buildWorkerPortalActivationUrl } from './workerPortal.js';
 
-const ACTIVE_WORKER_STATUSES = Object.freeze(['ACTIVE', 'CONTRATADO']);
+const ACTIVE_DISPATCH_WORKER_STATUS = 'CONTRATADO';
 const DEFAULT_ACTIVATION_TTL_MINUTES = 30;
 const ADMIN_REQUEST_HEADER = 'attendance-admin';
 
@@ -86,19 +86,21 @@ function safeErrorCode(error) {
   return /^[A-Za-z0-9_]{1,100}$/.test(candidate) ? candidate : 'worker_portal_activation_admin_error';
 }
 
+function contractTypeLabel(value) {
+  return normalizeString(value)?.toUpperCase() === 'CONTRATISTA' ? 'Contratista' : 'Directo';
+}
+
 function workerLabel(worker) {
-  const documentNumber = normalizeString(worker.documentNumber);
-  const suffix = documentNumber ? ` · ${documentNumber.slice(-4)}` : '';
-  return `${worker.fullName}${suffix}`;
+  return `${worker.fullName} · ${contractTypeLabel(worker.contractType)}`;
 }
 
 async function loadActiveWorkers(prisma) {
   return prisma.dispatchWorker.findMany({
-    where: { operationalStatus: { in: [...ACTIVE_WORKER_STATUSES] } },
+    where: { operationalStatus: ACTIVE_DISPATCH_WORKER_STATUS },
     select: {
       id: true,
       fullName: true,
-      documentNumber: true,
+      contractType: true,
       operationalStatus: true,
       isTestProfile: true
     },
@@ -110,12 +112,12 @@ async function findActiveWorker(prisma, workerId) {
   return prisma.dispatchWorker.findFirst({
     where: {
       id: workerId,
-      operationalStatus: { in: [...ACTIVE_WORKER_STATUSES] }
+      operationalStatus: ACTIVE_DISPATCH_WORKER_STATUS
     },
     select: {
       id: true,
       fullName: true,
-      documentNumber: true,
+      contractType: true,
       operationalStatus: true,
       isTestProfile: true
     }
@@ -149,6 +151,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
           id: worker.id,
           label: workerLabel(worker),
           fullName: worker.fullName,
+          contractType: contractTypeLabel(worker.contractType),
           isTestProfile: Boolean(worker.isTestProfile)
         })),
         defaultTtlMinutes: ttlMinutes
@@ -191,6 +194,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
         worker: {
           id: worker.id,
           fullName: worker.fullName,
+          contractType: contractTypeLabel(worker.contractType),
           isTestProfile: Boolean(worker.isTestProfile)
         },
         activationUrl,

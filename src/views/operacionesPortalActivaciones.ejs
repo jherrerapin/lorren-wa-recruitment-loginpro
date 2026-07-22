@@ -6,7 +6,7 @@
   <title>Activar Portal del Auxiliar — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing:border-box; margin:0; padding:0; }
     :root { --bg:#f4f5f7; --surface:#fff; --surface-2:#f9fafb; --border:#e1e4e8; --text:#1a1d23; --muted:#6b7280; --navy:#1e2d3d; --teal:#0d7a6b; --teal-hover:#0a5f53; --amber:#92400e; --amber-light:#fef3c7; --red:#b91c1c; --red-light:#fee2e2; --green:#166534; --green-light:#dcfce7; --shadow:0 10px 28px rgba(15,23,42,.08); --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
     body { font-family:var(--font); background:var(--bg); color:var(--text); min-height:100vh; }
     .navbar { background:var(--navy); min-height:52px; padding:0 24px; display:flex; align-items:center; gap:20px; }
@@ -64,7 +64,8 @@
 
     <section class="card">
       <h2>Seleccionar auxiliar</h2>
-      <p>El enlace vence en aproximadamente <strong><%= defaultTtlMinutes %> minutos</strong> y reemplaza cualquier activación pendiente anterior del mismo auxiliar.</p>
+      <p>Se muestran únicamente los auxiliares con estado <strong>Contratado</strong> que aparecen en Personal operativo. Al lado del nombre se indica si el contrato es <strong>Directo</strong> o <strong>Contratista</strong>.</p>
+      <p class="meta">El enlace vence en aproximadamente <strong><%= defaultTtlMinutes %> minutos</strong> y reemplaza cualquier activación pendiente anterior del mismo auxiliar.</p>
 
       <% if (typeof loadError !== 'undefined' && loadError) { %>
         <div class="alert alert-error"><%= loadError %></div>
@@ -72,7 +73,7 @@
 
       <form id="activation-form">
         <div class="field">
-          <label for="workerId">Auxiliar activo</label>
+          <label for="workerId">Auxiliar activo de Despacho</label>
           <select id="workerId" name="workerId" required <%= workers.length ? '' : 'disabled' %>>
             <option value="">Selecciona un auxiliar</option>
             <% workers.forEach((worker) => { %>
@@ -150,7 +151,7 @@
           if (!response.ok || !payload.ok || !payload.activationUrl) throw new Error(payload.error || 'activation_failed');
 
           activationUrl.value = payload.activationUrl;
-          workerName.textContent = `Auxiliar: ${payload.worker.fullName}${payload.worker.isTestProfile ? ' (perfil de prueba)' : ''}`;
+          workerName.textContent = `Auxiliar: ${payload.worker.fullName} · ${payload.worker.contractType}${payload.worker.isTestProfile ? ' (perfil de prueba)' : ''}`;
           const expiry = new Date(payload.expiresAt);
           expiresAt.textContent = Number.isNaN(expiry.getTime()) ? 'Vencimiento automático configurado.' : `Vence: ${expiry.toLocaleString('es-CO')}`;
           result.classList.remove('hidden');

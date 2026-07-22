@@ -96,12 +96,11 @@ function attendanceDevControlHtml(enabled) {
         </div>
         <span class="${statusClass}">${statusLabel}</span>
       </div>
-      <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;">
+      <div class="card-body">
         <form method="post" action="/admin/operaciones/asistencia-acceso/reclutador-general">
           <input type="hidden" name="enabled" value="${nextEnabled}" />
           <button class="${buttonClass}" type="submit">${actionLabel}</button>
         </form>
-        <a class="btn" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a>
       </div>
     </section>`;
 }
