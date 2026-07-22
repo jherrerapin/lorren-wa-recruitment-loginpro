@@ -30,12 +30,17 @@ jobs:
       - name: Apply exact fixture alignment
         run: node scripts/apply-615-align-harness-contracts.mjs
 
-      - name: Validate fixture contracts
+      - name: Validate canonical fixture contract
         run: |
           node --check test/fixtures/conversationCases.js
           node --check test/conversationHarnessCanonicalExpectations.test.js
           node --test test/conversationHarnessCanonicalExpectations.test.js
-          node --test test/dispatchTransportNormalization.test.js test/candidateData.test.js
+
+      - name: Validate transport normalization contract
+        run: node --test test/dispatchTransportNormalization.test.js
+
+      - name: Validate candidate parser contract
+        run: node --test test/candidateData.test.js
 
       - name: Commit aligned fixtures
         env:
