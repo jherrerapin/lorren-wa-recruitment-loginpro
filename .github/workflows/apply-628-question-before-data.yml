@@ -34,8 +34,10 @@ jobs:
         run: |
           node --check src/routes/webhook.js
           node --check src/services/replySafety.js
+          node --check src/services/vacancyFirstGate.js
           node --check test/activeVacancyQuestionIntake.test.js
           node --check test/replySafety.test.js
+          node --check test/vacancyFirstGate.test.js
 
       - name: Validate registered contract evidence safety
         run: node --test test/replySafety.test.js
@@ -73,28 +75,8 @@ jobs:
       - name: Validate city-only boundary
         run: node --test --test-name-pattern="solo ciudad" test/activeVacancyQuestionIntake.test.js
 
-      - name: Capture vacancy first gate regressions
-        run: |
-          set +e
-          node --test test/vacancyFirstGate.test.js > diagnostics/628-vacancy-gate.tap 2>&1
-          status=$?
-          set -e
-          printf 'status=%s\n' "$status" > diagnostics/628-vacancy-gate-summary.txt
-
-      - name: Upload vacancy gate diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: question-before-data-vacancy-gate
-          path: |
-            diagnostics/628-vacancy-gate.tap
-            diagnostics/628-vacancy-gate-summary.txt
-          if-no-files-found: error
-
-      - name: Validate vacancy first gate regressions
-        run: |
-          cat diagnostics/628-vacancy-gate.tap
-          grep -q '^status=0$' diagnostics/628-vacancy-gate-summary.txt
+      - name: Validate vacancy first gate boundaries
+        run: node --test test/vacancyFirstGate.test.js
 
       - name: Run webhook vacancy authority regressions
         run: node --test test/webhookVacancyFirstGateAuthority.test.js
@@ -105,15 +87,15 @@ jobs:
       - name: Run webhook conversation flow regressions
         run: node --test test/webhookConversationFlow.test.js
 
-      - name: Commit generated runtime patch
+      - name: Commit generated runtime and contract patch
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           if ! git diff --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/routes/webhook.js src/services/replySafety.js
-            git commit -m "fix: responder duda y reconocer contrato registrado"
+            git add src/routes/webhook.js src/services/replySafety.js src/services/vacancyFirstGate.js test/vacancyFirstGate.test.js
+            git commit -m "fix: responder duda y preservar fronteras de vacante"
             git push origin "HEAD:${HEAD_REF}"
           fi
 
