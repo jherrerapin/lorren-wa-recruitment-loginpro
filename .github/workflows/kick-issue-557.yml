@@ -6,12 +6,20 @@ on:
       - fix/557-persistent-dispatch-whatsapp
     paths:
       - .github/workflows/kick-issue-557.yml
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'fix/557-persistent-dispatch-whatsapp' || github.ref_name == 'fix/557-persistent-dispatch-whatsapp'
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
@@ -67,5 +75,3 @@ jobs:
           git add -A
           git commit -m "fix: persistir confirmaciones de WhatsApp despacho (#557)"
           git push origin HEAD:fix/557-persistent-dispatch-whatsapp
-
-# Triggered after PR #559 opened.
