@@ -229,3 +229,30 @@ El campo `gender` se conserva como dato normalizado cuando acompaña otro dato m
 Si `updateMany` devuelve `count=0`, el webhook recupera el candidato vigente, registra `STALE_CANDIDATE_SILENT_PROFILE_CAPTURE` y no envía la respuesta construida sobre el snapshot obsoleto. No reintenta, no asigna vacante y no aplica parcialmente.
 
 Consentimiento, CV, atribución, agenda, reservas, permisos, asistencia, textos y Prisma permanecen fuera de este slice.
+
+
+## Fase 10: progreso administrativo de entrevistas
+
+Las acciones administrativas de entrevista dejaron de escribir `Candidate.currentStep`
+directamente desde `admin.js`.
+
+`reflectCandidateAdminInterviewProgress()` es ahora la autoridad estrecha para dos
+hechos ya confirmados por `InterviewBookingStateService`:
+
+- `MANUAL_BOOKING_CREATED` fija `SCHEDULED`;
+- `LAST_BOOKING_DELETED` fija `SCHEDULING` cuando no queda otra reserva activa.
+
+El contrato exige `candidateId`, actor, motivo y origen esperado. La persistencia usa
+`updateMany` como compare-and-set por `id + currentStep`; no acepta `nextStep`
+arbitrario y puede reutilizar Prisma raíz o un cliente transaccional sin abrir una
+transacción anidada.
+
+La reserva conserva su resultado canónico aunque el reflejo de progreso encuentre una
+carrera. En ese caso administración registra el conflicto, conserva el paso más
+reciente y comunica que la reserva fue creada o eliminada sin afirmar que reemplazó el
+progreso concurrente. Se retiró el fallback que degradaba a `SCHEDULING` después de una
+asignación manual ya creada.
+
+Esta fase no modifica disponibilidad, reservas, textos al candidato, consentimiento,
+CV, perfil, recordatorios, permisos, asistencia ni ninguna lógica relacionada con
+género.

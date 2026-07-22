@@ -36,8 +36,10 @@ import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/reply
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
 import {
+  CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS,
   pauseCandidateAutomationFromAdmin,
   recordManualWhatsAppOpen,
+  reflectCandidateAdminInterviewProgress,
   resumeCandidateAutomationFromAdmin
 } from '../services/candidateStateService.js';
 import { listOfferableSlots, createBooking, formatInterviewDate } from '../services/interviewScheduler.js';
@@ -2279,7 +2281,10 @@ export function adminRouter(prisma) {
       where: { id },
       select: {
         id: true,
-        candidateId: true
+        candidateId: true,
+        candidate: {
+          select: { currentStep: true }
+        }
       }
     });
 
@@ -2305,16 +2310,10 @@ export function adminRouter(prisma) {
         select: { id: true }
       });
 
-      if (!remainingActiveBooking) {
-        await tx.candidate.update({
-          where: { id: booking.candidateId },
-          data: {
-            currentStep: ConversationStep.SCHEDULING
-          }
-        });
-      }
-
-      return { deleted: true };
+      return {
+        deleted: true,
+        shouldReflectProgress: !remainingActiveBooking
+      };
     });
 
     if (!deletionResult.deleted) {
@@ -2325,7 +2324,38 @@ export function adminRouter(prisma) {
       ));
     }
 
-    return res.redirect(withFlashMessage(returnTo, 'success', 'Agendamiento eliminado correctamente.'));
+    let progressTransition = null;
+    if (deletionResult.shouldReflectProgress) {
+      try {
+        progressTransition = await reflectCandidateAdminInterviewProgress(prisma, {
+          candidateId: booking.candidateId,
+          action: CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.LAST_BOOKING_DELETED,
+          expected: { currentStep: booking.candidate.currentStep },
+          actor: req.username || req.userRole || 'dev',
+          reason: 'Última entrevista activa eliminada desde administración'
+        });
+      } catch (progressError) {
+        console.error('[admin_interview_delete_progress_update]', {
+          candidateId: booking.candidateId,
+          expectedStep: booking.candidate.currentStep,
+          progressError
+        });
+        progressTransition = { count: 0, candidate: null, error: progressError };
+      }
+
+      if (progressTransition.count !== 1) {
+        console.warn('[admin_interview_delete_progress_conflict]', {
+          candidateId: booking.candidateId,
+          expectedStep: booking.candidate.currentStep,
+          observedStep: progressTransition.candidate?.currentStep || null
+        });
+      }
+    }
+
+    const successMessage = deletionResult.shouldReflectProgress && progressTransition?.count !== 1
+      ? 'Agendamiento eliminado correctamente. El progreso del candidato cambió en paralelo y se conservó su estado más reciente.'
+      : 'Agendamiento eliminado correctamente.';
+    return res.redirect(withFlashMessage(returnTo, 'success', successMessage));
   });
 
   router.post('/candidates/:id/interview-assign', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
@@ -2341,6 +2371,7 @@ export function adminRouter(prisma) {
         where: { id },
         select: {
           id: true,
+          currentStep: true,
           vacancyId: true,
           lastInboundAt: true,
           vacancy: {
@@ -2391,29 +2422,30 @@ export function adminRouter(prisma) {
         !chosenOffer.windowOk
       );
 
+      let progressTransition = null;
       try {
-        await prisma.candidate.update({
-          where: { id: candidate.id },
-          data: { currentStep: ConversationStep.SCHEDULED }
-        });
-      } catch (stepError) {
-        console.error('[manual_interview_assign_step_update]', {
+        progressTransition = await reflectCandidateAdminInterviewProgress(prisma, {
           candidateId: candidate.id,
-          preferredStep: ConversationStep.SCHEDULED,
-          stepError
+          action: CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.MANUAL_BOOKING_CREATED,
+          expected: { currentStep: candidate.currentStep },
+          actor: req.username || req.userRole || 'dev',
+          reason: 'Entrevista asignada manualmente desde administración'
         });
-        try {
-          await prisma.candidate.update({
-            where: { id: candidate.id },
-            data: { currentStep: ConversationStep.SCHEDULING }
-          });
-        } catch (fallbackStepError) {
-          console.error('[manual_interview_assign_step_update_fallback]', {
-            candidateId: candidate.id,
-            fallbackStep: ConversationStep.SCHEDULING,
-            fallbackStepError
-          });
-        }
+      } catch (progressError) {
+        console.error('[manual_interview_assign_progress_update]', {
+          candidateId: candidate.id,
+          expectedStep: candidate.currentStep,
+          progressError
+        });
+        progressTransition = { count: 0, candidate: null, error: progressError };
+      }
+
+      if (progressTransition.count !== 1) {
+        console.warn('[manual_interview_assign_progress_conflict]', {
+          candidateId: candidate.id,
+          expectedStep: candidate.currentStep,
+          observedStep: progressTransition.candidate?.currentStep || null
+        });
       }
 
       await logCandidateAdminEvent(prisma, {
@@ -2421,10 +2453,15 @@ export function adminRouter(prisma) {
         actorRole: req.userRole,
         eventType: 'INTERVIEW_ASSIGNED',
         eventLabel: 'Asignó entrevista manualmente',
-        note: chosenOffer.formattedDate
+        note: progressTransition.count === 1
+          ? chosenOffer.formattedDate
+          : `${chosenOffer.formattedDate}. El progreso conversacional cambió en paralelo y se conservó.`
       });
 
-    return res.redirect(withFlashMessage(returnTo, 'success', `Entrevista asignada para ${chosenOffer.formattedDate}.`));
+      const assignmentMessage = progressTransition.count === 1
+        ? `Entrevista asignada para ${chosenOffer.formattedDate}.`
+        : `Entrevista asignada para ${chosenOffer.formattedDate}. El progreso del candidato cambió en paralelo y se conservó su estado más reciente.`;
+      return res.redirect(withFlashMessage(returnTo, 'success', assignmentMessage));
     } catch (error) {
       console.error('[manual_interview_assign]', {
         candidateId: id,

@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 9,
-  "phase": "silent_profile_capture_authority_migrated",
+  "schemaVersion": 10,
+  "phase": "admin_interview_progress_authority_migrated",
   "aggregate": "Candidate",
   "migrationTarget": "src/services/candidateStateService.js",
   "trackedFields": [
@@ -34,7 +34,8 @@
     "conversation_engine_explicit_pause_authority",
     "consent_step_authority",
     "vacancy_first_gate_authority",
-    "silent_profile_capture_authority"
+    "silent_profile_capture_authority",
+    "admin_interview_progress_authority"
   ],
   "sourceInventory": [
     {
@@ -53,7 +54,7 @@
         "multilineWindowUntil",
         "multilineBatchVersion"
       ],
-      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate y captura silenciosa mediante contratos estrechos y compare-and-set."
+      "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa y reflejos administrativos de entrevista mediante contratos estrechos y compare-and-set."
     },
     {
       "path": "src/services/conversationEngine.js",
@@ -98,11 +99,11 @@
     },
     {
       "path": "src/routes/admin.js",
-      "role": "direct_writer",
+      "role": "indirect_writer",
       "trackedFields": [
         "currentStep"
       ],
-      "notes": "Contiene operaciones administrativas explícitas que pueden corregir o reiniciar el paso."
+      "notes": "Lee currentStep para panel y acciones administrativas; los reflejos de asignación y eliminación de entrevistas delegan en CandidateStateService con actor, motivo y origen esperado."
     },
     {
       "path": "src/services/vacancyFirstGate.js",
@@ -386,33 +387,28 @@
       ]
     },
     {
-      "id": "admin_progress_override",
+      "id": "admin_interview_progress_reflection",
       "owners": [
         "src/routes/admin.js"
       ],
       "writers": [
-        "src/routes/admin.js"
+        "src/services/candidateStateService.js"
       ],
       "origins": [
         "*"
       ],
       "destinations": [
-        "MENU",
-        "GREETING_SENT",
-        "COLLECTING_DATA",
-        "CONFIRMING_DATA",
-        "ASK_CV",
-        "DONE",
         "SCHEDULING",
         "SCHEDULED"
       ],
       "allowedFields": [
         "currentStep"
       ],
-      "trigger": "Corrección o reinicio explícito realizado desde el panel administrativo.",
-      "concurrency": "La autorización de acceso se valida, pero la corrección de progreso aún no exige el snapshot anterior.",
-      "idempotency": "Repetir el mismo valor converge; una futura autoridad debe registrar actor, origen esperado y motivo.",
+      "trigger": "Asignación manual de entrevista o eliminación administrativa de la última reserva activa.",
+      "concurrency": "CandidateStateService compara candidateId y currentStep observado; count cero conserva el paso más reciente sin revertir la mutación canónica de InterviewBooking.",
+      "idempotency": "Cada acción fija su destino y no acepta nextStep arbitrario; repetir con un snapshot obsoleto devuelve count cero.",
       "externalEffects": [
+        "interview_booking_transition",
         "admin_audit"
       ]
     }
@@ -464,7 +460,7 @@
   ],
   "nextMigrationSlices": [
     "migrar las demás ramas legacy del webhook por familias pequeñas",
-    "migrar correcciones administrativas con actor, motivo y origen esperado"
+    "migrar reflejos de agenda y vacantes pausadas en chatEngine"
   ],
   "stepContracts": [
     {
@@ -520,6 +516,32 @@
       "concurrency": "updateMany compara id y currentStep dentro de la transacción del consentimiento.",
       "idempotency": "Permite el mismo paso para registrar un nuevo evento; un snapshot obsoleto devuelve count cero.",
       "conflictPolicy": "ConsentStateService revierte candidato y evento; dataConsentGate no captura perfil ni envía respuesta obsoleta."
+    },
+    {
+      "id": "admin_interview_progress_reflection",
+      "owner": "src/services/candidateStateService.js",
+      "consumer": "src/routes/admin.js",
+      "status": "canonical",
+      "actions": {
+        "MANUAL_BOOKING_CREATED": "SCHEDULED",
+        "LAST_BOOKING_DELETED": "SCHEDULING"
+      },
+      "allowedFields": [
+        "currentStep"
+      ],
+      "preconditions": [
+        "candidateId requerido",
+        "currentStep esperado válido",
+        "acción administrativa conocida",
+        "actor y motivo no vacíos",
+        "nextStep arbitrario prohibido"
+      ],
+      "mutation": {
+        "currentStep": "destino fijo derivado de la acción"
+      },
+      "concurrency": "updateMany compara id y currentStep; count cero conserva el estado vigente.",
+      "idempotency": "La misma acción converge si el snapshot coincide; una carrera no se presenta como transición aplicada.",
+      "conflictPolicy": "La reserva permanece creada o eliminada por su autoridad; administración informa que conservó el progreso concurrente."
     }
   ],
   "compositeContracts": [
