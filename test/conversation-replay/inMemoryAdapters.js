@@ -126,6 +126,20 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     return structuredClone(updated);
   }
 
+  function updateConversationPendingFields({ tenantContext, pendingFields, source }) {
+    validateContext(tenantContext);
+    if (!Array.isArray(pendingFields)) throw new Error('pending_fields_array_required');
+    conversationState.pendingFields = [...pendingFields];
+    auditEvents.push({
+      type: 'CONVERSATION_PENDING_FIELDS_UPDATED',
+      tenantId: tenantContext.tenantId,
+      pendingFields: [...pendingFields],
+      source,
+      recordedAt: now
+    });
+    return structuredClone(conversationState);
+  }
+
   function createConsentEvent({ tenantContext, requestedCandidateId, event }) {
     validateContext(tenantContext);
     assertNonEmptyString(requestedCandidateId, 'candidateId');
@@ -303,6 +317,7 @@ export function createInMemoryReplayAdapters(fixture, options = {}) {
     claimInbound,
     readCandidate,
     updateCandidate,
+    updateConversationPendingFields,
     createConsentEvent,
     persistOutbound,
     readOutbound,

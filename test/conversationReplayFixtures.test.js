@@ -184,7 +184,7 @@ function validateFixture(fixture, label) {
 
 test('el corpus conversacional contiene fixtures válidos, versionados y con proveedores simulados', () => {
   const entries = loadConversationFixtures();
-  assert.ok(entries.length >= 6, 'el corpus debe incluir al menos seis escenarios protegidos');
+  assert.ok(entries.length >= 8, 'el corpus debe incluir al menos ocho escenarios protegidos');
 
   const fixtureIds = new Set();
   const inboundMessageIds = new Set();

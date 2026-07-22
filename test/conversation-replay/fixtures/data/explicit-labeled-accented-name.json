@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-test-name-001",
+      "status": "EN_PROCESO",
+      "currentStep": "COLLECTING_DATA",
+      "dataConsentStatus": "ACCEPTED",
+      "vacancyId": "vacancy-test-name-capture",
+      "fullName": null,
+      "documentType": null
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-test-name-capture",
+      "isActive": true,
+      "acceptingApplications": true,
+      "city": "Ibagué",
+      "title": "Auxiliar de cargue y descargue"
+    },
+    "pendingFields": [
+      "fullName",
+      "documentType"
+    ]
+  },
+  "id": "data-explicit-labeled-accented-name-v1",
+  "title": "Lórren conserva un nombre completo etiquetado con tildes y eñe",
+  "providerStubs": {
+    "aiResult": {
+      "status": "ok",
+      "intent": "provide_data",
+      "parsedFields": {
+        "fullName": "José Ángel Peña"
+      },
+      "extraction": {
+        "turnType": "DATA",
+        "fieldEvidence": {
+          "fullName": {
+            "snippet": "José Ángel Peña",
+            "confidence": 0.99,
+            "source": "structured_output"
+          }
+        },
+        "conflicts": []
+      }
+    }
+  },
+  "history": [],
+  "inbound": {
+    "messageId": "test-message-data-name-001",
+    "type": "text",
+    "body": "Nombre completo: José Ángel Peña"
+  },
+  "expected": {
+    "interpretation": {
+      "intent": "PROVIDE_CANDIDATE_DATA",
+      "additionalIntents": [],
+      "consentDecision": null,
+      "providedFields": {
+        "fullName": "José Ángel Peña"
+      }
+    },
+    "plan": {
+      "actions": [
+        {
+          "type": "SAVE_CANDIDATE_FIELDS",
+          "data": {
+            "fields": {
+              "fullName": "José Ángel Peña"
+            }
+          }
+        },
+        {
+          "type": "ACKNOWLEDGE_DATA"
+        },
+        {
+          "type": "RESUME_PENDING_FIELD",
+          "data": {
+            "field": "documentType"
+          }
+        }
+      ],
+      "allowedWrites": [
+        "candidate.fullName",
+        "conversation.pendingFields",
+        "candidate.lastOutboundAt",
+        "message.outbound"
+      ],
+      "forbiddenWrites": [
+        "candidate.documentType",
+        "candidate.currentStep",
+        "candidate.vacancyId"
+      ],
+      "nextStep": "COLLECTING_DATA",
+      "pendingField": "documentType"
+    },
+    "response": {
+      "requiredFacts": [
+        "Debe reconocer el nombre José Ángel Peña",
+        "Debe continuar con el tipo de documento sin volver a pedir el nombre"
+      ],
+      "forbiddenClaims": [
+        "El documento ya fue registrado",
+        "La postulación ya quedó completa"
+      ],
+      "requiredText": [
+        "José Ángel Peña",
+        "tipo de documento"
+      ],
+      "forbiddenText": [
+        "nombre completo nuevamente",
+        "postulación completa"
+      ]
+    },
+    "finalState": {
+      "currentStep": "COLLECTING_DATA",
+      "fullName": "José Ángel Peña",
+      "documentType": null,
+      "pendingFields": [
+        "documentType"
+      ]
+    }
+  }
+}

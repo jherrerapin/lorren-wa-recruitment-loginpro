@@ -10,6 +10,7 @@ const CANONICAL_INTENT_BY_RUNTIME = Object.freeze({
   continue_application: 'CONTINUE_APPLICATION',
   ask_vacancy_schedule: 'ASK_VACANCY_SCHEDULE',
   provide_correction: 'CORRECT_CANDIDATE_DATA',
+  provide_data: 'PROVIDE_CANDIDATE_DATA',
   accept_data_consent: 'ACCEPT_DATA_CONSENT',
   reject_data_consent: 'REJECT_DATA_CONSENT',
   send_attachment: 'SEND_ATTACHMENT'
