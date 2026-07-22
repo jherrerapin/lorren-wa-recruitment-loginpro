@@ -8,6 +8,7 @@
 import { isSuspiciousFullName } from './debugTrace.js';
 import { normalizeBogotaLocalidad } from './geographyNormalization.js';
 import { normalizeTransportMode as deterministicNormalizeTransportMode } from './transportMode.js';
+import { extractExplicitAge, isWorkDurationNumber, isWorkMetricNumber } from './ageEvidence.js';
 
 const NAME_TOKEN_REGEX = /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/;
 const IMPLICIT_NEIGHBORHOODS = new Set([
@@ -304,20 +305,7 @@ function detectExplicitGender(text = '') {
 }
 
 function detectContextualAge(text = '') {
-  const compact = normalizeLooseText(text);
-  if (!compact) return null;
-
-  const ageWithYears = compact.match(/\b(\d{1,2})\s*anos\b(?!\s+de\s+experiencia)/i);
-  const explicit = compact.match(/\b(?:mi\s+edad\s+es|edad\s*(?:es|:)?|tengo|soy\s+de)\s*(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?\b(?!\s+de\s+experiencia)/i);
-  const fallback = !/experien/i.test(compact) && !hasAddressLikeContext(compact)
-    ? compact.match(/^\D*(\d{1,2})(?:\s*anos(?:\s+de\s+edad)?)?\D*$/i)
-    : null;
-  const rawAge = ageWithYears?.[1] || explicit?.[1] || fallback?.[1];
-  if (!rawAge) return null;
-
-  const age = Number.parseInt(rawAge, 10);
-  if (!Number.isFinite(age) || age < 14 || age > 80) return null;
-  return age;
+  return extractExplicitAge(text);
 }
 
 function detectAgeFromSequence(text = '') {
@@ -388,6 +376,7 @@ function detectStandaloneAge(text = '') {
 
     const age = Number.parseInt(token, 10);
     if (!Number.isFinite(age) || age < 14 || age > 80) continue;
+    if (isWorkDurationNumber(age, text) || isWorkMetricNumber(age, text)) continue;
 
     const previous = normalizeLooseText(tokens[index - 1] || '');
     const next = normalizeLooseText(tokens[index + 1] || '');
@@ -560,7 +549,7 @@ function detectRobustExperienceTime(text = '') {
   }
 
   const durationRegex = /\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/gi;
-  const hasGlobalWorkContext = /\b(experien|trabaj|labor|cargo|oficio)\b/.test(compact);
+  const hasGlobalWorkContext = /\b(experien|trabaj|labor|cargo|oficio|operaci|logistic|personal|coordin|turno)\b/.test(compact);
   const hasShortAffirmativeContext = /\bsi\s+tengo\s+/.test(compact);
   let bestDuration = null;
   let bestScore = -1;
@@ -578,7 +567,7 @@ function detectRobustExperienceTime(text = '') {
       && !/\b(experien|trabaj|labor|cargo|oficio)\b/.test(nearContext);
     if (looksLikeAgeSnippet) continue;
 
-    const hasLocalWorkContext = /\b(experien|trabaj|labor|cargo|oficio)\b/.test(nearContext);
+    const hasLocalWorkContext = /\b(experien|trabaj|labor|cargo|oficio|operaci|logistic|personal|coordin|turno)\b/.test(nearContext);
     const startsText = start < 2;
     const looksStandaloneYears = durationUnitLooksLikeYears && startsText && !hasLocalWorkContext;
     let score = hasLocalWorkContext ? 3 : (hasShortAffirmativeContext ? 2 : (hasGlobalWorkContext ? 1 : 0));

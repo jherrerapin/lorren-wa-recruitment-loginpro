@@ -12,6 +12,7 @@
  */
 
 import { hasAmbiguousGenderEvidence, hasStrongGenderEvidence } from './genderEvidencePolicy.js';
+import { classifyAgeEvidence } from './ageEvidence.js';
 
 const DEFAULT_MIN_CONFIDENCE = 0.72;
 const CORE_IDENTITY_FIELDS = new Set(['fullName', 'documentType', 'documentNumber', 'age']);
@@ -374,16 +375,15 @@ function sanitizeDocumentType(value) {
   return { ok: true };
 }
 
-function sanitizeAge(value, text) {
+function sanitizeAge(value, text, context = {}) {
   if (!/^\d+$/.test(String(value || '').trim())) return { ok: false, reason: 'invalid_numeric_value' };
   const age = Number(value);
   if (!Number.isInteger(age) || age < 14 || age > 80) return { ok: false, reason: 'invalid_age_range' };
-  if (/\b(calle|carrera|cra|cl|avenida|av|km|kilometro)\s+\d{1,3}\b/i.test(text)) {
-    const normalized = normalizeText(text);
-    if (!/\b(edad|tengo|anos|ano)\b/.test(normalized)) return { ok: false, reason: 'address_number_not_age' };
-  }
-  if (hasExperienceEvidence(text) && !hasAgeEvidence(text)) return { ok: false, reason: 'experience_number_not_age' };
-  return { ok: true };
+
+  const allowStandalone = fieldWasPending('age', context) || lastQuestionAskedForField('age', context);
+  const evidence = classifyAgeEvidence(age, text, { allowStandalone });
+  if (!evidence.valid) return { ok: false, reason: evidence.reason };
+  return { ok: true, value: age };
 }
 
 function evaluateField(field, value, evidence, text, context, turnType) {
@@ -395,7 +395,7 @@ function evaluateField(field, value, evidence, text, context, turnType) {
   if (field === 'gender') return sanitizeGender(value, evidence, text, context, turnType);
   if (field === 'documentNumber') return sanitizeDocumentNumber(value);
   if (field === 'documentType') return sanitizeDocumentType(value);
-  if (field === 'age') return sanitizeAge(value, text);
+  if (field === 'age') return sanitizeAge(value, text, context);
 
   return { ok: true };
 }
