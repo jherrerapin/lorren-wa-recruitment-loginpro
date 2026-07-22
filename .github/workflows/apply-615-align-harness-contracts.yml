@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   apply-and-characterize:
-    if: github.head_ref == 'test/615-align-harness-contracts'
+    if: github.head_ref == 'fix/615-repair-merged-harness-alignment'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch
