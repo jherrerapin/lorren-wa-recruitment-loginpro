@@ -58,7 +58,7 @@
               window.location.replace(payload.redirectTo || '/operaciones/portal');
             })
             .catch(() => {
-              status.textContent = 'No fue posible activar este dispositivo. El enlace puede haber vencido o ya fue utilizado.';
+              status.textContent = 'No fue posible activar este dispositivo. El enlace puede haber vencido o el portal puede estar temporalmente no disponible.';
               status.classList.add('warning');
             });
         })();
@@ -70,6 +70,10 @@
       <% if (expiresAt) { %>
         <p class="meta">La sesión tiene vencimiento automático y puede revocarse desde Lórren.</p>
       <% } %>
+    <% } else if (mode === 'unavailable') { %>
+      <h1>Portal temporalmente no disponible</h1>
+      <p>No pudimos validar la sesión en este momento. Tu dispositivo no fue desactivado por esta pantalla.</p>
+      <div class="status warning">Intenta abrir el enlace nuevamente más tarde</div>
     <% } else { %>
       <h1>Acceso no activo</h1>
       <p>Este dispositivo no tiene una sesión vigente. Abre el enlace seguro enviado por Lórren o solicita uno nuevo.</p>
