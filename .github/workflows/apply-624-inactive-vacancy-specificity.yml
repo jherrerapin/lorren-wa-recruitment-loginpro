@@ -1,0 +1,89 @@
+name: Validate inactive vacancy specificity
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-characterize:
+    if: github.head_ref == 'fix/624-inactive-vacancy-specificity'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply exact resolver patch
+        run: node scripts/apply-624-inactive-vacancy-specificity.mjs
+
+      - name: Validate syntax
+        run: |
+          node --check src/services/vacancyResolver.js
+          node --check test/inactiveVacancySpecificity.test.js
+
+      - name: Run focused specificity regressions
+        run: node --test test/inactiveVacancySpecificity.test.js
+
+      - name: Run existing vacancy resolver regressions
+        run: node --test test/vacancyResolver.test.js test/leaderVacancyResolution.test.js test/cityVacancyCrossAssignment.test.js
+
+      - name: Commit generated resolver patch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/services/vacancyResolver.js
+            git commit -m "fix: priorizar vacante inactiva específica"
+            git push origin "HEAD:${HEAD_REF}"
+          fi
+
+      - name: Characterize harness after resolver repair
+        run: |
+          mkdir -p diagnostics
+          set +e
+          node --test test/conversation-harness.test.js > diagnostics/624-harness.tap 2>&1
+          status=$?
+          set -e
+          grep -E '^    not ok [0-9]+ - ' diagnostics/624-harness.tap | sed 's/^    //' > diagnostics/624-remaining-failures.txt || true
+          count=$(wc -l < diagnostics/624-remaining-failures.txt | tr -d ' ')
+          printf 'status=%s\nremaining_failures=%s\nprevious_failures=18\n' "$status" "$count" > diagnostics/624-harness-summary.txt
+          if grep -q 'inactive-vacancy-offers-registration-for-future-openings' diagnostics/624-remaining-failures.txt; then
+            echo "Target inactive vacancy scenario still fails."
+            exit 1
+          fi
+          if [ "$count" -gt 17 ]; then
+            echo "Resolver repair did not reduce the harness corpus."
+            exit 1
+          fi
+
+      - name: Commit harness characterization
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add diagnostics/624-harness.tap diagnostics/624-remaining-failures.txt diagnostics/624-harness-summary.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "test: caracterizar harness después de #624"
+            git push origin "HEAD:${HEAD_REF}"
+          fi
+
+      - name: Run conversation replays
+        run: |
+          node --test test/conversationReplayFixtures.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js test/conversationReplayIntegral.test.js test/conversationReplayRecovery.test.js
