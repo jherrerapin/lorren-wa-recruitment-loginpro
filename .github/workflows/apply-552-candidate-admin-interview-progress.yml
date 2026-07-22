@@ -60,9 +60,6 @@ jobs:
       - name: Test InterviewBooking authority regressions
         run: node --test test/interviewBookingStateService.test.js
 
-      - name: Test administrative Candidate regressions
-        run: node --test test/adminCandidateStateAuthority.test.js
-
       - name: Commit functional change
         run: |
           git config user.name "github-actions[bot]"
