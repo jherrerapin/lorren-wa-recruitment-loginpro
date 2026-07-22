@@ -1,21 +1,28 @@
 name: Apply Candidate admin interview progress authority
 
 on:
-  push:
+  pull_request:
     branches:
-      - refactor/552-candidate-admin-interview-progress-authority
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   apply-and-validate:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.head_ref == 'refactor/552-candidate-admin-interview-progress-authority'
+      && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
+          ref: refactor/552-candidate-admin-interview-progress-authority
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -57,4 +64,4 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m "refactor: centralizar progreso administrativo de entrevistas (#552)"
-          git push
+          git push origin HEAD:refactor/552-candidate-admin-interview-progress-authority
