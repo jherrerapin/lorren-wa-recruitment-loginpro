@@ -27,12 +27,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Apply exact resolver patch
+      - name: Apply exact resolver and gate patch
         run: node scripts/apply-624-inactive-vacancy-specificity.mjs
 
       - name: Validate syntax
         run: |
           node --check src/services/vacancyResolver.js
+          node --check src/services/vacancyFirstGate.js
           node --check test/inactiveVacancySpecificity.test.js
 
       - name: Validate specific inactive preference
@@ -46,6 +47,9 @@ jobs:
 
       - name: Validate city boundary
         run: node --test --test-name-pattern="otra ciudad nunca cruza" test/inactiveVacancySpecificity.test.js
+
+      - name: Validate inactive gate persistence
+        run: node --test --test-name-pattern="compuerta incluye vacancyId" test/inactiveVacancySpecificity.test.js
 
       - name: Capture integral future registration result
         run: |
@@ -62,9 +66,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/services/vacancyResolver.js diagnostics/624-integration.tap diagnostics/624-integration-summary.txt
+          git add src/services/vacancyResolver.js src/services/vacancyFirstGate.js diagnostics/624-integration.tap diagnostics/624-integration-summary.txt
           if ! git diff --cached --quiet; then
-            git commit -m "fix: priorizar vacante inactiva específica"
+            git commit -m "fix: priorizar y persistir vacante inactiva específica"
             git push origin "HEAD:${HEAD_REF}"
           fi
 
@@ -73,8 +77,8 @@ jobs:
           cat diagnostics/624-integration.tap
           grep -q '^status=0$' diagnostics/624-integration-summary.txt
 
-      - name: Run existing vacancy resolver regressions
-        run: node --test test/vacancyResolver.test.js test/leaderVacancyResolution.test.js test/cityVacancyCrossAssignment.test.js
+      - name: Run existing vacancy and gate regressions
+        run: node --test test/vacancyResolver.test.js test/leaderVacancyResolution.test.js test/cityVacancyCrossAssignment.test.js test/candidateVacancyFirstGateStateService.test.js test/webhookVacancyFirstGateAuthority.test.js
 
       - name: Characterize harness after resolver repair
         run: |
