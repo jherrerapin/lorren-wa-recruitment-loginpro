@@ -30,7 +30,7 @@ test('dispatch clients operations contracts', () => {
   assert.match(server, /app\.use\('\/admin\/operaciones', wrapAsyncRouter\(dispatchOpsExtrasRouter\(prisma\)\)\)/);
   assert.match(server, /app\.use\('\/admin\/operaciones', dispatchErrorHandler\('\/admin\/operaciones'\)\)/);
 
-  ['worker-list', 'max-height', 'request-list', 'Clientes', 'Solicitudes de servicio', 'Crear solicitud interna'].forEach((s) => assert.match(view, new RegExp(s)));
+  ['worker-list', 'max-height', 'request-list', 'Clientes', 'Crear solicitud', 'Crear solicitud interna'].forEach((s) => assert.match(view, new RegExp(s)));
   assert.match(view, /overflow-y:\s*auto/);
 
   const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
@@ -45,4 +45,21 @@ test('dispatch clients operations contracts', () => {
   ['src/views/operacionesClientes.ejs','src/views/operacionesClienteOperaciones.ejs','src/views/publicDispatchRequest.ejs','src/views/operacionesPersonalNuevo.ejs','src/views/operacionesSolicitudEditar.ejs'].forEach((f)=>assert.ok(fs.existsSync(f)));
   assert.doesNotMatch(route, /webhook/i);
   assert.doesNotMatch(route, /conversationEngine/i);
+});
+
+
+test('dispatch action labels describe their actual destinations', () => {
+  const dashboard = fs.readFileSync('src/views/operacionesDashboard.ejs', 'utf8');
+  const clients = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
+  const assignment = fs.readFileSync('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8');
+  const legacyAssignment = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+  const clientOperations = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
+  const creationLink = /href="\/admin\/operaciones\/solicitudes">Crear solicitud<\/a>/;
+
+  [dashboard, clients, assignment, legacyAssignment].forEach((view) => {
+    assert.match(view, creationLink);
+    assert.doesNotMatch(view, /href="\/admin\/operaciones\/solicitudes">Solicitudes de servicio<\/a>/);
+  });
+  assert.match(dashboard, /Abre el formulario para registrar una nueva solicitud operativa\./);
+  assert.match(clientOperations, /href="\/admin\/operaciones\/asignaciones">Ir a asignación<\/a>/);
 });
