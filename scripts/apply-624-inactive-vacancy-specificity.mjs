@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const file = 'src/services/vacancyResolver.js';
-let source = readFileSync(file, 'utf8');
+const resolverFile = 'src/services/vacancyResolver.js';
+let resolverSource = readFileSync(resolverFile, 'utf8');
 
 const helperAnchor = `function baseVacancyResolution(overrides = {}) {
   return { vacancy: null, requiresRelocation: false, ambiguous: false, options: [], source: 'text_inference_fallback', fallback: true, ...overrides };
@@ -16,10 +16,10 @@ const helperReplacement = `function shouldPreferSpecificInactiveMatch(activeMatc
 
 ${helperAnchor}`;
 
-if (!source.includes('function shouldPreferSpecificInactiveMatch(')) {
-  const count = source.split(helperAnchor).length - 1;
+if (!resolverSource.includes('function shouldPreferSpecificInactiveMatch(')) {
+  const count = resolverSource.split(helperAnchor).length - 1;
   if (count !== 1) throw new Error(`helper anchor count=${count}`);
-  source = source.replace(helperAnchor, helperReplacement);
+  resolverSource = resolverSource.replace(helperAnchor, helperReplacement);
 }
 
 const oldResolutionBlock = `  const { best, runnerUp, margin } = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint, operationZones });
@@ -36,11 +36,26 @@ const newResolutionBlock = `  const activeMatch = pickBestVacancyMatch(matchingC
   }
   if (!best || best.score < effectiveThreshold || !activeHasRoleEvidence) {`;
 
-if (!source.includes(newResolutionBlock)) {
-  const count = source.split(oldResolutionBlock).length - 1;
+if (!resolverSource.includes(newResolutionBlock)) {
+  const count = resolverSource.split(oldResolutionBlock).length - 1;
   if (count !== 1) throw new Error(`resolution block count=${count}`);
-  source = source.replace(oldResolutionBlock, newResolutionBlock);
+  resolverSource = resolverSource.replace(oldResolutionBlock, newResolutionBlock);
 }
 
-writeFileSync(file, source, 'utf8');
-console.log('Inactive vacancy specificity patch applied for #624.');
+writeFileSync(resolverFile, resolverSource, 'utf8');
+
+const gateFile = 'src/services/vacancyFirstGate.js';
+let gateSource = readFileSync(gateFile, 'utf8');
+const oldGateUpdate = `      candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
+      reply: buildInactiveVacancyReply(resolution.vacancy, resolution.city, inboundText),`;
+const newGateUpdate = `      candidateUpdates: { vacancyId: resolution.vacancy.id, currentStep: GREETING_SENT, botResumeMode: PAUSED_VACANCY_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
+      reply: buildInactiveVacancyReply(resolution.vacancy, resolution.city, inboundText),`;
+
+if (!gateSource.includes(newGateUpdate)) {
+  const count = gateSource.split(oldGateUpdate).length - 1;
+  if (count !== 1) throw new Error(`inactive gate update count=${count}`);
+  gateSource = gateSource.replace(oldGateUpdate, newGateUpdate);
+}
+
+writeFileSync(gateFile, gateSource, 'utf8');
+console.log('Inactive vacancy specificity and gate persistence patch applied for #624.');
