@@ -1,3 +1,4 @@
+import { ReminderState } from '@prisma/client';
 import { buildFutureSlot } from '../helpers/mockScheduler.js';
 
 const OP_IBA = {
@@ -78,7 +79,7 @@ function candidateDefaults(overrides = {}) {
     cvData: null,
     cvOriginalName: null,
     cvMimeType: null,
-    reminderState: 'PENDING',
+    reminderState: ReminderState.NONE,
     reminderScheduledFor: null,
     botPaused: false,
     botPausedAt: null,
