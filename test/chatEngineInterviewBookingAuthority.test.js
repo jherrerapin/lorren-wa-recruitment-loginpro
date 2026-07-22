@@ -64,12 +64,16 @@ test('la reserva se transiciona antes del CAS y un conflicto suprime la respuest
   assert.match(handler, /candidateProgressConflict:\s*true/);
 });
 
-test('cancelación conserva la limpieza de recordatorio del candidato', () => {
+test('cancelación delega la limpieza del recordatorio y conserva la respuesta canónica', () => {
   const cancelStart = handler.indexOf("if (intent === 'cancel_interview')");
   const rescheduleStart = handler.indexOf("if (intent === 'reschedule_interview')");
   assert.ok(cancelStart >= 0 && rescheduleStart > cancelStart, 'No se encontraron las ramas de cancelación y reprogramación.');
   const cancelBranch = handler.slice(cancelStart, rescheduleStart);
 
-  assert.match(cancelBranch, /reminderScheduledFor:\s*null/);
-  assert.match(cancelBranch, /reminderState:\s*['"]SKIPPED['"]/);
+  assert.match(cancelBranch, /reflectCandidateInterviewCancellationReminder/);
+  assert.match(cancelBranch, /STALE_CANDIDATE_CANCELLATION_REMINDER/);
+  assert.match(cancelBranch, /candidateReminderConflict/);
+  assert.match(cancelBranch, /Listo, ya registré la cancelación de tu entrevista/);
+  assert.doesNotMatch(cancelBranch, /prisma\.candidate\.update\s*\(/);
+  assert.doesNotMatch(cancelBranch, /suppressed:\s*true/);
 });

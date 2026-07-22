@@ -3,7 +3,10 @@ import { ConversationStep } from '@prisma/client';
 import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
 import { getNextAvailableSlotAfter, formatInterviewDate } from './interviewScheduler.js';
 import { applyInterviewReminderResponse } from './interviewBookingStateService.js';
-import { reflectCandidateInterviewRescheduleProgress } from './candidateStateService.js';
+import {
+  reflectCandidateInterviewCancellationReminder,
+  reflectCandidateInterviewRescheduleProgress
+} from './candidateStateService.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 import { guardReplyAgainstReadinessDrift, sanitizeOutboundReply } from './replySafety.js';
 import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
@@ -152,19 +155,34 @@ async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inb
   }
 
   if (intent === 'cancel_interview') {
-    await prisma.candidate.update({
-      where: { id: candidate.id },
-      data: {
-        reminderScheduledFor: null,
-        reminderState: 'SKIPPED'
+    const reminderTransition = await reflectCandidateInterviewCancellationReminder(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        reminderScheduledFor: candidate.reminderScheduledFor ?? null,
+        reminderState: candidate.reminderState
       }
     });
-    return buildEngineHandledResult({
-      currentStep,
-      intent,
-      classification,
-      reply: 'Listo, ya registré la cancelación de tu entrevista. Si más adelante deseas retomarla, me escribes por aquí.'
-    });
+    const candidateReminderConflict = reminderTransition.count !== 1;
+
+    if (candidateReminderConflict) {
+      const observedCandidate = reminderTransition.candidate || candidate;
+      console.warn('[STALE_CANDIDATE_CANCELLATION_REMINDER]', JSON.stringify({
+        candidateId: candidate.id,
+        bookingId: booking.id,
+        expectedReminderState: candidate.reminderState || null,
+        observedReminderState: observedCandidate?.reminderState || null
+      }));
+    }
+
+    return {
+      ...buildEngineHandledResult({
+        currentStep,
+        intent,
+        classification,
+        reply: 'Listo, ya registré la cancelación de tu entrevista. Si más adelante deseas retomarla, me escribes por aquí.'
+      }),
+      candidateReminderConflict
+    };
   }
 
   if (intent === 'reschedule_interview') {
