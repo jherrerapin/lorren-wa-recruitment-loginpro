@@ -75,3 +75,5 @@ jobs:
           git add -A
           git commit -m "fix: persistir confirmaciones de WhatsApp despacho (#557)"
           git push origin HEAD:fix/557-persistent-dispatch-whatsapp
+
+# Diagnostic runner trigger after base workflow update.
