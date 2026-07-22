@@ -871,6 +871,92 @@ export async function completeCandidateRequirementRejection(client, input = {}) 
 }
 
 
+
+const CANDIDATE_INTERVIEW_RESCHEDULE_PROGRESS_ORIGINS = new Set([
+  ConversationStep.SCHEDULING,
+  ConversationStep.SCHEDULED
+]);
+
+function normalizeCandidateInterviewRescheduleProgressSnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_interview_reschedule_snapshot_required');
+  }
+
+  const currentStep = requireConversationStep(
+    expected.currentStep,
+    'candidate_interview_reschedule_expected_current_step'
+  );
+  if (!CANDIDATE_INTERVIEW_RESCHEDULE_PROGRESS_ORIGINS.has(currentStep)) {
+    throw new TypeError('candidate_interview_reschedule_expected_step_invalid');
+  }
+
+  return {
+    currentStep,
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_interview_reschedule_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_interview_reschedule_expected_reminder_state'
+    )
+  };
+}
+
+function candidateInterviewRescheduleProgressExpectedWhere(snapshot) {
+  return {
+    currentStep: snapshot.currentStep,
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function reflectCandidateInterviewRescheduleProgress(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+
+  if (Object.hasOwn(input, 'nextStep')) {
+    throw new TypeError('candidate_interview_reschedule_next_step_not_allowed');
+  }
+  if (Object.hasOwn(input, 'update') || Object.hasOwn(input, 'data')) {
+    throw new TypeError('candidate_interview_reschedule_patch_not_allowed');
+  }
+
+  const expected = normalizeCandidateInterviewRescheduleProgressSnapshot(input.expected);
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...candidateInterviewRescheduleProgressExpectedWhere(expected)
+    },
+    data: {
+      currentStep: ConversationStep.SCHEDULING,
+      reminderScheduledFor: null,
+      reminderState: ReminderState.SKIPPED
+    }
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    nextStep: ConversationStep.SCHEDULING,
+    nextReminderState: ReminderState.SKIPPED
+  };
+}
+
 export const CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS = Object.freeze({
   MANUAL_BOOKING_CREATED: 'MANUAL_BOOKING_CREATED',
   LAST_BOOKING_DELETED: 'LAST_BOOKING_DELETED'
