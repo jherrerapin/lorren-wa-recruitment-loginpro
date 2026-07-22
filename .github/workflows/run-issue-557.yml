@@ -1,0 +1,90 @@
+name: Run issue 557 implementation
+
+on:
+  pull_request:
+    branches:
+      - automation/557-whatsapp-runner
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/557-persistent-dispatch-whatsapp'
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/557-persistent-dispatch-whatsapp
+          fetch-depth: 0
+      - name: Check prepared recipe
+        id: recipe
+        shell: bash
+        run: |
+          if [ -f .github/workflows/apply-issue-557.yml ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "La implementación ya fue aplicada; no hay receta temporal pendiente."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.recipe.outputs.available == 'true'
+        with:
+          node-version: 20
+          cache: npm
+      - name: Extract and run prepared implementation
+        if: steps.recipe.outputs.available == 'true'
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/apply-issue-557.yml').read_text(encoding='utf-8')
+          start_marker = "          python3 <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.find(start_marker)
+          end = workflow.find(end_marker, start + len(start_marker))
+          if start < 0 or end < 0:
+              raise SystemExit('No se encontró la receta preparada del issue #557.')
+          script = workflow[start + len(start_marker):end]
+          Path('/tmp/apply-issue-557.py').write_text(textwrap.dedent(script), encoding='utf-8')
+          PY
+          python3 /tmp/apply-issue-557.py
+      - name: Remove temporary workflows
+        if: steps.recipe.outputs.available == 'true'
+        run: rm -f .github/workflows/apply-issue-557.yml .github/workflows/kick-issue-557.yml
+      - name: Install dependencies
+        if: steps.recipe.outputs.available == 'true'
+        run: npm ci
+      - name: Validate Prisma and generated client
+        if: steps.recipe.outputs.available == 'true'
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+      - name: Check changed JavaScript syntax
+        if: steps.recipe.outputs.available == 'true'
+        run: |
+          node --check src/routes/dispatchWaRouterV2.js
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check src/services/dispatchWhatsappWebServiceV6.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
+      - name: Run focused WhatsApp regressions
+        if: steps.recipe.outputs.available == 'true'
+        run: node --test test/dispatchWhatsappRuntimeContracts.test.js test/dispatchAssignmentBoardContracts.test.js
+      - name: Commit canonical implementation
+        if: steps.recipe.outputs.available == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: persistir confirmaciones de WhatsApp despacho (#557)"
+          git push origin HEAD:fix/557-persistent-dispatch-whatsapp
