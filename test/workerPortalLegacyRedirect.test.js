@@ -12,7 +12,8 @@ function responseDouble() {
     headers: {},
     statusCode: 200,
     redirect: null,
-    json: null
+    json: null,
+    body: null
   };
 
   return {
@@ -35,18 +36,43 @@ function responseDouble() {
       json(payload) {
         state.json = payload;
         return payload;
+      },
+      send(payload) {
+        state.body = payload;
+        return payload;
       }
     }
   };
 }
 
-function routeHandler(router, path) {
+function routeLayer(router, path) {
   const layer = router.stack.find((item) => item.route?.path === path && item.route.methods?.get);
   assert.ok(layer, `GET ${path} debe existir`);
-  return layer.route.stack.at(-1).handle;
+  return layer;
 }
 
-test('GET /admin/operaciones/portal redirige al portal público', () => {
+function routeHandler(router, path) {
+  return routeLayer(router, path).route.stack.at(-1).handle;
+}
+
+test('el alias administrativo antiguo queda restringido exclusivamente a DEV', () => {
+  const router = dispatchBridgeRouter();
+  const middleware = routeLayer(router, '/portal').route.stack[0].handle;
+  const { res, state } = responseDouble();
+  let nextCalls = 0;
+
+  middleware({ session: { userRole: 'admin' } }, res, () => { nextCalls += 1; });
+
+  assert.equal(state.statusCode, 403);
+  assert.equal(state.body, 'Acceso restringido a DEV');
+  assert.equal(nextCalls, 0);
+
+  const devResponse = responseDouble();
+  middleware({ session: { userRole: 'dev' } }, devResponse.res, () => { nextCalls += 1; });
+  assert.equal(nextCalls, 1);
+});
+
+test('GET /admin/operaciones/portal redirige al portal público para DEV', () => {
   const router = dispatchBridgeRouter();
   const { res, state } = responseDouble();
 
@@ -57,7 +83,7 @@ test('GET /admin/operaciones/portal redirige al portal público', () => {
   assert.match(state.headers['Cache-Control'], /no-store/);
 });
 
-test('GET /admin/operaciones/portal/activar redirige a activación pública', () => {
+test('GET /admin/operaciones/portal/activar redirige a activación pública para DEV', () => {
   const router = dispatchBridgeRouter();
   const { res, state } = responseDouble();
 
