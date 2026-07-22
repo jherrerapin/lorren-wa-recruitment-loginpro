@@ -15,6 +15,7 @@ export const ATTENDANCE_RISK_FLAG = Object.freeze({
   ASSIGNMENT_NOT_ACTIVE: 'ASSIGNMENT_NOT_ACTIVE',
   ATTENDANCE_NOT_ENABLED: 'ATTENDANCE_NOT_ENABLED',
   DUPLICATE_ARRIVAL: 'DUPLICATE_ARRIVAL',
+  ARRIVAL_WINDOW_NOT_OPEN: 'ARRIVAL_WINDOW_NOT_OPEN',
   GEOFENCE_NOT_CONFIGURED: 'GEOFENCE_NOT_CONFIGURED',
   LOCATION_NOT_AVAILABLE: 'LOCATION_NOT_AVAILABLE',
   OUTSIDE_GEOFENCE: 'OUTSIDE_GEOFENCE',
@@ -84,6 +85,10 @@ export function evaluateArrivalValidation(input = {}) {
 
   if (input.duplicateMark === true) {
     return rejectedResult(ATTENDANCE_RISK_FLAG.DUPLICATE_ARRIVAL);
+  }
+
+  if (input.arrivalWindowOpen === false) {
+    return rejectedResult(ATTENDANCE_RISK_FLAG.ARRIVAL_WINDOW_NOT_OPEN);
   }
 
   const toleranceMinutes = Math.max(0, finiteNumber(input.toleranceMinutes, 0));
