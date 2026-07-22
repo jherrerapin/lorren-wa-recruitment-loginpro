@@ -123,6 +123,17 @@
         status.className = `alert ${type === 'success' ? 'alert-success' : type === 'warning' ? 'alert-warning' : 'alert-error'}`;
       }
 
+      function mobileSafeActivationUrl(rawUrl) {
+        const url = new URL(rawUrl, window.location.origin);
+        const fragmentParams = new URLSearchParams(url.hash.startsWith('#') ? url.hash.slice(1) : url.hash);
+        const token = fragmentParams.get('token');
+        if (token) {
+          url.searchParams.set('token', token);
+          url.hash = '';
+        }
+        return url.toString();
+      }
+
       form?.addEventListener('submit', async (event) => {
         event.preventDefault();
         const workerId = workerSelect.value;
@@ -150,7 +161,7 @@
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.ok || !payload.activationUrl) throw new Error(payload.error || 'activation_failed');
 
-          activationUrl.value = payload.activationUrl;
+          activationUrl.value = mobileSafeActivationUrl(payload.activationUrl);
           workerName.textContent = `Auxiliar: ${payload.worker.fullName} · ${payload.worker.contractType}${payload.worker.isTestProfile ? ' (perfil de prueba)' : ''}`;
           const expiry = new Date(payload.expiresAt);
           expiresAt.textContent = Number.isNaN(expiry.getTime()) ? 'Vencimiento automático configurado.' : `Vence: ${expiry.toLocaleString('es-CO')}`;
