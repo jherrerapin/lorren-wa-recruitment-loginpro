@@ -2,198 +2,134 @@ TAP version 13
 # Subtest: mensaje de recolección masiva usa campos reales requeridos por la vacante
 ok 1 - mensaje de recolección masiva usa campos reales requeridos por la vacante
   ---
-  duration_ms: 1.858117
+  duration_ms: 2.481823
   ...
 # Subtest: mensaje de recolección masiva respeta campos configurados en la vacante
 ok 2 - mensaje de recolección masiva respeta campos configurados en la vacante
   ---
-  duration_ms: 0.261291
+  duration_ms: 0.346864
   ...
 # Subtest: mensaje de recolección masiva no repite datos ya conocidos del candidato
 ok 3 - mensaje de recolección masiva no repite datos ya conocidos del candidato
   ---
-  duration_ms: 0.268221
+  duration_ms: 0.330133
   ...
 # Subtest: rechaza saludos propuestos erróneamente como nombre y barrio
 ok 4 - rechaza saludos propuestos erróneamente como nombre y barrio
   ---
-  duration_ms: 0.847036
+  duration_ms: 1.120904
   ...
 # Subtest: rechaza confirmación simple como nombre
 ok 5 - rechaza confirmación simple como nombre
   ---
-  duration_ms: 0.261231
+  duration_ms: 0.353507
   ...
 # Subtest: rechaza frase de vacante como nombre
 ok 6 - rechaza frase de vacante como nombre
   ---
-  duration_ms: 0.476742
+  duration_ms: 0.558138
   ...
 # Subtest: acepta nombre real con evidencia explícita de identidad
-not ok 7 - acepta nombre real con evidencia explícita de identidad
+ok 7 - acepta nombre real con evidencia explícita de identidad
   ---
-  duration_ms: 0.627808
-  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:119:1'
-  failureType: 'testCodeFailure'
-  error: 'hasAgeEvidence is not defined'
-  code: 'ERR_TEST_FAILURE'
-  name: 'ReferenceError'
-  stack: |-
-    sanitizeFullName (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:272:35)
-    evaluateField (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:390:36)
-    sanitizeCandidateFieldsForConversation (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:416:20)
-    sanitize (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:78:10)
-    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:121:18)
-    Test.runInAsyncScope (node:async_hooks:206:9)
-    Test.run (node:internal/test_runner/test:796:25)
-    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
-    Test.postRun (node:internal/test_runner/test:889:19)
-    Test.run (node:internal/test_runner/test:835:12)
+  duration_ms: 0.91949
   ...
 # Subtest: acepta nombre solo cuando responde al campo pendiente de nombre
-not ok 8 - acepta nombre solo cuando responde al campo pendiente de nombre
+ok 8 - acepta nombre solo cuando responde al campo pendiente de nombre
   ---
-  duration_ms: 0.243875
-  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:132:1'
-  failureType: 'testCodeFailure'
-  error: 'hasAgeEvidence is not defined'
-  code: 'ERR_TEST_FAILURE'
-  name: 'ReferenceError'
-  stack: |-
-    sanitizeFullName (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:272:35)
-    evaluateField (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:390:36)
-    sanitizeCandidateFieldsForConversation (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:416:20)
-    sanitize (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:78:10)
-    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:134:18)
-    Test.runInAsyncScope (node:async_hooks:206:9)
-    Test.run (node:internal/test_runner/test:796:25)
-    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
-    Test.postRun (node:internal/test_runner/test:889:19)
-    Test.run (node:internal/test_runner/test:835:12)
+  duration_ms: 0.467669
   ...
 # Subtest: acepta barrio real con evidencia de residencia
 ok 9 - acepta barrio real con evidencia de residencia
   ---
-  duration_ms: 0.781358
+  duration_ms: 0.810166
   ...
 # Subtest: rechaza cargo propuesto como barrio
 ok 10 - rechaza cargo propuesto como barrio
   ---
-  duration_ms: 0.309102
+  duration_ms: 0.375668
   ...
 # Subtest: acepta género femenino explícito con evidencia lingüística
 ok 11 - acepta género femenino explícito con evidencia lingüística
   ---
-  duration_ms: 1.172753
+  duration_ms: 1.488266
   ...
 # Subtest: acepta género femenino contextual y no convierte interés en nombre o barrio
 ok 12 - acepta género femenino contextual y no convierte interés en nombre o barrio
   ---
-  duration_ms: 0.460478
+  duration_ms: 0.581581
   ...
 # Subtest: acepta género femenino por postulacion lingüística auto-referida
 ok 13 - acepta género femenino por postulacion lingüística auto-referida
   ---
-  duration_ms: 0.43492
+  duration_ms: 0.513274
   ...
 # Subtest: rechaza género inferido solo por nombre y conserva nombre pendiente
-not ok 14 - rechaza género inferido solo por nombre y conserva nombre pendiente
+ok 14 - rechaza género inferido solo por nombre y conserva nombre pendiente
   ---
-  duration_ms: 0.2208
-  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:211:1'
-  failureType: 'testCodeFailure'
-  error: 'hasAgeEvidence is not defined'
-  code: 'ERR_TEST_FAILURE'
-  name: 'ReferenceError'
-  stack: |-
-    sanitizeFullName (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:272:35)
-    evaluateField (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:390:36)
-    sanitizeCandidateFieldsForConversation (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:416:20)
-    sanitize (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:78:10)
-    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:213:18)
-    Test.runInAsyncScope (node:async_hooks:206:9)
-    Test.run (node:internal/test_runner/test:796:25)
-    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
-    Test.postRun (node:internal/test_runner/test:889:19)
-    Test.run (node:internal/test_runner/test:835:12)
+  duration_ms: 0.674203
   ...
 # Subtest: rechaza número de dirección como edad
 ok 15 - rechaza número de dirección como edad
   ---
-  duration_ms: 0.392967
+  duration_ms: 0.48429
   ...
 # Subtest: rechaza número de experiencia como edad y conserva experienceTime
 ok 16 - rechaza número de experiencia como edad y conserva experienceTime
   ---
-  duration_ms: 0.396753
+  duration_ms: 0.387821
   ...
 # Subtest: no marca mujer por tratamiento de cortesía: Sii Señora claro
 ok 17 - no marca mujer por tratamiento de cortesía: Sii Señora claro
   ---
-  duration_ms: 0.366397
+  duration_ms: 0.300659
   ...
 # Subtest: no marca mujer por gracias señorita
 ok 18 - no marca mujer por gracias señorita
   ---
-  duration_ms: 0.15373
+  duration_ms: 0.319815
   ...
 # Subtest: rechaza saludos y cortesías como valores de cualquier campo de texto
 ok 19 - rechaza saludos y cortesías como valores de cualquier campo de texto
   ---
-  duration_ms: 0.165928
+  duration_ms: 0.223486
   ...
 # Subtest: acepta valores legítimos después de la validación semántica
-not ok 20 - acepta valores legítimos después de la validación semántica
+ok 20 - acepta valores legítimos después de la validación semántica
   ---
-  duration_ms: 0.351615
-  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:297:1'
-  failureType: 'testCodeFailure'
-  error: 'hasAgeEvidence is not defined'
-  code: 'ERR_TEST_FAILURE'
-  name: 'ReferenceError'
-  stack: |-
-    sanitizeFullName (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:272:35)
-    evaluateField (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:390:36)
-    sanitizeCandidateFieldsForConversation (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/src/services/fieldSanitizer.js:416:20)
-    sanitize (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:78:10)
-    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/fieldSanitizer.test.js:304:18)
-    Test.runInAsyncScope (node:async_hooks:206:9)
-    Test.run (node:internal/test_runner/test:796:25)
-    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
-    Test.postRun (node:internal/test_runner/test:889:19)
-    Test.run (node:internal/test_runner/test:835:12)
+  duration_ms: 2.155427
   ...
 # Subtest: caracterización género: positivos FEMALE usan evidencia fuerte compartida
 ok 21 - caracterización género: positivos FEMALE usan evidencia fuerte compartida
   ---
-  duration_ms: 0.696101
+  duration_ms: 0.873504
   ...
 # Subtest: caracterización género: positivos MALE usan evidencia fuerte compartida
 ok 22 - caracterización género: positivos MALE usan evidencia fuerte compartida
   ---
-  duration_ms: 0.643281
+  duration_ms: 0.837306
   ...
 # Subtest: caracterización género: negativos y ambiguos no se aceptan como género del candidato
 ok 23 - caracterización género: negativos y ambiguos no se aceptan como género del candidato
   ---
-  duration_ms: 0.54801
+  duration_ms: 0.768138
   ...
 # Subtest: caracterización género: no se infiere por nombre
 ok 24 - caracterización género: no se infiere por nombre
   ---
-  duration_ms: 0.514969
+  duration_ms: 0.544192
   ...
 # Subtest: caracterización género: prompt, sanitizador y policy conservan la misma evidencia base
 ok 25 - caracterización género: prompt, sanitizador y policy conservan la misma evidencia base
   ---
-  duration_ms: 1.386032
+  duration_ms: 1.874936
   ...
 1..25
 # tests 25
 # suites 0
-# pass 21
-# fail 4
+# pass 25
+# fail 0
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 96.166655
+# duration_ms 142.484083

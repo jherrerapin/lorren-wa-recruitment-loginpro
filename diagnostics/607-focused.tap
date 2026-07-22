@@ -2,47 +2,47 @@ TAP version 13
 # Subtest: parser no convierte duración laboral ni cantidad de personal en edad
 ok 1 - parser no convierte duración laboral ni cantidad de personal en edad
   ---
-  duration_ms: 11.930241
+  duration_ms: 14.858472
   ...
 # Subtest: parser separa edad explícita, experiencia y cantidad de personal
 ok 2 - parser separa edad explícita, experiencia y cantidad de personal
   ---
-  duration_ms: 4.546215
+  duration_ms: 5.595252
   ...
 # Subtest: parser conserva corrección explícita de edad
 ok 3 - parser conserva corrección explícita de edad
   ---
-  duration_ms: 2.924091
+  duration_ms: 3.697995
   ...
 # Subtest: parser conserva respuesta numérica corta
 ok 4 - parser conserva respuesta numérica corta
   ---
-  duration_ms: 0.725424
+  duration_ms: 0.894403
   ...
 # Subtest: sanitizer rechaza 56 cuando el número está ligado a trabajadores
 ok 5 - sanitizer rechaza 56 cuando el número está ligado a trabajadores
   ---
-  duration_ms: 1.474043
+  duration_ms: 1.882228
   ...
 # Subtest: sanitizer rechaza una duración laboral dentro del rango de edad
 ok 6 - sanitizer rechaza una duración laboral dentro del rango de edad
   ---
-  duration_ms: 0.694358
+  duration_ms: 0.85499
   ...
 # Subtest: sanitizer acepta la edad explícita aunque el mensaje incluya experiencia
 ok 7 - sanitizer acepta la edad explícita aunque el mensaje incluya experiencia
   ---
-  duration_ms: 0.349503
+  duration_ms: 0.438685
   ...
 # Subtest: sanitizer acepta respuesta corta cuando edad está pendiente
 ok 8 - sanitizer acepta respuesta corta cuando edad está pendiente
   ---
-  duration_ms: 0.248662
+  duration_ms: 0.319724
   ...
 # Subtest: sanitizer no acepta un número suelto sin contexto de edad
 ok 9 - sanitizer no acepta un número suelto sin contexto de edad
   ---
-  duration_ms: 0.409642
+  duration_ms: 0.503386
   ...
 1..9
 # tests 9
@@ -52,4 +52,4 @@ ok 9 - sanitizer no acepta un número suelto sin contexto de edad
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 78.557045
+# duration_ms 101.995791
