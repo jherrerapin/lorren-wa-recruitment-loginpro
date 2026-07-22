@@ -1,0 +1,47 @@
+name: Patch 618 worker portal compatibility
+
+on:
+  push:
+    branches:
+      - fix/618-worker-portal-legacy-redirect
+    paths:
+      - '.github/workflows/patch-618-worker-portal-compatibility.yml'
+      - '.github/scripts/patch-618-worker-portal-compatibility.mjs'
+      - '.github/patch-618-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/618-worker-portal-legacy-redirect
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply exact server patch
+        run: node .github/scripts/patch-618-worker-portal-compatibility.mjs
+      - name: Validate syntax and focused tests
+        run: |
+          node --check src/server.js
+          node --check src/routes/workerPortalCompatibility.js
+          node --check test/workerPortalCompatibility.test.js
+          node --test test/workerPortalCompatibility.test.js
+      - name: Remove temporary automation
+        run: rm -f .github/scripts/patch-618-worker-portal-compatibility.mjs .github/workflows/patch-618-worker-portal-compatibility.yml .github/patch-618-trigger.txt
+      - name: Commit functional patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/server.js .github
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix: montar redirect verificable del Portal del Auxiliar'
+          git push origin HEAD:fix/618-worker-portal-legacy-redirect
