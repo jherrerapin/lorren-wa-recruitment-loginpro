@@ -135,7 +135,7 @@ function buildExpectedTimestamp(serviceDate, timeText, label) {
   return new Date(`${dateKey}T${time}-05:00`);
 }
 
-function buildExpectedWindow(serviceRequest) {
+export function buildDispatchAttendanceExpectedWindow(serviceRequest) {
   const expectedStartAt = buildExpectedTimestamp(
     serviceRequest.serviceDate,
     serviceRequest.startTime,
@@ -155,6 +155,18 @@ function buildExpectedWindow(serviceRequest) {
     expectedEndAt = new Date(expectedEndAt.getTime() + 24 * 60 * 60 * 1000);
   }
   return { expectedStartAt, expectedEndAt };
+}
+
+export function getDispatchArrivalWindowState(input = {}) {
+  const now = requiredTimestamp(input.now, 'attendance_window_now');
+  const expectedStartAt = requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
+  const earlyArrivalWindowMinutes = optionalFiniteNumber(
+    input.earlyArrivalWindowMinutes,
+    'early_arrival_window_minutes',
+    { min: 0 }
+  ) ?? 0;
+  const opensAt = new Date(expectedStartAt.getTime() - earlyArrivalWindowMinutes * 60_000);
+  return { open: now.getTime() >= opensAt.getTime(), opensAt };
 }
 
 function minutesLateAt(now, expectedStartAt) {
@@ -259,7 +271,9 @@ async function registerInsideTransaction(client, input) {
       serviceRequest: { include: { operationPoint: true } }
     }
   });
-  if (!assignment) throw new Error('attendance_assignment_not_found');
+  if (!assignment || (input.expectedWorkerId && assignment.workerId !== input.expectedWorkerId)) {
+    throw new Error('attendance_assignment_not_found');
+  }
 
   const operationPoint = assignment.serviceRequest.operationPoint ?? null;
   const existingSession = assignment.attendanceSession ?? null;
@@ -287,7 +301,28 @@ async function registerInsideTransaction(client, input) {
         expectedStartAt: existingSession.expectedStartAt,
         expectedEndAt: existingSession.expectedEndAt
       }
-    : buildExpectedWindow(assignment.serviceRequest);
+    : buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
+  const arrivalWindow = getDispatchArrivalWindowState({
+    now: input.now,
+    expectedStartAt: expectedWindow.expectedStartAt,
+    earlyArrivalWindowMinutes: finiteDatabaseNumber(operationPoint?.earlyArrivalWindowMinutes) ?? 0
+  });
+
+  if (!arrivalWindow.open) {
+    const validation = evaluateArrivalValidation({
+      assignmentActive,
+      attendanceEnabled,
+      duplicateMark,
+      arrivalWindowOpen: false
+    });
+    return {
+      recorded: false,
+      replayed: false,
+      attendanceSession: existingSession,
+      attendanceMark: null,
+      validation
+    };
+  }
 
   const deviceSignals = await resolveDeviceSignals(client, {
     workerId: assignment.workerId,
@@ -300,6 +335,7 @@ async function registerInsideTransaction(client, input) {
     assignmentActive,
     attendanceEnabled,
     duplicateMark,
+    arrivalWindowOpen: true,
     hasConfiguredGeofence: geofence.hasConfiguredGeofence,
     withinGeofence: geofence.withinGeofence,
     accuracyMeters: input.accuracyMeters,
@@ -387,6 +423,7 @@ function normalizeInput(input) {
 
   return {
     assignmentId: requireNonEmptyString(value.assignmentId, 'assignment_id'),
+    expectedWorkerId: optionalString(value.expectedWorkerId, 'expected_worker_id'),
     idempotencyKey: requireNonEmptyString(value.idempotencyKey, 'idempotency_key'),
     now,
     clientCapturedAt: optionalTimestamp(value.clientCapturedAt, 'client_captured_at'),
