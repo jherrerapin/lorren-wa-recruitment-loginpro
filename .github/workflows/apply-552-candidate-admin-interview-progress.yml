@@ -28,7 +28,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Apply exact patch
@@ -48,14 +48,20 @@ jobs:
           node --check test/adminInterviewBookingAuthority.test.js
           node --check test/candidateProgressAuthority.test.js
 
-      - name: Run focused tests
-        run: |
-          node --test \
-            test/candidateAdminInterviewProgressStateService.test.js \
-            test/adminInterviewBookingAuthority.test.js \
-            test/candidateProgressAuthority.test.js \
-            test/interviewBookingStateService.test.js \
-            test/adminCandidateStateAuthority.test.js
+      - name: Test Candidate admin interview progress authority
+        run: node --test test/candidateAdminInterviewProgressStateService.test.js
+
+      - name: Test admin interview booking contracts
+        run: node --test test/adminInterviewBookingAuthority.test.js
+
+      - name: Test Candidate progress gate
+        run: node --test test/candidateProgressAuthority.test.js
+
+      - name: Test InterviewBooking authority regressions
+        run: node --test test/interviewBookingStateService.test.js
+
+      - name: Test administrative Candidate regressions
+        run: node --test test/adminCandidateStateAuthority.test.js
 
       - name: Commit functional change
         run: |
