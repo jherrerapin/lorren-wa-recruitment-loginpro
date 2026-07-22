@@ -872,6 +872,74 @@ export async function completeCandidateRequirementRejection(client, input = {}) 
 
 
 
+
+function normalizeCandidateInterviewCancellationReminderSnapshot(expected) {
+  const requiredFields = [
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_interview_cancellation_reminder_snapshot_required');
+  }
+
+  return {
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_interview_cancellation_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_interview_cancellation_expected_reminder_state'
+    )
+  };
+}
+
+function candidateInterviewCancellationReminderExpectedWhere(snapshot) {
+  return {
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function reflectCandidateInterviewCancellationReminder(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+
+  if (Object.hasOwn(input, 'nextReminderState') || Object.hasOwn(input, 'nextStep')) {
+    throw new TypeError('candidate_interview_cancellation_next_state_not_allowed');
+  }
+  if (Object.hasOwn(input, 'update') || Object.hasOwn(input, 'data')) {
+    throw new TypeError('candidate_interview_cancellation_patch_not_allowed');
+  }
+
+  const expected = normalizeCandidateInterviewCancellationReminderSnapshot(input.expected);
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...candidateInterviewCancellationReminderExpectedWhere(expected)
+    },
+    data: {
+      reminderScheduledFor: null,
+      reminderState: ReminderState.SKIPPED
+    }
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    nextReminderState: ReminderState.SKIPPED
+  };
+}
+
 const CANDIDATE_INTERVIEW_RESCHEDULE_PROGRESS_ORIGINS = new Set([
   ConversationStep.SCHEDULING,
   ConversationStep.SCHEDULED

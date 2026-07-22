@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'interview_reschedule_progress_authority_migrated');
+  assert.equal(manifest.phase, 'interview_cancellation_reminder_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -102,7 +102,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'silent_profile_capture_authority',
     'admin_interview_progress_authority',
     'manual_review_pause_authority',
-    'interview_reschedule_progress_authority'
+    'interview_reschedule_progress_authority',
+    'interview_cancellation_reminder_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -240,7 +241,7 @@ test('CandidateStateService controla las transiciones simples del engine y expli
 });
 
 test('el manifiesto registra el contrato compuesto de falta de interés', () => {
-  assert.equal(manifest.compositeContracts.length, 7);
+  assert.equal(manifest.compositeContracts.length, 8);
   const contract = manifest.compositeContracts.find((item) => item.id === 'conversation_engine_no_interest');
   assert.equal(contract.id, 'conversation_engine_no_interest');
   assert.equal(contract.owner, 'src/services/candidateStateService.js');
@@ -676,4 +677,57 @@ test('la documentación registra la fase del reflejo de reprogramación', () => 
   assert.match(documentation, /reflectCandidateInterviewRescheduleProgress/);
   assert.match(documentation, /STALE_CANDIDATE_RESCHEDULE_PROGRESS/);
   assert.match(documentation, /no construye ni envía la respuesta obsoleta/i);
+});
+
+
+
+test('el manifiesto registra la autoridad de recordatorio tras cancelación', () => {
+  const contract = manifest.compositeContracts.find((item) => item.id === 'interview_cancellation_reminder_reflection');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/services/chatEngine.js');
+  assert.equal(contract.responseConsumer, 'src/services/chatEngine.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, ['reminderScheduledFor', 'reminderState']);
+  assert.ok(contract.excludedCombinations.includes('currentStep_change'));
+  assert.ok(contract.excludedCombinations.includes('gender_logic'));
+
+  const authority = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'reflectCandidateInterviewCancellationReminder'
+  );
+  assert.match(authority, /candidate\.updateMany\s*\(/);
+  assert.match(authority, /candidateInterviewCancellationReminderExpectedWhere\(expected\)/);
+  assert.match(authority, /reminderScheduledFor:\s*null/);
+  assert.match(authority, /reminderState:\s*ReminderState\.SKIPPED/);
+  assert.match(authority, /candidate_interview_cancellation_next_state_not_allowed/);
+  assert.match(authority, /candidate_interview_cancellation_patch_not_allowed/);
+  assert.doesNotMatch(authority, /currentStep|InterviewBooking|interviewBooking|gender|vacancyId|botPaused/);
+});
+
+test('chatEngine conserva la respuesta canónica si la limpieza del recordatorio encuentra carrera', () => {
+  const handler = extractFunctionSource(readSource('src/services/chatEngine.js'), 'handleAppointmentIntentDirectly');
+  const cancelStart = handler.indexOf("if (intent === 'cancel_interview')");
+  const rescheduleStart = handler.indexOf("if (intent === 'reschedule_interview')");
+  assert.ok(cancelStart >= 0 && rescheduleStart > cancelStart);
+  const cancelBranch = handler.slice(cancelStart, rescheduleStart);
+
+  assert.match(cancelBranch, /reflectCandidateInterviewCancellationReminder/);
+  assert.match(cancelBranch, /STALE_CANDIDATE_CANCELLATION_REMINDER/);
+  assert.match(cancelBranch, /candidateReminderConflict/);
+  assert.match(cancelBranch, /Listo, ya registré la cancelación de tu entrevista/);
+  assert.doesNotMatch(cancelBranch, /prisma\.candidate\.update\s*\(/);
+  assert.doesNotMatch(cancelBranch, /suppressed:\s*true/);
+
+  const bookingIndex = handler.indexOf('applyInterviewReminderResponse');
+  const reflectionIndex = handler.indexOf('reflectCandidateInterviewCancellationReminder');
+  assert.ok(bookingIndex >= 0 && reflectionIndex > bookingIndex);
+});
+
+test('la documentación registra la fase de recordatorio cancelado', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 13: recordatorio después de cancelación/);
+  assert.match(documentation, /reflectCandidateInterviewCancellationReminder/);
+  assert.match(documentation, /STALE_CANDIDATE_CANCELLATION_REMINDER/);
+  assert.match(documentation, /conserva la\s+respuesta de cancelación/i);
 });

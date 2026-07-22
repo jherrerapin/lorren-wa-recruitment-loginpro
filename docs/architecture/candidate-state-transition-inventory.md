@@ -302,3 +302,27 @@ No reintenta ni aplica parcialmente.
 Confirmación, cancelación, creación de una nueva reserva, disponibilidad, vacantes
 pausadas, webhook, consentimiento, CV, perfil, permisos, asistencia, Prisma y cualquier
 lógica relacionada con género permanecen fuera de esta fase.
+
+
+
+## Fase 13: recordatorio después de cancelación
+
+La rama `cancel_interview` continúa entregando primero la intención a
+`InterviewBookingStateService`. Una vez confirmada la cancelación canónica de la
+reserva, `reflectCandidateInterviewCancellationReminder()` controla exclusivamente la
+limpieza de `reminderScheduledFor` y `reminderState` en `Candidate`.
+
+La autoridad exige el snapshot observado de fecha y estado, compara ambos mediante
+`updateMany` y fija únicamente `null / SKIPPED`. No acepta un siguiente estado ni un
+patch arbitrario y reutiliza Prisma raíz o un cliente transaccional sin abrir otra
+transacción.
+
+Si el CAS devuelve `count=0`, `chatEngine` registra
+`STALE_CANDIDATE_CANCELLATION_REMINDER`, conserva el recordatorio concurrente y marca
+el conflicto en su resultado interno. A diferencia de la reprogramación, conserva la
+respuesta de cancelación: esa respuesta describe la transición canónica de la reserva,
+que sí fue aplicada. No reintenta ni aplica parcialmente.
+
+Confirmación, reprogramación, `currentStep`, creación de reservas, disponibilidad,
+vacantes pausadas, webhook, consentimiento, CV, perfil, permisos, asistencia, Prisma y
+cualquier lógica relacionada con género permanecen fuera de esta fase.
