@@ -526,7 +526,7 @@ test('prevención de repetición bloquea mismo replyKind y reason sin informaci�
   assert.equal(decision.reason, 'REPEAT_PREVENTED');
 });
 
-test('vacante inactiva explícita en Siberia responde oferta futura sin candidateUpdates.vacancyId', async () => {
+test('vacante inactiva explícita en Siberia persiste candidateUpdates.vacancyId', async () => {
   const inactiveSiberia = vacancy({
     id: 'vac-siberia-inactive-explicit',
     title: 'Auxiliar Cargue y Descargue Siberia',
@@ -546,6 +546,7 @@ test('vacante inactiva explícita en Siberia responde oferta futura sin candidat
 
   assert.equal(decision.action, VacancyFirstGateAction.INACTIVE_VACANCY_REPLY);
   assert.equal(decision.replyKind, 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER');
-  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+  assert.equal(decision.candidateUpdates.vacancyId, 'vac-siberia-inactive-explicit');
   assert.equal(decision.vacancyId, undefined);
+  assert.equal(decision.resolution.reason, 'matched_inactive_vacancy');
 });

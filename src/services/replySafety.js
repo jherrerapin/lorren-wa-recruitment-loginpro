@@ -221,7 +221,7 @@ function claimIsSupported(claim, supportedText) {
     contrato_directo: ['contrato directo'],
     contrato_indefinido: ['contrato indefinido'],
     contrato_fijo: ['contrato fijo', 'termino fijo', 'término fijo'],
-    obra_labor: ['obra labor', 'obra o labor'],
+    obra_labor: ['obra labor', 'obra o labor', 'contrato por obra'],
     vinculacion_inmediata: ['vinculacion inmediata', 'contratacion inmediata'],
     pagos_quincenales: ['pagos quincenales', 'pago quincenal', 'quincenal'],
     frecuencia_pago: ['pago semanal', 'pago mensual', 'pago diario', 'semanal', 'mensual', 'diario'],

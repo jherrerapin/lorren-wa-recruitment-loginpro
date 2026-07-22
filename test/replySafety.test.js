@@ -30,6 +30,28 @@ test('bloquea pagos quincenales y contrato directo no soportados', () => {
   assert.ok(result.blockedClaims.includes('pagos_quincenales'));
 });
 
+test('permite contrato por obra cuando está registrado literalmente', () => {
+  const vacancy = { ...baseVacancy, conditions: 'Contrato por obra y proceso con entrevista' };
+  const reply = 'Las condiciones registradas son: Contrato por obra y proceso con entrevista.\n\nPerfecto, seguimos con tu postulación. Para dejar tu registro completo, compárteme nombre completo y edad.';
+  const result = sanitizeOutboundReply({ reply, vacancy, currentStep: 'COLLECTING_DATA', source: 'vacancy_first_gate' });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.reply, reply);
+  assert.deepEqual(result.blockedClaims, []);
+});
+
+test('bloquea contrato por obra cuando no está registrado', () => {
+  const result = sanitizeOutboundReply({
+    reply: 'La vacante ofrece contrato por obra.',
+    vacancy: baseVacancy,
+    currentStep: 'COLLECTING_DATA',
+    source: 'vacancy_first_gate'
+  });
+
+  assert.equal(result.blocked, true);
+  assert.ok(result.blockedClaims.includes('obra_labor'));
+});
+
 test('normaliza instrucciones automáticas de carga a PDF, DOC o DOCX', () => {
   const variants = [
     'Adjunta tu hoja de vida como archivo PDF o DOCX.',
