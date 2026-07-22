@@ -17,9 +17,6 @@
     .qr-image { width: min(420px, 100%); border: 10px solid #fff; border-radius: 18px; box-shadow: var(--shadow); background: #fff; }
     .alert { border: 1px solid #fecaca; background: #fff5f5; color: #991b1b; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
     .info-box { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 14px; padding: 12px 14px; font-weight: 800; }
-    .storage-box { border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 11px 13px; display: grid; gap: 3px; font-size: 12px; }
-    .storage-box.persistent { border-color: #86efac; background: #f0fdf4; color: #166534; }
-    .storage-box.ephemeral { border-color: #fdba74; background: #fff7ed; color: #9a3412; }
     .technical-box { border: 1px dashed #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 12px 14px; font-size: 12px; line-height: 1.45; word-break: break-word; }
     .muted-strong { color: var(--muted); font-weight: 800; }
     .inline-action-form { display: inline-flex; margin: 0; }
@@ -62,7 +59,6 @@
         <h2 id="statusTitle"><%= ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión' %></h2>
         <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span data-raw-ready-at="<%= lastReadyAt || '' %>"><%= lastReadyAt || '' %></span></p>
         <p>Esta pantalla permite vincular y revisar la conexión de WhatsApp de despacho para enviar mensajes desde el panel.</p>
-        <% if (role === 'dev') { %><div class="storage-box <%= authStoragePersistent ? 'persistent' : 'ephemeral' %>" id="storageBox"><strong id="storageLabel"><%= authStoragePersistent ? 'Sesión persistente' : 'Sesión en almacenamiento efímero' %></strong><span id="storageText"><%= authStoragePersistent ? 'LocalAuth está dentro de almacenamiento persistente.' : (authStorageWarning || 'La sesión puede perderse al reiniciar o desplegar.') %></span></div><% } %>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
         <% if (role === 'dev') { %>
           <details class="technical-box" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>>
@@ -101,9 +97,6 @@
     const readyAt = document.getElementById('readyAt');
     const readyAtText = readyAt?.querySelector('span');
     const errorBox = document.getElementById('errorBox');
-    const storageBox = document.getElementById('storageBox');
-    const storageLabel = document.getElementById('storageLabel');
-    const storageText = document.getElementById('storageText');
     const technicalDetails = document.getElementById('technicalDetails');
     const technicalError = document.getElementById('technicalError');
     const connectedMessage = document.getElementById('connectedMessage');
@@ -137,12 +130,6 @@
     }
 
     function setHidden(element, hidden) { if (element) element.hidden = hidden; }
-    function renderStorageStatus(data) {
-      const persistent = Boolean(data.authStoragePersistent);
-      if (storageBox) storageBox.className = 'storage-box ' + (persistent ? 'persistent' : 'ephemeral');
-      if (storageLabel) storageLabel.textContent = persistent ? 'Sesión persistente' : 'Sesión en almacenamiento efímero';
-      if (storageText) storageText.textContent = persistent ? 'LocalAuth está dentro de almacenamiento persistente.' : (data.authStorageWarning || 'La sesión puede perderse al reiniciar o desplegar.');
-    }
     function renderStatus(data) {
       const hasError = Boolean(data.lastError || data.technicalLastError);
       const isPreparingConnection = Boolean(data.initializing || data.reconnecting);
@@ -151,7 +138,6 @@
       statusCard.classList.toggle('connected', Boolean(data.ready));
       statusTitle.textContent = data.ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión';
       renderReadyAt(data.lastReadyAt);
-      renderStorageStatus(data);
       setHidden(errorBox, !hasError);
       if (errorBox) errorBox.textContent = hasError ? (data.lastError || fallbackOperationalError) : '';
       setHidden(technicalDetails, !isDev || !data.technicalLastError);
@@ -162,13 +148,34 @@
       setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError || isPreparingConnection);
       if (data.qrImage && qrImage && qrImage.src !== data.qrImage) qrImage.src = data.qrImage;
     }
+    function renderStatusError() {
+      renderStatus({
+        ready: false,
+        initializing: false,
+        reconnecting: false,
+        qrImage: null,
+        lastError: fallbackOperationalError,
+        technicalLastError: null,
+        lastReadyAt: null
+      });
+    }
     async function refreshStatus() {
-      const response = await fetch('/admin/operaciones/whatsapp/estado', { cache: 'no-store' });
-      if (!response.ok) return;
-      renderStatus(await response.json());
+      try {
+        const response = await fetch('/admin/operaciones/whatsapp/estado', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' }
+        });
+        if (!response.ok) throw new Error(`Estado HTTP ${response.status}`);
+        renderStatus(await response.json());
+      } catch (error) {
+        console.error('No fue posible consultar el estado de WhatsApp despacho.', error);
+        renderStatusError();
+      }
     }
     document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);
     renderReadyAt(readyAtText?.dataset.rawReadyAt || readyAtText?.textContent || '');
+    refreshStatus();
     window.setInterval(refreshStatus, 3000);
   </script>
 </body>

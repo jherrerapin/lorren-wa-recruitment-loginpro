@@ -1,5 +1,5 @@
 import express from 'express';
-import { closeDispatchWhatsappSession, getDispatchWhatsappStatusView, initDispatchWhatsappClient, sendDispatchWhatsappMessage } from '../services/dispatchWhatsappWebService.js';
+import { closeDispatchWhatsappSession, getDispatchWhatsappStatusView, initDispatchWhatsappClient, restartDispatchWhatsappClient, sendDispatchWhatsappMessage } from '../services/dispatchWhatsappWebService.js';
 
 const OPERATIONAL_SESSION_ERROR = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
@@ -78,16 +78,16 @@ function shouldRecoverStalledInitialization(status = {}) {
   return now - initializingSeenAtMs > STALLED_INITIALIZATION_TIMEOUT_MS;
 }
 
+// La recuperación automática reinicia Chromium sin cerrar ni borrar la sesión persistida.
 function recoverStalledInitialization() {
   if (recoveryInProgress) return;
   recoveryInProgress = true;
   initializingSeenAtMs = null;
   console.warn('[dispatch-wa] Inicialización de WhatsApp despacho atascada. Se reinicia el cliente para volver a generar QR/conexión.');
-  closeDispatchWhatsappSession()
-    .catch((error) => console.warn('[dispatch-wa] No fue posible cerrar completamente el cliente atascado.', error?.message || error))
+  restartDispatchWhatsappClient('estado atascado detectado desde el panel')
+    .catch((error) => console.warn('[dispatch-wa] No fue posible reiniciar el cliente atascado.', error?.message || error))
     .finally(() => {
       recoveryInProgress = false;
-      initDispatchWhatsappClient();
     });
 }
 

@@ -7,6 +7,7 @@ import {
   getDispatchWhatsappStatus as getRuntimeStatus,
   getDispatchWhatsappStatusView as getRuntimeStatusView,
   initDispatchWhatsappClient as initRuntimeClient,
+  restartDispatchWhatsappClient as restartRuntimeClient,
   sendDispatchWhatsappMediaMessage,
   sendDispatchWhatsappMessage as sendRuntimeTextMessage
 } from './dispatchWhatsappWebServiceV6.js';
@@ -18,7 +19,6 @@ const WATCHDOG_ENABLED = AUTO_START_ENABLED
 const WATCHDOG_INTERVAL_MS = Math.max(30000, Number(process.env.DISPATCH_WWEB_WATCHDOG_INTERVAL_MS || 60000));
 const WATCHDOG_START_DELAY_MS = Math.max(0, Number(process.env.DISPATCH_WWEB_WATCHDOG_START_DELAY_MS || 5000));
 const STALLED_INITIALIZATION_TIMEOUT_MS = Math.max(60000, Number(process.env.DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS || 60000));
-const STALLED_RECOVERY_PROBE_MS = Math.max(1000, Number(process.env.DISPATCH_WWEB_STALLED_RECOVERY_PROBE_MS || 3000));
 const STALE_LINK_CLEANUP_LIMIT = Math.max(50, Number(process.env.DISPATCH_WA_STALE_LINK_CLEANUP_LIMIT || 1000));
 const SENDABLE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
 const EXPIRABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'];
@@ -122,13 +122,6 @@ function prepareRuntimeEnvironment({ cleanupStaleProcesses = false } = {}) {
   runtimeEnvironmentPrepared = true;
 }
 
-function scheduleStalledRecoveryProbe() {
-  const timer = setTimeout(() => {
-    runDispatchWhatsappWatchdog('stalled_recovery').catch(() => {});
-  }, STALLED_RECOVERY_PROBE_MS);
-  timer.unref?.();
-}
-
 async function validateOutgoingAssignmentContext(context = {}, phone = '') {
   const assignmentId = String(context?.assignmentId || '').trim();
   const serviceRequestId = String(context?.serviceRequestId || '').trim();
@@ -220,10 +213,9 @@ async function runDispatchWhatsappWatchdog(reason = 'interval') {
       if (!initializingSeenAtMs) {
         initializingSeenAtMs = now;
       } else if (now - initializingSeenAtMs >= STALLED_INITIALIZATION_TIMEOUT_MS) {
-        console.warn('[dispatch-wa] Watchdog detectó una inicialización atascada. Limpiando Chromium para permitir la recuperación.');
-        killStaleChromiumProcesses(status.authDataPath || resolveAuthDataPath());
-        initializingSeenAtMs = now;
-        scheduleStalledRecoveryProbe();
+        console.warn('[dispatch-wa] Watchdog detectó una inicialización atascada. Reiniciando el cliente sin cerrar la sesión persistida.');
+        initializingSeenAtMs = null;
+        await restartDispatchWhatsappClient(`watchdog:${reason}`);
         return;
       }
     } else {
@@ -274,6 +266,13 @@ export function getDispatchWhatsappStatus() {
 
 export async function getDispatchWhatsappStatusView(options = {}) {
   return getRuntimeStatusView(options);
+}
+
+export async function restartDispatchWhatsappClient(reason = 'recuperación automática') {
+  if (!runtimeEnvironmentPrepared) prepareRuntimeEnvironment({ cleanupStaleProcesses: true });
+  const status = getRuntimeStatus();
+  killStaleChromiumProcesses(status.authDataPath || resolveAuthDataPath());
+  return restartRuntimeClient(reason);
 }
 
 export async function closeDispatchWhatsappSession() {

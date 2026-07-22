@@ -56,12 +56,17 @@ test('existing auto-start kill switch also disables the server watchdog', () => 
 
 test('watchdog recovers a stalled Chromium initialization without logging out the WhatsApp account', () => {
   const source = readSource('src/services/dispatchWhatsappWebService.js');
+  const watchdog = between(
+    source,
+    "async function runDispatchWhatsappWatchdog(reason = 'interval')",
+    'export function startDispatchWhatsappWatchdog()'
+  );
   assert.match(source, /let initializingSeenAtMs = null/);
   assert.match(source, /DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS/);
   assert.match(source, /status\.initializing && !status\.ready && !status\.lastQr && !status\.lastError/);
-  assert.match(source, /killStaleChromiumProcesses\(status\.authDataPath \|\| resolveAuthDataPath\(\)\)/);
-  assert.match(source, /scheduleStalledRecoveryProbe\(\)/);
-  assert.doesNotMatch(source, /closeRuntimeSession\(\)\.catch/);
+  assert.match(watchdog, /await restartDispatchWhatsappClient\(`watchdog:\$\{reason\}`\)/);
+  assert.doesNotMatch(source, /scheduleStalledRecoveryProbe/);
+  assert.doesNotMatch(watchdog, /closeDispatchWhatsappSession|closeRuntimeSession/);
 });
 
 test('manual WhatsApp logout is respected by the server watchdog', () => {
@@ -244,13 +249,33 @@ test('runtime identifies only an auth directory inside the Railway volume as per
   else process.env.NODE_ENV = previousNodeEnv;
 });
 
-test('WhatsApp storage diagnostics remain restricted to DEV', () => {
+test('WhatsApp status view omits storage implementation details and surfaces polling failures', () => {
   const view = readSource('src/views/operacionesWhatsappEstado.ejs');
-  assert.match(view, /<% if \(role === 'dev'\) \{ %><div class="storage-box/);
-  assert.match(view, /id="storageBox"/);
-  assert.match(view, /Sesión persistente/);
-  assert.match(view, /Sesión en almacenamiento efímero/);
-  assert.match(view, /renderStorageStatus\(data\)/);
+  assert.doesNotMatch(view, /storage-box|storageBox|storageLabel|storageText/);
+  assert.doesNotMatch(view, /Sesión persistente|Sesión en almacenamiento efímero|LocalAuth|renderStorageStatus/);
+  assert.match(view, /function renderStatusError\(\)/);
+  assert.match(view, /catch \(error\)/);
+  assert.match(view, /renderStatusError\(\)/);
+  assert.match(view, /refreshStatus\(\);\s*window\.setInterval\(refreshStatus, 3000\)/);
+});
+
+test('stalled recovery releases the client without deleting LocalAuth session data', () => {
+  const runtime = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const restart = between(runtime, 'export async function restartDispatchWhatsappClient', 'async function getReadyClient');
+  assert.match(restart, /client = null/);
+  assert.match(restart, /initializing = false/);
+  assert.match(restart, /destroyClientWithoutLogout\(oldClient\)/);
+  assert.match(restart, /cleanupChromiumProfileLocks\(dataPath\)/);
+  assert.match(restart, /initDispatchWhatsappClient\(\)/);
+  assert.doesNotMatch(restart, /logout\(/);
+});
+
+test('panel stalled recovery uses non-destructive restart instead of manual logout', () => {
+  const route = readSource('src/routes/dispatchWaRouterV2.js');
+  const recovery = between(route, 'function recoverStalledInitialization()', 'async function getStatusForViewer');
+  assert.match(route, /restartDispatchWhatsappClient/);
+  assert.match(recovery, /restartDispatchWhatsappClient\('estado atascado detectado desde el panel'\)/);
+  assert.doesNotMatch(recovery, /closeDispatchWhatsappSession\(/);
 });
 
 test('stale cleanup includes uncertain delivery and pending automatic replies', () => {
