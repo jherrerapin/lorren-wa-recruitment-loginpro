@@ -36,9 +36,13 @@ jobs:
           node --check src/services/candidateData.js
           node --check src/services/fieldSanitizer.js
           node --check test/candidateAgeEvidence.test.js
+          node --check test/candidateAgeHarnessIntegration.test.js
 
       - name: Run focused age evidence regressions
         run: node --test test/candidateAgeEvidence.test.js
+
+      - name: Run integral age preservation regression
+        run: node --test test/candidateAgeHarnessIntegration.test.js
 
       - name: Run candidate parser regressions
         run: node --test test/candidateData.test.js
