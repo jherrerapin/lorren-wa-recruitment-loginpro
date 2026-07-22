@@ -1,6 +1,6 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
-import { detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
+import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 
 const ConversationStep = Object.freeze({
@@ -58,8 +58,20 @@ function recentConversationText(recentMessages = []) {
     .join('\n');
 }
 
-function buildResolutionText(inboundText = '', recentMessages = []) {
-  return [recentConversationText(recentMessages), inboundText]
+export function buildVacancyResolutionText(inboundText = '', recentMessages = []) {
+  const currentText = String(inboundText || '').trim();
+  const turn = analyzeConversationTurn(currentText);
+  const hasCurrentVacancyEvidence = Boolean(
+    detectCityFromText(currentText)
+    || detectRoleHintFromText(currentText)
+    || detectOperationZoneEvidence(currentText).length
+  );
+
+  if (turn.correction && hasCurrentVacancyEvidence) {
+    return currentText.slice(-4000);
+  }
+
+  return [recentConversationText(recentMessages), currentText]
     .filter(Boolean)
     .join('\n')
     .slice(-4000);
@@ -519,7 +531,7 @@ export async function resolveVacancyFirstGate({
     };
   }
 
-  const resolutionText = buildResolutionText(inboundText, recentMessages);
+  const resolutionText = buildVacancyResolutionText(inboundText, recentMessages);
   const resolution = await resolveVacancyFromText(prisma, resolutionText || inboundText, {
     cityHint: vacancyHints?.city || null,
     roleHint: vacancyHints?.roleHint || null,
