@@ -1,11 +1,11 @@
 TAP version 13
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:30.901Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:31.182Z"}
 # Subtest: conversation harness regression cases
     # Subtest: greeting-not-name
     not ok 1 - greeting-not-name
       ---
-      duration_ms: 158.187139
+      duration_ms: 153.011569
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: 'greeting-not-name: la respuesta final no contiene "vacante o cargo"'
@@ -24,18 +24,18 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:30.998Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:31.517Z"}
     # Subtest: age-not-experience
     ok 2 - age-not-experience
       ---
-      duration_ms: 94.174482
+      duration_ms: 333.846114
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:31.095Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:31.606Z"}
     # Subtest: experience-headcount-number-does-not-trigger-age-rejection
     not ok 3 - experience-headcount-number-does-not-trigger-age-rejection
       ---
-      duration_ms: 99.237066
+      duration_ms: 89.391795
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -60,7 +60,7 @@ TAP version 13
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:31.184Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:31.669Z"}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
@@ -69,7 +69,7 @@ TAP version 13
     # Subtest: fragmented-data-consolidation
     not ok 4 - fragmented-data-consolidation
       ---
-      duration_ms: 1529.500292
+      duration_ms: 356.840662
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -96,32 +96,32 @@ TAP version 13
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:32.702Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.042Z"}
     # Subtest: greeting-not-name-or-neighborhood
     ok 5 - greeting-not-name-or-neighborhood
       ---
-      duration_ms: 74.623111
+      duration_ms: 77.464726
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:32.759Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.118Z"}
     # Subtest: bike-variants-recognized
     ok 6 - bike-variants-recognized
       ---
-      duration_ms: 56.886605
+      duration_ms: 76.068147
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:32.822Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.162Z"}
     # Subtest: car-recognized
     ok 7 - car-recognized
       ---
-      duration_ms: 62.513854
+      duration_ms: 44.038017
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:32.884Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.236Z"}
     # Subtest: city-with-multiple-vacancies-asks-which-one
     not ok 8 - city-with-multiple-vacancies-asks-which-one
       ---
-      duration_ms: 61.590258
+      duration_ms: 73.444189
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: 'city-with-multiple-vacancies-asks-which-one: la respuesta final no contiene "Ya tengo la ciudad: Ibague"'
@@ -140,11 +140,11 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:32.960Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.295Z"}
     # Subtest: city-only-does-not-auto-assign-even-with-single-active-city-vacancy
     not ok 9 - city-only-does-not-auto-assign-even-with-single-active-city-vacancy
       ---
-      duration_ms: 76.339832
+      duration_ms: 58.773781
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: 'city-only-does-not-auto-assign-even-with-single-active-city-vacancy: la respuesta final no contiene "Ya tengo la ciudad: Ibague"'
@@ -163,11 +163,11 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:33.049Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.361Z"}
     # Subtest: inactive-vacancy-offers-registration-for-future-openings
     not ok 10 - inactive-vacancy-offers-registration-for-future-openings
       ---
-      duration_ms: 88.448861
+      duration_ms: 66.12169
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -192,11 +192,11 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:33.112Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.412Z"}
     # Subtest: bus-and-independent-recognized
     not ok 11 - bus-and-independent-recognized
       ---
-      duration_ms: 62.077253
+      duration_ms: 51.023036
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -221,11 +221,11 @@ TAP version 13
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [BOT_REPLY_SAFETY_BLOCKED] {"candidateId":"candidate-1","blockedClaims":["obra_labor"],"reason":"unsupported_sensitive_vacancy_claim"}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:33.183Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.500Z"}
     # Subtest: answer-question-before-data
     not ok 12 - answer-question-before-data
       ---
-      duration_ms: 71.457067
+      duration_ms: 87.092935
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -253,32 +253,32 @@ TAP version 13
     # Subtest: no-interest-closes
     ok 13 - no-interest-closes
       ---
-      duration_ms: 62.293185
+      duration_ms: 43.205759
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:33.325Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.590Z"}
     # Subtest: natural-correction-in-confirmation
     ok 14 - natural-correction-in-confirmation
       ---
-      duration_ms: 79.061451
+      duration_ms: 46.936298
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:33.402Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.648Z"}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:33.551Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:32.794Z"}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
     # Subtest: ibague-flow-name-correction-and-transport-list
     not ok 15 - ibague-flow-name-correction-and-transport-list
       ---
-      duration_ms: 479.026507
+      duration_ms: 341.285629
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -301,28 +301,28 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:33.867Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.004Z"}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
     # Subtest: madrid-city-role-fragments-do-not-become-name
     ok 16 - madrid-city-role-fragments-do-not-become-name
       ---
-      duration_ms: 139.479896
+      duration_ms: 146.412021
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:34.016Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.140Z"}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
     # Subtest: funza-bodega-city-does-not-become-name-and-resolves-vacancy
     ok 17 - funza-bodega-city-does-not-become-name-and-resolves-vacancy
       ---
-      duration_ms: 123.572946
+      duration_ms: 124.547887
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:34.126Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.235Z"}
     # Subtest: bodega-data-block-keeps-name-doc-and-transport
     not ok 18 - bodega-data-block-keeps-name-doc-and-transport
       ---
-      duration_ms: 58.195734
+      duration_ms: 32.293812
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -348,26 +348,26 @@ TAP version 13
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:34.197Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.285Z"}
     # Subtest: single-missing-medical-restrictions-accepts-natural-no
     ok 19 - single-missing-medical-restrictions-accepts-natural-no
       ---
-      duration_ms: 70.616856
+      duration_ms: 49.827672
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:34.261Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.316Z"}
     # Subtest: medical-restrictions-confusion-gets-clear-explanation
     ok 20 - medical-restrictions-confusion-gets-clear-explanation
       ---
-      duration_ms: 64.108593
+      duration_ms: 31.017416
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:34.327Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.380Z"}
     # Subtest: future-birthday-keeps-current-age-and-does-not-repeat-transport
     not ok 21 - future-birthday-keeps-current-age-and-does-not-repeat-transport
       ---
-      duration_ms: 65.992461
+      duration_ms: 63.923122
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -390,7 +390,7 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:34.389Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.429Z"}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
@@ -400,7 +400,7 @@ TAP version 13
     # Subtest: ibague-greeting-interest-does-not-become-name-and-name-correction-advances
     not ok 22 - ibague-greeting-interest-does-not-become-name-and-name-correction-advances
       ---
-      duration_ms: 285.415378
+      duration_ms: 254.304319
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -424,7 +424,7 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:34.679Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:33.691Z"}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
@@ -446,7 +446,7 @@ TAP version 13
     # Subtest: ibague-pdf-phrase-does-not-become-name-or-reopen-confirmation
     not ok 23 - ibague-pdf-phrase-does-not-become-name-or-reopen-confirmation
       ---
-      duration_ms: 564.00906
+      duration_ms: 488.046241
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -470,12 +470,12 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:35.228Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:34.169Z"}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"Buenas noches","currentStep":"GREETING_SENT","vacancyId":null,"reason":"REPEAT_PREVENTED","gate":"vacancy_first_gate","action":"SUPPRESS_REPLY","replyKind":"ASK_CITY_AND_ROLE","recentReplyKind":"ASK_CITY_AND_ROLE","createdAt":"2026-07-22T19:58:35.340Z"}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"Buenas noches","currentStep":"GREETING_SENT","vacancyId":null,"reason":"REPEAT_PREVENTED","gate":"vacancy_first_gate","action":"SUPPRESS_REPLY","replyKind":"ASK_CITY_AND_ROLE","recentReplyKind":"ASK_CITY_AND_ROLE","createdAt":"2026-07-22T20:02:34.291Z"}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
@@ -488,7 +488,7 @@ TAP version 13
     # Subtest: ibague-role-phrase-does-not-become-name-and-name-correction-sticks
     not ok 24 - ibague-role-phrase-does-not-become-name-and-name-correction-sticks
       ---
-      duration_ms: 660.096171
+      duration_ms: 517.352618
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -512,7 +512,7 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:35.903Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:34.715Z"}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
@@ -520,15 +520,15 @@ TAP version 13
     # Subtest: bogota-calle-80-does-not-become-age-or-trigger-rejection
     ok 25 - bogota-calle-80-does-not-become-age-or-trigger-rejection
       ---
-      duration_ms: 134.386387
+      duration_ms: 196.932729
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:36.032Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:34.885Z"}
     # Subtest: human-intervention-pauses-bot
     not ok 26 - human-intervention-pauses-bot
       ---
-      duration_ms: 60.293834
+      duration_ms: 47.650075
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -552,18 +552,18 @@ TAP version 13
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:36.088Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:34.977Z"}
     # Subtest: cv-first-then-city-vacancy
     ok 27 - cv-first-then-city-vacancy
       ---
-      duration_ms: 55.306022
+      duration_ms: 91.479865
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:36.166Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:35.050Z"}
     # Subtest: foreigner-with-ppt-not-rejected
     not ok 28 - foreigner-with-ppt-not-rejected
       ---
-      duration_ms: 78.346236
+      duration_ms: 73.032398
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -588,28 +588,28 @@ TAP version 13
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:36.240Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:35.121Z"}
     # Subtest: yes-please-not-name
     ok 29 - yes-please-not-name
       ---
-      duration_ms: 73.54998
+      duration_ms: 71.067994
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:36.311Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:35.172Z"}
     # Subtest: female-contextual-interest-not-name-or-neighborhood
     ok 30 - female-contextual-interest-not-name-or-neighborhood
       ---
-      duration_ms: 70.832674
+      duration_ms: 50.431402
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:36.973Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:35.223Z"}
     # Subtest: no-multiple-templates-mixed
     not ok 31 - no-multiple-templates-mixed
       ---
-      duration_ms: 661.595305
+      duration_ms: 50.758545
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: 'no-multiple-templates-mixed: la respuesta final no contiene "requisitos registrados"'
@@ -631,7 +631,7 @@ TAP version 13
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [ENGINE_PRIMARY_FALLBACK] {"phone":"573001112233","candidateId":"candidate-1","reason":"invalid_engine_json","delegatedToDeterministicFlow":true}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:37.029Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:36.454Z"}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
@@ -639,16 +639,16 @@ TAP version 13
     # Subtest: no-infinite-confirmation
     ok 32 - no-infinite-confirmation
       ---
-      duration_ms: 119.561977
+      duration_ms: 1269.851867
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"si","currentStep":"CONFIRMING_DATA","vacancyId":"vac-post","reason":"Candidate main flow is complete and the new message is only contextual closure.","gate":"chat_engine","action":"SUPPRESSED","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T19:58:37.163Z"}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"si","currentStep":"CONFIRMING_DATA","vacancyId":"vac-post","reason":"Candidate main flow is complete and the new message is only contextual closure.","gate":"chat_engine","action":"SUPPRESSED","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T20:02:36.540Z"}
 # [BOT_SUPPRESSED] {"phone":"573001112233","candidateId":"candidate-1","reason":"Candidate main flow is complete and the new message is only contextual closure."}
     # Subtest: female-pipeline-after-cv
     not ok 33 - female-pipeline-after-cv
       ---
-      duration_ms: 70.158724
+      duration_ms: 46.793402
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -674,18 +674,18 @@ TAP version 13
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"listo","currentStep":"ASK_CV","vacancyId":"vac-sched","reason":"Candidate main flow is complete and the new message is only contextual closure.","gate":"chat_engine","action":"SUPPRESSED","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T19:58:37.212Z"}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"listo","currentStep":"ASK_CV","vacancyId":"vac-sched","reason":"Candidate main flow is complete and the new message is only contextual closure.","gate":"chat_engine","action":"SUPPRESSED","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T20:02:36.601Z"}
 # [BOT_SUPPRESSED] {"phone":"573001112233","candidateId":"candidate-1","reason":"Candidate main flow is complete and the new message is only contextual closure."}
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"no puedo, otro horario","currentStep":"ASK_CV","vacancyId":"vac-sched","reason":"Candidate has no real pending action; suppressing automatic flow continuation.","gate":"contextual_response_gate","action":"NO_REPLY","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T19:58:37.298Z"}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"no puedo, otro horario","currentStep":"ASK_CV","vacancyId":"vac-sched","reason":"Candidate has no real pending action; suppressing automatic flow continuation.","gate":"contextual_response_gate","action":"NO_REPLY","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T20:02:36.685Z"}
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
 # [BOT_REPLY_STATE_GUARD_BLOCKED] {"candidateId":"candidate-1","reasons":["resolved_cv_requested_again"]}
-# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T21:58:37.367Z"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-22T22:02:36.732Z"}
     # Subtest: scheduling-offer-reschedule-confirm
     not ok 34 - scheduling-offer-reschedule-confirm
       ---
-      duration_ms: 204.091691
+      duration_ms: 192.107247
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -713,7 +713,7 @@ TAP version 13
     # Subtest: document-exception-pauses-for-manual-review
     not ok 35 - document-exception-pauses-for-manual-review
       ---
-      duration_ms: 129.044783
+      duration_ms: 68.728663
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -740,7 +740,7 @@ TAP version 13
     # Subtest: done-step-followup-about-previous-application-gets-status-ack
     not ok 36 - done-step-followup-about-previous-application-gets-status-ack
       ---
-      duration_ms: 54.689418
+      duration_ms: 53.160456
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: 'done-step-followup-about-previous-application-gets-status-ack: la respuesta final no contiene "postulación ya está registrada"'
@@ -762,7 +762,7 @@ TAP version 13
     # Subtest: done-step-answers-vacancy-question-naturally
     ok 37 - done-step-answers-vacancy-question-naturally
       ---
-      duration_ms: 75.135422
+      duration_ms: 49.39393
       ...
 # [ENGINE_PARSE_FAIL] { phone: '573001112233', parseStrategy: 'none' }
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
@@ -770,7 +770,7 @@ TAP version 13
     # Subtest: ask-cv-out-of-scope-question-pauses-for-dev-review
     not ok 38 - ask-cv-out-of-scope-question-pauses-for-dev-review
       ---
-      duration_ms: 133.423854
+      duration_ms: 50.783493
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -798,7 +798,7 @@ TAP version 13
     # Subtest: scheduled-arrival-problem-pauses-for-manual-review-without-reply
     not ok 39 - scheduled-arrival-problem-pauses-for-manual-review-without-reply
       ---
-      duration_ms: 64.856139
+      duration_ms: 33.67969
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: |-
@@ -821,11 +821,11 @@ TAP version 13
         async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
       ...
 # [AI_FALLBACK] {"phone":"573001112233","error":null}
-# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"cual es la direccion exacta de la entrevista?","currentStep":"SCHEDULED","vacancyId":"vac-sched","reason":"Candidate has no real pending action; suppressing automatic flow continuation.","gate":"contextual_response_gate","action":"NO_REPLY","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T19:58:38.077Z"}
+# [BOT_SILENCE_TRACE] {"source":"bot_silence_trace","visibility":"internal","neverSendToCandidate":true,"candidateId":"candidate-1","inboundPreview":"cual es la direccion exacta de la entrevista?","currentStep":"SCHEDULED","vacancyId":"vac-sched","reason":"Candidate has no real pending action; suppressing automatic flow continuation.","gate":"contextual_response_gate","action":"NO_REPLY","replyKind":null,"recentReplyKind":null,"createdAt":"2026-07-22T20:02:37.029Z"}
     # Subtest: scheduled-question-uses-context-instead-of-repeating-flow
     not ok 40 - scheduled-question-uses-context-instead-of-repeating-flow
       ---
-      duration_ms: 251.700206
+      duration_ms: 40.526489
       location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:170:13'
       failureType: 'testCodeFailure'
       error: 'scheduled-question-uses-context-instead-of-repeating-flow: la respuesta final no contiene "direccion de entrevista"'
@@ -847,7 +847,7 @@ TAP version 13
     1..40
 not ok 1 - conversation harness regression cases
   ---
-  duration_ms: 7332.637424
+  duration_ms: 5999.321931
   location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/conversation-harness.test.js:168:1'
   failureType: 'subtestsFailed'
   error: '24 subtests failed'
@@ -861,4 +861,4 @@ not ok 1 - conversation harness regression cases
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 7968.856684
+# duration_ms 6415.962693
