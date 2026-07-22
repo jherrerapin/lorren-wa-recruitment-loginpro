@@ -73,8 +73,17 @@ jobs:
       - name: Validate city-only boundary
         run: node --test --test-name-pattern="solo ciudad" test/activeVacancyQuestionIntake.test.js
 
-      - name: Run gate and webhook authority regressions
-        run: node --test test/vacancyFirstGate.test.js test/webhookVacancyFirstGateAuthority.test.js test/turnOrchestratorContracts.test.js test/webhookConversationFlow.test.js
+      - name: Run vacancy first gate regressions
+        run: node --test test/vacancyFirstGate.test.js
+
+      - name: Run webhook vacancy authority regressions
+        run: node --test test/webhookVacancyFirstGateAuthority.test.js
+
+      - name: Run turn orchestrator contracts
+        run: node --test test/turnOrchestratorContracts.test.js
+
+      - name: Run webhook conversation flow regressions
+        run: node --test test/webhookConversationFlow.test.js
 
       - name: Commit generated runtime patch
         env:
