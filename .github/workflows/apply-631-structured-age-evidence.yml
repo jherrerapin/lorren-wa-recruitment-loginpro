@@ -30,6 +30,14 @@ jobs:
       - name: Apply exact structured age patch
         run: node scripts/apply-631-structured-age-evidence.mjs
 
+      - name: Upload generated age evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-age-evidence
+          path: src/services/ageEvidence.js
+          if-no-files-found: error
+
       - name: Validate age evidence syntax
         run: node --check src/services/ageEvidence.js
 
