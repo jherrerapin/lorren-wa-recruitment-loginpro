@@ -116,6 +116,7 @@ function buildPortalAssignment(assignment, now) {
       : 'Horario por confirmar',
     expectedStartAt: expectedStartAt?.toISOString() || null,
     expectedEndAt: expectedEndAt?.toISOString() || null,
+    arrivalWindowOpen: windowState.open,
     arrivalWindowOpensAt: windowState.opensAt?.toISOString() || null,
     attendanceEnabled,
     arrivalReported,
