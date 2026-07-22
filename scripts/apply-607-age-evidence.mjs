@@ -51,6 +51,26 @@ replaceFunction(
   }
 }
 
+{
+  let source = readFileSync(candidateFile, 'utf8');
+  const oldGlobal = "  const hasGlobalWorkContext = /\\b(experien|trabaj|labor|cargo|oficio)\\b/.test(compact);";
+  const newGlobal = "  const hasGlobalWorkContext = /\\b(experien|trabaj|labor|cargo|oficio|operaci|logistic|personal|coordin|turno)\\b/.test(compact);";
+  const oldLocal = "    const hasLocalWorkContext = /\\b(experien|trabaj|labor|cargo|oficio)\\b/.test(nearContext);";
+  const newLocal = "    const hasLocalWorkContext = /\\b(experien|trabaj|labor|cargo|oficio|operaci|logistic|personal|coordin|turno)\\b/.test(nearContext);";
+
+  if (!source.includes(newGlobal)) {
+    const count = source.split(oldGlobal).length - 1;
+    if (count !== 1) throw new Error(`candidateData global work context count: ${count}`);
+    source = source.replace(oldGlobal, newGlobal);
+  }
+  if (!source.includes(newLocal)) {
+    const count = source.split(oldLocal).length - 1;
+    if (count !== 1) throw new Error(`candidateData local work context count: ${count}`);
+    source = source.replace(oldLocal, newLocal);
+  }
+  writeFileSync(candidateFile, source, 'utf8');
+}
+
 const sanitizerFile = 'src/services/fieldSanitizer.js';
 {
   let source = readFileSync(sanitizerFile, 'utf8');
