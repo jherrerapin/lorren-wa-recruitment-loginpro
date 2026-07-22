@@ -2,7 +2,7 @@ TAP version 13
 # Subtest: parser no convierte duración laboral ni cantidad de personal en edad
 not ok 1 - parser no convierte duración laboral ni cantidad de personal en edad
   ---
-  duration_ms: 15.44542
+  duration_ms: 15.214711
   location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/candidateAgeEvidence.test.js:24:1'
   failureType: 'testCodeFailure'
   error: |-
@@ -28,70 +28,49 @@ not ok 1 - parser no convierte duración laboral ni cantidad de personal en edad
 # Subtest: parser separa edad explícita, experiencia y cantidad de personal
 ok 2 - parser separa edad explícita, experiencia y cantidad de personal
   ---
-  duration_ms: 6.13335
+  duration_ms: 6.019007
   ...
 # Subtest: parser conserva corrección explícita de edad
 ok 3 - parser conserva corrección explícita de edad
   ---
-  duration_ms: 4.843646
+  duration_ms: 3.570183
   ...
 # Subtest: parser conserva respuesta numérica corta
 ok 4 - parser conserva respuesta numérica corta
   ---
-  duration_ms: 1.448391
+  duration_ms: 0.837087
   ...
 # Subtest: sanitizer rechaza 56 cuando el número está ligado a trabajadores
 ok 5 - sanitizer rechaza 56 cuando el número está ligado a trabajadores
   ---
-  duration_ms: 2.919364
+  duration_ms: 1.911798
   ...
-# Subtest: sanitizer rechaza 12 cuando el número está ligado a experiencia
-not ok 6 - sanitizer rechaza 12 cuando el número está ligado a experiencia
+# Subtest: sanitizer rechaza una duración laboral dentro del rango de edad
+ok 6 - sanitizer rechaza una duración laboral dentro del rango de edad
   ---
-  duration_ms: 0.415879
-  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/candidateAgeEvidence.test.js:60:1'
-  failureType: 'testCodeFailure'
-  error: |-
-    Expected values to be strictly equal:
-    + actual - expected
-    
-    + 'invalid_age_range'
-    - 'experience_number_not_age'
-  code: 'ERR_ASSERTION'
-  name: 'AssertionError'
-  expected: 'experience_number_not_age'
-  actual: 'invalid_age_range'
-  operator: 'strictEqual'
-  stack: |-
-    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/candidateAgeEvidence.test.js:64:10)
-    Test.runInAsyncScope (node:async_hooks:206:9)
-    Test.run (node:internal/test_runner/test:796:25)
-    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
-    Test.postRun (node:internal/test_runner/test:889:19)
-    Test.run (node:internal/test_runner/test:835:12)
-    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  duration_ms: 0.801741
   ...
 # Subtest: sanitizer acepta la edad explícita aunque el mensaje incluya experiencia
 ok 7 - sanitizer acepta la edad explícita aunque el mensaje incluya experiencia
   ---
-  duration_ms: 0.681125
+  duration_ms: 0.470451
   ...
 # Subtest: sanitizer acepta respuesta corta cuando edad está pendiente
 ok 8 - sanitizer acepta respuesta corta cuando edad está pendiente
   ---
-  duration_ms: 0.568634
+  duration_ms: 0.297897
   ...
 # Subtest: sanitizer no acepta un número suelto sin contexto de edad
 ok 9 - sanitizer no acepta un número suelto sin contexto de edad
   ---
-  duration_ms: 0.722913
+  duration_ms: 0.468837
   ...
 1..9
 # tests 9
 # suites 0
-# pass 7
-# fail 2
+# pass 8
+# fail 1
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 118.986152
+# duration_ms 103.306325
