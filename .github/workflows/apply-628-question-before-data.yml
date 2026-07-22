@@ -73,8 +73,28 @@ jobs:
       - name: Validate city-only boundary
         run: node --test --test-name-pattern="solo ciudad" test/activeVacancyQuestionIntake.test.js
 
-      - name: Run vacancy first gate regressions
-        run: node --test test/vacancyFirstGate.test.js
+      - name: Capture vacancy first gate regressions
+        run: |
+          set +e
+          node --test test/vacancyFirstGate.test.js > diagnostics/628-vacancy-gate.tap 2>&1
+          status=$?
+          set -e
+          printf 'status=%s\n' "$status" > diagnostics/628-vacancy-gate-summary.txt
+
+      - name: Upload vacancy gate diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: question-before-data-vacancy-gate
+          path: |
+            diagnostics/628-vacancy-gate.tap
+            diagnostics/628-vacancy-gate-summary.txt
+          if-no-files-found: error
+
+      - name: Validate vacancy first gate regressions
+        run: |
+          cat diagnostics/628-vacancy-gate.tap
+          grep -q '^status=0$' diagnostics/628-vacancy-gate-summary.txt
 
       - name: Run webhook vacancy authority regressions
         run: node --test test/webhookVacancyFirstGateAuthority.test.js
