@@ -26,6 +26,15 @@ test('perfil de pruebas no cuenta como asignado ni confirmado', () => {
   });
 });
 
+test('una asignación sin auxiliar relacionado tampoco cuenta como cobertura', () => {
+  const request = {
+    requiredWorkers: 1,
+    assignments: [{ status: 'CONFIRMED', worker: null }]
+  };
+  assert.equal(operationalAssignments(request).length, 0);
+  assert.equal(deriveDispatchRequestOperationalState(request).status, 'PENDING_ASSIGNMENT');
+});
+
 test('auxiliar real sigue determinando pendiente o completa', () => {
   const pending = {
     requiredWorkers: 1,
