@@ -21,6 +21,7 @@ const STALLED_INITIALIZATION_TIMEOUT_MS = Math.max(60000, Number(process.env.DIS
 const STALLED_RECOVERY_PROBE_MS = Math.max(1000, Number(process.env.DISPATCH_WWEB_STALLED_RECOVERY_PROBE_MS || 3000));
 const STALE_LINK_CLEANUP_LIMIT = Math.max(50, Number(process.env.DISPATCH_WA_STALE_LINK_CLEANUP_LIMIT || 1000));
 const SENDABLE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
+const EXPIRABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'];
 
 let watchdogTimer = null;
 let watchdogStartTimer = null;
@@ -174,7 +175,7 @@ async function validateOutgoingAssignmentContext(context = {}, phone = '') {
 async function expirePastConfirmationLinks(reason = 'watchdog') {
   const today = todayIsoDateCO();
   const links = await prisma.dispatchWhatsappConfirmation.findMany({
-    where: { status: 'PENDING' },
+    where: { status: { in: EXPIRABLE_CONFIRMATION_LINK_STATUSES } },
     select: {
       id: true,
       assignment: {
@@ -196,7 +197,7 @@ async function expirePastConfirmationLinks(reason = 'watchdog') {
 
   if (!staleIds.length) return 0;
   const result = await prisma.dispatchWhatsappConfirmation.updateMany({
-    where: { id: { in: staleIds }, status: 'PENDING' },
+    where: { id: { in: staleIds }, status: { in: EXPIRABLE_CONFIRMATION_LINK_STATUSES } },
     data: { status: 'EXPIRED' }
   });
   console.log(`[dispatch-wa] Contextos antiguos de confirmación expirados=${result.count} reason=${reason} fechaCorte=${today}.`);

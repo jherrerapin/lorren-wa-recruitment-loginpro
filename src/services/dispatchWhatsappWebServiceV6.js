@@ -23,6 +23,8 @@ const PENDING_RECONCILIATION_MESSAGES_PER_CHAT = Math.max(1, Number(process.env.
 const CHROMIUM_LOCK_FILES = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket']);
 const PENDING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
+const RECOVERABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN'];
+const CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING';
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const AUTOMATIC_CONFIRMATION_REPLY = 'Gracias.';
 
@@ -278,26 +280,26 @@ function rememberPendingConfirmation(phone, context = {}, chatIds = []) {
 
 async function preparePendingConfirmationLink({ phone, context = {}, chatId = '' }) {
   const primaryChatId = normalizeChatId(chatId);
-  const remembered = rememberPendingConfirmation(phone, context, primaryChatId ? [primaryChatId] : []);
-  if (!remembered?.assignmentId || !remembered?.serviceRequestId || !primaryChatId) {
+  const normalizedPhone = normalizePhone(phone);
+  const pendingValue = buildPendingConfirmationValue(normalizedPhone, context);
+  if (!pendingValue?.assignmentId || !pendingValue?.serviceRequestId || !primaryChatId) {
     throw buildError('No fue posible preparar el contexto persistente de confirmación.', 503);
   }
 
   try {
     const link = await prisma.dispatchWhatsappConfirmation.create({
       data: {
-        assignmentId: remembered.assignmentId,
-        serviceRequestId: remembered.serviceRequestId,
-        phone: remembered.phone,
+        assignmentId: pendingValue.assignmentId,
+        serviceRequestId: pendingValue.serviceRequestId,
+        phone: normalizedPhone,
         chatId: primaryChatId,
         status: 'PENDING',
-        expiresAt: new Date(remembered.expiresAt)
+        expiresAt: new Date(pendingValue.expiresAt)
       }
     });
+    const remembered = rememberPendingConfirmation(normalizedPhone, context, [primaryChatId]);
     return { ...remembered, linkId: link.id, primaryChatId };
   } catch (error) {
-    pendingConfirmationByPhone.delete(remembered.phone);
-    pendingConfirmationByChatId.delete(primaryChatId);
     console.error('[dispatch-wa] No fue posible guardar el contexto antes del envío.', error?.message || error);
     throw buildError('No se envió WhatsApp porque no fue posible guardar el contexto de confirmación. Intenta nuevamente.', 503);
   }
@@ -330,17 +332,15 @@ async function finalizePendingConfirmationLink({ pending, chatIds = [], provider
   }
 }
 
-async function markPendingConfirmationSendFailed(pending) {
+async function markPendingConfirmationDeliveryUnknown(pending) {
   if (!pending?.linkId) return;
-  pendingConfirmationByPhone.delete(pending.phone);
-  pendingConfirmationByChatId.delete(pending.primaryChatId);
   try {
     await prisma.dispatchWhatsappConfirmation.updateMany({
       where: { id: pending.linkId, status: 'PENDING' },
-      data: { status: 'SEND_FAILED' }
+      data: { status: 'DELIVERY_UNKNOWN' }
     });
   } catch (error) {
-    console.warn('[dispatch-wa] No fue posible marcar como fallido el contexto de un envío rechazado.', error?.message || error);
+    console.warn('[dispatch-wa] No fue posible conservar el estado de entrega incierta.', error?.message || error);
   }
 }
 
@@ -383,18 +383,27 @@ function resolveAuthDataPath() {
   return './storage/dispatch-wweb-auth';
 }
 
+export function isPathWithinRoot(rootPath, targetPath) {
+  if (!rootPath || !targetPath) return false;
+  const root = path.resolve(rootPath);
+  const target = path.resolve(targetPath);
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 function authStorageInfo() {
-  const authDataPath = resolveAuthDataPath();
+  const authDataPath = path.resolve(resolveAuthDataPath());
   const explicitPersistentPath = process.env.DISPATCH_WWEB_AUTH_PERSISTENT === 'true';
-  const railwayVolume = Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH);
-  const authStoragePersistent = railwayVolume || explicitPersistentPath;
+  const railwayVolumeMountPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '';
+  const authPathInsideRailwayVolume = isPathWithinRoot(railwayVolumeMountPath, authDataPath);
+  const authStoragePersistent = explicitPersistentPath || authPathInsideRailwayVolume;
   return {
     authDataPath,
     authStoragePersistent,
     authStorageMode: authStoragePersistent ? 'PERSISTENT' : 'EPHEMERAL',
     authStorageWarning: authStoragePersistent
       ? null
-      : 'La sesión de WhatsApp está en almacenamiento efímero. Monta un volumen Railway y desactiva Serverless para operación continua.'
+      : 'La sesión de WhatsApp está en almacenamiento efímero. Monta un volumen Railway, ubica LocalAuth dentro del volumen y desactiva Serverless para operación continua.'
   };
 }
 
@@ -556,7 +565,7 @@ async function findPendingAssignmentFromChatId(chatId, message = {}) {
 
 async function latestPendingConfirmationLink(where) {
   return prisma.dispatchWhatsappConfirmation.findFirst({
-    where: { status: 'PENDING', expiresAt: { gt: new Date() }, ...where },
+    where: { status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES }, expiresAt: { gt: new Date() }, ...where },
     orderBy: { createdAt: 'desc' }
   });
 }
@@ -581,21 +590,18 @@ async function findPersistedPendingAssignmentByLink({ phone = '', chatId = '', m
   return assignment;
 }
 
-async function markPersistedConfirmationLinksCompleted({ assignmentId, phone = '', chatId = '' } = {}) {
-  const normalizedPhone = normalizePhone(phone);
-  const normalizedChatId = normalizeChatId(chatId);
-  const or = [
-    ...(normalizedChatId ? [{ chatId: normalizedChatId }] : []),
-    ...(normalizedPhone ? [{ phone: normalizedPhone }] : [])
-  ];
-  if (!assignmentId || !or.length) return;
+async function setPersistedConfirmationLinksStatus({ assignmentId, status = 'CONFIRMED' } = {}) {
+  if (!assignmentId) return;
   try {
     await prisma.dispatchWhatsappConfirmation.updateMany({
-      where: { assignmentId, status: 'PENDING', OR: or },
-      data: { status: 'CONFIRMED' }
+      where: {
+        assignmentId,
+        status: { in: [...RECOVERABLE_CONFIRMATION_LINK_STATUSES, CONFIRMED_REPLY_PENDING_STATUS] }
+      },
+      data: { status }
     });
   } catch (error) {
-    console.warn('[dispatch-wa] No fue posible cerrar contexto persistido de confirmación.', error?.message || error);
+    console.warn('[dispatch-wa] No fue posible actualizar todos los contextos persistidos de confirmación.', error?.message || error);
   }
 }
 
@@ -617,14 +623,20 @@ async function sendAutomaticConfirmationReply(activeClient, chatId) {
 
 async function applyAssignmentConfirmation({ activeClient, assignment, phone = '', chatId = '', eventName = 'message' } = {}) {
   if (!assignment?.id || !chatId) return false;
-  const updated = await prisma.dispatchAssignment.updateMany({ where: { id: assignment.id, status: { in: PENDING_ASSIGNMENT_STATUSES } }, data: { status: CONFIRMED_ASSIGNMENT_STATUS } });
+  const updated = await prisma.dispatchAssignment.updateMany({
+    where: { id: assignment.id, status: { in: PENDING_ASSIGNMENT_STATUSES } },
+    data: { status: CONFIRMED_ASSIGNMENT_STATUS }
+  });
   if (!updated.count) return false;
   await recalculateServiceRequestStatus(assignment.serviceRequestId);
   if (phone) pendingConfirmationByPhone.delete(phone);
   pendingConfirmationByChatId.delete(normalizeChatId(chatId));
-  await markPersistedConfirmationLinksCompleted({ assignmentId: assignment.id, phone, chatId });
-  await sendAutomaticConfirmationReply(activeClient, chatId);
-  console.log(`[dispatch-wa] Confirmación automática registrada para assignment=${assignment.id} phone=${phone} sender=${chatId} event=${eventName}.`);
+  const automaticReplySent = await sendAutomaticConfirmationReply(activeClient, chatId);
+  await setPersistedConfirmationLinksStatus({
+    assignmentId: assignment.id,
+    status: automaticReplySent ? 'CONFIRMED' : CONFIRMED_REPLY_PENDING_STATUS
+  });
+  console.log(`[dispatch-wa] Confirmación automática registrada para assignment=${assignment.id} phone=${phone} sender=${chatId} event=${eventName} thanks=${automaticReplySent ? 'sent' : 'pending'}.`);
   return true;
 }
 
@@ -720,13 +732,43 @@ async function processPersistedConfirmationTarget(activeClient, link) {
   return 0;
 }
 
+async function retryPendingAutomaticReplies(activeClient) {
+  if (!activeClient) return 0;
+  const pendingReplyLinks = await prisma.dispatchWhatsappConfirmation.findMany({
+    where: { status: CONFIRMED_REPLY_PENDING_STATUS, expiresAt: { gt: new Date() } },
+    select: {
+      id: true,
+      assignmentId: true,
+      serviceRequestId: true,
+      phone: true,
+      chatId: true,
+      createdAt: true
+    },
+    orderBy: { createdAt: 'desc' },
+    take: PENDING_RECONCILIATION_LIMIT
+  });
+  const targets = selectLatestPendingConfirmationTargets(pendingReplyLinks);
+  let sentCount = 0;
+  for (const target of targets) {
+    const chatIds = await reconciliationChatIds(activeClient, target);
+    for (const chatId of chatIds) {
+      if (!await sendAutomaticConfirmationReply(activeClient, chatId)) continue;
+      await setPersistedConfirmationLinksStatus({ assignmentId: target.assignmentId, status: 'CONFIRMED' });
+      sentCount += 1;
+      break;
+    }
+  }
+  return sentCount;
+}
+
 async function processPersistedPendingConfirmations(activeClient, reason = 'interval') {
   if (!activeClient || pendingReconciliationRunning) return 0;
   pendingReconciliationRunning = true;
   let processed = 0;
+  let repliesRetried = 0;
   try {
     const links = await prisma.dispatchWhatsappConfirmation.findMany({
-      where: { status: 'PENDING', expiresAt: { gt: new Date() } },
+      where: { status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES }, expiresAt: { gt: new Date() } },
       select: {
         id: true,
         assignmentId: true,
@@ -740,10 +782,11 @@ async function processPersistedPendingConfirmations(activeClient, reason = 'inte
     });
     const targets = selectLatestPendingConfirmationTargets(links);
     for (const target of targets) processed += await processPersistedConfirmationTarget(activeClient, target);
+    repliesRetried = await retryPendingAutomaticReplies(activeClient);
     lastPendingReconciliationAt = new Date().toISOString();
-    lastPendingReconciliationProcessed = processed;
-    console.log(`[dispatch-wa] Reconciliación persistente finalizada. reason=${reason} pendientes=${targets.length} confirmaciones=${processed}.`);
-    return processed;
+    lastPendingReconciliationProcessed = processed + repliesRetried;
+    console.log(`[dispatch-wa] Reconciliación persistente finalizada. reason=${reason} pendientes=${targets.length} confirmaciones=${processed} graciasReintentados=${repliesRetried}.`);
+    return processed + repliesRetried;
   } catch (error) {
     console.warn('[dispatch-wa] No fue posible reconciliar confirmaciones persistidas.', error?.message || error);
     return processed;
@@ -937,7 +980,7 @@ export async function sendDispatchWhatsappMessage({ phone, message, context }) {
     });
     return { phone: recipient.normalizedPhone, providerMessageId };
   } catch (error) {
-    await markPendingConfirmationSendFailed(pending);
+    await markPendingConfirmationDeliveryUnknown(pending);
     releaseSendLock(lockKey);
     throw error;
   }

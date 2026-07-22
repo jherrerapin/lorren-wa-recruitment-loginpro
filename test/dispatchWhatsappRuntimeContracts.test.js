@@ -178,12 +178,13 @@ test('server validates that assignment worker and recipient phone are the same',
   assert.match(source, /validateOutgoingAssignmentContext\(args\.context, args\.phone\)/);
 });
 
-test('confirmation context is persisted before WhatsApp send and failed sends are closed', () => {
+test('confirmation context is persisted before WhatsApp send and uncertain delivery remains recoverable', () => {
   const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
   const sender = between(source, 'export async function sendDispatchWhatsappMessage', 'export async function sendDispatchWhatsappMediaMessage');
   assert.ok(sender.indexOf('preparePendingConfirmationLink') < sender.indexOf('activeClient.sendMessage'));
   assert.match(source, /prisma\.dispatchWhatsappConfirmation\.create\(/);
-  assert.match(source, /status: 'SEND_FAILED'/);
+  assert.match(source, /status: 'DELIVERY_UNKNOWN'/);
+  assert.match(source, /RECOVERABLE_CONFIRMATION_LINK_STATUSES = \['PENDING', 'DELIVERY_UNKNOWN'\]/);
   assert.match(source, /The primary row was created before sending/);
 });
 
@@ -221,5 +222,39 @@ test('runtime reports whether LocalAuth storage is persistent', () => {
   assert.match(source, /authStorageMode: authStoragePersistent \? 'PERSISTENT' : 'EPHEMERAL'/);
   assert.match(source, /RAILWAY_VOLUME_MOUNT_PATH/);
   assert.match(source, /DISPATCH_WWEB_AUTH_PERSISTENT/);
+});
+
+test('automatic thanks failures remain persisted and are retried without confirming twice', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  assert.match(source, /CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING'/);
+  assert.match(source, /automaticReplySent \? 'CONFIRMED' : CONFIRMED_REPLY_PENDING_STATUS/);
+  assert.match(source, /async function retryPendingAutomaticReplies/);
+  assert.match(source, /await retryPendingAutomaticReplies\(activeClient\)/);
+  assert.match(source, /where: \{\s*assignmentId,\s*status: \{ in: \[\.\.\.RECOVERABLE_CONFIRMATION_LINK_STATUSES, CONFIRMED_REPLY_PENDING_STATUS\] \}/s);
+});
+
+test('runtime identifies only an auth directory inside the Railway volume as persistent', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  const runtime = await import('../src/services/dispatchWhatsappWebServiceV6.js?path-test=557');
+  assert.equal(runtime.isPathWithinRoot('/data', '/data/dispatch-wweb-auth'), true);
+  assert.equal(runtime.isPathWithinRoot('/data', '/tmp/dispatch-wweb-auth'), false);
+  assert.equal(runtime.isPathWithinRoot('/data', '/data-other/auth'), false);
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = previousNodeEnv;
+});
+
+test('WhatsApp status screen visibly reports persistent or ephemeral LocalAuth storage', () => {
+  const view = readSource('src/views/operacionesWhatsappEstado.ejs');
+  assert.match(view, /id="storageBox"/);
+  assert.match(view, /Sesión persistente/);
+  assert.match(view, /Sesión en almacenamiento efímero/);
+  assert.match(view, /renderStorageStatus\(data\)/);
+});
+
+test('stale cleanup includes uncertain delivery and pending automatic replies', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /EXPIRABLE_CONFIRMATION_LINK_STATUSES = \['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'\]/);
+  assert.match(source, /status: \{ in: EXPIRABLE_CONFIRMATION_LINK_STATUSES \}/);
 });
 
