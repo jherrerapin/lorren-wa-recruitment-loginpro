@@ -94,6 +94,14 @@ export function rankHistoricalWorkers(historyAssignments = []) {
   ));
 }
 
+export function filterAssignmentsForServiceDate(assignments = [], serviceDate) {
+  const selectedDate = dispatchServiceDateKey(serviceDate);
+  if (!selectedDate) return [];
+  return assignments.filter(
+    (assignment) => dispatchServiceDateKey(assignment?.serviceRequest?.serviceDate) === selectedDate
+  );
+}
+
 export function selectAutoAssignmentCandidates({
   rankedWorkers = [],
   activeAssignments = [],
@@ -198,8 +206,9 @@ export async function autoAssignServiceRequest(prisma, serviceRequestId, options
   if (!rankedWorkers.length) return { assignedCount: 0, reason: 'no_confirmed_history' };
 
   const rankedWorkerIds = rankedWorkers.map((candidate) => candidate.workerId);
-  const sameDateWhere = buildDispatchServiceDateWhere(dispatchServiceDateKey(request.serviceDate));
-  const activeAssignments = await prisma.dispatchAssignment.findMany({
+  const selectedDate = dispatchServiceDateKey(request.serviceDate);
+  const sameDateWhere = buildDispatchServiceDateWhere(selectedDate);
+  const activeAssignmentCandidates = await prisma.dispatchAssignment.findMany({
     where: {
       workerId: { in: rankedWorkerIds },
       serviceRequestId: { not: request.id },
@@ -218,6 +227,7 @@ export async function autoAssignServiceRequest(prisma, serviceRequestId, options
       }
     }
   });
+  const activeAssignments = filterAssignmentsForServiceDate(activeAssignmentCandidates, selectedDate);
 
   const alreadyAssignedWorkerIds = new Set((request.assignments || []).map((assignment) => assignment.workerId));
   const candidates = selectAutoAssignmentCandidates({
