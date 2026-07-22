@@ -7,7 +7,8 @@ import {
   WORKER_PORTAL_INSTALLATION_COOKIE_NAME,
   applyWorkerPortalSecurityHeaders,
   buildWorkerPortalActivationUrl,
-  ensureWorkerPortalInstallationId,
+  resolveWorkerPortalInstallationId,
+  setWorkerPortalInstallationCookie,
   workerPortalCookieOptions,
   workerPortalRouter
 } from '../src/routes/workerPortal.js';
@@ -74,6 +75,14 @@ function requestDouble({ body = {}, cookies = {}, headers = {}, ip = '127.0.0.1'
   };
 }
 
+function activationRequest(overrides = {}) {
+  return requestDouble({
+    body: { activationToken: ACTIVATION_TOKEN },
+    headers: { 'x-requested-with': 'worker-portal' },
+    ...overrides
+  });
+}
+
 function routeHandler(router, path, method) {
   const layer = router.stack.find((item) => item.route?.path === path && item.route.methods?.[method]);
   assert.ok(layer, `route ${method.toUpperCase()} ${path} must exist`);
@@ -109,26 +118,24 @@ test('las cookies del portal son Secure, HttpOnly, Strict y limitadas al portal'
   });
 });
 
-test('la instalación reutiliza un UUID válido y reemplaza valores malformados', () => {
-  const existing = responseDouble();
-  const existingId = ensureWorkerPortalInstallationId(
+test('la instalación reutiliza UUID válido y difiere la cookie nueva hasta activar', () => {
+  const existing = resolveWorkerPortalInstallationId(
     requestDouble({ cookies: { [WORKER_PORTAL_INSTALLATION_COOKIE_NAME]: INSTALLATION_ID } }),
-    existing.res,
     () => { throw new Error('must_not_generate'); }
   );
-  assert.equal(existingId, INSTALLATION_ID);
-  assert.equal(existing.state.cookies.length, 0);
+  assert.deepEqual(existing, { installationId: INSTALLATION_ID, shouldSetCookie: false });
 
-  const replacement = responseDouble();
-  const generatedId = ensureWorkerPortalInstallationId(
+  const generated = resolveWorkerPortalInstallationId(
     requestDouble({ cookies: { [WORKER_PORTAL_INSTALLATION_COOKIE_NAME]: 'invalid' } }),
-    replacement.res,
     () => INSTALLATION_ID
   );
-  assert.equal(generatedId, INSTALLATION_ID);
-  assert.equal(replacement.state.cookies[0].name, WORKER_PORTAL_INSTALLATION_COOKIE_NAME);
-  assert.equal(replacement.state.cookies[0].options.httpOnly, true);
-  assert.equal(replacement.state.cookies[0].options.secure, true);
+  assert.deepEqual(generated, { installationId: INSTALLATION_ID, shouldSetCookie: true });
+
+  const { res, state } = responseDouble();
+  setWorkerPortalInstallationCookie(res, generated.installationId);
+  assert.equal(state.cookies[0].name, WORKER_PORTAL_INSTALLATION_COOKIE_NAME);
+  assert.equal(state.cookies[0].options.httpOnly, true);
+  assert.equal(state.cookies[0].options.secure, true);
 });
 
 test('el enlace futuro coloca el token exclusivamente en el fragmento', () => {
@@ -176,9 +183,9 @@ test('POST exitoso activa sesión, fija dos cookies y responde una URL limpia', 
     }
   });
   const { res, state } = responseDouble();
-  const req = requestDouble({
-    body: { activationToken: ACTIVATION_TOKEN },
+  const req = activationRequest({
     headers: {
+      'x-requested-with': 'worker-portal',
       'user-agent': 'Browser Test',
       'sec-ch-ua-platform': 'Android'
     },
@@ -203,7 +210,7 @@ test('POST exitoso activa sesión, fija dos cookies y responde una URL limpia', 
   assert.equal(JSON.stringify(state.json).includes(SESSION_TOKEN), false);
 });
 
-test('token inválido, vencido o consumido produce una respuesta genérica', async () => {
+test('una activación rechazada no deja cookie persistente de instalación', async () => {
   const originalWarn = console.warn;
   console.warn = () => {};
   try {
@@ -214,14 +221,62 @@ test('token inválido, vencido o consumido produce una respuesta genérica', asy
     });
     const { res, state } = responseDouble();
 
+    await routeHandler(router, '/activar', 'post')(activationRequest(), res);
+
+    assert.equal(state.statusCode, 400);
+    assert.deepEqual(state.json, { ok: false, error: 'activation_invalid_or_expired' });
+    assert.equal(state.cookies.length, 0);
+    assert.equal(JSON.stringify(state.json).includes(ACTIVATION_TOKEN), false);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('POST sin cabecera del portal se rechaza antes de consumir la activación', async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  let activationCalls = 0;
+  try {
+    const router = buildRouter({
+      activateSessionFn: async () => {
+        activationCalls += 1;
+        return null;
+      }
+    });
+    const { res, state } = responseDouble();
+
     await routeHandler(router, '/activar', 'post')(
       requestDouble({ body: { activationToken: ACTIVATION_TOKEN } }),
       res
     );
 
+    assert.equal(activationCalls, 0);
     assert.equal(state.statusCode, 400);
-    assert.deepEqual(state.json, { ok: false, error: 'activation_invalid_or_expired' });
-    assert.equal(JSON.stringify(state.json).includes(ACTIVATION_TOKEN), false);
+    assert.equal(state.cookies.length, 0);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('los logs sanitizan mensajes arbitrarios y nunca incluyen el token', async () => {
+  const originalWarn = console.warn;
+  let observedLog;
+  console.warn = (...args) => { observedLog = args; };
+  try {
+    const router = buildRouter({
+      activateSessionFn: async () => {
+        throw new Error(`sensitive ${ACTIVATION_TOKEN}`);
+      }
+    });
+    const { res } = responseDouble();
+
+    await routeHandler(router, '/activar', 'post')(activationRequest(), res);
+
+    assert.deepEqual(observedLog, [
+      '[WORKER_PORTAL_ACTIVATION_REJECTED]',
+      { code: 'worker_portal_error' }
+    ]);
+    assert.equal(JSON.stringify(observedLog).includes(ACTIVATION_TOKEN), false);
   } finally {
     console.warn = originalWarn;
   }
@@ -276,6 +331,7 @@ test('la vista elimina el fragmento antes del POST y no carga terceros', () => {
   assert.ok(replaceIndex >= 0);
   assert.ok(fetchIndex > replaceIndex);
   assert.match(view, /window\.location\.hash/);
+  assert.match(view, /'X-Requested-With': 'worker-portal'/);
   assert.doesNotMatch(view, /https?:\/\//i);
   assert.doesNotMatch(view, /localStorage|sessionStorage/);
 });
