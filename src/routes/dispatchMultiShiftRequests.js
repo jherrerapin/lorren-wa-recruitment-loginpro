@@ -2,6 +2,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import { loadPublicDispatchRequestHistory } from '../services/publicDispatchRequestHistory.js';
+import { autoAssignServiceRequests } from '../services/dispatchAutoAssignment.js';
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_YYYY_MM_DD_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -163,9 +164,13 @@ function getRequestEditLock(requests = []) {
 }
 
 async function createRequests(baseData, blocks) {
-  return prisma.$transaction(blocks.map((block) => prisma.dispatchServiceRequest.create({
+  const createdRequests = await prisma.$transaction(blocks.map((block) => prisma.dispatchServiceRequest.create({
     data: { ...baseData, ...block }
   })));
+  await autoAssignServiceRequests(prisma, createdRequests, {
+    createdByUsername: baseData.createdByUsername || 'AUTO_HISTORY'
+  });
+  return createdRequests;
 }
 
 async function loadPublicClient(publicToken) {
@@ -274,13 +279,15 @@ async function updatePublicRequests(client, currentRequests, body) {
     status: 'PENDING_ASSIGNMENT'
   };
 
+  const createdRequestIds = [];
   await prisma.$transaction(async (tx) => {
     for (const [index, block] of blocks.entries()) {
       const existing = existingRequests[index];
       if (existing) {
         await tx.dispatchServiceRequest.update({ where: { id: existing.id }, data: { ...baseData, ...block } });
       } else {
-        await tx.dispatchServiceRequest.create({ data: { ...baseData, ...block } });
+        const created = await tx.dispatchServiceRequest.create({ data: { ...baseData, ...block } });
+        createdRequestIds.push(created.id);
       }
     }
 
@@ -289,6 +296,12 @@ async function updatePublicRequests(client, currentRequests, body) {
       await tx.dispatchServiceRequest.delete({ where: { id: request.id } });
     }
   });
+
+  if (createdRequestIds.length) {
+    await autoAssignServiceRequests(prisma, createdRequestIds, {
+      createdByUsername: 'AUTO_HISTORY'
+    });
+  }
 
   const updatedKey = nextGroupCode || existingRequests[0]?.id;
   return { updatedKey, operationPoint, selectedService };

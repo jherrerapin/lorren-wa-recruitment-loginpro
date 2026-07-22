@@ -117,6 +117,11 @@ enum CitySourceModule {
   DISPATCH
 }
 
+enum DispatchContractType {
+  DIRECTO
+  CONTRATISTA
+}
+
 model City {
   id                 String           @id @default(cuid())
   name               String           @unique
@@ -548,6 +553,7 @@ model DispatchWorker {
   residenceCity     String?
   residenceLocality String?
   transportMode     String?
+  contractType      DispatchContractType    @default(DIRECTO)
   cvOriginalName    String?
   cvMimeType        String?
   cvData            Bytes?
