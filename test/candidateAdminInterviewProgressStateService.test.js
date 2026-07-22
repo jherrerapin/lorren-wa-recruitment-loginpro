@@ -53,6 +53,10 @@ test('la creación manual de reserva fija SCHEDULED mediante CAS', async () => {
   });
 
   assert.equal(result.count, 1);
+  assert.equal(result.action, CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.MANUAL_BOOKING_CREATED);
+  assert.equal(result.actor, 'devloginpro');
+  assert.equal(result.reason, 'Entrevista asignada manualmente');
+  assert.equal(result.expectedStep, ConversationStep.CONFIRMING_DATA);
   assert.equal(result.nextStep, ConversationStep.SCHEDULED);
   assert.equal(result.candidate.currentStep, ConversationStep.SCHEDULED);
   assert.equal(getState().currentStep, ConversationStep.SCHEDULED);
@@ -80,6 +84,10 @@ test('eliminar la última reserva fija SCHEDULING y reutiliza un cliente tx', as
   });
 
   assert.equal(result.count, 1);
+  assert.equal(result.action, CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.LAST_BOOKING_DELETED);
+  assert.equal(result.actor, 'devloginpro');
+  assert.equal(result.reason, 'Última reserva eliminada');
+  assert.equal(result.expectedStep, ConversationStep.SCHEDULED);
   assert.equal(result.nextStep, ConversationStep.SCHEDULING);
   assert.equal(txHarness.getState().currentStep, ConversationStep.SCHEDULING);
   assert.equal(txHarness.calls.transactions, 0);
