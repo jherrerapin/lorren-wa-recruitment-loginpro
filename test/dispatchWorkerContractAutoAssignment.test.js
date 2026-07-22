@@ -1,3 +1,4 @@
+// Regresión del contrato de auxiliar y de la selección automática por historial operativo.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
