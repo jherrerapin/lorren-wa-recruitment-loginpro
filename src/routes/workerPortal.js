@@ -11,6 +11,7 @@ import {
   resolveWorkerPortalSession
 } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { createPrismaWorkerPortalSessionRepository } from '../modules/dispatch-attendance/infrastructure/prismaWorkerPortalSessionRepository.js';
+import { createWorkerPortalActivationAbuseGuard } from '../services/workerPortalActivationAbuseGuard.js';
 
 export const WORKER_PORTAL_HOME_PATH = '/operaciones/portal';
 export const WORKER_PORTAL_ACTIVATION_PATH = '/operaciones/portal/activar';
@@ -18,10 +19,19 @@ export const WORKER_PORTAL_INSTALLATION_COOKIE_NAME = '__Secure-lorren-installat
 export const WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
 const GENERIC_ACTIVATION_ERROR = 'activation_invalid_or_expired';
+const ACTIVATION_RATE_LIMIT_ERROR = 'activation_temporarily_limited';
 const CONFIGURATION_ERROR_CODES = new Set([
   'installation_pepper_required',
   'installation_pepper_too_short',
   'worker_portal_session_ttl_invalid'
+]);
+const EXPECTED_ACTIVATION_REJECTION_CODES = new Set([
+  'activation_token_required',
+  'activation_token_invalid',
+  'worker_portal_activation_request_invalid',
+  'worker_portal_session_repository_result_invalid',
+  'worker_portal_session_repository_expiry_invalid',
+  'worker_portal_session_repository_expired'
 ]);
 
 function validDate(value) {
@@ -48,7 +58,7 @@ function normalizeOptionalHeader(value, maxLength) {
 }
 
 function requestIp(req) {
-  return normalizeOptionalHeader(req.ip, 120);
+  return normalizeOptionalHeader(req.ip, 120) || 'unknown';
 }
 
 function requestPlatform(req) {
@@ -69,6 +79,16 @@ function errorCode(error) {
 function isConfigurationError(error) {
   const code = errorCode(error);
   return CONFIGURATION_ERROR_CODES.has(code) || code.startsWith('worker_portal_session_prisma_');
+}
+
+function isExpectedActivationRejection(error) {
+  return EXPECTED_ACTIVATION_REJECTION_CODES.has(errorCode(error));
+}
+
+function isActivationBodyParserError(error) {
+  return error?.type === 'entity.parse.failed'
+    || error?.type === 'entity.too.large'
+    || (error instanceof SyntaxError && Number(error?.status) === 400);
 }
 
 export function workerPortalCookieOptions(maxAge) {
@@ -152,6 +172,29 @@ function renderPortal(res, mode, nonce, expiresAt = null) {
   });
 }
 
+export function createWorkerPortalActivationAttemptMiddleware(attemptGuard) {
+  if (!attemptGuard || typeof attemptGuard.consume !== 'function') {
+    throw new Error('worker_portal_activation_attempt_guard_required');
+  }
+
+  return function workerPortalActivationAttemptMiddleware(req, res, next) {
+    const decision = attemptGuard.consume(requestIp(req));
+    if (decision.allowed) return next();
+
+    applyWorkerPortalSecurityHeaders(res);
+    res.set('Retry-After', String(decision.retryAfterSeconds));
+    return res.status(429).json({ ok: false, error: ACTIVATION_RATE_LIMIT_ERROR });
+  };
+}
+
+export function workerPortalActivationJsonErrorHandler(error, _req, res, next) {
+  if (!isActivationBodyParserError(error)) return next(error);
+
+  applyWorkerPortalSecurityHeaders(res);
+  const status = error?.type === 'entity.too.large' ? 413 : 400;
+  return res.status(status).json({ ok: false, error: GENERIC_ACTIVATION_ERROR });
+}
+
 export function workerPortalRouter(prisma, options = {}) {
   const router = express.Router();
   const repository = options.repository || createPrismaWorkerPortalSessionRepository(prisma);
@@ -165,9 +208,11 @@ export function workerPortalRouter(prisma, options = {}) {
   const randomSessionBytesFn = options.randomSessionBytesFn;
   const nonceBytesFn = options.nonceBytesFn || randomBytes;
   const nowFn = options.nowFn || (() => new Date());
+  const activationAttemptGuard = options.activationAttemptGuard || createWorkerPortalActivationAbuseGuard();
+  const activationAttemptMiddleware = createWorkerPortalActivationAttemptMiddleware(activationAttemptGuard);
+  const activationJsonParser = express.json({ limit: '4kb', strict: true, type: 'application/json' });
 
   router.use(cookieParser());
-  router.use(express.json({ limit: '4kb' }));
 
   router.get('/activar', (_req, res) => {
     const nonce = createNonce(nonceBytesFn);
@@ -175,7 +220,7 @@ export function workerPortalRouter(prisma, options = {}) {
     return renderPortal(res, 'activation', nonce);
   });
 
-  router.post('/activar', async (req, res) => {
+  router.post('/activar', activationAttemptMiddleware, activationJsonParser, async (req, res) => {
     applyWorkerPortalSecurityHeaders(res);
 
     try {
@@ -205,13 +250,18 @@ export function workerPortalRouter(prisma, options = {}) {
       return res.status(200).json({ ok: true, redirectTo: WORKER_PORTAL_HOME_PATH });
     } catch (error) {
       const code = errorCode(error);
-      console.warn('[WORKER_PORTAL_ACTIVATION_REJECTED]', { code });
       if (isConfigurationError(error)) {
+        console.error('[WORKER_PORTAL_CONFIGURATION_ERROR]', { code });
         return res.status(503).json({ ok: false, error: 'portal_temporarily_unavailable' });
+      }
+      if (!isExpectedActivationRejection(error)) {
+        console.error('[WORKER_PORTAL_ACTIVATION_ERROR]', { code });
       }
       return res.status(400).json({ ok: false, error: GENERIC_ACTIVATION_ERROR });
     }
   });
+
+  router.use('/activar', workerPortalActivationJsonErrorHandler);
 
   router.get('/', async (req, res) => {
     const nonce = createNonce(nonceBytesFn);
