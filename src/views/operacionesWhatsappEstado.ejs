@@ -62,7 +62,7 @@
         <h2 id="statusTitle"><%= ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión' %></h2>
         <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span data-raw-ready-at="<%= lastReadyAt || '' %>"><%= lastReadyAt || '' %></span></p>
         <p>Esta pantalla permite vincular y revisar la conexión de WhatsApp de despacho para enviar mensajes desde el panel.</p>
-        <div class="storage-box <%= authStoragePersistent ? 'persistent' : 'ephemeral' %>" id="storageBox"><strong id="storageLabel"><%= authStoragePersistent ? 'Sesión persistente' : 'Sesión en almacenamiento efímero' %></strong><span id="storageText"><%= authStoragePersistent ? 'LocalAuth está dentro de almacenamiento persistente.' : (authStorageWarning || 'La sesión puede perderse al reiniciar o desplegar.') %></span></div>
+        <% if (role === 'dev') { %><div class="storage-box <%= authStoragePersistent ? 'persistent' : 'ephemeral' %>" id="storageBox"><strong id="storageLabel"><%= authStoragePersistent ? 'Sesión persistente' : 'Sesión en almacenamiento efímero' %></strong><span id="storageText"><%= authStoragePersistent ? 'LocalAuth está dentro de almacenamiento persistente.' : (authStorageWarning || 'La sesión puede perderse al reiniciar o desplegar.') %></span></div><% } %>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
         <% if (role === 'dev') { %>
           <details class="technical-box" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>>

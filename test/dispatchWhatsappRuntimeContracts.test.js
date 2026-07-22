@@ -244,8 +244,9 @@ test('runtime identifies only an auth directory inside the Railway volume as per
   else process.env.NODE_ENV = previousNodeEnv;
 });
 
-test('WhatsApp status screen visibly reports persistent or ephemeral LocalAuth storage', () => {
+test('WhatsApp storage diagnostics remain restricted to DEV', () => {
   const view = readSource('src/views/operacionesWhatsappEstado.ejs');
+  assert.match(view, /<% if \(role === 'dev'\) \{ %><div class="storage-box/);
   assert.match(view, /id="storageBox"/);
   assert.match(view, /Sesión persistente/);
   assert.match(view, /Sesión en almacenamiento efímero/);
