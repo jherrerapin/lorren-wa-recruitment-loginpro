@@ -1595,7 +1595,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
   const aiResult = await tryOpenAIParse(cleanText);
   const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};
-  const sanitizerContext = { currentStep: candidate.currentStep };
+  const sanitizerContext = {
+    currentStep: candidate.currentStep,
+    pendingFields: getMissingFields(candidate, currentVacancy)
+  };
   const understanding = await conversationUnderstanding(cleanText, { aiResult, context: sanitizerContext });
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
