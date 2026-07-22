@@ -1,0 +1,49 @@
+TAP version 13
+# [AI_FALLBACK] {"phone":"573001112233","error":null}
+# [BOT_REPLY_SAFETY_BLOCKED] {"candidateId":"candidate-1","blockedClaims":["obra_labor"],"reason":"unsupported_sensitive_vacancy_claim"}
+# [REMINDER_TRACE] {"candidateId":"candidate-1","event":"reminder_scheduled","reminderAt":"2026-07-23T01:19:17.405Z"}
+# Subtest: interés explícito y pregunta responde primero y entra a recolección
+not ok 1 - interés explícito y pregunta responde primero y entra a recolección
+  ---
+  duration_ms: 260.636027
+  location: '/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/activeVacancyQuestionIntake.test.js:69:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /condiciones registradas/i. Input:
+    
+    'Sobre ese punto no tengo una condición registrada para confirmarla. Te comparto solo la información registrada de la vacante: Vacante: Mensajero Bogota | Ciudad: Bogota | Requisitos: Conocimiento de direcciones y disponibilidad | Condiciones: Contrato por obra y proceso con entrevista | Documentos requeridos: Documento y hoja de vida | Zona de operación: Calle 80 # 10-20. Si quieres, seguimos con tu proceso.'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'Sobre ese punto no tengo una condición registrada para confirmarla. Te comparto solo la información registrada de la vacante: Vacante: Mensajero Bogota | Ciudad: Bogota | Requisitos: Conocimiento de direcciones y disponibilidad | Condiciones: Contrato por obra y proceso con entrevista | Documentos requeridos: Documento y hoja de vida | Zona de operación: Calle 80 # 10-20. Si quieres, seguimos con tu proceso.'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/test/activeVacancyQuestionIntake.test.js:74:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: consulta informativa sin interés conserva GREETING_SENT
+ok 2 - consulta informativa sin interés conserva GREETING_SENT # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.707149
+  ...
+# Subtest: interés sin pregunta conserva el comportamiento actual
+ok 3 - interés sin pregunta conserva el comportamiento actual # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.161712
+  ...
+# Subtest: solo ciudad no asigna vacante ni inicia recolección
+ok 4 - solo ciudad no asigna vacante ni inicia recolección # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.100447
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 3
+# todo 0
+# duration_ms 864.943886
