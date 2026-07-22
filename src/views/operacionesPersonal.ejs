@@ -105,6 +105,7 @@
         <a class="btn btn-secondary" href="/admin/operaciones/personal/importar-excel">&#11014; Importar Excel</a>
         <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
         <% if (role === 'dev') { %>
+          <a class="btn btn-success" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a>
           <form method="post" action="/admin/operaciones/sync-contratados">
             <button type="submit" class="btn btn-primary">Sincronizar contratados</button>
           </form>
