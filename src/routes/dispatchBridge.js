@@ -1,6 +1,7 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';
+import { dispatchWorkerPortalActivationAdminRouter } from './dispatchWorkerPortalActivationAdmin.js';
 import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBridgeCore.js';
 import {
   resolveAttendanceFeatureAccess,
@@ -95,11 +96,12 @@ function attendanceDevControlHtml(enabled) {
         </div>
         <span class="${statusClass}">${statusLabel}</span>
       </div>
-      <div class="card-body">
+      <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;">
         <form method="post" action="/admin/operaciones/asistencia-acceso/reclutador-general">
           <input type="hidden" name="enabled" value="${nextEnabled}" />
           <button class="${buttonClass}" type="submit">${actionLabel}</button>
         </form>
+        <a class="btn" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a>
       </div>
     </section>`;
 }
@@ -200,6 +202,12 @@ export function dispatchBridgeRouter() {
         return res.redirect('/admin/users?error=' + encodeURIComponent(message));
       }
     }
+  );
+
+  router.use(
+    '/portal-activaciones',
+    requireDev,
+    dispatchWorkerPortalActivationAdminRouter(prisma)
   );
 
   router.use(
