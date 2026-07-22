@@ -2,7 +2,7 @@ export const ACTIVE_DISPATCH_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PE
 export const CONFIRMED_DISPATCH_ASSIGNMENT_STATUS = 'CONFIRMED';
 
 export function isOperationalDispatchWorker(worker) {
-  return !Boolean(worker?.isTestProfile);
+  return Boolean(worker) && !Boolean(worker.isTestProfile);
 }
 
 export function operationalAssignments(request = {}) {
