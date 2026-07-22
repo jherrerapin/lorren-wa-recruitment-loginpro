@@ -1,0 +1,325 @@
+name: Apply issue 557 final hardening
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply final hardening
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:140]}')
+              write(path, text.replace(old, new, 1))
+
+          def replace_block(path, start, end, new_block):
+              text = read(path)
+              start_index = text.find(start)
+              if start_index < 0:
+                  raise SystemExit(f'{path}: missing block start {start}')
+              end_index = text.find(end, start_index)
+              if end_index < 0:
+                  raise SystemExit(f'{path}: missing block end {end}')
+              write(path, text[:start_index] + new_block.rstrip() + '\n\n' + text[end_index:])
+
+          runtime = 'src/services/dispatchWhatsappWebServiceV6.js'
+
+          replace_once(
+              runtime,
+              "const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];",
+              "const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];\nconst RECOVERABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN'];\nconst CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING';"
+          )
+
+          replace_block(
+              runtime,
+              'async function preparePendingConfirmationLink',
+              'async function finalizePendingConfirmationLink',
+              """async function preparePendingConfirmationLink({ phone, context = {}, chatId = '' }) {
+  const primaryChatId = normalizeChatId(chatId);
+  const normalizedPhone = normalizePhone(phone);
+  const pendingValue = buildPendingConfirmationValue(normalizedPhone, context);
+  if (!pendingValue?.assignmentId || !pendingValue?.serviceRequestId || !primaryChatId) {
+    throw buildError('No fue posible preparar el contexto persistente de confirmación.', 503);
+  }
+
+  try {
+    const link = await prisma.dispatchWhatsappConfirmation.create({
+      data: {
+        assignmentId: pendingValue.assignmentId,
+        serviceRequestId: pendingValue.serviceRequestId,
+        phone: normalizedPhone,
+        chatId: primaryChatId,
+        status: 'PENDING',
+        expiresAt: new Date(pendingValue.expiresAt)
+      }
+    });
+    const remembered = rememberPendingConfirmation(normalizedPhone, context, [primaryChatId]);
+    return { ...remembered, linkId: link.id, primaryChatId };
+  } catch (error) {
+    console.error('[dispatch-wa] No fue posible guardar el contexto antes del envío.', error?.message || error);
+    throw buildError('No se envió WhatsApp porque no fue posible guardar el contexto de confirmación. Intenta nuevamente.', 503);
+  }
+}"""
+          )
+
+          replace_block(
+              runtime,
+              'async function markPendingConfirmationSendFailed',
+              'async function loadWhatsappWebModule',
+              """async function markPendingConfirmationDeliveryUnknown(pending) {
+  if (!pending?.linkId) return;
+  try {
+    await prisma.dispatchWhatsappConfirmation.updateMany({
+      where: { id: pending.linkId, status: 'PENDING' },
+      data: { status: 'DELIVERY_UNKNOWN' }
+    });
+  } catch (error) {
+    console.warn('[dispatch-wa] No fue posible conservar el estado de entrega incierta.', error?.message || error);
+  }
+}"""
+          )
+
+          replace_block(
+              runtime,
+              'function authStorageInfo() {',
+              'function ensureAuthDataPath() {',
+              """export function isPathWithinRoot(rootPath, targetPath) {
+  if (!rootPath || !targetPath) return false;
+  const root = path.resolve(rootPath);
+  const target = path.resolve(targetPath);
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function authStorageInfo() {
+  const authDataPath = path.resolve(resolveAuthDataPath());
+  const explicitPersistentPath = process.env.DISPATCH_WWEB_AUTH_PERSISTENT === 'true';
+  const railwayVolumeMountPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '';
+  const authPathInsideRailwayVolume = isPathWithinRoot(railwayVolumeMountPath, authDataPath);
+  const authStoragePersistent = explicitPersistentPath || authPathInsideRailwayVolume;
+  return {
+    authDataPath,
+    authStoragePersistent,
+    authStorageMode: authStoragePersistent ? 'PERSISTENT' : 'EPHEMERAL',
+    authStorageWarning: authStoragePersistent
+      ? null
+      : 'La sesión de WhatsApp está en almacenamiento efímero. Monta un volumen Railway, ubica LocalAuth dentro del volumen y desactiva Serverless para operación continua.'
+  };
+}"""
+          )
+
+          replace_once(
+              runtime,
+              "where: { status: 'PENDING', expiresAt: { gt: new Date() }, ...where },",
+              "where: { status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES }, expiresAt: { gt: new Date() }, ...where },"
+          )
+
+          replace_block(
+              runtime,
+              'async function markPersistedConfirmationLinksCompleted',
+              'async function sendAutomaticConfirmationReply',
+              """async function setPersistedConfirmationLinksStatus({ assignmentId, status = 'CONFIRMED' } = {}) {
+  if (!assignmentId) return;
+  try {
+    await prisma.dispatchWhatsappConfirmation.updateMany({
+      where: {
+        assignmentId,
+        status: { in: [...RECOVERABLE_CONFIRMATION_LINK_STATUSES, CONFIRMED_REPLY_PENDING_STATUS] }
+      },
+      data: { status }
+    });
+  } catch (error) {
+    console.warn('[dispatch-wa] No fue posible actualizar todos los contextos persistidos de confirmación.', error?.message || error);
+  }
+}"""
+          )
+
+          replace_block(
+              runtime,
+              'async function applyAssignmentConfirmation',
+              'async function resolveAssignmentForInboundConfirmation',
+              """async function applyAssignmentConfirmation({ activeClient, assignment, phone = '', chatId = '', eventName = 'message' } = {}) {
+  if (!assignment?.id || !chatId) return false;
+  const updated = await prisma.dispatchAssignment.updateMany({
+    where: { id: assignment.id, status: { in: PENDING_ASSIGNMENT_STATUSES } },
+    data: { status: CONFIRMED_ASSIGNMENT_STATUS }
+  });
+  if (!updated.count) return false;
+  await recalculateServiceRequestStatus(assignment.serviceRequestId);
+  if (phone) pendingConfirmationByPhone.delete(phone);
+  pendingConfirmationByChatId.delete(normalizeChatId(chatId));
+  const automaticReplySent = await sendAutomaticConfirmationReply(activeClient, chatId);
+  await setPersistedConfirmationLinksStatus({
+    assignmentId: assignment.id,
+    status: automaticReplySent ? 'CONFIRMED' : CONFIRMED_REPLY_PENDING_STATUS
+  });
+  console.log(`[dispatch-wa] Confirmación automática registrada para assignment=${assignment.id} phone=${phone} sender=${chatId} event=${eventName} thanks=${automaticReplySent ? 'sent' : 'pending'}.`);
+  return true;
+}"""
+          )
+
+          retry_block = """async function retryPendingAutomaticReplies(activeClient) {
+  if (!activeClient) return 0;
+  const pendingReplyLinks = await prisma.dispatchWhatsappConfirmation.findMany({
+    where: { status: CONFIRMED_REPLY_PENDING_STATUS, expiresAt: { gt: new Date() } },
+    select: {
+      id: true,
+      assignmentId: true,
+      serviceRequestId: true,
+      phone: true,
+      chatId: true,
+      createdAt: true
+    },
+    orderBy: { createdAt: 'desc' },
+    take: PENDING_RECONCILIATION_LIMIT
+  });
+  const targets = selectLatestPendingConfirmationTargets(pendingReplyLinks);
+  let sentCount = 0;
+  for (const target of targets) {
+    const chatIds = await reconciliationChatIds(activeClient, target);
+    for (const chatId of chatIds) {
+      if (!await sendAutomaticConfirmationReply(activeClient, chatId)) continue;
+      await setPersistedConfirmationLinksStatus({ assignmentId: target.assignmentId, status: 'CONFIRMED' });
+      sentCount += 1;
+      break;
+    }
+  }
+  return sentCount;
+}
+
+"""
+          replace_once(
+              runtime,
+              'async function processPersistedPendingConfirmations(activeClient, reason = \'interval\') {',
+              retry_block + "async function processPersistedPendingConfirmations(activeClient, reason = 'interval') {"
+          )
+          replace_once(
+              runtime,
+              "  let processed = 0;\n  try {\n    const links = await prisma.dispatchWhatsappConfirmation.findMany({\n      where: { status: 'PENDING', expiresAt: { gt: new Date() } },",
+              "  let processed = 0;\n  let repliesRetried = 0;\n  try {\n    const links = await prisma.dispatchWhatsappConfirmation.findMany({\n      where: { status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES }, expiresAt: { gt: new Date() } },"
+          )
+          replace_once(
+              runtime,
+              "    for (const target of targets) processed += await processPersistedConfirmationTarget(activeClient, target);\n    lastPendingReconciliationAt = new Date().toISOString();\n    lastPendingReconciliationProcessed = processed;\n    console.log(`[dispatch-wa] Reconciliación persistente finalizada. reason=${reason} pendientes=${targets.length} confirmaciones=${processed}.`);\n    return processed;",
+              "    for (const target of targets) processed += await processPersistedConfirmationTarget(activeClient, target);\n    repliesRetried = await retryPendingAutomaticReplies(activeClient);\n    lastPendingReconciliationAt = new Date().toISOString();\n    lastPendingReconciliationProcessed = processed + repliesRetried;\n    console.log(`[dispatch-wa] Reconciliación persistente finalizada. reason=${reason} pendientes=${targets.length} confirmaciones=${processed} graciasReintentados=${repliesRetried}.`);\n    return processed + repliesRetried;"
+          )
+
+          replace_once(
+              runtime,
+              '    await markPendingConfirmationSendFailed(pending);',
+              '    await markPendingConfirmationDeliveryUnknown(pending);'
+          )
+
+          facade = 'src/services/dispatchWhatsappWebService.js'
+          replace_once(
+              facade,
+              "const SENDABLE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];",
+              "const SENDABLE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];\nconst EXPIRABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'];"
+          )
+          replace_once(
+              facade,
+              "where: { status: 'PENDING' },",
+              "where: { status: { in: EXPIRABLE_CONFIRMATION_LINK_STATUSES } },"
+          )
+          replace_once(
+              facade,
+              "where: { id: { in: staleIds }, status: 'PENDING' },",
+              "where: { id: { in: staleIds }, status: { in: EXPIRABLE_CONFIRMATION_LINK_STATUSES } },"
+          )
+
+          view = 'src/views/operacionesWhatsappEstado.ejs'
+          replace_once(
+              view,
+              '    .info-box { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 14px; padding: 12px 14px; font-weight: 800; }',
+              '    .info-box { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 14px; padding: 12px 14px; font-weight: 800; }\n    .storage-box { border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; border-radius: 14px; padding: 11px 13px; display: grid; gap: 3px; font-size: 12px; }\n    .storage-box.persistent { border-color: #86efac; background: #f0fdf4; color: #166534; }\n    .storage-box.ephemeral { border-color: #fdba74; background: #fff7ed; color: #9a3412; }'
+          )
+          replace_once(
+              view,
+              '        <p>Esta pantalla permite vincular y revisar la conexión de WhatsApp de despacho para enviar mensajes desde el panel.</p>\n        <div class="alert" id="errorBox"',
+              '        <p>Esta pantalla permite vincular y revisar la conexión de WhatsApp de despacho para enviar mensajes desde el panel.</p>\n        <div class="storage-box <%= authStoragePersistent ? \'persistent\' : \'ephemeral\' %>" id="storageBox"><strong id="storageLabel"><%= authStoragePersistent ? \'Sesión persistente\' : \'Sesión en almacenamiento efímero\' %></strong><span id="storageText"><%= authStoragePersistent ? \'LocalAuth está dentro de almacenamiento persistente.\' : (authStorageWarning || \'La sesión puede perderse al reiniciar o desplegar.\') %></span></div>\n        <div class="alert" id="errorBox"'
+          )
+          replace_once(
+              view,
+              "    const errorBox = document.getElementById('errorBox');",
+              "    const errorBox = document.getElementById('errorBox');\n    const storageBox = document.getElementById('storageBox');\n    const storageLabel = document.getElementById('storageLabel');\n    const storageText = document.getElementById('storageText');"
+          )
+          replace_once(
+              view,
+              '    function setHidden(element, hidden) { if (element) element.hidden = hidden; }\n    function renderStatus(data) {',
+              "    function setHidden(element, hidden) { if (element) element.hidden = hidden; }\n    function renderStorageStatus(data) {\n      const persistent = Boolean(data.authStoragePersistent);\n      if (storageBox) storageBox.className = 'storage-box ' + (persistent ? 'persistent' : 'ephemeral');\n      if (storageLabel) storageLabel.textContent = persistent ? 'Sesión persistente' : 'Sesión en almacenamiento efímero';\n      if (storageText) storageText.textContent = persistent ? 'LocalAuth está dentro de almacenamiento persistente.' : (data.authStorageWarning || 'La sesión puede perderse al reiniciar o desplegar.');\n    }\n    function renderStatus(data) {"
+          )
+          replace_once(
+              view,
+              '      renderReadyAt(data.lastReadyAt);\n      setHidden(errorBox, !hasError);',
+              '      renderReadyAt(data.lastReadyAt);\n      renderStorageStatus(data);\n      setHidden(errorBox, !hasError);'
+          )
+
+          test_path = 'test/dispatchWhatsappRuntimeContracts.test.js'
+          test_text = read(test_path)
+          test_text = test_text.replace(
+              "test('confirmation context is persisted before WhatsApp send and failed sends are closed', () => {",
+              "test('confirmation context is persisted before WhatsApp send and uncertain delivery remains recoverable', () => {",
+              1
+          )
+          test_text = test_text.replace(
+              "  assert.match(source, /status: 'SEND_FAILED'/);",
+              "  assert.match(source, /status: 'DELIVERY_UNKNOWN'/);\n  assert.match(source, /RECOVERABLE_CONFIRMATION_LINK_STATUSES = \['PENDING', 'DELIVERY_UNKNOWN'\]/);",
+              1
+          )
+          extra_tests = r'''
+
+test('automatic thanks failures remain persisted and are retried without confirming twice', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  assert.match(source, /CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING'/);
+  assert.match(source, /automaticReplySent \? 'CONFIRMED' : CONFIRMED_REPLY_PENDING_STATUS/);
+  assert.match(source, /async function retryPendingAutomaticReplies/);
+  assert.match(source, /await retryPendingAutomaticReplies\(activeClient\)/);
+  assert.match(source, /where: \{\s*assignmentId,\s*status: \{ in: \[\.\.\.RECOVERABLE_CONFIRMATION_LINK_STATUSES, CONFIRMED_REPLY_PENDING_STATUS\] \}/s);
+});
+
+test('runtime identifies only an auth directory inside the Railway volume as persistent', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  const runtime = await import('../src/services/dispatchWhatsappWebServiceV6.js?path-test=557');
+  assert.equal(runtime.isPathWithinRoot('/data', '/data/dispatch-wweb-auth'), true);
+  assert.equal(runtime.isPathWithinRoot('/data', '/tmp/dispatch-wweb-auth'), false);
+  assert.equal(runtime.isPathWithinRoot('/data', '/data-other/auth'), false);
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = previousNodeEnv;
+});
+
+test('WhatsApp status screen visibly reports persistent or ephemeral LocalAuth storage', () => {
+  const view = readSource('src/views/operacionesWhatsappEstado.ejs');
+  assert.match(view, /id="storageBox"/);
+  assert.match(view, /Sesión persistente/);
+  assert.match(view, /Sesión en almacenamiento efímero/);
+  assert.match(view, /renderStorageStatus\(data\)/);
+});
+
+test('stale cleanup includes uncertain delivery and pending automatic replies', () => {
+  const source = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(source, /EXPIRABLE_CONFIRMATION_LINK_STATUSES = \['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'\]/);
+  assert.match(source, /status: \{ in: EXPIRABLE_CONFIRMATION_LINK_STATUSES \}/);
+});
+'''
+          if "automatic thanks failures remain persisted" in test_text:
+              raise SystemExit('follow-up tests already installed')
+          write(test_path, test_text.rstrip() + extra_tests + '\n')
+          PY
