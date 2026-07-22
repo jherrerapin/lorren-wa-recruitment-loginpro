@@ -78,6 +78,7 @@ function shouldRecoverStalledInitialization(status = {}) {
   return now - initializingSeenAtMs > STALLED_INITIALIZATION_TIMEOUT_MS;
 }
 
+// La recuperación automática reinicia Chromium sin cerrar ni borrar la sesión persistida.
 function recoverStalledInitialization() {
   if (recoveryInProgress) return;
   recoveryInProgress = true;
