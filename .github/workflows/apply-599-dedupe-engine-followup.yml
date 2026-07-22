@@ -1,4 +1,4 @@
-name: Apply engine follow-up deduplication
+name: Diagnose engine follow-up deduplication
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  apply-and-validate:
+  diagnose-harness:
     if: github.head_ref == 'fix/599-dedupe-engine-followup'
     runs-on: ubuntu-latest
     steps:
@@ -27,39 +27,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Apply exact patch
-        run: node scripts/apply-599-dedupe-engine-followup.mjs
-
-      - name: Validate syntax
+      - name: Capture conversation harness output
         run: |
-          node --check src/routes/webhook.js
-          node --check src/services/replyComposition.js
-          node --check test/replyComposition.test.js
-          node --check test/webhookEngineFollowUpComposition.test.js
+          mkdir -p diagnostics
+          set +e
+          node --test test/conversation-harness.test.js > diagnostics/599-conversation-harness.tap 2>&1
+          status=$?
+          echo "$status" > diagnostics/599-conversation-harness.status
+          exit 0
 
-      - name: Run focused composition regressions
-        run: node --test test/replyComposition.test.js test/webhookEngineFollowUpComposition.test.js
-
-      - name: Commit generated webhook patch
+      - name: Commit harness diagnostic
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          if git diff --quiet; then
-            echo "No generated changes to commit."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/routes/webhook.js
-            git commit -m "fix: evitar seguimiento duplicado del engine"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add diagnostics/599-conversation-harness.tap diagnostics/599-conversation-harness.status
+          if ! git diff --cached --quiet; then
+            git commit -m "test: capturar divergencia del harness #599"
             git push origin "HEAD:${HEAD_REF}"
           fi
-
-      - name: Run conversation engine guard rails
-        run: node --test test/conversationEngineGuardRails.test.js
-
-      - name: Run conversation harness
-        run: node --test test/conversation-harness.test.js
-
-      - name: Run conversation replays
-        run: |
-          node --test test/conversationReplayFixtures.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js test/conversationReplayIntegral.test.js test/conversationReplayRecovery.test.js
