@@ -87,7 +87,7 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'multilineWindowUntil',
     'multilineBatchVersion'
   ]);
-  assert.equal(manifest.phase, 'silent_profile_capture_authority_migrated');
+  assert.equal(manifest.phase, 'admin_interview_progress_authority_migrated');
   assert.equal(manifest.rules.runtimeChangesAllowedInThisPhase, true);
   assert.equal(manifest.rules.allowArbitraryCandidatePatch, false);
   assert.equal(manifest.rules.genderLogicInScope, false);
@@ -99,7 +99,8 @@ test('el manifiesto de progreso coincide con el enum canónico de Prisma', () =>
     'conversation_engine_explicit_pause_authority',
     'consent_step_authority',
     'vacancy_first_gate_authority',
-    'silent_profile_capture_authority'
+    'silent_profile_capture_authority',
+    'admin_interview_progress_authority'
   ]);
   assert.doesNotMatch(manifest.trackedFields.join('|'), /gender/i);
 });
@@ -520,4 +521,45 @@ test('la documentación registra la fase de captura silenciosa', () => {
   assert.match(documentation, /applyCandidateSilentProfileCapture/);
   assert.match(documentation, /STALE_CANDIDATE_SILENT_PROFILE_CAPTURE/);
   assert.match(documentation, /no modifica detección, inferencia, filtros, rutas ni decisiones relacionadas con género/i);
+});
+
+
+test('el manifiesto registra la autoridad administrativa de progreso de entrevistas', () => {
+  const contract = manifest.stepContracts.find((item) => item.id === 'admin_interview_progress_reflection');
+  assert.ok(contract);
+  assert.equal(contract.owner, 'src/services/candidateStateService.js');
+  assert.equal(contract.consumer, 'src/routes/admin.js');
+  assert.equal(contract.status, 'canonical');
+  assert.deepEqual(contract.allowedFields, ['currentStep']);
+  assert.deepEqual(contract.actions, {
+    MANUAL_BOOKING_CREATED: 'SCHEDULED',
+    LAST_BOOKING_DELETED: 'SCHEDULING'
+  });
+
+  const family = manifest.transitionFamilies.find((item) => item.id === 'admin_interview_progress_reflection');
+  assert.ok(family);
+  assert.deepEqual(family.writers, ['src/services/candidateStateService.js']);
+  assert.deepEqual(family.destinations, ['SCHEDULING', 'SCHEDULED']);
+
+  const authority = extractFunctionSource(
+    readSource('src/services/candidateStateService.js'),
+    'reflectCandidateAdminInterviewProgress'
+  );
+  assert.match(authority, /candidate\.updateMany\s*\(/);
+  assert.match(authority, /currentStep\s*:\s*expectedStep/);
+  assert.match(authority, /currentStep\s*:\s*nextStep/);
+  assert.match(authority, /candidate_admin_interview_next_step_not_allowed/);
+  assert.doesNotMatch(authority, /InterviewBooking|interviewBooking|status|gender|vacancyId|reminder/);
+
+  const adminSource = manifest.sourceInventory.find((item) => item.path === 'src/routes/admin.js');
+  assert.equal(adminSource.role, 'indirect_writer');
+});
+
+test('la documentación registra la fase administrativa de entrevistas', () => {
+  const documentation = readSource('docs/architecture/candidate-state-transition-inventory.md');
+  assert.match(documentation, /Fase 10: progreso administrativo de entrevistas/);
+  assert.match(documentation, /reflectCandidateAdminInterviewProgress/);
+  assert.match(documentation, /MANUAL_BOOKING_CREATED/);
+  assert.match(documentation, /LAST_BOOKING_DELETED/);
+  assert.match(documentation, /actor, motivo y origen esperado/i);
 });

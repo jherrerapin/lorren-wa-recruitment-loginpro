@@ -34,7 +34,7 @@ test('el recordatorio manual usa solo los estados activos canónicos', () => {
   assert.doesNotMatch(route, /ACTIVE_BOOKING_STATUSES\.includes\(booking\.status\)/);
 });
 
-test('la eliminación individual delega por id y candidato antes de reajustar el paso', () => {
+test('la eliminación individual refleja SCHEDULING sin escritura directa de Candidate', () => {
   const route = between(
     "router.post('/interviews/:id/delete'",
     "router.post('/candidates/:id/interview-assign'"
@@ -43,22 +43,18 @@ test('la eliminación individual delega por id y candidato antes de reajustar el
   assert.match(route, /bookingId:\s*booking\.id/);
   assert.match(route, /candidateId:\s*booking\.candidateId/);
   assert.match(route, /deletion\.count\s*===\s*0/);
-  assert.doesNotMatch(route, /tx\.interviewBooking\.delete\s*\(/);
-  const deletionIndex = route.indexOf('deletion.count === 0');
-  const remainingIndex = route.indexOf('remainingActiveBooking');
-  const updateIndex = route.indexOf('tx.candidate.update');
+  assert.match(route, /shouldReflectProgress:\s*!remainingActiveBooking/);
+  assert.match(route, /reflectCandidateAdminInterviewProgress\(prisma,\s*\{/);
+  assert.match(route, /CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS\.LAST_BOOKING_DELETED/);
+  assert.match(route, /expected:\s*\{\s*currentStep:\s*booking\.candidate\.currentStep\s*\}/);
+  assert.doesNotMatch(route, /(?:prisma|tx)\.candidate\.(?:update|updateMany)\s*\(/);
+  assert.doesNotMatch(route, /nextStep\s*:/);
 
-  assert.ok(deletionIndex >= 0, 'No se encontró "deletion.count === 0"');
-  assert.ok(remainingIndex >= 0, 'No se encontró "remainingActiveBooking"');
-  assert.ok(updateIndex >= 0, 'No se encontró "tx.candidate.update"');
-  assert.ok(
-    deletionIndex < remainingIndex,
-    'La carrera debe resolverse antes de buscar reservas activas restantes.'
-  );
-  assert.ok(
-    remainingIndex < updateIndex,
-    'El paso solo se reajusta después de comprobar reservas activas restantes.'
-  );
+  const deletionIndex = route.indexOf('deleteAdministrativeInterviewBooking(tx');
+  const remainingIndex = route.indexOf('remainingActiveBooking');
+  const reflectionIndex = route.indexOf('reflectCandidateAdminInterviewProgress(prisma');
+  assert.ok(deletionIndex >= 0 && deletionIndex < remainingIndex);
+  assert.ok(remainingIndex < reflectionIndex);
 });
 
 test('la eliminación del candidato conserva el orden mensajes, reservas y candidato', () => {
@@ -77,7 +73,7 @@ test('la eliminación del candidato conserva el orden mensajes, reservas y candi
   assert.ok(bookingsIndex < candidateIndex);
 });
 
-test('la asignación manual usa una sola sustitución atómica con el cliente Prisma raíz', () => {
+test('la asignación manual crea una reserva y refleja SCHEDULED mediante CAS', () => {
   const route = between(
     "router.post('/candidates/:id/interview-assign'",
     "router.post('/candidates/:id/status'"
@@ -87,26 +83,24 @@ test('la asignación manual usa una sola sustitución atómica con el cliente Pr
   assert.doesNotMatch(route, /prisma\.\$transaction\s*\(/);
   assert.doesNotMatch(route, /interviewBooking\.findFirst\s*\(/);
   assert.doesNotMatch(route, /\btx\b/);
+  assert.doesNotMatch(route, /prisma\.candidate\.(?:update|updateMany)\s*\(/);
+  assert.doesNotMatch(route, /manual_interview_assign_step_update_fallback/);
+  assert.doesNotMatch(route, /nextStep\s*:/);
 
   const createCalls = route.match(/\bcreateBooking\s*\(/g) || [];
   assert.equal(createCalls.length, 1, 'La ruta debe llamar createBooking exactamente una vez');
   assert.match(route, /await createBooking\(\s*prisma,\s*candidate\.id,\s*candidate\.vacancyId,\s*chosenOffer\.slot\.id,\s*chosenOffer\.date,\s*!chosenOffer\.windowOk\s*\)/s);
-
-  assert.match(route, /if \(!chosenOffer\?\.slot\)/);
-  assert.match(route, /currentStep:\s*ConversationStep\.SCHEDULED/);
-  assert.match(route, /currentStep:\s*ConversationStep\.SCHEDULING/);
+  assert.match(route, /currentStep:\s*true/);
+  assert.match(route, /reflectCandidateAdminInterviewProgress\(prisma,\s*\{/);
+  assert.match(route, /CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS\.MANUAL_BOOKING_CREATED/);
+  assert.match(route, /expected:\s*\{\s*currentStep:\s*candidate\.currentStep\s*\}/);
   assert.match(route, /eventType:\s*['"]INTERVIEW_ASSIGNED['"]/);
 
   const availabilityIndex = route.indexOf('if (!chosenOffer?.slot)');
   const createIndex = route.indexOf('await createBooking(');
-  const stepIndex = route.indexOf('currentStep: ConversationStep.SCHEDULED');
+  const reflectionIndex = route.indexOf('reflectCandidateAdminInterviewProgress(prisma');
   const auditIndex = route.indexOf("eventType: 'INTERVIEW_ASSIGNED'");
-
-  assert.ok(availabilityIndex >= 0, 'No se encontró la validación de disponibilidad');
-  assert.ok(createIndex >= 0, 'No se encontró la creación canónica de la reserva');
-  assert.ok(stepIndex >= 0, 'No se encontró la actualización del paso');
-  assert.ok(auditIndex >= 0, 'No se encontró la auditoría administrativa');
-  assert.ok(availabilityIndex < createIndex, 'La oferta debe validarse antes de crear');
-  assert.ok(createIndex < stepIndex, 'La reserva debe persistirse antes de actualizar el paso');
-  assert.ok(stepIndex < auditIndex, 'La auditoría debe ocurrir después de actualizar el paso');
+  assert.ok(availabilityIndex >= 0 && availabilityIndex < createIndex);
+  assert.ok(createIndex < reflectionIndex);
+  assert.ok(reflectionIndex < auditIndex);
 });

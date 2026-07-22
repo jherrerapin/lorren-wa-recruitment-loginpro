@@ -777,6 +777,71 @@ export async function completeCandidateRequirementRejection(client, input = {}) 
 }
 
 
+export const CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS = Object.freeze({
+  MANUAL_BOOKING_CREATED: 'MANUAL_BOOKING_CREATED',
+  LAST_BOOKING_DELETED: 'LAST_BOOKING_DELETED'
+});
+
+const CANDIDATE_ADMIN_INTERVIEW_PROGRESS_DESTINATIONS = new Map([
+  [
+    CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.MANUAL_BOOKING_CREATED,
+    ConversationStep.SCHEDULED
+  ],
+  [
+    CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.LAST_BOOKING_DELETED,
+    ConversationStep.SCHEDULING
+  ]
+]);
+
+function requireCandidateAdminInterviewProgressAction(value) {
+  const action = String(value || '').trim();
+  if (!CANDIDATE_ADMIN_INTERVIEW_PROGRESS_DESTINATIONS.has(action)) {
+    throw new TypeError('candidate_admin_interview_action_invalid');
+  }
+  return action;
+}
+
+export async function reflectCandidateAdminInterviewProgress(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const action = requireCandidateAdminInterviewProgressAction(input.action);
+  const expectedStep = requireConversationStep(
+    input.expected?.currentStep,
+    'candidate_admin_interview_expected_current_step'
+  );
+  const actor = requireNonEmptyString(input.actor, 'candidate_admin_interview_actor');
+  const reason = requireNonEmptyString(input.reason, 'candidate_admin_interview_reason');
+
+  if (Object.hasOwn(input, 'nextStep')) {
+    throw new TypeError('candidate_admin_interview_next_step_not_allowed');
+  }
+
+  const nextStep = CANDIDATE_ADMIN_INTERVIEW_PROGRESS_DESTINATIONS.get(action);
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      currentStep: expectedStep
+    },
+    data: {
+      currentStep: nextStep
+    }
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    action,
+    actor,
+    reason,
+    expectedStep,
+    nextStep
+  };
+}
+
+
 const CONSENT_STEP_DESTINATIONS = new Set([
   ConversationStep.COLLECTING_DATA,
   ConversationStep.GREETING_SENT,
