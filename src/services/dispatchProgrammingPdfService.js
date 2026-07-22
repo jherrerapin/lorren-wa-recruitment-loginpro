@@ -32,6 +32,16 @@ export function normalizeProgrammingDate(value) {
   return normalizeDispatchDateParam(value);
 }
 
+export function normalizeProgrammingIncludePending(value, fallback = true) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['true', '1', 'yes', 'si', 'sí', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 function formatBogotaDateTime(value = new Date()) {
   return new Intl.DateTimeFormat('es-CO', {
     timeZone: 'America/Bogota',
@@ -63,6 +73,30 @@ function cleanServiceName(value) {
 function buildScheduleLabel(request) {
   if (request.endTime) return `${request.startTime || '-'} - ${request.endTime}`;
   return request.startTime || '-';
+}
+
+function requestStatusLabel(value) {
+  return ({
+    PENDING_ASSIGNMENT: 'Pendiente de asignación',
+    ASSIGNMENT_PARTIAL: 'Asignación parcial',
+    PENDING_CONFIRMATION: 'Pendiente de confirmación',
+    ASSIGNMENT_COMPLETE: 'Asignación completa',
+    CANCELLED: 'Cancelada'
+  }[value] || value || 'Pendiente');
+}
+
+function assignmentStatusLabel(value) {
+  return ({
+    ASSIGNED: 'Asignado',
+    CONFIRMATION_PENDING: 'Pendiente de confirmación',
+    CONFIRMED: 'Confirmado'
+  }[value] || value || 'Pendiente');
+}
+
+function requestStatusClass(value) {
+  if (value === COMPLETE_REQUEST_STATUS) return 'complete';
+  if (value === 'PENDING_CONFIRMATION') return 'confirmation';
+  return 'pending';
 }
 
 function groupByClient(requests) {
@@ -123,21 +157,30 @@ export function buildProgrammingCompletionSummary(requests) {
   };
 }
 
+export function selectProgrammingRequests(requests = [], options = {}) {
+  const includePending = normalizeProgrammingIncludePending(options.includePending, true);
+  if (options.requestId || includePending) return [...requests];
+  return requests.filter((request) => request.status === COMPLETE_REQUEST_STATUS);
+}
+
 function buildWorkersHtml(request) {
   const assignments = activeAssignments(request);
   if (!assignments.length) return '<p class="empty-workers">Sin auxiliares asignados.</p>';
   return `<ol class="workers-list">${assignments.map((assignment) => {
     const worker = assignment.worker || {};
-    return `<li><strong>${escapeHtml(worker.fullName || 'Auxiliar')}</strong><span>${escapeHtml(workerDocumentLabel(worker))}</span></li>`;
+    return `<li><strong>${escapeHtml(worker.fullName || 'Auxiliar')}</strong><span>${escapeHtml(workerDocumentLabel(worker))}</span><em>${escapeHtml(assignmentStatusLabel(assignment.status))}</em></li>`;
   }).join('')}</ol>`;
 }
 
-function buildHtml({ selectedDate, requests, managedBy }) {
-  const assignedRequests = requests.filter((request) => activeAssignments(request).length > 0);
-  const requestsByClient = groupByClient(assignedRequests);
-  const summary = buildProgrammingCompletionSummary(requests);
+function buildHtml({ selectedDate, requests, managedBy, includePending, overallSummary }) {
+  const requestsByClient = groupByClient(requests);
+  const includedSummary = buildProgrammingCompletionSummary(requests);
   const generatedAt = formatBogotaDateTime();
   const manager = normalizeString(managedBy) || 'Julián Herrera';
+  const documentTitle = includePending ? 'Programación operativa del día' : 'Programación confirmada del día';
+  const scopeLabel = includePending
+    ? 'Incluye solicitudes pendientes, parciales o por confirmar.'
+    : 'Incluye únicamente solicitudes con asignación completa.';
 
   const clientSections = requestsByClient.length ? requestsByClient.map(([clientName, clientRequests]) => {
     const clientRequired = clientRequests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
@@ -146,7 +189,10 @@ function buildHtml({ selectedDate, requests, managedBy }) {
       <section class="block-card">
         <div class="block-title">
           <div><span>Bloque ${index + 1}</span><strong>${escapeHtml(buildScheduleLabel(request))}</strong></div>
-          <div class="coverage">${activeAssignments(request).length}/${Number(request.requiredWorkers || 0)} auxiliares</div>
+          <div class="block-status">
+            <span class="request-status ${requestStatusClass(request.status)}">${escapeHtml(requestStatusLabel(request.status))}</span>
+            <div class="coverage">${activeAssignments(request).length}/${Number(request.requiredWorkers || 0)} auxiliares</div>
+          </div>
         </div>
         <div class="block-meta">
           <div><b>Operación:</b> ${escapeHtml(request.operationPointName || 'Sin operación')}</div>
@@ -166,7 +212,7 @@ function buildHtml({ selectedDate, requests, managedBy }) {
         ${rows}
       </section>
     `;
-  }).join('') : '<section class="client-section"><h2>Sin programación asignada</h2><p>No hay solicitudes con auxiliares asignados para esta fecha.</p></section>';
+  }).join('') : `<section class="client-section"><h2>Sin solicitudes para este alcance</h2><p>${includePending ? 'No hay solicitudes programadas para esta fecha.' : 'No hay solicitudes con asignación completa para esta fecha.'}</p></section>`;
 
   return `<!doctype html>
 <html lang="es">
@@ -181,6 +227,7 @@ function buildHtml({ selectedDate, requests, managedBy }) {
   .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; font-weight: 800; color: #bff8ef; margin-bottom: 8px; }
   h1 { margin: 0; font-size: 25px; line-height: 1.15; }
   .subtitle { margin: 8px 0 0; color: #e6fffb; font-size: 12px; }
+  .scope { margin: 8px 0 0; color: #fff; font-size: 11px; font-weight: 700; }
   .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 18px; }
   .summary-card { border: 1px solid #d8e0ea; border-radius: 12px; padding: 10px; background: #f8fafc; }
   .summary-card span { display: block; color: #60708a; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
@@ -193,12 +240,18 @@ function buildHtml({ selectedDate, requests, managedBy }) {
   .block-title { background: #f8fafc; border-bottom: 1px solid #d8e0ea; padding: 9px 11px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .block-title span { display: block; color: #60708a; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
   .block-title strong { display: block; color: #172033; font-size: 15px; }
-  .coverage { background: #dcfce7; color: #166534; border-radius: 999px; padding: 5px 9px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+  .block-status { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+  .request-status { border-radius: 999px; padding: 5px 9px; font-size: 10px !important; font-weight: 800; white-space: nowrap; }
+  .request-status.complete { background: #dcfce7; color: #166534; }
+  .request-status.confirmation { background: #dbeafe; color: #1d4ed8; }
+  .request-status.pending { background: #fef3c7; color: #92400e; }
+  .coverage { background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 5px 9px; font-size: 11px; font-weight: 800; white-space: nowrap; }
   .block-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 10px 11px 0; color: #334155; }
   .workers-list { margin: 8px 0 0; padding: 0 11px 11px 32px; }
-  .workers-list li { margin: 4px 0; line-height: 1.35; }
+  .workers-list li { margin: 5px 0; line-height: 1.35; }
   .workers-list strong { color: #172033; }
   .workers-list span { color: #475569; margin-left: 6px; }
+  .workers-list em { display: inline-block; margin-left: 6px; color: #1d4ed8; font-size: 10px; font-style: normal; font-weight: 800; }
   .empty-workers { padding: 0 11px 11px; color: #991b1b; font-weight: 800; }
   .footer { margin-top: 18px; border-top: 1px solid #d8e0ea; padding-top: 10px; display: flex; justify-content: space-between; color: #60708a; font-size: 10px; }
 </style>
@@ -206,17 +259,18 @@ function buildHtml({ selectedDate, requests, managedBy }) {
 <body>
   <header class="header">
     <div class="eyebrow">LoginPro · Operaciones / Despacho</div>
-    <h1>Programación operativa completa</h1>
+    <h1>${escapeHtml(documentTitle)}</h1>
     <p class="subtitle">Fecha de servicio: ${escapeHtml(selectedDate)} · Generado: ${escapeHtml(generatedAt)} · Gestionado por: ${escapeHtml(manager)}</p>
+    <p class="scope">${escapeHtml(scopeLabel)}</p>
   </header>
   <section class="summary">
-    <div class="summary-card"><span>Solicitudes</span><strong>${summary.completedRequests}/${summary.totalRequests}</strong></div>
-    <div class="summary-card"><span>Aux. requeridos</span><strong>${summary.requiredWorkers}</strong></div>
-    <div class="summary-card"><span>Aux. asignados</span><strong>${summary.assignedWorkers}</strong></div>
-    <div class="summary-card"><span>Clientes</span><strong>${requestsByClient.length}</strong></div>
+    <div class="summary-card"><span>Solicitudes incluidas</span><strong>${includedSummary.totalRequests}</strong></div>
+    <div class="summary-card"><span>Completas del día</span><strong>${overallSummary.completedRequests}/${overallSummary.totalRequests}</strong></div>
+    <div class="summary-card"><span>Aux. requeridos</span><strong>${includedSummary.requiredWorkers}</strong></div>
+    <div class="summary-card"><span>Aux. asignados</span><strong>${includedSummary.assignedWorkers}</strong></div>
   </section>
   ${clientSections}
-  <footer class="footer"><span>Documento generado por LoginPro Operaciones.</span><span>Solo incluye nombre completo y documento del auxiliar.</span></footer>
+  <footer class="footer"><span>Documento generado por LoginPro Operaciones.</span><span>Solo incluye nombre completo, documento y estado del auxiliar.</span></footer>
 </body>
 </html>`;
 }
@@ -251,11 +305,23 @@ async function htmlToPdfBuffer(html) {
 }
 
 export async function buildProgrammingPdfBuffer(prisma, options = {}) {
-  const { selectedDate, requests } = await loadProgrammingRequests(prisma, options.fecha || options.date, { requestId: options.requestId });
-  const html = buildHtml({ selectedDate, requests, managedBy: options.managedBy });
+  const loaded = await loadProgrammingRequests(prisma, options.fecha || options.date, { requestId: options.requestId });
+  const includePending = normalizeProgrammingIncludePending(options.includePending, true);
+  const requests = selectProgrammingRequests(loaded.requests, { includePending, requestId: options.requestId });
+  const overallSummary = buildProgrammingCompletionSummary(loaded.requests);
+  const includedSummary = buildProgrammingCompletionSummary(requests);
+  const html = buildHtml({
+    selectedDate: loaded.selectedDate,
+    requests,
+    managedBy: options.managedBy,
+    includePending,
+    overallSummary
+  });
   return {
-    selectedDate,
-    summary: buildProgrammingCompletionSummary(requests),
+    selectedDate: loaded.selectedDate,
+    summary: overallSummary,
+    includedSummary,
+    includePending,
     buffer: await htmlToPdfBuffer(html)
   };
 }
