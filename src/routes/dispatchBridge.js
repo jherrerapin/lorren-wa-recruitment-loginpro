@@ -172,17 +172,19 @@ function applyRedirectNoStore(res) {
 export function dispatchBridgeRouter() {
   const router = express.Router();
 
-  router.get('/portal', (_req, res) => {
+  // Alias administrativo exclusivo de DEV para corregir enlaces o marcadores antiguos.
+  // El acceso público del auxiliar continúa siendo /operaciones/portal.
+  router.get('/portal', requireDev, (_req, res) => {
     applyRedirectNoStore(res);
     return res.redirect(302, WORKER_PORTAL_PUBLIC_PATH);
   });
 
-  router.get('/portal/activar', (_req, res) => {
+  router.get('/portal/activar', requireDev, (_req, res) => {
     applyRedirectNoStore(res);
     return res.redirect(302, `${WORKER_PORTAL_PUBLIC_PATH}/activar`);
   });
 
-  router.get('/portal-release', (_req, res) => {
+  router.get('/portal-release', requireDev, (_req, res) => {
     applyRedirectNoStore(res);
     return res.status(200).json({
       service: 'lorren-attendance-portal',
