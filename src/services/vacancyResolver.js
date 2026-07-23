@@ -211,23 +211,42 @@ function buildCityNames(vacancies = []) {
   return Array.from(new Set(vacancies.map(canonicalVacancyCity).filter(Boolean)));
 }
 
+function findLastWholePhraseIndex(paddedText = '', phrase = '') {
+  const normalizedPhrase = normalizeResolverText(phrase);
+  if (!normalizedPhrase) return -1;
+  return paddedText.lastIndexOf(` ${normalizedPhrase} `);
+}
+
 export function detectCityFromText(text = '', cityNames = []) {
   const normalized = normalizeResolverText(text);
   if (!normalized) return null;
   const padded = ` ${normalized} `;
-  let bestMatch = null;
+  const matches = [];
+
   for (const cityName of cityNames) {
     const cityNormalized = normalizeResolverText(cityName);
-    if (!cityNormalized) continue;
-    if (padded.includes(` ${cityNormalized} `) && (!bestMatch || cityNormalized.length > bestMatch.normalized.length)) {
-      bestMatch = { value: cityName, normalized: cityNormalized };
+    const index = findLastWholePhraseIndex(padded, cityNormalized);
+    if (index >= 0) {
+      matches.push({ value: cityName, normalized: cityNormalized, index, priority: 1 });
     }
   }
-  if (bestMatch?.value) return bestMatch.value;
+
   for (const entry of CITY_ALIASES) {
-    if (entry.aliases.some((alias) => padded.includes(` ${normalizeResolverText(alias)} `))) return entry.value;
+    for (const alias of entry.aliases) {
+      const aliasNormalized = normalizeResolverText(alias);
+      const index = findLastWholePhraseIndex(padded, aliasNormalized);
+      if (index >= 0) {
+        matches.push({ value: entry.value, normalized: aliasNormalized, index, priority: 0 });
+      }
+    }
   }
-  return null;
+
+  matches.sort((left, right) => (
+    right.index - left.index
+    || right.normalized.length - left.normalized.length
+    || right.priority - left.priority
+  ));
+  return matches[0]?.value || null;
 }
 
 function cleanRoleTokens(tokens = [], cityTokens = new Set()) {
@@ -502,7 +521,8 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   const activeVacancies = options.activeVacancies || options.vacancies || allVacancies.filter(isVacancyOpen);
   if (!allVacancies.length) return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'no_vacancies_configured', source: 'text_inference_fallback', fallback: true };
 
-  const city = options.cityHint || detectCityFromText(text, buildCityNames(allVacancies));
+  const detectedCity = detectCityFromText(text, buildCityNames(allVacancies));
+  const city = detectedCity || options.cityHint || null;
   const operationZones = detectOperationZoneEvidence(text);
   const localRoleHint = detectRoleHintFromText(text, { city });
   const roleHint = mergeRoleHints(options.roleHint, localRoleHint, city);
