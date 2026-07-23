@@ -87,6 +87,9 @@ jobs:
             node --check "$file"
           done < <(find src test -type f -name '*.js' -print0)
 
+      - name: Validate transitional code inventory
+        run: node --test test/transitionalCodeInventory.test.js
+
       - name: Run conversation turn arbitration regressions
         run: node --test test/conversationIntent.test.js
 
