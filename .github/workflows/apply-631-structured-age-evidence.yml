@@ -55,8 +55,14 @@ jobs:
       - name: Run focused structured age regressions
         run: node --test test/structuredAgeEvidence.test.js
 
-      - name: Run structured age integrations
-        run: node --test test/structuredAgeHarnessIntegration.test.js
+      - name: Validate Ibagué age 24 integration
+        run: node --test --test-name-pattern="ibague-flow-name-correction" test/structuredAgeHarnessIntegration.test.js
+
+      - name: Validate Ibagué age 30 integration
+        run: node --test --test-name-pattern="ibague-role-phrase" test/structuredAgeHarnessIntegration.test.js
+
+      - name: Validate future birthday integration
+        run: node --test --test-name-pattern="future-birthday" test/structuredAgeHarnessIntegration.test.js
 
       - name: Run existing age and parser regressions
         run: node --test test/candidateAgeEvidence.test.js test/candidateAgeHarnessIntegration.test.js test/candidateData.test.js test/fieldSanitizer.test.js
