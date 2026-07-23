@@ -1,4 +1,5 @@
 import { createMetaAdsClient } from './metaAdsClient.js';
+import { CAMPAIGN_VACANCY_CONFIRMATION_MODE } from './dataConsentGate.js';
 
 const INSIGHT_FIELDS = [
   'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name',
@@ -336,8 +337,16 @@ export async function associateCandidatesByExactAdId(prisma, campaignRows = []) 
     let vacancyFilled = 0;
     if (campaign.vacancyId) {
       const vacancyResult = await prisma.candidate.updateMany({
-        where: { sourceType: 'META_ADS', metaAdId, vacancyId: null },
-        data: { vacancyId: campaign.vacancyId }
+        where: {
+          sourceType: 'META_ADS',
+          metaAdId,
+          campaignId: campaign.id,
+          vacancyId: null
+        },
+        data: {
+          vacancyId: campaign.vacancyId,
+          botResumeMode: CAMPAIGN_VACANCY_CONFIRMATION_MODE
+        }
       });
       vacancyFilled = vacancyResult.count || 0;
     }
