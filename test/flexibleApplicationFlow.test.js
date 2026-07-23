@@ -240,6 +240,49 @@ test('un identificador objetivo gana sobre una coincidencia textual más larga',
   assert.equal(resolution.matchMode, 'objective_id_exact');
 });
 
+test('un ad_id desconocido no degrada a una campaña de nombre parecido', () => {
+  const campaigns = [
+    {
+      id: 'campaign-wrong',
+      code: 'ad-registered',
+      name: 'Líder Operación Neiva Julio 2026',
+      notes: 'Anuncio sincronizado desde Meta Ads'
+    }
+  ];
+  const message = {
+    referral: {
+      ad_id: 'ad-unknown',
+      campaign_id: 'campaign-unknown',
+      ad_name: 'Líder Operación Neiva Julio 2026'
+    }
+  };
+
+  const resolution = resolveCampaignForReferral(campaigns, message);
+  assert.equal(resolution.campaign, null);
+  assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
+  assert.deepEqual(resolution.matches, []);
+});
+
+test('una coincidencia descriptiva parcial no asigna campaña', () => {
+  const campaigns = [
+    {
+      id: 'campaign-1',
+      code: 'NEIVA-LIDER-JULIO-2026',
+      name: 'Líder Operación Neiva Julio 2026',
+      notes: null
+    }
+  ];
+  const message = {
+    referral: {
+      ad_name: 'Líder Operación Neiva'
+    }
+  };
+
+  const resolution = resolveCampaignForReferral(campaigns, message);
+  assert.equal(resolution.campaign, null);
+  assert.equal(resolution.reason, 'no_campaign_match');
+});
+
 test('atribución no elige arbitrariamente cuando dos campañas empatan', () => {
   const campaigns = [
     { id: 'campaign-1', code: 'NEIVA-LIDER', name: 'Líder Neiva', notes: null },
