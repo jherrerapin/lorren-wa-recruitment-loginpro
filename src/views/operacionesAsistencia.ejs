@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= pageTitle %> — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    .attendance-page { display: grid; gap: 16px; }
+    .filter-card, .metrics-card, .attendance-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-sm); }
+    .filter-card { padding: 16px; }
+    .filter-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: end; }
+    .filter-grid .field { min-width: 0; }
+    .filter-grid input, .filter-grid select { width: 100%; }
+    .filter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+    .metric { padding: 14px; border-top: 4px solid var(--teal); }
+    .metric.review { border-top-color: #d97706; }
+    .metric.auto { border-top-color: #15803d; }
+    .metric.manual { border-top-color: #2563eb; }
+    .metric.late { border-top-color: #b45309; }
+    .metric.rejected { border-top-color: #b91c1c; }
+    .metric.no-show { border-top-color: #64748b; }
+    .metric-label { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+    .metric-value { margin-top: 5px; color: var(--navy); font-size: 25px; font-weight: 950; }
+    .attendance-list { display: grid; gap: 14px; }
+    .attendance-card { overflow: hidden; }
+    .attendance-head { display: flex; justify-content: space-between; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--border); align-items: start; }
+    .attendance-head h2 { margin: 2px 0 4px; color: var(--navy); font-size: 18px; }
+    .attendance-head p { margin: 0; color: var(--muted); font-size: 13px; }
+    .attendance-body { padding: 16px 18px; display: grid; gap: 14px; }
+    .status-pill { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 900; text-align: center; background: #eef2f7; color: #475569; }
+    .status-REVIEW_REQUIRED { background: #fff7ed; color: #9a3412; }
+    .status-AUTO_VALIDATED { background: #dcfce7; color: #166534; }
+    .status-MANUAL_VALIDATED { background: #dbeafe; color: #1d4ed8; }
+    .status-REJECTED { background: #fee2e2; color: #991b1b; }
+    .status-NO_SHOW { background: #e2e8f0; color: #334155; }
+    .status-PENDING { background: #fef9c3; color: #854d0e; }
+    .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .fact { padding: 10px 12px; border: 1px solid #e5eaf0; border-radius: 12px; background: #fafcfd; min-width: 0; }
+    .fact span { display: block; color: var(--muted); font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+    .fact strong { display: block; margin-top: 4px; color: var(--navy); font-size: 13px; overflow-wrap: anywhere; }
+    .risk-row { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+    .risk-score { display: inline-flex; border-radius: 999px; padding: 5px 9px; background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 900; }
+    .risk-score.high { background: #fee2e2; color: #991b1b; }
+    .risk-flag { display: inline-flex; border-radius: 999px; padding: 5px 8px; background: #fff7ed; color: #9a3412; font-size: 10px; font-weight: 800; }
+    .review-history { padding: 11px 12px; border-left: 4px solid #94a3b8; border-radius: 10px; background: #f8fafc; color: #475569; font-size: 12px; line-height: 1.45; }
+    .detail-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); gap: 14px; }
+    .attendance-map { height: 320px; border: 1px solid var(--border); border-radius: 14px; background: #eef2f5; overflow: hidden; }
+    .map-legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 11px; margin-top: 7px; }
+    .map-legend span::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 999px; margin-right: 5px; }
+    .map-legend .operation::before { background: #2563eb; }
+    .map-legend .arrival::before { background: #dc2626; }
+    details.review-panel { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    details.review-panel > summary { cursor: pointer; list-style: none; padding: 12px 14px; color: var(--navy); font-size: 13px; font-weight: 900; background: #f8fafc; }
+    details.review-panel > summary::-webkit-details-marker { display: none; }
+    .review-content { padding: 14px; display: grid; gap: 12px; }
+    .review-form { display: grid; gap: 9px; padding: 12px; border: 1px solid #e5eaf0; border-radius: 12px; }
+    .review-form h3 { margin: 0; color: var(--navy); font-size: 14px; }
+    .review-form textarea, .review-form select, .review-form input { width: 100%; }
+    .review-form textarea { min-height: 74px; }
+    .review-form .inline { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 9px; }
+    .btn-danger { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+    .btn-warning { background: #d97706; border-color: #d97706; color: #fff; }
+    .empty-state { padding: 38px 20px; text-align: center; background: #fff; border: 1px dashed var(--border); border-radius: 18px; color: var(--muted); }
+    .alert-success { background: #dcfce7; border: 1px solid #86efac; color: #166534; border-radius: 12px; padding: 11px 13px; }
+    .alert-error { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; border-radius: 12px; padding: 11px 13px; }
+    .evidence-link { display: inline-flex; width: fit-content; }
+    @media (max-width: 1100px) { .metrics-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 820px) { .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .detail-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 620px) { .metrics-grid, .filter-grid, .facts { grid-template-columns: 1fr; } .attendance-head { flex-direction: column; } .review-form .inline { grid-template-columns: 1fr; } .attendance-map { height: 280px; } }
+  </style>
+</head>
+<body>
+  <% const filters = board?.filters || {}; %>
+  <% const range = board?.range || {}; %>
+  <% const metrics = board?.metrics || {}; %>
+  <% const hiddenFilters = () => `
+    <input type="hidden" name="from" value="${String(range.from || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" />
+    <input type="hidden" name="to" value="${String(range.to || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" />
+    <input type="hidden" name="status" value="${String(filters.status || 'ALL').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" />
+    <input type="hidden" name="client" value="${String(filters.client || 'ALL').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" />
+    <input type="hidden" name="q" value="${String(filters.q || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" />
+  `; %>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page attendance-page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Control operativo</div>
+        <h1>Asistencia operativa</h1>
+        <p>Revisa llegadas, riesgos, geocerca y evidencia. Las marcaciones confiables se validan automáticamente; aquí se resuelven excepciones y correcciones.</p>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones">Volver al panel</a>
+        <a class="btn btn-primary" href="/admin/operaciones/asignaciones">Ver asignaciones</a>
+      </div>
+    </section>
+
+    <% if (success) { %><div class="alert-success"><%= success %></div><% } %>
+    <% if (error) { %><div class="alert-error"><%= error %></div><% } %>
+
+    <section class="filter-card" aria-label="Filtros de asistencia">
+      <form method="get" action="/admin/operaciones/asistencia">
+        <div class="filter-grid">
+          <div class="field"><label for="from">Desde</label><input id="from" name="from" type="date" value="<%= range.from || '' %>" /></div>
+          <div class="field"><label for="to">Hasta</label><input id="to" name="to" type="date" value="<%= range.to || '' %>" /></div>
+          <div class="field">
+            <label for="status">Estado</label>
+            <select id="status" name="status">
+              <% const statusOptions = [
+                ['ALL', 'Todos'],
+                ['REVIEW_REQUIRED', 'Pendientes de revisión'],
+                ['AUTO_VALIDATED', 'Validadas automáticamente'],
+                ['MANUAL_VALIDATED', 'Validadas manualmente'],
+                ['REJECTED', 'Rechazadas'],
+                ['NO_SHOW', 'No registraron llegada'],
+                ['PENDING', 'Pendientes de llegada']
+              ]; %>
+              <% statusOptions.forEach(([value, label]) => { %><option value="<%= value %>" <%= filters.status === value ? 'selected' : '' %>><%= label %></option><% }); %>
+            </select>
+          </div>
+          <div class="field">
+            <label for="client">Cliente</label>
+            <select id="client" name="client">
+              <option value="ALL">Todos</option>
+              <% (board.clients || []).forEach((client) => { %><option value="<%= client %>" <%= filters.client === client ? 'selected' : '' %>><%= client %></option><% }); %>
+            </select>
+          </div>
+          <div class="field"><label for="q">Auxiliar, documento o punto</label><input id="q" name="q" value="<%= filters.q || '' %>" placeholder="Buscar..." /></div>
+        </div>
+        <div class="filter-actions">
+          <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+          <a class="btn" href="/admin/operaciones/asistencia">Hoy</a>
+        </div>
+      </form>
+    </section>
+
+    <section class="metrics-grid" aria-label="Resumen de asistencia">
+      <article class="metrics-card metric"><div class="metric-label">Asignaciones</div><div class="metric-value"><%= metrics.total || 0 %></div></article>
+      <article class="metrics-card metric review"><div class="metric-label">Por revisar</div><div class="metric-value"><%= metrics.pendingReview || 0 %></div></article>
+      <article class="metrics-card metric auto"><div class="metric-label">Automáticas</div><div class="metric-value"><%= metrics.autoValidated || 0 %></div></article>
+      <article class="metrics-card metric manual"><div class="metric-label">Manuales</div><div class="metric-value"><%= metrics.manualValidated || 0 %></div></article>
+      <article class="metrics-card metric late"><div class="metric-label">Llegadas tarde</div><div class="metric-value"><%= metrics.late || 0 %></div></article>
+      <article class="metrics-card metric rejected"><div class="metric-label">Rechazadas</div><div class="metric-value"><%= metrics.rejected || 0 %></div></article>
+      <article class="metrics-card metric no-show"><div class="metric-label">Sin llegada</div><div class="metric-value"><%= metrics.noShow || 0 %></div></article>
+    </section>
+
+    <% if (!(board.rows || []).length) { %>
+      <section class="empty-state"><strong>No hay asistencias para los filtros seleccionados.</strong><br />Cambia la fecha o revisa que existan asignaciones activas.</section>
+    <% } else { %>
+      <section class="attendance-list" aria-label="Listado de asistencias">
+        <% board.rows.forEach((row, index) => { %>
+          <article class="attendance-card">
+            <header class="attendance-head">
+              <div>
+                <div class="eyebrow"><%= row.serviceDateLabel %> · <%= row.scheduleLabel %></div>
+                <h2><%= row.workerName %></h2>
+                <p><%= row.clientName %> · <%= row.operationPointName %></p>
+              </div>
+              <span class="status-pill status-<%= row.status %>"><%= row.statusLabel %></span>
+            </header>
+            <div class="attendance-body">
+              <div class="facts">
+                <div class="fact"><span>Documento</span><strong><%= [row.documentType, row.documentNumber].filter(Boolean).join(' ') || 'Sin documento' %></strong></div>
+                <div class="fact"><span>Teléfono</span><strong><%= row.phone || 'Sin teléfono' %></strong></div>
+                <div class="fact"><span>Llegada reportada</span><strong><%= row.arrivalReportedLabel %></strong></div>
+                <div class="fact"><span>Puntualidad</span><strong><%= row.punctualityLabel %></strong></div>
+                <div class="fact"><span>Ciudad</span><strong><%= row.cityName %></strong></div>
+                <div class="fact"><span>Dirección</span><strong><%= row.address %></strong></div>
+                <div class="fact"><span>Distancia al punto</span><strong><%= row.distanceToPointMeters === null ? 'Sin dato' : `${Math.round(row.distanceToPointMeters)} m` %></strong></div>
+                <div class="fact"><span>Precisión GPS</span><strong><%= row.accuracyMeters === null ? 'Sin dato' : `${Math.round(row.accuracyMeters)} m` %></strong></div>
+              </div>
+
+              <div class="risk-row">
+                <span class="risk-score <%= row.riskScore >= 50 ? 'high' : '' %>">Riesgo: <%= row.riskScore %>/100</span>
+                <% if (row.insideGeofence === true) { %><span class="risk-score">Dentro de geocerca</span><% } %>
+                <% if (row.insideGeofence === false) { %><span class="risk-flag">Fuera de geocerca</span><% } %>
+                <% row.riskFlags.forEach((flag) => { %><span class="risk-flag"><%= flag.replaceAll('_', ' ') %></span><% }); %>
+                <% if (row.evidenceAvailable && row.markId) { %><a class="btn evidence-link" href="/admin/operaciones/asistencia/evidence/<%= row.markId %>" target="_blank" rel="noopener">Ver fotografía</a><% } %>
+              </div>
+
+              <% if (row.lastReview) { %>
+                <div class="review-history"><strong>Última decisión:</strong> <%= row.lastReview.action %> por <%= row.lastReview.actorUsername %> · <%= row.lastReview.createdAtLabel %><br /><strong>Motivo:</strong> <%= row.lastReview.reason %><% if (row.lastReview.notes) { %><br /><%= row.lastReview.notes %><% } %></div>
+              <% } %>
+
+              <div class="detail-grid">
+                <div>
+                  <% const hasMap = row.pointLatitude !== null && row.pointLongitude !== null; %>
+                  <% if (hasMap) { %>
+                    <details class="map-panel" data-map-details>
+                      <summary class="btn">Ver ubicación y geocerca</summary>
+                      <div
+                        id="attendanceMap<%= index %>"
+                        class="attendance-map"
+                        data-point-lat="<%= row.pointLatitude %>"
+                        data-point-lng="<%= row.pointLongitude %>"
+                        data-mark-lat="<%= row.markLatitude === null ? '' : row.markLatitude %>"
+                        data-mark-lng="<%= row.markLongitude === null ? '' : row.markLongitude %>"
+                        data-radius="<%= row.geofenceRadiusMeters %>"
+                      ></div>
+                      <div class="map-legend"><span class="operation">Punto operativo y geocerca</span><span class="arrival">Ubicación reportada</span></div>
+                    </details>
+                  <% } else { %>
+                    <div class="alert-error">Este punto todavía no tiene coordenadas configuradas.</div>
+                  <% } %>
+                </div>
+
+                <details class="review-panel">
+                  <summary><%= row.sessionId ? 'Revisar o corregir asistencia' : 'Registrar asistencia manual' %></summary>
+                  <div class="review-content">
+                    <% if (row.sessionId && row.arrivalReportedAt) { %>
+                      <form class="review-form" method="post" action="/admin/operaciones/asistencia/sessions/<%= row.sessionId %>/review">
+                        <%- hiddenFilters() %>
+                        <input type="hidden" name="action" value="VALIDATE" />
+                        <h3>Validar o corregir llegada</h3>
+                        <div class="inline">
+                          <select name="attendanceStatus" required>
+                            <option value="ON_TIME" <%= row.punctualityStatus === 'ON_TIME' ? 'selected' : '' %>>A tiempo</option>
+                            <option value="LATE" <%= row.punctualityStatus === 'LATE' ? 'selected' : '' %>>Tarde</option>
+                          </select>
+                          <input name="reason" minlength="5" maxlength="500" required placeholder="Motivo obligatorio" />
+                        </div>
+                        <textarea name="notes" maxlength="1000" placeholder="Notas adicionales"></textarea>
+                        <button class="btn btn-primary" type="submit">Guardar validación</button>
+                      </form>
+
+                      <form class="review-form" method="post" action="/admin/operaciones/asistencia/sessions/<%= row.sessionId %>/review">
+                        <%- hiddenFilters() %>
+                        <input type="hidden" name="action" value="REJECT" />
+                        <h3>Rechazar marcación</h3>
+                        <input name="reason" minlength="5" maxlength="500" required placeholder="Motivo obligatorio del rechazo" />
+                        <textarea name="notes" maxlength="1000" placeholder="Notas adicionales"></textarea>
+                        <button class="btn btn-danger" type="submit">Rechazar marcación</button>
+                      </form>
+
+                      <% if (row.validationStatus !== 'REVIEW_REQUIRED') { %>
+                        <form class="review-form" method="post" action="/admin/operaciones/asistencia/sessions/<%= row.sessionId %>/review">
+                          <%- hiddenFilters() %>
+                          <input type="hidden" name="action" value="REOPEN" />
+                          <h3>Reabrir para revisión</h3>
+                          <input name="reason" minlength="5" maxlength="500" required placeholder="Motivo obligatorio" />
+                          <button class="btn btn-warning" type="submit">Reabrir revisión</button>
+                        </form>
+                      <% } %>
+                    <% } else if (row.manualAttendanceAllowed) { %>
+                      <form class="review-form" method="post" action="/admin/operaciones/asistencia/assignments/<%= row.assignmentId %>/manual">
+                        <%- hiddenFilters() %>
+                        <h3>Marcación manual auditada</h3>
+                        <div class="inline">
+                          <select name="attendanceStatus" required><option value="ON_TIME">A tiempo</option><option value="LATE">Tarde</option></select>
+                          <input name="reportedAt" type="datetime-local" />
+                        </div>
+                        <input name="reason" minlength="5" maxlength="500" required placeholder="Motivo obligatorio" />
+                        <textarea name="notes" maxlength="1000" placeholder="Notas adicionales"></textarea>
+                        <button class="btn btn-primary" type="submit">Registrar asistencia manual</button>
+                      </form>
+                    <% } else { %>
+                      <div class="alert-error">Este punto no permite marcaciones manuales.</div>
+                    <% } %>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </article>
+        <% }); %>
+      </section>
+    <% } %>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script>
+    (() => {
+      const initialized = new WeakSet();
+      function numberValue(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      function initializeMap(container) {
+        if (!container || initialized.has(container) || !window.L) return;
+        const pointLat = numberValue(container.dataset.pointLat);
+        const pointLng = numberValue(container.dataset.pointLng);
+        if (pointLat === null || pointLng === null) return;
+        initialized.add(container);
+        const map = window.L.map(container, { scrollWheelZoom: false });
+        window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        const operation = [pointLat, pointLng];
+        const radius = Math.max(1, numberValue(container.dataset.radius) || 100);
+        const operationMarker = window.L.circleMarker(operation, {
+          radius: 8,
+          color: '#1d4ed8',
+          fillColor: '#2563eb',
+          fillOpacity: 1
+        }).addTo(map).bindPopup('Punto operativo');
+        const geofence = window.L.circle(operation, {
+          radius,
+          color: '#2563eb',
+          fillColor: '#60a5fa',
+          fillOpacity: .16
+        }).addTo(map);
+        const bounds = window.L.latLngBounds([operationMarker.getLatLng()]);
+        const markLat = numberValue(container.dataset.markLat);
+        const markLng = numberValue(container.dataset.markLng);
+        if (markLat !== null && markLng !== null) {
+          const mark = window.L.circleMarker([markLat, markLng], {
+            radius: 8,
+            color: '#991b1b',
+            fillColor: '#dc2626',
+            fillOpacity: 1
+          }).addTo(map).bindPopup('Ubicación reportada');
+          bounds.extend(mark.getLatLng());
+          window.L.polyline([operation, [markLat, markLng]], { color: '#64748b', dashArray: '5,6' }).addTo(map);
+        }
+        bounds.extend(geofence.getBounds());
+        map.fitBounds(bounds, { padding: [24, 24], maxZoom: 18 });
+        window.setTimeout(() => map.invalidateSize(), 0);
+      }
+      document.querySelectorAll('[data-map-details]').forEach((details) => {
+        details.addEventListener('toggle', () => {
+          if (details.open) initializeMap(details.querySelector('.attendance-map'));
+        });
+        if (details.open) initializeMap(details.querySelector('.attendance-map'));
+      });
+    })();
+  </script>
+</body>
+</html>
