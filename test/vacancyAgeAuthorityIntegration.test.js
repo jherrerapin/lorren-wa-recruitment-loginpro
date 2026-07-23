@@ -116,7 +116,7 @@ test('una edad superior al máximo configurado usa el código y rango canónicos
   });
 
   assert.equal(result.candidate.status, 'RECHAZADO');
-  assert.match(result.candidate.rejectionReason, /máximo 55 años/i);
+  assert.match(result.candidate.rejectionReason, /entre 18 y 55 años/i);
   assert.match(result.candidate.rejectionDetails, /Edad detectada: 56/i);
   assert.match(result.candidate.rejectionDetails, /Rango requerido: entre 18 y 55 años/i);
   assert.match(result.candidate.rejectionDetails, /Código: age_above_max/i);
