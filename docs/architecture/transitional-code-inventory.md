@@ -38,11 +38,9 @@ Marcar una entrada como `RETIRABLE` exige pruebas existentes y `retirementEviden
 
 `FF_POSTGRES_JOB_QUEUE` y `FF_ASYNC_ADMIN_MEDIA_FORWARD` no deben considerarse solución SaaS definitiva mientras la cola, deduplicación, ownership y observabilidad no estén aislados por tenant.
 
-### Adjuntos y memoria
+### Adjuntos
 
 `FF_ATTACHMENT_ANALYZER` sigue siendo transitorio hasta consolidar consentimiento, clasificación, almacenamiento y revisión manual detrás de un único caso de uso.
-
-`FF_SEMANTIC_SHORT_MEMORY` está bloqueado porque no tiene consumidor productivo observado. Su retiro requiere confirmar que ninguna configuración externa depende de él y documentar que no fue activado en producción.
 
 ### Aliases del webhook
 
@@ -55,6 +53,14 @@ Los aliases iniciales están concentrados en `src/routes/webhook.js`:
 - `buildDataRequestPrompt()`.
 
 La mayoría solo renombran funciones de `readinessGuard.js`; `getMissingFields()` incluso crea una cadena sobre otro alias local. No se eliminan en este slice. El scanner impide que adquieran política sin reclasificación.
+
+## Retiros completados
+
+### `FF_SEMANTIC_SHORT_MEMORY` — #651
+
+El flag se retiró porque no existía ningún consumidor productivo, ruta de configuración, worker, persistencia ni caso de uso que leyera su valor. Solo estaba declarado en `featureFlags.js`, proyectado por `getHardeningFlags()` y repetido en pruebas y documentación.
+
+Una variable externa con ese nombre no podía alterar el runtime. Su eliminación reduce configuración fantasma sin introducir ni retirar una capacidad real de memoria. Los documentos históricos de hardening conservan la referencia como registro de la fase en la que el flag fue propuesto; este inventario representa el estado vigente.
 
 ## Qué bloquea CI
 
@@ -71,8 +77,8 @@ La prueba falla cuando:
 ## Orden de limpieza después de este inventario
 
 1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).
-2. Retirar aliases puros en PR pequeños, empezando por la cadena `getMissingFields()` / `getMissingFieldsForVacancy()`.
-3. Resolver el estado de `FF_SEMANTIC_SHORT_MEMORY` y retirar configuración fantasma si se confirma que nunca tuvo consumidor.
+2. Retirar configuración fantasma sin consumidores, comenzando por `FF_SEMANTIC_SHORT_MEMORY` (#651).
+3. Retirar aliases puros en PR pequeños, empezando por la cadena `getMissingFields()` / `getMissingFieldsForVacancy()`.
 4. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.
 5. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.
 6. Diseñar `TenantContext` y la migración del tenant inicial LoginPro.
