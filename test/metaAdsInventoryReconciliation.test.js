@@ -367,7 +367,7 @@ test('sin configuración retorna un error estructurado y no lanza excepción', a
   assert.equal(result.error.code, 'META_ADS_NOT_CONFIGURED');
 });
 
-test('asocia candidato únicamente por ad_id exacto y completa vacante solo si falta', async () => {
+test('asocia candidato por ad_id exacto y deja la vacante pendiente de confirmación', async () => {
   const calls = [];
   const prisma = {
     candidate: {
@@ -397,8 +397,12 @@ test('asocia candidato únicamente por ad_id exacto y completa vacante solo si f
     where: {
       sourceType: 'META_ADS',
       metaAdId: 'ad-123',
+      campaignId: 'campaign-1',
       vacancyId: null
     },
-    data: { vacancyId: 'vacancy-1' }
+    data: {
+      vacancyId: 'vacancy-1',
+      botResumeMode: 'campaign_vacancy_pending_confirmation'
+    }
   });
 });
