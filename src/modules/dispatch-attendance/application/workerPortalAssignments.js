@@ -6,6 +6,7 @@ import {
 
 const PORTAL_PAST_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PORTAL_FUTURE_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
+const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 
 function requireNonEmptyString(value, label) {
@@ -26,6 +27,10 @@ function requireDate(value, label) {
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function nonNegativeMinutes(value, fallback) {
+  return Math.max(0, finiteNumber(value, fallback));
 }
 
 function requireAssignmentReader(prisma, methodName) {
@@ -69,6 +74,26 @@ function normalizePhotoPolicy(value) {
   return ['NEVER', 'RISK_ONLY', 'ALWAYS'].includes(value) ? value : 'RISK_ONLY';
 }
 
+function boundedArrivalWindow({ now, expectedStartAt, point }) {
+  const baseWindow = getDispatchArrivalWindowState({
+    now,
+    expectedStartAt,
+    earlyArrivalWindowMinutes: nonNegativeMinutes(point?.earlyArrivalWindowMinutes, 0)
+  });
+  const absenceGraceMinutes = nonNegativeMinutes(
+    point?.absenceGraceMinutes,
+    DEFAULT_ABSENCE_GRACE_MINUTES
+  );
+  const closesAt = new Date(expectedStartAt.getTime() + absenceGraceMinutes * 60_000);
+  const expired = now.getTime() > closesAt.getTime();
+  return {
+    open: baseWindow.open && !expired,
+    opensAt: baseWindow.opensAt,
+    closesAt,
+    expired
+  };
+}
+
 function buildPortalAssignment(assignment, now) {
   const request = assignment?.serviceRequest;
   if (!request) throw new Error('worker_portal_assignment_service_request_required');
@@ -77,17 +102,13 @@ function buildPortalAssignment(assignment, now) {
   const session = assignment.attendanceSession ?? null;
   let expectedStartAt = null;
   let expectedEndAt = null;
-  let windowState = { open: false, opensAt: null };
+  let windowState = { open: false, opensAt: null, closesAt: null, expired: false };
 
   if (request.startTime) {
     const expected = buildDispatchAttendanceExpectedWindow(request);
     expectedStartAt = expected.expectedStartAt;
     expectedEndAt = expected.expectedEndAt;
-    windowState = getDispatchArrivalWindowState({
-      now,
-      expectedStartAt,
-      earlyArrivalWindowMinutes: finiteNumber(point?.earlyArrivalWindowMinutes, 0)
-    });
+    windowState = boundedArrivalWindow({ now, expectedStartAt, point });
   }
 
   const arrivalReported = Boolean(session?.arrivalReportedAt);
@@ -100,8 +121,9 @@ function buildPortalAssignment(assignment, now) {
 
   let actionLabel = 'Registrar llegada';
   if (arrivalReported) actionLabel = attendanceLabel(session);
-  else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
   else if (!expectedStartAt) actionLabel = 'Horario pendiente';
+  else if (windowState.expired) actionLabel = 'Jornada vencida';
+  else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
   else if (!windowState.open) actionLabel = `Disponible desde ${formatTime(windowState.opensAt)}`;
 
   return {
@@ -118,6 +140,8 @@ function buildPortalAssignment(assignment, now) {
     expectedEndAt: expectedEndAt?.toISOString() || null,
     arrivalWindowOpen: windowState.open,
     arrivalWindowOpensAt: windowState.opensAt?.toISOString() || null,
+    arrivalWindowClosesAt: windowState.closesAt?.toISOString() || null,
+    arrivalWindowExpired: windowState.expired,
     attendanceEnabled,
     arrivalReported,
     attendanceStatus: session?.attendanceStatus || 'PENDING',

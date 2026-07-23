@@ -48,6 +48,22 @@ const leafletHtmlWithInvalidIntegrity = `<!doctype html>
 </body>
 </html>`;
 
+const attendanceSearchHtml = `<!doctype html>
+<html>
+<body>
+<main class="page">
+  <details class="attendance-config">
+    <form class="attendance-map-form">
+      <input type="checkbox" name="attendanceEnabled" value="true" />
+    </form>
+  </details>
+</main>
+<script>
+  fetch(\`https://nominatim.openstreetmap.org/search?\${params.toString()}\`);
+</script>
+</body>
+</html>`;
+
 test('una persona sin acceso no ve la configuracion de asistencia', () => {
   const output = filterAttendanceFeatureHtml(sampleHtml, {
     allowed: false,
@@ -143,10 +159,29 @@ test('el HTML entregado corrige el hash oficial de Leaflet 1.9.4', () => {
   assert.doesNotMatch(output, /sha256-20nQCchB9coqIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
 });
 
+test('el HTML usa el geocodificador interno y prepara la habilitación al guardar', () => {
+  const output = filterAttendanceFeatureHtml(attendanceSearchHtml, {
+    allowed: true,
+    isDev: false,
+    recruiterGeneralEnabled: true
+  });
+
+  assert.match(output, /\/admin\/operaciones\/asistencia\/geocodificar\?\$\{params\.toString\(\)\}/);
+  assert.doesNotMatch(output, /nominatim\.openstreetmap\.org\/search/);
+  assert.match(output, /name="attendanceEnabled" value="true" checked/);
+});
+
 test('la ruta de escritura exige permiso de asistencia en servidor', () => {
   assert.match(
     routeSource,
     /\/clientes\/:clientId\/operaciones\/:operationId\/asistencia[\s\S]*?requireOps[\s\S]*?requireAttendanceAccess[\s\S]*?dispatchAttendancePointConfigRouter/
+  );
+});
+
+test('la búsqueda interna exige sesión de operaciones y permiso de asistencia', () => {
+  assert.match(
+    routeSource,
+    /\/asistencia\/geocodificar[\s\S]*?requireOps[\s\S]*?requireAttendanceAccess[\s\S]*?geocodeAttendanceAddress/
   );
 });
 
