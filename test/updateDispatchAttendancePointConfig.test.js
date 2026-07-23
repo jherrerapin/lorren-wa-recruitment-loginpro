@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ATTENDANCE_PHOTO_POLICY,
+  DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS,
+  DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS,
   SUPPORTED_ATTENDANCE_TIMEZONES,
   updateDispatchAttendancePointConfig
 } from '../src/modules/dispatch-attendance/application/updatePointConfig.js';
@@ -49,8 +51,8 @@ function validInput(overrides = {}) {
     attendanceEnabled: true,
     attendanceLatitude: 4.711,
     attendanceLongitude: -74.0721,
-    geofenceRadiusMeters: 120,
-    maxLocationAccuracyMeters: 40,
+    geofenceRadiusMeters: 1_900,
+    maxLocationAccuracyMeters: 400,
     earlyArrivalWindowMinutes: 60,
     lateToleranceMinutes: 10,
     absenceGraceMinutes: 20,
@@ -70,11 +72,13 @@ async function rejectsWithoutWrite(input, expectedMessage, point = basePoint()) 
   assert.equal(prisma.writes.length, 0);
 }
 
-test('activa un punto con geocerca completa y solo actualiza campos de asistencia', async () => {
+test('activa un punto con ubicación completa y aplica los estándares protegidos', async () => {
   const prisma = createPrisma();
   const result = await updateDispatchAttendancePointConfig(prisma, validInput());
 
   assert.equal(result.attendanceEnabled, true);
+  assert.equal(result.geofenceRadiusMeters, DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS);
+  assert.equal(result.maxLocationAccuracyMeters, DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS);
   assert.equal(prisma.writes.length, 1);
   assert.deepEqual(Object.keys(prisma.writes[0].data).sort(), [
     'absenceGraceMinutes',
@@ -106,16 +110,17 @@ test('rechaza coordenadas fuera de rango', async () => {
   await rejectsWithoutWrite(validInput({ attendanceLongitude: -181 }), 'attendance_longitude_invalid');
 });
 
-test('rechaza radio y precisión fuera de límites', async () => {
-  await rejectsWithoutWrite(validInput({ geofenceRadiusMeters: 19 }), 'geofence_radius_meters_invalid');
-  await rejectsWithoutWrite(validInput({ maxLocationAccuracyMeters: 501 }), 'max_location_accuracy_meters_invalid');
-});
+test('ignora radio y precisión enviados por el cliente y fuerza 100/50', async () => {
+  const prisma = createPrisma();
+  const result = await updateDispatchAttendancePointConfig(prisma, validInput({
+    geofenceRadiusMeters: 2_000,
+    maxLocationAccuracyMeters: 500
+  }));
 
-test('rechaza precisión mayor que el radio', async () => {
-  await rejectsWithoutWrite(
-    validInput({ geofenceRadiusMeters: 50, maxLocationAccuracyMeters: 80 }),
-    'location_accuracy_exceeds_geofence_radius'
-  );
+  assert.equal(result.geofenceRadiusMeters, 100);
+  assert.equal(result.maxLocationAccuracyMeters, 50);
+  assert.equal(prisma.writes[0].data.geofenceRadiusMeters, 100);
+  assert.equal(prisma.writes[0].data.maxLocationAccuracyMeters, 50);
 });
 
 test('rechaza declarar ausencia antes de la tolerancia de tardanza', async () => {
@@ -135,7 +140,7 @@ test('acepta booleanos explícitos típicos de formulario', async () => {
     attendanceLatitude: 4.7,
     attendanceLongitude: -74.1,
     geofenceRadiusMeters: 100,
-    maxLocationAccuracyMeters: 30
+    maxLocationAccuracyMeters: 50
   }));
   const result = await updateDispatchAttendancePointConfig(prisma, validInput({
     attendanceEnabled: 'on',
@@ -163,8 +168,8 @@ test('desactivar conserva la configuración cuando los campos se omiten', async 
     attendanceEnabled: true,
     attendanceLatitude: 4.711,
     attendanceLongitude: -74.0721,
-    geofenceRadiusMeters: 120,
-    maxLocationAccuracyMeters: 40,
+    geofenceRadiusMeters: 100,
+    maxLocationAccuracyMeters: 50,
     attendancePhotoPolicy: 'ALWAYS'
   });
   const prisma = createPrisma(configured);
@@ -178,15 +183,16 @@ test('desactivar conserva la configuración cuando los campos se omiten', async 
   assert.equal(result.attendanceLatitude, configured.attendanceLatitude);
   assert.equal(result.attendanceLongitude, configured.attendanceLongitude);
   assert.equal(result.geofenceRadiusMeters, configured.geofenceRadiusMeters);
+  assert.equal(result.maxLocationAccuracyMeters, configured.maxLocationAccuracyMeters);
 });
 
-test('permite limpiar geocerca únicamente cuando la asistencia queda desactivada', async () => {
+test('permite limpiar coordenadas al desactivar sin aceptar parámetros técnicos del cliente', async () => {
   const configured = basePoint({
     attendanceEnabled: true,
     attendanceLatitude: 4.711,
     attendanceLongitude: -74.0721,
-    geofenceRadiusMeters: 120,
-    maxLocationAccuracyMeters: 40
+    geofenceRadiusMeters: 100,
+    maxLocationAccuracyMeters: 50
   });
   const prisma = createPrisma(configured);
   const result = await updateDispatchAttendancePointConfig(prisma, {
@@ -201,11 +207,13 @@ test('permite limpiar geocerca únicamente cuando la asistencia queda desactivad
 
   assert.equal(result.attendanceLatitude, null);
   assert.equal(result.attendanceLongitude, null);
-  assert.equal(result.geofenceRadiusMeters, null);
-  assert.equal(result.maxLocationAccuracyMeters, null);
+  assert.equal(result.geofenceRadiusMeters, configured.geofenceRadiusMeters);
+  assert.equal(result.maxLocationAccuracyMeters, configured.maxLocationAccuracyMeters);
 });
 
-test('expone catálogos cerrados para la futura interfaz', () => {
+test('expone catálogos cerrados y estándares del producto', () => {
   assert.deepEqual(Object.values(ATTENDANCE_PHOTO_POLICY), ['NEVER', 'RISK_ONLY', 'ALWAYS']);
   assert.deepEqual(SUPPORTED_ATTENDANCE_TIMEZONES, ['America/Bogota']);
+  assert.equal(DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS, 100);
+  assert.equal(DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS, 50);
 });
