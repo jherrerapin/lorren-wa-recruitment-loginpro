@@ -352,6 +352,7 @@ test('fallo al obtener anuncios conserva filas y reporta error real y etapa exac
   assert.equal(result.error.endpoint, '/v23.0/act_123/ads');
   assert.equal(result.error.message, 'Permiso ads_read requerido.');
   assert.equal(calls.campaignUpdates.length, 0);
+  assert.equal(calls.accountUpserts.length, 0);
 });
 
 test('sin configuración retorna un error estructurado y no lanza excepción', async () => {
