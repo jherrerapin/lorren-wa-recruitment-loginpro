@@ -2,8 +2,6 @@ import express from 'express';
 import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import session from 'express-session';
-import connectPgSimple from 'connect-pg-simple';
 import bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import { PrismaClient } from '@prisma/client';
@@ -30,6 +28,7 @@ import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
 import { getOpenAiModelConfig } from './services/openAiModelConfig.js';
+import { createAdminSessionMiddleware } from './services/adminSession.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,8 +36,6 @@ const prisma = new PrismaClient();
 const app = express();
 
 const isProduction = process.env.NODE_ENV === 'production';
-const sessionCookieName = process.env.SESSION_COOKIE_NAME || 'loginpro.sid';
-const sessionSecret = process.env.SESSION_SECRET || 'dev-session-secret-change-me';
 const LOREN_STATS_UI_LABEL = 'Estadísticas';
 const LOREN_STATS_BASE_PATH = '/admin/estadisticas';
 const LOREN_STATS_LEGACY_BASE_PATH = '/admin/v2';
@@ -47,10 +44,6 @@ const META_ADS_DEFAULT_LOOKBACK_DAYS = Number(process.env.META_ADS_DEFAULT_LOOKB
 
 let metaAdsLastAutoSyncAt = 0;
 let metaAdsAutoSyncInFlight = null;
-
-if (!process.env.SESSION_SECRET) {
-  console.warn('SESSION_SECRET no esta configurada. Usa un valor robusto en produccion.');
-}
 
 if (isProduction) {
   app.set('trust proxy', 1);
@@ -427,31 +420,8 @@ app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-const PgStore = connectPgSimple(session);
-const sessionStore = new PgStore({
-  conString: process.env.DATABASE_URL,
-  tableName: 'session',
-  createTableIfMissing: true,
-  pruneSessionInterval: 60 * 60
-});
-
-sessionStore.on('error', (err) => {
-  console.error('[SESSION_STORE_ERROR]', err);
-});
-
-app.use(session({
-  name: sessionCookieName,
-  secret: sessionSecret,
-  store: sessionStore,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isProduction,
-    maxAge: 1000 * 60 * 60 * 8
-  }
-}));
+const { middleware: adminSessionMiddleware } = createAdminSessionMiddleware();
+app.use(adminSessionMiddleware);
 
 app.use(dispatchAuditMiddleware(prisma));
 

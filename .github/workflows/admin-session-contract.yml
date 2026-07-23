@@ -1,0 +1,57 @@
+name: Admin session contract
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/server.js'
+      - 'src/services/adminSession.js'
+      - 'test/adminSession.test.js'
+      - '.github/workflows/admin-session-contract.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/server.js'
+      - 'src/services/adminSession.js'
+      - 'test/adminSession.test.js'
+      - '.github/workflows/admin-session-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate session source syntax
+        run: |
+          node --check src/services/adminSession.js
+          node --check src/server.js
+          node --check test/adminSession.test.js
+
+      - name: Run admin session contract
+        run: node --test test/adminSession.test.js
