@@ -5,6 +5,7 @@ import fs from 'node:fs';
 const router = fs.readFileSync('src/routes/dispatchAttendancePointConfig.js', 'utf8');
 const bridge = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
 const bridgeCore = fs.readFileSync('src/routes/dispatchBridgeCore.js', 'utf8');
+const authority = fs.readFileSync('src/modules/dispatch-attendance/application/updatePointConfig.js', 'utf8');
 const view = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
 
 test('la configuración administrativa usa una autoridad aislada', () => {
@@ -23,20 +24,56 @@ test('la fachada monta la ruta detrás de requireOps y conserva el router existe
   assert.doesNotMatch(bridgeCore, /dispatchAttendancePointConfigRouter/);
 });
 
-test('el formulario envía booleanos explícitos y límites coherentes', () => {
-  assert.match(view, /attendanceEnabledFallback/);
-  assert.match(view, /manualAttendanceAllowedFallback/);
-  assert.match(view, /name\s*=\s*['"]attendanceLatitude['"][^>]*min\s*=\s*['"]-90['"][^>]*max\s*=\s*['"]90['"][^>]*step\s*=\s*['"]0\.0000001['"]/);
-  assert.match(view, /name\s*=\s*['"]attendanceLongitude['"][^>]*min\s*=\s*['"]-180['"][^>]*max\s*=\s*['"]180['"][^>]*step\s*=\s*['"]0\.0000001['"]/);
-  assert.match(view, /name\s*=\s*['"]geofenceRadiusMeters['"][^>]*min\s*=\s*['"]20['"][^>]*max\s*=\s*['"]2000['"][^>]*step\s*=\s*['"]1['"]/);
-  assert.match(view, /name\s*=\s*['"]maxLocationAccuracyMeters['"][^>]*min\s*=\s*['"]5['"][^>]*max\s*=\s*['"]500['"][^>]*step\s*=\s*['"]1['"]/);
-  assert.match(view, /name\s*=\s*['"]earlyArrivalWindowMinutes['"][^>]*min\s*=\s*['"]0['"][^>]*max\s*=\s*['"]240['"]/);
-  assert.match(view, /name\s*=\s*['"]lateToleranceMinutes['"][^>]*min\s*=\s*['"]0['"][^>]*max\s*=\s*['"]240['"]/);
-  assert.match(view, /name\s*=\s*['"]absenceGraceMinutes['"][^>]*min\s*=\s*['"]0['"][^>]*max\s*=\s*['"]240['"]/);
+test('radio y precisión no son editables y el servidor impone 100/50', () => {
+  assert.doesNotMatch(view, /type="number"\s+name="geofenceRadiusMeters"/);
+  assert.doesNotMatch(view, /type="number"\s+name="maxLocationAccuracyMeters"/);
+  assert.doesNotMatch(router, /req\.body\.geofenceRadiusMeters/);
+  assert.doesNotMatch(router, /req\.body\.maxLocationAccuracyMeters/);
+  assert.match(authority, /DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS\s*=\s*100/);
+  assert.match(authority, /DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS\s*=\s*50/);
+  assert.match(view, /Radio permitido:\s*100 m/);
+  assert.match(view, /Precisión GPS:\s*50 m o mejor/);
 });
 
-test('la fase no expone marcación pública', () => {
+test('el mapa reemplaza la escritura manual de coordenadas', () => {
+  assert.match(view, /type="hidden"\s+name="attendanceLatitude"/);
+  assert.match(view, /type="hidden"\s+name="attendanceLongitude"/);
+  assert.doesNotMatch(view, /type="number"\s+name="attendanceLatitude"/);
+  assert.doesNotMatch(view, /type="number"\s+name="attendanceLongitude"/);
+  assert.match(view, /class="attendance-map"/);
+  assert.match(view, /Buscar dirección/);
+  assert.match(view, /Usar mi ubicación/);
+  assert.match(view, /marker\(point,\s*\{\s*draggable:\s*true\s*\}\)/);
+  assert.match(view, /map\.on\(['"]click['"]/);
+  assert.match(view, /L\.circle\(point,\s*\{\s*radius:\s*ATTENDANCE_GEOFENCE_RADIUS_METERS\s*\}\)/);
+});
+
+test('Leaflet, OpenStreetMap, búsqueda explícita y geolocalización respetan el contrato', () => {
+  assert.match(view, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
+  assert.match(view, /sha256-p4NxAoJBhIIN\+hmNHrzRCf9tD\/miZyoHS5obTRR9BMY=/);
+  assert.match(view, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
+  assert.match(view, /sha256-20nQCchB9coqIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
+  assert.match(view, /https:\/\/tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/);
+  assert.match(view, /OpenStreetMap<\/a> contributors/);
+  assert.match(view, /https:\/\/nominatim\.openstreetmap\.org\/search/);
+  assert.match(view, /respectNominatimRateLimit/);
+  assert.doesNotMatch(view, /attendance-address-search['"]\)\?\.addEventListener\(['"]input/);
+  assert.match(view, /navigator\.geolocation\.getCurrentPosition/);
+  assert.match(view, /enableHighAccuracy:\s*true/);
+  assert.match(view, /maximumAge:\s*0/);
+});
+
+test('el formulario conserva booleanos explícitos y límites operativos', () => {
+  assert.match(view, /attendanceEnabledFallback/);
+  assert.match(view, /manualAttendanceAllowedFallback/);
+  assert.match(view, /name="earlyArrivalWindowMinutes"\s+min="0"\s+max="240"/);
+  assert.match(view, /name="lateToleranceMinutes"\s+min="0"\s+max="240"/);
+  assert.match(view, /name="absenceGraceMinutes"\s+min="0"\s+max="240"/);
+  assert.match(view, /Selecciona primero la ubicación exacta del punto/);
+});
+
+test('la ruta administrativa no registra llegadas ni escribe Prisma directamente', () => {
   assert.doesNotMatch(router, /registerDispatchArrival/);
   assert.doesNotMatch(router, /\/public|\/marcar|\/llegada/);
-  assert.match(view, /no publica todavía un enlace de marcación/);
+  assert.doesNotMatch(router, /dispatchOperationPoint\.update/);
 });
