@@ -7,12 +7,15 @@ import {
   resolveAttendanceFeatureAccess,
   setRecruiterGeneralAttendanceEnabled
 } from '../services/attendanceFeatureAccess.js';
+import { geocodeAttendanceAddress } from '../services/attendanceGeocoding.js';
 
-export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-22-r4';
+export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-22-r5';
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
 const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
+const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -61,6 +64,14 @@ function requestIpDetails(req) {
     forwardedFor,
     userAgent: normalizeString(req.get?.('user-agent'))
   };
+}
+
+function requestOrigin(req) {
+  const forwardedProto = normalizeString(req.get?.('x-forwarded-proto'))?.split(',')[0]?.trim();
+  const protocol = forwardedProto || req.protocol || 'https';
+  const host = normalizeString(req.get?.('host'));
+  if (!host) return 'https://lorren.app';
+  return `${protocol}://${host}`;
 }
 
 async function loadAttendanceFeatureAccess(req, res, next) {
@@ -120,9 +131,25 @@ function normalizeLeafletScriptIntegrity(html) {
   return html.replace(scriptPattern, `$1${LEAFLET_1_9_4_SCRIPT_INTEGRITY}$2`);
 }
 
+function normalizeAttendanceGeocodingEndpoint(html) {
+  return html.split(NOMINATIM_BROWSER_SEARCH_URL).join(ATTENDANCE_GEOCODING_PATH);
+}
+
+function defaultAttendanceEnablement(html) {
+  return html.replace(
+    /<input\b(?=[^>]*\bname=["']attendanceEnabled["'])(?=[^>]*\bvalue=["']true["'])[^>]*>/gi,
+    (tag) => {
+      if (/\bchecked\b/i.test(tag)) return tag;
+      return tag.replace(/\s*\/?\>$/, (ending) => ` checked${ending}`);
+    }
+  );
+}
+
 export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = false, recruiterGeneralEnabled = false } = {}) {
   if (typeof html !== 'string') return html;
   let output = normalizeLeafletScriptIntegrity(html);
+  output = normalizeAttendanceGeocodingEndpoint(output);
+  output = defaultAttendanceEnablement(output);
 
   if (!allowed) {
     output = output.replace(
@@ -181,6 +208,12 @@ function applyRedirectNoStore(res) {
   res.set('Expires', '0');
 }
 
+function attendanceGeocodingErrorStatus(error) {
+  const code = typeof error?.message === 'string' ? error.message : '';
+  if (code.endsWith('_required') || code.endsWith('_too_short') || code.endsWith('_too_long')) return 400;
+  return 503;
+}
+
 export function dispatchBridgeRouter() {
   const router = express.Router();
 
@@ -208,6 +241,30 @@ export function dispatchBridgeRouter() {
 
   router.use(loadAttendanceFeatureAccess);
   router.use(installAttendanceRenderGate);
+
+  router.get(
+    '/asistencia/geocodificar',
+    requireOps,
+    requireAttendanceAccess,
+    async (req, res) => {
+      applyRedirectNoStore(res);
+      try {
+        const results = await geocodeAttendanceAddress(req.query?.q, {
+          origin: requestOrigin(req)
+        });
+        return res.status(200).json(results);
+      } catch (error) {
+        const code = typeof error?.message === 'string' ? error.message : 'attendance_geocoding_failed';
+        console.warn('[ATTENDANCE_GEOCODING_FAILED]', { code });
+        return res.status(attendanceGeocodingErrorStatus(error)).json({
+          ok: false,
+          error: attendanceGeocodingErrorStatus(error) === 400
+            ? 'attendance_geocoding_query_invalid'
+            : 'attendance_geocoding_unavailable'
+        });
+      }
+    }
+  );
 
   router.post(
     '/asistencia-acceso/reclutador-general',
