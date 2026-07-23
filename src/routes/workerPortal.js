@@ -2,6 +2,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import multer from 'multer';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import {
   hashInstallationId,
   normalizeActivationToken,
@@ -33,9 +34,14 @@ export const WORKER_PORTAL_ACTIVATION_PATH = '/operaciones/portal/activar';
 export const WORKER_PORTAL_INSTALLATION_COOKIE_NAME = '__Secure-lorren-installation';
 export const WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
+const WORKER_PORTAL_SERVICE_WORKER_FILE = fileURLToPath(
+  new URL('../public/worker-portal-sw.js', import.meta.url)
+);
 const GENERIC_ACTIVATION_ERROR = 'activation_invalid_or_expired';
 const ACTIVATION_RATE_LIMIT_ERROR = 'activation_temporarily_limited';
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
+const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
+const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
 const CONFIGURATION_ERROR_CODES = new Set([
   'installation_pepper_required',
   'installation_pepper_too_short',
@@ -149,6 +155,16 @@ function normalizeIdempotencyKey(value) {
   return value.trim();
 }
 
+function normalizeCaptureMode(value) {
+  if (value === undefined || value === null || value === '') return ONLINE_WEB_CAPTURE_MODE;
+  if (typeof value !== 'string') throw new Error('attendance_capture_mode_invalid');
+  const normalized = value.trim().toUpperCase();
+  if (![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(normalized)) {
+    throw new Error('attendance_capture_mode_invalid');
+  }
+  return normalized;
+}
+
 function arrivalPublicResult(result) {
   if (!result?.recorded) {
     return {
@@ -164,8 +180,11 @@ function arrivalPublicResult(result) {
 
   const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
   const punctualityStatus = result.validation?.reportedPunctuality || null;
+  const riskFlags = Array.isArray(result.validation?.riskFlags) ? result.validation.riskFlags : [];
   let message = 'Llegada registrada y enviada para revisión.';
-  if (validationStatus === 'AUTO_VALIDATED') {
+  if (riskFlags.includes('OFFLINE_WEB_CAPTURE')) {
+    message = 'Llegada guardada sin conexión y sincronizada. Quedó pendiente de revisión.';
+  } else if (validationStatus === 'AUTO_VALIDATED') {
     message = punctualityStatus === 'LATE'
       ? 'Llegada registrada y validada. Se registró como llegada tarde.'
       : 'Llegada registrada y validada a tiempo.';
@@ -210,7 +229,7 @@ export function applyWorkerPortalSecurityHeaders(res, nonce = null) {
   res.set('X-Frame-Options', 'DENY');
   res.set(
     'Content-Security-Policy',
-    `default-src 'none'; script-src ${scriptSource}; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
+    `default-src 'none'; script-src ${scriptSource} 'self'; worker-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
   );
 }
 
@@ -267,6 +286,7 @@ function clearWorkerPortalSessionCookie(res) {
 }
 
 function renderPortal(res, mode, nonce, options = {}) {
+  res.set('X-Lorren-Worker-Portal-Mode', mode);
   return res.render('workerPortal', {
     mode,
     nonce,
@@ -352,6 +372,14 @@ export function workerPortalRouter(prisma, options = {}) {
   router.use(cookieParser());
   router.use(redactWorkerPortalActivationUrlForLogging);
 
+  router.get('/service-worker.js', (_req, res) => {
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Service-Worker-Allowed', `${WORKER_PORTAL_HOME_PATH}/`);
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.sendFile(WORKER_PORTAL_SERVICE_WORKER_FILE);
+  });
+
   router.get('/activar', (_req, res) => {
     const nonce = createNonce(nonceBytesFn);
     applyWorkerPortalSecurityHeaders(res, nonce);
@@ -422,6 +450,13 @@ export function workerPortalRouter(prisma, options = {}) {
           return res.status(401).json({ ok: false, error: 'portal_session_required' });
         }
 
+        const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotencyKey);
+        const captureMode = normalizeCaptureMode(req.body?.captureMode);
+        const clientCapturedAt = optionalBodyDate(req.body?.clientCapturedAt, 'attendance_client_captured_at');
+        if (captureMode === OFFLINE_WEB_CAPTURE_MODE && !clientCapturedAt) {
+          throw new Error('attendance_client_captured_at_required');
+        }
+
         const assignment = await loadAssignmentForArrivalFn(prisma, {
           workerId: session.workerId,
           assignmentId: req.params.assignmentId,
@@ -431,10 +466,7 @@ export function workerPortalRouter(prisma, options = {}) {
         if (!assignment.attendanceEnabled) {
           return res.status(409).json({ ok: false, error: 'attendance_not_enabled' });
         }
-        if (assignment.arrivalReported) {
-          return res.status(409).json({ ok: false, error: 'arrival_already_registered' });
-        }
-        if (!assignment.canRegisterArrival) {
+        if (captureMode !== OFFLINE_WEB_CAPTURE_MODE && !assignment.canRegisterArrival && !assignment.arrivalReported) {
           return res.status(409).json({
             ok: false,
             error: 'arrival_window_not_open',
@@ -442,11 +474,9 @@ export function workerPortalRouter(prisma, options = {}) {
           });
         }
 
-        const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotencyKey);
         const latitude = requiredBodyNumber(req.body?.latitude, 'attendance_latitude', { min: -90, max: 90 });
         const longitude = requiredBodyNumber(req.body?.longitude, 'attendance_longitude', { min: -180, max: 180 });
         const accuracyMeters = requiredBodyNumber(req.body?.accuracyMeters, 'attendance_accuracy', { min: 0, max: 100_000 });
-        const clientCapturedAt = optionalBodyDate(req.body?.clientCapturedAt, 'attendance_client_captured_at');
         const photoRequired = assignment.photoRequired === true;
         if (photoRequired && !req.file) {
           return res.status(400).json({ ok: false, error: 'selfie_required' });
@@ -474,12 +504,15 @@ export function workerPortalRouter(prisma, options = {}) {
           expectedWorkerId: session.workerId,
           idempotencyKey,
           now,
+          captureMode,
           clientCapturedAt,
           latitude,
           longitude,
           accuracyMeters,
           installationIdHash,
-          persistentStorageAvailable: true,
+          persistentStorageAvailable: captureMode === OFFLINE_WEB_CAPTURE_MODE
+            ? req.body?.persistentStorageAvailable === 'true'
+            : true,
           hasFreshPhoto: Boolean(evidence?.storageKey),
           evidenceStorageKey: evidence?.storageKey || null,
           evidenceMimeType: evidence?.mimeType || null,
@@ -507,6 +540,12 @@ export function workerPortalRouter(prisma, options = {}) {
         }
         if (code === 'attendance_assignment_not_found') {
           return res.status(404).json({ ok: false, error: 'assignment_not_available' });
+        }
+        if (code === 'attendance_offline_capture_expired') {
+          return res.status(409).json({ ok: false, error: 'offline_capture_expired' });
+        }
+        if (code === 'attendance_offline_capture_future_invalid') {
+          return res.status(400).json({ ok: false, error: 'offline_capture_time_invalid' });
         }
         if (EXPECTED_ARRIVAL_INPUT_CODES.has(code) || code.endsWith('_invalid') || code.endsWith('_required')) {
           return res.status(400).json({ ok: false, error: 'arrival_request_invalid' });
