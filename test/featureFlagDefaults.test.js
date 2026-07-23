@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
-import { getHardeningFlags, isFeatureEnabled } from '../src/services/featureFlags.js';
+import { FEATURE_FLAG_DEFAULTS, getHardeningFlags, isFeatureEnabled } from '../src/services/featureFlags.js';
 import { tryOpenAIParse } from '../src/services/aiParser.js';
 
 const HARDENING_FLAG_NAMES = [
@@ -9,7 +9,6 @@ const HARDENING_FLAG_NAMES = [
   'FF_POLICY_LAYER',
   'FF_POSTGRES_JOB_QUEUE',
   'FF_ATTACHMENT_ANALYZER',
-  'FF_SEMANTIC_SHORT_MEMORY',
   'FF_ASYNC_ADMIN_MEDIA_FORWARD'
 ];
 
@@ -24,18 +23,18 @@ function restoreEnv(snapshot = {}) {
   }
 }
 
-test('los defaults canónicos reflejan el runtime del extractor y mantienen apagados los demás flags', () => {
+test('los defaults canónicos reflejan únicamente flags con caminos de runtime', () => {
   const previous = snapshotEnv(HARDENING_FLAG_NAMES);
   try {
     for (const name of HARDENING_FLAG_NAMES) delete process.env[name];
 
     assert.equal(isFeatureEnabled('FF_RESPONSES_EXTRACTOR'), true);
+    assert.equal(Object.hasOwn(FEATURE_FLAG_DEFAULTS, 'FF_SEMANTIC_SHORT_MEMORY'), false);
     assert.deepEqual(getHardeningFlags(), {
       responsesExtractor: true,
       policyLayer: false,
       postgresJobQueue: false,
       attachmentAnalyzer: false,
-      semanticShortMemory: false,
       asyncAdminMediaForward: false
     });
 

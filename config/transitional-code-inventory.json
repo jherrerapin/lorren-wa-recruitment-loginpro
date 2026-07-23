@@ -133,23 +133,6 @@
       ]
     },
     {
-      "name": "FF_SEMANTIC_SHORT_MEMORY",
-      "kind": "canonical_feature_flag",
-      "status": "BLOCKED",
-      "runtimeDefault": false,
-      "definitionPaths": [
-        "src/services/featureFlags.js"
-      ],
-      "consumerPaths": [],
-      "configurationPaths": [],
-      "owner": "conversation-memory",
-      "purpose": "Reserva una capacidad de memoria semántica corta que actualmente no tiene consumidor productivo.",
-      "retirementCondition": "Confirmar que no existe configuración externa dependiente, documentar que nunca fue activado en producción y eliminar declaración, documentación y pruebas en un PR específico.",
-      "evidenceTests": [
-        "test/featureFlagDefaults.test.js"
-      ]
-    },
-    {
       "name": "FF_ASYNC_ADMIN_MEDIA_FORWARD",
       "kind": "canonical_feature_flag",
       "status": "TRANSITIONAL",
