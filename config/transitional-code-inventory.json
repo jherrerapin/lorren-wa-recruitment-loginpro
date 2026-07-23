@@ -14,8 +14,6 @@
     ],
     "trackedAliasSymbols": [
       "getRequiredFieldKeys",
-      "getMissingFieldsForVacancy",
-      "getMissingFields",
       "formatFieldList",
       "buildDataRequestPrompt"
     ]
@@ -164,36 +162,6 @@
       "owner": "recruitment-readiness",
       "purpose": "Renombra sin añadir política la lista de campos obligatorios definida por la vacante.",
       "retirementCondition": "Sustituir todos los consumidores internos por getRequiredCandidateFieldKeys y conservar regresiones de campos dinámicos.",
-      "evidenceTests": [
-        "test/flexibleApplicationFlow.test.js",
-        "test/fieldSanitizer.test.js"
-      ]
-    },
-    {
-      "symbol": "getMissingFieldsForVacancy",
-      "kind": "pure_alias",
-      "status": "TRANSITIONAL",
-      "definitionPath": "src/routes/webhook.js",
-      "targetSymbol": "getMissingFieldLabels",
-      "targetPath": "src/services/readinessGuard.js",
-      "owner": "recruitment-readiness",
-      "purpose": "Renombra sin transformación la autoridad de etiquetas de campos faltantes.",
-      "retirementCondition": "Reemplazar el alias por getMissingFieldLabels y verificar mensajes de recolección por ciudad y vacante.",
-      "evidenceTests": [
-        "test/flexibleApplicationFlow.test.js",
-        "test/fieldSanitizer.test.js"
-      ]
-    },
-    {
-      "symbol": "getMissingFields",
-      "kind": "alias_chain",
-      "status": "TRANSITIONAL",
-      "definitionPath": "src/routes/webhook.js",
-      "targetSymbol": "getMissingFieldsForVacancy",
-      "targetPath": "src/routes/webhook.js",
-      "owner": "recruitment-readiness",
-      "purpose": "Conserva un segundo nombre local encima de otro alias del mismo webhook.",
-      "retirementCondition": "Sustituir consumidores directamente por getMissingFieldLabels y retirar conjuntamente la cadena de aliases en un PR acotado.",
       "evidenceTests": [
         "test/flexibleApplicationFlow.test.js",
         "test/fieldSanitizer.test.js"

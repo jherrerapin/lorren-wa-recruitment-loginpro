@@ -44,17 +44,21 @@ Marcar una entrada como `RETIRABLE` exige pruebas existentes y `retirementEviden
 
 ### Aliases del webhook
 
-Los aliases iniciales están concentrados en `src/routes/webhook.js`:
+Los aliases transitorios que permanecen en `src/routes/webhook.js` son:
 
 - `getRequiredFieldKeys()`;
-- `getMissingFieldsForVacancy()`;
-- `getMissingFields()`;
 - `formatFieldList()`;
 - `buildDataRequestPrompt()`.
 
-La mayoría solo renombran funciones de `readinessGuard.js`; `getMissingFields()` incluso crea una cadena sobre otro alias local. No se eliminan en este slice. El scanner impide que adquieran política sin reclasificación.
+Continúan inventariados hasta retirarlos en PR pequeños con regresiones específicas. El scanner impide que adquieran política sin reclasificación.
 
 ## Retiros completados
+
+### Cadena `getMissingFields()` / `getMissingFieldsForVacancy()` — #656
+
+Ambos aliases se retiraron porque no añadían política ni transformación. Todos los consumidores del webhook invocan directamente `getMissingFieldLabels(candidate, vacancy)`, la autoridad existente en `readinessGuard.js`.
+
+El cambio conserva las mismas etiquetas y el mismo orden de campos faltantes; únicamente elimina dos nombres intermedios y la cadena local entre ellos.
 
 ### `FF_SEMANTIC_SHORT_MEMORY` — #651
 
@@ -78,7 +82,7 @@ La prueba falla cuando:
 
 1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).
 2. Retirar configuración fantasma sin consumidores, comenzando por `FF_SEMANTIC_SHORT_MEMORY` (#651).
-3. Retirar aliases puros en PR pequeños, empezando por la cadena `getMissingFields()` / `getMissingFieldsForVacancy()`.
+3. Retirar los aliases puros restantes en PR pequeños: `getRequiredFieldKeys()`, `formatFieldList()` y `buildDataRequestPrompt()`.
 4. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.
 5. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.
 6. Diseñar `TenantContext` y la migración del tenant inicial LoginPro.
