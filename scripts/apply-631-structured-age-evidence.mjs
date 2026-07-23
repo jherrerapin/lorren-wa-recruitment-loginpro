@@ -23,8 +23,8 @@ function normalizeStructuredSegments(text = '') {
 function hasStructuredAgeSegment(value, text = '') {
   const number = valuePattern(value);
   if (!number) return false;
-  const labeled = new RegExp(\`^edad\\s*(?:es\\s*)?[:\\-]?\\s*\${number}(?:\\s+anos?(?:\\s+de\\s+edad)?)?$\`);
-  const yearsOnly = new RegExp(\`^\${number}\\s+anos?(?:\\s+de\\s+edad)?$\`);
+  const labeled = new RegExp(\`^edad\\\\s*(?:es\\\\s*)?[:\\\\-]?\\\\s*\${number}(?:\\\\s+anos?(?:\\\\s+de\\\\s+edad)?)?$\`);
+  const yearsOnly = new RegExp(\`^\${number}\\\\s+anos?(?:\\\\s+de\\\\s+edad)?$\`);
   return normalizeStructuredSegments(text).some((segment) => labeled.test(segment) || yearsOnly.test(segment));
 }
 
@@ -32,20 +32,20 @@ function isFutureBirthdayNumber(value, text = '') {
   const number = valuePattern(value);
   if (!number) return false;
   const normalized = normalizeText(text);
-  return new RegExp(\`\\b(?:cumplo|cumplire|voy\\s+a\\s+cumplir)(?:\\s+los)?\\s+\${number}\\b\`).test(normalized);
+  return new RegExp(\`\\\\b(?:cumplo|cumplire|voy\\\\s+a\\\\s+cumplir)(?:\\\\s+los)?\\\\s+\${number}\\\\b\`).test(normalized);
 }
 
 function hasCurrentAgeBeforeFutureBirthday(value, text = '') {
   const number = valuePattern(value);
   if (!number) return false;
   const normalized = normalizeText(text);
-  return new RegExp(\`\\b\${number}\\s+anos?\\b.{0,70}\\b(?:cumplo|cumplire|voy\\s+a\\s+cumplir)(?:\\s+los)?\\s+\\d{1,2}\\b\`).test(normalized);
+  return new RegExp(\`\\\\b\${number}\\\\s+anos?\\\\b.{0,70}\\\\b(?:cumplo|cumplire|voy\\\\s+a\\\\s+cumplir)(?:\\\\s+los)?\\\\s+\\\\d{1,2}\\\\b\`).test(normalized);
 }`;
 
 if (!ageSource.includes('function normalizeStructuredSegments(')) {
   const count = ageSource.split(valuePatternBlock).length - 1;
   if (count !== 1) throw new Error(`age valuePattern anchor count=${count}`);
-  ageSource = ageSource.replace(valuePatternBlock, structuredHelpers);
+  ageSource = ageSource.replace(valuePatternBlock, () => structuredHelpers);
 }
 
 const oldExplicitStart = `function hasExplicitAgeBinding(value, text = '') {
@@ -70,7 +70,7 @@ const newExplicitStart = `function hasExplicitAgeBinding(value, text = '') {
 if (!ageSource.includes(newExplicitStart)) {
   const count = ageSource.split(oldExplicitStart).length - 1;
   if (count !== 1) throw new Error(`explicit age anchor count=${count}`);
-  ageSource = ageSource.replace(oldExplicitStart, newExplicitStart);
+  ageSource = ageSource.replace(oldExplicitStart, () => newExplicitStart);
 }
 
 const oldClassifyStart = `export function classifyAgeEvidence(value, text = '', options = {}) {
@@ -86,7 +86,7 @@ const newClassifyStart = `export function classifyAgeEvidence(value, text = '', 
 if (!ageSource.includes(newClassifyStart)) {
   const count = ageSource.split(oldClassifyStart).length - 1;
   if (count !== 1) throw new Error(`classify age anchor count=${count}`);
-  ageSource = ageSource.replace(oldClassifyStart, newClassifyStart);
+  ageSource = ageSource.replace(oldClassifyStart, () => newClassifyStart);
 }
 
 const oldExtractStart = `export function extractExplicitAge(text = '') {
@@ -116,7 +116,7 @@ const newExtractStart = `export function extractExplicitAge(text = '') {
 if (!ageSource.includes(newExtractStart)) {
   const count = ageSource.split(oldExtractStart).length - 1;
   if (count !== 1) throw new Error(`extract age anchor count=${count}`);
-  ageSource = ageSource.replace(oldExtractStart, newExtractStart);
+  ageSource = ageSource.replace(oldExtractStart, () => newExtractStart);
 }
 
 writeFileSync(ageFile, ageSource, 'utf8');
@@ -142,7 +142,7 @@ export function shouldPreserveStructuredLocalField(field, localValue, proposedVa
 if (!candidateSource.includes('export function shouldPreserveStructuredLocalField(')) {
   const count = candidateSource.split(oldContextual).length - 1;
   if (count !== 1) throw new Error(`candidate contextual age anchor count=${count}`);
-  candidateSource = candidateSource.replace(oldContextual, newContextual);
+  candidateSource = candidateSource.replace(oldContextual, () => newContextual);
 }
 
 const oldContextCall = `  const detectedAge = detectContextualAge(compact);`;
@@ -150,7 +150,7 @@ const newContextCall = `  const detectedAge = detectContextualAge(text);`;
 if (!candidateSource.includes(newContextCall)) {
   const count = candidateSource.split(oldContextCall).length - 1;
   if (count !== 1) throw new Error(`candidate age call anchor count=${count}`);
-  candidateSource = candidateSource.replace(oldContextCall, newContextCall);
+  candidateSource = candidateSource.replace(oldContextCall, () => newContextCall);
 }
 
 writeFileSync(candidateFile, candidateSource, 'utf8');
@@ -167,7 +167,7 @@ const newImport = `  normalizeCandidateFields,
 if (!webhookSource.includes(newImport)) {
   const count = webhookSource.split(oldImport).length - 1;
   if (count !== 1) throw new Error(`webhook candidate import anchor count=${count}`);
-  webhookSource = webhookSource.replace(oldImport, newImport);
+  webhookSource = webhookSource.replace(oldImport, () => newImport);
 }
 
 const oldAiLoop = `  for (const [field, value] of Object.entries(aiFields)) {
@@ -180,7 +180,7 @@ const newAiLoop = `  for (const [field, value] of Object.entries(aiFields)) {
 if (!webhookSource.includes(newAiLoop)) {
   const count = webhookSource.split(oldAiLoop).length - 1;
   if (count !== 1) throw new Error(`webhook AI merge anchor count=${count}`);
-  webhookSource = webhookSource.replace(oldAiLoop, newAiLoop);
+  webhookSource = webhookSource.replace(oldAiLoop, () => newAiLoop);
 }
 
 const oldEngineLoop = `  for (const [field, value] of Object.entries(engineFields)) {
@@ -193,7 +193,7 @@ const newEngineLoop = `  for (const [field, value] of Object.entries(engineField
 if (!webhookSource.includes(newEngineLoop)) {
   const count = webhookSource.split(oldEngineLoop).length - 1;
   if (count !== 1) throw new Error(`webhook engine merge anchor count=${count}`);
-  webhookSource = webhookSource.replace(oldEngineLoop, newEngineLoop);
+  webhookSource = webhookSource.replace(oldEngineLoop, () => newEngineLoop);
 }
 
 writeFileSync(webhookFile, webhookSource, 'utf8');
