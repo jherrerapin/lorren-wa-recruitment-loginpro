@@ -2,12 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildAttendanceGeocodingQueries,
+  buildBogotaPlateQuery,
   buildIdecaGeocodingQueries,
   geocodeAttendanceAddress,
+  normalizeArcgisGeocodingResults,
   normalizeAttendanceGeocodingResults,
   normalizeBogotaAddressForIdeca,
-  normalizeIdecaGeocodingResults
+  normalizeBogotaPlateResults,
+  normalizeIdecaGeocodingResults,
+  resetAttendanceGeocodingStateForTests
 } from '../src/services/attendanceGeocoding.js';
+
+function response(payload, { ok = true, status = 200 } = {}) {
+  return { ok, status, async json() { return payload; } };
+}
+
+test.beforeEach(() => resetAttendanceGeocodingStateForTests());
 
 test('genera variantes exacta, normalizada, por intersección y por vía principal', () => {
   const queries = buildAttendanceGeocodingQueries('Calle 25 Sur #51F-35, Bogotá, Colombia');
@@ -18,7 +28,7 @@ test('genera variantes exacta, normalizada, por intersección y por vía princip
   assert.ok(queries.includes('Calle 25 Sur, Bogotá, Colombia'));
 });
 
-test('normaliza la nomenclatura bogotana al formato oficial de búsqueda', () => {
+test('normaliza nomenclatura bogotana y construye consulta segura de placa domiciliaria', () => {
   assert.equal(
     normalizeBogotaAddressForIdeca('Calle 25 Sur #51F-35, Bogotá, Colombia'),
     'CL 25 SUR 51F 35'
@@ -31,10 +41,15 @@ test('normaliza la nomenclatura bogotana al formato oficial de búsqueda', () =>
     buildIdecaGeocodingQueries('Calle 25 Sur #51F-35, Bogotá, Colombia'),
     ['CL 25 SUR 51F 35', 'Calle 25 Sur #51F-35', 'Calle 25 Sur 51F 35']
   );
-  assert.deepEqual(buildIdecaGeocodingQueries('Carrera 5 #10-20, Cali'), []);
+  const plateQuery = buildBogotaPlateQuery('Calle 25 Sur #51F-35, Bogotá, Colombia');
+  assert.equal(plateQuery.exact, 'CL 25 SUR 51F 35');
+  assert.equal(plateQuery.prefix, 'CL 25 SUR 51F');
+  assert.match(plateQuery.where, /PDONVIAL = 'CL 25 SUR 51F 35'/);
+  assert.match(plateQuery.where, /PDONVIAL LIKE 'CL 25 SUR 51F %'/);
+  assert.equal(buildBogotaPlateQuery('Carrera 5 #10-20, Cali'), null);
 });
 
-test('normaliza resultados Nominatim con proveedor y precisión explícitos', () => {
+test('normaliza resultados de Nominatim con proveedor y precisión explícitos', () => {
   const results = normalizeAttendanceGeocodingResults([
     { lat: '4.611', lon: '-74.102', display_name: 'Bogotá, Colombia', importance: '0.7' },
     { lat: 'not-a-number', lon: '-74.2', display_name: 'Inválido' }
@@ -51,7 +66,23 @@ test('normaliza resultados Nominatim con proveedor y precisión explícitos', ()
   }]);
 });
 
-test('extrae el centroide de la respuesta oficial de Mapas Bogotá', () => {
+test('normaliza la capa oficial de placa domiciliaria como resultado exacto', () => {
+  const results = normalizeBogotaPlateResults({
+    features: [{
+      attributes: { PDONVIAL: 'CL 25 SUR 51F 35', PDOTEXTO: '35', PDOTIPO: 1 },
+      geometry: { x: -74.132456, y: 4.595123 }
+    }]
+  }, 'Calle 25 Sur #51F-35, Bogotá, Colombia');
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].provider, 'ideca-placa');
+  assert.equal(results[0].precision, 'address');
+  assert.equal(results[0].importance, 1);
+  assert.equal(results[0].lat, '4.595123');
+  assert.equal(results[0].lon, '-74.132456');
+});
+
+test('conserva el buscador legado de Mapas Bogotá como respaldo', () => {
   const results = normalizeIdecaGeocodingResults({
     response: [{
       resultFields: ['NOMBRE', 'BARRIO'],
@@ -64,102 +95,146 @@ test('extrae el centroide de la respuesta oficial de Mapas Bogotá', () => {
     }]
   }, 'Calle 25 Sur #51F-35, Bogotá, Colombia');
 
-  assert.equal(results.length, 1);
-  assert.equal(results[0].lat, '4.595123');
-  assert.equal(results[0].lon, '-74.132456');
-  assert.equal(results[0].provider, 'ideca');
+  assert.equal(results[0].provider, 'ideca-legacy');
   assert.equal(results[0].precision, 'address');
-  assert.match(results[0].display_name, /CL 25 SUR 51F 35/);
 });
 
-test('consulta primero Mapas Bogotá para una dirección de Bogotá', async () => {
+test('normaliza candidatos de ArcGIS sin exponer el token', () => {
+  const results = normalizeArcgisGeocodingResults({
+    candidates: [{
+      address: 'Calle 25 Sur 51F 35, Bogotá',
+      score: 96,
+      location: { x: -74.1324, y: 4.5951 },
+      attributes: { Addr_type: 'PointAddress' }
+    }]
+  });
+  assert.equal(results[0].provider, 'arcgis');
+  assert.equal(results[0].precision, 'address');
+  assert.equal(results[0].importance, 0.96);
+});
+
+test('consulta primero la capa oficial de placas y detiene la cascada al hallar coincidencia exacta', async () => {
   const requests = [];
   const fetchFn = async (url, options) => {
     requests.push({ url, options });
-    return {
-      ok: true,
-      async json() {
-        return {
-          response: [{
-            resultFields: ['EESDIRECCI'],
-            urlService: 'https://serviciosgis.catastrobogota.gov.co/catastro/direcciones',
-            data: [{
-              EESDIRECCI: 'CL 25 SUR 51F 35',
-              centroide: { lat: 4.595123, lng: -74.132456 }
-            }]
-          }]
-        };
-      }
-    };
+    return response({
+      features: [{
+        attributes: { PDONVIAL: 'CL 25 SUR 51F 35' },
+        geometry: { x: -74.132456, y: 4.595123 }
+      }]
+    });
   };
 
   const results = await geocodeAttendanceAddress(
-    'Calle 25 Sur #51F-35, Bogotá, Colombia prueba-ideca-638',
-    { fetchFn, origin: 'https://lorren.example', nowFn: () => 1_000, sleepFn: async () => {} }
+    'Calle 25 Sur #51F-35, Bogotá, Colombia',
+    {
+      fetchFn,
+      origin: 'https://lorren.example',
+      nowFn: () => 1_000,
+      sleepFn: async () => {},
+      disableCache: true
+    }
   );
 
   assert.equal(requests.length, 1);
-  assert.match(requests[0].url, /catalogopmb\.catastrobogota\.gov\.co\/PMBWeb\/web\/buscar2/);
-  assert.match(requests[0].url, /q=CL\+25\+SUR\+51F\+35/);
-  assert.match(requests[0].options.headers['User-Agent'], /Lorren-Attendance\/1\.1/);
-  assert.equal(results[0].provider, 'ideca');
-  assert.equal(results[0].lat, '4.595123');
+  assert.match(requests[0].url, /catastro\/placadomiciliaria\/MapServer\/0\/query/);
+  assert.match(requests[0].url, /outSR=4326/);
+  assert.match(requests[0].options.headers['User-Agent'], /Lorren-Attendance\/2\.0/);
+  assert.equal(results[0].provider, 'ideca-placa');
 });
 
-test('continúa con Nominatim cuando Mapas Bogotá no arroja coincidencias', async () => {
+test('usa ArcGIS del lado del servidor cuando hay token y la capa oficial no coincide', async () => {
   const requests = [];
   const fetchFn = async (url, options) => {
     requests.push({ url, options });
-    if (url.includes('catalogopmb.catastrobogota.gov.co')) {
-      return { ok: true, async json() { return { response: [] }; } };
+    if (url.includes('placadomiciliaria')) return response({ features: [] });
+    if (url.includes('geocode-api.arcgis.com')) {
+      return response({
+        candidates: [{
+          address: 'Calle 25 Sur 51F 35, Bogotá',
+          score: 95,
+          location: { x: -74.13245, y: 4.59512 },
+          attributes: { Addr_type: 'PointAddress' }
+        }]
+      });
     }
-    return {
-      ok: true,
-      async json() {
-        return [{
-          lat: '4.60123',
-          lon: '-74.11234',
-          display_name: 'Calle 25 Sur, Bogotá, Colombia',
-          type: 'residential',
-          importance: 0.6
-        }];
-      }
-    };
+    throw new Error(`solicitud inesperada: ${url}`);
   };
 
   const results = await geocodeAttendanceAddress(
-    'Calle 25 Sur #51F-36, Bogotá, Colombia prueba-fallback-638',
-    { fetchFn, origin: 'https://lorren.example', nowFn: () => 2_000, sleepFn: async () => {} }
+    'Calle 25 Sur #51F-35, Bogotá, Colombia',
+    {
+      fetchFn,
+      arcgisToken: 'test-token-not-exposed',
+      origin: 'https://lorren.example',
+      nowFn: () => 2_000,
+      sleepFn: async () => {},
+      disableCache: true
+    }
   );
 
-  assert.ok(requests.some(({ url }) => url.includes('catalogopmb.catastrobogota.gov.co')));
-  const nominatimRequest = requests.find(({ url }) => url.includes('nominatim.openstreetmap.org'));
-  assert.ok(nominatimRequest);
-  assert.match(nominatimRequest.url, /viewbox=/);
-  assert.match(nominatimRequest.url, /bounded=1/);
-  assert.match(nominatimRequest.options.headers['User-Agent'], /Lorren-Attendance\/1\.1/);
-  assert.equal(results[0].provider, 'nominatim');
-  assert.equal(results[0].lat, '4.60123');
+  const arcgis = requests.find(({ url }) => url.includes('geocode-api.arcgis.com'));
+  assert.ok(arcgis);
+  assert.doesNotMatch(arcgis.url, /test-token-not-exposed/);
+  assert.equal(arcgis.options.headers['X-Esri-Authorization'], 'Bearer test-token-not-exposed');
+  assert.equal(results[0].provider, 'arcgis');
 });
 
-test('continúa con Nominatim si Mapas Bogotá está temporalmente caído', async () => {
+test('continúa por legado y Nominatim cuando la capa oficial está temporalmente caída', async () => {
+  const requests = [];
   const fetchFn = async (url) => {
-    if (url.includes('catalogopmb.catastrobogota.gov.co')) {
-      return { ok: false, status: 503, async json() { return {}; } };
+    requests.push(url);
+    if (url.includes('placadomiciliaria')) return response({}, { ok: false, status: 503 });
+    if (url.includes('catalogopmb.catastrobogota.gov.co')) return response({ response: [] });
+    if (url.includes('nominatim.openstreetmap.org')) {
+      return response([{
+        lat: '4.60123',
+        lon: '-74.11234',
+        display_name: 'Calle 25 Sur, Bogotá, Colombia',
+        type: 'residential',
+        importance: 0.6
+      }]);
     }
-    return {
-      ok: true,
-      async json() {
-        return [{ lat: '4.62', lon: '-74.10', display_name: 'Bogotá, Colombia' }];
-      }
-    };
+    throw new Error(`solicitud inesperada: ${url}`);
   };
 
   const results = await geocodeAttendanceAddress(
-    'Calle 26 #70-40, Bogotá, Colombia prueba-caida-638',
-    { fetchFn, origin: 'https://lorren.example', nowFn: () => 3_000, sleepFn: async () => {} }
+    'Calle 25 Sur #51F-36, Bogotá, Colombia',
+    {
+      fetchFn,
+      origin: 'https://lorren.example',
+      nowFn: () => 3_000,
+      sleepFn: async () => {},
+      disableCache: true
+    }
   );
 
+  assert.equal(requests.filter((url) => url.includes('placadomiciliaria')).length, 2);
+  assert.ok(requests.some((url) => url.includes('catalogopmb.catastrobogota.gov.co')));
+  const nominatimRequest = requests.find((url) => url.includes('nominatim.openstreetmap.org'));
+  assert.ok(nominatimRequest);
+  assert.match(nominatimRequest, /viewbox=/);
+  assert.match(nominatimRequest, /bounded=1/);
   assert.equal(results[0].provider, 'nominatim');
-  assert.equal(results[0].lat, '4.62');
+});
+
+test('no almacena búsquedas vacías y vuelve a consultar en el siguiente intento', async () => {
+  let calls = 0;
+  const fetchFn = async (url) => {
+    calls += 1;
+    if (url.includes('placadomiciliaria')) return response({ features: [] });
+    if (url.includes('catalogopmb')) return response({ response: [] });
+    return response([]);
+  };
+  const options = {
+    fetchFn,
+    origin: 'https://lorren.example',
+    nowFn: () => 4_000,
+    sleepFn: async () => {}
+  };
+
+  await geocodeAttendanceAddress('Calle 31 #10-99, Bogotá, Colombia', options);
+  const firstCalls = calls;
+  await geocodeAttendanceAddress('Calle 31 #10-99, Bogotá, Colombia', options);
+  assert.ok(calls > firstCalls);
 });

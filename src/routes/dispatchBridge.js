@@ -1,5 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
+import { dispatchAttendanceAdminRouter } from './dispatchAttendanceAdmin.js';
 import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';
 import { dispatchWorkerPortalActivationAdminRouter } from './dispatchWorkerPortalActivationAdmin.js';
 import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBridgeCore.js';
@@ -9,7 +10,7 @@ import {
 } from '../services/attendanceFeatureAccess.js';
 import { geocodeAttendanceAddress } from '../services/attendanceGeocoding.js';
 
-export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-22-r5';
+export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-23-r6';
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -217,8 +218,6 @@ function attendanceGeocodingErrorStatus(error) {
 export function dispatchBridgeRouter() {
   const router = express.Router();
 
-  // Alias administrativo exclusivo de DEV para corregir enlaces o marcadores antiguos.
-  // El acceso público del auxiliar continúa siendo /operaciones/portal.
   router.get('/portal', requireDev, (_req, res) => {
     applyRedirectNoStore(res);
     return res.redirect(302, WORKER_PORTAL_PUBLIC_PATH);
@@ -264,6 +263,13 @@ export function dispatchBridgeRouter() {
         });
       }
     }
+  );
+
+  router.use(
+    '/asistencia',
+    requireOps,
+    requireAttendanceAccess,
+    dispatchAttendanceAdminRouter(prisma)
   );
 
   router.post(
