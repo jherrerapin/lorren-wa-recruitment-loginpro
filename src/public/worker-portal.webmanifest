@@ -4,7 +4,7 @@
   "description": "Portal de programación y marcación de asistencia para auxiliares de LoginPro.",
   "lang": "es-CO",
   "start_url": "/operaciones/portal",
-  "scope": "/operaciones/portal/",
+  "scope": "/operaciones/portal",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#f4f6f8",
