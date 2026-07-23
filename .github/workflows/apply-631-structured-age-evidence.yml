@@ -38,25 +38,40 @@ jobs:
           path: src/services/ageEvidence.js
           if-no-files-found: error
 
-      - name: Validate age evidence syntax
-        run: node --check src/services/ageEvidence.js
-
-      - name: Validate candidate parser syntax
-        run: node --check src/services/candidateData.js
-
-      - name: Validate webhook syntax
-        run: node --check src/routes/webhook.js
-
-      - name: Validate test syntax
+      - name: Validate syntax
         run: |
+          node --check src/services/ageEvidence.js
+          node --check src/services/candidateData.js
+          node --check src/routes/webhook.js
           node --check test/structuredAgeEvidence.test.js
           node --check test/structuredAgeHarnessIntegration.test.js
 
       - name: Run focused structured age regressions
         run: node --test test/structuredAgeEvidence.test.js
 
+      - name: Capture Ibagué age 24 integration
+        run: |
+          mkdir -p diagnostics
+          set +e
+          node --test --test-name-pattern="ibague-flow-name-correction" test/structuredAgeHarnessIntegration.test.js > diagnostics/631-age24.tap 2>&1
+          status=$?
+          set -e
+          printf 'status=%s\n' "$status" > diagnostics/631-age24-summary.txt
+
+      - name: Upload Ibagué age 24 diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: structured-age-24
+          path: |
+            diagnostics/631-age24.tap
+            diagnostics/631-age24-summary.txt
+          if-no-files-found: error
+
       - name: Validate Ibagué age 24 integration
-        run: node --test --test-name-pattern="ibague-flow-name-correction" test/structuredAgeHarnessIntegration.test.js
+        run: |
+          cat diagnostics/631-age24.tap
+          grep -q '^status=0$' diagnostics/631-age24-summary.txt
 
       - name: Validate Ibagué age 30 integration
         run: node --test --test-name-pattern="ibague-role-phrase" test/structuredAgeHarnessIntegration.test.js
@@ -84,7 +99,6 @@ jobs:
 
       - name: Characterize harness after structured age repair
         run: |
-          mkdir -p diagnostics
           set +e
           node --test test/conversation-harness.test.js > diagnostics/631-harness.tap 2>&1
           status=$?
