@@ -5,7 +5,6 @@ export const FEATURE_FLAG_DEFAULTS = Object.freeze({
   FF_POLICY_LAYER: false,
   FF_POSTGRES_JOB_QUEUE: false,
   FF_ATTACHMENT_ANALYZER: false,
-  FF_SEMANTIC_SHORT_MEMORY: false,
   FF_ASYNC_ADMIN_MEDIA_FORWARD: false
 });
 
@@ -27,7 +26,6 @@ export function getHardeningFlags() {
     policyLayer: isFeatureEnabled('FF_POLICY_LAYER'),
     postgresJobQueue: isFeatureEnabled('FF_POSTGRES_JOB_QUEUE'),
     attachmentAnalyzer: isFeatureEnabled('FF_ATTACHMENT_ANALYZER'),
-    semanticShortMemory: isFeatureEnabled('FF_SEMANTIC_SHORT_MEMORY'),
     asyncAdminMediaForward: isFeatureEnabled('FF_ASYNC_ADMIN_MEDIA_FORWARD')
   };
 }
