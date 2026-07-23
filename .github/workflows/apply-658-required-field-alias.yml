@@ -1,0 +1,52 @@
+name: Apply required field alias retirement
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'refactor/658-remove-required-field-alias'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Apply verified retirement patch
+        run: node scripts/apply-658-remove-required-field-alias.mjs
+
+      - name: Validate focused contracts
+        run: |
+          node --check src/routes/webhook.js
+          node --check test/webhookRequiredFieldAliasRemoval.test.js
+          node --test test/webhookRequiredFieldAliasRemoval.test.js test/transitionalCodeInventory.test.js test/flexibleApplicationFlow.test.js test/fieldSanitizer.test.js
+
+      - name: Commit final slice and remove temporary machinery
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/webhook.js config/transitional-code-inventory.json docs/architecture/transitional-code-inventory.md test/webhookRequiredFieldAliasRemoval.test.js
+          git rm scripts/apply-658-remove-required-field-alias.mjs .github/workflows/apply-658-required-field-alias.yml
+          git commit -m "refactor: retirar alias de campos requeridos"
+          git push origin "HEAD:${HEAD_REF}"
