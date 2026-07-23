@@ -198,9 +198,6 @@ function getFieldLabel(field, vacancy = null) {
 function buildResidenceMissingField(candidate, vacancy = null) {
   return getCandidateResidenceValue(candidate, vacancy) ? null : getResidenceFieldConfig(vacancy).label;
 }
-function getMissingFieldsForVacancy(candidate, vacancy = null) {
-  return getMissingFieldLabels(candidate, vacancy);
-}
 function formatFieldListForVacancy(fields = [], vacancy = null) {
   const labels = fields
     .map((field) => getFieldLabel(field, vacancy))
@@ -212,9 +209,6 @@ function formatFieldListForVacancy(fields = [], vacancy = null) {
 }
 function buildDataRequestPrompt(candidate = {}, vacancy = null) {
   return buildCandidateDataCollectionMessage(candidate, vacancy);
-}
-function getMissingFields(candidate, vacancy = null) {
-  return getMissingFieldsForVacancy(candidate, vacancy);
 }
 function formatFieldList(fields = [], vacancy = null) {
   return formatFieldListForVacancy(fields, vacancy);
@@ -234,7 +228,7 @@ function buildMedicalRestrictionsClarifier() {
 }
 function enrichNormalizedDataFromContext(text = '', normalizedData = {}, candidate = {}, vacancy = null) {
   const enriched = { ...normalizedData };
-  const missing = getMissingFields(candidate, vacancy);
+  const missing = getMissingFieldLabels(candidate, vacancy);
   const missingSet = new Set(missing);
   const normalizedText = normalizeComparableText(text);
 
@@ -255,7 +249,7 @@ function enrichNormalizedDataFromContext(text = '', normalizedData = {}, candida
   return enriched;
 }
 function buildMissingFieldsReply(candidate, normalizedData = {}, vacancy = null) {
-  const missing = getMissingFields(candidate, vacancy);
+  const missing = getMissingFieldLabels(candidate, vacancy);
   if (!missing.length) return '';
   const capturedCount = Object.keys(normalizedData || {})
     .filter((field) => getRequiredFieldKeys(vacancy).includes(field) && normalizedData[field] !== undefined && normalizedData[field] !== null && normalizedData[field] !== '')
@@ -266,7 +260,7 @@ function buildMissingFieldsReply(candidate, normalizedData = {}, vacancy = null)
 }
 function buildUpdatedConfirmationReply(candidate, updatedFields = [], vacancy = null) {
   const updatedLabel = formatFieldList(updatedFields, vacancy);
-  const missing = getMissingFields(candidate, vacancy);
+  const missing = getMissingFieldLabels(candidate, vacancy);
   const intro = updatedLabel
     ? `Listo, ya actualice ${updatedLabel}. Asi va tu registro:`
     : 'Listo, asi va tu registro:';
@@ -276,7 +270,7 @@ function buildUpdatedConfirmationReply(candidate, updatedFields = [], vacancy = 
   return buildConfirmationSummary(candidate, { intro, prompt }, vacancy);
 }
 function buildConfirmationClarifier(candidate, vacancy = null) {
-  const missing = getMissingFields(candidate, vacancy);
+  const missing = getMissingFieldLabels(candidate, vacancy);
   if (missing.length) {
     return `Si ves algo por ajustar, enviame solo el dato correcto. Para seguir todavía necesito: ${missing.join(', ')}.`;
   }
@@ -426,7 +420,7 @@ function buildVacancyContinuePrompt(candidate, vacancy = null) {
       return 'Si quieres dejar tu perfil registrado por si la vacante se vuelve a abrir, solo me falta tu hoja de vida en PDF, DOC o DOCX.';
     }
     if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
-      const missing = getMissingFields(candidate, vacancy);
+      const missing = getMissingFieldLabels(candidate, vacancy);
       if (missing.length) {
         return `Si quieres dejar tu perfil registrado, aun me faltan estos datos: ${missing.join(', ')}.`;
       }
@@ -436,7 +430,7 @@ function buildVacancyContinuePrompt(candidate, vacancy = null) {
   }
   if (candidate.currentStep === ConversationStep.ASK_CV) return RECORDATORIO_HV;
   if (candidate.currentStep === ConversationStep.COLLECTING_DATA || candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
-    const missing = getMissingFields(candidate, vacancy);
+    const missing = getMissingFieldLabels(candidate, vacancy);
     if (missing.length) return `Si deseas continuar, aun me faltan estos datos: ${missing.join(', ')}.`;
     return SOLICITAR_HV;
   }
@@ -748,9 +742,9 @@ async function buildInterviewConfirmationReply(candidate, vacancy, nextSlot) {
 
 function shouldAskForConfirmation(candidate, normalizedData, vacancy = null) {
   if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) {
-    return getMissingFields(candidate, vacancy).length === 0;
+    return getMissingFieldLabels(candidate, vacancy).length === 0;
   }
-  const missing = getMissingFields(candidate, vacancy);
+  const missing = getMissingFieldLabels(candidate, vacancy);
   const hasMainBlock = getRequiredFieldKeys(vacancy).every((field) => {
     if (field === 'locality' || field === 'neighborhood') {
       return Boolean(getCandidateResidenceValue(candidate, vacancy));
@@ -1614,7 +1608,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};
   const sanitizerContext = {
     currentStep: candidate.currentStep,
-    pendingFields: getMissingFields(candidate, currentVacancy)
+    pendingFields: getMissingFieldLabels(candidate, currentVacancy)
   };
   const understanding = await conversationUnderstanding(cleanText, { aiResult, context: sanitizerContext });
   const localParsedData = parseNaturalData(cleanText);
@@ -1818,7 +1812,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
   if (candidate.status === CandidateStatus.RECHAZADO) return reply(prisma, candidate.id, from, DESCARTE_MSG);
 
-  const currentMissingFields = getMissingFields(candidate, currentVacancy);
+  const currentMissingFields = getMissingFieldLabels(candidate, currentVacancy);
   const shouldPreferVacancyContextReply = Boolean(
     currentVacancy
     && (
@@ -2465,7 +2459,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   const routeAfterConfirmation = async (updatedCandidate) => {
-    const missing = getMissingFields(updatedCandidate, currentVacancy);
+    const missing = getMissingFieldLabels(updatedCandidate, currentVacancy);
     if (missing.length) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       const replyText = buildMissingFieldsReply(updatedCandidate, normalizedData, currentVacancy);
@@ -2504,7 +2498,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     const { updatedCandidate: updated, decisions } = await applyDecisionsAndUpdate();
     const correctedRequiredFields = decisions.persistedFields.filter((field) => getRequiredFieldKeys(currentVacancy).includes(field));
-    const missingAfterCorrection = getMissingFields(updated, currentVacancy);
+    const missingAfterCorrection = getMissingFieldLabels(updated, currentVacancy);
 
     if (correctedRequiredFields.length) {
       if (!missingAfterCorrection.length) {
@@ -2686,7 +2680,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       : { reject: false };
     if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
     const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
-    const missingAfterUpdate = getMissingFields(updated, currentVacancy);
+    const missingAfterUpdate = getMissingFieldLabels(updated, currentVacancy);
 
     if (!updated.vacancyId && !isFutureProfileCaptureCandidate(updated)) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
@@ -3127,7 +3121,7 @@ export function webhookRouter(prisma) {
                   const afterCvVacancy = afterCvSave.vacancyId
                     ? await loadVacancyContext(prisma, afterCvSave.vacancyId)
                     : null;
-                  const missing = getMissingFields(afterCvSave, afterCvVacancy);
+                  const missing = getMissingFieldLabels(afterCvSave, afterCvVacancy);
                   if (shouldFinalizeAfterCv({ missingFields: missing })) {
                     await finalizeCandidateAfterCv(prisma, afterCvSave, from);
                   } else {
