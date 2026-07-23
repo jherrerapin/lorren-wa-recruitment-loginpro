@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 1,
+  "issue": 578,
+  "programIssue": 570,
+  "rules": {
+    "runtimeChangesAllowed": false,
+    "genderLogicInScope": false,
+    "retirableRequiresEvidence": true,
+    "allowedStatuses": [
+      "ACTIVE",
+      "TRANSITIONAL",
+      "RETIRABLE",
+      "BLOCKED"
+    ],
+    "trackedAliasSymbols": [
+      "getRequiredFieldKeys",
+      "getMissingFieldsForVacancy",
+      "getMissingFields",
+      "formatFieldList",
+      "buildDataRequestPrompt"
+    ]
+  },
+  "featureFlags": [
+    {
+      "name": "USE_CONVERSATION_ENGINE",
+      "kind": "environment_flag",
+      "status": "TRANSITIONAL",
+      "runtimeDefault": false,
+      "definitionPaths": [
+        "src/routes/webhook.js"
+      ],
+      "consumerPaths": [
+        "src/routes/webhook.js"
+      ],
+      "configurationPaths": [
+        ".env.example",
+        ".github/workflows/ci.yml",
+        ".github/workflows/contextual-fallback-ci.yml"
+      ],
+      "owner": "conversation-orchestration",
+      "purpose": "Selecciona entre el motor conversacional extraído y el camino legacy que todavía vive en el webhook.",
+      "retirementCondition": "Demostrar paridad mediante replays con ambos valores, convertir un solo orquestador en autoridad y retirar el camino alterno en un PR independiente.",
+      "evidenceTests": [
+        "test/conversation-harness.test.js",
+        "test/lorrenRegressionFixes.test.js",
+        "test/activeVacancyQuestionIntake.test.js"
+      ]
+    },
+    {
+      "name": "FF_RESPONSES_EXTRACTOR",
+      "kind": "canonical_feature_flag",
+      "status": "TRANSITIONAL",
+      "runtimeDefault": true,
+      "definitionPaths": [
+        "src/services/featureFlags.js"
+      ],
+      "consumerPaths": [
+        "src/services/aiParser.js"
+      ],
+      "configurationPaths": [
+        ".env.example",
+        ".github/workflows/ci.yml",
+        ".github/workflows/contextual-fallback-ci.yml"
+      ],
+      "owner": "conversation-understanding",
+      "purpose": "Mantiene el extractor estructurado de Responses API como camino principal y conserva temporalmente el parser legacy como rollback.",
+      "retirementCondition": "Eliminar el parser legacy cuando los replays, la evidencia estructurada y la observabilidad demuestren que Responses API cubre todos los turnos soportados.",
+      "evidenceTests": [
+        "test/aiParser.test.js",
+        "test/featureFlagDefaults.test.js"
+      ]
+    },
+    {
+      "name": "FF_POLICY_LAYER",
+      "kind": "canonical_feature_flag",
+      "status": "BLOCKED",
+      "runtimeDefault": false,
+      "definitionPaths": [
+        "src/services/featureFlags.js"
+      ],
+      "consumerPaths": [
+        "src/routes/webhook.js"
+      ],
+      "configurationPaths": [],
+      "owner": "conversation-policy",
+      "purpose": "Activa una capa de política adicional durante la consolidación de decisiones del turno.",
+      "retirementCondition": "Definir si la capa será autoridad canónica o será absorbida por el orquestador; antes deben existir regresiones explícitas para ambos valores del flag.",
+      "evidenceTests": [
+        "test/featureFlagDefaults.test.js",
+        "test/hardeningP0Delta.test.js",
+        "test/flowDecisionAuthority.test.js"
+      ]
+    },
+    {
+      "name": "FF_POSTGRES_JOB_QUEUE",
+      "kind": "canonical_feature_flag",
+      "status": "TRANSITIONAL",
+      "runtimeDefault": false,
+      "definitionPaths": [
+        "src/services/featureFlags.js"
+      ],
+      "consumerPaths": [
+        "src/services/reminder.js"
+      ],
+      "configurationPaths": [],
+      "owner": "background-jobs",
+      "purpose": "Permite migrar recordatorios desde temporizadores locales hacia una cola persistida en PostgreSQL.",
+      "retirementCondition": "Hacer tenant-aware la cola, demostrar idempotencia y recuperación tras reinicio, migrar recordatorios y retirar el temporizador local.",
+      "evidenceTests": [
+        "test/reminder.test.js",
+        "test/hardeningP0Delta.test.js"
+      ]
+    },
+    {
+      "name": "FF_ATTACHMENT_ANALYZER",
+      "kind": "canonical_feature_flag",
+      "status": "TRANSITIONAL",
+      "runtimeDefault": false,
+      "definitionPaths": [
+        "src/services/featureFlags.js"
+      ],
+      "consumerPaths": [
+        "src/routes/webhook.js"
+      ],
+      "configurationPaths": [],
+      "owner": "candidate-attachments",
+      "purpose": "Habilita el análisis enriquecido de adjuntos mientras se conserva el manejo determinístico anterior.",
+      "retirementCondition": "Consolidar clasificación, almacenamiento, consentimiento y revisión manual detrás de un solo caso de uso con replays de adjuntos legibles y no legibles.",
+      "evidenceTests": [
+        "test/hardeningP0Delta.test.js",
+        "test/p9CvOnlyPdfDocx.test.js",
+        "test/aiFirstRecruitmentGuards.test.js"
+      ]
+    },
+    {
+      "name": "FF_SEMANTIC_SHORT_MEMORY",
+      "kind": "canonical_feature_flag",
+      "status": "BLOCKED",
+      "runtimeDefault": false,
+      "definitionPaths": [
+        "src/services/featureFlags.js"
+      ],
+      "consumerPaths": [],
+      "configurationPaths": [],
+      "owner": "conversation-memory",
+      "purpose": "Reserva una capacidad de memoria semántica corta que actualmente no tiene consumidor productivo.",
+      "retirementCondition": "Confirmar que no existe configuración externa dependiente, documentar que nunca fue activado en producción y eliminar declaración, documentación y pruebas en un PR específico.",
+      "evidenceTests": [
+        "test/featureFlagDefaults.test.js"
+      ]
+    },
+    {
+      "name": "FF_ASYNC_ADMIN_MEDIA_FORWARD",
+      "kind": "canonical_feature_flag",
+      "status": "TRANSITIONAL",
+      "runtimeDefault": false,
+      "definitionPaths": [
+        "src/services/featureFlags.js"
+      ],
+      "consumerPaths": [
+        "src/routes/webhook.js"
+      ],
+      "configurationPaths": [],
+      "owner": "supervisor-media",
+      "purpose": "Alterna el reenvío administrativo de medios entre ejecución síncrona y procesamiento asíncrono.",
+      "retirementCondition": "Mover el reenvío a una cola persistida tenant-aware, demostrar entrega idempotente y retirar el camino síncrono o el asíncrono temporal.",
+      "evidenceTests": [
+        "test/hardeningP0Delta.test.js",
+        "test/lorrenRegressionFixes.test.js"
+      ]
+    }
+  ],
+  "aliases": [
+    {
+      "symbol": "getRequiredFieldKeys",
+      "kind": "pure_alias",
+      "status": "TRANSITIONAL",
+      "definitionPath": "src/routes/webhook.js",
+      "targetSymbol": "getRequiredCandidateFieldKeys",
+      "targetPath": "src/services/readinessGuard.js",
+      "owner": "recruitment-readiness",
+      "purpose": "Renombra sin añadir política la lista de campos obligatorios definida por la vacante.",
+      "retirementCondition": "Sustituir todos los consumidores internos por getRequiredCandidateFieldKeys y conservar regresiones de campos dinámicos.",
+      "evidenceTests": [
+        "test/flexibleApplicationFlow.test.js",
+        "test/fieldSanitizer.test.js"
+      ]
+    },
+    {
+      "symbol": "getMissingFieldsForVacancy",
+      "kind": "pure_alias",
+      "status": "TRANSITIONAL",
+      "definitionPath": "src/routes/webhook.js",
+      "targetSymbol": "getMissingFieldLabels",
+      "targetPath": "src/services/readinessGuard.js",
+      "owner": "recruitment-readiness",
+      "purpose": "Renombra sin transformación la autoridad de etiquetas de campos faltantes.",
+      "retirementCondition": "Reemplazar el alias por getMissingFieldLabels y verificar mensajes de recolección por ciudad y vacante.",
+      "evidenceTests": [
+        "test/flexibleApplicationFlow.test.js",
+        "test/fieldSanitizer.test.js"
+      ]
+    },
+    {
+      "symbol": "getMissingFields",
+      "kind": "alias_chain",
+      "status": "TRANSITIONAL",
+      "definitionPath": "src/routes/webhook.js",
+      "targetSymbol": "getMissingFieldsForVacancy",
+      "targetPath": "src/routes/webhook.js",
+      "owner": "recruitment-readiness",
+      "purpose": "Conserva un segundo nombre local encima de otro alias del mismo webhook.",
+      "retirementCondition": "Sustituir consumidores directamente por getMissingFieldLabels y retirar conjuntamente la cadena de aliases en un PR acotado.",
+      "evidenceTests": [
+        "test/flexibleApplicationFlow.test.js",
+        "test/fieldSanitizer.test.js"
+      ]
+    },
+    {
+      "symbol": "formatFieldList",
+      "kind": "pure_alias",
+      "status": "TRANSITIONAL",
+      "definitionPath": "src/routes/webhook.js",
+      "targetSymbol": "formatFieldListForVacancy",
+      "targetPath": "src/routes/webhook.js",
+      "owner": "recruitment-readiness",
+      "purpose": "Expone con otro nombre el formateador local que sí contiene la transformación de etiquetas.",
+      "retirementCondition": "Usar formatFieldListForVacancy directamente o extraer el formateador al servicio canónico y actualizar pruebas de redacción.",
+      "evidenceTests": [
+        "test/flexibleApplicationFlow.test.js",
+        "test/lorrenRegressionFixes.test.js"
+      ]
+    },
+    {
+      "symbol": "buildDataRequestPrompt",
+      "kind": "pure_alias",
+      "status": "TRANSITIONAL",
+      "definitionPath": "src/routes/webhook.js",
+      "targetSymbol": "buildCandidateDataCollectionMessage",
+      "targetPath": "src/services/readinessGuard.js",
+      "owner": "recruitment-readiness",
+      "purpose": "Renombra sin añadir política el mensaje dinámico de recolección de datos.",
+      "retirementCondition": "Reemplazar llamadas por buildCandidateDataCollectionMessage y validar que consentimiento y preguntas de vacante mantienen el orden del flujo.",
+      "evidenceTests": [
+        "test/flexibleApplicationFlow.test.js",
+        "test/conversationReplayIntegral.test.js"
+      ]
+    }
+  ]
+}
