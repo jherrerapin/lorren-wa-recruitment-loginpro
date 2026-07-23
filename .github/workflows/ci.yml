@@ -90,6 +90,9 @@ jobs:
       - name: Validate transitional code inventory
         run: node --test test/transitionalCodeInventory.test.js
 
+      - name: Run vacancy age authority regressions
+        run: node --test test/readinessGuard.test.js test/candidateAgeHarnessIntegration.test.js test/structuredAgeHarnessIntegration.test.js test/vacancyAgeAuthorityIntegration.test.js
+
       - name: Run conversation turn arbitration regressions
         run: node --test test/conversationIntent.test.js
 
