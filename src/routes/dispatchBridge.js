@@ -8,7 +8,7 @@ import {
   setRecruiterGeneralAttendanceEnabled
 } from '../services/attendanceFeatureAccess.js';
 
-export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-22-r2';
+export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-22-r4';
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 function normalizeString(value) {
