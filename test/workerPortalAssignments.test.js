@@ -27,6 +27,7 @@ function assignmentFixture(overrides = {}) {
         address: 'Carrera 1 # 2-3',
         attendanceEnabled: true,
         earlyArrivalWindowMinutes: 60,
+        absenceGraceMinutes: 15,
         attendancePhotoPolicy: 'RISK_ONLY'
       },
       ...overrides.serviceRequest
@@ -56,6 +57,7 @@ test('lista únicamente asignaciones activas del auxiliar y prepara una tarjeta 
   assert.equal(assignments.length, 1);
   assert.equal(assignments[0].clientName, 'Cliente Prueba');
   assert.equal(assignments[0].canRegisterArrival, true);
+  assert.equal(assignments[0].arrivalWindowClosesAt, '2026-07-22T13:45:00.000Z');
   assert.equal(assignments[0].photoRequired, true);
   assert.equal(assignments[0].workerId, undefined);
   assert.equal(assignments[0].serviceRequest, undefined);
@@ -100,6 +102,52 @@ test('antes de la ventana anticipada informa la hora y bloquea la marcación', a
   assert.equal(assignments[0].canRegisterArrival, false);
   assert.match(assignments[0].actionLabel, /Disponible desde/i);
   assert.equal(assignments[0].arrivalWindowOpensAt, '2026-07-22T12:30:00.000Z');
+});
+
+test('después del tiempo de ausencia muestra jornada vencida y bloquea el registro', async () => {
+  const prisma = {
+    dispatchAssignment: {
+      async findMany() {
+        return [assignmentFixture()];
+      }
+    }
+  };
+
+  const assignments = await loadWorkerPortalAssignments(prisma, {
+    workerId: 'worker-1',
+    now: new Date('2026-07-22T13:45:01.000Z')
+  });
+
+  assert.equal(assignments[0].canRegisterArrival, false);
+  assert.equal(assignments[0].arrivalWindowExpired, true);
+  assert.equal(assignments[0].actionLabel, 'Jornada vencida');
+  assert.equal(assignments[0].arrivalWindowClosesAt, '2026-07-22T13:45:00.000Z');
+});
+
+test('una jornada vencida se identifica antes que la configuración deshabilitada', async () => {
+  const prisma = {
+    dispatchAssignment: {
+      async findMany() {
+        return [assignmentFixture({
+          serviceRequest: {
+            ...assignmentFixture().serviceRequest,
+            operationPoint: {
+              ...assignmentFixture().serviceRequest.operationPoint,
+              attendanceEnabled: false
+            }
+          }
+        })];
+      }
+    }
+  };
+
+  const assignments = await loadWorkerPortalAssignments(prisma, {
+    workerId: 'worker-1',
+    now: new Date('2026-07-22T14:00:00.000Z')
+  });
+
+  assert.equal(assignments[0].attendanceEnabled, false);
+  assert.equal(assignments[0].actionLabel, 'Jornada vencida');
 });
 
 test('una llegada existente se muestra como estado y no ofrece una segunda marcación', async () => {
