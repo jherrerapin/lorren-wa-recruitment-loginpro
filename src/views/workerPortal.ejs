@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#176c36">
   <title>Portal del Auxiliar · Lórren</title>
+  <link rel="manifest" href="/public/worker-portal.webmanifest">
+  <link rel="icon" href="/public/worker-portal-icon.svg" type="image/svg+xml">
   <style>
     :root { color-scheme: light; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
@@ -20,18 +23,29 @@
     .warning { background: #fff6df; color: #76520b; }
     .danger { background: #fdecec; color: #8f2525; }
     .meta { margin-top: 16px; font-size: 13px; color: #72808e; }
-    .portal-header { display: flex; gap: 14px; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+    .portal-header { display: flex; gap: 14px; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
     .session-chip { flex: 0 0 auto; padding: 8px 10px; border-radius: 999px; background: #eaf8ef; color: #176c36; font-size: 12px; font-weight: 800; }
+    .connectivity-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid #dfe4ea; border-radius: 14px; background: #fff; font-size: 13px; }
+    .connectivity-bar strong { color: #263645; }
+    .connectivity-copy { color: #5f6e7c; }
+    .connectivity-dot { width: 10px; height: 10px; border-radius: 999px; background: #176c36; box-shadow: 0 0 0 4px #eaf8ef; flex: 0 0 auto; }
+    .connectivity-bar.offline { background: #fff9e9; border-color: #efd89a; }
+    .connectivity-bar.offline .connectivity-dot { background: #a66d00; box-shadow: 0 0 0 4px #fff0bd; }
+    .connectivity-bar.syncing .connectivity-dot { background: #2c6faa; box-shadow: 0 0 0 4px #dbeeff; }
     .assignment-list { display: grid; gap: 14px; }
     .assignment-card { background: #fff; border: 1px solid #dfe4ea; border-radius: 18px; padding: 18px; box-shadow: 0 8px 26px rgba(23, 33, 43, .06); }
+    .assignment-card.has-pending { border-color: #e7c765; background: #fffdf6; }
     .assignment-date { margin-bottom: 8px; color: #176c36; font-size: 13px; font-weight: 800; text-transform: capitalize; }
     .assignment-time { margin-top: 5px; color: #263645; font-weight: 750; }
     .assignment-details { display: grid; gap: 7px; margin: 16px 0; font-size: 14px; }
     .detail-row { display: grid; grid-template-columns: 92px 1fr; gap: 10px; }
     .detail-label { color: #72808e; }
     .detail-value { color: #263645; font-weight: 600; overflow-wrap: anywhere; }
+    .assignment-local-status { display: none; margin: 0 0 12px; padding: 10px 12px; border-radius: 11px; background: #fff4ce; color: #76520b; font-size: 13px; font-weight: 750; }
+    .assignment-card.has-pending .assignment-local-status { display: block; }
     .arrival-button, .primary-button, .secondary-button { width: 100%; border: 0; border-radius: 12px; padding: 14px 16px; font-weight: 800; cursor: pointer; }
     .arrival-button, .primary-button { background: #176c36; color: #fff; }
+    .arrival-button.queued { background: #a66d00; }
     .secondary-button { background: #edf1f4; color: #263645; }
     button:disabled { cursor: not-allowed; opacity: .55; }
     .empty-state { padding: 24px; border: 1px dashed #cfd7df; border-radius: 16px; text-align: center; background: #fff; }
@@ -109,7 +123,7 @@
               });
           })();
         </script>
-    </section>
+      </section>
     <% } else if (mode === 'active') { %>
       <% const portalAssignments = Array.isArray(assignments) ? assignments : []; %>
       <header class="portal-header">
@@ -121,10 +135,18 @@
         <span class="session-chip">Dispositivo verificado</span>
       </header>
 
+      <section id="portal-connectivity" class="connectivity-bar" aria-live="polite">
+        <span class="connectivity-dot" aria-hidden="true"></span>
+        <div>
+          <strong id="connectivity-title">Con conexión</strong>
+          <div id="connectivity-copy" class="connectivity-copy">Las marcaciones se enviarán inmediatamente.</div>
+        </div>
+      </section>
+
       <% if (portalAssignments.length) { %>
         <section class="assignment-list" aria-label="Asignaciones activas">
           <% portalAssignments.forEach((assignment) => { %>
-            <article class="assignment-card">
+            <article class="assignment-card" data-assignment-card="<%= assignment.id %>">
               <p class="assignment-date"><%= assignment.dateLabel %></p>
               <h2><%= assignment.clientName %></h2>
               <p class="assignment-time"><%= assignment.timeLabel %></p>
@@ -133,11 +155,17 @@
                 <div class="detail-row"><span class="detail-label">Ciudad</span><span class="detail-value"><%= assignment.cityName %></span></div>
                 <div class="detail-row"><span class="detail-label">Dirección</span><span class="detail-value"><%= assignment.address %></span></div>
               </div>
+              <div class="assignment-local-status" data-local-status="<%= assignment.id %>"></div>
               <button
                 type="button"
                 class="arrival-button"
                 data-assignment-id="<%= assignment.id %>"
                 data-photo-required="<%= assignment.photoRequired ? 'true' : 'false' %>"
+                data-attendance-enabled="<%= assignment.attendanceEnabled ? 'true' : 'false' %>"
+                data-arrival-reported="<%= assignment.arrivalReported ? 'true' : 'false' %>"
+                data-server-action-label="<%= assignment.actionLabel %>"
+                data-window-opens-at="<%= assignment.arrivalWindowOpensAt || '' %>"
+                data-window-closes-at="<%= assignment.arrivalWindowClosesAt || '' %>"
                 <%= assignment.canRegisterArrival ? '' : 'disabled' %>
               ><%= assignment.actionLabel %></button>
             </article>
@@ -195,10 +223,11 @@
             <button type="button" class="primary-button" id="submit-arrival" disabled>Registrar llegada</button>
             <button type="button" class="secondary-button" id="cancel-arrival">Cancelar</button>
           </div>
-          <p class="fine-print">La hora oficial es la recibida por Lórren. El GPS y la fotografía se usan solo para validar esta marcación.</p>
+          <p class="fine-print">Con internet, Lórren usa la hora recibida por el servidor. Sin internet, la marca queda guardada en este dispositivo y se sincroniza después para revisión.</p>
         </div>
       </dialog>
 
+      <script src="/public/worker-portal-offline.js"></script>
       <script nonce="<%= nonce %>">
         (() => {
           const dialog = document.getElementById('arrival-dialog');
@@ -217,6 +246,10 @@
           const resultBox = document.getElementById('arrival-result');
           const closeButton = document.getElementById('close-arrival');
           const cancelButton = document.getElementById('cancel-arrival');
+          const connectivityBar = document.getElementById('portal-connectivity');
+          const connectivityTitle = document.getElementById('connectivity-title');
+          const connectivityCopy = document.getElementById('connectivity-copy');
+          const offlineApi = window.LorrenWorkerPortalOffline || null;
 
           let assignmentId = null;
           let photoRequired = false;
@@ -225,6 +258,7 @@
           let photoUrl = null;
           let cameraStream = null;
           let idempotencyKey = null;
+          let offlineState = { queue: [], receipts: [], online: navigator.onLine };
 
           function newIdempotencyKey() {
             if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -272,6 +306,7 @@
             fileFallback.hidden = true;
             fallbackPhoto.value = '';
             submitButton.disabled = true;
+            submitButton.textContent = navigator.onLine ? 'Registrar llegada' : 'Guardar llegada sin internet';
           }
 
           function requestLocation() {
@@ -372,8 +407,137 @@
 
           photoConsent.addEventListener('change', updateSubmitState);
 
-          document.querySelectorAll('.arrival-button:not(:disabled)').forEach((button) => {
+          function receiptForAssignment(id) {
+            return offlineState.receipts.find((receipt) => receipt.assignmentId === id) || null;
+          }
+
+          function queuedForAssignment(id) {
+            return offlineState.queue.find((record) => record.assignmentId === id) || null;
+          }
+
+          function formatOpenTime(value) {
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return null;
+            return new Intl.DateTimeFormat('es-CO', {
+              hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Bogota'
+            }).format(date);
+          }
+
+          function evaluateAssignmentButton(button) {
+            const id = button.dataset.assignmentId;
+            const card = document.querySelector(`[data-assignment-card="${CSS.escape(id)}"]`);
+            const localStatus = document.querySelector(`[data-local-status="${CSS.escape(id)}"]`);
+            const queued = queuedForAssignment(id);
+            const receipt = receiptForAssignment(id);
+            button.classList.remove('queued');
+            card?.classList.remove('has-pending');
+            if (queued) {
+              const labels = {
+                PENDING: 'Llegada guardada offline',
+                SYNCING: 'Sincronizando llegada…',
+                SESSION_REQUIRED: 'Activa nuevamente para sincronizar'
+              };
+              button.disabled = true;
+              button.classList.add('queued');
+              button.textContent = labels[queued.state] || 'Llegada pendiente de sincronización';
+              if (localStatus) localStatus.textContent = queued.state === 'SESSION_REQUIRED'
+                ? 'La marca sigue segura en este celular, pero se necesita una nueva activación para enviarla.'
+                : 'La marca está guardada en este celular y no se eliminará hasta que Lórren confirme la sincronización.';
+              card?.classList.add('has-pending');
+              return;
+            }
+            if (receipt && ['SYNCED', 'REVIEW_REQUIRED', 'ALREADY_RECORDED'].includes(receipt.state)) {
+              button.disabled = true;
+              button.textContent = receipt.state === 'REVIEW_REQUIRED'
+                ? 'Llegada sincronizada · en revisión'
+                : 'Llegada sincronizada';
+              return;
+            }
+            if (button.dataset.arrivalReported === 'true') {
+              button.disabled = true;
+              button.textContent = button.dataset.serverActionLabel || 'Llegada registrada';
+              return;
+            }
+            if (button.dataset.attendanceEnabled !== 'true') {
+              button.disabled = true;
+              button.textContent = 'Marcación no habilitada';
+              return;
+            }
+            const now = Date.now();
+            const opensAt = new Date(button.dataset.windowOpensAt || '').getTime();
+            const closesAt = new Date(button.dataset.windowClosesAt || '').getTime();
+            if (!Number.isFinite(opensAt) || !Number.isFinite(closesAt)) {
+              button.disabled = true;
+              button.textContent = button.dataset.serverActionLabel || 'Horario pendiente';
+              return;
+            }
+            if (now < opensAt) {
+              button.disabled = true;
+              button.textContent = `Disponible desde ${formatOpenTime(opensAt) || ''}`.trim();
+              return;
+            }
+            if (now > closesAt) {
+              button.disabled = true;
+              button.textContent = 'Jornada vencida';
+              return;
+            }
+            button.disabled = false;
+            button.textContent = navigator.onLine ? 'Registrar llegada' : 'Guardar llegada sin internet';
+          }
+
+          function refreshAssignmentButtons() {
+            document.querySelectorAll('.arrival-button').forEach(evaluateAssignmentButton);
+          }
+
+          function renderConnectivity() {
+            const pendingCount = offlineState.queue.length;
+            const syncing = offlineState.queue.some((record) => record.state === 'SYNCING');
+            connectivityBar.classList.toggle('offline', !offlineState.online);
+            connectivityBar.classList.toggle('syncing', syncing);
+            if (!offlineState.online) {
+              connectivityTitle.textContent = 'Sin conexión';
+              connectivityCopy.textContent = pendingCount
+                ? `${pendingCount} marcación(es) guardada(s) en este celular.`
+                : 'Puedes registrar la llegada y se enviará cuando vuelva internet.';
+            } else if (syncing) {
+              connectivityTitle.textContent = 'Sincronizando';
+              connectivityCopy.textContent = 'Lórren está enviando las marcaciones guardadas.';
+            } else if (pendingCount) {
+              connectivityTitle.textContent = 'Con conexión · envío pendiente';
+              connectivityCopy.textContent = `${pendingCount} marcación(es) esperan sincronización automática.`;
+            } else {
+              connectivityTitle.textContent = 'Con conexión';
+              connectivityCopy.textContent = 'Las marcaciones se enviarán inmediatamente.';
+            }
+          }
+
+          function handleOfflineState(state) {
+            offlineState = state || offlineState;
+            renderConnectivity();
+            refreshAssignmentButtons();
+          }
+
+          async function queueCurrentArrival() {
+            if (!offlineApi) throw new Error('El almacenamiento offline no está disponible en este navegador.');
+            await offlineApi.queueArrival({
+              assignmentId,
+              idempotencyKey,
+              latitude: locationEvidence.latitude,
+              longitude: locationEvidence.longitude,
+              accuracyMeters: locationEvidence.accuracyMeters,
+              clientCapturedAt: locationEvidence.clientCapturedAt,
+              photoConsent: Boolean(photoBlob && photoConsent.checked),
+              selfie: photoBlob || null
+            });
+            showResult('Llegada guardada en este celular. Se sincronizará automáticamente cuando vuelva internet y quedará pendiente de revisión.', 'warning');
+            stopCamera();
+            submitButton.disabled = true;
+            submitButton.textContent = 'Guardada sin conexión';
+          }
+
+          document.querySelectorAll('.arrival-button').forEach((button) => {
             button.addEventListener('click', () => {
+              if (button.disabled) return;
               assignmentId = button.dataset.assignmentId;
               photoRequired = button.dataset.photoRequired === 'true';
               idempotencyKey = newIdempotencyKey();
@@ -388,8 +552,19 @@
           async function submitArrival() {
             if (!assignmentId || !locationEvidence || (photoRequired && !photoBlob)) return;
             submitButton.disabled = true;
-            submitButton.textContent = 'Registrando…';
+            submitButton.textContent = navigator.onLine ? 'Registrando…' : 'Guardando en este celular…';
             resultBox.hidden = true;
+
+            if (!navigator.onLine) {
+              try {
+                await queueCurrentArrival();
+              } catch (error) {
+                showResult(error?.message || 'No fue posible guardar la llegada sin internet.', 'danger');
+                submitButton.disabled = false;
+                submitButton.textContent = 'Guardar llegada sin internet';
+              }
+              return;
+            }
 
             const form = new FormData();
             form.set('idempotencyKey', idempotencyKey);
@@ -397,6 +572,7 @@
             form.set('longitude', String(locationEvidence.longitude));
             form.set('accuracyMeters', String(locationEvidence.accuracyMeters));
             form.set('clientCapturedAt', locationEvidence.clientCapturedAt);
+            form.set('captureMode', 'ONLINE_WEB');
             form.set('photoConsent', photoBlob && photoConsent.checked ? 'true' : 'false');
             if (photoBlob) form.set('selfie', photoBlob, 'selfie-llegada.jpg');
 
@@ -409,14 +585,19 @@
               });
               const payload = await response.json().catch(() => ({}));
               if (!response.ok || !payload.ok) {
+                if (response.status >= 500 && offlineApi) {
+                  await queueCurrentArrival();
+                  return;
+                }
                 const messages = {
-                  arrival_window_not_open: 'La ventana para registrar la llegada todavía no está abierta.',
+                  arrival_window_not_open: 'La ventana para registrar la llegada todavía no está abierta o ya terminó.',
                   arrival_already_registered: 'Esta llegada ya había sido registrada.',
                   attendance_not_enabled: 'La marcación no está habilitada para esta operación.',
                   selfie_required: 'Debes tomar la selfie de evidencia.',
                   photo_consent_required: 'Debes aceptar el uso de la fotografía para continuar.',
                   portal_session_required: 'Tu sesión venció. Solicita un nuevo enlace de activación.',
-                  arrival_temporarily_unavailable: 'El registro está temporalmente no disponible. Intenta nuevamente.'
+                  arrival_temporarily_unavailable: 'El registro está temporalmente no disponible. La marca puede guardarse sin conexión.',
+                  offline_capture_expired: 'La marcación guardada superó el tiempo máximo permitido para sincronizar.'
                 };
                 throw new Error(messages[payload.error] || 'No fue posible registrar la llegada. Revisa los permisos e intenta nuevamente.');
               }
@@ -424,9 +605,18 @@
               stopCamera();
               setTimeout(() => window.location.reload(), 1400);
             } catch (error) {
-              showResult(error?.message || 'No fue posible registrar la llegada.', 'danger');
+              if (offlineApi && (error instanceof TypeError || !navigator.onLine)) {
+                try {
+                  await queueCurrentArrival();
+                  return;
+                } catch (queueError) {
+                  showResult(queueError?.message || 'No fue posible guardar la llegada sin conexión.', 'danger');
+                }
+              } else {
+                showResult(error?.message || 'No fue posible registrar la llegada.', 'danger');
+              }
               submitButton.disabled = false;
-              submitButton.textContent = 'Registrar llegada';
+              submitButton.textContent = navigator.onLine ? 'Registrar llegada' : 'Guardar llegada sin internet';
             }
           }
 
@@ -445,6 +635,27 @@
             event.preventDefault();
             closeDialog();
           });
+
+          window.addEventListener('online', () => {
+            offlineState.online = true;
+            renderConnectivity();
+            refreshAssignmentButtons();
+          });
+          window.addEventListener('offline', () => {
+            offlineState.online = false;
+            renderConnectivity();
+            refreshAssignmentButtons();
+          });
+
+          offlineApi?.init({ onStateChange: handleOfflineState }).catch(() => {
+            connectivityTitle.textContent = navigator.onLine ? 'Con conexión' : 'Sin conexión';
+            connectivityCopy.textContent = navigator.onLine
+              ? 'La sincronización offline no está disponible en este navegador.'
+              : 'Este navegador no pudo preparar el almacenamiento offline.';
+          });
+          renderConnectivity();
+          refreshAssignmentButtons();
+          window.setInterval(refreshAssignmentButtons, 30000);
         })();
       </script>
     <% } else if (mode === 'unavailable') { %>
