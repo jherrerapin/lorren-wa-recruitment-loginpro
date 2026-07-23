@@ -18,6 +18,7 @@ test('el inventario no conserva la cadena retirada', () => {
     assert.equal(inventory.rules.trackedAliasSymbols.includes(symbol), false);
     assert.equal(inventory.aliases.some((entry) => entry.symbol === symbol), false);
   }
+  assert.equal(inventory.aliases.some((entry) => retired.has(entry.targetSymbol)), false);
 });
 
 test('los aliases fuera de alcance permanecen inventariados', () => {
