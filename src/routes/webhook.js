@@ -45,7 +45,7 @@ import { applyInterviewReminderResponse } from '../services/interviewBookingStat
 import { buildInterviewDocumentsSentence, buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
 import { appendUniqueReplySegment } from '../services/replyComposition.js';
-import { buildCandidateDataCollectionMessage, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
+import { buildCandidateDataCollectionMessage, evaluateCandidateEligibility, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
 import {
@@ -168,10 +168,22 @@ function hasStrongAgeEvidence(text = '', parsed = {}, evidenceByField = {}) {
   if (/\b(tengo|edad|anos|años|cumpli|cumplo|soy de)\b/.test(n)) return true;
   return Number(ageEvidence.confidence || 0) >= 0.92 && /\bedad\b/.test(n);
 }
-function shouldRejectByRequirements(text, parsed = {}, evidenceByField = {}) {
+function shouldRejectByRequirements(text, parsed = {}, evidenceByField = {}, vacancy = null) {
   const n = normalizeComparableText(text);
-  if (parsed.age && (parsed.age < 18 || parsed.age > 50) && hasStrongAgeEvidence(text, parsed, evidenceByField)) {
-    return { reject: true, reason: 'Edad fuera del rango permitido', details: `Edad detectada: ${parsed.age}` };
+  if (hasStrongAgeEvidence(text, parsed, evidenceByField)) {
+    const ageFailure = evaluateCandidateEligibility({ age: parsed.age }, vacancy)
+      .failures.find((failure) => failure.field === 'age');
+    if (ageFailure) {
+      return {
+        reject: true,
+        reason: ageFailure.message,
+        details: ageFailure.details,
+        code: ageFailure.code,
+        candidateAge: ageFailure.candidateAge,
+        minAge: ageFailure.minAge,
+        maxAge: ageFailure.maxAge
+      };
+    }
   }
   if (explicitlyLacksValidDocument(n)) return { reject: true, reason: 'Documento no vigente', details: 'El candidato indicó no tener documento vigente.' };
   if (mentionsForeigner(text) && hasValidForeignDocumentMention(text, parsed)) return { reject: false };
@@ -1563,13 +1575,17 @@ async function wasDoneAckSent(prisma, candidateId) {
   return latestOutbound.some((message) => message?.rawPayload?.source === 'bot_done_ack');
 }
 async function rejectCandidate(prisma, candidateId, from, rejection = {}) {
+  const rejectionDetails = [
+    rejection.details || null,
+    rejection.code ? `Código: ${rejection.code}.` : null
+  ].filter(Boolean).join(' ');
   await prisma.candidate.update({
     where: { id: candidateId },
     data: {
       status: CandidateStatus.RECHAZADO,
       currentStep: ConversationStep.DONE,
       rejectionReason: rejection.reason || 'No cumple requisitos',
-      rejectionDetails: rejection.details || null,
+      rejectionDetails: rejectionDetails || null,
       reminderScheduledFor: null,
       reminderState: 'SKIPPED'
     }
@@ -1779,7 +1795,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     if (isPostOnboarding && !vacancyState && !candidateState.vacancyId) return false;
 
     if (hasDataIntent && vacancyState && isVacancyOpen(vacancyState) && !isFutureProfileCaptureCandidate(candidateState)) {
-      const rejection = shouldRejectByRequirements(cleanText, normalizedData, evidenceByField);
+      const rejection = shouldRejectByRequirements(cleanText, normalizedData, evidenceByField, vacancyState);
       if (rejection.reject) {
         await rejectCandidate(prisma, candidate.id, from, rejection);
         return true;
@@ -2569,7 +2585,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.COLLECTING_DATA } });
       if (hasDataIntent) {
         const rejection = currentVacancy && isVacancyOpen(currentVacancy) && !isFutureProfileCaptureCandidate(candidate)
-          ? shouldRejectByRequirements(cleanText, normalizedData)
+          ? shouldRejectByRequirements(cleanText, normalizedData, evidenceByField, currentVacancy)
           : { reject: false };
         if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
         const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
@@ -2597,7 +2613,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     const rejection = currentVacancy && isVacancyOpen(currentVacancy) && !isFutureProfileCaptureCandidate(candidate)
-      ? shouldRejectByRequirements(cleanText, normalizedData)
+      ? shouldRejectByRequirements(cleanText, normalizedData, evidenceByField, currentVacancy)
       : { reject: false };
     if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
 
@@ -2666,7 +2682,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     const rejection = currentVacancy && isVacancyOpen(currentVacancy) && !isFutureProfileCaptureCandidate(candidate)
-      ? shouldRejectByRequirements(cleanText, normalizedData)
+      ? shouldRejectByRequirements(cleanText, normalizedData, evidenceByField, currentVacancy)
       : { reject: false };
     if (rejection.reject) return rejectCandidate(prisma, candidate.id, from, rejection);
     const { updatedCandidate: updated } = await applyDecisionsAndUpdate();
