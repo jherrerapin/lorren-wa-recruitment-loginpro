@@ -13,7 +13,8 @@ import {
   isHighConfidenceLocalField,
   looksLikeNoMedicalRestrictionsText,
   normalizeCandidateFields,
-  parseNaturalData
+  parseNaturalData,
+  shouldPreserveStructuredLocalField
 } from '../services/candidateData.js';
 import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
@@ -1622,12 +1623,14 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
   for (const [field, value] of Object.entries(aiFields)) {
     if (value === undefined || value === null || value === '') continue;
+    if (shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'openai');
     if (extractionEvidence[field]) evidenceByField[field] = extractionEvidence[field];
   }
   for (const [field, value] of Object.entries(engineFields)) {
     if (value === undefined || value === null || value === '') continue;
+    if (shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'engine');
     evidenceByField[field] = evidenceByField[field] || { snippet: cleanText.slice(0, 120), confidence: 0.8, source: 'engine' };

@@ -308,6 +308,15 @@ function detectContextualAge(text = '') {
   return extractExplicitAge(text);
 }
 
+export function shouldPreserveStructuredLocalField(field, localValue, proposedValue) {
+  if (field !== 'age') return false;
+  const localAge = Number.parseInt(String(localValue ?? '').trim(), 10);
+  const proposedAge = Number.parseInt(String(proposedValue ?? '').trim(), 10);
+  if (!Number.isInteger(localAge) || localAge < 14 || localAge > 80) return false;
+  if (!Number.isInteger(proposedAge) || proposedAge < 14 || proposedAge > 80) return false;
+  return localAge !== proposedAge;
+}
+
 function detectAgeFromSequence(text = '') {
   const segments = String(text || '')
     .split(/[\n,]+/)
@@ -660,7 +669,7 @@ export function parseNaturalData(text = '') {
     }
   }
 
-  const detectedAge = detectContextualAge(compact);
+  const detectedAge = detectContextualAge(text);
   if (detectedAge !== null) result.age = detectedAge;
   if (result.age === undefined) {
     const ageFromSequence = detectAgeFromSequence(text);
