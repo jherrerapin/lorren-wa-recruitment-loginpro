@@ -48,7 +48,7 @@ test('el mapa reemplaza la escritura manual de coordenadas', () => {
   assert.match(view, /L\.circle\(point,\s*\{\s*radius:\s*ATTENDANCE_GEOFENCE_RADIUS_METERS\s*\}\)/);
 });
 
-test('Leaflet, OpenStreetMap, búsqueda explícita y geolocalización respetan el contrato', () => {
+test('Leaflet, OpenStreetMap, búsqueda serializada y geolocalización respetan el contrato', () => {
   assert.match(view, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
   assert.match(view, /sha256-p4NxAoJBhIIN\+hmNHrzRCf9tD\/miZyoHS5obTRR9BMY=/);
   assert.match(view, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
@@ -56,7 +56,11 @@ test('Leaflet, OpenStreetMap, búsqueda explícita y geolocalización respetan e
   assert.match(view, /https:\/\/tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/);
   assert.match(view, /OpenStreetMap<\/a> contributors/);
   assert.match(view, /https:\/\/nominatim\.openstreetmap\.org\/search/);
-  assert.match(view, /respectNominatimRateLimit/);
+  assert.match(view, /nextNominatimSearchAt\s*=\s*scheduledAt\s*\+\s*1100/);
+  assert.match(view, /reserveNominatimSearchSlot/);
+  assert.match(view, /new AbortController\(\)/);
+  assert.match(view, /controller\.abort\(\),\s*8000/);
+  assert.match(view, /signal:\s*controller\.signal/);
   assert.doesNotMatch(view, /attendance-address-search['"]\)\?\.addEventListener\(['"]input/);
   assert.match(view, /navigator\.geolocation\.getCurrentPosition/);
   assert.match(view, /enableHighAccuracy:\s*true/);
