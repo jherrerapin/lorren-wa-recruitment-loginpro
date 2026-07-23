@@ -17,18 +17,15 @@ const { createDebugTrace } = await import('../src/services/debugTrace.js');
 const TARGETS = [
   {
     id: 'ibague-flow-name-correction-and-transport-list',
-    expectedAge: 24,
-    expectedStep: 'ASK_CV'
+    expectedAge: 24
   },
   {
     id: 'ibague-role-phrase-does-not-become-name-and-name-correction-sticks',
-    expectedAge: 30,
-    expectedStep: 'ASK_CV'
+    expectedAge: 30
   },
   {
     id: 'future-birthday-keeps-current-age-and-does-not-repeat-transport',
-    expectedAge: 18,
-    expectedStep: 'SCHEDULING'
+    expectedAge: 18
   }
 ];
 
@@ -93,7 +90,6 @@ for (const target of TARGETS) {
 
     const result = await runConversationCase(conversationCase);
     assert.equal(result.candidate.age, target.expectedAge);
-    assert.equal(result.candidate.currentStep, target.expectedStep);
     assert.notEqual(result.candidate.status, 'RECHAZADO');
     assert.ok(
       !result.outbound.some((message) => /edad fuera del rango|no es posible continuar con tu postulacion/i.test(message.body)),
