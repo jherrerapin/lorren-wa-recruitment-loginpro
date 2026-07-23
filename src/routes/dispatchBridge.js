@@ -11,6 +11,9 @@ import {
 export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-22-r4';
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
+const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -108,9 +111,18 @@ function attendanceDevControlHtml(enabled) {
     </section>`;
 }
 
+function normalizeLeafletScriptIntegrity(html) {
+  const escapedUrl = LEAFLET_1_9_4_SCRIPT_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const scriptPattern = new RegExp(
+    `(<script\\s+[^>]*src=["']${escapedUrl}["'][^>]*integrity=["'])[^"']*(["'][^>]*>)`,
+    'i'
+  );
+  return html.replace(scriptPattern, `$1${LEAFLET_1_9_4_SCRIPT_INTEGRITY}$2`);
+}
+
 export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = false, recruiterGeneralEnabled = false } = {}) {
   if (typeof html !== 'string') return html;
-  let output = html;
+  let output = normalizeLeafletScriptIntegrity(html);
 
   if (!allowed) {
     output = output.replace(
