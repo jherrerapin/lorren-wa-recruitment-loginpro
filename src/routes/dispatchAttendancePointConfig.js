@@ -41,10 +41,11 @@ export function dispatchAttendancePointConfigRouter(prisma) {
     const operationPointId = req.params.operationId;
 
     try {
+      const attendanceEnabled = explicitAttendanceCheckbox(req.body, 'attendanceEnabled');
       await updateDispatchAttendancePointConfig(prisma, {
         clientId,
         operationPointId,
-        attendanceEnabled: explicitAttendanceCheckbox(req.body, 'attendanceEnabled'),
+        attendanceEnabled,
         attendanceLatitude: req.body.attendanceLatitude,
         attendanceLongitude: req.body.attendanceLongitude,
         earlyArrivalWindowMinutes: req.body.earlyArrivalWindowMinutes,
@@ -54,7 +55,10 @@ export function dispatchAttendancePointConfigRouter(prisma) {
         attendancePhotoPolicy: req.body.attendancePhotoPolicy,
         manualAttendanceAllowed: explicitAttendanceCheckbox(req.body, 'manualAttendanceAllowed')
       });
-      return res.redirect(clientOperationsPath(clientId, 'Configuración de asistencia guardada. La marcación quedó habilitada para este punto.'));
+      const message = attendanceEnabled === 'true'
+        ? 'Configuración de asistencia guardada. La marcación quedó habilitada para este punto.'
+        : 'Configuración de asistencia guardada. La marcación quedó deshabilitada para este punto.';
+      return res.redirect(clientOperationsPath(clientId, message));
     } catch (error) {
       console.warn('[ATTENDANCE_POINT_CONFIG]', error?.message || error);
       return res.redirect(clientOperationsPath(clientId, attendancePointConfigurationErrorMessage(error)));
