@@ -66,23 +66,6 @@ export function extractMetaAttributionFields(message = {}) {
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value));
 }
 
-function campaignTokens(campaign = {}) {
-  return compactUnique([
-    normalizeCampaignCode(campaign.code),
-    normalizeAttributionToken(campaign.code),
-    normalizeAttributionToken(campaign.name),
-    normalizeAttributionToken(campaign.notes)
-  ]).filter((token) => token.length >= 3);
-}
-
-function referralTokens(message = {}) {
-  return compactUnique(
-    collectReferralAttributionValues(message)
-      .flatMap((value) => [normalizeCampaignCode(value), normalizeAttributionToken(value)])
-      .filter((token) => token.length >= 3)
-  );
-}
-
 function referralIdentityTokens(message = {}) {
   const referral = extractReferralFromInboundMessage(message) || {};
   return compactUnique([
@@ -103,16 +86,6 @@ function referralDescriptiveTokens(message = {}) {
   ].map(normalizeAttributionToken)).filter((token) => token.length >= 3);
 }
 
-function tokenMatchScore(referralToken, campaignToken) {
-  if (!referralToken || !campaignToken) return 0;
-  if (referralToken === campaignToken) return 2000 + Math.min(referralToken.length, 100);
-  if (referralToken.length < 8 || campaignToken.length < 8) return 0;
-  if (referralToken.includes(campaignToken) || campaignToken.includes(referralToken)) {
-    return 100 + Math.min(referralToken.length, campaignToken.length, 100);
-  }
-  return 0;
-}
-
 function scoreCampaignForReferral(campaign = {}, message = {}) {
   const campaignCode = normalizeCampaignCode(campaign.code);
   const campaignCodeToken = normalizeAttributionToken(campaign.code);
@@ -127,6 +100,12 @@ function scoreCampaignForReferral(campaign = {}, message = {}) {
   if (campaignCodeToken && identityTokens.includes(campaignCodeToken)) {
     return { campaign, score: 9900, mode: 'objective_id_exact' };
   }
+
+  // Si Meta entregó IDs objetivos, no se permite degradar a nombres, notas ni
+  // similitud textual. Un ID desconocido debe conservarse para trazabilidad y
+  // dejar que Lórren pregunte ciudad/cargo en lugar de inventar una asociación.
+  if (identityTokens.length) return { campaign, score: 0, mode: null };
+
   if (campaignCode && descriptiveTokens.includes(campaignCode)) {
     return { campaign, score: 8000, mode: 'campaign_code_exact' };
   }
@@ -140,31 +119,31 @@ function scoreCampaignForReferral(campaign = {}, message = {}) {
     return { campaign, score: 6000, mode: 'campaign_notes_exact' };
   }
 
-  const tokensFromReferral = referralTokens(message);
-  const tokensFromCampaign = campaignTokens(campaign);
-  let score = 0;
-  for (const referralToken of tokensFromReferral) {
-    for (const campaignToken of tokensFromCampaign) {
-      score = Math.max(score, tokenMatchScore(referralToken, campaignToken));
-    }
-  }
-
-  return {
-    campaign,
-    score,
-    mode: score >= 2000 ? 'generic_exact' : (score > 0 ? 'unique_partial' : null)
-  };
+  // Las coincidencias parciales no son una fuente inequívoca de atribución.
+  return { campaign, score: 0, mode: null };
 }
 
 export function resolveCampaignForReferral(campaigns = [], message = {}) {
-  if (!referralTokens(message).length) return { campaign: null, reason: 'no_referral_tokens', matches: [] };
+  const identityTokens = referralIdentityTokens(message);
+  const descriptiveTokens = referralDescriptiveTokens(message);
+  if (!identityTokens.length && !descriptiveTokens.length) {
+    return { campaign: null, reason: 'no_referral_tokens', matches: [] };
+  }
 
   const matches = campaigns
     .map((campaign) => scoreCampaignForReferral(campaign, message))
     .filter((match) => match.score > 0)
     .sort((a, b) => b.score - a.score || String(a.campaign.id).localeCompare(String(b.campaign.id)));
 
-  if (!matches.length) return { campaign: null, reason: 'no_campaign_match', matches: [] };
+  if (!matches.length) {
+    return {
+      campaign: null,
+      reason: identityTokens.length
+        ? 'objective_metadata_without_exact_campaign_match'
+        : 'no_campaign_match',
+      matches: []
+    };
+  }
 
   const best = matches[0];
   const tied = matches.filter((match) => match.score === best.score);
@@ -178,7 +157,7 @@ export function resolveCampaignForReferral(campaigns = [], message = {}) {
 
   return {
     campaign: best.campaign,
-    reason: best.mode === 'unique_partial' ? 'unique_partial_campaign_match' : 'exact_campaign_match',
+    reason: 'exact_campaign_match',
     matchMode: best.mode,
     matches: [{ campaignId: best.campaign.id, score: best.score, mode: best.mode }]
   };
@@ -279,6 +258,7 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
       reason: resolution.reason === 'ambiguous_campaign_match'
         ? 'ambiguous_referral_campaign'
         : 'metadata_saved_without_campaign_match',
+      attributionResolutionReason: resolution.reason,
       campaignCodeRaw,
       metaFields,
       matches: resolution.matches
@@ -323,6 +303,7 @@ async function runCampaignAttribution(prisma, req) {
         candidateId: candidate.id,
         attributed: result.attributed,
         reason: result.reason,
+        attributionResolutionReason: result.attributionResolutionReason || null,
         matchMode: result.matchMode || null,
         campaignId: result.campaignId || null,
         vacancyId: result.vacancyId || null,
