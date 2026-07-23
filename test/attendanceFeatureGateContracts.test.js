@@ -36,6 +36,18 @@ const reformattedHtml = `<!doctype html>
 </body>
 </html>`;
 
+const leafletHtmlWithInvalidIntegrity = `<!doctype html>
+<html>
+<body>
+<main class="page"></main>
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""
+></script>
+</body>
+</html>`;
+
 test('una persona sin acceso no ve la configuracion de asistencia', () => {
   const output = filterAttendanceFeatureHtml(sampleHtml, {
     allowed: false,
@@ -118,6 +130,17 @@ test('el filtro no duplica el control DEV', () => {
   });
 
   assert.equal((second.match(/data-attendance-dev-control/g) || []).length, 1);
+});
+
+test('el HTML entregado corrige el hash oficial de Leaflet 1.9.4', () => {
+  const output = filterAttendanceFeatureHtml(leafletHtmlWithInvalidIntegrity, {
+    allowed: true,
+    isDev: false,
+    recruiterGeneralEnabled: false
+  });
+
+  assert.match(output, /sha256-20nQCchB9co0qIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
+  assert.doesNotMatch(output, /sha256-20nQCchB9coqIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
 });
 
 test('la ruta de escritura exige permiso de asistencia en servidor', () => {
