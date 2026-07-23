@@ -18,6 +18,35 @@ function valuePattern(value) {
   return age === null ? null : String(age);
 }
 
+function normalizeStructuredSegments(text = '') {
+  return String(text || '')
+    .split(/[\n,;]+/)
+    .map((segment) => normalizeText(segment))
+    .filter(Boolean);
+}
+
+function hasStructuredAgeSegment(value, text = '') {
+  const number = valuePattern(value);
+  if (!number) return false;
+  const labeled = new RegExp(`^edad\\s*(?:es\\s*)?[:\\-]?\\s*${number}(?:\\s+anos?(?:\\s+de\\s+edad)?)?$`);
+  const yearsOnly = new RegExp(`^${number}\\s+anos?(?:\\s+de\\s+edad)?$`);
+  return normalizeStructuredSegments(text).some((segment) => labeled.test(segment) || yearsOnly.test(segment));
+}
+
+function isFutureBirthdayNumber(value, text = '') {
+  const number = valuePattern(value);
+  if (!number) return false;
+  const normalized = normalizeText(text);
+  return new RegExp(`\\b(?:cumplo|cumplire|voy\\s+a\\s+cumplir)(?:\\s+los)?\\s+${number}\\b`).test(normalized);
+}
+
+function hasCurrentAgeBeforeFutureBirthday(value, text = '') {
+  const number = valuePattern(value);
+  if (!number) return false;
+  const normalized = normalizeText(text);
+  return new RegExp(`\\b${number}\\s+anos?\\b.{0,70}\\b(?:cumplo|cumplire|voy\\s+a\\s+cumplir)(?:\\s+los)?\\s+\\d{1,2}\\b`).test(normalized);
+}
+
 function hasWorkContext(text = '') {
   return /\b(?:experien\w*|trabaj\w*|labor\w*|cargo|oficio|operacion\w*|logistic\w*|personal|turnos?|coordin\w*)\b/.test(normalizeText(text));
 }
@@ -68,6 +97,10 @@ function hasExplicitAgeBinding(value, text = '') {
   if (!number) return false;
   const normalized = normalizeText(text);
   if (!normalized) return false;
+  if (hasCurrentAgeBeforeFutureBirthday(number, text)) return true;
+  if (hasStructuredAgeSegment(number, text)) {
+    return !isWorkDurationNumber(number, text) && !isWorkMetricNumber(number, text);
+  }
 
   const patterns = [
     new RegExp(`\\bmi\\s+edad\\s+(?:es\\s+)?${number}\\b`),
@@ -103,6 +136,7 @@ function hasStandaloneNumber(value, text = '') {
 export function classifyAgeEvidence(value, text = '', options = {}) {
   const age = normalizeAge(value);
   if (age === null) return { valid: false, reason: 'invalid_age_range' };
+  if (isFutureBirthdayNumber(age, text)) return { valid: false, reason: 'future_birthday_not_current_age' };
   if (hasAddressBinding(age, text)) return { valid: false, reason: 'address_number_not_age' };
   if (isWorkMetricNumber(age, text)) return { valid: false, reason: 'work_metric_not_age' };
   if (isWorkDurationNumber(age, text)) return { valid: false, reason: 'experience_number_not_age' };
@@ -116,6 +150,19 @@ export function classifyAgeEvidence(value, text = '', options = {}) {
 export function extractExplicitAge(text = '') {
   const normalized = normalizeText(text);
   if (!normalized) return null;
+
+  const birthdayMatch = normalized.match(/\b(\d{1,2})\s+anos?\b.{0,70}\b(?:cumplo|cumplire|voy\s+a\s+cumplir)(?:\s+los)?\s+\d{1,2}\b/);
+  if (birthdayMatch?.[1]) {
+    const currentAge = normalizeAge(birthdayMatch[1]);
+    if (currentAge !== null && classifyAgeEvidence(currentAge, text, { allowStandalone: false }).valid) return currentAge;
+  }
+
+  for (const segment of normalizeStructuredSegments(text)) {
+    const match = segment.match(/^(?:edad\s*(?:es\s*)?[:\-]?\s*)?(\d{1,2})\s+anos?(?:\s+de\s+edad)?$/);
+    if (!match?.[1]) continue;
+    const age = normalizeAge(match[1]);
+    if (age !== null && classifyAgeEvidence(age, text, { allowStandalone: false }).valid) return age;
+  }
 
   const patterns = [
     /\bmi\s+edad\s+(?:es\s+)?(\d{1,2})\b/,
