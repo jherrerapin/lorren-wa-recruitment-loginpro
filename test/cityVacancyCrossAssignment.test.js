@@ -30,11 +30,21 @@ test('detecta Medellin aunque no exista una vacante configurada en esa ciudad', 
   assert.equal(city, 'Medellin');
 });
 
-test('Medellin + cargue y descargue no se cruza con la vacante activa de Neiva', async () => {
+test('la última ciudad mencionada prevalece sobre una ciudad anterior del contexto', () => {
+  const city = detectCityFromText(
+    'Inicialmente escribí Neiva\nAhora el proceso correcto es Medellín',
+    ['Neiva', 'Medellin']
+  );
+
+  assert.equal(city, 'Medellin');
+});
+
+test('Medellin explícito prevalece sobre un cityHint equivocado y no se cruza con Neiva', async () => {
   const resolution = await resolveVacancyFromText(
     null,
     ['Hola para saber si tienen vacantes de empleo en medellín?', 'Medellín', 'Cargue y descargue'].join('\n'),
     {
+      cityHint: 'Neiva',
       activeVacancies: [activeNeivaVacancy],
       allVacancies: [activeNeivaVacancy]
     }
@@ -45,6 +55,22 @@ test('Medellin + cargue y descargue no se cruza con la vacante activa de Neiva',
   assert.equal(resolution.city, 'Medellin');
   assert.equal(resolution.roleHint, 'cargue descargue');
   assert.equal(resolution.reason, 'city_without_active_vacancies');
+});
+
+test('cityHint sigue siendo util cuando el candidato no escribió una ciudad', async () => {
+  const resolution = await resolveVacancyFromText(
+    null,
+    'Me interesa cargue y descargue',
+    {
+      cityHint: 'Neiva',
+      activeVacancies: [activeNeivaVacancy],
+      allVacancies: [activeNeivaVacancy]
+    }
+  );
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, activeNeivaVacancy.id);
+  assert.equal(resolution.city, 'Neiva');
 });
 
 test('la compuerta inicial responde sin vacantes en Medellin y no asigna Neiva', async () => {
@@ -74,6 +100,7 @@ test('la compuerta inicial responde sin vacantes en Medellin y no asigna Neiva',
       { direction: 'INBOUND', body: 'Medellín' }
     ],
     vacancyHints: {
+      city: 'Neiva',
       activeVacancies: [activeNeivaVacancy],
       allVacancies: [activeNeivaVacancy]
     }
