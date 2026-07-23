@@ -110,6 +110,23 @@ function offlineFallbackResponse() {
   });
 }
 
+async function cacheActivePortal() {
+  const response = await fetch(PORTAL_PATH, {
+    credentials: 'include',
+    cache: 'no-store',
+    headers: { Accept: 'text/html' }
+  });
+  const mode = response.headers.get('X-Lorren-Worker-Portal-Mode');
+  const cache = await caches.open(CACHE_NAME);
+  if (response.ok && mode === 'active') {
+    await cache.put(PORTAL_CACHE_KEY, response.clone());
+    await notifyClients({ type: 'PORTAL_CACHED' });
+    return true;
+  }
+  if (mode === 'inactive') await cache.delete(PORTAL_CACHE_KEY);
+  return false;
+}
+
 async function networkFirstPortal(request) {
   const cache = await caches.open(CACHE_NAME);
   try {
@@ -172,7 +189,7 @@ async function syncRecord(record) {
       message: 'La marcación offline venció antes de sincronizarse.'
     });
     await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, error: 'offline_capture_expired' });
-    return { retry: false };
+    return { retry: false, sessionRequired: false };
   }
 
   const inProgress = {
@@ -201,7 +218,7 @@ async function syncRecord(record) {
       updatedAt: new Date().toISOString()
     });
     await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: 'network_unavailable' });
-    return { retry: true, error };
+    return { retry: true, sessionRequired: false, error };
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -215,7 +232,7 @@ async function syncRecord(record) {
       message: payload.message || 'Marcación sincronizada.'
     });
     await notifyClients({ type: 'ARRIVAL_SYNCED', assignmentId: record.assignmentId, state, payload });
-    return { retry: false };
+    return { retry: false, sessionRequired: false };
   }
 
   if (response.status === 401) {
@@ -226,7 +243,7 @@ async function syncRecord(record) {
       updatedAt: new Date().toISOString()
     });
     await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: 'portal_session_required' });
-    return { retry: false };
+    return { retry: false, sessionRequired: true };
   }
 
   if (terminalRejection(response.status, payload.error)) {
@@ -239,7 +256,7 @@ async function syncRecord(record) {
         : 'La marcación offline fue rechazada por el servidor.'
     });
     await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, error: payload.error || 'arrival_rejected' });
-    return { retry: false };
+    return { retry: false, sessionRequired: false };
   }
 
   await putQueueRecord({
@@ -249,7 +266,7 @@ async function syncRecord(record) {
     updatedAt: new Date().toISOString()
   });
   await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: payload.error || `http_${response.status}` });
-  return { retry: response.status >= 500 };
+  return { retry: response.status >= 500, sessionRequired: false };
 }
 
 async function syncQueue({ throwOnRetry = false } = {}) {
@@ -258,7 +275,7 @@ async function syncQueue({ throwOnRetry = false } = {}) {
   for (const record of records) {
     const result = await syncRecord(record);
     shouldRetry = shouldRetry || result.retry;
-    if (record.state === 'SESSION_REQUIRED') break;
+    if (result.sessionRequired) break;
   }
   if (throwOnRetry && shouldRetry) throw new Error('arrival_sync_retry_required');
 }
@@ -305,5 +322,9 @@ self.addEventListener('sync', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SYNC_ARRIVALS') {
     event.waitUntil(syncQueue().catch(() => {}));
+    return;
+  }
+  if (event.data?.type === 'CACHE_PORTAL') {
+    event.waitUntil(cacheActivePortal().catch(() => false));
   }
 });
