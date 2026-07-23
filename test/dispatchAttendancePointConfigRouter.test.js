@@ -23,7 +23,7 @@ test('checkbox rechaza valores permisivos o fallback ausente', () => {
 test('errores conocidos se traducen sin exponer códigos internos', () => {
   assert.equal(
     attendancePointConfigurationErrorMessage(new Error('attendance_geofence_coordinates_required')),
-    'Ingresa latitud y longitud antes de habilitar la asistencia.'
+    'Selecciona la ubicación exacta del punto en el mapa antes de habilitar la asistencia.'
   );
   assert.equal(
     attendancePointConfigurationErrorMessage(new Error('attendanceLatitude_invalid')),
@@ -51,7 +51,7 @@ test('router delega en la autoridad y no escribe Prisma directamente', () => {
   assert.match(source, /router\.post\('\/'/);
 });
 
-test('router no expone todavía una marcación pública', () => {
+test('router no expone una marcación pública', () => {
   const source = fs.readFileSync('src/routes/dispatchAttendancePointConfig.js', 'utf8');
   assert.doesNotMatch(source, /registerDispatchArrival/);
   assert.doesNotMatch(source, /\/public|\/marcar|\/llegada/);

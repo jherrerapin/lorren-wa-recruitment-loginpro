@@ -6,8 +6,27 @@
   <title>Operaciones de cliente — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
   <style>
     select.has-selection { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); background: #f0fdfa; }
+    .attendance-map-field { gap: 10px; }
+    .attendance-map { width: 100%; height: 320px; border: 1px solid #dfe4ea; border-radius: 14px; background: #eef2f5; overflow: hidden; }
+    .attendance-map-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: end; }
+    .attendance-map-actions input { min-width: 0; }
+    .attendance-map-status { padding: 10px 12px; border-radius: 10px; background: #f2f5f7; color: #44515e; font-size: 13px; line-height: 1.45; }
+    .attendance-map-status.is-error { background: #fff2e8; color: #8b3a14; }
+    .attendance-standards { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px; border: 1px solid #d8e8e4; border-radius: 12px; background: #f2fbf8; }
+    .attendance-standard { display: inline-flex; align-items: center; min-height: 30px; padding: 5px 9px; border: 1px solid #b9ddd3; border-radius: 999px; background: #fff; color: #24594e; font-size: 12px; font-weight: 750; }
+    .attendance-map .leaflet-control-attribution { font-size: 10px; }
+    @media (max-width: 760px) {
+      .attendance-map-actions { grid-template-columns: 1fr; }
+      .attendance-map { height: 280px; }
+    }
   </style>
 </head>
 <body>
@@ -66,7 +85,7 @@
           </div>
           <% if (!client.operationPoints.length) { %><div class="empty"><strong>No hay operaciones registradas.</strong>Crea el primer punto de servicio para este cliente.</div><% } else { %>
             <div class="list">
-              <% client.operationPoints.forEach((op)=>{ const legacyLink = baseUrl + '/operaciones/solicitud/' + op.publicToken; %>
+              <% client.operationPoints.forEach((op)=>{ const legacyLink = baseUrl + '/operaciones/solicitud/' + op.publicToken; const suggestedAddress = [op.address, op.cityName, 'Colombia'].filter(Boolean).join(', '); %>
                 <article class="item-card">
                   <h3><%= op.name %></h3>
                   <div class="item-meta">
@@ -94,24 +113,45 @@
                       <span><strong>Zona horaria:</strong> <%= op.attendanceTimezone || 'America/Bogota' %></span>
                       <span><strong>Fotografía:</strong> <%= op.attendancePhotoPolicy === 'ALWAYS' ? 'Siempre' : op.attendancePhotoPolicy === 'NEVER' ? 'Nunca' : 'Solo ante riesgo' %></span>
                     </div>
-                    <form method="post" action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/asistencia" class="form-grid compact-form" autocomplete="off">
+                    <form
+                      method="post"
+                      action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/asistencia"
+                      class="form-grid compact-form attendance-map-form"
+                      autocomplete="off"
+                    >
                       <input type="hidden" name="attendanceEnabledFallback" value="false" />
                       <input type="hidden" name="manualAttendanceAllowedFallback" value="false" />
+                      <input type="hidden" name="attendanceLatitude" value="<%= op.attendanceLatitude == null ? '' : op.attendanceLatitude %>" />
+                      <input type="hidden" name="attendanceLongitude" value="<%= op.attendanceLongitude == null ? '' : op.attendanceLongitude %>" />
                       <div class="field full">
-                        <label><input type="checkbox" name="attendanceEnabled" value="true" <%= op.attendanceEnabled ? 'checked' : '' %> /> Habilitar control de asistencia en este punto</label>
-                        <small class="muted">La activación exige coordenadas, radio y precisión válidos. Esta opción no publica todavía un enlace de marcación.</small>
+                        <label><input type="checkbox" name="attendanceEnabled" value="true" <%= op.attendanceEnabled || op.attendanceLatitude == null || op.attendanceLongitude == null ? 'checked' : '' %> /> Habilitar control de asistencia al guardar</label>
+                        <small class="muted">Selecciona el punto exacto en el mapa. Lórren aplicará automáticamente una geocerca de 100 metros y exigirá una precisión GPS de 50 metros o mejor.</small>
                       </div>
-                      <div class="field"><label>Latitud</label><input type="number" name="attendanceLatitude" min="-90" max="90" step="0.0000001" value="<%= op.attendanceLatitude == null ? '' : op.attendanceLatitude %>" placeholder="4.6097100" /></div>
-                      <div class="field"><label>Longitud</label><input type="number" name="attendanceLongitude" min="-180" max="180" step="0.0000001" value="<%= op.attendanceLongitude == null ? '' : op.attendanceLongitude %>" placeholder="-74.0817500" /></div>
-                      <div class="field"><label>Radio de geocerca (m)</label><input type="number" name="geofenceRadiusMeters" min="20" max="2000" step="1" value="<%= op.geofenceRadiusMeters == null ? '' : op.geofenceRadiusMeters %>" /></div>
-                      <div class="field"><label>Precisión máxima GPS (m)</label><input type="number" name="maxLocationAccuracyMeters" min="5" max="500" step="1" value="<%= op.maxLocationAccuracyMeters == null ? '' : op.maxLocationAccuracyMeters %>" /></div>
+                      <div class="field full attendance-map-field">
+                        <label for="attendance-search-<%= op.id %>">Ubicación exacta de la operación</label>
+                        <div class="attendance-map-actions">
+                          <input id="attendance-search-<%= op.id %>" class="attendance-address-search" type="search" value="<%= suggestedAddress %>" placeholder="Dirección, barrio o nombre del lugar" />
+                          <button class="btn attendance-search-button" type="button">Buscar dirección</button>
+                          <button class="btn btn-primary attendance-current-location" type="button">Usar mi ubicación</button>
+                        </div>
+                        <small class="muted">También puedes tocar el mapa o arrastrar el marcador hasta la entrada real del punto.</small>
+                        <div id="attendance-map-<%= op.id %>" class="attendance-map" role="application" aria-label="Mapa para seleccionar el punto de asistencia"></div>
+                        <div class="attendance-map-status" role="status" aria-live="polite"><%= op.attendanceLatitude != null && op.attendanceLongitude != null ? 'Ubicación guardada. Puedes ajustarla en el mapa.' : 'Busca la dirección, usa tu ubicación o toca el mapa para seleccionar el punto.' %></div>
+                      </div>
+                      <div class="field full">
+                        <div class="attendance-standards">
+                          <span class="attendance-standard">Radio permitido: 100 m</span>
+                          <span class="attendance-standard">Precisión GPS: 50 m o mejor</span>
+                          <span class="muted">Valores protegidos y definidos por Lórren.</span>
+                        </div>
+                      </div>
                       <div class="field"><label>Ventana anticipada (min)</label><input type="number" name="earlyArrivalWindowMinutes" min="0" max="240" step="1" required value="<%= op.earlyArrivalWindowMinutes %>" /></div>
                       <div class="field"><label>Tolerancia de tardanza (min)</label><input type="number" name="lateToleranceMinutes" min="0" max="240" step="1" required value="<%= op.lateToleranceMinutes %>" /></div>
                       <div class="field"><label>Declarar ausencia después de (min)</label><input type="number" name="absenceGraceMinutes" min="0" max="240" step="1" required value="<%= op.absenceGraceMinutes %>" /></div>
                       <div class="field"><label>Zona horaria</label><select name="attendanceTimezone" required><option value="America/Bogota" selected>America/Bogota</option></select></div>
                       <div class="field"><label>Política de fotografía</label><select name="attendancePhotoPolicy" required><option value="NEVER" <%= op.attendancePhotoPolicy === 'NEVER' ? 'selected' : '' %>>Nunca</option><option value="RISK_ONLY" <%= op.attendancePhotoPolicy === 'RISK_ONLY' ? 'selected' : '' %>>Solo ante riesgo</option><option value="ALWAYS" <%= op.attendancePhotoPolicy === 'ALWAYS' ? 'selected' : '' %>>Siempre</option></select></div>
                       <div class="field"><label><input type="checkbox" name="manualAttendanceAllowed" value="true" <%= op.manualAttendanceAllowed ? 'checked' : '' %> /> Permitir corrección o registro manual auditado</label></div>
-                      <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar asistencia</button></div>
+                      <div class="form-actions full"><button class="btn btn-primary" type="submit"><%= op.attendanceEnabled ? 'Guardar asistencia' : 'Guardar y habilitar asistencia' %></button></div>
                     </form>
                   </details>
                   <div class="actions stack-actions">
@@ -175,8 +215,19 @@
     </section>
   </main>
 
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
   <script>
+    const ATTENDANCE_GEOFENCE_RADIUS_METERS = 100;
+    const DEFAULT_ATTENDANCE_MAP_CENTER = [4.570868, -74.297333];
+    const attendanceMaps = new WeakMap();
+    let nextNominatimSearchAt = 0;
+
     function refreshSelectState(select) { select.classList.toggle('has-selection', Boolean(select.value)); }
+
     async function loadCityOptions() {
       const selects = Array.from(document.querySelectorAll('.city-select'));
       if (!selects.length) return;
@@ -210,6 +261,192 @@
         console.error('No fue posible cargar ciudades', error);
       }
     }
+
+    function setAttendanceMapStatus(form, message, isError = false) {
+      const status = form.querySelector('.attendance-map-status');
+      if (!status) return;
+      status.textContent = message;
+      status.classList.toggle('is-error', isError);
+    }
+
+    function finiteCoordinate(value, min, max) {
+      const number = Number(value);
+      return Number.isFinite(number) && number >= min && number <= max ? number : null;
+    }
+
+    function setAttendancePoint(form, state, latitude, longitude, message, options = {}) {
+      const lat = finiteCoordinate(latitude, -90, 90);
+      const lng = finiteCoordinate(longitude, -180, 180);
+      if (lat === null || lng === null) {
+        setAttendanceMapStatus(form, 'La ubicación seleccionada no es válida.', true);
+        return;
+      }
+
+      form.querySelector('[name="attendanceLatitude"]').value = lat.toFixed(7);
+      form.querySelector('[name="attendanceLongitude"]').value = lng.toFixed(7);
+      const point = [lat, lng];
+
+      if (!state.marker) {
+        state.marker = window.L.marker(point, { draggable: true }).addTo(state.map);
+        state.marker.on('dragend', () => {
+          const moved = state.marker.getLatLng();
+          setAttendancePoint(form, state, moved.lat, moved.lng, 'Punto ajustado manualmente. Guarda para aplicar el cambio.', { recenter: false });
+        });
+      } else {
+        state.marker.setLatLng(point);
+      }
+
+      if (!state.circle) {
+        state.circle = window.L.circle(point, { radius: ATTENDANCE_GEOFENCE_RADIUS_METERS }).addTo(state.map);
+      } else {
+        state.circle.setLatLng(point).setRadius(ATTENDANCE_GEOFENCE_RADIUS_METERS);
+      }
+
+      if (options.recenter !== false) state.map.setView(point, 18);
+      setAttendanceMapStatus(form, message || 'Punto seleccionado. Guarda la configuración para habilitar la marcación.');
+    }
+
+    async function reserveNominatimSearchSlot() {
+      const now = Date.now();
+      const scheduledAt = Math.max(now, nextNominatimSearchAt);
+      nextNominatimSearchAt = scheduledAt + 1100;
+      const waitMs = scheduledAt - now;
+      if (waitMs > 0) await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+    }
+
+    function initializeAttendanceMap(form) {
+      if (!form) return;
+      const existingState = attendanceMaps.get(form);
+      if (existingState) {
+        window.setTimeout(() => existingState.map.invalidateSize(), 0);
+        return;
+      }
+      if (!window.L) {
+        setAttendanceMapStatus(form, 'No fue posible cargar el mapa. Recarga la página e inténtalo nuevamente.', true);
+        return;
+      }
+
+      const mapContainer = form.querySelector('.attendance-map');
+      const latitudeInput = form.querySelector('[name="attendanceLatitude"]');
+      const longitudeInput = form.querySelector('[name="attendanceLongitude"]');
+      const savedLatitude = finiteCoordinate(latitudeInput?.value, -90, 90);
+      const savedLongitude = finiteCoordinate(longitudeInput?.value, -180, 180);
+      const hasSavedPoint = savedLatitude !== null && savedLongitude !== null;
+      const initialCenter = hasSavedPoint ? [savedLatitude, savedLongitude] : DEFAULT_ATTENDANCE_MAP_CENTER;
+      const map = window.L.map(mapContainer, { scrollWheelZoom: false }).setView(initialCenter, hasSavedPoint ? 18 : 6);
+      const state = { map, marker: null, circle: null };
+      attendanceMaps.set(form, state);
+
+      window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      }).addTo(map);
+
+      map.on('click', (event) => {
+        setAttendancePoint(form, state, event.latlng.lat, event.latlng.lng, 'Punto seleccionado en el mapa. Guarda para habilitar la marcación.');
+      });
+
+      if (hasSavedPoint) {
+        setAttendancePoint(form, state, savedLatitude, savedLongitude, 'Ubicación guardada. Puedes tocar el mapa o arrastrar el marcador para ajustarla.');
+      }
+
+      form.querySelector('.attendance-search-button')?.addEventListener('click', async () => {
+        const searchInput = form.querySelector('.attendance-address-search');
+        const query = String(searchInput?.value || '').trim();
+        if (query.length < 4) {
+          setAttendanceMapStatus(form, 'Escribe una dirección o nombre de lugar más específico.', true);
+          searchInput?.focus();
+          return;
+        }
+
+        const button = form.querySelector('.attendance-search-button');
+        button.disabled = true;
+        setAttendanceMapStatus(form, 'Buscando la dirección…');
+        try {
+          await reserveNominatimSearchSlot();
+          const params = new URLSearchParams({
+            q: query,
+            format: 'jsonv2',
+            limit: '1',
+            countrycodes: 'co',
+            'accept-language': 'es'
+          });
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+          let response;
+          try {
+            response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+              headers: { Accept: 'application/json' },
+              signal: controller.signal
+            });
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+          if (!response.ok) throw new Error('geocoding_unavailable');
+          const results = await response.json();
+          const first = Array.isArray(results) ? results[0] : null;
+          if (!first) {
+            setAttendanceMapStatus(form, 'No encontramos esa dirección. Prueba con barrio, ciudad o selecciona el punto directamente en el mapa.', true);
+            return;
+          }
+          setAttendancePoint(form, state, first.lat, first.lon, 'Dirección encontrada. Ajusta el marcador si la entrada real está en otro lugar.');
+        } catch (_error) {
+          setAttendanceMapStatus(form, 'La búsqueda de direcciones no está disponible. Usa tu ubicación o selecciona el punto directamente en el mapa.', true);
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      form.querySelector('.attendance-current-location')?.addEventListener('click', () => {
+        if (!navigator.geolocation) {
+          setAttendanceMapStatus(form, 'Este navegador no permite obtener la ubicación. Selecciona el punto directamente en el mapa.', true);
+          return;
+        }
+        const button = form.querySelector('.attendance-current-location');
+        button.disabled = true;
+        setAttendanceMapStatus(form, 'Obteniendo tu ubicación actual…');
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const accuracy = Math.round(position.coords.accuracy || 0);
+            setAttendancePoint(
+              form,
+              state,
+              position.coords.latitude,
+              position.coords.longitude,
+              accuracy > 50
+                ? `Ubicación obtenida con una precisión aproximada de ${accuracy} m. Ajusta el marcador hasta la entrada exacta.`
+                : `Ubicación actual seleccionada con una precisión aproximada de ${accuracy} m.`
+            );
+            button.disabled = false;
+          },
+          () => {
+            setAttendanceMapStatus(form, 'No fue posible obtener tu ubicación. Revisa el permiso del navegador o selecciona el punto en el mapa.', true);
+            button.disabled = false;
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+      });
+
+      form.addEventListener('submit', (event) => {
+        const enabled = form.querySelector('[name="attendanceEnabled"]')?.checked === true;
+        const hasCoordinates = Boolean(latitudeInput?.value && longitudeInput?.value);
+        if (enabled && !hasCoordinates) {
+          event.preventDefault();
+          setAttendanceMapStatus(form, 'Selecciona primero la ubicación exacta del punto.', true);
+          mapContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+
+      window.setTimeout(() => map.invalidateSize(), 0);
+    }
+
+    document.querySelectorAll('details.attendance-config').forEach((details) => {
+      details.addEventListener('toggle', () => {
+        if (details.open) initializeAttendanceMap(details.querySelector('.attendance-map-form'));
+      });
+      if (details.open) initializeAttendanceMap(details.querySelector('.attendance-map-form'));
+    });
+
     document.querySelectorAll('.copy-client-link').forEach((button) => {
       button.addEventListener('click', async () => {
         const value = button.dataset.copyValue || '';
@@ -228,6 +465,7 @@
         }
       });
     });
+
     window.addEventListener('pageshow', (event) => { if (event.persisted) window.location.reload(); });
     loadCityOptions();
   </script>
