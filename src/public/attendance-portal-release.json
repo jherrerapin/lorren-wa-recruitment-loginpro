@@ -1,9 +1,9 @@
 {
   "service": "lorren-attendance-portal",
-  "release": "attendance-portal-2026-07-22-r4",
+  "release": "attendance-portal-2026-07-22-r5",
   "legacyAdminRedirect": true,
   "publicPortalPath": "/operaciones/portal",
-  "features": ["assignments", "arrival", "geolocation", "selfie-evidence", "attendance-point-map"],
+  "features": ["assignments", "arrival", "geolocation", "selfie-evidence", "attendance-point-map", "server-side-geocoding", "bounded-arrival-window"],
   "defaultGeofenceRadiusMeters": 100,
   "defaultMaxLocationAccuracyMeters": 50
 }
