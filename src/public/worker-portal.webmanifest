@@ -1,0 +1,20 @@
+{
+  "name": "Lórren Asistencia",
+  "short_name": "Lórren",
+  "description": "Portal de programación y marcación de asistencia para auxiliares de LoginPro.",
+  "lang": "es-CO",
+  "start_url": "/operaciones/portal",
+  "scope": "/operaciones/portal/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f6f8",
+  "theme_color": "#176c36",
+  "icons": [
+    {
+      "src": "/public/worker-portal-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
