@@ -134,6 +134,12 @@
     }
   }
 
+  function postToServiceWorker(message) {
+    const registration = serviceWorkerRegistration;
+    const target = registration?.active || registration?.waiting || navigator.serviceWorker?.controller;
+    target?.postMessage(message);
+  }
+
   async function registerBackgroundSync() {
     const registration = serviceWorkerRegistration || await navigator.serviceWorker?.ready;
     if (!registration) return false;
@@ -146,8 +152,7 @@
         // The service worker message fallback below remains available.
       }
     }
-    const target = registration.active || registration.waiting || navigator.serviceWorker.controller;
-    target?.postMessage({ type: 'SYNC_ARRIVALS' });
+    postToServiceWorker({ type: 'SYNC_ARRIVALS' });
     return false;
   }
 
@@ -198,24 +203,24 @@
 
   async function syncNow() {
     await registerBackgroundSync();
-    const registration = serviceWorkerRegistration || await navigator.serviceWorker?.ready;
-    const target = registration?.active || registration?.waiting || navigator.serviceWorker.controller;
-    target?.postMessage({ type: 'SYNC_ARRIVALS' });
+    postToServiceWorker({ type: 'SYNC_ARRIVALS' });
   }
 
   async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return null;
     serviceWorkerRegistration = await navigator.serviceWorker.register(
       '/operaciones/portal/service-worker.js',
-      { scope: '/operaciones/portal/' }
+      { scope: '/operaciones/portal' }
     );
+    serviceWorkerRegistration = await navigator.serviceWorker.ready;
+    postToServiceWorker({ type: 'CACHE_PORTAL' });
     return serviceWorkerRegistration;
   }
 
   function handleServiceWorkerMessage(event) {
     const message = event?.data;
     if (!message || typeof message !== 'object') return;
-    if (['ARRIVAL_QUEUE_UPDATED', 'ARRIVAL_SYNCED', 'ARRIVAL_SYNC_REJECTED', 'ARRIVAL_SYNC_RETRY'].includes(message.type)) {
+    if (['ARRIVAL_QUEUE_UPDATED', 'ARRIVAL_SYNCED', 'ARRIVAL_SYNC_REJECTED', 'ARRIVAL_SYNC_RETRY', 'PORTAL_CACHED'].includes(message.type)) {
       emitState({ event: message });
     }
   }
@@ -227,6 +232,7 @@
     navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
     window.addEventListener('online', () => {
       emitState();
+      postToServiceWorker({ type: 'CACHE_PORTAL' });
       syncNow().catch(() => {});
     });
     window.addEventListener('offline', () => emitState());
