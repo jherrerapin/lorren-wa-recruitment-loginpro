@@ -207,9 +207,6 @@ function formatFieldListForVacancy(fields = [], vacancy = null) {
 function buildDataRequestPrompt(candidate = {}, vacancy = null) {
   return buildCandidateDataCollectionMessage(candidate, vacancy);
 }
-function formatFieldList(fields = [], vacancy = null) {
-  return formatFieldListForVacancy(fields, vacancy);
-}
 function formatYearsLabel(age) {
   if (!age) return 'Pendiente';
   return `${age} a\u00f1os`;
@@ -256,7 +253,7 @@ function buildMissingFieldsReply(candidate, normalizedData = {}, vacancy = null)
   return `Para continuar con la postulación falta esta información: ${missing.join(', ')}.`;
 }
 function buildUpdatedConfirmationReply(candidate, updatedFields = [], vacancy = null) {
-  const updatedLabel = formatFieldList(updatedFields, vacancy);
+  const updatedLabel = formatFieldListForVacancy(updatedFields, vacancy);
   const missing = getMissingFieldLabels(candidate, vacancy);
   const intro = updatedLabel
     ? `Listo, ya actualice ${updatedLabel}. Asi va tu registro:`

@@ -13,7 +13,6 @@
       "BLOCKED"
     ],
     "trackedAliasSymbols": [
-      "formatFieldList",
       "buildDataRequestPrompt"
     ]
   },
@@ -151,21 +150,6 @@
     }
   ],
   "aliases": [
-    {
-      "symbol": "formatFieldList",
-      "kind": "pure_alias",
-      "status": "TRANSITIONAL",
-      "definitionPath": "src/routes/webhook.js",
-      "targetSymbol": "formatFieldListForVacancy",
-      "targetPath": "src/routes/webhook.js",
-      "owner": "recruitment-readiness",
-      "purpose": "Expone con otro nombre el formateador local que sí contiene la transformación de etiquetas.",
-      "retirementCondition": "Usar formatFieldListForVacancy directamente o extraer el formateador al servicio canónico y actualizar pruebas de redacción.",
-      "evidenceTests": [
-        "test/flexibleApplicationFlow.test.js",
-        "test/lorrenRegressionFixes.test.js"
-      ]
-    },
     {
       "symbol": "buildDataRequestPrompt",
       "kind": "pure_alias",
