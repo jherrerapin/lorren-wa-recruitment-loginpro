@@ -34,6 +34,30 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Correct status-view transformation in application recipe
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply-issue-677.py')
+          source = path.read_text(encoding='utf-8')
+          old = '''status_old = "return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };"
+          status_new = "return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };"
+          if v6.count(status_old) != 2:
+              raise SystemExit(f'estado runtime: se esperaban 2 coincidencias y se encontraron {v6.count(status_old)}')
+          v6 = v6.replace(status_old, status_new)
+          '''
+          new = '''status_old = "return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };"
+          status_new = "return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };"
+          v6 = replace_once(v6, status_old, status_new, 'estado runtime interno')
+          status_view_old = "return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };"
+          status_view_new = "return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };"
+          v6 = replace_once(v6, status_view_old, status_view_new, 'estado runtime de vista')
+          '''
+          if source.count(old) != 1:
+              raise SystemExit(f'No se encontró el bloque de estado esperado: {source.count(old)}')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply exact reliability changes
         run: |
           if [ -f .github/issue-677-apply-error.txt ]; then
