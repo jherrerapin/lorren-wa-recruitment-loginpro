@@ -16,6 +16,9 @@
       --navy: #1e2d3d;
       --teal: #0d7a6b;
       --teal-hover: #0a5f53;
+      --danger: #b91c1c;
+      --warning-bg: #fffbeb;
+      --warning-border: #fcd34d;
       --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
       --shadow-md: 0 10px 28px rgba(15,23,42,.08);
       --radius: 12px;
@@ -28,26 +31,49 @@
     .navbar .brand img { height: 28px; display: block; }
     .navbar .spacer { flex: 1; }
     .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 6px 12px !important; border-radius: 7px; cursor: pointer; font-size: 12px; font-weight: 600; }
-    .page { max-width: 780px; margin: 0 auto; padding: 36px 20px 60px; display: grid; gap: 20px; }
+    .page { max-width: 1120px; margin: 0 auto; padding: 36px 20px 60px; display: grid; gap: 20px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow-md); }
-    h1 { color: var(--navy); font-size: 22px; margin-bottom: 8px; }
-    .sub { color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 24px; }
+    .hero { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+    h1 { color: var(--navy); font-size: 24px; margin-bottom: 8px; }
+    h2 { color: var(--navy); font-size: 18px; margin-bottom: 8px; }
+    .sub { color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 760px; }
     .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
     .field label { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
     input[type=file] { border: 2px dashed var(--border); border-radius: 10px; padding: 20px; width: 100%; background: #f9fafb; cursor: pointer; font-size: 13px; color: var(--muted); }
     input[type=file]:hover { border-color: var(--teal); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; border: 1px solid var(--border); border-radius: 10px; padding: 9px 18px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border: 1px solid var(--border); border-radius: 10px; padding: 9px 18px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 13px; font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); }
     .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
     .btn-primary:hover { background: var(--teal-hover); }
     .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    .alert-error { border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 10px; padding: 12px 14px; font-size: 13px; font-weight: 700; margin-bottom: 18px; }
-    .info-box { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px; padding: 16px 18px; font-size: 13px; color: #0f766e; margin-bottom: 22px; }
-    .info-box strong { display: block; margin-bottom: 8px; font-size: 13px; }
-    .info-box ul { padding-left: 18px; line-height: 2; }
-    .col-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
-    .col-table th { text-align: left; color: #0f766e; font-weight: 900; padding: 4px 10px; border-bottom: 1px solid #99f6e4; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-    .col-table td { padding: 6px 10px; border-bottom: 1px solid #ccfbf1; color: #134e4a; }
+    .alert-error { border: 1px solid #fecaca; background: #fef2f2; color: var(--danger); border-radius: 10px; padding: 12px 14px; font-size: 13px; font-weight: 700; margin-bottom: 18px; line-height: 1.5; }
+    .info-box { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px; padding: 16px 18px; font-size: 13px; color: #0f766e; }
+    .warning-box { background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 10px; padding: 15px 17px; color: #854d0e; line-height: 1.55; }
+    .grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 20px; align-items: start; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+    .col-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 820px; }
+    .col-table th { text-align: left; color: #fff; background: var(--teal); font-weight: 900; padding: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .col-table td { padding: 10px; border-bottom: 1px solid var(--border); color: #334155; vertical-align: top; line-height: 1.4; }
+    .col-table tr:last-child td { border-bottom: 0; }
+    .required, .optional { display: inline-flex; border-radius: 999px; padding: 3px 7px; font-size: 10px; font-weight: 900; white-space: nowrap; }
+    .required { background: #fee2e2; color: #991b1b; }
+    .optional { background: #e2e8f0; color: #475569; }
+    .rules { display: grid; gap: 12px; }
+    .rule { border: 1px solid var(--border); border-radius: 10px; padding: 13px 14px; background: #f8fafc; }
+    .rule strong { display: block; color: var(--navy); margin-bottom: 5px; }
+    .rule p, .rule li { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .rule ul { padding-left: 18px; }
+    details { border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    summary { cursor: pointer; padding: 12px 14px; font-weight: 800; color: var(--navy); }
+    .catalog { padding: 0 14px 14px; max-height: 220px; overflow: auto; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .upload-card { position: sticky; top: 18px; }
+    .small { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      .upload-card { position: static; }
+      .card { padding: 20px; }
+      .navbar { padding: 0 14px; gap: 12px; flex-wrap: wrap; }
+    }
   </style>
 </head>
 <body>
@@ -62,36 +88,87 @@
   </nav>
 
   <main class="page">
-    <div class="card">
-      <h1>&#11014; Importar auxiliares desde Excel</h1>
-      <p class="sub">Sube un archivo <strong>.xlsx</strong> con los auxiliares a registrar. Se crearán con origen <strong>📊 Excel masivo</strong> y estado <strong>Contratado</strong>. Si ya existe un auxiliar con la misma cédula, la fila se omite sin generar error.</p>
-
-      <% if (error) { %><div class="alert-error">&#9888; <%= error %></div><% } %>
-
-      <div class="info-box">
-        <strong>Formato esperado del archivo — columnas en orden:</strong>
-        <table class="col-table">
-          <thead><tr><th>Columna</th><th>Campo</th><th>Ejemplo</th></tr></thead>
-          <tbody>
-            <tr><td><strong>A</strong></td><td>Nombre completo</td><td>Oscar Antonio Montoya Hernandez</td></tr>
-            <tr><td><strong>B</strong></td><td>Cédula</td><td>2615249</td></tr>
-            <tr><td><strong>C</strong></td><td>Teléfono</td><td>3134645409</td></tr>
-            <tr><td><strong>D</strong></td><td>Localidad</td><td>Siberia</td></tr>
-          </tbody>
-        </table>
-        <p style="margin-top:10px;font-size:12px;color:#0f766e;">&#9432; La primera fila del archivo se trata como encabezado y se omite automáticamente. Solo se requiere el <strong>Nombre</strong>; las demás columnas son opcionales.</p>
+    <section class="card hero">
+      <div>
+        <h1>Importar auxiliares desde Excel</h1>
+        <p class="sub">La carga masiva ahora utiliza los mismos datos operativos del formulario manual. Las columnas se identifican por su encabezado, por lo que puedes cambiar su orden sin afectar la importación.</p>
       </div>
+      <div class="actions">
+        <a class="btn btn-primary" href="/admin/operaciones/personal/importar-excel/plantilla">Descargar plantilla completa</a>
+        <a class="btn btn-secondary" href="/admin/operaciones/personal">Volver a personal</a>
+      </div>
+    </section>
 
-      <form method="post" action="/admin/operaciones/personal/importar-excel" enctype="multipart/form-data">
-        <div class="field">
-          <label for="excelFile">Archivo Excel (.xlsx)</label>
-          <input type="file" id="excelFile" name="excelFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+    <% if (error) { %><div class="alert-error">⚠ <%= error %></div><% } %>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Campos aceptados</h2>
+        <p class="sub" style="margin-bottom:16px;">La fila 1 debe contener los encabezados. Los datos empiezan en la fila 2. Todos los campos marcados como obligatorios deben estar completos en cada auxiliar.</p>
+        <div class="table-wrap">
+          <table class="col-table">
+            <thead><tr><th>Encabezado</th><th>Requisito</th><th>Cómo diligenciarlo</th><th>Ejemplo</th></tr></thead>
+            <tbody>
+              <% columns.forEach((column) => { %>
+                <tr>
+                  <td><strong><%= column.header %></strong></td>
+                  <td><span class="<%= column.required ? 'required' : 'optional' %>"><%= column.required ? 'Obligatorio' : 'Opcional' %></span></td>
+                  <td><%= column.help %></td>
+                  <td><%= column.example %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
         </div>
-        <div class="actions">
-          <button type="submit" class="btn btn-primary">&#9654; Iniciar importación</button>
-          <a class="btn btn-secondary" href="/admin/operaciones/personal">Cancelar</a>
+
+        <div class="warning-box" style="margin-top:16px;">
+          <strong>Hoja de vida:</strong> no se importa desde una celda del Excel. Después de crear el auxiliar, puedes adjuntar su PDF, DOC o DOCX desde <strong>Editar auxiliar</strong>. No escribas rutas locales ni enlaces a archivos dentro de la plantilla.
         </div>
-      </form>
+      </section>
+
+      <aside class="card upload-card">
+        <h2>Subir archivo</h2>
+        <p class="sub" style="margin-bottom:18px;">Solo se acepta un archivo <strong>.xlsx</strong> de máximo <strong>5 MB</strong>. El sistema valida todas las filas antes de crear o actualizar auxiliares.</p>
+
+        <form method="post" action="/admin/operaciones/personal/importar-excel" enctype="multipart/form-data">
+          <div class="field">
+            <label for="excelFile">Archivo Excel (.xlsx)</label>
+            <input type="file" id="excelFile" name="excelFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn btn-primary">Validar e importar</button>
+            <a class="btn btn-secondary" href="/admin/operaciones/personal">Cancelar</a>
+          </div>
+        </form>
+
+        <div class="rules" style="margin-top:20px;">
+          <div class="rule">
+            <strong>Varias ciudades o vacantes</strong>
+            <p>Sepáralas usando coma, punto y coma, barra vertical <strong>|</strong> o un salto de línea.</p>
+          </div>
+          <div class="rule">
+            <strong>Documentos duplicados</strong>
+            <p>Un documento ya activo se omite. Un auxiliar desactivado se actualiza con todos los datos y relaciones del Excel.</p>
+          </div>
+          <div class="rule">
+            <strong>Valores controlados</strong>
+            <ul>
+              <li>Contrato: DIRECTO o CONTRATISTA.</li>
+              <li>Estado: CONTRATADO o INACTIVE.</li>
+              <li>Transporte: Publico, Moto, Bicicleta o Carro.</li>
+            </ul>
+          </div>
+
+          <details>
+            <summary>Ciudades válidas (<%= cities.length %>)</summary>
+            <div class="catalog"><%= cities.map((city) => city.name).join(' · ') || 'No hay ciudades configuradas.' %></div>
+          </details>
+          <details>
+            <summary>Vacantes / perfiles válidos (<%= vacancies.length %>)</summary>
+            <div class="catalog"><%= vacancies.map((vacancy) => `${vacancy.title} — ${vacancy.city || 'Sin ciudad'}`).join(' · ') || 'No hay vacantes configuradas.' %></div>
+          </details>
+        </div>
+      </aside>
     </div>
   </main>
 </body>
