@@ -28,7 +28,7 @@ import {
   scheduleCandidateMultilineWindow
 } from '../services/candidateStateService.js';
 import { runChatEngine } from '../services/chatEngine.js';
-import { think, extractEngineCandidateFields } from '../services/conversationEngine.js';
+import { think, extractEngineCandidateFields, prepareEngineDecisionContext } from '../services/conversationEngine.js';
 import { storeCandidateCv } from '../services/cvStorage.js';
 import { applyFieldPolicy } from '../services/policyLayer.js';
 import { analyzeAttachment } from '../services/attachmentAnalyzer.js';
@@ -822,6 +822,15 @@ async function buildEngineContext(prisma, candidate, inboundText = '', providedV
 
 async function previewEngineCandidateFields(prisma, candidate, inboundText, providedVacancy = null) {
   const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, candidate, inboundText, providedVacancy);
+  const preparedContext = await prepareEngineDecisionContext({
+    inboundText,
+    candidate,
+    vacancy,
+    recentMessages,
+    nextSlot,
+    currentStep: candidate.currentStep || ConversationStep.MENU,
+    prisma
+  });
   const preview = await think({
     inboundText,
     candidate,
@@ -829,12 +838,19 @@ async function previewEngineCandidateFields(prisma, candidate, inboundText, prov
     recentMessages,
     nextSlot,
     currentStep: candidate.currentStep || ConversationStep.MENU,
+    prisma,
+    preparedContext
   });
+  const usage = preview?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
 
-  if (preview?.fallback) return { fields: {}, usage: preview?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
+  if (preview?.fallback) {
+    return { fields: {}, usage, decision: null, used: false };
+  }
   return {
     fields: extractEngineCandidateFields(preview.actions, preview.extractedFields),
-    usage: preview?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+    usage,
+    decision: preview,
+    used: true
   };
 }
 
@@ -862,9 +878,11 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
     recentMessages,
     nextSlot,
     candidateFieldHints: options.candidateFieldHints || {},
+    precomputedDecision: options.enginePreview?.decision || null,
   });
   if (options.debugTrace) {
     options.debugTrace.engine_primary = true;
+    options.debugTrace.engine_plan_reused = Boolean(engineResult.decisionReused);
     options.debugTrace.engine_actions = (engineResult.actions || []).map((action) => action?.type).filter(Boolean);
     options.debugTrace.engine_loop_guard = Boolean(engineResult.loopGuardApplied);
     options.debugTrace.blockedActions = engineResult.blockedActions || [];
@@ -1616,7 +1634,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     ['documentType', 'documentNumber', 'age', 'medicalRestrictions', 'transportMode', 'neighborhood', 'locality'].includes(field)
   ));
 
-  debugTrace.openai_used = aiResult.used || turnInterpretation.engineFieldCount > 0;
+  debugTrace.openai_used = aiResult.used || rawEnginePreview.used || turnInterpretation.engineFieldCount > 0;
   debugTrace.openai_status = aiResult.status === 'error' ? 'fallback' : aiResult.status;
   debugTrace.openai_model = aiResult.model || debugTrace.openai_model;
   debugTrace.openai_temperature_omitted = typeof aiResult.temperature_omitted === 'boolean'
@@ -1716,7 +1734,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     if (USE_CONVERSATION_ENGINE && isQuestionLike(cleanText) && !shouldPreferDeterministicVacancyReply) {
       const handledByEngine = await replyWithEngine(prisma, candidateState, from, cleanText, effectiveVacancy, {
         candidateFieldHints: normalizedData,
-        debugTrace
+        debugTrace,
+        enginePreview: rawEnginePreview
       });
       if (handledByEngine) return;
     }
@@ -1740,7 +1759,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     return replyWithEngine(prisma, candidateState, from, cleanText, vacancyState, {
       candidateFieldHints: normalizedData,
-      debugTrace
+      debugTrace,
+      enginePreview: rawEnginePreview
     });
   };
 

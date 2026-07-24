@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { ConversationStep, Gender, ReminderState } from '@prisma/client';
-import { act } from '../src/services/conversationEngine.js';
+import { act, prepareEngineDecisionContext } from '../src/services/conversationEngine.js';
+import { runChatEngine } from '../src/services/chatEngine.js';
 
 function baseCandidate(overrides = {}) {
   return {
@@ -183,4 +184,122 @@ test('chatEngine suprime la respuesta calculada sobre un paso obsoleto', () => {
   assert.match(source, /staleStepConflict/);
   assert.match(source, /effectiveReply\s*=\s*staleStepConflict\s*\?\s*null/);
   assert.match(source, /suppressedReason:\s*staleStepConflict\s*\?\s*['"]stale_candidate_step['"]/);
+});
+
+
+test('chatEngine reutiliza una decisión válida sin ejecutar un segundo think', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const candidate = baseCandidate();
+    const currentVacancy = vacancy();
+    const prisma = createPrismaHarness(candidate);
+    const inboundText = 'continua con mi proceso';
+    const preparedContext = await prepareEngineDecisionContext({
+      prisma,
+      candidate,
+      vacancy: currentVacancy,
+      inboundText,
+      recentMessages: [],
+      currentStep: candidate.currentStep
+    });
+    const plannedReply = 'Respuesta calculada una sola vez para este turno.';
+    const result = await runChatEngine({
+      prisma,
+      candidate,
+      vacancy: currentVacancy,
+      inboundText,
+      recentMessages: [],
+      precomputedDecision: {
+        reply: plannedReply,
+        nextStep: candidate.currentStep,
+        actions: [{ type: 'nothing' }],
+        extractedFields: {},
+        fallback: false,
+        fallbackReason: null,
+        loopGuardApplied: false,
+        contextFingerprint: preparedContext.contextFingerprint,
+        usage: { input_tokens: 11, output_tokens: 7, total_tokens: 18 }
+      }
+    });
+
+    assert.equal(result.reply, plannedReply);
+    assert.equal(result.decisionReused, true);
+    assert.equal(result.fallback, false);
+    assert.deepEqual(result.usage, { input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('chatEngine no reutiliza una decisión fallback', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const candidate = baseCandidate();
+    const prisma = createPrismaHarness(candidate);
+    const result = await runChatEngine({
+      prisma,
+      candidate,
+      vacancy: vacancy(),
+      inboundText: 'continua con mi proceso',
+      recentMessages: [],
+      precomputedDecision: {
+        reply: 'NO_DEBE_REUTILIZARSE',
+        nextStep: candidate.currentStep,
+        actions: [{ type: 'nothing' }],
+        extractedFields: {},
+        fallback: true,
+        fallbackReason: 'preview_failed',
+        loopGuardApplied: false,
+        usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 }
+      }
+    });
+
+    assert.equal(result.decisionReused, false);
+    assert.equal(result.fallback, true);
+    assert.notEqual(result.reply, 'NO_DEBE_REUTILIZARSE');
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('webhook entrega la decisión previa y el engine valida la huella completa', () => {
+  const webhookSource = fs.readFileSync('src/routes/webhook.js', 'utf8');
+  const engineSource = fs.readFileSync('src/services/chatEngine.js', 'utf8');
+  const plannerSource = fs.readFileSync('src/services/conversationEngine.js', 'utf8');
+  assert.match(webhookSource, /prepareEngineDecisionContext/);
+  assert.equal((webhookSource.match(/enginePreview: rawEnginePreview/g) || []).length, 2);
+  assert.match(engineSource, /precomputedDecision\.contextFingerprint === preparedContext\.contextFingerprint/);
+  assert.match(plannerSource, /createHash\('sha256'\)/);
+  assert.match(plannerSource, /JSON\.stringify\(\{ systemPrompt, userPrompt \}\)/);
+});
+
+test('la huella cambia cuando cambia el historial o el slot', async () => {
+  const candidate = baseCandidate();
+  const currentVacancy = vacancy();
+  const prisma = createPrismaHarness(candidate);
+  const base = {
+    prisma,
+    candidate,
+    vacancy: currentVacancy,
+    inboundText: 'continua con mi proceso',
+    currentStep: candidate.currentStep
+  };
+  const original = await prepareEngineDecisionContext({ ...base, recentMessages: [], nextSlot: null });
+  const withHistory = await prepareEngineDecisionContext({
+    ...base,
+    recentMessages: [{ direction: 'OUTBOUND', body: 'Mensaje previo', rawPayload: { source: 'engine' } }],
+    nextSlot: null
+  });
+  const withSlot = await prepareEngineDecisionContext({
+    ...base,
+    recentMessages: [],
+    nextSlot: { slot: { id: 'slot-2' }, date: new Date('2026-08-01T15:00:00.000Z'), formattedDate: '1 de agosto' }
+  });
+
+  assert.notEqual(original.contextFingerprint, withHistory.contextFingerprint);
+  assert.notEqual(original.contextFingerprint, withSlot.contextFingerprint);
 });

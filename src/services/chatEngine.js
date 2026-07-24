@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { ConversationStep } from '@prisma/client';
-import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention } from './conversationEngine.js';
+import { think, act, extractEngineCandidateFields, hasRecentHumanIntervention, prepareEngineDecisionContext } from './conversationEngine.js';
 import { getNextAvailableSlotAfter, formatInterviewDate } from './interviewScheduler.js';
 import { applyInterviewReminderResponse } from './interviewBookingStateService.js';
 import {
@@ -465,6 +465,7 @@ export async function runChatEngine({
   recentMessages,
   nextSlot = null,
   candidateFieldHints = {},
+  precomputedDecision = null,
 }) {
   const currentStep = candidate.currentStep || ConversationStep.MENU;
   const storedActiveInterviewBooking = await loadActiveInterviewBooking(prisma, candidate.id);
@@ -579,15 +580,33 @@ export async function runChatEngine({
     };
   }
 
-  const result = await think({
+  const preparedContext = await prepareEngineDecisionContext({
     inboundText,
     candidate,
     vacancy,
     recentMessages,
     nextSlot,
     currentStep,
-    prisma,
+    prisma
   });
+  const decisionReused = Boolean(
+    precomputedDecision
+    && precomputedDecision.fallback === false
+    && precomputedDecision.contextFingerprint
+    && precomputedDecision.contextFingerprint === preparedContext.contextFingerprint
+  );
+  const result = decisionReused
+    ? precomputedDecision
+    : await think({
+      inboundText,
+      candidate,
+      vacancy,
+      recentMessages,
+      nextSlot,
+      currentStep,
+      prisma,
+      preparedContext
+    });
 
   const actions = Array.isArray(result.actions) ? result.actions : [];
   const extractedFields = result.extractedFields && typeof result.extractedFields === 'object'
@@ -671,7 +690,10 @@ export async function runChatEngine({
     fallback: result.fallback,
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),
-    usage: result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    decisionReused,
+    usage: decisionReused
+      ? { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+      : (result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 }),
     suppressed: noUsefulReply,
     suppressedReason: staleStepConflict
       ? 'stale_candidate_step'
