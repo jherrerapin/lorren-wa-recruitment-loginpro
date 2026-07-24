@@ -404,6 +404,12 @@ export function dispatchBridgeRouter() {
           || operation.attendanceLatitude !== null
           || operation.attendanceLongitude !== null;
 
+        if (locationChanged && hadAttendanceLocation && !req.canAccessAttendanceFeature) {
+          return res.status(403).send(
+            'Cambiar la ciudad o dirección de un punto con asistencia requiere acceso autorizado a Asistencia.'
+          );
+        }
+
         const data = {
           name,
           cityName,
