@@ -1,0 +1,82 @@
+name: Finalize issue 670 import privacy
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'fix/670-dispatch-worker-excel-import'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out correction branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/670-dispatch-worker-excel-import
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Remove personal data from technical logs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service_path = Path('src/services/dispatchWorkerExcelImport.js')
+          service = service_path.read_text(encoding='utf-8')
+          old_duplicate = "errors.push(`Fila ${row.rowNumber}: el Número de documento ${documentNumber} está repetido dentro del archivo.`);"
+          new_duplicate = "errors.push(`Fila ${row.rowNumber}: el Número de documento está repetido dentro del archivo.`);"
+          if old_duplicate not in service:
+              raise SystemExit('No se encontró el mensaje de documento repetido')
+          service_path.write_text(service.replace(old_duplicate, new_duplicate, 1), encoding='utf-8')
+
+          route_path = Path('src/routes/dispatchOpsExtras.js')
+          route = route_path.read_text(encoding='utf-8')
+          old_log = "console.error('[Dispatch worker Excel import]', error);"
+          new_log = """console.error('[Dispatch worker Excel import]', {
+              name: error?.name || 'Error',
+              statusCode: error?.statusCode || null,
+              errorCount: Array.isArray(error?.errors) ? error.errors.length : null
+            });"""
+          if old_log not in route:
+              raise SystemExit('No se encontró el log actual del importador')
+          route_path.write_text(route.replace(old_log, new_log, 1), encoding='utf-8')
+          PY
+
+      - name: Remove temporary workflow
+        run: rm -f .github/workflows/finalize-issue-670.yml
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate correction
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/dispatchWorkerExcelImport.js
+          node --check src/routes/dispatchOpsExtras.js
+          node --test test/dispatchWorkerExcelImport.test.js
+          node --test test/dispatchWorkerContractAutoAssignment.test.js
+
+      - name: Commit privacy hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: evitar datos personales en logs de importación (#670)"
+          git push origin HEAD:fix/670-dispatch-worker-excel-import
