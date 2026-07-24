@@ -165,15 +165,24 @@ function normalizeCaptureMode(value) {
   return normalized;
 }
 
+function arrivalPublicError(result) {
+  const firstFlag = result?.validation?.riskFlags?.[0];
+  const errors = {
+    ARRIVAL_WINDOW_NOT_OPEN: 'arrival_window_not_open',
+    DUPLICATE_ARRIVAL: 'arrival_already_registered',
+    ATTENDANCE_NOT_ENABLED: 'attendance_not_enabled',
+    ASSIGNMENT_NOT_ACTIVE: 'assignment_not_available'
+  };
+  return errors[firstFlag] || 'arrival_not_recorded';
+}
+
 function arrivalPublicResult(result) {
   if (!result?.recorded) {
     return {
       status: 409,
       payload: {
         ok: false,
-        error: result?.validation?.riskFlags?.[0] === 'ARRIVAL_WINDOW_NOT_OPEN'
-          ? 'arrival_window_not_open'
-          : 'arrival_not_recorded'
+        error: arrivalPublicError(result)
       }
     };
   }
@@ -375,7 +384,7 @@ export function workerPortalRouter(prisma, options = {}) {
   router.get('/service-worker.js', (_req, res) => {
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('Service-Worker-Allowed', `${WORKER_PORTAL_HOME_PATH}/`);
+    res.set('Service-Worker-Allowed', WORKER_PORTAL_HOME_PATH);
     res.set('X-Content-Type-Options', 'nosniff');
     return res.sendFile(WORKER_PORTAL_SERVICE_WORKER_FILE);
   });
