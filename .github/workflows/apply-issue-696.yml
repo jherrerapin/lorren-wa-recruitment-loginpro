@@ -28,6 +28,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Stop on captured diagnostic
+        run: |
+          if [ -f .github/issue-696-validation-error.txt ]; then
+            cat .github/issue-696-validation-error.txt
+            exit 1
+          fi
+
       - name: Load exact fix recipe
         run: |
           git fetch origin automation/696-logout-runner
@@ -49,13 +56,28 @@ jobs:
 
       - name: Validate logout fix
         run: |
-          npx prisma validate
-          npm run prisma:generate
-          node --check src/services/adminSession.js
-          node --check src/server.js
-          node --check test/adminSession.test.js
-          node --test test/adminSession.test.js
-          git diff --check
+          set +e
+          {
+            npx prisma validate &&
+            npm run prisma:generate &&
+            node --check src/services/adminSession.js &&
+            node --check src/server.js &&
+            node --check test/adminSession.test.js &&
+            node --test test/adminSession.test.js &&
+            git diff --check
+          } > /tmp/issue-696-validation.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-696-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/issue-696-validation.log .github/issue-696-validation-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/issue-696-validation-error.txt
+            git commit -m "chore: capturar diagnóstico de logout #696"
+            git push origin HEAD:fix/696-logout-redirect
+            exit "$status"
+          fi
 
       - name: Commit canonical fix
         run: |
