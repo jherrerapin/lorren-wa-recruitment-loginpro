@@ -1,0 +1,69 @@
+name: Apply issue 688 WhatsApp cleanup
+
+on:
+  pull_request:
+    branches:
+      - automation/688-cleanup-runner
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'refactor/688-clean-dispatch-whatsapp-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out functional branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/688-clean-dispatch-whatsapp-runtime
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Load exact cleanup recipe
+        run: |
+          git fetch origin automation/688-cleanup-runner
+          git show origin/automation/688-cleanup-runner:.github/scripts/apply-issue-688.py > /tmp/apply-issue-688.py
+
+      - name: Apply exact cleanup
+        run: python3 /tmp/apply-issue-688.py
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate cleanup
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/dispatchWhatsappWebServiceV6.js
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check src/routes/dispatchWaRouterV2.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
+          node --test test/dispatchWhatsappRuntimeContracts.test.js
+          git diff --check
+
+      - name: Commit canonical cleanup
+        run: |
+          if git diff --quiet; then
+            echo "No hay cambios pendientes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/dispatchWhatsappWebServiceV6.js src/routes/dispatchWaRouterV2.js test/dispatchWhatsappRuntimeContracts.test.js
+          git commit -m "refactor: limpiar runtime de WhatsApp despacho (#688)"
+          git push origin HEAD:refactor/688-clean-dispatch-whatsapp-runtime
