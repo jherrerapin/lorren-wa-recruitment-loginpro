@@ -34,9 +34,45 @@ export function resolveAdminSessionConfig(env = process.env) {
         httpOnly: true,
         sameSite: 'lax',
         secure: isProduction,
+        path: '/',
         maxAge: ADMIN_SESSION_DEFAULTS.maxAgeMs
       }
     }
+  };
+}
+
+export function buildAdminSessionCookieClearOptions(config = resolveAdminSessionConfig()) {
+  const cookie = config?.sessionOptions?.cookie || {};
+  return {
+    path: cookie.path || '/',
+    httpOnly: cookie.httpOnly !== false,
+    sameSite: cookie.sameSite || 'lax',
+    secure: Boolean(cookie.secure)
+  };
+}
+
+export function createAdminLogoutHandler({
+  config = resolveAdminSessionConfig(),
+  logger = console
+} = {}) {
+  const cookieName = config.cookieName;
+  const cookieOptions = buildAdminSessionCookieClearOptions(config);
+
+  return function destroyAdminSession(req, res) {
+    const finishLogout = () => {
+      res.set('Cache-Control', 'no-store');
+      res.clearCookie(cookieName, cookieOptions);
+      return res.redirect(303, '/login');
+    };
+
+    if (!req.session || typeof req.session.destroy !== 'function') {
+      return finishLogout();
+    }
+
+    return req.session.destroy((error) => {
+      if (error) logger.error('[LOGOUT_DESTROY_ERROR]', error);
+      return finishLogout();
+    });
   };
 }
 
