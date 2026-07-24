@@ -1,4 +1,4 @@
-name: Audit data request alias
+name: Apply final data request alias retirement
 
 on:
   pull_request:
@@ -6,63 +6,139 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  audit:
+  apply:
     if: github.head_ref == 'refactor/663-retire-data-request-alias'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
-      - name: Check out branch
+      - name: Check out PR branch
         uses: actions/checkout@v5
         with:
-          persist-credentials: false
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Audit exact references
+      - name: Apply exact reduction
         run: |
           node <<'NODE'
           const fs = require('node:fs');
-          const source = fs.readFileSync('src/routes/webhook.js', 'utf8');
-          const lines = source.split(/\r?\n/);
-          const matches = [];
 
-          for (let index = 0; index < lines.length; index += 1) {
-            if (lines[index].includes('buildDataRequestPrompt')) {
-              matches.push({ line: index + 1, text: lines[index].trim() });
+          function replaceExactlyOnce(source, before, after, label) {
+            const first = source.indexOf(before);
+            if (first === -1) throw new Error(`Missing ${label}.`);
+            if (source.indexOf(before, first + before.length) !== -1) {
+              throw new Error(`Found ${label} more than once.`);
             }
+            return source.replace(before, after);
           }
 
-          const definition = matches.filter((entry) => entry.text.startsWith('function buildDataRequestPrompt('));
-          const consumers = matches.filter((entry) => !entry.text.startsWith('function buildDataRequestPrompt('));
-          const nonDirect = consumers.filter((entry) => !entry.text.includes('buildDataRequestPrompt('));
-          const result = {
-            totalReferences: matches.length,
-            definitionCount: definition.length,
-            consumerCount: consumers.length,
-            nonDirectCount: nonDirect.length,
-            matches
-          };
+          const webhookPath = 'src/routes/webhook.js';
+          let webhook = fs.readFileSync(webhookPath, 'utf8');
+          const definition = `function buildDataRequestPrompt(candidate = {}, vacancy = null) {\n  return buildCandidateDataCollectionMessage(candidate, vacancy);\n}\n`;
+          webhook = replaceExactlyOnce(webhook, definition, '', 'buildDataRequestPrompt definition');
 
-          fs.writeFileSync('audit-663.json', `${JSON.stringify(result, null, 2)}\n`);
-          console.log(JSON.stringify(result));
+          const consumerCount = (webhook.match(/\bbuildDataRequestPrompt\(/g) || []).length;
+          if (consumerCount !== 2) {
+            throw new Error(`Expected exactly 2 direct consumers; found ${consumerCount}.`);
+          }
+          webhook = webhook.replace(/\bbuildDataRequestPrompt\(/g, 'buildCandidateDataCollectionMessage(');
+          if (/\bbuildDataRequestPrompt\b/.test(webhook)) {
+            throw new Error('A buildDataRequestPrompt reference remains.');
+          }
+          if ((webhook.match(/\bbuildCandidateDataCollectionMessage\(/g) || []).length < 2) {
+            throw new Error('Canonical data collection calls are missing.');
+          }
+          fs.writeFileSync(webhookPath, webhook);
 
-          if (definition.length !== 1) {
-            throw new Error(`Expected exactly one definition; found ${definition.length}.`);
+          const inventoryPath = 'config/transitional-code-inventory.json';
+          const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
+          inventory.rules.trackedAliasSymbols = inventory.rules.trackedAliasSymbols.filter(
+            (symbol) => symbol !== 'buildDataRequestPrompt'
+          );
+          inventory.aliases = inventory.aliases.filter(
+            (entry) => entry.symbol !== 'buildDataRequestPrompt'
+          );
+          if (inventory.rules.trackedAliasSymbols.length !== 0 || inventory.aliases.length !== 0) {
+            throw new Error('The alias inventory is not empty after retirement.');
           }
-          if (consumers.length < 1) {
-            throw new Error('Expected at least one consumer.');
-          }
-          if (nonDirect.length > 0) {
-            throw new Error('Found an indirect or non-call reference.');
-          }
+          fs.writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`);
+
+          const docsPath = 'docs/architecture/transitional-code-inventory.md';
+          let docs = fs.readFileSync(docsPath, 'utf8');
+          docs = replaceExactlyOnce(
+            docs,
+            `### Aliases del webhook\n\nEl único alias transitorio que permanece en \`src/routes/webhook.js\` es:\n\n- \`buildDataRequestPrompt()\`.\n\nContinúan inventariados hasta retirarlos en PR pequeños con regresiones específicas. El scanner impide que adquieran política sin reclasificación.`,
+            `### Aliases del webhook\n\nNo quedan aliases puros inventariados en \`src/routes/webhook.js\`. La prueba consolidada bloquea su reaparición y exige llamadas directas a las autoridades canónicas.`,
+            'current webhook alias section'
+          );
+          docs = replaceExactlyOnce(
+            docs,
+            `## Retiros completados\n\n### \`formatFieldList()\` — #661`,
+            `## Retiros completados\n\n### \`buildDataRequestPrompt()\` — #663\n\nLa auditoría encontró una sola definición, dos consumidores directos y ninguna referencia indirecta. Ambos consumidores invocan ahora \`buildCandidateDataCollectionMessage()\`, la autoridad existente en \`readinessGuard.js\`.\n\nNo cambian el texto, el orden ni las reglas del mensaje de recolección; se elimina únicamente el último nombre intermedio del webhook.\n\n### \`formatFieldList()\` — #661`,
+            'completed retirements section'
+          );
+          docs = replaceExactlyOnce(
+            docs,
+            `1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).\n2. Retirar configuración fantasma sin consumidores, comenzando por \`FF_SEMANTIC_SHORT_MEMORY\` (#651).\n3. Retirar el último alias puro del webhook: \`buildDataRequestPrompt()\`.\n4. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.\n5. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.\n6. Diseñar \`TenantContext\` y la migración del tenant inicial LoginPro.\n7. Introducir aislamiento de datos, archivos, campañas, jobs, cachés, sesiones y observabilidad por tenant antes de incorporar un segundo cliente.`,
+            `1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).\n2. Retirar configuración fantasma sin consumidores, comenzando por \`FF_SEMANTIC_SHORT_MEMORY\` (#651).\n3. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.\n4. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.\n5. Diseñar \`TenantContext\` y la migración del tenant inicial LoginPro.\n6. Introducir aislamiento de datos, archivos, campañas, jobs, cachés, sesiones y observabilidad por tenant antes de incorporar un segundo cliente.`,
+            'cleanup order'
+          );
+          fs.writeFileSync(docsPath, docs);
+
+          const testPath = 'test/webhookReadinessAliasRemoval.test.js';
+          let testSource = fs.readFileSync(testPath, 'utf8');
+          testSource = replaceExactlyOnce(
+            testSource,
+            `  'getRequiredFieldKeys',\n  'formatFieldList'\n]);`,
+            `  'getRequiredFieldKeys',\n  'formatFieldList',\n  'buildDataRequestPrompt'\n]);`,
+            'retired alias set'
+          );
+          testSource = replaceExactlyOnce(
+            testSource,
+            `  assert.ok((webhook.match(/\\bformatFieldListForVacancy\\(/g) || []).length >= 2);\n});`,
+            `  assert.ok((webhook.match(/\\bformatFieldListForVacancy\\(/g) || []).length >= 2);\n  assert.ok((webhook.match(/\\bbuildCandidateDataCollectionMessage\\(/g) || []).length >= 2);\n});`,
+            'canonical authority assertions'
+          );
+          testSource = replaceExactlyOnce(
+            testSource,
+            `test('solo permanece inventariado buildDataRequestPrompt', () => {\n  assert.deepEqual(inventory.rules.trackedAliasSymbols, ['buildDataRequestPrompt']);\n  assert.deepEqual(inventory.aliases.map((entry) => entry.symbol), ['buildDataRequestPrompt']);\n});`,
+            `test('no quedan aliases puros inventariados', () => {\n  assert.deepEqual(inventory.rules.trackedAliasSymbols, []);\n  assert.deepEqual(inventory.aliases, []);\n});`,
+            'remaining alias inventory test'
+          );
+          fs.writeFileSync(testPath, testSource);
+
+          console.log(JSON.stringify({ consumerCount, finalAliasCount: inventory.aliases.length }));
           NODE
 
-      - name: Upload exact audit result
-        uses: actions/upload-artifact@v4
-        with:
-          name: audit-663-data-request-alias
-          path: audit-663.json
-          if-no-files-found: error
-          retention-days: 3
+      - name: Validate focused reduction
+        run: |
+          node --check src/routes/webhook.js
+          node --check test/webhookReadinessAliasRemoval.test.js
+          node --test test/transitionalCodeInventory.test.js test/webhookReadinessAliasRemoval.test.js
+
+      - name: Commit four-file reduction
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/routes/webhook.js \
+            config/transitional-code-inventory.json \
+            docs/architecture/transitional-code-inventory.md \
+            test/webhookReadinessAliasRemoval.test.js
+          printf '%s\n' \
+            'config/transitional-code-inventory.json' \
+            'docs/architecture/transitional-code-inventory.md' \
+            'src/routes/webhook.js' \
+            'test/webhookReadinessAliasRemoval.test.js' \
+            | sort > /tmp/expected.txt
+          git diff --cached --name-only | sort > /tmp/actual.txt
+          diff -u /tmp/expected.txt /tmp/actual.txt
+          git commit -m "refactor: retirar último alias puro del webhook"
+          git push origin "HEAD:${HEAD_REF}"
