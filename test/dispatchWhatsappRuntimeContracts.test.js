@@ -187,10 +187,10 @@ test('confirmation context is persisted before WhatsApp send and uncertain deliv
   const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
   const sender = between(source, 'export async function sendDispatchWhatsappMessage', 'export async function sendDispatchWhatsappMediaMessage');
   assert.ok(sender.indexOf('preparePendingConfirmationLink') < sender.indexOf('activeClient.sendMessage'));
-  assert.match(source, /prisma\.dispatchWhatsappConfirmation\.create\(/);
+  assert.match(source, /tx\.dispatchWhatsappConfirmation\.create\(/);
   assert.match(source, /status: 'DELIVERY_UNKNOWN'/);
   assert.match(source, /RECOVERABLE_CONFIRMATION_LINK_STATUSES = \['PENDING', 'DELIVERY_UNKNOWN'\]/);
-  assert.match(source, /The primary row was created before sending/);
+  assert.match(source, /Los alias persistidos antes del envío mantienen recuperable la confirmación/);
 });
 
 test('persistent reconciliation targets exact pending assignments and runs without dashboard polling', () => {
@@ -229,13 +229,19 @@ test('runtime reports whether LocalAuth storage is persistent', () => {
   assert.match(source, /DISPATCH_WWEB_AUTH_PERSISTENT/);
 });
 
-test('automatic thanks failures remain persisted and are retried without confirming twice', () => {
+test('automatic thanks are persisted before sending and orphaned confirmations are repaired', () => {
   const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const applyBlock = between(
+    source,
+    'async function applyAssignmentConfirmation',
+    'async function resolveAssignmentForInboundConfirmation'
+  );
   assert.match(source, /CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING'/);
-  assert.match(source, /automaticReplySent \? 'CONFIRMED' : CONFIRMED_REPLY_PENDING_STATUS/);
-  assert.match(source, /async function retryPendingAutomaticReplies/);
-  assert.match(source, /await retryPendingAutomaticReplies\(activeClient\)/);
-  assert.match(source, /where: \{\s*assignmentId,\s*status: \{ in: \[\.\.\.RECOVERABLE_CONFIRMATION_LINK_STATUSES, CONFIRMED_REPLY_PENDING_STATUS\] \}/s);
+  assert.match(source, /export async function claimDispatchAssignmentConfirmation/);
+  assert.ok(applyBlock.indexOf('claimDispatchAssignmentConfirmation') < applyBlock.indexOf('sendAutomaticConfirmationReply'));
+  assert.match(source, /async function repairConfirmedAssignmentsAwaitingReply/);
+  assert.match(source, /assignment: \{ status: CONFIRMED_ASSIGNMENT_STATUS \}/);
+  assert.match(source, /await repairConfirmedAssignmentsAwaitingReply\(\)/);
 });
 
 test('runtime identifies only an auth directory inside the Railway volume as persistent', async () => {
@@ -284,3 +290,113 @@ test('stale cleanup includes uncertain delivery and pending automatic replies', 
   assert.match(source, /status: \{ in: EXPIRABLE_CONFIRMATION_LINK_STATUSES \}/);
 });
 
+
+
+test('PN and LID aliases are resolved and persisted before the confirmation request is sent', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  const runtime = await import('../src/services/dispatchWhatsappWebServiceV6.js?aliases-test=677');
+  const aliases = await runtime.resolveDispatchWhatsappChatAliases({
+    getNumberId: async () => ({ _serialized: '573001234567@c.us' }),
+    getContactLidAndPhone: async () => [{ lid: '123456789@lid', pn: '573001234567@c.us' }]
+  }, {
+    phone: '3001234567',
+    chatIds: ['573001234567@c.us']
+  });
+  assert.deepEqual(aliases.sort(), ['123456789@lid', '573001234567@c.us']);
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const sender = between(source, 'export async function sendDispatchWhatsappMessage', 'export async function sendDispatchWhatsappMediaMessage');
+  assert.ok(sender.indexOf('resolveDispatchWhatsappChatAliases') < sender.indexOf('preparePendingConfirmationLink'));
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = previousNodeEnv;
+});
+
+test('an incomplete duplicate event cannot reserve the inbound lock before assignment resolution', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const inbound = between(
+    source,
+    'async function confirmAssignmentFromInboundMessage',
+    'function bindInboundMessageListeners'
+  );
+  assert.ok(inbound.indexOf('resolveAssignmentForInboundConfirmation') < inbound.indexOf('reserveInbound(message)'));
+  assert.match(inbound, /releaseInbound\(message\)/);
+});
+
+test('confirmation claim atomically leaves the automatic reply pending and repairs confirmed assignments', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  const runtime = await import('../src/services/dispatchWhatsappWebServiceV6.js?claim-test=677');
+  const operations = [];
+  const tx = {
+    dispatchAssignment: {
+      updateMany: async () => { operations.push('assignment-confirmed'); return { count: 1 }; },
+      findUnique: async () => ({ status: 'CONFIRMED' })
+    },
+    dispatchWhatsappConfirmation: {
+      updateMany: async ({ data }) => { operations.push(`links-${data.status}`); return { count: 1 }; },
+      create: async () => { operations.push('link-created'); return { id: 'link' }; }
+    }
+  };
+  const prismaClient = { $transaction: async (callback) => callback(tx) };
+  const result = await runtime.claimDispatchAssignmentConfirmation({
+    assignment: { id: 'a1', serviceRequestId: 'r1' },
+    phone: '3001234567',
+    chatId: '573001234567@c.us',
+    prismaClient
+  });
+  assert.deepEqual(result, { assignmentConfirmed: true, shouldReply: true, repaired: false });
+  assert.deepEqual(operations, ['assignment-confirmed', 'links-CONFIRMED_REPLY_PENDING']);
+
+  const repairTx = {
+    dispatchAssignment: {
+      updateMany: async () => ({ count: 0 }),
+      findUnique: async () => ({ status: 'CONFIRMED' })
+    },
+    dispatchWhatsappConfirmation: {
+      updateMany: async () => ({ count: 1 }),
+      create: async () => ({ id: 'unused' })
+    }
+  };
+  const repaired = await runtime.claimDispatchAssignmentConfirmation({
+    assignment: { id: 'a2', serviceRequestId: 'r2' },
+    prismaClient: { $transaction: async (callback) => callback(repairTx) }
+  });
+  assert.deepEqual(repaired, { assignmentConfirmed: false, shouldReply: true, repaired: true });
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = previousNodeEnv;
+});
+
+test('recoverable confirmations and pending automatic replies are not discarded by the legacy 36-hour TTL', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const latest = between(source, 'async function latestPendingConfirmationLink', 'async function findPersistedPendingAssignmentByLink');
+  const retry = between(source, 'async function retryPendingAutomaticReplies', 'async function processPersistedPendingConfirmations');
+  const reconcile = between(source, 'async function processPersistedPendingConfirmations', 'function stopPendingConfirmationReconciliation');
+  assert.doesNotMatch(latest, /expiresAt:\s*\{\s*gt:/);
+  assert.doesNotMatch(retry, /expiresAt:\s*\{\s*gt:/);
+  assert.doesNotMatch(reconcile, /expiresAt:\s*\{\s*gt:/);
+});
+
+test('watchdog probes a ready client and restarts only after consecutive health failures', async () => {
+  const runtimeSource = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const facade = readSource('src/services/dispatchWhatsappWebService.js');
+  assert.match(runtimeSource, /export async function probeDispatchWhatsappClientHealth/);
+  assert.match(runtimeSource, /activeClient\.getState\(\)/);
+  assert.match(runtimeSource, /CONNECTED_CLIENT_STATE/);
+  assert.match(facade, /probeDispatchWhatsappClientHealth as probeRuntimeHealth/);
+  assert.match(facade, /HEALTH_FAILURE_THRESHOLD/);
+  assert.match(facade, /readyHealthFailures \+= 1/);
+  assert.match(facade, /restartDispatchWhatsappClient\(`health:/);
+
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'test';
+  const runtime = await import('../src/services/dispatchWhatsappWebServiceV6.js?health-test=677');
+  assert.deepEqual(
+    await runtime.probeDispatchWhatsappClientHealth({ activeClient: { getState: async () => 'CONNECTED' }, timeoutMs: 1000 }),
+    { healthy: true, state: 'CONNECTED', error: null }
+  );
+  const unhealthy = await runtime.probeDispatchWhatsappClientHealth({ activeClient: { getState: async () => 'UNPAIRED' }, timeoutMs: 1000 });
+  assert.equal(unhealthy.healthy, false);
+  assert.equal(unhealthy.state, 'UNPAIRED');
+  if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = previousNodeEnv;
+});

@@ -7,6 +7,7 @@ import {
   getDispatchWhatsappStatus as getRuntimeStatus,
   getDispatchWhatsappStatusView as getRuntimeStatusView,
   initDispatchWhatsappClient as initRuntimeClient,
+  probeDispatchWhatsappClientHealth as probeRuntimeHealth,
   restartDispatchWhatsappClient as restartRuntimeClient,
   sendDispatchWhatsappMediaMessage,
   sendDispatchWhatsappMessage as sendRuntimeTextMessage
@@ -19,6 +20,8 @@ const WATCHDOG_ENABLED = AUTO_START_ENABLED
 const WATCHDOG_INTERVAL_MS = Math.max(30000, Number(process.env.DISPATCH_WWEB_WATCHDOG_INTERVAL_MS || 60000));
 const WATCHDOG_START_DELAY_MS = Math.max(0, Number(process.env.DISPATCH_WWEB_WATCHDOG_START_DELAY_MS || 5000));
 const STALLED_INITIALIZATION_TIMEOUT_MS = Math.max(60000, Number(process.env.DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS || 60000));
+const HEALTH_PROBE_TIMEOUT_MS = Math.max(3000, Number(process.env.DISPATCH_WWEB_HEALTH_TIMEOUT_MS || 10000));
+const HEALTH_FAILURE_THRESHOLD = Math.max(1, Number(process.env.DISPATCH_WWEB_HEALTH_FAILURE_THRESHOLD || 2));
 const STALE_LINK_CLEANUP_LIMIT = Math.max(50, Number(process.env.DISPATCH_WA_STALE_LINK_CLEANUP_LIMIT || 1000));
 const SENDABLE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
 const EXPIRABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'];
@@ -28,6 +31,7 @@ let watchdogStartTimer = null;
 let watchdogInFlight = false;
 let initializingSeenAtMs = null;
 let runtimeEnvironmentPrepared = false;
+let readyHealthFailures = 0;
 
 function buildOperationalError(message, statusCode = 400) {
   const error = new Error(message);
@@ -205,9 +209,27 @@ async function runDispatchWhatsappWatchdog(reason = 'interval') {
     const status = getRuntimeStatus();
     if (status.manualLogoutRequested) {
       initializingSeenAtMs = null;
+      readyHealthFailures = 0;
       return;
     }
 
+    if (status.ready) {
+      const health = await probeRuntimeHealth({ timeoutMs: HEALTH_PROBE_TIMEOUT_MS });
+      if (health.healthy) {
+        readyHealthFailures = 0;
+        return;
+      }
+      readyHealthFailures += 1;
+      console.warn(`[dispatch-wa] Comprobación de salud fallida. state=${health.state || 'unknown'} failures=${readyHealthFailures}/${HEALTH_FAILURE_THRESHOLD}.`);
+      if (readyHealthFailures >= HEALTH_FAILURE_THRESHOLD) {
+        readyHealthFailures = 0;
+        initializingSeenAtMs = null;
+        await restartDispatchWhatsappClient(`health:${health.state || reason}`);
+      }
+      return;
+    }
+
+    readyHealthFailures = 0;
     if (status.initializing && !status.ready && !status.lastQr && !status.lastError) {
       const now = Date.now();
       if (!initializingSeenAtMs) {
@@ -278,6 +300,7 @@ export async function restartDispatchWhatsappClient(reason = 'recuperación auto
 export async function closeDispatchWhatsappSession() {
   stopDispatchWhatsappWatchdog();
   runtimeEnvironmentPrepared = false;
+  readyHealthFailures = 0;
   return closeRuntimeSession();
 }
 
