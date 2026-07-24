@@ -1,0 +1,59 @@
+name: Sync issue 688 with main
+
+on:
+  pull_request:
+    branches:
+      - automation/688-sync-runner
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.head_ref == 'refactor/688-clean-dispatch-whatsapp-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out functional branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/688-clean-dispatch-whatsapp-runtime
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure Git and merge current main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate synchronized branch
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/dispatchWhatsappWebServiceV6.js
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check src/routes/dispatchWaRouterV2.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
+          node --test test/dispatchWhatsappRuntimeContracts.test.js
+          git diff --check origin/main...HEAD
+
+      - name: Push synchronized branch
+        run: git push origin HEAD:refactor/688-clean-dispatch-whatsapp-runtime
