@@ -65,3 +65,44 @@ test('conversationUnderstanding permite género femenino contextual sin crear no
   assert.equal(result.candidateFields.fullName, undefined);
   assert.equal(result.candidateFields.neighborhood, undefined);
 });
+
+
+test('conversationUnderstanding concentra la interpretación runtime en un solo snapshot', async () => {
+  const transportEvidence = { snippet: 'moto', confidence: 0.94, source: 'ai_extraction' };
+  const result = await conversationUnderstanding('CC 10203040, tengo 21 años, me movilizo en moto y no tengo restricciones médicas', {
+    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['documentNumber', 'age', 'transportMode', 'medicalRestrictions'] },
+    aiResult: {
+      status: 'ok',
+      used: true,
+      intent: 'provide_data',
+      parsedFields: { documentNumber: '99999999', age: 30, transportMode: 'Moto', city: 'Bogota', roleHint: 'Auxiliar' },
+      usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+      extraction: { turnType: 'DATA_BLOCK', fieldEvidence: { transportMode: transportEvidence } }
+    },
+    runtime: {
+      localParsedData: { documentType: 'CC', documentNumber: '10203040', age: 21 },
+      engineFields: { medicalRestrictions: 'Sin restricciones médicas' },
+      engineUsage: { input_tokens: 4, output_tokens: 5, total_tokens: 9 },
+      fallbackIntent: 'continue_application',
+      enrichFields: (fields) => fields
+    }
+  });
+
+  const snapshot = result.turnInterpretation;
+  assert.ok(snapshot);
+  assert.equal(snapshot.intent, 'provide_data');
+  assert.equal(snapshot.fields.documentType, 'CC');
+  assert.equal(snapshot.fields.documentNumber, '99999999');
+  assert.equal(snapshot.fields.age, 21);
+  assert.equal(snapshot.fields.transportMode, 'Moto');
+  assert.equal(snapshot.fields.medicalRestrictions, 'Sin restricciones médicas');
+  assert.equal(snapshot.sourceByField.documentNumber, 'merged');
+  assert.equal(snapshot.sourceByField.medicalRestrictions, 'engine');
+  assert.deepEqual(snapshot.evidenceByField.transportMode, transportEvidence);
+  assert.equal(snapshot.cityHint, 'Bogota');
+  assert.equal(snapshot.roleHint, 'Auxiliar');
+  assert.equal(snapshot.engineFieldCount, 1);
+  assert.deepEqual(snapshot.usage, { input_tokens: 5, output_tokens: 7, total_tokens: 12 });
+  assert.deepEqual(result.candidateFields, snapshot.fields);
+  assert.ok(Array.isArray(snapshot.rejectedFields));
+});
