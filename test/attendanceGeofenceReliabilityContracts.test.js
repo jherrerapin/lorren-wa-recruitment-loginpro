@@ -24,8 +24,10 @@ test('el mapa invalida su tamaño antes de recalcular el encuadre', () => {
   assert.ok(invalidateIndex >= 0);
   assert.ok(fitIndex > invalidateIndex);
   assert.match(runtimeSource, /requestAnimationFrame/);
-  assert.match(runtimeSource, /data-attendance-coordinate-diagnostics/);
+  assert.match(runtimeSource, /dataset\.attendanceCoordinateDiagnostics/);
   assert.match(runtimeSource, /tileerror/);
+  assert.match(runtimeSource, /navigator\.clipboard\.writeText/);
+  assert.doesNotMatch(runtimeSource, /google\.com\/maps/);
 });
 
 test('la búsqueda de dirección exige selección explícita y no toma el primer resultado', () => {
@@ -47,5 +49,7 @@ test('cambiar ciudad o dirección invalida la geocerca antigua', () => {
   assert.match(bridgeSource, /data\.attendanceEnabled = false/);
   assert.match(bridgeSource, /data\.attendanceLatitude = null/);
   assert.match(bridgeSource, /data\.attendanceLongitude = null/);
+  assert.match(bridgeSource, /!req\.canAccessAttendanceFeature/);
+  assert.match(bridgeSource, /requiere acceso autorizado a Asistencia/);
   assert.match(bridgeSource, /vuelve a confirmar el punto exacto/);
 });
