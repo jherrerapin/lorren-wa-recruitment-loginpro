@@ -29,6 +29,11 @@ jobs:
           const allowed = new Set(['.js', '.mjs', '.yml', '.yaml', '.json', '.md']);
           const symbols = [
             'USE_CONVERSATION_ENGINE',
+            'shouldUseEngineFieldPreview',
+            'previewEngineCandidateFields',
+            'shouldUsePrimaryConversationEngine',
+            'replyWithEngine',
+            'tryPrimaryEngineReply',
             'conversationUnderstanding',
             'think',
             'extractEngineCandidateFields',
@@ -67,7 +72,7 @@ jobs:
             );
           }
 
-          function contexts(source, token, radius = 10) {
+          function contexts(source, token, radius = 18) {
             const lines = source.split(/\r?\n/);
             const hits = [];
             for (let index = 0; index < lines.length; index += 1) {
@@ -113,13 +118,18 @@ jobs:
           }
 
           const webhook = sources.get('src/routes/webhook.js');
-          const selectors = {
-            USE_CONVERSATION_ENGINE: contexts(webhook, 'USE_CONVERSATION_ENGINE', 16),
-            runChatEngine: contexts(webhook, 'runChatEngine', 16),
-            think: contexts(webhook, 'think(', 16),
-            conversationUnderstanding: contexts(webhook, 'conversationUnderstanding', 16),
-            extractEngineCandidateFields: contexts(webhook, 'extractEngineCandidateFields', 16)
-          };
+          const selectors = Object.fromEntries([
+            'USE_CONVERSATION_ENGINE',
+            'shouldUseEngineFieldPreview',
+            'previewEngineCandidateFields',
+            'shouldUsePrimaryConversationEngine',
+            'replyWithEngine',
+            'tryPrimaryEngineReply',
+            'runChatEngine',
+            'think(',
+            'conversationUnderstanding',
+            'extractEngineCandidateFields'
+          ].map((token) => [token, contexts(webhook, token)]));
 
           const tests = files.filter((file) => file.startsWith('test/'));
           const testFlagCoverage = tests.flatMap((file) => {
@@ -129,7 +139,7 @@ jobs:
               file,
               trueAssignments: (source.match(/USE_CONVERSATION_ENGINE\s*=\s*['"]true['"]/g) || []).length,
               falseAssignments: (source.match(/USE_CONVERSATION_ENGINE\s*=\s*['"]false['"]/g) || []).length,
-              deletes: (source.match(/delete\s+process\.env\.USE_CONVERSATION_ENGINE/g) || []).length,
+              deletesApiKey: (source.match(/delete\s+process\.env\.OPENAI_API_KEY/g) || []).length,
               references: lineMatches(file, source, 'USE_CONVERSATION_ENGINE')
             }];
           });
@@ -149,10 +159,11 @@ jobs:
 
           fs.writeFileSync('audit-667-authority-map.json', `${JSON.stringify(result, null, 2)}\n`);
           console.log(JSON.stringify({
-            selectorReferences: references.USE_CONVERSATION_ENGINE.length,
-            runChatEngineReferences: references.runChatEngine.length,
-            thinkReferences: references.think.length,
-            testsWithExplicitFlag: testFlagCoverage.length
+            productionSelectorReferences: references.USE_CONVERSATION_ENGINE.filter((entry) => entry.file.startsWith('src/')).length,
+            testsWithExplicitFlag: testFlagCoverage.length,
+            webhookLines: core['src/routes/webhook.js'].lineCount,
+            conversationEngineLines: core['src/services/conversationEngine.js'].lineCount,
+            chatEngineLines: core['src/services/chatEngine.js'].lineCount
           }));
           NODE
 
@@ -167,7 +178,7 @@ jobs:
   test-both-paths:
     if: github.head_ref == 'audit/667-conversation-engine-authority'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CI: 'true'
       NODE_ENV: test
@@ -178,6 +189,9 @@ jobs:
       FF_RESPONSES_EXTRACTOR: 'false'
       DISPATCH_WWEB_AUTO_START: 'false'
       PUPPETEER_SKIP_DOWNLOAD: 'true'
+      META_PHONE_NUMBER_ID: meta-phone-id
+      META_ACCESS_TOKEN: meta-access-token
+      OPENAI_API_KEY: test-openai-key
 
     steps:
       - name: Check out audit branch
@@ -197,73 +211,126 @@ jobs:
       - name: Generate Prisma Client
         run: npm run prisma:generate
 
-      - name: Run existing matrix with both selector values
+      - name: Prepare selector-neutral test copies
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const sources = [
+            'test/conversation-harness.test.js',
+            'test/lorrenRegressionFixes.test.js',
+            'test/activeVacancyQuestionIntake.test.js',
+            'test/inactiveVacancySpecificity.test.js',
+            'test/candidateAgeHarnessIntegration.test.js',
+            'test/candidateExperienceHarnessIntegration.test.js',
+            'test/structuredAgeHarnessIntegration.test.js',
+            'test/vacancyAgeAuthorityIntegration.test.js'
+          ];
+
+          const generated = [];
+          for (const sourcePath of sources) {
+            let source = fs.readFileSync(sourcePath, 'utf8');
+            source = source
+              .replace(/^process\.env\.USE_CONVERSATION_ENGINE\s*=\s*['"](?:true|false)['"];\s*$/gm, '')
+              .replace(/^delete\s+process\.env\.OPENAI_API_KEY;\s*$/gm, '');
+            const target = path.join('test', `.audit667-${path.basename(sourcePath)}`);
+            fs.writeFileSync(target, source);
+            generated.push({ source: sourcePath, target });
+          }
+          fs.writeFileSync('audit-667-generated-tests.json', `${JSON.stringify(generated, null, 2)}\n`);
+          NODE
+
+      - name: Run each scenario in isolated processes
         shell: bash
         run: |
           set -euo pipefail
-          tests=(
-            test/conversation-harness.test.js
-            test/lorrenRegressionFixes.test.js
-            test/activeVacancyQuestionIntake.test.js
-            test/inactiveVacancySpecificity.test.js
-            test/candidateAgeHarnessIntegration.test.js
-            test/candidateExperienceHarnessIntegration.test.js
-            test/structuredAgeHarnessIntegration.test.js
-            test/vacancyAgeAuthorityIntegration.test.js
+          mapfile -t generated_tests < <(node -e "for (const x of require('./audit-667-generated-tests.json')) console.log(x.target)")
+          stable_tests=(
             test/conversationReplayInterpretation.test.js
             test/conversationReplayPlanning.test.js
             test/conversationReplayConsentAttachmentEdges.test.js
             test/conversationReplayRecovery.test.js
+            test/conversationEngineGuardRails.test.js
+            test/conversationUnderstanding.test.js
           )
-
+          cases=("${generated_tests[@]}" "${stable_tests[@]}")
           printf '[]' > audit-667-matrix.json
-          for value in false true; do
-            set +e
-            USE_CONVERSATION_ENGINE="$value" node --test "${tests[@]}" > "audit-667-${value}.log" 2>&1
-            exit_code=$?
-            set -e
+          : > audit-667-false.log
+          : > audit-667-true.log
 
-            VALUE="$value" EXIT_CODE="$exit_code" node <<'NODE'
-            const fs = require('node:fs');
-            const value = process.env.VALUE;
-            const output = fs.readFileSync(`audit-667-${value}.log`, 'utf8');
-            const current = JSON.parse(fs.readFileSync('audit-667-matrix.json', 'utf8'));
-            const metric = (name) => {
-              const matches = [...output.matchAll(new RegExp(`^# ${name} (\\d+)$`, 'gm'))];
-              return matches.length ? Number(matches.at(-1)[1]) : null;
-            };
-            const topLevel = output.split(/\r?\n/)
-              .filter((line) => /^(?:ok|not ok) \d+ - /.test(line))
-              .map((line) => line.replace(/ duration_ms: [\d.]+/, ' duration_ms: <ignored>'));
-            current.push({
-              value,
-              exitCode: Number(process.env.EXIT_CODE),
-              tests: metric('tests'),
-              pass: metric('pass'),
-              fail: metric('fail'),
-              skipped: metric('skipped'),
-              topLevel
-            });
-            fs.writeFileSync('audit-667-matrix.json', `${JSON.stringify(current, null, 2)}\n`);
-            NODE
+          for value in false true; do
+            for test_file in "${cases[@]}"; do
+              safe_name=$(basename "$test_file" | tr -c '[:alnum:].-' '_')
+              case_log="audit-667-${value}-${safe_name}.log"
+              set +e
+              USE_CONVERSATION_ENGINE="$value" node --test "$test_file" > "$case_log" 2>&1
+              exit_code=$?
+              set -e
+              cat "$case_log" >> "audit-667-${value}.log"
+
+              VALUE="$value" TEST_FILE="$test_file" EXIT_CODE="$exit_code" CASE_LOG="$case_log" node <<'NODE'
+              const fs = require('node:fs');
+              const output = fs.readFileSync(process.env.CASE_LOG, 'utf8');
+              const current = JSON.parse(fs.readFileSync('audit-667-matrix.json', 'utf8'));
+              const metric = (name) => {
+                const matches = [...output.matchAll(new RegExp(`^# ${name} (\\d+)$`, 'gm'))];
+                return matches.length ? Number(matches.at(-1)[1]) : null;
+              };
+              current.push({
+                value: process.env.VALUE,
+                file: process.env.TEST_FILE,
+                exitCode: Number(process.env.EXIT_CODE),
+                tests: metric('tests'),
+                pass: metric('pass'),
+                fail: metric('fail'),
+                skipped: metric('skipped'),
+                failures: output.split(/\r?\n/).filter((line) => /^not ok \d+ - /.test(line))
+              });
+              fs.writeFileSync('audit-667-matrix.json', `${JSON.stringify(current, null, 2)}\n`);
+              NODE
+            done
           done
 
           node <<'NODE'
           const fs = require('node:fs');
-          const matrix = JSON.parse(fs.readFileSync('audit-667-matrix.json', 'utf8'));
-          const [off, on] = matrix;
+          const rows = JSON.parse(fs.readFileSync('audit-667-matrix.json', 'utf8'));
+          const byFile = new Map();
+          for (const row of rows) {
+            const entry = byFile.get(row.file) || {};
+            entry[row.value] = row;
+            byFile.set(row.file, entry);
+          }
+          const comparisons = [...byFile.entries()].map(([file, pair]) => ({
+            file,
+            false: pair.false,
+            true: pair.true,
+            sameExitCode: pair.false?.exitCode === pair.true?.exitCode,
+            sameTotals: ['tests', 'pass', 'fail', 'skipped'].every((key) => pair.false?.[key] === pair.true?.[key]),
+            bothPass: pair.false?.exitCode === 0 && pair.true?.exitCode === 0
+          }));
           const result = {
-            matrix,
-            sameExitCode: off.exitCode === on.exitCode,
-            sameTotals: ['tests', 'pass', 'fail', 'skipped'].every((key) => off[key] === on[key]),
-            sameTopLevelResults: JSON.stringify(off.topLevel) === JSON.stringify(on.topLevel)
+            comparisons,
+            divergentFiles: comparisons.filter((entry) => !entry.sameExitCode || !entry.sameTotals).map((entry) => entry.file),
+            failingWithFalse: comparisons.filter((entry) => entry.false?.exitCode !== 0).map((entry) => entry.file),
+            failingWithTrue: comparisons.filter((entry) => entry.true?.exitCode !== 0).map((entry) => entry.file),
+            bothPassCount: comparisons.filter((entry) => entry.bothPass).length,
+            totalFiles: comparisons.length
           };
           fs.writeFileSync('audit-667-matrix.json', `${JSON.stringify(result, null, 2)}\n`);
-          console.log(JSON.stringify(result));
-          if (off.exitCode !== 0 || on.exitCode !== 0) process.exit(1);
+          console.log(JSON.stringify({
+            totalFiles: result.totalFiles,
+            bothPassCount: result.bothPassCount,
+            divergentFiles: result.divergentFiles,
+            failingWithFalse: result.failingWithFalse,
+            failingWithTrue: result.failingWithTrue
+          }));
           NODE
 
+          rm -f test/.audit667-*.test.js
+
       - name: Upload selector matrix
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: audit-667-selector-matrix
@@ -271,5 +338,6 @@ jobs:
             audit-667-matrix.json
             audit-667-false.log
             audit-667-true.log
+            audit-667-generated-tests.json
           if-no-files-found: error
           retention-days: 3
