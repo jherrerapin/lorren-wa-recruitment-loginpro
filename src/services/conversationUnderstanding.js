@@ -21,8 +21,7 @@ const EMPTY_UNDERSTANDING = Object.freeze({
   rejectedFields: [],
   suggestedNextAction: 'ask_for_clarification',
   fieldConfidence: {},
-  replyGuidance: { tone: 'neutral', goal: 'collect_data' },
-  turnInterpretation: null
+  replyGuidance: { tone: 'neutral', goal: 'collect_data' }
 });
 
 function baseUnderstanding() {
@@ -37,8 +36,7 @@ function baseUnderstanding() {
     rejectedFields: [],
     suggestedNextAction: EMPTY_UNDERSTANDING.suggestedNextAction,
     fieldConfidence: {},
-    replyGuidance: { ...EMPTY_UNDERSTANDING.replyGuidance },
-    turnInterpretation: null
+    replyGuidance: { ...EMPTY_UNDERSTANDING.replyGuidance }
   };
 }
 
@@ -89,6 +87,12 @@ function sumTokenUsage(current = {}, next = {}) {
     output_tokens: Number(current.output_tokens || 0) + Number(next.output_tokens || 0),
     total_tokens: Number(current.total_tokens || 0) + Number(next.total_tokens || 0)
   };
+}
+
+function hasFieldsFromOriginalUnderstanding(turnInterpretation = {}) {
+  return Object.entries(turnInterpretation.sourceByField || {}).some(([field, source]) => (
+    source !== 'engine' && hasValue(turnInterpretation.fields?.[field])
+  ));
 }
 
 function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context = {}) {
@@ -196,7 +200,9 @@ export async function conversationUnderstanding(text, options = {}) {
     understanding.turnInterpretation = turnInterpretation;
     understanding.candidateFields = turnInterpretation.fields;
     understanding.rejectedFields = turnInterpretation.rejectedFields;
-    understanding.intent = Object.keys(turnInterpretation.fields).length ? 'provide_data' : (aiResult?.intent || 'unknown');
+    understanding.intent = hasFieldsFromOriginalUnderstanding(turnInterpretation)
+      ? 'provide_data'
+      : (aiResult?.intent || 'unknown');
     understanding.suggestedNextAction = Object.keys(turnInterpretation.fields).length ? 'collect_or_confirm' : 'ask_for_clarification';
     understanding.fieldConfidence = buildConfidenceFromEvidence(turnInterpretation.fields, turnInterpretation.evidenceByField);
   } else if (extractionWasUseful) {
