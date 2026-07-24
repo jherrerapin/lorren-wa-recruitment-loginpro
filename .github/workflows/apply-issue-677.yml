@@ -34,7 +34,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Correct application recipe contracts
+      - name: Correct status-view transformation in application recipe
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -55,12 +55,7 @@ jobs:
           '''
           if source.count(old) != 1:
               raise SystemExit(f'No se encontró el bloque de estado esperado: {source.count(old)}')
-          source = source.replace(old, new, 1)
-          old_assertion = "  assert.match(source, /prisma\\.dispatchWhatsappConfirmation\\.create\\(/);"
-          new_assertion = "  assert.match(source, /tx\\.dispatchWhatsappConfirmation\\.create\\(/);"
-          if source.count(old_assertion) != 1:
-              raise SystemExit(f'No se encontró la aserción persistente anterior: {source.count(old_assertion)}')
-          path.write_text(source.replace(old_assertion, new_assertion, 1), encoding='utf-8')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Apply exact reliability changes
@@ -83,6 +78,19 @@ jobs:
             git push origin HEAD:fix/677-whatsapp-confirmation-reliability
             exit "$status"
           fi
+
+      - name: Update transactional persistence contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('test/dispatchWhatsappRuntimeContracts.test.js')
+          source = path.read_text(encoding='utf-8')
+          old = "assert.match(source, /prisma\\.dispatchWhatsappConfirmation\\.create\\(/);"
+          new = "assert.match(source, /tx\\.dispatchWhatsappConfirmation\\.create\\(/);"
+          if source.count(old) != 1:
+              raise SystemExit(f'No se encontró la aserción anterior: {source.count(old)}')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Remove temporary application files
         run: rm -f .github/scripts/apply-issue-677.py .github/issue-677-apply-error.txt .github/issue-677-test-error.txt .github/issue-677-trigger .github/issue-677-trigger-2 .github/issue-677-trigger-3
