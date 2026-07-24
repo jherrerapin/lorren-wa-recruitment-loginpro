@@ -5,6 +5,11 @@ import { sendDispatchCompletionEmail } from '../services/dispatchCompletionEmail
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
+import {
+  DISPATCH_WORKER_EXCEL_COLUMNS,
+  buildDispatchWorkerImportTemplate,
+  importDispatchWorkerExcelWorkbook
+} from '../services/dispatchWorkerExcelImport.js';
 
 const TEMPLATE_KEY = 'DISPATCH_ASSIGNMENT_WHATSAPP';
 const DEFAULT_ASSIGNMENT_TEMPLATE = 'Hola {{nombre}}, te confirmamos asignacion para {{fecha}} en {{operacion}}. Direccion: {{direccion}}. Horario: {{horaInicio}} - {{horaFin}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
@@ -22,7 +27,22 @@ const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
 // Revertir a ['DISABLED', 'INACTIVE'] con source filter despues de reactivarlo.
 const DISABLED_STATUSES = ['DISABLED', 'INACTIVE', 'ELIMINADO'];
 
-const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const MAX_EXCEL_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_EXCEL_MIME_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/octet-stream'
+]);
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_EXCEL_SIZE_BYTES },
+  fileFilter(_req, file, callback) {
+    const originalName = String(file.originalname || '').toLowerCase();
+    const mimeType = String(file.mimetype || '').toLowerCase();
+    if (!originalName.endsWith('.xlsx')) return callback(new Error('El archivo debe estar en formato .xlsx.'));
+    if (mimeType && !ALLOWED_EXCEL_MIME_TYPES.has(mimeType)) return callback(new Error('El tipo de archivo no corresponde a un Excel .xlsx.'));
+    return callback(null, true);
+  }
+});
 const workerCvUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_CV_SIZE_BYTES },
@@ -108,6 +128,16 @@ function buildRequiredWorkerFieldsMessage(missingFields) {
 function parseWorkerCvUpload(req, res, next) {
   workerCvUpload.single('cvFile')(req, res, (error) => {
     if (error) req.workerCvUploadError = error.code === 'LIMIT_FILE_SIZE' ? 'La hoja de vida no puede superar 5 MB.' : error.message || 'No fue posible procesar la hoja de vida.';
+    return next();
+  });
+}
+function parseDispatchWorkerExcelUpload(req, res, next) {
+  excelUpload.single('excelFile')(req, res, (error) => {
+    if (error) {
+      req.dispatchWorkerExcelUploadError = error.code === 'LIMIT_FILE_SIZE'
+        ? 'El archivo Excel no puede superar 5 MB.'
+        : error.message || 'No fue posible recibir el archivo Excel.';
+    }
     return next();
   });
 }
@@ -345,68 +375,48 @@ export function dispatchOpsExtrasRouter(prisma) {
     });
   });
 
-  router.get('/personal/importar-excel', requireOps, (req, res) => {
+  router.get('/personal/importar-excel', requireOps, async (req, res) => {
+    const [cities, vacancies] = await loadWorkerFormLists(prisma);
     return res.render('operacionesPersonalImportar', {
       role: req.session?.userRole || req.userRole,
       message: normalizeString(req.query.message),
-      error: normalizeString(req.query.error)
+      error: normalizeString(req.query.error),
+      columns: DISPATCH_WORKER_EXCEL_COLUMNS,
+      cities,
+      vacancies
     });
   });
 
-  router.post('/personal/importar-excel', requireOps, excelUpload.single('excelFile'), async (req, res) => {
-    if (!req.file) return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent('Debes seleccionar un archivo Excel.'));
+  router.get('/personal/importar-excel/plantilla', requireOps, async (_req, res) => {
+    const [cities, vacancies] = await loadWorkerFormLists(prisma);
+    const workbook = buildDispatchWorkerImportTemplate({ cities, vacancies });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="plantilla-importacion-auxiliares.xlsx"');
+    await workbook.xlsx.write(res);
+    return res.end();
+  });
+
+  router.post('/personal/importar-excel', requireOps, parseDispatchWorkerExcelUpload, async (req, res) => {
+    if (req.dispatchWorkerExcelUploadError) {
+      return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(req.dispatchWorkerExcelUploadError));
+    }
+    if (!req.file) {
+      return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent('Debes seleccionar un archivo Excel .xlsx.'));
+    }
+
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(req.file.buffer);
-      const sheet = workbook.worksheets[0];
-      if (!sheet) throw new Error('El archivo no tiene hojas de calculo.');
-      const rows = [];
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        const getCellText = (col) => {
-          const cell = row.getCell(col);
-          const val = cell.value;
-          if (val === null || val === undefined) return null;
-          if (typeof val === 'object' && val.richText) return val.richText.map((r) => r.text).join('');
-          if (typeof val === 'number') return String(Math.round(val));
-          return normalizeString(String(val));
-        };
-        const nombre = getCellText(1); const cedula = getCellText(2); const telefono = getCellText(3); const localidad = getCellText(4);
-        if (nombre) rows.push({ nombre, cedula, telefono, localidad });
-      });
-      if (!rows.length) throw new Error('El archivo no contiene datos validos (recuerda que la primera fila se trata como encabezado).');
-      let creados = 0, omitidos = 0, reactivados = 0;
-      for (const row of rows) {
-        if (row.cedula) {
-          const activeExisting = await prisma.dispatchWorker.findFirst({
-            where: { documentNumber: row.cedula, operationalStatus: 'CONTRATADO' },
-            select: { id: true }
-          });
-          if (activeExisting) { omitidos++; continue; }
-          const disabledExisting = await prisma.dispatchWorker.findFirst({
-            where: { documentNumber: row.cedula, source: { in: DISPATCH_OWNED_SOURCES }, operationalStatus: { in: DISABLED_STATUSES } },
-            select: { id: true }
-          });
-          if (disabledExisting) {
-            await prisma.dispatchWorker.update({
-              where: { id: disabledExisting.id },
-              data: { fullName: row.nombre, phone: row.telefono || null, residenceLocality: row.localidad || null, operationalStatus: 'CONTRATADO', source: 'EXCEL_IMPORT' }
-            });
-            reactivados++;
-            continue;
-          }
-        }
-        await prisma.dispatchWorker.create({ data: { fullName: row.nombre, documentNumber: row.cedula || null, phone: row.telefono || null, residenceLocality: row.localidad || null, source: 'EXCEL_IMPORT', operationalStatus: 'CONTRATADO' } });
-        creados++;
-      }
+      const [cities, vacancies] = await loadWorkerFormLists(prisma);
+      const result = await importDispatchWorkerExcelWorkbook({ prisma, workbook, cities, vacancies });
       const parts = [];
-      if (creados) parts.push(`${creados} auxiliar${creados !== 1 ? 'es creados' : ' creado'}`);
-      if (reactivados) parts.push(`${reactivados} reactivado${reactivados !== 1 ? 's' : ''}`);
-      if (omitidos) parts.push(`${omitidos} omitido${omitidos !== 1 ? 's' : ''} por cedula ya activa`);
+      if (result.created) parts.push(`${result.created} auxiliar${result.created !== 1 ? 'es creados' : ' creado'}`);
+      if (result.updated) parts.push(`${result.updated} auxiliar${result.updated !== 1 ? 'es actualizados' : ' actualizado'}`);
+      if (result.skipped) parts.push(`${result.skipped} omitido${result.skipped !== 1 ? 's' : ''} por documento ya activo`);
       const summary = parts.length ? parts.join(', ') : 'Sin cambios';
-      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importacion completada: ${summary}.`));
+      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importación completada: ${summary}.`));
     } catch (error) {
-      console.error('[Excel import]', error);
+      console.error('[Dispatch worker Excel import]', error);
       return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(error.message || 'Error al procesar el archivo.'));
     }
   });
