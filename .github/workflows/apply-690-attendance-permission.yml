@@ -47,7 +47,17 @@ jobs:
           new_guard = "    if count == 0 and text.count(new) == 1:\n        return\n    if count != 1:\n        raise RuntimeError(f'{path}: expected one literal match, found {count}')"
           if text.count(old_guard) != 1:
               raise SystemExit('runner literal helper guard not found exactly once')
-          runner.write_text(text.replace(old_guard, new_guard, 1), encoding='utf-8')
+          text = text.replace(old_guard, new_guard, 1)
+
+          handled_blocks = [
+              r"\nreplace_once\(\n    'src/server\.js',\n    '''      canAccessDispatch: true,.*?\n\)\n",
+              r"\nreplace_once\(\n    'src/server\.js',\n    '''         canAccessDispatch: role === 'dev',.*?\n\)\n"
+          ]
+          for pattern in handled_blocks:
+              text, count = re.subn(pattern, '\n', text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'handled server block not found: {pattern}')
+          runner.write_text(text, encoding='utf-8')
 
           server_path = Path('src/server.js')
           server = server_path.read_text(encoding='utf-8')
