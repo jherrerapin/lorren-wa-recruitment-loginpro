@@ -1,0 +1,70 @@
+Prisma schema loaded from prisma/schema.prisma
+┌─────────────────────────────────────────────────────────┐
+│  Update available 6.19.2 -> 7.9.0                       │
+│                                                         │
+│  This is a major update - please follow the guide at    │
+│  https://pris.ly/d/major-version-upgrade                │
+│                                                         │
+│  Run the following to update                            │
+│    npm i --save-dev prisma@latest                       │
+│    npm i @prisma/client@latest                          │
+└─────────────────────────────────────────────────────────┘
+The schema at prisma/schema.prisma is valid 🚀
+
+> lorren-wa-recruitment-loginpro@1.0.0 prisma:generate
+> prisma generate
+
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v6.19.2) to ./node_modules/@prisma/client in 475ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Interested in query caching in just a few lines of code? Try Accelerate today! https://pris.ly/tip-3-accelerate
+
+TAP version 13
+# Subtest: la configuración de desarrollo conserva los defaults administrativos actuales
+ok 1 - la configuración de desarrollo conserva los defaults administrativos actuales
+  ---
+  duration_ms: 1.82904
+  ...
+# Subtest: producción usa secreto y cookie configurados sin alterar el contrato
+ok 2 - producción usa secreto y cookie configurados sin alterar el contrato
+  ---
+  duration_ms: 0.1728
+  ...
+# Subtest: el factory inyecta store, registra errores y devuelve el middleware
+ok 3 - el factory inyecta store, registra errores y devuelve el middleware
+  ---
+  duration_ms: 0.442095
+  ...
+# Subtest: el cierre de sesión elimina la cookie configurada y redirige al login
+ok 4 - el cierre de sesión elimina la cookie configurada y redirige al login
+  ---
+  duration_ms: 0.400182
+  ...
+# Subtest: el cierre de sesión redirige aunque la sesión ya no exista
+ok 5 - el cierre de sesión redirige aunque la sesión ya no exista
+  ---
+  duration_ms: 0.985963
+  ...
+# Subtest: un error al destruir la sesión se registra pero no deja al usuario atrapado en logout
+ok 6 - un error al destruir la sesión se registra pero no deja al usuario atrapado en logout
+  ---
+  duration_ms: 0.347803
+  ...
+# Subtest: server conecta GET y POST logout con la autoridad de sesión configurada
+ok 7 - server conecta GET y POST logout con la autoridad de sesión configurada
+  ---
+  duration_ms: 0.274103
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 94.346242
+test/adminSession.test.js:220: new blank line at EOF.
