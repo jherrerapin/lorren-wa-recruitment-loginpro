@@ -1,0 +1,63 @@
+name: Apply issue 677 WhatsApp reliability
+
+on:
+  pull_request:
+    branches:
+      - automation/677-whatsapp-runner
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/677-whatsapp-confirmation-reliability'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out functional branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/677-whatsapp-confirmation-reliability
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply exact reliability changes
+        run: python3 .github/scripts/apply-issue-677.py
+
+      - name: Remove temporary application script
+        run: rm -f .github/scripts/apply-issue-677.py
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate Prisma and syntax
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/dispatchWhatsappWebServiceV6.js
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Run focused WhatsApp regressions
+        run: node --test test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Commit canonical correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: garantizar confirmaciones de WhatsApp despacho (#677)"
+          git push origin HEAD:fix/677-whatsapp-confirmation-reliability
