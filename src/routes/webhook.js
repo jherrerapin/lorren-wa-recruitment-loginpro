@@ -10,17 +10,14 @@ import {
   getCandidateResidenceValue,
   getResidenceFieldConfig,
   hasMeaningfulCandidateData,
-  isHighConfidenceLocalField,
   looksLikeNoMedicalRestrictionsText,
   normalizeCandidateFields,
-  parseNaturalData,
-  shouldPreserveStructuredLocalField
+  parseNaturalData
 } from '../services/candidateData.js';
 import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
-import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitizer.js';
 import { shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../services/botAutomationPolicy.js';
 import {
   acquireCandidateMultilineBatch,
@@ -780,18 +777,6 @@ function inferNaturalOverwriteFields(text, normalizedData = {}, current = {}, cu
   }
 
   return [...allow];
-}
-
-function mergeFieldSource(sourceByField, field, source) {
-  if (!field || !source) return;
-  sourceByField[field] = sourceByField[field] ? 'merged' : source;
-}
-
-function sumTokenUsage(current = {}, next = {}) {
-  const input = Number(current.input_tokens || 0) + Number(next.input_tokens || 0);
-  const output = Number(current.output_tokens || 0) + Number(next.output_tokens || 0);
-  const total = Number(current.total_tokens || 0) + Number(next.total_tokens || 0);
-  return { input_tokens: input, output_tokens: output, total_tokens: total };
 }
 
 function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {}, aiFields = {}) {
@@ -1596,63 +1581,32 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   }
 
   const aiResult = await tryOpenAIParse(cleanText);
-  const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};
   const sanitizerContext = {
     currentStep: candidate.currentStep,
     pendingFields: getMissingFieldLabels(candidate, currentVacancy)
   };
-  const understanding = await conversationUnderstanding(cleanText, { aiResult, context: sanitizerContext });
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
   const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields)
     ? await previewEngineCandidateFields(prisma, candidate, cleanText, currentVacancy)
     : { fields: {}, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
-  const engineFields = rawEnginePreview?.fields && typeof rawEnginePreview.fields === 'object'
-    ? normalizeCandidateFields(rawEnginePreview.fields)
-    : {};
-  const sourceByField = {};
-  const evidenceByField = {};
-  const mergedData = {};
-
-  for (const [field, value] of Object.entries(localParsedData)) {
-    if (value === undefined || value === null || value === '') continue;
-    if (isHighConfidenceLocalField(field, value)) {
-      mergedData[field] = value;
-      mergeFieldSource(sourceByField, field, 'local');
-      evidenceByField[field] = { snippet: cleanText.slice(0, 120), confidence: 0.9, source: 'local' };
-    }
-  }
-  for (const [field, value] of Object.entries(aiFields)) {
-    if (value === undefined || value === null || value === '') continue;
-    if (shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
-    mergedData[field] = value;
-    mergeFieldSource(sourceByField, field, 'openai');
-    if (extractionEvidence[field]) evidenceByField[field] = extractionEvidence[field];
-  }
-  for (const [field, value] of Object.entries(engineFields)) {
-    if (value === undefined || value === null || value === '') continue;
-    if (shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
-    mergedData[field] = value;
-    mergeFieldSource(sourceByField, field, 'engine');
-    evidenceByField[field] = evidenceByField[field] || { snippet: cleanText.slice(0, 120), confidence: 0.8, source: 'engine' };
-  }
-  let normalizedData = normalizeCandidateFields(mergedData);
-  if (currentVacancy) {
-    normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
-  }
-  normalizedData = enrichNormalizedDataFromContext(cleanText, normalizedData, candidate, currentVacancy);
-  const semanticGate = sanitizeCandidateFieldsForConversation({
-    fields: normalizedData,
-    evidence: evidenceByField,
-    text: cleanText,
+  const understanding = await conversationUnderstanding(cleanText, {
+    aiResult,
     context: sanitizerContext,
-    turnType: aiResult?.extraction?.turnType || null
+    runtime: {
+      localParsedData,
+      engineFields: rawEnginePreview?.fields || {},
+      engineUsage: rawEnginePreview?.usage || {},
+      vacancy: currentVacancy,
+      fallbackIntent,
+      enrichFields: (fields) => enrichNormalizedDataFromContext(cleanText, fields, candidate, currentVacancy)
+    }
   });
-  normalizedData = semanticGate.fields;
-  for (const rejected of semanticGate.rejectedFields) {
-    delete sourceByField[rejected.field];
-    delete evidenceByField[rejected.field];
-  }
+  const turnInterpretation = understanding.turnInterpretation;
+  if (!turnInterpretation) throw new Error('Missing runtime turn interpretation.');
+  let normalizedData = turnInterpretation.fields;
+  const sourceByField = turnInterpretation.sourceByField;
+  const evidenceByField = turnInterpretation.evidenceByField;
   const hasDataIntent = containsCandidateData(cleanText, normalizedData);
   const requiredFields = getRequiredCandidateFieldKeys(currentVacancy);
   const hasNonNameProfileFieldCapture = Object.keys(normalizedData).some((field) => (
@@ -1662,13 +1616,13 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     ['documentType', 'documentNumber', 'age', 'medicalRestrictions', 'transportMode', 'neighborhood', 'locality'].includes(field)
   ));
 
-  debugTrace.openai_used = aiResult.used || Object.keys(engineFields).length > 0;
+  debugTrace.openai_used = aiResult.used || turnInterpretation.engineFieldCount > 0;
   debugTrace.openai_status = aiResult.status === 'error' ? 'fallback' : aiResult.status;
   debugTrace.openai_model = aiResult.model || debugTrace.openai_model;
   debugTrace.openai_temperature_omitted = typeof aiResult.temperature_omitted === 'boolean'
     ? aiResult.temperature_omitted
     : debugTrace.openai_temperature_omitted;
-  const combinedUsage = sumTokenUsage(aiResult?.usage || {}, rawEnginePreview?.usage || {});
+  const combinedUsage = turnInterpretation.usage;
   debugTrace.openai_input_tokens = combinedUsage.input_tokens;
   debugTrace.openai_output_tokens = combinedUsage.output_tokens;
   debugTrace.openai_total_tokens = combinedUsage.total_tokens;
@@ -1684,20 +1638,17 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     output_tokens: combinedUsage.output_tokens,
     total_tokens: combinedUsage.total_tokens
   };
-  const resolvedIntent = aiResult.intent || understanding.intent || fallbackIntent;
+  const resolvedIntent = turnInterpretation.intent;
   const vacancyHints = {
-    city: aiFields.city || understanding.cityDetection?.value || null,
-    roleHint: aiFields.roleHint || understanding.vacancyDetection?.value || null,
+    city: turnInterpretation.cityHint,
+    roleHint: turnInterpretation.roleHint,
   };
   if (resolvedIntent) debugTrace.openai_intent = resolvedIntent;
-  debugTrace.openai_detected_fields = [...new Set([
-    ...Object.keys(aiFields).filter((k) => normalizedData[k] !== undefined),
-    ...Object.keys(engineFields).filter((k) => normalizedData[k] !== undefined),
-  ])];
+  debugTrace.openai_detected_fields = turnInterpretation.detectedFields;
   debugTrace.source_by_field = sourceByField;
   debugTrace.field_evidence = evidenceByField;
   debugTrace.normalized_fields = normalizedData;
-  debugTrace.rejected_fields.push(...semanticGate.rejectedFields);
+  debugTrace.rejected_fields.push(...turnInterpretation.rejectedFields);
   debugTrace.vacancy_hint_city = vacancyHints.city;
   debugTrace.vacancy_hint_role = vacancyHints.roleHint;
 

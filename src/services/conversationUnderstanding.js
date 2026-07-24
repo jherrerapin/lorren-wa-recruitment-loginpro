@@ -1,6 +1,14 @@
-import { normalizeCandidateFields, parseNaturalData } from './candidateData.js';
+import {
+  alignCandidateLocationFields,
+  isHighConfidenceLocalField,
+  normalizeCandidateFields,
+  parseNaturalData,
+  shouldPreserveStructuredLocalField
+} from './candidateData.js';
 import { detectRoleHintFromText } from './vacancyResolver.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
+
+const EMPTY_USAGE = Object.freeze({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
 
 const EMPTY_UNDERSTANDING = Object.freeze({
   intent: 'unknown',
@@ -68,6 +76,97 @@ function buildLocalEvidence(fields = {}, text = '') {
   );
 }
 
+function mergeFieldSource(sourceByField, field, source) {
+  if (!field || !source) return;
+  sourceByField[field] = sourceByField[field] ? 'merged' : source;
+}
+
+function sumTokenUsage(current = {}, next = {}) {
+  return {
+    input_tokens: Number(current.input_tokens || 0) + Number(next.input_tokens || 0),
+    output_tokens: Number(current.output_tokens || 0) + Number(next.output_tokens || 0),
+    total_tokens: Number(current.total_tokens || 0) + Number(next.total_tokens || 0)
+  };
+}
+
+function hasFieldsFromOriginalUnderstanding(turnInterpretation = {}) {
+  return Object.entries(turnInterpretation.sourceByField || {}).some(([field, source]) => (
+    source !== 'engine' && hasValue(turnInterpretation.fields?.[field])
+  ));
+}
+
+function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context = {}) {
+  const localParsedData = runtime.localParsedData || parseNaturalData(input);
+  const aiFields = aiResult?.parsedFields || {};
+  const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};
+  const engineFields = runtime.engineFields && typeof runtime.engineFields === 'object'
+    ? normalizeAiFields(runtime.engineFields)
+    : {};
+  const sourceByField = {};
+  const evidenceByField = {};
+  const mergedData = {};
+
+  for (const [field, value] of Object.entries(localParsedData)) {
+    if (!hasValue(value) || !isHighConfidenceLocalField(field, value)) continue;
+    mergedData[field] = value;
+    mergeFieldSource(sourceByField, field, 'local');
+    evidenceByField[field] = { snippet: input.slice(0, 120), confidence: 0.9, source: 'local' };
+  }
+
+  for (const [field, value] of Object.entries(aiFields)) {
+    if (!hasValue(value) || shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
+    mergedData[field] = value;
+    mergeFieldSource(sourceByField, field, 'openai');
+    if (extractionEvidence[field]) evidenceByField[field] = extractionEvidence[field];
+  }
+
+  for (const [field, value] of Object.entries(engineFields)) {
+    if (!hasValue(value) || shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
+    mergedData[field] = value;
+    mergeFieldSource(sourceByField, field, 'engine');
+    evidenceByField[field] = evidenceByField[field]
+      || { snippet: input.slice(0, 120), confidence: 0.8, source: 'engine' };
+  }
+
+  let fields = normalizeCandidateFields(mergedData);
+  if (runtime.vacancy) {
+    fields = alignCandidateLocationFields(fields, runtime.vacancy, { clearAlternate: false });
+  }
+  if (typeof runtime.enrichFields === 'function') {
+    fields = runtime.enrichFields(fields) || fields;
+  }
+
+  const semanticGate = sanitizeCandidateFieldsForConversation({
+    fields,
+    evidence: evidenceByField,
+    text: input,
+    context,
+    turnType: aiResult?.extraction?.turnType || null
+  });
+  fields = semanticGate.fields;
+
+  for (const rejected of semanticGate.rejectedFields) {
+    delete sourceByField[rejected.field];
+    delete evidenceByField[rejected.field];
+  }
+
+  return {
+    intent: 'unknown',
+    fields,
+    sourceByField,
+    evidenceByField,
+    rejectedFields: semanticGate.rejectedFields,
+    cityHint: null,
+    roleHint: null,
+    detectedFields: [...new Set([
+      ...Object.keys(aiFields).filter((field) => fields[field] !== undefined),
+      ...Object.keys(engineFields).filter((field) => fields[field] !== undefined)
+    ])],
+    engineFieldCount: Object.keys(engineFields).length,
+    usage: sumTokenUsage(aiResult?.usage || EMPTY_USAGE, runtime.engineUsage || EMPTY_USAGE)
+  };
+}
+
 function detectCorrectionIntent(text = '', aiResult = {}) {
   const extraction = aiResult?.extraction || {};
   if (Array.isArray(extraction.conflicts) && extraction.conflicts.length) return true;
@@ -94,8 +193,19 @@ export async function conversationUnderstanding(text, options = {}) {
   const aiCity = typeof aiFields.city === 'string' ? aiFields.city.trim() || null : null;
   const aiRoleHint = typeof aiFields.roleHint === 'string' ? aiFields.roleHint.trim() || null : null;
   const extractionWasUseful = aiResult?.status === 'ok' && (Object.keys(aiCandidateFields).length > 0 || aiCity || aiRoleHint || aiResult.intent);
+  const runtime = options.runtime && typeof options.runtime === 'object' ? options.runtime : null;
 
-  if (extractionWasUseful) {
+  if (runtime) {
+    const turnInterpretation = buildRuntimeTurnInterpretation(input, aiResult, runtime, options.context || {});
+    understanding.turnInterpretation = turnInterpretation;
+    understanding.candidateFields = turnInterpretation.fields;
+    understanding.rejectedFields = turnInterpretation.rejectedFields;
+    understanding.intent = hasFieldsFromOriginalUnderstanding(turnInterpretation)
+      ? 'provide_data'
+      : (aiResult?.intent || 'unknown');
+    understanding.suggestedNextAction = Object.keys(turnInterpretation.fields).length ? 'collect_or_confirm' : 'ask_for_clarification';
+    understanding.fieldConfidence = buildConfidenceFromEvidence(turnInterpretation.fields, turnInterpretation.evidenceByField);
+  } else if (extractionWasUseful) {
     const sanitized = sanitizeCandidateFieldsForConversation({
       fields: rawAiCandidateFields,
       evidence: aiEvidence,
@@ -154,6 +264,12 @@ export async function conversationUnderstanding(text, options = {}) {
   if (typeof options.aiParser === 'function') {
     const secondaryAiResult = await options.aiParser(input, options.context || {});
     if (secondaryAiResult?.intent) understanding.intent = secondaryAiResult.intent;
+  }
+
+  if (understanding.turnInterpretation) {
+    understanding.turnInterpretation.intent = aiResult?.intent || understanding.intent || runtime?.fallbackIntent || 'unknown';
+    understanding.turnInterpretation.cityHint = aiFields.city || understanding.cityDetection?.value || null;
+    understanding.turnInterpretation.roleHint = aiFields.roleHint || understanding.vacancyDetection?.value || null;
   }
 
   return understanding;
