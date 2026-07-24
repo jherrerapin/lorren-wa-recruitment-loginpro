@@ -7,14 +7,31 @@ const DISABLED_STATUSES = ['DISABLED', 'INACTIVE', 'ELIMINADO'];
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
 const ALLOWED_TRANSPORT_MODES = new Set(['Publico', 'Moto', 'Bicicleta', 'Carro']);
 
+const LEGACY_FULL_NAME_COLUMN = {
+  field: 'fullName',
+  header: 'Nombre completo',
+  required: false,
+  example: 'Oscar Antonio Montoya Hernández',
+  help: 'Formato compatible con plantillas anteriores.',
+  aliases: ['nombre', 'nombre y apellidos', 'auxiliar', 'nombre auxiliar']
+};
+
 export const DISPATCH_WORKER_EXCEL_COLUMNS = [
   {
-    field: 'fullName',
-    header: 'Nombre completo',
+    field: 'firstNames',
+    header: 'Nombres',
     required: true,
-    example: 'Oscar Antonio Montoya Hernández',
-    help: 'Nombre y apellidos del auxiliar.',
-    aliases: ['nombre', 'auxiliar', 'nombre auxiliar']
+    example: 'Oscar Antonio',
+    help: 'Uno o varios nombres. Se unirán automáticamente con los apellidos.',
+    aliases: ['nombres del auxiliar', 'primer nombre', 'segundo nombre']
+  },
+  {
+    field: 'lastNames',
+    header: 'Apellidos',
+    required: true,
+    example: 'Montoya Hernández',
+    help: 'Uno o varios apellidos. Se unirán automáticamente con los nombres.',
+    aliases: ['apellido', 'apellidos del auxiliar', 'primer apellido', 'segundo apellido']
   },
   {
     field: 'phone',
@@ -75,26 +92,26 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
   {
     field: 'operationalStatus',
     header: 'Estado operativo',
-    required: true,
+    required: false,
     example: 'CONTRATADO',
-    help: 'Valores permitidos: CONTRATADO o INACTIVE.',
+    help: 'Opcional. Si queda vacío, se guarda como CONTRATADO.',
     aliases: ['estado', 'status', 'estado auxiliar']
   },
   {
     field: 'operationalCities',
     header: 'Ciudades operativas',
-    required: true,
+    required: false,
     example: 'Bogotá; Siberia',
-    help: 'Una o varias ciudades separadas por coma, punto y coma, | o salto de línea.',
+    help: 'Opcional. Puedes indicar varias ciudades separadas por coma, punto y coma, | o salto de línea.',
     aliases: ['ciudad operativa', 'ciudades de operacion', 'ciudades operación', 'ciudades']
   },
   {
     field: 'vacancies',
     header: 'Vacantes / perfiles',
-    required: true,
+    required: false,
     example: 'Auxiliar de cargue y descargue — Bogotá',
-    help: 'Una o varias vacantes separadas por coma, punto y coma, | o salto de línea.',
-    aliases: ['vacantes', 'perfiles', 'cargos', 'vacantes perfiles']
+    help: 'Opcional. Puedes indicar varias vacantes separadas por coma, punto y coma, | o salto de línea.',
+    aliases: ['vacantes', 'vacante', 'perfiles', 'perfil', 'cargos', 'vacantes perfiles']
   },
   {
     field: 'notes',
@@ -106,10 +123,26 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
   }
 ];
 
+const PARSABLE_EXCEL_COLUMNS = [LEGACY_FULL_NAME_COLUMN, ...DISPATCH_WORKER_EXCEL_COLUMNS];
+const NAME_FIELDS = new Set(['firstNames', 'lastNames']);
+
 function normalizeString(value) {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
   return text.length ? text : null;
+}
+
+function normalizeNamePart(value) {
+  return normalizeString(value)?.replace(/\s+/g, ' ') || null;
+}
+
+export function buildDispatchWorkerFullName(row = {}) {
+  const legacyFullName = normalizeNamePart(row.fullName);
+  if (legacyFullName) return legacyFullName;
+  const firstNames = normalizeNamePart(row.firstNames);
+  const lastNames = normalizeNamePart(row.lastNames);
+  if (!firstNames || !lastNames) return null;
+  return `${firstNames} ${lastNames}`;
 }
 
 export function normalizeExcelLookup(value) {
@@ -142,7 +175,7 @@ function columnAliases(column) {
 
 export function buildDispatchWorkerExcelHeaderMap(headerRow) {
   const aliasToField = new Map();
-  for (const column of DISPATCH_WORKER_EXCEL_COLUMNS) {
+  for (const column of PARSABLE_EXCEL_COLUMNS) {
     for (const alias of columnAliases(column)) aliasToField.set(alias, column.field);
   }
 
@@ -152,9 +185,12 @@ export function buildDispatchWorkerExcelHeaderMap(headerRow) {
     if (field && !map.has(field)) map.set(field, columnNumber);
   });
 
+  const hasSupportedNameHeaders = map.has('fullName') || (map.has('firstNames') && map.has('lastNames'));
   const missingHeaders = DISPATCH_WORKER_EXCEL_COLUMNS
-    .filter((column) => column.required && !map.has(column.field))
+    .filter((column) => column.required && !NAME_FIELDS.has(column.field) && !map.has(column.field))
     .map((column) => column.header);
+  if (!hasSupportedNameHeaders) missingHeaders.unshift('Nombres + Apellidos (o Nombre completo)');
+
   if (missingHeaders.length) {
     throw new DispatchWorkerExcelValidationError([
       `Faltan columnas obligatorias en el encabezado: ${missingHeaders.join(', ')}.`
@@ -179,6 +215,7 @@ function normalizeContractType(value) {
 
 function normalizeOperationalStatus(value) {
   const key = normalizeExcelLookup(value);
+  if (!key) return ACTIVE_STATUS;
   if (['contratado', 'contratada', 'disponible', 'activo', 'activa'].includes(key)) return 'CONTRATADO';
   if (['inactive', 'inactivo', 'inactiva'].includes(key)) return 'INACTIVE';
   return null;
@@ -232,7 +269,7 @@ export function parseDispatchWorkerExcelWorksheet(worksheet) {
   for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
     const row = worksheet.getRow(rowNumber);
     const values = {};
-    for (const column of DISPATCH_WORKER_EXCEL_COLUMNS) {
+    for (const column of PARSABLE_EXCEL_COLUMNS) {
       values[column.field] = headerMap.has(column.field)
         ? readCellText(row.getCell(headerMap.get(column.field)))
         : null;
@@ -261,9 +298,11 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
   const documentNumbers = new Set();
 
   for (const row of rows) {
+    const fullName = buildDispatchWorkerFullName(row);
     const missing = DISPATCH_WORKER_EXCEL_COLUMNS
-      .filter((column) => column.required && !normalizeString(row[column.field]))
+      .filter((column) => column.required && !NAME_FIELDS.has(column.field) && !normalizeString(row[column.field]))
       .map((column) => column.header);
+    if (!fullName) missing.unshift('Nombres y Apellidos (o Nombre completo)');
     if (missing.length) {
       errors.push(`Fila ${row.rowNumber}: faltan ${missing.join(', ')}.`);
       continue;
@@ -290,13 +329,13 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
 
     const cityIds = [...new Set(operationalCities.map((city) => city.id))];
     const vacancyIds = [...new Set(vacancies.map((vacancy) => vacancy.id))];
-    if (!cityIds.length) errors.push(`Fila ${row.rowNumber}: debes indicar al menos una Ciudad operativa válida.`);
-    if (!vacancyIds.length) errors.push(`Fila ${row.rowNumber}: debes indicar al menos una Vacante / perfil válida.`);
 
-    const selectedCityNames = new Set(operationalCities.map((city) => normalizeExcelLookup(city.name)));
-    for (const vacancy of vacancies) {
-      if (vacancy.city && !selectedCityNames.has(normalizeExcelLookup(vacancy.city))) {
-        errors.push(`Fila ${row.rowNumber}: la vacante “${vacancyLabel(vacancy)}” no corresponde a las Ciudades operativas seleccionadas.`);
+    if (operationalCities.length && vacancies.length) {
+      const selectedCityNames = new Set(operationalCities.map((city) => normalizeExcelLookup(city.name)));
+      for (const vacancy of vacancies) {
+        if (vacancy.city && !selectedCityNames.has(normalizeExcelLookup(vacancy.city))) {
+          errors.push(`Fila ${row.rowNumber}: la vacante “${vacancyLabel(vacancy)}” no corresponde a las Ciudades operativas seleccionadas.`);
+        }
       }
     }
 
@@ -310,7 +349,7 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
     prepared.push({
       rowNumber: row.rowNumber,
       workerData: {
-        fullName: normalizeString(row.fullName),
+        fullName,
         phone: normalizeString(row.phone),
         documentType: normalizeString(row.documentType)?.toUpperCase(),
         documentNumber,
@@ -398,6 +437,12 @@ function styleHeader(row) {
   });
 }
 
+function templateColumnNumber(field) {
+  const index = DISPATCH_WORKER_EXCEL_COLUMNS.findIndex((column) => column.field === field);
+  if (index < 0) throw new Error(`No se encontró la columna ${field} en la plantilla.`);
+  return index + 1;
+}
+
 export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] } = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren Dispatch';
@@ -425,8 +470,11 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
   worksheet.getRow(2).alignment = { vertical: 'top', wrapText: true };
   worksheet.getRow(2).height = 36;
 
+  const transportColumn = templateColumnNumber('transportMode');
+  const contractColumn = templateColumnNumber('contractType');
+  const statusColumn = templateColumnNumber('operationalStatus');
   for (let rowNumber = 2; rowNumber <= 1000; rowNumber += 1) {
-    worksheet.getCell(`G${rowNumber}`).dataValidation = {
+    worksheet.getRow(rowNumber).getCell(transportColumn).dataValidation = {
       type: 'list',
       allowBlank: true,
       formulae: ['"Publico,Moto,Bicicleta,Carro"'],
@@ -434,7 +482,7 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
       errorTitle: 'Medio de transporte inválido',
       error: 'Selecciona Publico, Moto, Bicicleta o Carro.'
     };
-    worksheet.getCell(`H${rowNumber}`).dataValidation = {
+    worksheet.getRow(rowNumber).getCell(contractColumn).dataValidation = {
       type: 'list',
       allowBlank: false,
       formulae: ['"DIRECTO,CONTRATISTA"'],
@@ -442,13 +490,13 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
       errorTitle: 'Tipo de contrato inválido',
       error: 'Selecciona DIRECTO o CONTRATISTA.'
     };
-    worksheet.getCell(`I${rowNumber}`).dataValidation = {
+    worksheet.getRow(rowNumber).getCell(statusColumn).dataValidation = {
       type: 'list',
-      allowBlank: false,
+      allowBlank: true,
       formulae: ['"CONTRATADO,INACTIVE"'],
       showErrorMessage: true,
       errorTitle: 'Estado inválido',
-      error: 'Selecciona CONTRATADO o INACTIVE.'
+      error: 'Selecciona CONTRATADO o INACTIVE, o déjalo vacío para usar CONTRATADO.'
     };
   }
 
@@ -468,6 +516,12 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
       example: column.example
     });
   }
+  instructions.addRow({
+    field: 'Nombre completo (compatible)',
+    required: 'Alternativa',
+    help: 'Las plantillas anteriores con una sola columna Nombre completo siguen siendo válidas. No combines esa columna con Nombres y Apellidos.',
+    example: 'Oscar Antonio Montoya Hernández'
+  });
   instructions.addRow({
     field: 'Hoja de vida',
     required: 'No se importa',
