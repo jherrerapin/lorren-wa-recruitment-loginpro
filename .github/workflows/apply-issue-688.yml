@@ -39,10 +39,12 @@ jobs:
         run: |
           git fetch origin automation/688-cleanup-runner
           git show origin/automation/688-cleanup-runner:.github/scripts/apply-issue-688.py > /tmp/apply-issue-688.py
+          git show origin/automation/688-cleanup-runner:.github/scripts/normalize-issue-688.py > /tmp/normalize-issue-688.py
 
       - name: Apply exact cleanup
         run: |
           python3 /tmp/apply-issue-688.py
+          python3 /tmp/normalize-issue-688.py
           rm -f .github/issue-688-trigger.txt
 
       - name: Set up Node.js 20
