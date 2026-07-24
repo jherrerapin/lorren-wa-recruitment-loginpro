@@ -1,0 +1,75 @@
+name: Commit validated single turn interpretation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  commit:
+    if: github.head_ref == 'refactor/669-single-turn-interpretation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: test
+      OPENAI_API_KEY: test-openai-key
+      META_PHONE_NUMBER_ID: meta-phone-id
+      META_ACCESS_TOKEN: meta-access-token
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply reviewed patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-669-single-turn-interpretation.yml').read_text()
+          start_marker = "          node <<'NODE'\n"
+          end_marker = "\n          NODE\n"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          lines = source[start:end].splitlines()
+          Path('/tmp/apply-669.js').write_text('\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n')
+          PY
+          node /tmp/apply-669.js
+
+      - name: Validate focused consolidation
+        run: |
+          node --check src/services/conversationUnderstanding.js
+          node --check src/routes/webhook.js
+          node --check test/conversationUnderstanding.test.js
+          node --test test/conversationUnderstanding.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js
+
+      - name: Commit three-file change
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/webhook.js test/conversationUnderstanding.test.js
+          printf '%s\n' 'src/routes/webhook.js' 'test/conversationUnderstanding.test.js' | sort > /tmp/expected.txt
+          git diff --cached --name-only | sort > /tmp/actual.txt
+          diff -u /tmp/expected.txt /tmp/actual.txt
+          git commit -m "refactor: consumir interpretación única por turno"
+          git push origin "HEAD:${HEAD_REF}"
