@@ -1,0 +1,117 @@
+name: Apply single turn interpretation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'refactor/669-single-turn-interpretation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact runtime consolidation
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          function count(source, symbol) {
+            return (source.match(new RegExp(`\\b${symbol}\\b`, 'g')) || []).length;
+          }
+
+          function replaceExactlyOnce(source, before, after, label) {
+            const first = source.indexOf(before);
+            if (first === -1) throw new Error(`Missing ${label}.`);
+            if (source.indexOf(before, first + before.length) !== -1) {
+              throw new Error(`Found ${label} more than once.`);
+            }
+            return source.replace(before, after);
+          }
+
+          const webhookPath = 'src/routes/webhook.js';
+          let webhook = fs.readFileSync(webhookPath, 'utf8');
+          const expectedCounts = {
+            alignCandidateLocationFields: 2,
+            isHighConfidenceLocalField: 2,
+            shouldPreserveStructuredLocalField: 3,
+            mergeFieldSource: 4,
+            sumTokenUsage: 2
+          };
+          for (const [symbol, expected] of Object.entries(expectedCounts)) {
+            const actual = count(webhook, symbol);
+            if (actual !== expected) throw new Error(`Expected ${expected} ${symbol} references; found ${actual}.`);
+          }
+
+          webhook = replaceExactlyOnce(webhook, `  alignCandidateLocationFields,\n`, '', 'alignCandidateLocationFields import');
+          webhook = replaceExactlyOnce(webhook, `  isHighConfidenceLocalField,\n`, '', 'isHighConfidenceLocalField import');
+          webhook = replaceExactlyOnce(webhook, `  shouldPreserveStructuredLocalField\n`, '', 'shouldPreserveStructuredLocalField import');
+          webhook = webhook.replace(`  parseNaturalData,\n} from '../services/candidateData.js';`, `  parseNaturalData\n} from '../services/candidateData.js';`);
+
+          webhook = replaceExactlyOnce(
+            webhook,
+            `function mergeFieldSource(sourceByField, field, source) {\n  if (!field || !source) return;\n  sourceByField[field] = sourceByField[field] ? 'merged' : source;\n}\n\nfunction sumTokenUsage(current = {}, next = {}) {\n  const input = Number(current.input_tokens || 0) + Number(next.input_tokens || 0);\n  const output = Number(current.output_tokens || 0) + Number(next.output_tokens || 0);\n  const total = Number(current.total_tokens || 0) + Number(next.total_tokens || 0);\n  return { input_tokens: input, output_tokens: output, total_tokens: total };\n}\n\n`,
+            '',
+            'duplicated field merge helpers'
+          );
+
+          const oldBlock = `  const aiResult = await tryOpenAIParse(cleanText);\n  const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};\n  const sanitizerContext = {\n    currentStep: candidate.currentStep,\n    pendingFields: getMissingFieldLabels(candidate, currentVacancy)\n  };\n  const understanding = await conversationUnderstanding(cleanText, { aiResult, context: sanitizerContext });\n  const localParsedData = parseNaturalData(cleanText);\n  const aiFields = aiResult.parsedFields || {};\n  const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields)\n    ? await previewEngineCandidateFields(prisma, candidate, cleanText, currentVacancy)\n    : { fields: {}, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };\n  const engineFields = rawEnginePreview?.fields && typeof rawEnginePreview.fields === 'object'\n    ? normalizeCandidateFields(rawEnginePreview.fields)\n    : {};\n  const sourceByField = {};\n  const evidenceByField = {};\n  const mergedData = {};\n\n  for (const [field, value] of Object.entries(localParsedData)) {\n    if (value === undefined || value === null || value === '') continue;\n    if (isHighConfidenceLocalField(field, value)) {\n      mergedData[field] = value;\n      mergeFieldSource(sourceByField, field, 'local');\n      evidenceByField[field] = { snippet: cleanText.slice(0, 120), confidence: 0.9, source: 'local' };\n    }\n  }\n  for (const [field, value] of Object.entries(aiFields)) {\n    if (value === undefined || value === null || value === '') continue;\n    if (shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;\n    mergedData[field] = value;\n    mergeFieldSource(sourceByField, field, 'openai');\n    if (extractionEvidence[field]) evidenceByField[field] = extractionEvidence[field];\n  }\n  for (const [field, value] of Object.entries(engineFields)) {\n    if (value === undefined || value === null || value === '') continue;\n    if (shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;\n    mergedData[field] = value;\n    mergeFieldSource(sourceByField, field, 'engine');\n    evidenceByField[field] = evidenceByField[field] || { snippet: cleanText.slice(0, 120), confidence: 0.8, source: 'engine' };\n  }\n  let normalizedData = normalizeCandidateFields(mergedData);\n  if (currentVacancy) {\n    normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });\n  }\n  normalizedData = enrichNormalizedDataFromContext(cleanText, normalizedData, candidate, currentVacancy);\n  const semanticGate = sanitizeCandidateFieldsForConversation({\n    fields: normalizedData,\n    evidence: evidenceByField,\n    text: cleanText,\n    context: sanitizerContext,\n    turnType: aiResult?.extraction?.turnType || null\n  });\n  normalizedData = semanticGate.fields;\n  for (const rejected of semanticGate.rejectedFields) {\n    delete sourceByField[rejected.field];\n    delete evidenceByField[rejected.field];\n  }\n  const hasDataIntent = containsCandidateData(cleanText, normalizedData);\n  const requiredFields = getRequiredCandidateFieldKeys(currentVacancy);\n  const hasNonNameProfileFieldCapture = Object.keys(normalizedData).some((field) => (\n    requiredFields.includes(field) && field !== 'fullName'\n  ));\n  const hasMaterialProfileFieldCapture = Object.keys(normalizedData).some((field) => (\n    ['documentType', 'documentNumber', 'age', 'medicalRestrictions', 'transportMode', 'neighborhood', 'locality'].includes(field)\n  ));\n\n  debugTrace.openai_used = aiResult.used || Object.keys(engineFields).length > 0;\n  debugTrace.openai_status = aiResult.status === 'error' ? 'fallback' : aiResult.status;\n  debugTrace.openai_model = aiResult.model || debugTrace.openai_model;\n  debugTrace.openai_temperature_omitted = typeof aiResult.temperature_omitted === 'boolean'\n    ? aiResult.temperature_omitted\n    : debugTrace.openai_temperature_omitted;\n  const combinedUsage = sumTokenUsage(aiResult?.usage || {}, rawEnginePreview?.usage || {});\n  debugTrace.openai_input_tokens = combinedUsage.input_tokens;\n  debugTrace.openai_output_tokens = combinedUsage.output_tokens;\n  debugTrace.openai_total_tokens = combinedUsage.total_tokens;\n  const effectiveModels = getOpenAiModelConfig();\n  debugTrace.extraction_model = effectiveModels.extraction.model;\n  debugTrace.extraction_model_source = effectiveModels.extraction.source;\n  debugTrace.response_model = effectiveModels.conversation.model;\n  debugTrace.response_model_source = effectiveModels.conversation.source;\n  debugTrace.model_usage = {\n    extractionModel: debugTrace.extraction_model,\n    responseModel: debugTrace.response_model,\n    input_tokens: combinedUsage.input_tokens,\n    output_tokens: combinedUsage.output_tokens,\n    total_tokens: combinedUsage.total_tokens\n  };\n  const resolvedIntent = aiResult.intent || understanding.intent || fallbackIntent;\n  const vacancyHints = {\n    city: aiFields.city || understanding.cityDetection?.value || null,\n    roleHint: aiFields.roleHint || understanding.vacancyDetection?.value || null,\n  };\n  if (resolvedIntent) debugTrace.openai_intent = resolvedIntent;\n  debugTrace.openai_detected_fields = [...new Set([\n    ...Object.keys(aiFields).filter((k) => normalizedData[k] !== undefined),\n    ...Object.keys(engineFields).filter((k) => normalizedData[k] !== undefined),\n  ])];\n  debugTrace.source_by_field = sourceByField;\n  debugTrace.field_evidence = evidenceByField;\n  debugTrace.normalized_fields = normalizedData;\n  debugTrace.rejected_fields.push(...semanticGate.rejectedFields);\n  debugTrace.vacancy_hint_city = vacancyHints.city;\n  debugTrace.vacancy_hint_role = vacancyHints.roleHint;`;
+
+          const newBlock = `  const aiResult = await tryOpenAIParse(cleanText);\n  const sanitizerContext = {\n    currentStep: candidate.currentStep,\n    pendingFields: getMissingFieldLabels(candidate, currentVacancy)\n  };\n  const localParsedData = parseNaturalData(cleanText);\n  const aiFields = aiResult.parsedFields || {};\n  const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields)\n    ? await previewEngineCandidateFields(prisma, candidate, cleanText, currentVacancy)\n    : { fields: {}, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };\n  const understanding = await conversationUnderstanding(cleanText, {\n    aiResult,\n    context: sanitizerContext,\n    runtime: {\n      localParsedData,\n      engineFields: rawEnginePreview?.fields || {},\n      engineUsage: rawEnginePreview?.usage || {},\n      vacancy: currentVacancy,\n      fallbackIntent,\n      enrichFields: (fields) => enrichNormalizedDataFromContext(cleanText, fields, candidate, currentVacancy)\n    }\n  });\n  const turnInterpretation = understanding.turnInterpretation;\n  if (!turnInterpretation) throw new Error('Missing runtime turn interpretation.');\n  let normalizedData = turnInterpretation.fields;\n  const sourceByField = turnInterpretation.sourceByField;\n  const evidenceByField = turnInterpretation.evidenceByField;\n  const hasDataIntent = containsCandidateData(cleanText, normalizedData);\n  const requiredFields = getRequiredCandidateFieldKeys(currentVacancy);\n  const hasNonNameProfileFieldCapture = Object.keys(normalizedData).some((field) => (\n    requiredFields.includes(field) && field !== 'fullName'\n  ));\n  const hasMaterialProfileFieldCapture = Object.keys(normalizedData).some((field) => (\n    ['documentType', 'documentNumber', 'age', 'medicalRestrictions', 'transportMode', 'neighborhood', 'locality'].includes(field)\n  ));\n\n  debugTrace.openai_used = aiResult.used || turnInterpretation.engineFieldCount > 0;\n  debugTrace.openai_status = aiResult.status === 'error' ? 'fallback' : aiResult.status;\n  debugTrace.openai_model = aiResult.model || debugTrace.openai_model;\n  debugTrace.openai_temperature_omitted = typeof aiResult.temperature_omitted === 'boolean'\n    ? aiResult.temperature_omitted\n    : debugTrace.openai_temperature_omitted;\n  const combinedUsage = turnInterpretation.usage;\n  debugTrace.openai_input_tokens = combinedUsage.input_tokens;\n  debugTrace.openai_output_tokens = combinedUsage.output_tokens;\n  debugTrace.openai_total_tokens = combinedUsage.total_tokens;\n  const effectiveModels = getOpenAiModelConfig();\n  debugTrace.extraction_model = effectiveModels.extraction.model;\n  debugTrace.extraction_model_source = effectiveModels.extraction.source;\n  debugTrace.response_model = effectiveModels.conversation.model;\n  debugTrace.response_model_source = effectiveModels.conversation.source;\n  debugTrace.model_usage = {\n    extractionModel: debugTrace.extraction_model,\n    responseModel: debugTrace.response_model,\n    input_tokens: combinedUsage.input_tokens,\n    output_tokens: combinedUsage.output_tokens,\n    total_tokens: combinedUsage.total_tokens\n  };\n  const resolvedIntent = turnInterpretation.intent;\n  const vacancyHints = {\n    city: turnInterpretation.cityHint,\n    roleHint: turnInterpretation.roleHint,\n  };\n  if (resolvedIntent) debugTrace.openai_intent = resolvedIntent;\n  debugTrace.openai_detected_fields = turnInterpretation.detectedFields;\n  debugTrace.source_by_field = sourceByField;\n  debugTrace.field_evidence = evidenceByField;\n  debugTrace.normalized_fields = normalizedData;\n  debugTrace.rejected_fields.push(...turnInterpretation.rejectedFields);\n  debugTrace.vacancy_hint_city = vacancyHints.city;\n  debugTrace.vacancy_hint_role = vacancyHints.roleHint;`;
+
+          webhook = replaceExactlyOnce(webhook, oldBlock, newBlock, 'duplicated runtime interpretation block');
+
+          for (const symbol of ['alignCandidateLocationFields', 'isHighConfidenceLocalField', 'shouldPreserveStructuredLocalField', 'mergeFieldSource', 'sumTokenUsage']) {
+            if (count(webhook, symbol) !== 0) throw new Error(`${symbol} remains in webhook.`);
+          }
+          if (count(webhook, 'sanitizeCandidateFieldsForConversation') < 2) {
+            throw new Error('Unexpected removal of other field sanitizer consumers.');
+          }
+          if (count(webhook, 'turnInterpretation') < 8) {
+            throw new Error('Runtime snapshot is not fully consumed.');
+          }
+          fs.writeFileSync(webhookPath, webhook);
+
+          const testPath = 'test/conversationUnderstanding.test.js';
+          let testSource = fs.readFileSync(testPath, 'utf8');
+          const regression = `\n\ntest('conversationUnderstanding concentra la interpretación runtime en un solo snapshot', async () => {\n  const transportEvidence = { snippet: 'moto', confidence: 0.94, source: 'ai_extraction' };\n  const result = await conversationUnderstanding('CC 10203040, tengo 21 años y me movilizo en moto', {\n    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['documentNumber', 'age', 'transportMode'] },\n    aiResult: {\n      status: 'ok',\n      used: true,\n      intent: 'provide_data',\n      parsedFields: {\n        documentNumber: '99999999',\n        age: 30,\n        transportMode: 'Moto',\n        city: 'Bogota',\n        roleHint: 'Auxiliar'\n      },\n      usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },\n      extraction: {\n        turnType: 'DATA_BLOCK',\n        fieldEvidence: { transportMode: transportEvidence }\n      }\n    },\n    runtime: {\n      localParsedData: { documentType: 'CC', documentNumber: '10203040', age: 21 },\n      engineFields: { age: 31 },\n      engineUsage: { input_tokens: 4, output_tokens: 5, total_tokens: 9 },\n      fallbackIntent: 'continue_application',\n      enrichFields: (fields) => fields\n    }\n  });\n\n  const snapshot = result.turnInterpretation;\n  assert.ok(snapshot);\n  assert.equal(snapshot.intent, 'provide_data');\n  assert.equal(snapshot.fields.documentType, 'CC');\n  assert.equal(snapshot.fields.documentNumber, '10203040');\n  assert.equal(snapshot.fields.age, 21);\n  assert.equal(snapshot.fields.transportMode, 'Moto');\n  assert.equal(snapshot.sourceByField.documentNumber, 'local');\n  assert.deepEqual(snapshot.evidenceByField.transportMode, transportEvidence);\n  assert.equal(snapshot.cityHint, 'Bogota');\n  assert.equal(snapshot.roleHint, 'Auxiliar');\n  assert.equal(snapshot.engineFieldCount, 1);\n  assert.deepEqual(snapshot.usage, { input_tokens: 5, output_tokens: 7, total_tokens: 12 });\n  assert.deepEqual(result.candidateFields, snapshot.fields);\n  assert.ok(Array.isArray(snapshot.rejectedFields));\n});\n`;
+          if (testSource.includes('concentra la interpretación runtime')) {
+            throw new Error('Runtime interpretation regression already exists.');
+          }
+          testSource += regression;
+          fs.writeFileSync(testPath, testSource);
+          NODE
+
+      - name: Validate focused consolidation
+        run: |
+          node --check src/services/conversationUnderstanding.js
+          node --check src/routes/webhook.js
+          node --check test/conversationUnderstanding.test.js
+          node --test test/conversationUnderstanding.test.js test/conversationReplayInterpretation.test.js test/conversationReplayPlanning.test.js
+
+      - name: Commit runtime consolidation
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/webhook.js test/conversationUnderstanding.test.js
+          printf '%s\n' \
+            'src/routes/webhook.js' \
+            'test/conversationUnderstanding.test.js' \
+            | sort > /tmp/expected.txt
+          git diff --cached --name-only | sort > /tmp/actual.txt
+          diff -u /tmp/expected.txt /tmp/actual.txt
+          git commit -m "refactor: consumir interpretación única por turno"
+          git push origin "HEAD:${HEAD_REF}"
