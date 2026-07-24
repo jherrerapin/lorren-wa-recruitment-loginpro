@@ -44,14 +44,19 @@ Marcar una entrada como `RETIRABLE` exige pruebas existentes y `retirementEviden
 
 ### Aliases del webhook
 
-Los aliases transitorios que permanecen en `src/routes/webhook.js` son:
+El único alias transitorio que permanece en `src/routes/webhook.js` es:
 
-- `formatFieldList()`;
 - `buildDataRequestPrompt()`.
 
 Continúan inventariados hasta retirarlos en PR pequeños con regresiones específicas. El scanner impide que adquieran política sin reclasificación.
 
 ## Retiros completados
+
+### `formatFieldList()` — #661
+
+El alias se retiró porque solo reenviaba los mismos argumentos a `formatFieldListForVacancy()` y tenía un único consumidor. El formateador real permanece sin cambios.
+
+En el mismo slice se consolidaron las pruebas de aliases retirados y se eliminó un archivo de prueba duplicado con una expectativa obsoleta.
 
 ### `getRequiredFieldKeys()` — #658
 
@@ -81,13 +86,14 @@ La prueba falla cuando:
 - una ruta de definición, consumo, configuración o prueba deja de existir;
 - falta estado, propietario, propósito o condición de retiro;
 - una entrada se marca `RETIRABLE` sin evidencia;
-- un alias inventariado desaparece, apunta a un target inexistente o deja de ser puro sin reclasificación.
+- un alias inventariado desaparece, apunta a un target inexistente o deja de ser puro sin reclasificación;
+- un alias ya retirado reaparece en el webhook o vuelve a registrarse en el inventario.
 
 ## Orden de limpieza después de este inventario
 
 1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).
 2. Retirar configuración fantasma sin consumidores, comenzando por `FF_SEMANTIC_SHORT_MEMORY` (#651).
-3. Retirar los aliases puros restantes en PR pequeños: `formatFieldList()` y `buildDataRequestPrompt()`.
+3. Retirar el último alias puro del webhook: `buildDataRequestPrompt()`.
 4. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.
 5. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.
 6. Diseñar `TenantContext` y la migración del tenant inicial LoginPro.
