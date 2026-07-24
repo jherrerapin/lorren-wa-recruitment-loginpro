@@ -10,10 +10,12 @@ const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal
 const release = JSON.parse(fs.readFileSync(new URL('../src/public/attendance-portal-release.json', import.meta.url), 'utf8'));
 
 test('el portal es instalable y su alcance incluye la URL raíz de la jornada', () => {
+  assert.equal(manifest.id, '/operaciones/portal');
   assert.equal(manifest.start_url, '/operaciones/portal');
   assert.equal(manifest.scope, '/operaciones/portal');
   assert.equal(manifest.display, 'standalone');
-  assert.match(viewSource, /rel="manifest" href="\/public\/worker-portal\.webmanifest"/);
+  assert.match(viewSource, /rel="manifest" href="\/operaciones\/portal\/manifest\.webmanifest"/);
+  assert.ok(manifest.icons.every((icon) => icon.src === '/operaciones/portal/icon.svg'));
 });
 
 test('el service worker se sirve desde el portal con alcance explícito y sin caché HTTP', () => {
@@ -22,6 +24,18 @@ test('el service worker se sirve desde el portal con alcance explícito y sin ca
   assert.match(routeSource, /no-cache, no-store, must-revalidate/);
   assert.match(routeSource, /worker-src 'self'/);
   assert.match(routeSource, /manifest-src 'self'/);
+});
+
+test('el runtime, manifest e icono se solicitan dentro del alcance del service worker', () => {
+  assert.match(viewSource, /src="\/operaciones\/portal\/offline\.js"/);
+  assert.match(viewSource, /href="\/operaciones\/portal\/icon\.svg"/);
+  assert.match(routeSource, /router\.get\('\/offline\.js'/);
+  assert.match(routeSource, /router\.get\('\/manifest\.webmanifest'/);
+  assert.match(routeSource, /router\.get\('\/icon\.svg'/);
+  assert.match(serviceWorkerSource, /'\/operaciones\/portal\/offline\.js'/);
+  assert.match(serviceWorkerSource, /'\/operaciones\/portal\/manifest\.webmanifest'/);
+  assert.match(serviceWorkerSource, /'\/operaciones\/portal\/icon\.svg'/);
+  assert.doesNotMatch(serviceWorkerSource, /'\/public\/worker-portal-offline\.js'/);
 });
 
 test('la cola offline usa IndexedDB, conserva la selfie y exige idempotencia', () => {
