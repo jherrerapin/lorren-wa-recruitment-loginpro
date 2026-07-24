@@ -58,8 +58,6 @@ test('diagnóstico temporal genera los archivos revisables de #681', () => {
       kind: 'patch-681',
       mergeCommitSha: runGit(['rev-parse', 'HEAD']),
       mergeTreeSha: runGit(['rev-parse', 'HEAD^{tree}']),
-      mainParentSha: runGit(['rev-parse', 'HEAD^1']),
-      branchParentSha: runGit(['rev-parse', 'HEAD^2']),
       files
     });
     assert.fail('PATCH_681_ARTIFACT_READY');
