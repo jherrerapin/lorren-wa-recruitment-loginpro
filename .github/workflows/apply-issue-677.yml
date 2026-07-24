@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: Remove temporary application files
-        run: rm -f .github/scripts/apply-issue-677.py .github/issue-677-apply-error.txt .github/issue-677-trigger
+        run: rm -f .github/scripts/apply-issue-677.py .github/issue-677-apply-error.txt .github/issue-677-test-error.txt .github/issue-677-trigger .github/issue-677-trigger-2
 
       - name: Install locked dependencies
         run: npm ci
@@ -94,7 +94,21 @@ jobs:
           node --check test/dispatchWhatsappRuntimeContracts.test.js
 
       - name: Run focused WhatsApp regressions
-        run: node --test test/dispatchWhatsappRuntimeContracts.test.js
+        run: |
+          set +e
+          node --test test/dispatchWhatsappRuntimeContracts.test.js > /tmp/issue-677-tests.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-677-tests.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/issue-677-tests.log .github/issue-677-test-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/issue-677-test-error.txt
+            git commit -m "chore: capturar regresión WhatsApp #677"
+            git push origin HEAD:fix/677-whatsapp-confirmation-reliability
+            exit "$status"
+          fi
 
       - name: Commit canonical correction
         run: |
