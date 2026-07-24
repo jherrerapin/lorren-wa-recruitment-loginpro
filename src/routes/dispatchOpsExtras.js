@@ -416,7 +416,11 @@ export function dispatchOpsExtrasRouter(prisma) {
       const summary = parts.length ? parts.join(', ') : 'Sin cambios';
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importación completada: ${summary}.`));
     } catch (error) {
-      console.error('[Dispatch worker Excel import]', error);
+      console.error('[Dispatch worker Excel import]', {
+    name: error?.name || 'Error',
+    statusCode: error?.statusCode || null,
+    errorCount: Array.isArray(error?.errors) ? error.errors.length : null
+  });
       return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(error.message || 'Error al procesar el archivo.'));
     }
   });

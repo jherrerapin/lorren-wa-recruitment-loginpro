@@ -303,7 +303,7 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
     const documentNumber = normalizeString(row.documentNumber);
     const documentKey = documentNumber?.toUpperCase();
     if (documentKey && documentNumbers.has(documentKey)) {
-      errors.push(`Fila ${row.rowNumber}: el Número de documento ${documentNumber} está repetido dentro del archivo.`);
+      errors.push(`Fila ${row.rowNumber}: el Número de documento está repetido dentro del archivo.`);
     }
     if (documentKey) documentNumbers.add(documentKey);
 
