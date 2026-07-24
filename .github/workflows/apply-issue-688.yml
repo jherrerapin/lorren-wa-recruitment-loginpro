@@ -34,7 +34,9 @@ jobs:
           git show origin/automation/688-cleanup-runner:.github/scripts/apply-issue-688.py > /tmp/apply-issue-688.py
 
       - name: Apply exact cleanup
-        run: python3 /tmp/apply-issue-688.py
+        run: |
+          python3 /tmp/apply-issue-688.py
+          rm -f .github/issue-688-trigger.txt
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
@@ -64,6 +66,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/services/dispatchWhatsappWebServiceV6.js src/routes/dispatchWaRouterV2.js test/dispatchWhatsappRuntimeContracts.test.js
+          git add -A
           git commit -m "refactor: limpiar runtime de WhatsApp despacho (#688)"
           git push origin HEAD:refactor/688-clean-dispatch-whatsapp-runtime
