@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#176c36">
   <title>Portal del Auxiliar · Lórren</title>
-  <link rel="manifest" href="/public/worker-portal.webmanifest">
-  <link rel="icon" href="/public/worker-portal-icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/operaciones/portal/manifest.webmanifest">
+  <link rel="icon" href="/operaciones/portal/icon.svg" type="image/svg+xml">
   <style>
     :root { color-scheme: light; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
@@ -177,7 +177,6 @@
           <p class="meta">Cuando Operaciones te programe un servicio, aparecerá aquí automáticamente.</p>
         </section>
       <% } %>
-
       <% if (expiresAt) { %>
         <p class="meta">Tu sesión permanece en este dispositivo y puede revocarse desde Lórren.</p>
       <% } %>
@@ -227,7 +226,7 @@
         </div>
       </dialog>
 
-      <script src="/public/worker-portal-offline.js"></script>
+      <script src="/operaciones/portal/offline.js"></script>
       <script nonce="<%= nonce %>">
         (() => {
           const dialog = document.getElementById('arrival-dialog');
