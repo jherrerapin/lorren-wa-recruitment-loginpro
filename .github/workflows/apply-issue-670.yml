@@ -1,11 +1,10 @@
-name: Apply issue 670 dispatch worker Excel import
+name: Validate issue 670 dispatch worker Excel import
 
 on:
   pull_request:
     branches:
       - main
     types:
-      - opened
       - synchronize
       - reopened
 
@@ -13,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  validate:
     if: github.head_ref == 'fix/670-dispatch-worker-excel-import'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -34,11 +33,8 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Apply exact route integration
-        run: python3 .github/scripts/apply-issue-670.py
-
-      - name: Remove temporary application files
-        run: rm -f .github/issue-670-trigger .github/scripts/apply-issue-670.py .github/workflows/apply-issue-670.yml
+      - name: Remove temporary workflow
+        run: rm -f .github/workflows/apply-issue-670.yml
 
       - name: Install locked dependencies
         run: npm ci
@@ -56,10 +52,10 @@ jobs:
           node --test test/dispatchWorkerExcelImport.test.js
           node --test test/dispatchWorkerContractAutoAssignment.test.js
 
-      - name: Commit canonical correction
+      - name: Commit validated correction
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: ampliar importación masiva de auxiliares (#670)"
+          git commit -m "test: validar importación masiva de auxiliares (#670)"
           git push origin HEAD:fix/670-dispatch-worker-excel-import
