@@ -1,0 +1,5 @@
+/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/.github/scripts/apply-issue-677.py:517: SyntaxWarning: invalid escape sequence '\{'
+  new_test = """test('automatic thanks are persisted before sending and orphaned confirmations are repaired', () => {
+/home/runner/work/lorren-wa-recruitment-loginpro/lorren-wa-recruitment-loginpro/.github/scripts/apply-issue-677.py:535: SyntaxWarning: invalid escape sequence '\('
+  test_source += """
+estado runtime: se esperaban 2 coincidencias y se encontraron 1
