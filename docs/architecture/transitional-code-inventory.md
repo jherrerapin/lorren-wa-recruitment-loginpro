@@ -44,13 +44,15 @@ Marcar una entrada como `RETIRABLE` exige pruebas existentes y `retirementEviden
 
 ### Aliases del webhook
 
-El único alias transitorio que permanece en `src/routes/webhook.js` es:
-
-- `buildDataRequestPrompt()`.
-
-Continúan inventariados hasta retirarlos en PR pequeños con regresiones específicas. El scanner impide que adquieran política sin reclasificación.
+No quedan aliases puros inventariados en `src/routes/webhook.js`. La prueba consolidada bloquea su reaparición y exige llamadas directas a las autoridades canónicas.
 
 ## Retiros completados
+
+### `buildDataRequestPrompt()` — #663
+
+La auditoría encontró una sola definición, dos consumidores directos y ninguna referencia indirecta. Ambos consumidores invocan ahora `buildCandidateDataCollectionMessage()`, la autoridad existente en `readinessGuard.js`.
+
+No cambian el texto, el orden ni las reglas del mensaje de recolección; se elimina únicamente el último nombre intermedio del webhook.
 
 ### `formatFieldList()` — #661
 
@@ -93,11 +95,10 @@ La prueba falla cuando:
 
 1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).
 2. Retirar configuración fantasma sin consumidores, comenzando por `FF_SEMANTIC_SHORT_MEMORY` (#651).
-3. Retirar el último alias puro del webhook: `buildDataRequestPrompt()`.
-4. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.
-5. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.
-6. Diseñar `TenantContext` y la migración del tenant inicial LoginPro.
-7. Introducir aislamiento de datos, archivos, campañas, jobs, cachés, sesiones y observabilidad por tenant antes de incorporar un segundo cliente.
+3. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.
+4. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.
+5. Diseñar `TenantContext` y la migración del tenant inicial LoginPro.
+6. Introducir aislamiento de datos, archivos, campañas, jobs, cachés, sesiones y observabilidad por tenant antes de incorporar un segundo cliente.
 
 ## Regla de evolución
 

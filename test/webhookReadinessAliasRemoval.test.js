@@ -8,7 +8,8 @@ const retiredAliases = new Set([
   'getMissingFieldsForVacancy',
   'getMissingFields',
   'getRequiredFieldKeys',
-  'formatFieldList'
+  'formatFieldList',
+  'buildDataRequestPrompt'
 ]);
 
 test('el webhook usa directamente las autoridades canónicas retiradas de los aliases', () => {
@@ -18,6 +19,7 @@ test('el webhook usa directamente las autoridades canónicas retiradas de los al
   assert.ok((webhook.match(/\bgetMissingFieldLabels\(/g) || []).length >= 5);
   assert.ok((webhook.match(/\bgetRequiredCandidateFieldKeys\(/g) || []).length >= 5);
   assert.ok((webhook.match(/\bformatFieldListForVacancy\(/g) || []).length >= 2);
+  assert.ok((webhook.match(/\bbuildCandidateDataCollectionMessage\(/g) || []).length >= 2);
 });
 
 test('el inventario no conserva aliases retirados ni referencias hacia ellos', () => {
@@ -28,7 +30,7 @@ test('el inventario no conserva aliases retirados ni referencias hacia ellos', (
   }
 });
 
-test('solo permanece inventariado buildDataRequestPrompt', () => {
-  assert.deepEqual(inventory.rules.trackedAliasSymbols, ['buildDataRequestPrompt']);
-  assert.deepEqual(inventory.aliases.map((entry) => entry.symbol), ['buildDataRequestPrompt']);
+test('no quedan aliases puros inventariados', () => {
+  assert.deepEqual(inventory.rules.trackedAliasSymbols, []);
+  assert.deepEqual(inventory.aliases, []);
 });

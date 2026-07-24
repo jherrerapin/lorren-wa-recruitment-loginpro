@@ -204,9 +204,6 @@ function formatFieldListForVacancy(fields = [], vacancy = null) {
   if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
   return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
 }
-function buildDataRequestPrompt(candidate = {}, vacancy = null) {
-  return buildCandidateDataCollectionMessage(candidate, vacancy);
-}
 function formatYearsLabel(age) {
   if (!age) return 'Pendiente';
   return `${age} a\u00f1os`;
@@ -2107,7 +2104,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       ? buildQuestionFollowUpReply(
         currentVacancy,
         cleanText,
-        buildDataRequestPrompt(candidateState, currentVacancy),
+        buildCandidateDataCollectionMessage(candidateState, currentVacancy),
         candidateState
       )
       : buildVacancyReplyNatural(currentVacancy, candidateState, cleanText);
@@ -2593,7 +2590,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
         return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
       }
 
-      const dataPrompt = buildDataRequestPrompt(candidate, currentVacancy);
+      const dataPrompt = buildCandidateDataCollectionMessage(candidate, currentVacancy);
       const body = askedVacancyQuestion
         ? buildQuestionFollowUpReply(currentVacancy, cleanText, dataPrompt, candidate)
         : dataPrompt;

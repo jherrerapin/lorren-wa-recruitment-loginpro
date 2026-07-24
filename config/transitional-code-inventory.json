@@ -12,9 +12,7 @@
       "RETIRABLE",
       "BLOCKED"
     ],
-    "trackedAliasSymbols": [
-      "buildDataRequestPrompt"
-    ]
+    "trackedAliasSymbols": []
   },
   "featureFlags": [
     {
@@ -149,21 +147,5 @@
       ]
     }
   ],
-  "aliases": [
-    {
-      "symbol": "buildDataRequestPrompt",
-      "kind": "pure_alias",
-      "status": "TRANSITIONAL",
-      "definitionPath": "src/routes/webhook.js",
-      "targetSymbol": "buildCandidateDataCollectionMessage",
-      "targetPath": "src/services/readinessGuard.js",
-      "owner": "recruitment-readiness",
-      "purpose": "Renombra sin añadir política el mensaje dinámico de recolección de datos.",
-      "retirementCondition": "Reemplazar llamadas por buildCandidateDataCollectionMessage y validar que consentimiento y preguntas de vacante mantienen el orden del flujo.",
-      "evidenceTests": [
-        "test/flexibleApplicationFlow.test.js",
-        "test/conversationReplayIntegral.test.js"
-      ]
-    }
-  ]
+  "aliases": []
 }
