@@ -7,6 +7,7 @@ import {
   normalizeDispatchDateParam
 } from '../services/dispatchDate.js';
 import { confirmedOperationalAssignments, deriveDispatchRequestOperationalState, operationalAssignments } from '../services/dispatchOperationalCoverage.js';
+import { resolveAttendanceFeatureAccess } from '../services/attendanceFeatureAccess.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
@@ -199,6 +200,18 @@ async function loadServiceRequestsForDate(prisma, selectedDate) {
   }));
 }
 
+async function loadAttendanceAccessForDashboard(prisma, req) {
+  try {
+    return await resolveAttendanceFeatureAccess(prisma, {
+      userRole: req.session?.userRole || req.userRole,
+      username: req.session?.username || req.username
+    });
+  } catch (error) {
+    console.error('[DispatchOps] Error resolviendo acceso a asistencia:', error);
+    return { allowed: false, reason: 'access_resolution_failed' };
+  }
+}
+
 function applyTitle(worksheet, title, subtitle, columnCount) {
   worksheet.mergeCells(1, 1, 1, columnCount);
   const titleCell = worksheet.getCell(1, 1);
@@ -256,7 +269,7 @@ function styleStatusCell(cell, status) {
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 }
 
-function renderHome(res, req, selectedDate, requests) {
+function renderHome(res, req, selectedDate, requests, attendanceAccess) {
   const metrics = buildOperationsDashboardMetrics(requests);
   return res.render('operacionesDashboard', {
     role: req.session?.userRole || req.userRole,
@@ -265,7 +278,8 @@ function renderHome(res, req, selectedDate, requests) {
     activeSection: 'dashboard',
     selectedDate,
     metrics,
-    canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
+    canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch),
+    canAccessAttendanceFeature: Boolean(attendanceAccess?.allowed)
   });
 }
 
@@ -384,8 +398,11 @@ export function dispatchDashboardMetricsRouter(prisma) {
   router.get('/', async (req, res) => {
     try {
       const selectedDate = selectedDateFromQuery(req.query);
-      const requests = await loadServiceRequestsForDate(prisma, selectedDate);
-      return renderHome(res, req, selectedDate, requests);
+      const [requests, attendanceAccess] = await Promise.all([
+        loadServiceRequestsForDate(prisma, selectedDate),
+        loadAttendanceAccessForDashboard(prisma, req)
+      ]);
+      return renderHome(res, req, selectedDate, requests, attendanceAccess);
     } catch (err) {
       console.error('[DispatchOps] Error cargando inicio:', err);
       return res.status(500).send('Error cargando el panel de operaciones');
@@ -395,8 +412,11 @@ export function dispatchDashboardMetricsRouter(prisma) {
   router.get('/dispatch/operations', async (req, res) => {
     try {
       const selectedDate = selectedDateFromQuery(req.query);
-      const requests = await loadServiceRequestsForDate(prisma, selectedDate);
-      return renderHome(res, req, selectedDate, requests);
+      const [requests, attendanceAccess] = await Promise.all([
+        loadServiceRequestsForDate(prisma, selectedDate),
+        loadAttendanceAccessForDashboard(prisma, req)
+      ]);
+      return renderHome(res, req, selectedDate, requests, attendanceAccess);
     } catch (err) {
       console.error('[DispatchOps] Error cargando dashboard:', err);
       return res.status(500).send('Error cargando el dashboard de operaciones');
