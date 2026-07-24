@@ -79,17 +79,27 @@ jobs:
             exit "$status"
           fi
 
-      - name: Update transactional persistence contract
+      - name: Update transactional persistence contracts
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('test/dispatchWhatsappRuntimeContracts.test.js')
           source = path.read_text(encoding='utf-8')
-          old = "assert.match(source, /prisma\\.dispatchWhatsappConfirmation\\.create\\(/);"
-          new = "assert.match(source, /tx\\.dispatchWhatsappConfirmation\\.create\\(/);"
-          if source.count(old) != 1:
-              raise SystemExit(f'No se encontró la aserción anterior: {source.count(old)}')
-          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          replacements = [
+            (
+              "assert.match(source, /prisma\\.dispatchWhatsappConfirmation\\.create\\(/);",
+              "assert.match(source, /tx\\.dispatchWhatsappConfirmation\\.create\\(/);"
+            ),
+            (
+              "assert.match(source, /The primary row was created before sending/);",
+              "assert.match(source, /Los alias persistidos antes del envío mantienen recuperable la confirmación/);"
+            )
+          ]
+          for old, new in replacements:
+            if source.count(old) != 1:
+              raise SystemExit(f'No se encontró el contrato anterior: {old} count={source.count(old)}')
+            source = source.replace(old, new, 1)
+          path.write_text(source, encoding='utf-8')
           PY
 
       - name: Remove temporary application files
