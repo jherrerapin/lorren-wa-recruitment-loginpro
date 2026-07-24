@@ -38,7 +38,7 @@ function comparableText(value) {
 function requireSearchQuery(value) {
   if (typeof value !== 'string') throw new Error('attendance_geocoding_query_required');
   const query = normalizeWhitespace(value);
-  if (query.length < 4) throw new Error('attendance_geocoding_query_too_short');
+  if (query.length < 3) throw new Error('attendance_geocoding_query_too_short');
   if (query.length > 180) throw new Error('attendance_geocoding_query_too_long');
   return query;
 }
@@ -55,6 +55,23 @@ function uniqueQueries(values) {
   });
 }
 
+function containsWholeComparable(source, fragment) {
+  const haystack = ` ${comparableText(source)} `;
+  const needle = comparableText(fragment);
+  return Boolean(needle && haystack.includes(` ${needle} `));
+}
+
+export function buildContextualAttendanceQuery(rawQuery, city) {
+  const query = requireSearchQuery(rawQuery);
+  const normalizedCity = normalizeWhitespace(city);
+  const parts = [query];
+  if (normalizedCity && !containsWholeComparable(query, normalizedCity)) parts.push(normalizedCity);
+  if (!containsWholeComparable(query, 'Colombia')) parts.push('Colombia');
+  const contextual = normalizeWhitespace(parts.join(', '));
+  if (contextual.length > 180) return query;
+  return contextual;
+}
+
 function isBogotaQuery(query) {
   return /\bBOGOTA\b/.test(comparableText(query));
 }
@@ -63,52 +80,101 @@ function withoutColombianAddressSymbols(query) {
   return normalizeWhitespace(
     query
       .replace(/\s*(?:#|n(?:o|ro|úm(?:ero)?)\.?|n°)\s*/giu, ' ')
-      .replace(/([0-9A-Za-z])\s*-\s*([0-9A-Za-z])/g, '$1 $2')
+      .replace(/([0-9A-Za-z])\s*[-–—]\s*([0-9A-Za-z])/g, '$1 $2')
   );
 }
 
+const STREET_TYPE_PATTERN = [
+  'Avenida\\s+Carrera', 'Avenida\\s+Calle', 'Autopista', 'Transversal', 'Diagonal',
+  'Carrera', 'Calle', 'Avenida', 'AK', 'AC', 'AU', 'KR', 'CRA', 'CR', 'CLL', 'CL', 'DG', 'TV', 'AV'
+].join('|');
+const STREET_NUMBER_PATTERN = '[0-9]+[A-Za-z]?(?:\\s+Bis)?(?:\\s+(?:Sur|Norte|Este|Oeste))?';
+const COLOMBIAN_ADDRESS_PATTERN = new RegExp(
+  `^(${STREET_TYPE_PATTERN})\\s+(${STREET_NUMBER_PATTERN})\\s*(?:#|n(?:o|ro|úm(?:ero)?)\\.?|n°)?\\s*(${STREET_NUMBER_PATTERN})\\s*(?:[-–—]|\\s+)\\s*([0-9A-Za-z]+)(?:\\b|$)`,
+  'iu'
+);
+
+function canonicalStreetType(value) {
+  const type = comparableText(value);
+  const map = {
+    AK: 'Avenida Carrera',
+    AC: 'Avenida Calle',
+    AU: 'Autopista',
+    KR: 'Carrera',
+    CRA: 'Carrera',
+    CR: 'Carrera',
+    CARRERA: 'Carrera',
+    CL: 'Calle',
+    CLL: 'Calle',
+    CALLE: 'Calle',
+    DG: 'Diagonal',
+    DIAGONAL: 'Diagonal',
+    TV: 'Transversal',
+    TRANSVERSAL: 'Transversal',
+    AV: 'Avenida',
+    AVENIDA: 'Avenida',
+    'AVENIDA CARRERA': 'Avenida Carrera',
+    'AVENIDA CALLE': 'Avenida Calle',
+    AUTOPISTA: 'Autopista'
+  };
+  return map[type] || normalizeWhitespace(value);
+}
+
+function splitAddressLocation(query) {
+  const parts = query.split(',').map((part) => normalizeWhitespace(part)).filter(Boolean);
+  return { address: parts.shift() || '', locationParts: parts };
+}
+
+function colombianAddressParts(query) {
+  const { address, locationParts } = splitAddressLocation(query);
+  const match = address.match(COLOMBIAN_ADDRESS_PATTERN);
+  if (!match) return null;
+  const [, rawMainType, mainNumber, crossNumber, accessNumber] = match;
+  return {
+    mainType: canonicalStreetType(rawMainType),
+    mainNumber: normalizeWhitespace(mainNumber),
+    crossNumber: normalizeWhitespace(crossNumber),
+    accessNumber: normalizeWhitespace(accessNumber),
+    locationParts
+  };
+}
+
 function crossStreetType(mainType) {
-  const normalized = mainType.toLocaleLowerCase('es-CO');
+  const normalized = canonicalStreetType(mainType).toLocaleLowerCase('es-CO');
   if (normalized.includes('calle') || normalized === 'diagonal') return 'Carrera';
   return 'Calle';
 }
 
-function colombianAddressParts(query) {
-  const parts = query.split(',').map((part) => normalizeWhitespace(part)).filter(Boolean);
-  const address = parts.shift() || '';
-  const match = address.match(
-    /^(Calle|Carrera|Diagonal|Transversal|Avenida\s+Calle|Avenida\s+Carrera|Autopista|Avenida)\s+([0-9]+[A-Za-z]?(?:\s+Bis)?(?:\s+(?:Sur|Norte|Este|Oeste))?)\s*(?:#|n(?:o|ro|úm(?:ero)?)\.?|n°)?\s*([0-9]+[A-Za-z]?(?:\s+Bis)?(?:\s+(?:Sur|Norte|Este|Oeste))?)\s*-\s*([0-9A-Za-z]+)$/iu
-  );
-  if (!match) return null;
-  const [, mainType, mainNumber, crossNumber, accessNumber] = match;
-  return { mainType, mainNumber, crossNumber, accessNumber, locationParts: parts };
+function locationSuffix(parts) {
+  return parts.length ? `, ${parts.join(', ')}` : ', Colombia';
+}
+
+function canonicalColombianAddressQuery(query) {
+  const parsed = colombianAddressParts(query);
+  if (!parsed) return null;
+  return `${parsed.mainType} ${parsed.mainNumber} #${parsed.crossNumber}-${parsed.accessNumber}${locationSuffix(parsed.locationParts)}`;
 }
 
 function colombianIntersectionQuery(query, connector = ',') {
   const parsed = colombianAddressParts(query);
   if (!parsed) return null;
-  const location = parsed.locationParts.length
-    ? `, ${parsed.locationParts.join(', ')}`
-    : ', Colombia';
   const crossStreet = `${crossStreetType(parsed.mainType)} ${parsed.crossNumber}`;
   return connector === 'con'
-    ? `${parsed.mainType} ${parsed.mainNumber} con ${crossStreet}${location}`
-    : `${parsed.mainType} ${parsed.mainNumber}, ${crossStreet}${location}`;
+    ? `${parsed.mainType} ${parsed.mainNumber} con ${crossStreet}${locationSuffix(parsed.locationParts)}`
+    : `${parsed.mainType} ${parsed.mainNumber}, ${crossStreet}${locationSuffix(parsed.locationParts)}`;
 }
 
 function colombianMainStreetQuery(query) {
   const parsed = colombianAddressParts(query);
   if (!parsed) return null;
-  const location = parsed.locationParts.length
-    ? `, ${parsed.locationParts.join(', ')}`
-    : ', Colombia';
-  return `${parsed.mainType} ${parsed.mainNumber}${location}`;
+  return `${parsed.mainType} ${parsed.mainNumber}${locationSuffix(parsed.locationParts)}`;
 }
 
 export function buildAttendanceGeocodingQueries(rawQuery) {
   const query = requireSearchQuery(rawQuery);
   return uniqueQueries([
     query,
+    canonicalColombianAddressQuery(query),
     colombianIntersectionQuery(query),
     colombianIntersectionQuery(query, 'con'),
     withoutColombianAddressSymbols(query),
@@ -117,15 +183,22 @@ export function buildAttendanceGeocodingQueries(rawQuery) {
 }
 
 function officialStreetType(value) {
-  return comparableText(value)
-    .replace(/^AVENIDA CARRERA\b/, 'AK')
-    .replace(/^AVENIDA CALLE\b/, 'AC')
-    .replace(/^AUTOPISTA\b/, 'AU')
-    .replace(/^CARRERA\b/, 'KR')
-    .replace(/^CALLE\b/, 'CL')
-    .replace(/^DIAGONAL\b/, 'DG')
-    .replace(/^TRANSVERSAL\b/, 'TV')
-    .replace(/^AVENIDA\b/, 'AV');
+  const normalized = comparableText(value);
+  const aliases = [
+    ['AVENIDA CARRERA', 'AK'], ['AK', 'AK'],
+    ['AVENIDA CALLE', 'AC'], ['AC', 'AC'],
+    ['AUTOPISTA', 'AU'], ['AU', 'AU'],
+    ['CARRERA', 'KR'], ['CRA', 'KR'], ['KR', 'KR'], ['CR', 'KR'],
+    ['CALLE', 'CL'], ['CLL', 'CL'], ['CL', 'CL'],
+    ['DIAGONAL', 'DG'], ['DG', 'DG'],
+    ['TRANSVERSAL', 'TV'], ['TV', 'TV'],
+    ['AVENIDA', 'AV'], ['AV', 'AV']
+  ];
+  for (const [prefix, replacement] of aliases) {
+    if (normalized === prefix) return replacement;
+    if (normalized.startsWith(`${prefix} `)) return `${replacement}${normalized.slice(prefix.length)}`;
+  }
+  return normalized;
 }
 
 export function normalizeBogotaAddressForIdeca(rawQuery) {
@@ -142,8 +215,10 @@ export function buildIdecaGeocodingQueries(rawQuery) {
   const query = requireSearchQuery(rawQuery);
   if (!isBogotaQuery(query)) return [];
   const addressOnly = normalizeWhitespace(query.split(',')[0] || query);
+  const canonical = canonicalColombianAddressQuery(query)?.split(',')[0] || null;
   return uniqueQueries([
     normalizeBogotaAddressForIdeca(query),
+    canonical,
     addressOnly,
     withoutColombianAddressSymbols(addressOnly)
   ]);
@@ -420,9 +495,7 @@ function providerError(code, { retryable = true } = {}) {
 }
 
 function providerState(name) {
-  if (!providerHealth.has(name)) {
-    providerHealth.set(name, { failures: 0, openUntil: 0 });
-  }
+  if (!providerHealth.has(name)) providerHealth.set(name, { failures: 0, openUntil: 0 });
   return providerHealth.get(name);
 }
 
@@ -525,7 +598,7 @@ async function requestBogotaPlate(rawQuery, options) {
     requestOptions: {
       headers: {
         Accept: 'application/json',
-        'User-Agent': `Lorren-Attendance/2.0 (${identifyingOrigin(options.origin)})`
+        'User-Agent': `Lorren-Attendance/2.1 (${identifyingOrigin(options.origin)})`
       }
     }
   }, 'attendance_geocoding_ideca_placa_unavailable');
@@ -564,7 +637,7 @@ async function requestIdecaLegacy(query, rawQuery, options) {
     requestOptions: {
       headers: {
         Accept: 'application/json',
-        'User-Agent': `Lorren-Attendance/2.0 (${identifyingOrigin(options.origin)})`
+        'User-Agent': `Lorren-Attendance/2.1 (${identifyingOrigin(options.origin)})`
       }
     }
   }, 'attendance_geocoding_ideca_legacy_unavailable');
@@ -596,7 +669,7 @@ async function requestNominatim(query, options, precision = 'approximate') {
         Accept: 'application/json',
         'Accept-Language': 'es',
         Referer: `${origin}/admin/operaciones`,
-        'User-Agent': `Lorren-Attendance/2.0 (${origin})`
+        'User-Agent': `Lorren-Attendance/2.1 (${origin})`
       }
     }
   }, 'attendance_geocoding_nominatim_unavailable');
@@ -609,7 +682,7 @@ function appendResults(target, incoming) {
 }
 
 export async function geocodeAttendanceAddress(rawQuery, options = {}) {
-  const query = requireSearchQuery(rawQuery);
+  const query = buildContextualAttendanceQuery(rawQuery, options.city);
   const nowFn = options.nowFn || Date.now;
   const cached = options.disableCache ? null : readCache(query, nowFn());
   if (cached) return cached;
@@ -648,7 +721,7 @@ export async function geocodeAttendanceAddress(rawQuery, options = {}) {
 
   if (isBogotaQuery(query)) {
     const idecaQueries = buildIdecaGeocodingQueries(query);
-    for (const idecaQuery of idecaQueries.slice(0, 2)) {
+    for (const idecaQuery of idecaQueries.slice(0, 3)) {
       await useProvider('ideca_legacy', () => requestIdecaLegacy(idecaQuery, query, options));
       if (collected.length) break;
       if (!providerIsAvailable('ideca_legacy', nowFn())) break;
@@ -657,11 +730,11 @@ export async function geocodeAttendanceAddress(rawQuery, options = {}) {
 
   if (!hasStrongAddressResult(collected)) {
     const nominatimQueries = buildAttendanceGeocodingQueries(query);
-    for (let index = 0; index < Math.min(3, nominatimQueries.length); index += 1) {
+    for (let index = 0; index < Math.min(4, nominatimQueries.length); index += 1) {
       await useProvider('nominatim', () => requestNominatim(
         nominatimQueries[index],
         options,
-        index === 0 ? 'address' : 'approximate'
+        index <= 1 ? 'address' : 'approximate'
       ));
       if (hasStrongAddressResult(collected) || collected.length >= MAX_PUBLIC_RESULTS) break;
       if (!providerIsAvailable('nominatim', nowFn())) break;
