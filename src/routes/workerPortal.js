@@ -37,6 +37,15 @@ export const WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 *
 const WORKER_PORTAL_SERVICE_WORKER_FILE = fileURLToPath(
   new URL('../public/worker-portal-sw.js', import.meta.url)
 );
+const WORKER_PORTAL_OFFLINE_RUNTIME_FILE = fileURLToPath(
+  new URL('../public/worker-portal-offline.js', import.meta.url)
+);
+const WORKER_PORTAL_MANIFEST_FILE = fileURLToPath(
+  new URL('../public/worker-portal.webmanifest', import.meta.url)
+);
+const WORKER_PORTAL_ICON_FILE = fileURLToPath(
+  new URL('../public/worker-portal-icon.svg', import.meta.url)
+);
 const GENERIC_ACTIVATION_ERROR = 'activation_invalid_or_expired';
 const ACTIVATION_RATE_LIMIT_ERROR = 'activation_temporarily_limited';
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
@@ -390,18 +399,24 @@ export function workerPortalRouter(prisma, options = {}) {
   });
 
   router.get('/offline.js', (_req, res) => {
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    return res.redirect(302, '/public/worker-portal-offline.js');
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.sendFile(WORKER_PORTAL_OFFLINE_RUNTIME_FILE);
   });
 
   router.get('/manifest.webmanifest', (_req, res) => {
+    res.set('Content-Type', 'application/manifest+json; charset=utf-8');
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    return res.redirect(302, '/public/worker-portal.webmanifest');
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.sendFile(WORKER_PORTAL_MANIFEST_FILE);
   });
 
   router.get('/icon.svg', (_req, res) => {
+    res.set('Content-Type', 'image/svg+xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=86400');
-    return res.redirect(302, '/public/worker-portal-icon.svg');
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.sendFile(WORKER_PORTAL_ICON_FILE);
   });
 
   router.get('/activar', (_req, res) => {
