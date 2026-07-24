@@ -122,13 +122,46 @@ test('active WhatsApp engine keeps persistent Railway auth, LID mapping and rest
   assert.match(schema, /model DispatchWhatsappConfirmation/);
 });
 
-test('active WhatsApp engine supports reconnect and recent-message catchup', () => {
+test('active WhatsApp engine supports reconnect and targeted persistent reconciliation', () => {
   const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
   assert.match(source, /function scheduleReconnect\(reason\)/);
-  assert.match(source, /async function processRecentInboundConfirmations/);
-  assert.match(source, /scheduleRecentConfirmationCatchup\(client, 'ready'\)/);
+  assert.match(source, /async function processPersistedPendingConfirmations/);
+  assert.match(source, /startPendingConfirmationReconciliation\(client\)/);
   assert.match(source, /activeClient\.on\('message'/);
   assert.match(source, /activeClient\.on\('message_create'/);
+  assert.doesNotMatch(source, /CATCHUP_|processRecentInboundConfirmations|scheduleRecentConfirmationCatchup|activeClient\.getChats\(\)/);
+});
+
+
+
+test('runtime has one auto-start owner and status polling does not scan chats', () => {
+  const runtime = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const facade = readSource('src/services/dispatchWhatsappWebService.js');
+  const statusView = between(
+    runtime,
+    'export async function getDispatchWhatsappStatusView',
+    'export async function closeDispatchWhatsappSession'
+  );
+  assert.match(facade, /startDispatchWhatsappWatchdog\(\);/);
+  assert.doesNotMatch(runtime, /AUTO_START_ENABLED|AUTO_START_DELAY_MS|if \(AUTO_START_ENABLED\)/);
+  assert.doesNotMatch(statusView, /getChats|scheduleRecentConfirmationCatchup|processRecentInboundConfirmations/);
+});
+
+test('client recycling waits for Chromium destruction before reconnecting', () => {
+  const runtime = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const reset = between(runtime, 'async function resetClientReference', 'async function destroyClientWithoutLogout');
+  const initialization = between(runtime, 'export function initDispatchWhatsappClient', 'export function getDispatchWhatsappStatus');
+  assert.match(reset, /await destroyClientWithoutLogout\(oldClient\)/);
+  assert.match(initialization, /resetClientReference\(\)[\s\S]*\.finally\(\(\) => scheduleReconnect\(reason \|\| 'desconectado'\)\)/);
+  assert.match(initialization, /await resetClientReference\(\)/);
+});
+
+test('dispatch WhatsApp runtime logs avoid full phone and chat identifiers', () => {
+  const runtime = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  assert.doesNotMatch(runtime, /phone=\$\{normalizedPhone/);
+  assert.doesNotMatch(runtime, /reconciliar el chat \$\{chatId\}/);
+  assert.match(runtime, /phonePresent=/);
+  assert.match(runtime, /chatType=/);
 });
 
 test('current confirmation variants remain accepted', () => {
@@ -276,12 +309,12 @@ test('stalled recovery releases the client without deleting LocalAuth session da
   assert.doesNotMatch(restart, /logout\(/);
 });
 
-test('panel stalled recovery uses non-destructive restart instead of manual logout', () => {
+test('status polling delegates stalled recovery to the server watchdog', () => {
   const route = readSource('src/routes/dispatchWaRouterV2.js');
-  const recovery = between(route, 'function recoverStalledInitialization()', 'async function getStatusForViewer');
-  assert.match(route, /restartDispatchWhatsappClient/);
-  assert.match(recovery, /restartDispatchWhatsappClient\('estado atascado detectado desde el panel'\)/);
-  assert.doesNotMatch(recovery, /closeDispatchWhatsappSession\(/);
+  const statusReader = between(route, 'async function getStatusForViewer', 'export function dispatchWhatsappNotificationsRouter');
+  assert.doesNotMatch(route, /restartDispatchWhatsappClient|recoverStalledInitialization|STALLED_INITIALIZATION_TIMEOUT_MS/);
+  assert.match(statusReader, /getDispatchWhatsappStatusView\(\{ autoStart \}\)/);
+  assert.doesNotMatch(statusReader, /setTimeout|Date\.now|recoveryInProgress/);
 });
 
 test('stale cleanup includes uncertain delivery and pending automatic replies', () => {
