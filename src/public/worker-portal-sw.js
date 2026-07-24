@@ -1,0 +1,330 @@
+'use strict';
+
+const PORTAL_PATH = '/operaciones/portal';
+const PORTAL_CACHE_KEY = '/operaciones/portal';
+const CACHE_NAME = 'lorren-worker-portal-shell-v2';
+const STATIC_ASSETS = [
+  '/operaciones/portal/offline.js',
+  '/operaciones/portal/manifest.webmanifest',
+  '/operaciones/portal/icon.svg'
+];
+const DB_NAME = 'lorren-worker-portal-v1';
+const DB_VERSION = 1;
+const QUEUE_STORE = 'arrivalQueue';
+const RECEIPT_STORE = 'arrivalReceipts';
+const SYNC_TAG = 'lorren-worker-arrivals';
+const MAX_QUEUE_AGE_MS = 72 * 60 * 60 * 1000;
+
+function requestPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.addEventListener('success', () => resolve(request.result), { once: true });
+    request.addEventListener('error', () => reject(request.error || new Error('indexeddb_request_failed')), { once: true });
+  });
+}
+
+function transactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.addEventListener('complete', resolve, { once: true });
+    transaction.addEventListener('abort', () => reject(transaction.error || new Error('indexeddb_transaction_aborted')), { once: true });
+    transaction.addEventListener('error', () => reject(transaction.error || new Error('indexeddb_transaction_failed')), { once: true });
+  });
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.addEventListener('upgradeneeded', () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(QUEUE_STORE)) {
+        const queue = database.createObjectStore(QUEUE_STORE, { keyPath: 'idempotencyKey' });
+        queue.createIndex('assignmentId', 'assignmentId', { unique: false });
+        queue.createIndex('queuedAt', 'queuedAt', { unique: false });
+      }
+      if (!database.objectStoreNames.contains(RECEIPT_STORE)) {
+        const receipts = database.createObjectStore(RECEIPT_STORE, { keyPath: 'idempotencyKey' });
+        receipts.createIndex('assignmentId', 'assignmentId', { unique: false });
+        receipts.createIndex('completedAt', 'completedAt', { unique: false });
+      }
+    });
+    request.addEventListener('success', () => resolve(request.result), { once: true });
+    request.addEventListener('error', () => reject(request.error || new Error('indexeddb_open_failed')), { once: true });
+  });
+}
+
+async function readQueue() {
+  const database = await openDatabase();
+  try {
+    const transaction = database.transaction(QUEUE_STORE, 'readonly');
+    const records = await requestPromise(transaction.objectStore(QUEUE_STORE).getAll());
+    await transactionDone(transaction);
+    return Array.isArray(records) ? records : [];
+  } finally {
+    database.close();
+  }
+}
+
+async function putQueueRecord(record) {
+  const database = await openDatabase();
+  try {
+    const transaction = database.transaction(QUEUE_STORE, 'readwrite');
+    transaction.objectStore(QUEUE_STORE).put(record);
+    await transactionDone(transaction);
+  } finally {
+    database.close();
+  }
+}
+
+async function completeQueueRecord(record, receipt) {
+  const database = await openDatabase();
+  try {
+    const transaction = database.transaction([QUEUE_STORE, RECEIPT_STORE], 'readwrite');
+    transaction.objectStore(QUEUE_STORE).delete(record.idempotencyKey);
+    transaction.objectStore(RECEIPT_STORE).put({
+      idempotencyKey: record.idempotencyKey,
+      assignmentId: record.assignmentId,
+      capturedAt: record.clientCapturedAt,
+      queuedAt: record.queuedAt,
+      completedAt: new Date().toISOString(),
+      ...receipt
+    });
+    await transactionDone(transaction);
+  } finally {
+    database.close();
+  }
+}
+
+async function notifyClients(message) {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  clients.forEach((client) => client.postMessage(message));
+}
+
+function offlineFallbackResponse() {
+  return new Response(`<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Portal del Auxiliar · Lórren</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f4f6f8;color:#17212b;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(100%,480px);background:#fff;border:1px solid #dfe4ea;border-radius:20px;padding:26px;box-shadow:0 16px 44px rgba(23,33,43,.09)}h1{margin:0 0 10px;font-size:30px}p{margin:0;color:#4d5b69;line-height:1.55}.status{margin-top:18px;padding:14px;border-radius:12px;background:#fff6df;color:#76520b;font-weight:700}</style></head><body><main class="card"><h1>Sin conexión</h1><p>Abre el portal una vez con internet para guardar tu programación en este dispositivo. Las marcaciones pendientes se sincronizarán cuando vuelva la conexión.</p><div class="status">No hay una copia offline disponible todavía.</div></main></body></html>`, {
+    status: 503,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+    }
+  });
+}
+
+async function cacheActivePortal() {
+  const response = await fetch(PORTAL_PATH, {
+    credentials: 'include',
+    cache: 'no-store',
+    headers: { Accept: 'text/html' }
+  });
+  const mode = response.headers.get('X-Lorren-Worker-Portal-Mode');
+  const cache = await caches.open(CACHE_NAME);
+  if (response.ok && mode === 'active') {
+    await cache.put(PORTAL_CACHE_KEY, response.clone());
+    await notifyClients({ type: 'PORTAL_CACHED' });
+    return true;
+  }
+  if (mode === 'inactive') await cache.delete(PORTAL_CACHE_KEY);
+  return false;
+}
+
+async function networkFirstPortal(request) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request);
+    const mode = response.headers.get('X-Lorren-Worker-Portal-Mode');
+    if (response.ok && mode === 'active') {
+      await cache.put(PORTAL_CACHE_KEY, response.clone());
+    } else if (mode === 'inactive') {
+      await cache.delete(PORTAL_CACHE_KEY);
+    }
+    return response;
+  } catch {
+    return await cache.match(PORTAL_CACHE_KEY) || offlineFallbackResponse();
+  }
+}
+
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response.ok) await cache.put(request, response.clone());
+  return response;
+}
+
+function buildArrivalForm(record) {
+  const form = new FormData();
+  form.set('idempotencyKey', record.idempotencyKey);
+  form.set('latitude', String(record.latitude));
+  form.set('longitude', String(record.longitude));
+  form.set('accuracyMeters', String(record.accuracyMeters));
+  form.set('clientCapturedAt', record.clientCapturedAt);
+  form.set('captureMode', 'OFFLINE_WEB');
+  form.set('persistentStorageAvailable', record.persistentStorageAvailable === true ? 'true' : 'false');
+  form.set('photoConsent', record.selfie && record.photoConsent ? 'true' : 'false');
+  if (record.selfie instanceof Blob) {
+    const extension = record.selfie.type === 'image/png' ? 'png' : record.selfie.type === 'image/webp' ? 'webp' : 'jpg';
+    form.set('selfie', record.selfie, `selfie-llegada-offline.${extension}`);
+  }
+  return form;
+}
+
+function terminalRejection(status, error) {
+  if (status === 400 || status === 404) return true;
+  return status === 409 && [
+    'arrival_already_registered',
+    'arrival_window_not_open',
+    'offline_capture_expired',
+    'assignment_not_available',
+    'attendance_not_enabled'
+  ].includes(error);
+}
+
+async function syncRecord(record) {
+  const queuedAt = new Date(record.queuedAt || 0).getTime();
+  if (!Number.isFinite(queuedAt) || Date.now() - queuedAt > MAX_QUEUE_AGE_MS) {
+    await completeQueueRecord(record, {
+      state: 'REJECTED',
+      error: 'offline_capture_expired',
+      message: 'La marcación offline venció antes de sincronizarse.'
+    });
+    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, error: 'offline_capture_expired' });
+    return { retry: false, sessionRequired: false };
+  }
+
+  const inProgress = {
+    ...record,
+    state: 'SYNCING',
+    attempts: Number(record.attempts || 0) + 1,
+    updatedAt: new Date().toISOString(),
+    lastError: null
+  };
+  await putQueueRecord(inProgress);
+  await notifyClients({ type: 'ARRIVAL_QUEUE_UPDATED', assignmentId: record.assignmentId, state: 'SYNCING' });
+
+  let response;
+  try {
+    response = await fetch(`${PORTAL_PATH}/asignaciones/${encodeURIComponent(record.assignmentId)}/llegada`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'X-Requested-With': 'worker-portal' },
+      body: buildArrivalForm(record)
+    });
+  } catch (error) {
+    await putQueueRecord({
+      ...inProgress,
+      state: 'PENDING',
+      lastError: 'network_unavailable',
+      updatedAt: new Date().toISOString()
+    });
+    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: 'network_unavailable' });
+    return { retry: true, sessionRequired: false, error };
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (response.ok && payload.ok) {
+    const state = payload.requiresReview ? 'REVIEW_REQUIRED' : 'SYNCED';
+    await completeQueueRecord(record, {
+      state,
+      validationStatus: payload.validationStatus || null,
+      attendanceStatus: payload.attendanceStatus || null,
+      punctualityStatus: payload.punctualityStatus || null,
+      message: payload.message || 'Marcación sincronizada.'
+    });
+    await notifyClients({ type: 'ARRIVAL_SYNCED', assignmentId: record.assignmentId, state, payload });
+    return { retry: false, sessionRequired: false };
+  }
+
+  if (response.status === 401) {
+    await putQueueRecord({
+      ...inProgress,
+      state: 'SESSION_REQUIRED',
+      lastError: payload.error || 'portal_session_required',
+      updatedAt: new Date().toISOString()
+    });
+    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: 'portal_session_required' });
+    return { retry: false, sessionRequired: true };
+  }
+
+  if (terminalRejection(response.status, payload.error)) {
+    const alreadyRecorded = payload.error === 'arrival_already_registered';
+    await completeQueueRecord(record, {
+      state: alreadyRecorded ? 'ALREADY_RECORDED' : 'REJECTED',
+      error: payload.error || 'arrival_rejected',
+      message: alreadyRecorded
+        ? 'La llegada ya estaba registrada en Lórren.'
+        : 'La marcación offline fue rechazada por el servidor.'
+    });
+    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, error: payload.error || 'arrival_rejected' });
+    return { retry: false, sessionRequired: false };
+  }
+
+  await putQueueRecord({
+    ...inProgress,
+    state: 'PENDING',
+    lastError: payload.error || `http_${response.status}`,
+    updatedAt: new Date().toISOString()
+  });
+  await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: payload.error || `http_${response.status}` });
+  return { retry: response.status >= 500, sessionRequired: false };
+}
+
+async function syncQueue({ throwOnRetry = false } = {}) {
+  const records = (await readQueue()).sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt)));
+  let shouldRetry = false;
+  for (const record of records) {
+    const result = await syncRecord(record);
+    shouldRetry = shouldRetry || result.retry;
+    if (result.sessionRequired) break;
+  }
+  if (throwOnRetry && shouldRetry) throw new Error('arrival_sync_retry_required');
+}
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    Promise.all([
+      caches.keys().then((names) => Promise.all(names.filter((name) => name.startsWith('lorren-worker-portal-') && name !== CACHE_NAME).map((name) => caches.delete(name)))),
+      self.clients.claim()
+    ])
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  if (request.mode === 'navigate' && (url.pathname === PORTAL_PATH || url.pathname === `${PORTAL_PATH}/`)) {
+    event.respondWith(networkFirstPortal(request));
+    return;
+  }
+
+  if (STATIC_ASSETS.includes(url.pathname)) {
+    event.respondWith(cacheFirst(request));
+  }
+});
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === SYNC_TAG) {
+    event.waitUntil(syncQueue({ throwOnRetry: true }));
+  }
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SYNC_ARRIVALS') {
+    event.waitUntil(syncQueue().catch(() => {}));
+    return;
+  }
+  if (event.data?.type === 'CACHE_PORTAL') {
+    event.waitUntil(cacheActivePortal().catch(() => false));
+  }
+});

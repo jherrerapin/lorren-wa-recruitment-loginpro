@@ -29,6 +29,7 @@ function createFixture(overrides = {}) {
     geofenceRadiusMeters: 200,
     maxLocationAccuracyMeters: 100,
     lateToleranceMinutes: 10,
+    absenceGraceMinutes: 15,
     attendanceTimezone: 'America/Bogota',
     ...overrides.operationPoint
   };
@@ -196,6 +197,58 @@ test('auto-valida una llegada confiable y persiste todo en una transacción seri
   assert.equal(state.markCreates, 1);
   assert.equal(state.transactionCalls, 1);
   assert.deepEqual(state.transactionOptions[0], { isolationLevel: 'Serializable' });
+});
+
+test('sincroniza una captura offline usando la hora capturada y la deja en revisión', async () => {
+  const { prisma, state } = createFixture();
+  const capturedAt = new Date('2026-07-19T13:05:00.000Z');
+  const receivedAt = new Date('2026-07-19T16:00:00.000Z');
+  const result = await registerDispatchArrival(prisma, trustedInput({
+    idempotencyKey: 'offline-arrival-1',
+    captureMode: 'OFFLINE_WEB',
+    clientCapturedAt: capturedAt,
+    now: receivedAt,
+    hasFreshPhoto: true,
+    evidenceStorageKey: 'attendance/worker-1/assignment-1/arrival/offline-arrival-1.jpg',
+    evidenceMimeType: 'image/jpeg'
+  }));
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.validation.validationStatus, 'REVIEW_REQUIRED');
+  assert.equal(result.validation.reportedPunctuality, 'ON_TIME');
+  assert.ok(result.validation.riskFlags.includes(ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE));
+  assert.ok(result.validation.riskFlags.includes(ATTENDANCE_RISK_FLAG.DELAYED_SYNC));
+  assert.equal(result.attendanceSession.arrivalReportedAt.toISOString(), capturedAt.toISOString());
+  const mark = state.marks.get('offline-arrival-1');
+  assert.equal(mark.serverReceivedAt.toISOString(), receivedAt.toISOString());
+  assert.equal(mark.clientCapturedAt.toISOString(), capturedAt.toISOString());
+  assert.equal(result.attendanceSession.source, 'OFFLINE_WEB');
+});
+
+test('rechaza una captura offline cuya hora no estuvo dentro de la ventana de llegada', async () => {
+  const { prisma, state } = createFixture();
+  const result = await registerDispatchArrival(prisma, trustedInput({
+    idempotencyKey: 'offline-arrival-outside-window',
+    captureMode: 'OFFLINE_WEB',
+    clientCapturedAt: new Date('2026-07-19T15:00:00.000Z'),
+    now: new Date('2026-07-19T16:00:00.000Z')
+  }));
+
+  assert.equal(result.recorded, false);
+  assert.deepEqual(result.validation.riskFlags, [ATTENDANCE_RISK_FLAG.ARRIVAL_WINDOW_NOT_OPEN]);
+  assert.equal(state.markCreates, 0);
+});
+
+test('rechaza una captura offline de más de 72 horas', async () => {
+  const { prisma } = createFixture();
+  await assert.rejects(
+    registerDispatchArrival(prisma, trustedInput({
+      captureMode: 'OFFLINE_WEB',
+      clientCapturedAt: new Date('2026-07-19T13:00:00.000Z'),
+      now: new Date('2026-07-22T13:00:01.000Z')
+    })),
+    /attendance_offline_capture_expired/
+  );
 });
 
 test('un dispositivo nuevo registra llegada provisional y exige revisión', async () => {

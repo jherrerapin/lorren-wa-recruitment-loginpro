@@ -22,7 +22,10 @@ export const ATTENDANCE_RISK_FLAG = Object.freeze({
   LOW_LOCATION_ACCURACY: 'LOW_LOCATION_ACCURACY',
   UNAUTHORIZED_DEVICE: 'UNAUTHORIZED_DEVICE',
   SHARED_DEVICE_SIGNAL: 'SHARED_DEVICE_SIGNAL',
-  PERSISTENT_STORAGE_UNAVAILABLE: 'PERSISTENT_STORAGE_UNAVAILABLE'
+  PERSISTENT_STORAGE_UNAVAILABLE: 'PERSISTENT_STORAGE_UNAVAILABLE',
+  OFFLINE_WEB_CAPTURE: 'OFFLINE_WEB_CAPTURE',
+  CLIENT_CLOCK_UNTRUSTED: 'CLIENT_CLOCK_UNTRUSTED',
+  DELAYED_SYNC: 'DELAYED_SYNC'
 });
 
 function finiteNumber(value, fallback) {
@@ -69,6 +72,9 @@ function rejectedResult(flag) {
  * faltan señales confiables o aparecen indicios de riesgo. Una fotografía reciente puede
  * aportar evidencia, pero nunca convierte por sí sola un dispositivo no autorizado en uno
  * confiable.
+ *
+ * Una captura web offline siempre requiere revisión: IndexedDB permite conservar la marca,
+ * pero el reloj del navegador no equivale a una fuente horaria protegida por hardware.
  */
 export function evaluateArrivalValidation(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -95,6 +101,7 @@ export function evaluateArrivalValidation(input = {}) {
   const minutesLate = Math.max(0, finiteNumber(input.minutesLate, 0));
   const maxAccuracyMeters = Math.max(1, finiteNumber(input.maxAccuracyMeters, 100));
   const accuracyMeters = finiteNumber(input.accuracyMeters, null);
+  const syncDelayMinutes = Math.max(0, finiteNumber(input.syncDelayMinutes, 0));
   const reportedPunctuality = punctualityFromMinutes(minutesLate, toleranceMinutes);
   const riskFlags = [];
   let riskScore = 0;
@@ -133,6 +140,16 @@ export function evaluateArrivalValidation(input = {}) {
   if (input.persistentStorageAvailable === false) {
     riskFlags.push(ATTENDANCE_RISK_FLAG.PERSISTENT_STORAGE_UNAVAILABLE);
     riskScore += 20;
+  }
+
+  if (input.captureMode === 'OFFLINE_WEB') {
+    riskFlags.push(ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE);
+    riskFlags.push(ATTENDANCE_RISK_FLAG.CLIENT_CLOCK_UNTRUSTED);
+    riskScore += 40;
+    if (syncDelayMinutes >= 5) {
+      riskFlags.push(ATTENDANCE_RISK_FLAG.DELAYED_SYNC);
+      riskScore += Math.min(25, 10 + Math.floor(syncDelayMinutes / 60) * 5);
+    }
   }
 
   if (input.hasFreshPhoto === true && riskScore > 0) {

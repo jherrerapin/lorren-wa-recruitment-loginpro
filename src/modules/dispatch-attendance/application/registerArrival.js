@@ -18,6 +18,10 @@ const ACTIVE_ASSIGNMENT_STATUS_SET = new Set(ACTIVE_DISPATCH_ASSIGNMENT_STATUSES
 const MAX_SERIALIZABLE_RETRIES = 3;
 const SERIALIZABLE_ISOLATION_LEVEL = 'Serializable';
 const BOGOTA_TIME_ZONE = 'America/Bogota';
+const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
+const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
+const MAX_OFFLINE_CAPTURE_AGE_MS = 72 * 60 * 60 * 1000;
+const MAX_CLIENT_CLOCK_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 function requireInputObject(input, label) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -59,6 +63,15 @@ function optionalFiniteNumber(value, label, { min = -Infinity, max = Infinity } 
     throw new Error(`${label}_invalid`);
   }
   return number;
+}
+
+function normalizeCaptureMode(value) {
+  if (value === null || value === undefined || value === '') return ONLINE_WEB_CAPTURE_MODE;
+  const normalized = requireNonEmptyString(value, 'attendance_capture_mode').toUpperCase();
+  if (![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(normalized)) {
+    throw new Error('attendance_capture_mode_invalid');
+  }
+  return normalized;
 }
 
 function requirePrismaContract(client) {
@@ -165,12 +178,30 @@ export function getDispatchArrivalWindowState(input = {}) {
     'early_arrival_window_minutes',
     { min: 0 }
   ) ?? 0;
+  const absenceGraceMinutes = optionalFiniteNumber(
+    input.absenceGraceMinutes,
+    'absence_grace_minutes',
+    { min: 0 }
+  );
   const opensAt = new Date(expectedStartAt.getTime() - earlyArrivalWindowMinutes * 60_000);
-  return { open: now.getTime() >= opensAt.getTime(), opensAt };
+  const closesAt = absenceGraceMinutes === null
+    ? null
+    : new Date(expectedStartAt.getTime() + absenceGraceMinutes * 60_000);
+  const expired = Boolean(closesAt && now.getTime() > closesAt.getTime());
+  return {
+    open: now.getTime() >= opensAt.getTime() && !expired,
+    opensAt,
+    closesAt,
+    expired
+  };
 }
 
 function minutesLateAt(now, expectedStartAt) {
   return Math.max(0, Math.floor((now.getTime() - expectedStartAt.getTime()) / 60_000));
+}
+
+function syncDelayMinutes(now, reportedAt) {
+  return Math.max(0, Math.floor((now.getTime() - reportedAt.getTime()) / 60_000));
 }
 
 function isRetryableWriteConflict(error) {
@@ -303,9 +334,10 @@ async function registerInsideTransaction(client, input) {
       }
     : buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
   const arrivalWindow = getDispatchArrivalWindowState({
-    now: input.now,
+    now: input.reportedAt,
     expectedStartAt: expectedWindow.expectedStartAt,
-    earlyArrivalWindowMinutes: finiteDatabaseNumber(operationPoint?.earlyArrivalWindowMinutes) ?? 0
+    earlyArrivalWindowMinutes: finiteDatabaseNumber(operationPoint?.earlyArrivalWindowMinutes) ?? 0,
+    absenceGraceMinutes: finiteDatabaseNumber(operationPoint?.absenceGraceMinutes) ?? 15
   });
 
   if (!arrivalWindow.open) {
@@ -344,8 +376,10 @@ async function registerInsideTransaction(client, input) {
     sharedDeviceSignal: deviceSignals.sharedDeviceSignal,
     persistentStorageAvailable: input.persistentStorageAvailable,
     hasFreshPhoto: Boolean(input.hasFreshPhoto && input.evidenceStorageKey),
-    minutesLate: minutesLateAt(input.now, expectedWindow.expectedStartAt),
-    toleranceMinutes: finiteDatabaseNumber(operationPoint?.lateToleranceMinutes) ?? 0
+    minutesLate: minutesLateAt(input.reportedAt, expectedWindow.expectedStartAt),
+    toleranceMinutes: finiteDatabaseNumber(operationPoint?.lateToleranceMinutes) ?? 0,
+    captureMode: input.captureMode,
+    syncDelayMinutes: syncDelayMinutes(input.now, input.reportedAt)
   });
 
   if (!validation.canRecordArrival) {
@@ -365,7 +399,7 @@ async function registerInsideTransaction(client, input) {
       expectedEndAt: expectedWindow.expectedEndAt,
       attendanceStatus: 'PENDING',
       validationStatus: 'PENDING',
-      source: 'SYSTEM'
+      source: input.captureMode === OFFLINE_WEB_CAPTURE_MODE ? OFFLINE_WEB_CAPTURE_MODE : 'SYSTEM'
     }
   });
 
@@ -376,7 +410,7 @@ async function registerInsideTransaction(client, input) {
       markType: 'ARRIVAL',
       idempotencyKey: input.idempotencyKey,
       serverReceivedAt: input.now,
-      clientCapturedAt: input.clientCapturedAt,
+      clientCapturedAt: input.clientCapturedAt ?? input.reportedAt,
       latitude: input.latitude,
       longitude: input.longitude,
       accuracyMeters: input.accuracyMeters,
@@ -401,7 +435,7 @@ async function registerInsideTransaction(client, input) {
       punctualityStatus: validation.reportedPunctuality,
       riskScore: validation.riskScore,
       riskFlags: validation.riskFlags,
-      arrivalReportedAt: input.now,
+      arrivalReportedAt: input.reportedAt,
       arrivalValidatedAt: validation.validationStatus === ATTENDANCE_VALIDATION_STATUS.AUTO_VALIDATED
         ? input.now
         : null
@@ -420,13 +454,31 @@ async function registerInsideTransaction(client, input) {
 function normalizeInput(input) {
   const value = requireInputObject(input, 'attendance_arrival_input');
   const now = value.now === undefined ? new Date() : requiredTimestamp(value.now, 'attendance_server_now');
+  const captureMode = normalizeCaptureMode(value.captureMode);
+  const clientCapturedAt = optionalTimestamp(value.clientCapturedAt, 'client_captured_at');
+  const reportedAt = captureMode === OFFLINE_WEB_CAPTURE_MODE
+    ? requiredTimestamp(clientCapturedAt, 'client_captured_at')
+    : now;
+
+  if (captureMode === OFFLINE_WEB_CAPTURE_MODE) {
+    const futureSkew = reportedAt.getTime() - now.getTime();
+    const captureAge = now.getTime() - reportedAt.getTime();
+    if (futureSkew > MAX_CLIENT_CLOCK_FUTURE_SKEW_MS) {
+      throw new Error('attendance_offline_capture_future_invalid');
+    }
+    if (captureAge > MAX_OFFLINE_CAPTURE_AGE_MS) {
+      throw new Error('attendance_offline_capture_expired');
+    }
+  }
 
   return {
     assignmentId: requireNonEmptyString(value.assignmentId, 'assignment_id'),
     expectedWorkerId: optionalString(value.expectedWorkerId, 'expected_worker_id'),
     idempotencyKey: requireNonEmptyString(value.idempotencyKey, 'idempotency_key'),
     now,
-    clientCapturedAt: optionalTimestamp(value.clientCapturedAt, 'client_captured_at'),
+    reportedAt,
+    captureMode,
+    clientCapturedAt,
     latitude: optionalFiniteNumber(value.latitude, 'latitude', { min: -90, max: 90 }),
     longitude: optionalFiniteNumber(value.longitude, 'longitude', { min: -180, max: 180 }),
     accuracyMeters: optionalFiniteNumber(value.accuracyMeters, 'accuracy_meters', { min: 0 }),

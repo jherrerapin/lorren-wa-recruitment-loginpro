@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Lórren Asistencia">
+  <rect width="512" height="512" rx="112" fill="#176c36"/>
+  <path d="M151 122h72v202h138v66H151V122Z" fill="#fff"/>
+  <circle cx="351" cy="166" r="42" fill="#bde8cb"/>
+  <path d="m330 166 14 14 29-34" fill="none" stroke="#176c36" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
