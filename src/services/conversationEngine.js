@@ -9,6 +9,7 @@
  * JS keeps persistence, scheduling, CV flow and safety rules deterministic.
  */
 
+import { createHash } from 'node:crypto';
 import { buildGenderEvidencePromptText } from './genderEvidencePolicy.js';
 import axios from 'axios';
 import { modelSupportsTemperature, parseOptionalTemperature } from './aiParser.js';
@@ -759,7 +760,33 @@ function mapEngineGender(rawGender, Gender) {
   return mapping[String(rawGender).toUpperCase()] || null;
 }
 
-export async function think({ inboundText, candidate, vacancy, recentMessages = [], nextSlot = null, currentStep, prisma = null }) {
+export async function prepareEngineDecisionContext({
+  inboundText,
+  candidate,
+  vacancy,
+  recentMessages = [],
+  nextSlot = null,
+  currentStep,
+  prisma = null
+}) {
+  const botKnowledge = await loadBotKnowledgeForContext(prisma, { candidate, vacancy });
+  const systemPrompt = buildSystemPrompt({
+    vacancy,
+    candidate,
+    recentMessages,
+    nextSlot,
+    currentStep,
+    botKnowledge
+  });
+  const userPrompt = String(inboundText || '');
+  const contextFingerprint = createHash('sha256')
+    .update(JSON.stringify({ systemPrompt, userPrompt }))
+    .digest('hex');
+
+  return { systemPrompt, userPrompt, contextFingerprint };
+}
+
+export async function think({ inboundText, candidate, vacancy, recentMessages = [], nextSlot = null, currentStep, prisma = null, preparedContext = null }) {
   const fallbackReply = ENGINE_FALLBACK_REPLY;
 
   if (!process.env.OPENAI_API_KEY) {
@@ -775,20 +802,29 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
     };
   }
 
+  let engineContext = preparedContext;
   try {
     const model = DEFAULT_MODEL;
     const temperature = parseOptionalTemperature();
     const useTemperature = temperature.value !== null && modelSupportsTemperature(model);
 
-    const botKnowledge = await loadBotKnowledgeForContext(prisma, { candidate, vacancy });
+    engineContext = engineContext || await prepareEngineDecisionContext({
+      inboundText,
+      candidate,
+      vacancy,
+      recentMessages,
+      nextSlot,
+      currentStep,
+      prisma
+    });
     const response = await axios.post(
       OPENAI_URL,
       {
         model,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: buildSystemPrompt({ vacancy, candidate, recentMessages, nextSlot, currentStep, botKnowledge }) },
-          { role: 'user', content: String(inboundText || '') }
+          { role: 'system', content: engineContext.systemPrompt },
+          { role: 'user', content: engineContext.userPrompt }
         ],
         max_completion_tokens: 650,
         ...(useTemperature ? { temperature: temperature.value } : {})
@@ -817,6 +853,7 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
         fallback: true,
         fallbackReason: 'invalid_engine_json',
         loopGuardApplied: false,
+        contextFingerprint: engineContext.contextFingerprint,
         usage: extractUsage(response.data)
       };
     }
@@ -846,6 +883,7 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
       raw,
       fallback: false,
       fallbackReason: null,
+      contextFingerprint: engineContext.contextFingerprint,
       usage: extractUsage(response.data)
     };
   } catch (error) {
@@ -862,6 +900,7 @@ export async function think({ inboundText, candidate, vacancy, recentMessages = 
       fallback: true,
       fallbackReason: error?.code || error?.message || 'engine_error',
       loopGuardApplied: false,
+      contextFingerprint: engineContext?.contextFingerprint || null,
       usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
     };
   }
