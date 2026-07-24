@@ -196,7 +196,27 @@
             <div class="field full" id="vacancyField"><label for="scopeVacancyId">Vacante</label><select id="scopeVacancyId" name="scopeVacancyId"><option value="">Selecciona una vacante</option><% for (const vacancy of allowedVacancies) { %><option value="<%= vacancy.id %>"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></option><% } %></select></div>
           </div>
         </div>
-        <% if (role === 'dev') { %><div class="form-section"><h3 class="form-section-title">Permisos del panel</h3><div class="permission-stack"><label class="permission-card" for="canAccessDispatch"><input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" /><span><strong>Operaciones / Despacho</strong><small>Permite entrar al panel operativo además del alcance de reclutamiento seleccionado.</small></span></label><div class="statistics-permissions"><strong>Estadísticas</strong><small>Marca únicamente las herramientas que podrá usar este usuario.</small><label class="dispatch-row"><input name="canAccessMetaAds" type="checkbox" value="true" /><span><strong>Meta Ads</strong><small>Consulta inversión, resultados y costos de los anuncios.</small></span></label><label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante y el perfil buscado.</small></span></label></div></div></div><% } %>
+        <% if (role === 'dev') { %>
+          <div class="form-section">
+            <h3 class="form-section-title">Permisos del panel</h3>
+            <div class="permission-stack">
+              <label class="permission-card" for="canAccessDispatch">
+                <input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" />
+                <span><strong>Operaciones / Despacho</strong><small>Permite entrar al panel operativo además del alcance de reclutamiento seleccionado.</small></span>
+              </label>
+              <label class="permission-card" for="canAccessAttendance">
+                <input id="canAccessAttendance" name="canAccessAttendance" type="checkbox" value="true" />
+                <span><strong>Asistencia operativa</strong><small>Permite ver y administrar marcaciones, geocercas, evidencias y configuración de puntos. También activa Operaciones / Despacho.</small></span>
+              </label>
+              <div class="statistics-permissions">
+                <strong>Estadísticas</strong><small>Marca únicamente las herramientas que podrá usar este usuario.</small>
+                <label class="dispatch-row"><input name="canAccessMetaAds" type="checkbox" value="true" /><span><strong>Meta Ads</strong><small>Consulta inversión, resultados y costos de los anuncios.</small></span></label>
+                <label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante y el perfil buscado.</small></span></label>
+              </div>
+            </div>
+            <p class="hint" style="margin-top:10px;">Solo DEV puede conceder o retirar estos permisos.</p>
+          </div>
+        <% } %>
         <div class="form-actions"><button class="btn btn-primary" type="submit">Crear usuario</button></div>
       </form>
       <p class="hint" style="margin-top:12px;">El username se genera automáticamente como <strong>reclutador-...</strong>. Si ya existe, el sistema agrega un consecutivo.</p>
@@ -227,7 +247,7 @@
                     <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
                   <% } %>
                 </td>
-                <td>Reclutamiento<% if (user.canAccessDispatch) { %><small>Operaciones / Despacho</small><% } %><% if (user.canAccessMetaAds) { %><small>Estadísticas: Meta Ads</small><% } %><% if (user.canAccessCvAnalysis) { %><small>Estadísticas: Análisis HV</small><% } %></td>
+                <td>Reclutamiento<% if (user.canAccessDispatch) { %><small>Operaciones / Despacho</small><% } %><% if (user.canAccessAttendance) { %><small>Asistencia operativa</small><% } %><% if (user.canAccessMetaAds) { %><small>Estadísticas: Meta Ads</small><% } %><% if (user.canAccessCvAnalysis) { %><small>Estadísticas: Análisis HV</small><% } %></td>
                 <td><span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>"><%= user.isActive ? 'Activo' : 'Inactivo' %></span><small>Último cambio de contraseña: <%= user.lastPasswordResetAt ? user.lastPasswordResetAt.toLocaleString('es-CO', { hour12: false }) : 'Sin registro' %></small></td>
                 <td><% if (user.username === environmentAdminUsername) { %><small>La contraseña y recuperación se administran en Railway.</small><% } else { %><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.recoveryEmail || '—' %></small><small>Recuperación disponible desde /recover.</small><% } %></td>
                 <td>
@@ -287,7 +307,15 @@
                           </div>
                           <span class="hint">Debes marcar al menos una vacante. Las vacantes nuevas no se habilitarán automáticamente.</span>
                         </div>
-                        <% if (role === 'dev') { %><div class="field full"><label>Permisos adicionales</label><label class="dispatch-row"><input type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label><div class="statistics-permissions"><strong>Estadísticas</strong><small>Selecciona por separado las herramientas que podrá abrir.</small><label class="dispatch-row"><input type="checkbox" name="canAccessMetaAds" value="true" <%= user.canAccessMetaAds ? 'checked' : '' %> /><span><strong>Meta Ads</strong><small>Inversión, resultados y costos de los anuncios.</small></span></label><label class="dispatch-row"><input type="checkbox" name="canAccessCvAnalysis" value="true" <%= user.canAccessCvAnalysis ? 'checked' : '' %> /><span><strong>Análisis de hojas de vida</strong><small>Revisión y organización de candidatos con IA.</small></span></label></div><span class="hint">Estos permisos no amplían las ciudades ni las vacantes asignadas.</span></div><% } %>
+                        <% if (role === 'dev') { %>
+                          <div class="field full">
+                            <label>Permisos adicionales</label>
+                            <label class="dispatch-row"><input id="edit-canAccessDispatch-<%= user.id %>" type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label>
+                            <label class="dispatch-row"><input id="edit-canAccessAttendance-<%= user.id %>" type="checkbox" name="canAccessAttendance" value="true" <%= user.canAccessAttendance ? 'checked' : '' %> /><span><strong>Asistencia operativa</strong><small>Panel, revisión, geocerca, evidencia y configuración de puntos.</small></span></label>
+                            <div class="statistics-permissions"><strong>Estadísticas</strong><small>Selecciona por separado las herramientas que podrá abrir.</small><label class="dispatch-row"><input type="checkbox" name="canAccessMetaAds" value="true" <%= user.canAccessMetaAds ? 'checked' : '' %> /><span><strong>Meta Ads</strong><small>Inversión, resultados y costos de los anuncios.</small></span></label><label class="dispatch-row"><input type="checkbox" name="canAccessCvAnalysis" value="true" <%= user.canAccessCvAnalysis ? 'checked' : '' %> /><span><strong>Análisis de hojas de vida</strong><small>Revisión y organización de candidatos con IA.</small></span></label></div>
+                            <span class="hint">Solo DEV puede modificar estos permisos. Asistencia activa también el acceso al módulo padre de Operaciones.</span>
+                          </div>
+                        <% } %>
                       </div>
                       <div class="edit-drawer-actions"><button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Cancelar</button><button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button></div>
                     </form>
@@ -313,6 +341,22 @@
       }
       if (accessScope) { accessScope.addEventListener('change', syncCreateScopeVisibility); syncCreateScopeVisibility(); }
     })();
+
+    function bindAttendanceParent(attendanceInput, dispatchInput) {
+      if (!attendanceInput || !dispatchInput) return;
+      const requireDispatch = () => { if (attendanceInput.checked) dispatchInput.checked = true; };
+      attendanceInput.addEventListener('change', requireDispatch);
+      requireDispatch();
+    }
+
+    bindAttendanceParent(
+      document.getElementById('canAccessAttendance'),
+      document.getElementById('canAccessDispatch')
+    );
+    document.querySelectorAll('[id^="edit-canAccessAttendance-"]').forEach((attendanceInput) => {
+      const userId = attendanceInput.id.replace('edit-canAccessAttendance-', '');
+      bindAttendanceParent(attendanceInput, document.getElementById('edit-canAccessDispatch-' + userId));
+    });
 
     function syncVacancyGroups(userId) {
       const cityField = document.getElementById('edit-cityField-' + userId);

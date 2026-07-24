@@ -363,6 +363,7 @@ function buildUserSessionPayload(user) {
     userAccessVacancyId: user.scopeVacancyId || null,
     userSource: 'db',
     canAccessDispatch: Boolean(user.canAccessDispatch),
+    canAccessAttendance: Boolean(user.canAccessAttendance),
     canAccessMetaAds: Boolean(user.canAccessMetaAds),
     canAccessCvAnalysis: Boolean(user.canAccessCvAnalysis)
   };
@@ -377,6 +378,7 @@ function applySessionPayload(req, payload) {
   req.session.userAccessVacancyId = payload.userAccessVacancyId || null;
   req.session.userSource = payload.userSource || 'env';
   req.session.canAccessDispatch = Boolean(payload.canAccessDispatch);
+  req.session.canAccessAttendance = Boolean(payload.canAccessAttendance);
   req.session.canAccessMetaAds = Boolean(payload.canAccessMetaAds);
   req.session.canAccessCvAnalysis = Boolean(payload.canAccessCvAnalysis);
   req.session.canAccessStatistics = req.session.canAccessMetaAds || req.session.canAccessCvAnalysis;
@@ -434,11 +436,13 @@ app.use((req, res, next) => {
   req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
   req.userSource = req.session?.userSource || null;
   req.canAccessDispatch = Boolean(req.session?.canAccessDispatch);
+  req.canAccessAttendance = Boolean(req.session?.canAccessAttendance);
   req.canAccessMetaAds = Boolean(req.session?.canAccessMetaAds);
   req.canAccessCvAnalysis = Boolean(req.session?.canAccessCvAnalysis);
   req.canAccessStatistics = req.canAccessMetaAds || req.canAccessCvAnalysis;
   res.locals.role = req.userRole;
   res.locals.canAccessDispatch = req.userRole === 'dev' || req.canAccessDispatch;
+  res.locals.canAccessAttendance = req.userRole === 'dev' || req.canAccessAttendance;
   res.locals.canSeeLorenV2 = canSeeLorenV2(req);
   next();
 });
@@ -477,6 +481,7 @@ async function authenticateDatabaseUser(username, password) {
       scopeCity: true,
       scopeVacancyId: true,
       canAccessDispatch: true,
+      canAccessAttendance: true,
       canAccessMetaAds: true,
       canAccessCvAnalysis: true,
       isActive: true
@@ -508,6 +513,7 @@ app.post('/login', async (req, res) => {
         userAccessVacancyId: null,
         userSource: 'env',
         canAccessDispatch: role === 'dev',
+        canAccessAttendance: role === 'dev',
         canAccessMetaAds: role === 'dev',
         canAccessCvAnalysis: role === 'dev'
       };

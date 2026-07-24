@@ -402,6 +402,7 @@ model AppUser {
   createdByUsername   String?
   lastPasswordResetAt DateTime?
   canAccessDispatch   Boolean         @default(false)
+  canAccessAttendance Boolean         @default(false)
   canAccessStatistics Boolean         @default(false)
   canAccessMetaAds    Boolean         @default(false)
   canAccessCvAnalysis Boolean         @default(false)
@@ -415,6 +416,7 @@ model AppUser {
   @@index([accessScope, scopeCity])
   @@index([scopeVacancyId])
   @@index([canAccessDispatch])
+  @@index([canAccessAttendance])
   @@index([canAccessStatistics])
   @@index([canAccessMetaAds])
   @@index([canAccessCvAnalysis])
