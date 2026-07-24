@@ -51,7 +51,6 @@ jobs:
           const webhookPath = 'src/routes/webhook.js';
           let webhook = fs.readFileSync(webhookPath, 'utf8');
 
-          webhook = removeExactlyOnce(webhook, `  alignCandidateLocationFields,\n`, 'alignCandidateLocationFields import');
           webhook = removeExactlyOnce(webhook, `  isHighConfidenceLocalField,\n`, 'isHighConfidenceLocalField import');
           webhook = removeExactlyOnce(webhook, `  shouldPreserveStructuredLocalField\n`, 'shouldPreserveStructuredLocalField import');
           webhook = removeExactlyOnce(webhook, `import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitizer.js';\n`, 'field sanitizer import');
@@ -74,7 +73,6 @@ jobs:
           webhook = webhook.slice(0, blockStart) + newBlock + webhook.slice(blockEnd);
 
           for (const symbol of [
-            'alignCandidateLocationFields',
             'isHighConfidenceLocalField',
             'shouldPreserveStructuredLocalField',
             'sanitizeCandidateFieldsForConversation',
@@ -82,6 +80,9 @@ jobs:
             'sumTokenUsage'
           ]) {
             if (count(webhook, symbol) !== 0) throw new Error(`${symbol} remains in webhook.`);
+          }
+          if (count(webhook, 'alignCandidateLocationFields') !== 2) {
+            throw new Error('The unrelated location alignment authority changed unexpectedly.');
           }
           if (count(webhook, 'turnInterpretation') < 8) {
             throw new Error('Runtime snapshot is not fully consumed.');
