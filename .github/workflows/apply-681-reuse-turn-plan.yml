@@ -1,0 +1,343 @@
+name: Apply reusable turn plan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'refactor/681-reuse-turn-plan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply exact plan reuse patch
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          function replaceExactlyOnce(source, before, after, label) {
+            const first = source.indexOf(before);
+            if (first === -1) throw new Error(`Missing ${label}.`);
+            if (source.indexOf(before, first + before.length) !== -1) {
+              throw new Error(`Found ${label} more than once.`);
+            }
+            return source.replace(before, after);
+          }
+
+          function replaceExactCount(source, before, after, expected, label) {
+            const count = source.split(before).length - 1;
+            if (count !== expected) throw new Error(`Expected ${expected} ${label}; found ${count}.`);
+            return source.split(before).join(after);
+          }
+
+          const webhookPath = 'src/routes/webhook.js';
+          let webhook = fs.readFileSync(webhookPath, 'utf8');
+
+          const previewMarker = `async function previewEngineCandidateFields(prisma, candidate, inboundText, providedVacancy = null) {`;
+          if ((webhook.split(previewMarker).length - 1) !== 1) throw new Error('Unexpected previewEngineCandidateFields count.');
+
+          const planKeyHelper = `function buildEnginePlanContextKey(candidate = {}, vacancy = null, inboundText = '') {
+  const readiness = getCandidateReadiness(candidate, vacancy);
+  return JSON.stringify({
+    candidateId: candidate?.id || null,
+    currentStep: candidate?.currentStep || null,
+    status: candidate?.status || null,
+    vacancyId: vacancy?.id || candidate?.vacancyId || null,
+    vacancyState: vacancy ? {
+      isActive: Boolean(vacancy.isActive),
+      acceptingApplications: Boolean(vacancy.acceptingApplications),
+      schedulingEnabled: Boolean(vacancy.schedulingEnabled)
+    } : null,
+    botPaused: Boolean(candidate?.botPaused),
+    botResumeMode: candidate?.botResumeMode || null,
+    reminderState: candidate?.reminderState || null,
+    profile: {
+      fullName: candidate?.fullName || null,
+      documentType: candidate?.documentType || null,
+      documentNumber: candidate?.documentNumber || null,
+      age: candidate?.age ?? null,
+      gender: candidate?.gender || null,
+      neighborhood: candidate?.neighborhood || null,
+      locality: candidate?.locality || null,
+      medicalRestrictions: candidate?.medicalRestrictions || null,
+      transportMode: candidate?.transportMode || null,
+      experienceInfo: candidate?.experienceInfo || null,
+      experienceTime: candidate?.experienceTime || null,
+      hasValidCv: readiness.hasValidCv
+    },
+    inboundText: normalizeText(inboundText)
+  });
+}
+
+`;
+          webhook = webhook.replace(previewMarker, `${planKeyHelper}${previewMarker}`);
+
+          const previewPattern = /async function previewEngineCandidateFields\(prisma, candidate, inboundText, providedVacancy = null\) \{[\s\S]*?\n\}\n\nfunction shouldUsePrimaryConversationEngine/;
+          const previewMatch = webhook.match(previewPattern);
+          if (!previewMatch) throw new Error('Missing preview function block.');
+          const previewReplacement = `async function previewEngineCandidateFields(prisma, candidate, inboundText, providedVacancy = null) {
+  const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, candidate, inboundText, providedVacancy);
+  const contextKey = buildEnginePlanContextKey(candidate, vacancy, inboundText);
+  const preview = await think({
+    inboundText,
+    candidate,
+    vacancy,
+    recentMessages,
+    nextSlot,
+    currentStep: candidate.currentStep || ConversationStep.MENU,
+    prisma,
+  });
+  const usage = preview?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+
+  if (preview?.fallback) {
+    return { fields: {}, usage, decision: null, contextKey, used: false };
+  }
+  return {
+    fields: extractEngineCandidateFields(preview.actions, preview.extractedFields),
+    usage,
+    decision: preview,
+    contextKey,
+    used: true
+  };
+}
+
+function shouldUsePrimaryConversationEngine`;
+          webhook = webhook.replace(previewPattern, previewReplacement);
+
+          const engineCallBefore = `  const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, candidate, inboundText, providedVacancy);
+  const engineResult = await runChatEngine({
+    prisma,
+    candidate,
+    vacancy,
+    inboundText,
+    recentMessages,
+    nextSlot,
+    candidateFieldHints: options.candidateFieldHints || {},
+  });`;
+          const engineCallAfter = `  const { vacancy, recentMessages, nextSlot } = await buildEngineContext(prisma, candidate, inboundText, providedVacancy);
+  const currentPlanContextKey = buildEnginePlanContextKey(candidate, vacancy, inboundText);
+  const precomputedDecision = options.enginePreview?.decision
+    && options.enginePreview.contextKey === currentPlanContextKey
+    ? options.enginePreview.decision
+    : null;
+  const engineResult = await runChatEngine({
+    prisma,
+    candidate,
+    vacancy,
+    inboundText,
+    recentMessages,
+    nextSlot,
+    candidateFieldHints: options.candidateFieldHints || {},
+    precomputedDecision,
+  });`;
+          webhook = replaceExactlyOnce(webhook, engineCallBefore, engineCallAfter, 'replyWithEngine engine call');
+
+          webhook = replaceExactlyOnce(
+            webhook,
+            `    options.debugTrace.engine_primary = true;\n`,
+            `    options.debugTrace.engine_primary = true;\n    options.debugTrace.engine_plan_reused = Boolean(engineResult.decisionReused);\n`,
+            'engine primary debug marker'
+          );
+
+          webhook = replaceExactCount(
+            webhook,
+            `        candidateFieldHints: normalizedData,\n        debugTrace\n`,
+            `        candidateFieldHints: normalizedData,\n        debugTrace,\n        enginePreview: rawEnginePreview\n`,
+            1,
+            'vacancy context engine options'
+          );
+          webhook = replaceExactCount(
+            webhook,
+            `      candidateFieldHints: normalizedData,\n      debugTrace\n`,
+            `      candidateFieldHints: normalizedData,\n      debugTrace,\n      enginePreview: rawEnginePreview\n`,
+            1,
+            'primary engine options'
+          );
+
+          webhook = replaceExactlyOnce(
+            webhook,
+            `  debugTrace.openai_used = aiResult.used || turnInterpretation.engineFieldCount > 0;`,
+            `  debugTrace.openai_used = aiResult.used || rawEnginePreview.used || turnInterpretation.engineFieldCount > 0;`,
+            'openai used trace'
+          );
+
+          if ((webhook.match(/enginePreview: rawEnginePreview/g) || []).length !== 2) {
+            throw new Error('Engine preview is not forwarded to both eligible engine paths.');
+          }
+          if ((webhook.match(/buildEnginePlanContextKey/g) || []).length !== 3) {
+            throw new Error('Unexpected engine plan context key references.');
+          }
+          fs.writeFileSync(webhookPath, webhook);
+
+          const chatEnginePath = 'src/services/chatEngine.js';
+          let chatEngine = fs.readFileSync(chatEnginePath, 'utf8');
+          chatEngine = replaceExactlyOnce(
+            chatEngine,
+            `  nextSlot = null,\n  candidateFieldHints = {},\n}) {`,
+            `  nextSlot = null,\n  candidateFieldHints = {},\n  precomputedDecision = null,\n}) {`,
+            'runChatEngine arguments'
+          );
+
+          const thinkBefore = `  const result = await think({
+    inboundText,
+    candidate,
+    vacancy,
+    recentMessages,
+    nextSlot,
+    currentStep,
+    prisma,
+  });`;
+          const thinkAfter = `  const decisionReused = Boolean(precomputedDecision && precomputedDecision.fallback === false);
+  const result = decisionReused
+    ? precomputedDecision
+    : await think({
+      inboundText,
+      candidate,
+      vacancy,
+      recentMessages,
+      nextSlot,
+      currentStep,
+      prisma,
+    });`;
+          chatEngine = replaceExactlyOnce(chatEngine, thinkBefore, thinkAfter, 'primary think call');
+
+          chatEngine = replaceExactlyOnce(
+            chatEngine,
+            `    fallback: result.fallback,\n    fallbackReason: result.fallbackReason || null,\n    loopGuardApplied: Boolean(result.loopGuardApplied),\n    usage: result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },`,
+            `    fallback: result.fallback,\n    fallbackReason: result.fallbackReason || null,\n    loopGuardApplied: Boolean(result.loopGuardApplied),\n    decisionReused,\n    usage: decisionReused\n      ? { input_tokens: 0, output_tokens: 0, total_tokens: 0 }\n      : (result.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 }),`,
+            'engine result usage'
+          );
+          fs.writeFileSync(chatEnginePath, chatEngine);
+
+          const testPath = 'test/conversationEngineStepAuthority.test.js';
+          let testSource = fs.readFileSync(testPath, 'utf8');
+          testSource = replaceExactlyOnce(
+            testSource,
+            `import { act } from '../src/services/conversationEngine.js';`,
+            `import { act } from '../src/services/conversationEngine.js';\nimport { runChatEngine } from '../src/services/chatEngine.js';`,
+            'chat engine test import'
+          );
+
+          const regression = `
+
+test('chatEngine reutiliza una decisión válida sin ejecutar un segundo think', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const candidate = baseCandidate();
+    const prisma = createPrismaHarness(candidate);
+    const plannedReply = 'Respuesta calculada una sola vez para este turno.';
+    const result = await runChatEngine({
+      prisma,
+      candidate,
+      vacancy: vacancy(),
+      inboundText: 'continua con mi proceso',
+      recentMessages: [],
+      precomputedDecision: {
+        reply: plannedReply,
+        nextStep: candidate.currentStep,
+        actions: [{ type: 'nothing' }],
+        extractedFields: {},
+        fallback: false,
+        fallbackReason: null,
+        loopGuardApplied: false,
+        usage: { input_tokens: 11, output_tokens: 7, total_tokens: 18 }
+      }
+    });
+
+    assert.equal(result.reply, plannedReply);
+    assert.equal(result.decisionReused, true);
+    assert.equal(result.fallback, false);
+    assert.deepEqual(result.usage, { input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('chatEngine no reutiliza una decisión fallback', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const candidate = baseCandidate();
+    const prisma = createPrismaHarness(candidate);
+    const result = await runChatEngine({
+      prisma,
+      candidate,
+      vacancy: vacancy(),
+      inboundText: 'continua con mi proceso',
+      recentMessages: [],
+      precomputedDecision: {
+        reply: 'NO_DEBE_REUTILIZARSE',
+        nextStep: candidate.currentStep,
+        actions: [{ type: 'nothing' }],
+        extractedFields: {},
+        fallback: true,
+        fallbackReason: 'preview_failed',
+        loopGuardApplied: false,
+        usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 }
+      }
+    });
+
+    assert.equal(result.decisionReused, false);
+    assert.equal(result.fallback, true);
+    assert.notEqual(result.reply, 'NO_DEBE_REUTILIZARSE');
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('webhook condiciona la reutilización a una firma de contexto compatible', () => {
+  const source = fs.readFileSync('src/routes/webhook.js', 'utf8');
+  assert.match(source, /function buildEnginePlanContextKey/);
+  assert.match(source, /options\.enginePreview\.contextKey === currentPlanContextKey/);
+  assert.match(source, /engine_plan_reused = Boolean\(engineResult\.decisionReused\)/);
+  assert.equal((source.match(/enginePreview: rawEnginePreview/g) || []).length, 2);
+});`;
+          if (testSource.includes(`chatEngine reutiliza una decisión válida`)) {
+            throw new Error('Regression already exists.');
+          }
+          testSource += regression;
+          fs.writeFileSync(testPath, testSource);
+          NODE
+
+      - name: Validate focused plan reuse
+        run: |
+          node --check src/routes/webhook.js
+          node --check src/services/chatEngine.js
+          node --check test/conversationEngineStepAuthority.test.js
+          USE_CONVERSATION_ENGINE=true node --test test/conversationUnderstanding.test.js test/conversationEngineStepAuthority.test.js
+          USE_CONVERSATION_ENGINE=false node --test test/conversationUnderstanding.test.js test/conversationEngineStepAuthority.test.js
+
+      - name: Commit three-file change
+        run: |
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/routes/webhook.js src/services/chatEngine.js test/conversationEngineStepAuthority.test.js | sort)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/webhook.js src/services/chatEngine.js test/conversationEngineStepAuthority.test.js
+          git commit -m "refactor: reutilizar una decisión válida por turno (#681)"
+          git push origin HEAD:${{ github.head_ref }}
