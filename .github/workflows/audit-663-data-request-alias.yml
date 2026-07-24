@@ -1,15 +1,16 @@
 name: Audit data request alias
 
 on:
-  push:
+  pull_request:
     branches:
-      - refactor/663-retire-data-request-alias
+      - main
 
 permissions:
   contents: read
 
 jobs:
   audit:
+    if: github.head_ref == 'refactor/663-retire-data-request-alias'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
