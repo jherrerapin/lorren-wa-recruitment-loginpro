@@ -5,6 +5,7 @@ import ExcelJS from 'exceljs';
 import {
   DISPATCH_WORKER_EXCEL_COLUMNS,
   DispatchWorkerExcelValidationError,
+  buildDispatchWorkerFullName,
   buildDispatchWorkerImportTemplate,
   importDispatchWorkerExcelWorkbook,
   parseDispatchWorkerExcelWorksheet,
@@ -35,7 +36,8 @@ function completeHeaders() {
 
 function completeRow(overrides = {}) {
   const values = {
-    fullName: 'Ana Pérez',
+    firstNames: 'Ana María',
+    lastNames: 'Pérez Gómez',
     phone: '3001234567',
     documentType: 'CC',
     documentNumber: '1020304050',
@@ -52,30 +54,106 @@ function completeRow(overrides = {}) {
   return DISPATCH_WORKER_EXCEL_COLUMNS.map((column) => values[column.field] ?? '');
 }
 
-test('reconoce encabezados por nombre y aliases aunque cambie el orden', () => {
+function minimalHeaders() {
+  return [
+    'Nombres',
+    'Apellidos',
+    'Teléfono',
+    'Tipo de documento',
+    'Número de documento',
+    'Ciudad de residencia',
+    'Localidad / barrio',
+    'Tipo de contrato'
+  ];
+}
+
+function minimalRow(overrides = {}) {
+  const values = {
+    firstNames: 'Ana María',
+    lastNames: 'Pérez Gómez',
+    phone: '3001234567',
+    documentType: 'CC',
+    documentNumber: '1020304050',
+    residenceCity: 'Bogotá',
+    residenceLocality: 'Suba',
+    contractType: 'DIRECTO',
+    ...overrides
+  };
+  return [
+    values.firstNames,
+    values.lastNames,
+    values.phone,
+    values.documentType,
+    values.documentNumber,
+    values.residenceCity,
+    values.residenceLocality,
+    values.contractType
+  ];
+}
+
+test('reconoce nombres y apellidos separados por encabezado aunque cambie el orden', () => {
   const workbook = workbookWithRows(
-    ['Celular', 'Nombre', 'Cédula', 'Tipo documento', 'Ciudad', 'Barrio', 'Contrato', 'Estado', 'Ciudades', 'Perfiles', 'Transporte', 'Observaciones'],
-    [['3001234567', 'Ana Pérez', '1020304050', 'CC', 'Bogotá', 'Suba', 'DIRECTO', 'CONTRATADO', 'Bogotá', 'Auxiliar de cargue y descargue — Bogotá', 'Moto', 'Prueba']]
+    ['Celular', 'Apellidos', 'Nombres', 'Cédula', 'Tipo documento', 'Ciudad', 'Barrio', 'Contrato'],
+    [['3001234567', 'Pérez Gómez', 'Ana María', '1020304050', 'CC', 'Bogotá', 'Suba', 'DIRECTO']]
   );
 
   const rows = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].fullName, 'Ana Pérez');
+  assert.equal(rows[0].firstNames, 'Ana María');
+  assert.equal(rows[0].lastNames, 'Pérez Gómez');
   assert.equal(rows[0].documentNumber, '1020304050');
-  assert.equal(rows[0].operationalCities, 'Bogotá');
 });
 
-test('exige los mismos campos obligatorios del formulario manual', () => {
-  const workbook = workbookWithRows(['Nombre completo', 'Teléfono'], [['Ana Pérez', '3001234567']]);
-  assert.throws(
-    () => parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]),
-    (error) => error instanceof DispatchWorkerExcelValidationError
-      && error.message.includes('Tipo de documento')
-      && error.message.includes('Vacantes / perfiles')
+test('une nombres y apellidos limpiando espacios sobrantes', () => {
+  assert.equal(
+    buildDispatchWorkerFullName({ firstNames: '  Juan   Carlos ', lastNames: ' Pérez   Gómez  ' }),
+    'Juan Carlos Pérez Gómez'
   );
 });
 
-test('normaliza contrato, estado, transporte y relaciones múltiples', () => {
+test('mantiene compatibilidad con la columna anterior Nombre completo', () => {
+  const workbook = workbookWithRows(
+    ['Nombre completo', 'Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'],
+    [['  Ana   María Pérez Gómez  ', '3001234567', 'CC', '1020304050', 'Bogotá', 'Suba', 'DIRECTO']]
+  );
+  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
+  const prepared = prepareDispatchWorkerExcelRows(parsed, { cities, vacancies });
+  assert.equal(prepared[0].workerData.fullName, 'Ana María Pérez Gómez');
+});
+
+test('rechaza el archivo cuando no trae una modalidad de nombre compatible', () => {
+  const workbook = workbookWithRows(
+    ['Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'],
+    [['3001234567', 'CC', '1020304050', 'Bogotá', 'Suba', 'DIRECTO']]
+  );
+  assert.throws(
+    () => parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]),
+    (error) => error instanceof DispatchWorkerExcelValidationError
+      && error.message.includes('Nombres + Apellidos')
+  );
+});
+
+test('ciudades operativas, vacantes y estado pueden omitirse', () => {
+  const workbook = workbookWithRows(minimalHeaders(), [minimalRow()]);
+  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
+  const prepared = prepareDispatchWorkerExcelRows(parsed, { cities, vacancies });
+
+  assert.equal(prepared[0].workerData.fullName, 'Ana María Pérez Gómez');
+  assert.equal(prepared[0].workerData.operationalStatus, 'CONTRATADO');
+  assert.deepEqual(prepared[0].cityIds, []);
+  assert.deepEqual(prepared[0].vacancyIds, []);
+});
+
+test('un estado informado pero inválido continúa rechazándose', () => {
+  const workbook = workbookWithRows(completeHeaders(), [completeRow({ operationalStatus: 'PENDIENTE' })]);
+  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
+  assert.throws(
+    () => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }),
+    /Estado operativo debe ser CONTRATADO o INACTIVE/
+  );
+});
+
+test('normaliza contrato, estado, transporte y relaciones múltiples cuando se informan', () => {
   const workbook = workbookWithRows(completeHeaders(), [completeRow()]);
   const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
   const prepared = prepareDispatchWorkerExcelRows(parsed, { cities, vacancies });
@@ -89,18 +167,17 @@ test('normaliza contrato, estado, transporte y relaciones múltiples', () => {
   assert.equal(prepared[0].workerData.residenceCity, 'Bogotá');
 });
 
-test('rechaza filas incompletas y referencias inexistentes antes de guardar', () => {
-  const workbook = workbookWithRows(completeHeaders(), [completeRow({ residenceCity: 'Ciudad inventada', phone: '' })]);
+test('rechaza filas con un nombre sin su apellido', () => {
+  const workbook = workbookWithRows(minimalHeaders(), [minimalRow({ lastNames: '' })]);
   const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
   assert.throws(
     () => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }),
-    (error) => error instanceof DispatchWorkerExcelValidationError
-      && error.message.includes('Teléfono')
+    /Nombres y Apellidos/
   );
 });
 
 test('rechaza documentos repetidos dentro del mismo archivo', () => {
-  const workbook = workbookWithRows(completeHeaders(), [completeRow(), completeRow({ fullName: 'Otra persona' })]);
+  const workbook = workbookWithRows(minimalHeaders(), [minimalRow(), minimalRow({ firstNames: 'Otra', lastNames: 'Persona' })]);
   const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
   assert.throws(
     () => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }),
@@ -108,29 +185,27 @@ test('rechaza documentos repetidos dentro del mismo archivo', () => {
   );
 });
 
-test('la plantilla descargable contiene datos, instrucciones y catálogos', () => {
+test('la plantilla usa Nombres y Apellidos y deja el estado opcional', () => {
   const workbook = buildDispatchWorkerImportTemplate({ cities, vacancies });
-  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Auxiliares', 'Instrucciones', 'Catalogos']);
-  assert.equal(workbook.getWorksheet('Auxiliares').getRow(1).cellCount, DISPATCH_WORKER_EXCEL_COLUMNS.length);
+  const sheet = workbook.getWorksheet('Auxiliares');
+  const statusColumn = DISPATCH_WORKER_EXCEL_COLUMNS.findIndex((column) => column.field === 'operationalStatus') + 1;
+
+  assert.deepEqual(workbook.worksheets.map((item) => item.name), ['Auxiliares', 'Instrucciones', 'Catalogos']);
+  assert.equal(sheet.getCell('A1').value, 'Nombres');
+  assert.equal(sheet.getCell('B1').value, 'Apellidos');
+  assert.equal(sheet.getRow(2).getCell(statusColumn).dataValidation.allowBlank, true);
   assert.equal(workbook.getWorksheet('Catalogos').getCell('A2').value, 'Bogotá');
-  assert.match(String(workbook.getWorksheet('Catalogos').getCell('B2').value), /Bogotá/);
 });
 
-test('la importación omite documentos activos y crea auxiliares completos con relaciones', async () => {
-  const workbook = workbookWithRows(completeHeaders(), [
-    completeRow({ documentNumber: '111', fullName: 'Auxiliar existente' }),
-    completeRow({ documentNumber: '222', fullName: 'Auxiliar nuevo' })
-  ]);
+test('la importación crea un auxiliar contratado sin relaciones opcionales', async () => {
+  const workbook = workbookWithRows(minimalHeaders(), [minimalRow({ documentNumber: '222' })]);
   const createdWorkers = [];
-  const createdCities = [];
-  const createdVacancies = [];
+  let cityRelationsCreated = 0;
+  let vacancyRelationsCreated = 0;
   const prisma = {
     $transaction: async (callback) => callback(prisma),
     dispatchWorker: {
-      findFirst: async ({ where }) => {
-        if (where.documentNumber === '111' && where.operationalStatus === 'CONTRATADO') return { id: 'existing' };
-        return null;
-      },
+      findFirst: async () => null,
       create: async ({ data }) => {
         createdWorkers.push(data);
         return { id: 'new-worker' };
@@ -139,20 +214,20 @@ test('la importación omite documentos activos y crea auxiliares completos con r
     },
     dispatchWorkerCity: {
       deleteMany: async () => null,
-      createMany: async ({ data }) => { createdCities.push(...data); }
+      createMany: async ({ data }) => { cityRelationsCreated += data.length; }
     },
     dispatchWorkerVacancy: {
       deleteMany: async () => null,
-      createMany: async ({ data }) => { createdVacancies.push(...data); }
+      createMany: async ({ data }) => { vacancyRelationsCreated += data.length; }
     }
   };
 
   const result = await importDispatchWorkerExcelWorkbook({ prisma, workbook, cities, vacancies });
-  assert.deepEqual(result, { created: 1, updated: 0, skipped: 1, total: 2 });
-  assert.equal(createdWorkers[0].fullName, 'Auxiliar nuevo');
-  assert.equal(createdWorkers[0].documentType, 'CC');
-  assert.deepEqual(createdCities.map((row) => row.cityId), ['city-bogota', 'city-siberia']);
-  assert.deepEqual(createdVacancies.map((row) => row.vacancyId), ['vac-bogota']);
+  assert.deepEqual(result, { created: 1, updated: 0, skipped: 0, total: 1 });
+  assert.equal(createdWorkers[0].fullName, 'Ana María Pérez Gómez');
+  assert.equal(createdWorkers[0].operationalStatus, 'CONTRATADO');
+  assert.equal(cityRelationsCreated, 0);
+  assert.equal(vacancyRelationsCreated, 0);
 });
 
 test('la ruta restringe el archivo y evita registrar el error completo con datos de filas', () => {
