@@ -17,6 +17,7 @@ test('conversationUnderstanding devuelve estructura consistente requerida', asyn
   assert.equal(typeof result.suggestedNextAction, 'string');
   assert.equal(typeof result.fieldConfidence, 'object');
   assert.equal(typeof result.replyGuidance, 'object');
+  assert.equal(Object.hasOwn(result, 'turnInterpretation'), false);
   assert.equal(result.intent, 'provide_correction');
   assert.equal(result.candidateFields.transportMode, 'Moto');
 });
@@ -66,7 +67,6 @@ test('conversationUnderstanding permite género femenino contextual sin crear no
   assert.equal(result.candidateFields.neighborhood, undefined);
 });
 
-
 test('conversationUnderstanding concentra la interpretación runtime en un solo snapshot', async () => {
   const transportEvidence = { snippet: 'moto', confidence: 0.94, source: 'ai_extraction' };
   const result = await conversationUnderstanding('CC 10203040, tengo 21 años, me movilizo en moto y no tengo restricciones médicas', {
@@ -105,4 +105,27 @@ test('conversationUnderstanding concentra la interpretación runtime en un solo 
   assert.deepEqual(snapshot.usage, { input_tokens: 5, output_tokens: 7, total_tokens: 12 });
   assert.deepEqual(result.candidateFields, snapshot.fields);
   assert.ok(Array.isArray(snapshot.rejectedFields));
+});
+
+test('campos exclusivos del preview no cambian la intención base del turno', async () => {
+  const result = await conversationUnderstanding('no tengo restricciones médicas', {
+    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['medicalRestrictions'] },
+    aiResult: {
+      status: 'disabled',
+      parsedFields: {},
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+    },
+    runtime: {
+      localParsedData: {},
+      engineFields: { medicalRestrictions: 'Sin restricciones médicas' },
+      engineUsage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 },
+      fallbackIntent: 'continue_application',
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.turnInterpretation.fields.medicalRestrictions, 'Sin restricciones médicas');
+  assert.equal(result.turnInterpretation.sourceByField.medicalRestrictions, 'engine');
+  assert.equal(result.turnInterpretation.intent, 'unknown');
+  assert.equal(result.intent, 'unknown');
 });
