@@ -43,6 +43,11 @@ jobs:
       - name: Apply exact fix
         run: |
           python3 /tmp/apply-issue-696.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('test/adminSession.test.js')
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8')
+          PY
           rm -f .github/issue-696-trigger.txt
 
       - name: Set up Node.js 20
