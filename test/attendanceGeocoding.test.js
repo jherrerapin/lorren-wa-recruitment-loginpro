@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildAttendanceGeocodingQueries,
   buildBogotaPlateQuery,
+  buildContextualAttendanceQuery,
   buildIdecaGeocodingQueries,
   geocodeAttendanceAddress,
   normalizeArcgisGeocodingResults,
@@ -19,6 +20,21 @@ function response(payload, { ok = true, status = 200 } = {}) {
 
 test.beforeEach(() => resetAttendanceGeocodingStateForTests());
 
+test('agrega ciudad y país sin obligar al usuario a escribirlos', () => {
+  assert.equal(
+    buildContextualAttendanceQuery('CL 25 SUR 51F 35', 'Bogotá'),
+    'CL 25 SUR 51F 35, Bogotá, Colombia'
+  );
+  assert.equal(
+    buildContextualAttendanceQuery('Calle 25 Sur #51F-35, Bogotá, Colombia', 'Bogotá'),
+    'Calle 25 Sur #51F-35, Bogotá, Colombia'
+  );
+  assert.equal(
+    buildContextualAttendanceQuery('Centro Comercial Andino', 'Bogotá'),
+    'Centro Comercial Andino, Bogotá, Colombia'
+  );
+});
+
 test('genera variantes exacta, normalizada, por intersección y por vía principal', () => {
   const queries = buildAttendanceGeocodingQueries('Calle 25 Sur #51F-35, Bogotá, Colombia');
   assert.equal(queries[0], 'Calle 25 Sur #51F-35, Bogotá, Colombia');
@@ -26,6 +42,26 @@ test('genera variantes exacta, normalizada, por intersección y por vía princip
   assert.ok(queries.includes('Calle 25 Sur con Carrera 51F, Bogotá, Colombia'));
   assert.ok(queries.includes('Calle 25 Sur 51F 35, Bogotá, Colombia'));
   assert.ok(queries.includes('Calle 25 Sur, Bogotá, Colombia'));
+});
+
+test('acepta abreviaturas y formatos colombianos habituales sin perder la placa exacta', () => {
+  const cases = [
+    ['CL 25 SUR 51F 35, Bogotá, Colombia', 'CL 25 SUR 51F 35', 'CL 25 SUR 51F'],
+    ['Cll 25 Sur 51F-35, Bogotá, Colombia', 'CL 25 SUR 51F 35', 'CL 25 SUR 51F'],
+    ['Cra 51F #25 Sur-35, Bogotá, Colombia', 'KR 51F 25 SUR 35', 'KR 51F 25 SUR']
+  ];
+
+  cases.forEach(([query, exact, prefix]) => {
+    assert.equal(normalizeBogotaAddressForIdeca(query), exact);
+    const plate = buildBogotaPlateQuery(query);
+    assert.ok(plate);
+    assert.equal(plate.exact, exact);
+    assert.equal(plate.prefix, prefix);
+  });
+
+  const variants = buildAttendanceGeocodingQueries('CL 25 SUR 51F 35, Bogotá, Colombia');
+  assert.ok(variants.includes('Calle 25 Sur #51F-35, Bogotá, Colombia'));
+  assert.ok(variants.includes('Calle 25 Sur, Carrera 51F, Bogotá, Colombia'));
 });
 
 test('normaliza nomenclatura bogotana y construye consulta segura de placa domiciliaria', () => {
@@ -139,7 +175,33 @@ test('consulta primero la capa oficial de placas y detiene la cascada al hallar 
   assert.equal(requests.length, 1);
   assert.match(requests[0].url, /catastro\/placadomiciliaria\/MapServer\/0\/query/);
   assert.match(requests[0].url, /outSR=4326/);
-  assert.match(requests[0].options.headers['User-Agent'], /Lorren-Attendance\/2\.0/);
+  assert.match(requests[0].options.headers['User-Agent'], /Lorren-Attendance\/2\.1/);
+  assert.equal(results[0].provider, 'ideca-placa');
+});
+
+test('activa la capa oficial de Bogotá aunque el usuario solo escriba la dirección', async () => {
+  const requests = [];
+  const fetchFn = async (url) => {
+    requests.push(url);
+    return response({
+      features: [{
+        attributes: { PDONVIAL: 'CL 25 SUR 51F 35' },
+        geometry: { x: -74.132456, y: 4.595123 }
+      }]
+    });
+  };
+
+  const results = await geocodeAttendanceAddress('CL 25 SUR 51F 35', {
+    city: 'Bogotá',
+    fetchFn,
+    origin: 'https://lorren.example',
+    nowFn: () => 1_500,
+    sleepFn: async () => {},
+    disableCache: true
+  });
+
+  assert.equal(requests.length, 1);
+  assert.match(requests[0], /placadomiciliaria/);
   assert.equal(results[0].provider, 'ideca-placa');
 });
 
