@@ -54,6 +54,7 @@ jobs:
           webhook = removeExactlyOnce(webhook, `  alignCandidateLocationFields,\n`, 'alignCandidateLocationFields import');
           webhook = removeExactlyOnce(webhook, `  isHighConfidenceLocalField,\n`, 'isHighConfidenceLocalField import');
           webhook = removeExactlyOnce(webhook, `  shouldPreserveStructuredLocalField\n`, 'shouldPreserveStructuredLocalField import');
+          webhook = removeExactlyOnce(webhook, `import { sanitizeCandidateFieldsForConversation } from '../services/fieldSanitizer.js';\n`, 'field sanitizer import');
           webhook = webhook.replace(`  parseNaturalData,\n} from '../services/candidateData.js';`, `  parseNaturalData\n} from '../services/candidateData.js';`);
 
           const helperStartMarker = 'function mergeFieldSource(sourceByField, field, source) {';
@@ -72,11 +73,15 @@ jobs:
 
           webhook = webhook.slice(0, blockStart) + newBlock + webhook.slice(blockEnd);
 
-          for (const symbol of ['alignCandidateLocationFields', 'isHighConfidenceLocalField', 'shouldPreserveStructuredLocalField', 'mergeFieldSource', 'sumTokenUsage']) {
+          for (const symbol of [
+            'alignCandidateLocationFields',
+            'isHighConfidenceLocalField',
+            'shouldPreserveStructuredLocalField',
+            'sanitizeCandidateFieldsForConversation',
+            'mergeFieldSource',
+            'sumTokenUsage'
+          ]) {
             if (count(webhook, symbol) !== 0) throw new Error(`${symbol} remains in webhook.`);
-          }
-          if (count(webhook, 'sanitizeCandidateFieldsForConversation') < 2) {
-            throw new Error('Unexpected removal of other field sanitizer consumers.');
           }
           if (count(webhook, 'turnInterpretation') < 8) {
             throw new Error('Runtime snapshot is not fully consumed.');
