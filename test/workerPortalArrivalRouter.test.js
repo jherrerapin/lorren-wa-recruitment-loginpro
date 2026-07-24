@@ -45,18 +45,33 @@ function cookieHeader() {
   return `${WORKER_PORTAL_SESSION_COOKIE_NAME}=${SESSION_TOKEN}; ${WORKER_PORTAL_INSTALLATION_COOKIE_NAME}=${INSTALLATION_ID}`;
 }
 
-function arrivalForm({ includePhoto = true } = {}) {
+function arrivalForm({ includePhoto = true, captureMode = 'ONLINE_WEB', capturedAt = NOW } = {}) {
   const form = new FormData();
   form.set('idempotencyKey', 'arrival_test_123456789');
   form.set('latitude', '4.7111');
   form.set('longitude', '-74.072');
   form.set('accuracyMeters', '18');
-  form.set('clientCapturedAt', NOW.toISOString());
+  form.set('clientCapturedAt', capturedAt.toISOString());
+  form.set('captureMode', captureMode);
+  form.set('persistentStorageAvailable', 'true');
   form.set('photoConsent', includePhoto ? 'true' : 'false');
   if (includePhoto) {
     form.set('selfie', new Blob([Buffer.from('jpeg-test')], { type: 'image/jpeg' }), 'selfie.jpg');
   }
   return form;
+}
+
+function availableAssignment(overrides = {}) {
+  return {
+    id: 'assignment-1',
+    attendanceEnabled: true,
+    arrivalReported: false,
+    canRegisterArrival: true,
+    arrivalWindowOpensAt: '2026-07-22T12:00:00.000Z',
+    arrivalWindowClosesAt: '2026-07-22T13:15:00.000Z',
+    photoRequired: true,
+    ...overrides
+  };
 }
 
 test('registra llegada únicamente después de resolver sesión, propiedad, instalación y evidencia', async () => {
@@ -67,14 +82,7 @@ test('registra llegada únicamente después de resolver sesión, propiedad, inst
   await withServer({
     loadAssignmentForArrivalFn: async (_prisma, input) => {
       observedAssignmentInput = input;
-      return {
-        id: 'assignment-1',
-        attendanceEnabled: true,
-        arrivalReported: false,
-        canRegisterArrival: true,
-        arrivalWindowOpensAt: '2026-07-22T12:00:00.000Z',
-        photoRequired: true
-      };
+      return availableAssignment();
     },
     storeArrivalEvidenceFn: async (input) => {
       observedEvidenceInput = input;
@@ -88,7 +96,8 @@ test('registra llegada únicamente después de resolver sesión, propiedad, inst
         validation: {
           validationStatus: 'AUTO_VALIDATED',
           attendanceStatus: 'ON_TIME',
-          reportedPunctuality: 'ON_TIME'
+          reportedPunctuality: 'ON_TIME',
+          riskFlags: []
         }
       };
     }
@@ -114,8 +123,75 @@ test('registra llegada únicamente después de resolver sesión, propiedad, inst
   assert.equal(observedEvidenceInput.file.mimetype, 'image/jpeg');
   assert.equal(observedArrivalInput.expectedWorkerId, 'worker-1');
   assert.equal(observedArrivalInput.assignmentId, 'assignment-1');
+  assert.equal(observedArrivalInput.captureMode, 'ONLINE_WEB');
   assert.equal(observedArrivalInput.hasFreshPhoto, true);
   assert.match(observedArrivalInput.installationIdHash, /^[a-f0-9]{64}$/);
+});
+
+test('acepta sincronizar una captura offline aunque la ventana actual ya esté cerrada', async () => {
+  let observedArrivalInput;
+  const capturedAt = new Date('2026-07-22T12:59:00.000Z');
+  await withServer({
+    loadAssignmentForArrivalFn: async () => availableAssignment({
+      canRegisterArrival: false,
+      arrivalWindowClosesAt: '2026-07-22T12:30:00.000Z'
+    }),
+    storeArrivalEvidenceFn: async () => ({
+      storageKey: 'attendance/offline.jpg', mimeType: 'image/jpeg', created: true
+    }),
+    registerArrivalFn: async (_prisma, input) => {
+      observedArrivalInput = input;
+      return {
+        recorded: true,
+        replayed: false,
+        validation: {
+          validationStatus: 'REVIEW_REQUIRED',
+          attendanceStatus: 'ARRIVAL_REPORTED',
+          reportedPunctuality: 'ON_TIME',
+          riskFlags: ['OFFLINE_WEB_CAPTURE']
+        }
+      };
+    }
+  }, async (origin) => {
+    const response = await fetch(`${origin}/operaciones/portal/asignaciones/assignment-1/llegada`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookieHeader(),
+        'X-Requested-With': 'worker-portal'
+      },
+      body: arrivalForm({ captureMode: 'OFFLINE_WEB', capturedAt })
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.requiresReview, true);
+    assert.match(payload.message, /sin conexión/i);
+  });
+
+  assert.equal(observedArrivalInput.captureMode, 'OFFLINE_WEB');
+  assert.equal(observedArrivalInput.clientCapturedAt.toISOString(), capturedAt.toISOString());
+  assert.equal(observedArrivalInput.persistentStorageAvailable, true);
+});
+
+test('devuelve un resultado específico para una segunda clave de llegada', async () => {
+  await withServer({
+    loadAssignmentForArrivalFn: async () => availableAssignment({ arrivalReported: true, canRegisterArrival: false }),
+    storeArrivalEvidenceFn: async () => ({ storageKey: null, mimeType: null, created: false }),
+    registerArrivalFn: async () => ({
+      recorded: false,
+      validation: { riskFlags: ['DUPLICATE_ARRIVAL'] }
+    })
+  }, async (origin) => {
+    const response = await fetch(`${origin}/operaciones/portal/asignaciones/assignment-1/llegada`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookieHeader(),
+        'X-Requested-With': 'worker-portal'
+      },
+      body: arrivalForm({ includePhoto: true })
+    });
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { ok: false, error: 'arrival_already_registered' });
+  });
 });
 
 test('no permite consultar ni marcar una asignación que no pertenece a la sesión', async () => {
@@ -145,13 +221,7 @@ test('no permite consultar ni marcar una asignación que no pertenece a la sesi�
 
 test('exige selfie y autorización cuando la política de la operación la solicita', async () => {
   await withServer({
-    loadAssignmentForArrivalFn: async () => ({
-      id: 'assignment-1',
-      attendanceEnabled: true,
-      arrivalReported: false,
-      canRegisterArrival: true,
-      photoRequired: true
-    }),
+    loadAssignmentForArrivalFn: async () => availableAssignment(),
     registerArrivalFn: async () => {
       throw new Error('must_not_register');
     }
@@ -166,6 +236,18 @@ test('exige selfie y autorización cuando la política de la operación la solic
     });
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { ok: false, error: 'selfie_required' });
+  });
+});
+
+test('sirve el service worker con un alcance que incluye la raíz del portal', async () => {
+  await withServer({}, async (origin) => {
+    const response = await fetch(`${origin}/operaciones/portal/service-worker.js`);
+    const source = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /application\/javascript/);
+    assert.equal(response.headers.get('service-worker-allowed'), '/operaciones/portal');
+    assert.match(source, /lorren-worker-arrivals/);
+    assert.match(source, /CACHE_PORTAL/);
   });
 });
 
