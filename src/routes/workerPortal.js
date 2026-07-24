@@ -389,6 +389,21 @@ export function workerPortalRouter(prisma, options = {}) {
     return res.sendFile(WORKER_PORTAL_SERVICE_WORKER_FILE);
   });
 
+  router.get('/offline.js', (_req, res) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.redirect(302, '/public/worker-portal-offline.js');
+  });
+
+  router.get('/manifest.webmanifest', (_req, res) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.redirect(302, '/public/worker-portal.webmanifest');
+  });
+
+  router.get('/icon.svg', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=86400');
+    return res.redirect(302, '/public/worker-portal-icon.svg');
+  });
+
   router.get('/activar', (_req, res) => {
     const nonce = createNonce(nonceBytesFn);
     applyWorkerPortalSecurityHeaders(res, nonce);
