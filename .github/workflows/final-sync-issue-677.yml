@@ -1,0 +1,54 @@
+name: Final sync issue 677 with main
+
+on:
+  pull_request:
+    branches:
+      - automation/677-final-sync
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.head_ref == 'fix/677-whatsapp-confirmation-reliability'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out functional branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/677-whatsapp-confirmation-reliability
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure Git and merge current main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge origin/main --no-edit
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install and validate
+        run: |
+          npm ci
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/dispatchWhatsappWebServiceV6.js
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
+          node --test test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Push synchronized branch
+        run: git push origin HEAD:fix/677-whatsapp-confirmation-reliability
