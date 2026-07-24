@@ -37,14 +37,16 @@ jobs:
           const definition = matches.filter((entry) => entry.text.startsWith('function buildDataRequestPrompt('));
           const consumers = matches.filter((entry) => !entry.text.startsWith('function buildDataRequestPrompt('));
           const nonDirect = consumers.filter((entry) => !entry.text.includes('buildDataRequestPrompt('));
-
-          console.log(JSON.stringify({
+          const result = {
             totalReferences: matches.length,
             definitionCount: definition.length,
             consumerCount: consumers.length,
             nonDirectCount: nonDirect.length,
             matches
-          }, null, 2));
+          };
+
+          fs.writeFileSync('audit-663.json', `${JSON.stringify(result, null, 2)}\n`);
+          console.log(JSON.stringify(result));
 
           if (definition.length !== 1) {
             throw new Error(`Expected exactly one definition; found ${definition.length}.`);
@@ -56,3 +58,11 @@ jobs:
             throw new Error('Found an indirect or non-call reference.');
           }
           NODE
+
+      - name: Upload exact audit result
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-663-data-request-alias
+          path: audit-663.json
+          if-no-files-found: error
+          retention-days: 3
