@@ -2,11 +2,11 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v1';
+const CACHE_NAME = 'lorren-worker-portal-shell-v2';
 const STATIC_ASSETS = [
-  '/public/worker-portal-offline.js',
-  '/public/worker-portal.webmanifest',
-  '/public/worker-portal-icon.svg'
+  '/operaciones/portal/offline.js',
+  '/operaciones/portal/manifest.webmanifest',
+  '/operaciones/portal/icon.svg'
 ];
 const DB_NAME = 'lorren-worker-portal-v1';
 const DB_VERSION = 1;
