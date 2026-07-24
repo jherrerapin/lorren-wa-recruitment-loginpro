@@ -35,10 +35,28 @@ jobs:
           cache: npm
 
       - name: Apply exact reliability changes
-        run: python3 .github/scripts/apply-issue-677.py
+        run: |
+          if [ -f .github/issue-677-apply-error.txt ]; then
+            cat .github/issue-677-apply-error.txt
+            exit 1
+          fi
+          set +e
+          python3 .github/scripts/apply-issue-677.py > /tmp/issue-677-apply.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-677-apply.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/issue-677-apply.log .github/issue-677-apply-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/issue-677-apply-error.txt
+            git commit -m "chore: capturar diagnóstico de aplicación #677"
+            git push origin HEAD:fix/677-whatsapp-confirmation-reliability
+            exit "$status"
+          fi
 
-      - name: Remove temporary application script
-        run: rm -f .github/scripts/apply-issue-677.py
+      - name: Remove temporary application files
+        run: rm -f .github/scripts/apply-issue-677.py .github/issue-677-apply-error.txt
 
       - name: Install locked dependencies
         run: npm ci
