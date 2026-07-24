@@ -8,7 +8,7 @@ const inventory = JSON.parse(fs.readFileSync('config/transitional-code-inventory
 test('el webhook usa directamente la autoridad canónica de campos requeridos', () => {
   assert.doesNotMatch(webhook, /\bgetRequiredFieldKeys\b/);
   assert.match(webhook, /getRequiredCandidateFieldKeys\(vacancy\)/);
-  assert.ok((webhook.match(/\bgetRequiredCandidateFieldKeys\(/g) || []).length >= 2);
+  assert.ok((webhook.match(/\bgetRequiredCandidateFieldKeys\(/g) || []).length >= 5);
 });
 
 test('el inventario no conserva el alias retirado', () => {
