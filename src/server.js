@@ -28,7 +28,7 @@ import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
 import { getOpenAiModelConfig } from './services/openAiModelConfig.js';
-import { createAdminSessionMiddleware } from './services/adminSession.js';
+import { createAdminLogoutHandler, createAdminSessionMiddleware } from './services/adminSession.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -422,7 +422,8 @@ app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-const { middleware: adminSessionMiddleware } = createAdminSessionMiddleware();
+const { middleware: adminSessionMiddleware, config: adminSessionConfig } = createAdminSessionMiddleware();
+const destroySession = createAdminLogoutHandler({ config: adminSessionConfig });
 app.use(adminSessionMiddleware);
 
 app.use(dispatchAuditMiddleware(prisma));
@@ -607,13 +608,6 @@ app.post('/recover', async (req, res) => {
   params.set('username', username);
   return res.redirect(`/login?${params.toString()}`);
 });
-
-const destroySession = (req, res) => {
-  req.session.destroy(() => {
-    res.clearCookie(sessionCookieName);
-    res.redirect('/login');
-  });
-};
 
 app.post('/logout', destroySession);
 app.get('/logout', destroySession);
