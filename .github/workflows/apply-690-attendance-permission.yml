@@ -33,13 +33,41 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path('.github/scripts/apply-690-attendance-permission.py')
-          text = path.read_text(encoding='utf-8')
-          old = "updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)"
-          new = "updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=flags)"
-          if text.count(old) != 1:
+          import re
+
+          runner = Path('.github/scripts/apply-690-attendance-permission.py')
+          text = runner.read_text(encoding='utf-8')
+          old_regex = "updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)"
+          new_regex = "updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=flags)"
+          if text.count(old_regex) != 1:
               raise SystemExit('runner regex helper not found exactly once')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          text = text.replace(old_regex, new_regex, 1)
+
+          old_guard = "    if count != 1:\n        raise RuntimeError(f'{path}: expected one literal match, found {count}')"
+          new_guard = "    if count == 0 and text.count(new) == 1:\n        return\n    if count != 1:\n        raise RuntimeError(f'{path}: expected one literal match, found {count}')"
+          if text.count(old_guard) != 1:
+              raise SystemExit('runner literal helper guard not found exactly once')
+          runner.write_text(text.replace(old_guard, new_guard, 1), encoding='utf-8')
+
+          server_path = Path('src/server.js')
+          server = server_path.read_text(encoding='utf-8')
+          server, auth_count = re.subn(
+              r'(?m)^(\s*)canAccessDispatch:\s*true,\n\1canAccessMetaAds:\s*true,',
+              lambda match: f"{match.group(1)}canAccessDispatch: true,\n{match.group(1)}canAccessAttendance: true,\n{match.group(1)}canAccessMetaAds: true,",
+              server,
+              count=1
+          )
+          if auth_count != 1:
+              raise SystemExit(f'auth select permission insertion count: {auth_count}')
+          server, env_count = re.subn(
+              r"(?m)^(\s*)canAccessDispatch:\s*role === 'dev',\n\1canAccessMetaAds:\s*role === 'dev',",
+              lambda match: f"{match.group(1)}canAccessDispatch: role === 'dev',\n{match.group(1)}canAccessAttendance: role === 'dev',\n{match.group(1)}canAccessMetaAds: role === 'dev',",
+              server,
+              count=1
+          )
+          if env_count != 1:
+              raise SystemExit(f'env session permission insertion count: {env_count}')
+          server_path.write_text(server, encoding='utf-8')
           PY
           set +e
           python .github/scripts/apply-690-attendance-permission.py > .github/apply-690-error.log 2>&1
