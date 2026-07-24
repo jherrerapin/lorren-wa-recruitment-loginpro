@@ -75,6 +75,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
       scopeCity: true,
       scopeVacancyId: true,
       canAccessDispatch: true,
+      canAccessAttendance: true,
       canAccessStatistics: true,
       canAccessMetaAds: true,
       canAccessCvAnalysis: true
@@ -87,12 +88,14 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     req.session.userRole = null;
     req.session.userId = null;
     req.session.canAccessDispatch = false;
+    req.session.canAccessAttendance = false;
     req.session.canAccessStatistics = false;
     req.session.canAccessMetaAds = false;
     req.session.canAccessCvAnalysis = false;
     req.userRole = null;
     req.userId = null;
     req.canAccessDispatch = false;
+    req.canAccessAttendance = false;
     req.canAccessStatistics = false;
     req.canAccessMetaAds = false;
     req.canAccessCvAnalysis = false;
@@ -102,7 +105,8 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const accessScope = user.accessScope || 'ALL';
   const accessCity = user.scopeCity || null;
   const accessVacancyId = user.scopeVacancyId || null;
-  const canAccessDispatch = Boolean(user.canAccessDispatch);
+  const canAccessAttendance = Boolean(user.canAccessAttendance);
+  const canAccessDispatch = Boolean(user.canAccessDispatch) || canAccessAttendance;
   // La migración convierte el permiso general anterior en ambos permisos.
   // No se usa canAccessStatistics como fallback: si solo uno queda activo,
   // el permiso general derivado sigue en true y reabriría el otro módulo.
@@ -114,6 +118,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.session.userAccessCity = accessCity;
   req.session.userAccessVacancyId = accessVacancyId;
   req.session.canAccessDispatch = canAccessDispatch;
+  req.session.canAccessAttendance = canAccessAttendance;
   req.session.canAccessStatistics = canAccessStatistics;
   req.session.canAccessMetaAds = canAccessMetaAds;
   req.session.canAccessCvAnalysis = canAccessCvAnalysis;
@@ -124,6 +129,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.userAccessCity = accessCity;
   req.userAccessVacancyId = accessVacancyId;
   req.canAccessDispatch = canAccessDispatch;
+  req.canAccessAttendance = canAccessAttendance;
   req.canAccessStatistics = canAccessStatistics;
   req.canAccessMetaAds = canAccessMetaAds;
   req.canAccessCvAnalysis = canAccessCvAnalysis;

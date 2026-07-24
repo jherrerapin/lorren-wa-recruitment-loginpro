@@ -358,6 +358,7 @@ export function locationsRouter(prisma) {
         username: true,
         role: true,
         canAccessDispatch: true,
+        canAccessAttendance: true,
         canAccessStatistics: true,
         canAccessMetaAds: true,
         canAccessCvAnalysis: true
@@ -383,7 +384,8 @@ export function locationsRouter(prisma) {
       recoveryEmail: normalize(req.body.recoveryEmail)
     };
     if (req.userRole === 'dev') {
-      data.canAccessDispatch = isChecked(req.body.canAccessDispatch);
+      data.canAccessAttendance = isChecked(req.body.canAccessAttendance);
+      data.canAccessDispatch = isChecked(req.body.canAccessDispatch) || data.canAccessAttendance;
       data.canAccessMetaAds = isChecked(req.body.canAccessMetaAds);
       data.canAccessCvAnalysis = isChecked(req.body.canAccessCvAnalysis);
       data.canAccessStatistics = data.canAccessMetaAds || data.canAccessCvAnalysis;

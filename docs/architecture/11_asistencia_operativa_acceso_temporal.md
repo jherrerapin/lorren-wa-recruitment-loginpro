@@ -1,102 +1,57 @@
-# Asistencia operativa: acceso temporal controlado por DEV
+# Asistencia operativa: permiso individual administrado por DEV
 
-## Objetivo
+## Política
 
-Mientras se estabiliza la nueva función de asistencia, la configuración por punto queda visible y funcional únicamente para `dev`.
+La función de Asistencia se rige por denegación predeterminada y menor privilegio:
 
-El perfil protegido `reclutador-general` puede recibir acceso temporal mediante un interruptor visible solo para `dev`. Cualquier otro reclutador permanece bloqueado aunque tenga permiso general para entrar a Operaciones / Despacho.
+- `DEV` conserva acceso completo;
+- un usuario `ADMIN` solo puede entrar cuando su registro activo en `AppUser` tenga `canAccessAttendance = true`;
+- el permiso se concede o retira únicamente desde el panel de Usuarios por una sesión `DEV`;
+- conocer o escribir una URL directa no evita la autorización del servidor.
 
-## Estado inicial
+El permiso anterior, basado en un interruptor global temporal para `reclutador-general`, deja de ser autoridad. Los eventos históricos pueden conservarse como auditoría, pero no conceden acceso.
 
-El interruptor es temporal y se representa mediante eventos append-only en `DevAuditEvent`:
+## Alcance del permiso
 
-- `ATTENDANCE_RECRUITER_GENERAL_ENABLED`;
-- `ATTENDANCE_RECRUITER_GENERAL_DISABLED`.
+`canAccessAttendance` protege conjuntamente:
 
-La consulta toma únicamente el evento más reciente de la familia exacta `FEATURE_ACCESS` y la etiqueta `Asistencia operativa para reclutador-general`.
+- el botón y el panel de Asistencia;
+- revisión, validación, rechazo y corrección manual auditada;
+- consulta de fotografías y evidencia;
+- visualización de ubicación, geocerca y precisión;
+- geocodificación interna;
+- configuración de asistencia en los puntos operativos.
 
-La ausencia de eventos se interpreta como deshabilitado. Por tanto, después del despliegue:
+Como Asistencia pertenece a Operaciones / Despacho, habilitarla también deja activo `canAccessDispatch`. No modifica ciudades, vacantes ni alcance de reclutamiento.
 
-- `dev`: acceso permitido;
-- `reclutador-general`: acceso denegado;
-- otros perfiles: acceso denegado.
+## Funciones reservadas a DEV
 
-No se requiere migración para este control temporal y no se utiliza `BotKnowledge`, porque esa tabla pertenece al contexto curado del bot.
+La emisión de enlaces de activación del Portal del Auxiliar permanece exclusivamente para `DEV`. Esos enlaces autorizan un dispositivo primario y no forman parte del permiso administrativo ordinario de revisión de asistencia.
 
 ## Autoridad
 
-`src/services/attendanceFeatureAccess.js` es la única autoridad del interruptor.
+`src/services/attendanceFeatureAccess.js` es la autoridad única. Para usuarios no DEV consulta el registro vigente de `AppUser` por username y exige simultáneamente:
 
-### Consulta
+1. rol de sesión `admin`;
+2. usuario existente;
+3. usuario activo;
+4. rol persistido `ADMIN`;
+5. `canAccessAttendance` estrictamente verdadero.
 
-`resolveAttendanceFeatureAccess()` aplica las reglas:
+Ante errores de persistencia, ausencia de identidad o campos faltantes, el acceso se deniega.
 
-1. `dev` siempre puede entrar;
-2. solo el username exacto `reclutador-general` puede heredar el interruptor;
-3. el usuario debe existir, estar activo y conservar rol `ADMIN`;
-4. los demás perfiles se rechazan sin consultar eventos ni usuarios adicionales;
-5. si falla la persistencia, el middleware niega el acceso.
+## Persistencia y sesión
 
-### Actualización
+La columna `AppUser.canAccessAttendance` inicia en `false`. El login la copia a la sesión y `dispatchAuditMiddleware` la refresca desde base de datos en cada solicitud administrativa relevante, por lo que una revocación no depende de que el usuario cierre sesión.
 
-`setRecruiterGeneralAttendanceEnabled()`:
+## Interfaz DEV
 
-- exige un booleano real;
-- exige actor con rol `dev`;
-- comprueba la existencia del perfil protegido;
-- lee el estado anterior dentro de la transacción;
-- agrega un nuevo `DevAuditEvent` con estado anterior, estado nuevo, actor, IP, ruta y agente de usuario;
-- nunca modifica el rol, el alcance o los demás permisos del usuario.
+El panel de Usuarios muestra Asistencia dentro de `Permisos del panel`, tanto al crear como al editar. Los checkboxes no se renderizan para administradores no DEV y el backend ignora cualquier intento de esos actores por enviar manualmente los campos de permisos.
 
 ## Protección en servidor
 
-La ruta existente:
-
-```text
-POST /admin/operaciones/clientes/:clientId/operaciones/:operationId/asistencia
-```
-
-ahora exige dos controles independientes:
-
-1. acceso general a Operaciones;
-2. acceso temporal a la función de asistencia.
-
-Ocultar el formulario no concede seguridad por sí mismo. Una solicitud construida manualmente continúa bloqueada mediante `requireAttendanceAccess`.
-
-## Interfaz
-
-En la página de operaciones del cliente:
-
-- una persona sin acceso no recibe el bloque `Configurar asistencia`;
-- `dev` conserva el bloque y recibe una tarjeta de control temporal;
-- el botón alterna entre habilitar y deshabilitar a `reclutador-general`;
-- `reclutador-general`, cuando está habilitado, recibe el formulario pero nunca el botón DEV.
-
-El interruptor no modifica el rol, las ciudades, las vacantes ni el permiso general de Operaciones.
-
-## Alcance preservado
-
-Este cambio no:
-
-- habilita asistencia para ningún punto;
-- publica un portal del auxiliar;
-- crea una ruta pública de llegada;
-- captura GPS o fotografías;
-- modifica asignaciones, cobertura o WhatsApp;
-- cambia `DispatchAssignment.status`;
-- modifica Railway;
-- introduce reconocimiento facial.
-
-## Reactivación futura
-
-Cuando la función sea estable, el control temporal puede reemplazarse por un permiso dedicado en `AppUser` o ampliarse a otros perfiles. La ruta y la interfaz deben seguir consultando una autoridad del servidor; no debe eliminarse la protección dejando únicamente condiciones visuales.
+`requireAttendanceAccess` se ejecuta en el panel, geocodificación y configuración por punto. Ocultar el botón es solo una ayuda visual; la decisión efectiva siempre se toma en el servidor.
 
 ## Rollback
 
-Revertir:
-
-- `src/services/attendanceFeatureAccess.js`;
-- el gate agregado en `src/routes/dispatchBridge.js`;
-- las pruebas y este documento.
-
-Los eventos históricos pueden conservarse como auditoría aunque la autoridad temporal deje de utilizarse.
+Revertir el PR retira la autoridad y la UI nuevas. Si la migración ya fue aplicada, la columna puede permanecer sin uso durante el rollback; no contiene datos operativos ni modifica asistencias existentes.

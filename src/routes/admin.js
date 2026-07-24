@@ -77,6 +77,7 @@ function sessionAuth(req, res, next) {
   req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
   req.userSource = req.session?.userSource || null;
   req.canAccessDispatch = Boolean(req.session?.canAccessDispatch);
+  req.canAccessAttendance = Boolean(req.session?.canAccessAttendance);
   return next();
 }
 
@@ -130,6 +131,7 @@ async function ensureEnvironmentAdminProfile(prisma) {
         scopeCity: null,
         scopeVacancyId: null,
         canAccessDispatch: false,
+        canAccessAttendance: false,
         canAccessStatistics: false,
         canAccessMetaAds: false,
         canAccessCvAnalysis: false,
@@ -3179,7 +3181,9 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('La contrasena inicial debe tener al menos 6 caracteres.'));
     }
 
-    const canAccessDispatch = req.userRole === 'dev' && req.body.canAccessDispatch === 'true';
+    const canAccessAttendance = req.userRole === 'dev' && req.body.canAccessAttendance === 'true';
+    const canAccessDispatch = req.userRole === 'dev'
+      && (req.body.canAccessDispatch === 'true' || canAccessAttendance);
     const canAccessMetaAds = req.userRole === 'dev' && req.body.canAccessMetaAds === 'true';
     const canAccessCvAnalysis = req.userRole === 'dev' && req.body.canAccessCvAnalysis === 'true';
     const scopeResolution = await resolveRequestedUserScope(prisma, req, req.body);
@@ -3206,6 +3210,7 @@ export function adminRouter(prisma) {
         scopeCity: scopeResolution.scopeCity,
         scopeVacancyId: scopeResolution.scopeVacancyId,
         canAccessDispatch,
+        canAccessAttendance,
         canAccessStatistics: canAccessMetaAds || canAccessCvAnalysis,
         canAccessMetaAds,
         canAccessCvAnalysis,
