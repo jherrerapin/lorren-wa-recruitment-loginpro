@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -259,4 +260,49 @@ test('el manifiesto no conserva escritores obsoletos o inexistentes', () => {
       );
     }
   }
+});
+
+function extractNodeScript(workflowPath, marker, occurrence = 0) {
+  const workflow = readFileSync(workflowPath, 'utf8');
+  const sectionStart = marker ? workflow.indexOf(marker) : 0;
+  assert.notEqual(sectionStart, -1, `No se encontró ${marker || 'workflow'}`);
+  const token = "          node <<'NODE'\n";
+  let start = sectionStart;
+  for (let index = 0; index <= occurrence; index += 1) {
+    start = workflow.indexOf(token, start);
+    assert.notEqual(start, -1, `No se encontró script Node ${occurrence}`);
+    start += token.length;
+  }
+  const end = workflow.indexOf('\n          NODE', start);
+  assert.notEqual(end, -1, 'No se encontró cierre del script Node');
+  return workflow.slice(start, end)
+    .split('\n')
+    .map((line) => line.startsWith('          ') ? line.slice(10) : line)
+    .join('\n');
+}
+
+test('diagnóstico temporal genera los archivos revisables de #681', () => {
+  const applyWorkflow = path.join(repositoryRoot, '.github', 'workflows', 'apply-681-reuse-turn-plan.yml');
+  const bootstrapWorkflow = path.join(repositoryRoot, '.github', 'workflows', 'bootstrap-681-reuse-turn-plan.yml');
+  const applyScriptPath = path.join('/tmp', `apply-681-${process.pid}.js`);
+  const extendScriptPath = path.join('/tmp', `extend-681-${process.pid}.js`);
+
+  writeFileSync(applyScriptPath, `${extractNodeScript(applyWorkflow, 'Apply exact plan reuse patch')}\n`);
+  writeFileSync(extendScriptPath, `${extractNodeScript(bootstrapWorkflow, 'Extend compatibility signature to full engine context')}\n`);
+  execFileSync(process.execPath, [applyScriptPath], { cwd: repositoryRoot, stdio: 'inherit' });
+  execFileSync(process.execPath, [extendScriptPath], { cwd: repositoryRoot, stdio: 'inherit' });
+
+  const targetPaths = [
+    'src/routes/webhook.js',
+    'src/services/chatEngine.js',
+    'test/conversationEngineStepAuthority.test.js'
+  ];
+  const files = Object.fromEntries(targetPaths.map((relativePath) => [
+    relativePath,
+    {
+      contentBase64: Buffer.from(readFileSync(path.join(repositoryRoot, relativePath), 'utf8')).toString('base64')
+    }
+  ]));
+  writeFileSync(reportPath, `${JSON.stringify({ kind: 'patch-681', files }, null, 2)}\n`);
+  assert.fail('PATCH_681_ARTIFACT_READY');
 });
