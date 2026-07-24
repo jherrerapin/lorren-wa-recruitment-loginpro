@@ -46,13 +46,18 @@ Marcar una entrada como `RETIRABLE` exige pruebas existentes y `retirementEviden
 
 Los aliases transitorios que permanecen en `src/routes/webhook.js` son:
 
-- `getRequiredFieldKeys()`;
 - `formatFieldList()`;
 - `buildDataRequestPrompt()`.
 
 Continúan inventariados hasta retirarlos en PR pequeños con regresiones específicas. El scanner impide que adquieran política sin reclasificación.
 
 ## Retiros completados
+
+### `getRequiredFieldKeys()` — #658
+
+El alias se retiró porque solo reenviaba la vacante a `getRequiredCandidateFieldKeys()`. Todos sus consumidores usan ahora directamente la autoridad de campos requeridos definida en `readinessGuard.js`.
+
+No cambian los campos exigidos, su orden ni la configuración dinámica por vacante; se elimina únicamente un nombre intermedio.
 
 ### Cadena `getMissingFields()` / `getMissingFieldsForVacancy()` — #656
 
@@ -82,7 +87,7 @@ La prueba falla cuando:
 
 1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).
 2. Retirar configuración fantasma sin consumidores, comenzando por `FF_SEMANTIC_SHORT_MEMORY` (#651).
-3. Retirar los aliases puros restantes en PR pequeños: `getRequiredFieldKeys()`, `formatFieldList()` y `buildDataRequestPrompt()`.
+3. Retirar los aliases puros restantes en PR pequeños: `formatFieldList()` y `buildDataRequestPrompt()`.
 4. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.
 5. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.
 6. Diseñar `TenantContext` y la migración del tenant inicial LoginPro.

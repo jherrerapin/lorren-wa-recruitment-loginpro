@@ -189,9 +189,6 @@ function shouldRejectByRequirements(text, parsed = {}, evidenceByField = {}, vac
   if (mentionsForeigner(text) && hasValidForeignDocumentMention(text, parsed)) return { reject: false };
   return { reject: false };
 }
-function getRequiredFieldKeys(vacancy = null) {
-  return getRequiredCandidateFieldKeys(vacancy);
-}
 function getFieldLabel(field, vacancy = null) {
   return getReadinessFieldLabel(field, vacancy) || FIELD_LABELS[field] || field;
 }
@@ -252,7 +249,7 @@ function buildMissingFieldsReply(candidate, normalizedData = {}, vacancy = null)
   const missing = getMissingFieldLabels(candidate, vacancy);
   if (!missing.length) return '';
   const capturedCount = Object.keys(normalizedData || {})
-    .filter((field) => getRequiredFieldKeys(vacancy).includes(field) && normalizedData[field] !== undefined && normalizedData[field] !== null && normalizedData[field] !== '')
+    .filter((field) => getRequiredCandidateFieldKeys(vacancy).includes(field) && normalizedData[field] !== undefined && normalizedData[field] !== null && normalizedData[field] !== '')
     .length;
   if (capturedCount >= 2) return `Gracias, registré lo que compartiste. Para completar el proceso aún faltan: ${missing.join(', ')}.`;
   if (capturedCount === 1) return `Gracias, ese dato quedó registrado. Para continuar falta: ${missing.join(', ')}.`;
@@ -745,7 +742,7 @@ function shouldAskForConfirmation(candidate, normalizedData, vacancy = null) {
     return getMissingFieldLabels(candidate, vacancy).length === 0;
   }
   const missing = getMissingFieldLabels(candidate, vacancy);
-  const hasMainBlock = getRequiredFieldKeys(vacancy).every((field) => {
+  const hasMainBlock = getRequiredCandidateFieldKeys(vacancy).every((field) => {
     if (field === 'locality' || field === 'neighborhood') {
       return Boolean(getCandidateResidenceValue(candidate, vacancy));
     }
@@ -755,7 +752,7 @@ function shouldAskForConfirmation(candidate, normalizedData, vacancy = null) {
   if (!missing.length) return true;
 
   const correctedFields = Object.keys(normalizedData || {});
-  const requiresReconfirm = correctedFields.some((field) => getRequiredFieldKeys(vacancy).includes(field));
+  const requiresReconfirm = correctedFields.some((field) => getRequiredCandidateFieldKeys(vacancy).includes(field));
   return requiresReconfirm && correctedFields.length >= 2 && missing.length <= 2;
 }
 
@@ -1663,7 +1660,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     delete evidenceByField[rejected.field];
   }
   const hasDataIntent = containsCandidateData(cleanText, normalizedData);
-  const requiredFields = getRequiredFieldKeys(currentVacancy);
+  const requiredFields = getRequiredCandidateFieldKeys(currentVacancy);
   const hasNonNameProfileFieldCapture = Object.keys(normalizedData).some((field) => (
     requiredFields.includes(field) && field !== 'fullName'
   ));
@@ -2497,7 +2494,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
 
     const { updatedCandidate: updated, decisions } = await applyDecisionsAndUpdate();
-    const correctedRequiredFields = decisions.persistedFields.filter((field) => getRequiredFieldKeys(currentVacancy).includes(field));
+    const correctedRequiredFields = decisions.persistedFields.filter((field) => getRequiredCandidateFieldKeys(currentVacancy).includes(field));
     const missingAfterCorrection = getMissingFieldLabels(updated, currentVacancy);
 
     if (correctedRequiredFields.length) {
