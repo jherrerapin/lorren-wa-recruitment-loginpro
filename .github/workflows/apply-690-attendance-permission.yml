@@ -31,6 +31,16 @@ jobs:
 
       - name: Apply focused implementation
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply-690-attendance-permission.py')
+          text = path.read_text(encoding='utf-8')
+          old = "updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)"
+          new = "updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=flags)"
+          if text.count(old) != 1:
+              raise SystemExit('runner regex helper not found exactly once')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           set +e
           python .github/scripts/apply-690-attendance-permission.py > .github/apply-690-error.log 2>&1
           status=$?
