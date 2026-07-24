@@ -18,7 +18,7 @@
     {
       "name": "USE_CONVERSATION_ENGINE",
       "kind": "environment_flag",
-      "status": "TRANSITIONAL",
+      "status": "BLOCKED",
       "runtimeDefault": false,
       "definitionPaths": [
         "src/routes/webhook.js"
@@ -32,12 +32,21 @@
         ".github/workflows/contextual-fallback-ci.yml"
       ],
       "owner": "conversation-orchestration",
-      "purpose": "Selecciona entre el motor conversacional extraído y el camino legacy que todavía vive en el webhook.",
-      "retirementCondition": "Demostrar paridad mediante replays con ambos valores, convertir un solo orquestador en autoridad y retirar el camino alterno en un PR independiente.",
+      "purpose": "Activa tres capas sobre el flujo determinístico: previsualización de campos, respuesta primaria del chat engine y delegación de preguntas de vacante. El camino determinístico continúa como fallback y autoridad para casos no cubiertos.",
+      "retirementCondition": "Consolidar primero una sola interpretación de campos e intención y un solo plan por turno; después demostrar la misma matriz de escenarios con ambos valores, incluyendo preguntas de vacante, correcciones, consentimiento, adjuntos y agenda. Solo entonces elegir una autoridad y retirar el selector o el camino alterno en un PR independiente.",
       "evidenceTests": [
         "test/conversation-harness.test.js",
         "test/lorrenRegressionFixes.test.js",
-        "test/activeVacancyQuestionIntake.test.js"
+        "test/activeVacancyQuestionIntake.test.js",
+        "test/candidateAgeHarnessIntegration.test.js",
+        "test/candidateExperienceHarnessIntegration.test.js",
+        "test/inactiveVacancySpecificity.test.js",
+        "test/conversationReplayInterpretation.test.js",
+        "test/conversationReplayPlanning.test.js",
+        "test/conversationReplayConsentAttachmentEdges.test.js",
+        "test/conversationReplayRecovery.test.js",
+        "test/conversationEngineGuardRails.test.js",
+        "test/conversationUnderstanding.test.js"
       ]
     },
     {

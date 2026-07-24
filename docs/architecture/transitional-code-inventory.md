@@ -28,7 +28,29 @@ Marcar una entrada como `RETIRABLE` exige pruebas existentes y `retirementEviden
 
 ### Orquestación conversacional
 
-`USE_CONVERSATION_ENGINE` es transitorio y no pertenece todavía a la autoridad central de `featureFlags.js`. Selecciona entre el motor extraído y lógica legacy del webhook. Debe mantenerse hasta demostrar paridad por replays y elegir una sola autoridad del turno.
+`USE_CONVERSATION_ENGINE` está `BLOCKED`. La auditoría #667 demostró que no selecciona entre dos motores equivalentes; activa tres capas distintas sobre el flujo determinístico:
+
+1. previsualización de campos mediante `think()` durante `GREETING_SENT`, `COLLECTING_DATA`, `CONFIRMING_DATA` y `ASK_CV`;
+2. respuesta primaria mediante `runChatEngine()` en pasos habilitados cuando existen flag y API key;
+3. delegación de preguntas de vacante al chat engine antes de usar la respuesta determinística.
+
+El flujo determinístico continúa ejecutándose como fallback cuando el engine devuelve `fallback` y conserva casos que el engine no intenta manejar. Por eso no es seguro retirar ni el camino determinístico ni el extraído.
+
+La interpretación tampoco tiene todavía una sola autoridad. En el mismo turno el webhook puede ejecutar `tryOpenAIParse()`, `conversationUnderstanding()`, `parseNaturalData()`, una previsualización opcional del engine y un saneamiento semántico final. `conversationUnderstanding()` construye campos candidatos, pero el runtime vuelve a fusionar y sanear campos por separado; en el webhook solo se consumen de ese resultado la intención y las pistas de ciudad/cargo.
+
+#### Evidencia de la matriz #667
+
+La matriz aisló el selector eliminando únicamente las asignaciones internas del flag en copias temporales de las pruebas y ejecutó cada archivo en procesos separados:
+
+- 14 archivos comparados con `false` y `true`;
+- 12 archivos pasaron con ambos valores;
+- `lorrenRegressionFixes` presentó las mismas dos fallas preexistentes con ambos valores;
+- `conversation-harness` presentó fallas preexistentes con ambos valores y una diferencia de un caso;
+- la única diferencia observada fue el caso contextual femenino, que permanece fuera del alcance porque `genderLogicInScope` es `false`.
+
+La evidencia no demuestra paridad completa. Además, `.github/workflows/ci.yml` y `.github/workflows/contextual-fallback-ci.yml` fijan el selector en `false`, mientras `.env.example` propone `true`. Siete pruebas de integración lo fijaban en `true` y una regresión amplia lo fijaba en `false`; antes de la auditoría no existía una matriz común de los mismos escenarios.
+
+La condición previa para desbloquear el flag es consolidar una sola interpretación de campos/intención y un solo plan por turno. Después debe ejecutarse una matriz estable que cubra preguntas de vacante, correcciones, consentimiento, adjuntos y agenda con ambos valores. Solo entonces puede elegirse una autoridad y retirarse el selector o el camino alterno.
 
 `FF_RESPONSES_EXTRACTOR` también es transitorio, pero ya tiene un default canónico. Responses API es el camino principal y el parser legacy permanece como rollback.
 
@@ -93,9 +115,9 @@ La prueba falla cuando:
 
 ## Orden de limpieza después de este inventario
 
-1. Eliminar la política global de edad del webhook y usar la configuración de cada vacante (#642).
-2. Retirar configuración fantasma sin consumidores, comenzando por `FF_SEMANTIC_SHORT_MEMORY` (#651).
-3. Consolidar extractor, política y motor conversacional en una sola interpretación y un solo plan por turno.
+1. Consolidar extractor local, extractor IA, `conversationUnderstanding` y preview del engine en una sola interpretación por turno.
+2. Consolidar política y planificación en un solo plan antes de ejecutar efectos laterales.
+3. Ejecutar una matriz estable con ambos valores de `USE_CONVERSATION_ENGINE` y elegir una sola autoridad.
 4. Extraer autenticación, sesión, administración y adaptación de webhook fuera de los monolitos.
 5. Diseñar `TenantContext` y la migración del tenant inicial LoginPro.
 6. Introducir aislamiento de datos, archivos, campañas, jobs, cachés, sesiones y observabilidad por tenant antes de incorporar un segundo cliente.
