@@ -40,9 +40,31 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/ci.yml src/routes/webhook.js config/transitional-code-inventory.json docs/architecture/transitional-code-inventory.md test/webhookReadinessAliasRemoval.test.js
-          git rm test/webhookRequiredFieldAliasRemoval.test.js scripts/apply-661-format-alias-consolidation.mjs .github/workflows/apply-661-format-alias-consolidation.yml
+
+          rm -f \
+            test/webhookRequiredFieldAliasRemoval.test.js \
+            scripts/apply-661-format-alias-consolidation.mjs \
+            .github/workflows/apply-661-format-alias-consolidation.yml
+
+          git add -A
+
+          cat > /tmp/expected-paths.txt <<'EOF'
+          .github/workflows/apply-661-format-alias-consolidation.yml
+          .github/workflows/ci.yml
+          config/transitional-code-inventory.json
+          docs/architecture/transitional-code-inventory.md
+          scripts/apply-661-format-alias-consolidation.mjs
+          src/routes/webhook.js
+          test/webhookReadinessAliasRemoval.test.js
+          test/webhookRequiredFieldAliasRemoval.test.js
+          EOF
+          sed -i 's/^          //' /tmp/expected-paths.txt
+          git diff --cached --name-only | sort > /tmp/actual-paths.txt
+          sort -o /tmp/expected-paths.txt /tmp/expected-paths.txt
+          diff -u /tmp/expected-paths.txt /tmp/actual-paths.txt
+
           git commit -m "refactor: retirar formatFieldList y consolidar pruebas"
           git push origin "HEAD:${HEAD_REF}"
