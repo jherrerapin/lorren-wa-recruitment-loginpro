@@ -36,19 +36,18 @@ jobs:
           node --check test/webhookReadinessAliasRemoval.test.js
           node --test test/transitionalCodeInventory.test.js test/webhookReadinessAliasRemoval.test.js
 
-      - name: Prepare and verify exact final diff
+      - name: Prepare and verify publishable reduction
         run: |
           set -euo pipefail
+
+          git checkout -- .github/workflows/ci.yml
           rm -f \
             test/webhookRequiredFieldAliasRemoval.test.js \
-            scripts/apply-661-format-alias-consolidation.mjs \
-            .github/workflows/apply-661-format-alias-consolidation.yml
+            scripts/apply-661-format-alias-consolidation.mjs
 
           git add -A
 
           printf '%s\n' \
-            '.github/workflows/apply-661-format-alias-consolidation.yml' \
-            '.github/workflows/ci.yml' \
             'config/transitional-code-inventory.json' \
             'docs/architecture/transitional-code-inventory.md' \
             'scripts/apply-661-format-alias-consolidation.mjs' \
@@ -60,13 +59,13 @@ jobs:
           git diff --cached --name-only | sort | tee /tmp/actual-paths.txt
           diff -u /tmp/expected-paths.txt /tmp/actual-paths.txt
 
-      - name: Commit exact final diff
+      - name: Commit publishable reduction
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "refactor: retirar formatFieldList y consolidar pruebas"
 
-      - name: Push final branch
+      - name: Push publishable reduction
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: git push origin "HEAD:${HEAD_REF}"
