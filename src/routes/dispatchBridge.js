@@ -15,6 +15,7 @@ export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
 const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+const ATTENDANCE_MAP_RELIABILITY_SCRIPT = '/public/attendance-map-reliability.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
 
@@ -22,6 +23,24 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function comparableLocation(value) {
+  return (normalizeString(value) || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase('es-CO');
+}
+
+function operationLocationChanged(operation, nextLocation) {
+  return comparableLocation(operation?.cityName) !== comparableLocation(nextLocation?.cityName)
+    || comparableLocation(operation?.address) !== comparableLocation(nextLocation?.address);
+}
+
+function operationListRedirect(clientId, message) {
+  const suffix = message ? `?message=${encodeURIComponent(message)}` : '';
+  return `/admin/operaciones/clientes/${encodeURIComponent(clientId)}/operaciones${suffix}`;
 }
 
 function isOpsUser(req) {
@@ -132,6 +151,27 @@ function normalizeLeafletScriptIntegrity(html) {
   return html.replace(scriptPattern, `$1${LEAFLET_1_9_4_SCRIPT_INTEGRITY}$2`);
 }
 
+function injectAttendanceMapReliability(html) {
+  let output = html;
+  if (!/<meta\s+name=["']referrer["']/i.test(output)) {
+    output = output.replace(
+      /(<meta\s+name=["']viewport["'][^>]*>)/i,
+      '$1\n  <meta name="referrer" content="strict-origin-when-cross-origin" />'
+    );
+  }
+  if (output.includes(ATTENDANCE_MAP_RELIABILITY_SCRIPT)) return output;
+
+  const escapedUrl = LEAFLET_1_9_4_SCRIPT_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const leafletScriptPattern = new RegExp(
+    `(<script\\s+[^>]*src=["']${escapedUrl}["'][^>]*>\\s*<\\/script>)`,
+    'i'
+  );
+  return output.replace(
+    leafletScriptPattern,
+    `$1\n  <script src="${ATTENDANCE_MAP_RELIABILITY_SCRIPT}"></script>`
+  );
+}
+
 function normalizeAttendanceGeocodingEndpoint(html) {
   return html.split(NOMINATIM_BROWSER_SEARCH_URL).join(ATTENDANCE_GEOCODING_PATH);
 }
@@ -149,6 +189,7 @@ function defaultAttendanceEnablement(html) {
 export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = false, recruiterGeneralEnabled = false } = {}) {
   if (typeof html !== 'string') return html;
   let output = normalizeLeafletScriptIntegrity(html);
+  output = injectAttendanceMapReliability(output);
   output = normalizeAttendanceGeocodingEndpoint(output);
   output = defaultAttendanceEnablement(output);
 
@@ -169,6 +210,11 @@ export function filterAttendanceFeatureHtml(html, { allowed = false, isDev = fal
   return output;
 }
 
+export function filterAttendanceAdminHtml(html) {
+  if (typeof html !== 'string') return html;
+  return injectAttendanceMapReliability(normalizeLeafletScriptIntegrity(html));
+}
+
 function installAttendanceRenderGate(req, res, next) {
   const originalRender = res.render.bind(res);
   res.render = (view, locals, callback) => {
@@ -180,7 +226,9 @@ function installAttendanceRenderGate(req, res, next) {
       renderLocals = {};
     }
 
-    if (view !== 'operacionesClienteOperaciones') {
+    const isPointConfigView = view === 'operacionesClienteOperaciones';
+    const isAttendanceAdminView = view === 'operacionesAsistencia';
+    if (!isPointConfigView && !isAttendanceAdminView) {
       return originalRender(view, renderLocals, renderCallback);
     }
 
@@ -190,11 +238,13 @@ function installAttendanceRenderGate(req, res, next) {
         return next(error);
       }
 
-      const output = filterAttendanceFeatureHtml(html, {
-        allowed: Boolean(req.canAccessAttendanceFeature),
-        isDev: (req.session?.userRole || req.userRole) === 'dev',
-        recruiterGeneralEnabled: Boolean(req.recruiterGeneralAttendanceEnabled)
-      });
+      const output = isPointConfigView
+        ? filterAttendanceFeatureHtml(html, {
+          allowed: Boolean(req.canAccessAttendanceFeature),
+          isDev: (req.session?.userRole || req.userRole) === 'dev',
+          recruiterGeneralEnabled: Boolean(req.recruiterGeneralAttendanceEnabled)
+        })
+        : filterAttendanceAdminHtml(html);
 
       if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
@@ -321,6 +371,70 @@ export function dispatchBridgeRouter() {
     requireAttendanceAccess,
     dispatchAttendancePointConfigRouter(prisma)
   );
+
+  router.post(
+    '/clientes/:clientId/operaciones/:operationId/editar',
+    requireOps,
+    express.urlencoded({ extended: true }),
+    async (req, res, next) => {
+      try {
+        const name = normalizeString(req.body.name);
+        if (!name) return res.status(400).send('Nombre requerido');
+
+        const operation = await prisma.dispatchOperationPoint.findFirst({
+          where: {
+            id: req.params.operationId,
+            clientId: req.params.clientId
+          },
+          select: {
+            id: true,
+            cityName: true,
+            address: true,
+            attendanceEnabled: true,
+            attendanceLatitude: true,
+            attendanceLongitude: true
+          }
+        });
+        if (!operation) return res.status(404).send('Operación no encontrada');
+
+        const cityName = normalizeString(req.body.cityName);
+        const address = normalizeString(req.body.address);
+        const locationChanged = operationLocationChanged(operation, { cityName, address });
+        const hadAttendanceLocation = operation.attendanceEnabled === true
+          || operation.attendanceLatitude !== null
+          || operation.attendanceLongitude !== null;
+
+        const data = {
+          name,
+          cityName,
+          address,
+          contactName: normalizeString(req.body.contactName),
+          contactPhone: normalizeString(req.body.contactPhone),
+          notes: normalizeString(req.body.notes),
+          isActive: normalizeString(req.body.isActive) !== 'false'
+        };
+
+        if (locationChanged && hadAttendanceLocation) {
+          data.attendanceEnabled = false;
+          data.attendanceLatitude = null;
+          data.attendanceLongitude = null;
+        }
+
+        await prisma.dispatchOperationPoint.update({
+          where: { id: operation.id },
+          data
+        });
+
+        const message = locationChanged && hadAttendanceLocation
+          ? 'Operación actualizada. La dirección cambió: vuelve a confirmar el punto exacto antes de habilitar asistencia.'
+          : 'Operación actualizada.';
+        return res.redirect(operationListRedirect(req.params.clientId, message));
+      } catch (error) {
+        return next(error);
+      }
+    }
+  );
+
   router.use(dispatchBridgeCoreRouter());
   return router;
 }
