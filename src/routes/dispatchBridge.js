@@ -10,7 +10,7 @@ import {
 } from '../services/attendanceFeatureAccess.js';
 import { geocodeAttendanceAddress } from '../services/attendanceGeocoding.js';
 
-export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-23-r6';
+export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-23-r7';
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
