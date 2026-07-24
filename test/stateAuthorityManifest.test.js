@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const reportPath = path.join(repositoryRoot, 'state-authority-observed.json');
 
+function runGit(args) {
+  return execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim();
+}
+
 function extractNodeScript(workflowPath, marker) {
   const workflow = readFileSync(workflowPath, 'utf8');
   const sectionStart = workflow.indexOf(marker);
@@ -50,7 +54,14 @@ test('diagnóstico temporal genera los archivos revisables de #681', () => {
       relativePath,
       { contentBase64: Buffer.from(readFileSync(path.join(repositoryRoot, relativePath), 'utf8')).toString('base64') }
     ]));
-    writeReport({ kind: 'patch-681', files });
+    writeReport({
+      kind: 'patch-681',
+      mergeCommitSha: runGit(['rev-parse', 'HEAD']),
+      mergeTreeSha: runGit(['rev-parse', 'HEAD^{tree}']),
+      mainParentSha: runGit(['rev-parse', 'HEAD^1']),
+      branchParentSha: runGit(['rev-parse', 'HEAD^2']),
+      files
+    });
     assert.fail('PATCH_681_ARTIFACT_READY');
   } catch (error) {
     if (error?.message === 'PATCH_681_ARTIFACT_READY') throw error;
