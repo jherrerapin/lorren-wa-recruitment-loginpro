@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import ExcelJS from 'exceljs';
 import {
@@ -152,4 +153,12 @@ test('la importación omite documentos activos y crea auxiliares completos con r
   assert.equal(createdWorkers[0].documentType, 'CC');
   assert.deepEqual(createdCities.map((row) => row.cityId), ['city-bogota', 'city-siberia']);
   assert.deepEqual(createdVacancies.map((row) => row.vacancyId), ['vac-bogota']);
+});
+
+test('la ruta restringe el archivo y evita registrar el error completo con datos de filas', () => {
+  const route = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
+  assert.match(route, /MAX_EXCEL_SIZE_BYTES = 5 \* 1024 \* 1024/);
+  assert.match(route, /originalName\.endsWith\('\.xlsx'\)/);
+  assert.match(route, /errorCount: Array\.isArray\(error\?\.errors\)/);
+  assert.doesNotMatch(route, /console\.error\('\[Dispatch worker Excel import\]', error\)/);
 });
