@@ -45,6 +45,58 @@ jobs:
           PY
           node /tmp/apply-681.js
 
+      - name: Extend compatibility signature to full engine context
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          function replaceExactlyOnce(source, before, after, label) {
+            const first = source.indexOf(before);
+            if (first === -1) throw new Error(`Missing ${label}.`);
+            if (source.indexOf(before, first + before.length) !== -1) {
+              throw new Error(`Found ${label} more than once.`);
+            }
+            return source.replace(before, after);
+          }
+
+          const webhookPath = 'src/routes/webhook.js';
+          let webhook = fs.readFileSync(webhookPath, 'utf8');
+          webhook = replaceExactlyOnce(
+            webhook,
+            `function buildEnginePlanContextKey(candidate = {}, vacancy = null, inboundText = '') {`,
+            `function buildEnginePlanContextKey(candidate = {}, vacancy = null, inboundText = '', recentMessages = [], nextSlot = null) {`,
+            'plan context key signature'
+          );
+          webhook = replaceExactlyOnce(
+            webhook,
+            `    inboundText: normalizeText(inboundText)\n`,
+            `    recentMessages: (recentMessages || []).slice(-8).map((message) => ({\n      direction: message?.direction || null,\n      body: String(message?.body || ''),\n      source: message?.rawPayload?.source || null,\n      actor: message?.rawPayload?.actor || null,\n      createdAt: message?.createdAt?.toISOString?.() || String(message?.createdAt || '') || null\n    })),\n    nextSlot: nextSlot?.slot ? {\n      slotId: nextSlot.slot.id || null,\n      scheduledAt: nextSlot.date?.toISOString?.() || null,\n      formattedDate: nextSlot.formattedDate || null,\n      isAlternative: Boolean(nextSlot.isAlternative),\n      isConfirmedBooking: Boolean(nextSlot.isConfirmedBooking)\n    } : null,\n    inboundText: normalizeText(inboundText)\n`,
+            'plan context payload'
+          );
+          const oldCall = `buildEnginePlanContextKey(candidate, vacancy, inboundText)`;
+          const newCall = `buildEnginePlanContextKey(candidate, vacancy, inboundText, recentMessages, nextSlot)`;
+          const callCount = webhook.split(oldCall).length - 1;
+          if (callCount !== 2) throw new Error(`Expected two plan key calls; found ${callCount}.`);
+          webhook = webhook.split(oldCall).join(newCall);
+          if ((webhook.match(/recentMessages: \(recentMessages \|\| \[\]\)/g) || []).length !== 1) {
+            throw new Error('Recent message fingerprint missing.');
+          }
+          if ((webhook.match(/nextSlot: nextSlot\?\.slot/g) || []).length !== 1) {
+            throw new Error('Slot fingerprint missing.');
+          }
+          fs.writeFileSync(webhookPath, webhook);
+
+          const testPath = 'test/conversationEngineStepAuthority.test.js';
+          let testSource = fs.readFileSync(testPath, 'utf8');
+          testSource = replaceExactlyOnce(
+            testSource,
+            `  assert.match(source, /options\\.enginePreview\\.contextKey === currentPlanContextKey/);\n`,
+            `  assert.match(source, /options\\.enginePreview\\.contextKey === currentPlanContextKey/);\n  assert.match(source, /recentMessages: \\(recentMessages \\|\\| \\[\\]\\)\\.slice\\(-8\\)/);\n  assert.match(source, /nextSlot: nextSlot\\?\\.slot/);\n`,
+            'context signature regression'
+          );
+          fs.writeFileSync(testPath, testSource);
+          NODE
+
       - name: Validate focused plan reuse
         run: |
           node --check src/routes/webhook.js
