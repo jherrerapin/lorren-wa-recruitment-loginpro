@@ -43,6 +43,7 @@ test('diagnóstico temporal genera los archivos revisables de #681', () => {
     const targetPaths = [
       'src/routes/webhook.js',
       'src/services/chatEngine.js',
+      'src/services/conversationEngine.js',
       'test/conversationEngineStepAuthority.test.js'
     ];
     const files = Object.fromEntries(targetPaths.map((relativePath) => [
