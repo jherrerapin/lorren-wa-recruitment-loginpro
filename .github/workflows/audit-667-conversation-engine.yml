@@ -245,7 +245,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t generated_tests < <(node -e "for (const x of require('./audit-667-generated-tests.json')) console.log(x.target)")
+          mapfile -t generated_tests < <(node --input-type=module -e "import fs from 'node:fs'; for (const x of JSON.parse(fs.readFileSync('audit-667-generated-tests.json', 'utf8'))) console.log(x.target)")
           stable_tests=(
             test/conversationReplayInterpretation.test.js
             test/conversationReplayPlanning.test.js
