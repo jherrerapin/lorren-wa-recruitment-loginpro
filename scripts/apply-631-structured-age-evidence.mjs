@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
+execFileSync('git', ['config', 'user.name', 'github-actions[bot]']);
+execFileSync('git', ['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com']);
+
 const encoded = [1, 2, 3, 4, 5]
   .map((index) => readFileSync(`.tmp681/chunk${String(index).padStart(2, '0')}.txt`, 'utf8').trim())
   .join('');
