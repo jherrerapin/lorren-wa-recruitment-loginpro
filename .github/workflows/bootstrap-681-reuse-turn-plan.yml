@@ -88,12 +88,11 @@ jobs:
 
           const testPath = 'test/conversationEngineStepAuthority.test.js';
           let testSource = fs.readFileSync(testPath, 'utf8');
-          testSource = replaceExactlyOnce(
-            testSource,
-            `  assert.match(source, /options\\.enginePreview\\.contextKey === currentPlanContextKey/);\n`,
-            `  assert.match(source, /options\\.enginePreview\\.contextKey === currentPlanContextKey/);\n  assert.match(source, /recentMessages: \\(recentMessages \\|\\| \\[\\]\\)\\.slice\\(-8\\)/);\n  assert.match(source, /nextSlot: nextSlot\\?\\.slot/);\n`,
-            'context signature regression'
-          );
+          const regression = `\n\ntest('la firma del plan incluye historial reciente y slot', () => {\n  const source = fs.readFileSync('src/routes/webhook.js', 'utf8');\n  assert.match(source, /recentMessages: \\(recentMessages \\|\\| \\[\\]\\)\\.slice\\(-8\\)/);\n  assert.match(source, /nextSlot: nextSlot\\?\\.slot/);\n});`;
+          if (testSource.includes(`la firma del plan incluye historial reciente y slot`)) {
+            throw new Error('Context signature regression already exists.');
+          }
+          testSource += regression;
           fs.writeFileSync(testPath, testSource);
           NODE
 
