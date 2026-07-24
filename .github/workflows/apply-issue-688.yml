@@ -28,6 +28,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Stop on a captured validation diagnostic
+        run: |
+          if [ -f .github/issue-688-validation-error.txt ]; then
+            cat .github/issue-688-validation-error.txt
+            exit 1
+          fi
+
       - name: Load exact cleanup recipe
         run: |
           git fetch origin automation/688-cleanup-runner
@@ -49,14 +56,29 @@ jobs:
 
       - name: Validate cleanup
         run: |
-          npx prisma validate
-          npm run prisma:generate
-          node --check src/services/dispatchWhatsappWebServiceV6.js
-          node --check src/services/dispatchWhatsappWebService.js
-          node --check src/routes/dispatchWaRouterV2.js
-          node --check test/dispatchWhatsappRuntimeContracts.test.js
-          node --test test/dispatchWhatsappRuntimeContracts.test.js
-          git diff --check
+          set +e
+          {
+            npx prisma validate &&
+            npm run prisma:generate &&
+            node --check src/services/dispatchWhatsappWebServiceV6.js &&
+            node --check src/services/dispatchWhatsappWebService.js &&
+            node --check src/routes/dispatchWaRouterV2.js &&
+            node --check test/dispatchWhatsappRuntimeContracts.test.js &&
+            node --test test/dispatchWhatsappRuntimeContracts.test.js &&
+            git diff --check
+          } > /tmp/issue-688-validation.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-688-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/issue-688-validation.log .github/issue-688-validation-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/issue-688-validation-error.txt
+            git commit -m "chore: capturar diagnóstico de limpieza #688"
+            git push origin HEAD:refactor/688-clean-dispatch-whatsapp-runtime
+            exit "$status"
+          fi
 
       - name: Commit canonical cleanup
         run: |
