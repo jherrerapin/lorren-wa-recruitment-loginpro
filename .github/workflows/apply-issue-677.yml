@@ -56,7 +56,7 @@ jobs:
           fi
 
       - name: Remove temporary application files
-        run: rm -f .github/scripts/apply-issue-677.py .github/issue-677-apply-error.txt
+        run: rm -f .github/scripts/apply-issue-677.py .github/issue-677-apply-error.txt .github/issue-677-trigger
 
       - name: Install locked dependencies
         run: npm ci
