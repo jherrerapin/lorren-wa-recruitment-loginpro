@@ -1,0 +1,275 @@
+name: Audit conversation engine authority
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  map-authorities:
+    if: github.head_ref == 'audit/667-conversation-engine-authority'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out audit branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Build exact authority map
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const roots = ['src', 'test', '.github'];
+          const allowed = new Set(['.js', '.mjs', '.yml', '.yaml', '.json', '.md']);
+          const symbols = [
+            'USE_CONVERSATION_ENGINE',
+            'conversationUnderstanding',
+            'think',
+            'extractEngineCandidateFields',
+            'runChatEngine',
+            'tryOpenAIParse',
+            'parseNaturalData',
+            'detectConversationIntent',
+            'detectInterviewIntent',
+            'applyFieldPolicy',
+            'buildContextualReply'
+          ];
+          const sideEffectPatterns = [
+            ['prisma', /\bprisma\./],
+            ['persist', /\bpersist[A-Z]\w*\(/],
+            ['send', /\bsend(?:Text|Image|Message|WhatsApp)?\w*\(/],
+            ['schedule', /\bschedule\w*\(/],
+            ['enqueue', /\benqueue\w*\(/],
+            ['store', /\bstore\w*\(/],
+            ['stateMutation', /\b(?:create|update|upsert|delete|apply)[A-Z]\w*\(/]
+          ];
+
+          function walk(root) {
+            if (!fs.existsSync(root)) return [];
+            const result = [];
+            for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+              const full = path.join(root, entry.name);
+              if (entry.isDirectory()) result.push(...walk(full));
+              else if (allowed.has(path.extname(entry.name))) result.push(full);
+            }
+            return result;
+          }
+
+          function lineMatches(file, source, symbol) {
+            return source.split(/\r?\n/).flatMap((line, index) =>
+              line.includes(symbol) ? [{ file, line: index + 1, text: line.trim() }] : []
+            );
+          }
+
+          function contexts(source, token, radius = 10) {
+            const lines = source.split(/\r?\n/);
+            const hits = [];
+            for (let index = 0; index < lines.length; index += 1) {
+              if (!lines[index].includes(token)) continue;
+              const start = Math.max(0, index - radius);
+              const end = Math.min(lines.length, index + radius + 1);
+              hits.push({
+                line: index + 1,
+                context: lines.slice(start, end).map((text, offset) => ({ line: start + offset + 1, text }))
+              });
+            }
+            return hits;
+          }
+
+          const files = [...new Set(roots.flatMap(walk))].sort();
+          if (fs.existsSync('.env.example')) files.push('.env.example');
+          const sources = new Map(files.map((file) => [file, fs.readFileSync(file, 'utf8')]));
+          const references = Object.fromEntries(symbols.map((symbol) => [
+            symbol,
+            files.flatMap((file) => lineMatches(file, sources.get(file), symbol))
+          ]));
+
+          const coreFiles = [
+            'src/routes/webhook.js',
+            'src/services/conversationUnderstanding.js',
+            'src/services/conversationEngine.js',
+            'src/services/chatEngine.js'
+          ];
+
+          const core = {};
+          for (const file of coreFiles) {
+            const source = sources.get(file) || fs.readFileSync(file, 'utf8');
+            const lines = source.split(/\r?\n/);
+            core[file] = {
+              lineCount: lines.length,
+              exports: [...source.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)].map((match) => match[1]),
+              imports: [...source.matchAll(/import\s+[^;]+from\s+['"]([^'"]+)['"]/g)].map((match) => match[1]),
+              sideEffects: Object.fromEntries(sideEffectPatterns.map(([name, pattern]) => [
+                name,
+                lines.flatMap((line, index) => pattern.test(line) ? [{ line: index + 1, text: line.trim() }] : [])
+              ]))
+            };
+          }
+
+          const webhook = sources.get('src/routes/webhook.js');
+          const selectors = {
+            USE_CONVERSATION_ENGINE: contexts(webhook, 'USE_CONVERSATION_ENGINE', 16),
+            runChatEngine: contexts(webhook, 'runChatEngine', 16),
+            think: contexts(webhook, 'think(', 16),
+            conversationUnderstanding: contexts(webhook, 'conversationUnderstanding', 16),
+            extractEngineCandidateFields: contexts(webhook, 'extractEngineCandidateFields', 16)
+          };
+
+          const tests = files.filter((file) => file.startsWith('test/'));
+          const testFlagCoverage = tests.flatMap((file) => {
+            const source = sources.get(file);
+            if (!source.includes('USE_CONVERSATION_ENGINE')) return [];
+            return [{
+              file,
+              trueAssignments: (source.match(/USE_CONVERSATION_ENGINE\s*=\s*['"]true['"]/g) || []).length,
+              falseAssignments: (source.match(/USE_CONVERSATION_ENGINE\s*=\s*['"]false['"]/g) || []).length,
+              deletes: (source.match(/delete\s+process\.env\.USE_CONVERSATION_ENGINE/g) || []).length,
+              references: lineMatches(file, source, 'USE_CONVERSATION_ENGINE')
+            }];
+          });
+
+          const result = {
+            generatedAt: new Date().toISOString(),
+            symbols,
+            references,
+            core,
+            selectors,
+            testFlagCoverage,
+            workflowFlagCoverage: files
+              .filter((file) => file.startsWith('.github/'))
+              .flatMap((file) => lineMatches(file, sources.get(file), 'USE_CONVERSATION_ENGINE')),
+            envFlagCoverage: lineMatches('.env.example', sources.get('.env.example') || '', 'USE_CONVERSATION_ENGINE')
+          };
+
+          fs.writeFileSync('audit-667-authority-map.json', `${JSON.stringify(result, null, 2)}\n`);
+          console.log(JSON.stringify({
+            selectorReferences: references.USE_CONVERSATION_ENGINE.length,
+            runChatEngineReferences: references.runChatEngine.length,
+            thinkReferences: references.think.length,
+            testsWithExplicitFlag: testFlagCoverage.length
+          }));
+          NODE
+
+      - name: Upload authority map
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-667-authority-map
+          path: audit-667-authority-map.json
+          if-no-files-found: error
+          retention-days: 3
+
+  test-both-paths:
+    if: github.head_ref == 'audit/667-conversation-engine-authority'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: audit-only-placeholder
+      OPENAI_ENABLED: 'false'
+      FF_RESPONSES_EXTRACTOR: 'false'
+      DISPATCH_WWEB_AUTO_START: 'false'
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+    steps:
+      - name: Check out audit branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Run existing matrix with both selector values
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests=(
+            test/conversation-harness.test.js
+            test/lorrenRegressionFixes.test.js
+            test/activeVacancyQuestionIntake.test.js
+            test/inactiveVacancySpecificity.test.js
+            test/candidateAgeHarnessIntegration.test.js
+            test/candidateExperienceHarnessIntegration.test.js
+            test/structuredAgeHarnessIntegration.test.js
+            test/vacancyAgeAuthorityIntegration.test.js
+            test/conversationReplayInterpretation.test.js
+            test/conversationReplayPlanning.test.js
+            test/conversationReplayConsentAttachmentEdges.test.js
+            test/conversationReplayRecovery.test.js
+          )
+
+          printf '[]' > audit-667-matrix.json
+          for value in false true; do
+            set +e
+            USE_CONVERSATION_ENGINE="$value" node --test "${tests[@]}" > "audit-667-${value}.log" 2>&1
+            exit_code=$?
+            set -e
+
+            VALUE="$value" EXIT_CODE="$exit_code" node <<'NODE'
+            const fs = require('node:fs');
+            const value = process.env.VALUE;
+            const output = fs.readFileSync(`audit-667-${value}.log`, 'utf8');
+            const current = JSON.parse(fs.readFileSync('audit-667-matrix.json', 'utf8'));
+            const metric = (name) => {
+              const matches = [...output.matchAll(new RegExp(`^# ${name} (\\d+)$`, 'gm'))];
+              return matches.length ? Number(matches.at(-1)[1]) : null;
+            };
+            const topLevel = output.split(/\r?\n/)
+              .filter((line) => /^(?:ok|not ok) \d+ - /.test(line))
+              .map((line) => line.replace(/ duration_ms: [\d.]+/, ' duration_ms: <ignored>'));
+            current.push({
+              value,
+              exitCode: Number(process.env.EXIT_CODE),
+              tests: metric('tests'),
+              pass: metric('pass'),
+              fail: metric('fail'),
+              skipped: metric('skipped'),
+              topLevel
+            });
+            fs.writeFileSync('audit-667-matrix.json', `${JSON.stringify(current, null, 2)}\n`);
+            NODE
+          done
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const matrix = JSON.parse(fs.readFileSync('audit-667-matrix.json', 'utf8'));
+          const [off, on] = matrix;
+          const result = {
+            matrix,
+            sameExitCode: off.exitCode === on.exitCode,
+            sameTotals: ['tests', 'pass', 'fail', 'skipped'].every((key) => off[key] === on[key]),
+            sameTopLevelResults: JSON.stringify(off.topLevel) === JSON.stringify(on.topLevel)
+          };
+          fs.writeFileSync('audit-667-matrix.json', `${JSON.stringify(result, null, 2)}\n`);
+          console.log(JSON.stringify(result));
+          if (off.exitCode !== 0 || on.exitCode !== 0) process.exit(1);
+          NODE
+
+      - name: Upload selector matrix
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-667-selector-matrix
+          path: |
+            audit-667-matrix.json
+            audit-667-false.log
+            audit-667-true.log
+          if-no-files-found: error
+          retention-days: 3
