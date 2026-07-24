@@ -79,6 +79,22 @@ test('una señal de dispositivo compartido produce riesgo crítico y revisión',
   assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.SHARED_DEVICE_SIGNAL));
 });
 
+test('una captura web offline siempre queda pendiente de revisión aunque la geocerca sea válida', () => {
+  const result = evaluateArrivalValidation(trustedArrival({
+    captureMode: 'OFFLINE_WEB',
+    syncDelayMinutes: 18,
+    hasFreshPhoto: true
+  }));
+
+  assert.equal(result.canRecordArrival, true);
+  assert.equal(result.reportedPunctuality, ATTENDANCE_STATUS.ON_TIME);
+  assert.equal(result.attendanceStatus, ATTENDANCE_STATUS.ARRIVAL_REPORTED);
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED);
+  assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE));
+  assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.CLIENT_CLOCK_UNTRUSTED));
+  assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.DELAYED_SYNC));
+});
+
 test('rechaza una marcación cuando la asignación no está activa', () => {
   const result = evaluateArrivalValidation(trustedArrival({ assignmentActive: false }));
 
