@@ -10,6 +10,10 @@ const adminRouteSource = fs.readFileSync(
   new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url),
   'utf8'
 );
+const dashboardRouteSource = fs.readFileSync(
+  new URL('../src/routes/dispatchDashboardMetrics.js', import.meta.url),
+  'utf8'
+);
 const dashboardSource = fs.readFileSync(
   new URL('../src/views/operacionesDashboard.ejs', import.meta.url),
   'utf8'
@@ -49,12 +53,29 @@ test('la evidencia se entrega mediante URL firmada y ruta protegida', () => {
   assert.match(adminViewSource, /\/admin\/operaciones\/asistencia\/evidence\//);
 });
 
-test('el acceso al panel aparece en operaciones únicamente cuando asistencia está autorizada', () => {
+test('el dashboard resuelve la misma autoridad antes de mostrar el acceso a asistencia', () => {
+  assert.match(dashboardRouteSource, /resolveAttendanceFeatureAccess/);
+  assert.match(dashboardRouteSource, /loadAttendanceAccessForDashboard/);
+  assert.match(dashboardRouteSource, /canAccessAttendanceFeature: Boolean\(attendanceAccess\?\.allowed\)/);
   assert.match(dashboardSource, /canAccessAttendanceFeature/);
   assert.match(dashboardSource, /href="\/admin\/operaciones\/asistencia"/);
 });
 
-test('el panel muestra mapa, geocerca, precisión, riesgo y fotografía', () => {
+test('las tarjetas de auxiliares se comprimen con información operativa esencial', () => {
+  assert.match(adminViewSource, /<details class="attendance-card status-card-/);
+  assert.match(adminViewSource, /<summary class="attendance-summary">/);
+  assert.match(adminViewSource, /Desplegar todas/);
+  assert.match(adminViewSource, /Comprimir todas/);
+  assert.match(adminViewSource, /<span>Llegada<\/span>/);
+  assert.match(adminViewSource, /<span>Puntualidad<\/span>/);
+  assert.match(adminViewSource, /<span>Distancia<\/span>/);
+  assert.match(adminViewSource, /<span>Precisión GPS<\/span>/);
+  assert.match(adminViewSource, /Riesgo: <%= row\.riskScore %>\/100/);
+  assert.match(adminViewSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(adminViewSource, /details\.attendance-card\[open\] \{ grid-column: 1 \/ -1/);
+});
+
+test('el panel conserva mapa, geocerca, precisión, riesgo y fotografía dentro del detalle', () => {
   assert.match(adminViewSource, /Ver ubicación y geocerca/);
   assert.match(adminViewSource, /Precisión GPS/);
   assert.match(adminViewSource, /Riesgo:/);
