@@ -11,20 +11,12 @@ const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WIND
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
 const CONFIRMATION_MEMORY_TTL_MS = Number(process.env.DISPATCH_WA_CONFIRMATION_MEMORY_TTL_MS || 36 * 60 * 60 * 1000);
 const INBOUND_LOCK_TTL_MS = 30000;
-const AUTO_START_ENABLED = process.env.DISPATCH_WWEB_AUTO_START !== 'false' && process.env.NODE_ENV !== 'test';
-const AUTO_START_DELAY_MS = Number(process.env.DISPATCH_WWEB_AUTO_START_DELAY_MS || 1500);
-const CATCHUP_ENABLED = process.env.DISPATCH_WA_CATCHUP_ENABLED !== 'false';
-const CATCHUP_DELAY_MS = Number(process.env.DISPATCH_WA_CATCHUP_DELAY_MS || 4000);
-const CATCHUP_CHAT_LIMIT = Number(process.env.DISPATCH_WA_CATCHUP_CHAT_LIMIT || 80);
-const CATCHUP_MESSAGES_PER_CHAT = Number(process.env.DISPATCH_WA_CATCHUP_MESSAGES_PER_CHAT || 8);
-const CATCHUP_MIN_INTERVAL_MS = Number(process.env.DISPATCH_WA_CATCHUP_MIN_INTERVAL_MS || 60000);
 const CLIENT_DESTROY_TIMEOUT_MS = Math.max(1000, Number(process.env.DISPATCH_WWEB_DESTROY_TIMEOUT_MS || 5000));
 const PENDING_RECONCILIATION_INTERVAL_MS = Math.max(15000, Number(process.env.DISPATCH_WA_RECONCILE_INTERVAL_MS || 30000));
 const PENDING_RECONCILIATION_LIMIT = Math.max(1, Number(process.env.DISPATCH_WA_RECONCILE_LIMIT || 200));
 const PENDING_RECONCILIATION_MESSAGES_PER_CHAT = Math.max(1, Number(process.env.DISPATCH_WA_RECONCILE_MESSAGES_PER_CHAT || 20));
 const CHROMIUM_LOCK_FILES = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket']);
 const PENDING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
-const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const RECOVERABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN'];
 const CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING';
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
@@ -44,10 +36,6 @@ let lastError = null;
 let lastReadyAt = null;
 let lastAuthenticatedAt = null;
 let reconnectTimer = null;
-let catchupRunning = false;
-let lastCatchupAt = null;
-let lastCatchupStartedAt = 0;
-let lastCatchupProcessed = 0;
 let pendingReconciliationTimer = null;
 let pendingReconciliationRunning = false;
 let lastPendingReconciliationAt = null;
@@ -302,7 +290,7 @@ function buildPendingConfirmationValue(phone, context = {}) {
   const assignmentId = String(context?.assignmentId || '').trim();
   const serviceRequestId = String(context?.serviceRequestId || '').trim();
   if (!normalizedPhone || !assignmentId || !serviceRequestId) {
-    console.warn(`[dispatch-wa] Mensaje enviado sin contexto completo de confirmación. phone=${normalizedPhone || 'unknown'} assignment=${assignmentId || 'missing'} request=${serviceRequestId || 'missing'}`);
+    console.warn(`[dispatch-wa] Mensaje enviado sin contexto completo de confirmación. phonePresent=${normalizedPhone ? 'yes' : 'no'} assignment=${assignmentId || 'missing'} request=${serviceRequestId || 'missing'}`);
     return null;
   }
   return {
@@ -320,7 +308,7 @@ function rememberPendingConfirmation(phone, context = {}, chatIds = []) {
   pendingConfirmationByPhone.set(normalizedPhone, value);
   const normalizedChatIds = chatIds.map(normalizeChatId).filter(Boolean);
   normalizedChatIds.forEach((chatId) => pendingConfirmationByChatId.set(chatId, value));
-  console.log(`[dispatch-wa] Confirmación pendiente recordada. assignment=${value.assignmentId} phone=${normalizedPhone} chatIds=${normalizedChatIds.length}.`);
+  console.log(`[dispatch-wa] Confirmación pendiente recordada. assignment=${value.assignmentId} phoneLinked=yes chatAliases=${normalizedChatIds.length}.`);
   return { ...value, phone: normalizedPhone, chatIds: normalizedChatIds };
 }
 
@@ -547,14 +535,14 @@ function scheduleReconnect(reason) {
   }, RECONNECT_DELAY_MS);
 }
 
-function resetClientReference() {
+async function resetClientReference() {
   stopPendingConfirmationReconciliation();
   const oldClient = client;
   client = null;
   initializing = false;
   ready = false;
   lastQr = null;
-  if (oldClient) oldClient.destroy().catch((error) => console.warn('No fue posible cerrar completamente el cliente anterior de WhatsApp despacho.', error));
+  await destroyClientWithoutLogout(oldClient);
 }
 
 async function destroyClientWithoutLogout(activeClient) {
@@ -852,7 +840,7 @@ async function processPersistedConfirmationTarget(activeClient, link) {
         if (await confirmAssignmentFromInboundMessage(activeClient, message, 'persisted_reconciliation')) return 1;
       }
     } catch (error) {
-      console.warn(`[dispatch-wa] No fue posible reconciliar el chat ${chatId}.`, error?.message || error);
+      console.warn(`[dispatch-wa] No fue posible reconciliar un chat pendiente. chatType=${chatId.split('@')[1] || 'unknown'}.`, error?.message || error);
     }
   }
   return 0;
@@ -964,80 +952,8 @@ function startPendingConfirmationReconciliation(activeClient) {
   pendingReconciliationTimer.unref?.();
 }
 
-function chatTimestamp(chat = {}) {
-  return Number(chat.timestamp || chat.lastMessage?.timestamp || chat.lastMessage?._data?.t || 0);
-}
-
-function chatIdFromChat(chat = {}) {
-  return normalizeChatId(
-    chat.id?._serialized
-    || chat.lastMessage?.from
-    || chat.lastMessage?.to
-    || (chat.id?.server && chat.id?.user ? `${chat.id.user}@${chat.id.server}` : '')
-    || (chat.id?.user && String(chat.id.user).includes('@') ? chat.id.user : '')
-    || (typeof chat.id === 'string' ? chat.id : '')
-  );
-}
-
-function isSupportedChat(chat = {}) {
-  const serialized = chatIdFromChat(chat);
-  if (!serialized) return false;
-  if (chat.isGroup) return false;
-  return isSupportedSenderId(serialized);
-}
-
 function sortedMessages(messages = []) {
   return (Array.isArray(messages) ? messages : []).slice().sort((a, b) => messageTimestamp(a) - messageTimestamp(b));
-}
-
-async function processCatchupChat(activeClient, chat) {
-  if (!chat || typeof chat.fetchMessages !== 'function') return 0;
-  const messages = await chat.fetchMessages({ limit: CATCHUP_MESSAGES_PER_CHAT });
-  let processed = 0;
-  for (const message of sortedMessages(messages)) {
-    const ok = await confirmAssignmentFromInboundMessage(activeClient, message, 'catchup');
-    if (ok) processed += 1;
-  }
-  return processed;
-}
-
-async function processRecentInboundConfirmations(activeClient, reason = 'ready', options = {}) {
-  const force = Boolean(options?.force);
-  if (!CATCHUP_ENABLED || catchupRunning || !activeClient) return 0;
-  const nowMs = Date.now();
-  if (!force && CATCHUP_MIN_INTERVAL_MS > 0 && lastCatchupStartedAt && nowMs - lastCatchupStartedAt < CATCHUP_MIN_INTERVAL_MS) return 0;
-  lastCatchupStartedAt = nowMs;
-  catchupRunning = true;
-  let processed = 0;
-  try {
-    if (typeof activeClient.getChats !== 'function') return 0;
-    const chats = await activeClient.getChats();
-    const candidates = (Array.isArray(chats) ? chats : [])
-      .filter(isSupportedChat)
-      .sort((a, b) => chatTimestamp(b) - chatTimestamp(a))
-      .slice(0, CATCHUP_CHAT_LIMIT);
-    for (const chat of candidates) {
-      try { processed += await processCatchupChat(activeClient, chat); }
-      catch (error) { console.warn('[dispatch-wa] No fue posible revisar un chat reciente para confirmaciones.', error?.message || error); }
-    }
-    lastCatchupAt = new Date().toISOString();
-    lastCatchupProcessed = processed;
-    console.log(`[dispatch-wa] Revisión de mensajes recientes finalizada. reason=${reason} chats=${candidates.length} confirmaciones=${processed}.`);
-    return processed;
-  } catch (error) {
-    console.warn('[dispatch-wa] No fue posible revisar mensajes recientes después de reconectar.', error?.message || error);
-    return processed;
-  } finally {
-    catchupRunning = false;
-  }
-}
-
-function scheduleRecentConfirmationCatchup(activeClient, reason = 'ready', options = {}) {
-  if (!CATCHUP_ENABLED) return;
-  setTimeout(() => {
-    if (!ready || client !== activeClient) return;
-    processRecentInboundConfirmations(activeClient, reason, options).catch((error) => console.error('[dispatch-wa] Error ejecutando revisión diferida de confirmaciones.', error));
-  }, CATCHUP_DELAY_MS);
 }
 
 export async function probeDispatchWhatsappClientHealth(options = {}) {
@@ -1098,11 +1014,36 @@ export function initDispatchWhatsappClient() {
       });
       client.on('qr', (qr) => { lastQr = qr; ready = false; lastError = null; console.log('QR de WhatsApp despacho pendiente. Escanéalo para vincular la sesión:'); printTerminalQr(qr); });
       client.on('authenticated', () => { lastAuthenticatedAt = new Date().toISOString(); lastError = null; console.log('WhatsApp de despacho autenticado.'); });
-      client.on('ready', () => { ready = true; lastQr = null; lastError = null; lastReadyAt = new Date().toISOString(); console.log('WhatsApp de despacho conectado.'); startPendingConfirmationReconciliation(client); scheduleRecentConfirmationCatchup(client, 'ready'); });
+      client.on('ready', () => { ready = true; lastQr = null; lastError = null; lastReadyAt = new Date().toISOString(); console.log('WhatsApp de despacho conectado.'); startPendingConfirmationReconciliation(client); });
       bindInboundMessageListeners(client);
-      client.on('disconnected', (reason) => { ready = false; lastQr = null; lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.'; console.warn(lastError); resetClientReference(); scheduleReconnect(reason || 'desconectado'); });
-      client.on('auth_failure', (message) => { ready = false; lastQr = null; lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.'; console.warn(lastError); resetClientReference(); scheduleReconnect('fallo de autenticación'); });
-      client.initialize().catch((error) => { ready = false; lastQr = null; lastError = formatBrowserLaunchError(error); resetClientReference(); console.error('Error inicializando WhatsApp de despacho.', error); scheduleReconnect('error de inicio'); }).finally(() => { initializing = false; });
+      client.on('disconnected', (reason) => {
+        ready = false;
+        lastQr = null;
+        lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
+        console.warn(lastError);
+        resetClientReference()
+          .catch((error) => console.warn('[dispatch-wa] No fue posible liberar el cliente desconectado.', error?.message || error))
+          .finally(() => scheduleReconnect(reason || 'desconectado'));
+      });
+      client.on('auth_failure', (message) => {
+        ready = false;
+        lastQr = null;
+        lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
+        console.warn(lastError);
+        resetClientReference()
+          .catch((error) => console.warn('[dispatch-wa] No fue posible liberar el cliente con fallo de autenticación.', error?.message || error))
+          .finally(() => scheduleReconnect('fallo de autenticación'));
+      });
+      client.initialize()
+        .catch(async (error) => {
+          ready = false;
+          lastQr = null;
+          lastError = formatBrowserLaunchError(error);
+          await resetClientReference();
+          console.error('Error inicializando WhatsApp de despacho.', error);
+          scheduleReconnect('error de inicio');
+        })
+        .finally(() => { initializing = false; });
       return client;
     })
     .catch((error) => { ready = false; lastQr = null; lastError = error?.message || 'No fue posible preparar WhatsApp de despacho.'; initializing = false; console.error('Error preparando WhatsApp de despacho.', error); });
@@ -1110,19 +1051,18 @@ export function initDispatchWhatsappClient() {
 }
 
 export function getDispatchWhatsappStatus() {
-  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };
+  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };
 }
 
 export async function getDispatchWhatsappStatusView(options = {}) {
   const autoStart = Boolean(options?.autoStart);
   if (autoStart && !ready && !lastQr && !initializing && !client) initDispatchWhatsappClient();
-  if (ready && client) scheduleRecentConfirmationCatchup(client, autoStart ? 'status_start' : 'status_view');
   let qrImage = null;
   if (lastQr) {
     try { qrImage = await QRCode.toDataURL(lastQr); }
     catch (error) { console.error('No fue posible generar imagen QR de WhatsApp despacho.', error); }
   }
-  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, catchupRunning, lastCatchupAt, lastCatchupStartedAt, lastCatchupProcessed, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };
+  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };
 }
 
 export async function closeDispatchWhatsappSession() {
@@ -1198,11 +1138,4 @@ export async function sendDispatchWhatsappMediaMessage({ phone, caption, buffer,
     releaseSendLock(lockKey);
     throw error;
   }
-}
-
-if (AUTO_START_ENABLED) {
-  setTimeout(() => {
-    try { initDispatchWhatsappClient(); }
-    catch (error) { console.error('[dispatch-wa] No fue posible iniciar automáticamente WhatsApp despacho.', error); }
-  }, AUTO_START_DELAY_MS);
 }
