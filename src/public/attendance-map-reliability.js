@@ -95,7 +95,7 @@
       'font-size:12px',
       'line-height:1.45'
     ].join(';');
-    warning.textContent = 'El fondo cartográfico no respondió. Los puntos y coordenadas siguen siendo válidos; usa los enlaces de verificación mostrados debajo.';
+    warning.textContent = 'El fondo cartográfico no respondió. Los puntos y coordenadas siguen siendo válidos y pueden copiarse desde el diagnóstico mostrado debajo.';
     container.insertAdjacentElement('afterend', warning);
     return warning;
   }
@@ -129,22 +129,39 @@
   };
   Object.assign(leaflet.tileLayer, originalTileLayerFactory);
 
-  function mapsLink(latitude, longitude, label) {
-    const link = document.createElement('a');
-    link.href = `https://www.google.com/maps?q=${encodeURIComponent(`${latitude},${longitude}`)}`;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = label;
-    link.style.cssText = 'font-weight:800;color:#1d4ed8;text-decoration:none;';
-    return link;
+  function coordinateCopyButton(latitude, longitude) {
+    const coordinates = `${formatCoordinate(latitude)}, ${formatCoordinate(longitude)}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Copiar coordenadas';
+    button.style.cssText = [
+      'border:0',
+      'padding:3px 7px',
+      'border-radius:7px',
+      'background:#e7eef8',
+      'color:#1d4ed8',
+      'font-size:10px',
+      'font-weight:800',
+      'cursor:pointer'
+    ].join(';');
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(coordinates);
+        button.textContent = 'Copiadas';
+        window.setTimeout(() => { button.textContent = 'Copiar coordenadas'; }, 1600);
+      } catch {
+        window.prompt('Copia estas coordenadas:', coordinates);
+      }
+    });
+    return button;
   }
 
-  function coordinateLine(label, latitude, longitude, linkLabel) {
+  function coordinateLine(label, latitude, longitude) {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;';
     const text = document.createElement('span');
     text.textContent = `${label}: ${formatCoordinate(latitude)}, ${formatCoordinate(longitude)}`;
-    row.append(text, mapsLink(latitude, longitude, linkLabel));
+    row.append(text, coordinateCopyButton(latitude, longitude));
     return row;
   }
 
@@ -170,12 +187,12 @@
         'display:grid',
         'gap:5px'
       ].join(';');
-      panel.append(coordinateLine('Punto configurado', pointLat, pointLng, 'Abrir punto'));
+      panel.append(coordinateLine('Punto configurado', pointLat, pointLng));
 
       const markLat = finiteCoordinate(container.dataset.markLat, -90, 90);
       const markLng = finiteCoordinate(container.dataset.markLng, -180, 180);
       if (markLat !== null && markLng !== null) {
-        panel.append(coordinateLine('Ubicación reportada', markLat, markLng, 'Abrir marcación'));
+        panel.append(coordinateLine('Ubicación reportada', markLat, markLng));
       }
 
       const legend = container.parentElement?.querySelector('.map-legend');
