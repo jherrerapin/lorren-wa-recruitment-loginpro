@@ -47,7 +47,6 @@
     .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
     .alert-error { border: 1px solid #fecaca; background: #fef2f2; color: var(--danger); border-radius: 10px; padding: 12px 14px; font-size: 13px; font-weight: 700; margin-bottom: 18px; line-height: 1.5; }
-    .info-box { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px; padding: 16px 18px; font-size: 13px; color: #0f766e; }
     .warning-box { background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 10px; padding: 15px 17px; color: #854d0e; line-height: 1.55; }
     .grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 20px; align-items: start; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
@@ -67,7 +66,6 @@
     summary { cursor: pointer; padding: 12px 14px; font-weight: 800; color: var(--navy); }
     .catalog { padding: 0 14px 14px; max-height: 220px; overflow: auto; color: var(--muted); font-size: 12px; line-height: 1.7; }
     .upload-card { position: sticky; top: 18px; }
-    .small { color: var(--muted); font-size: 12px; line-height: 1.55; }
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; }
       .upload-card { position: static; }
@@ -91,7 +89,7 @@
     <section class="card hero">
       <div>
         <h1>Importar auxiliares desde Excel</h1>
-        <p class="sub">La carga masiva ahora utiliza los mismos datos operativos del formulario manual. Las columnas se identifican por su encabezado, por lo que puedes cambiar su orden sin afectar la importación.</p>
+        <p class="sub">La plantilla utiliza columnas separadas para nombres y apellidos. Al importar, el sistema los une automáticamente para mostrar el nombre completo dentro del dashboard.</p>
       </div>
       <div class="actions">
         <a class="btn btn-primary" href="/admin/operaciones/personal/importar-excel/plantilla">Descargar plantilla completa</a>
@@ -104,7 +102,7 @@
     <div class="grid">
       <section class="card">
         <h2>Campos aceptados</h2>
-        <p class="sub" style="margin-bottom:16px;">La fila 1 debe contener los encabezados. Los datos empiezan en la fila 2. Todos los campos marcados como obligatorios deben estar completos en cada auxiliar.</p>
+        <p class="sub" style="margin-bottom:16px;">La fila 1 contiene los encabezados y los datos empiezan en la fila 2. Las columnas pueden estar en cualquier orden.</p>
         <div class="table-wrap">
           <table class="col-table">
             <thead><tr><th>Encabezado</th><th>Requisito</th><th>Cómo diligenciarlo</th><th>Ejemplo</th></tr></thead>
@@ -122,7 +120,10 @@
         </div>
 
         <div class="warning-box" style="margin-top:16px;">
-          <strong>Hoja de vida:</strong> no se importa desde una celda del Excel. Después de crear el auxiliar, puedes adjuntar su PDF, DOC o DOCX desde <strong>Editar auxiliar</strong>. No escribas rutas locales ni enlaces a archivos dentro de la plantilla.
+          <strong>Compatibilidad:</strong> los archivos anteriores que tengan una sola columna llamada <strong>Nombre completo</strong> siguen funcionando. En un mismo archivo utiliza una sola modalidad: Nombres + Apellidos, o Nombre completo.
+        </div>
+        <div class="warning-box" style="margin-top:12px;">
+          <strong>Hoja de vida:</strong> no se importa desde una celda del Excel. Después de crear el auxiliar, puedes adjuntar su PDF, DOC o DOCX desde <strong>Editar auxiliar</strong>.
         </div>
       </section>
 
@@ -143,18 +144,30 @@
 
         <div class="rules" style="margin-top:20px;">
           <div class="rule">
+            <strong>Nombres y apellidos</strong>
+            <p>Ejemplo: Nombres <strong>Juan Carlos</strong> y Apellidos <strong>Pérez Gómez</strong> se guardan como <strong>Juan Carlos Pérez Gómez</strong>. Los espacios sobrantes se corrigen automáticamente.</p>
+          </div>
+          <div class="rule">
+            <strong>Estado automático</strong>
+            <p>Estado operativo es opcional. Si la columna no existe o la celda está vacía, el auxiliar se guarda como <strong>Contratado</strong>.</p>
+          </div>
+          <div class="rule">
+            <strong>Asignación operativa opcional</strong>
+            <p>Ciudades operativas y Vacantes / perfiles pueden quedar vacías. Después puedes agregarlas desde Editar auxiliar.</p>
+          </div>
+          <div class="rule">
             <strong>Varias ciudades o vacantes</strong>
-            <p>Sepáralas usando coma, punto y coma, barra vertical <strong>|</strong> o un salto de línea.</p>
+            <p>Cuando las diligencies, sepáralas usando coma, punto y coma, barra vertical <strong>|</strong> o un salto de línea.</p>
           </div>
           <div class="rule">
             <strong>Documentos duplicados</strong>
-            <p>Un documento ya activo se omite. Un auxiliar desactivado se actualiza con todos los datos y relaciones del Excel.</p>
+            <p>Un documento ya activo se omite. Un auxiliar desactivado se actualiza con los datos del Excel.</p>
           </div>
           <div class="rule">
             <strong>Valores controlados</strong>
             <ul>
               <li>Contrato: DIRECTO o CONTRATISTA.</li>
-              <li>Estado: CONTRATADO o INACTIVE.</li>
+              <li>Estado, cuando se informa: CONTRATADO o INACTIVE.</li>
               <li>Transporte: Publico, Moto, Bicicleta o Carro.</li>
             </ul>
           </div>
