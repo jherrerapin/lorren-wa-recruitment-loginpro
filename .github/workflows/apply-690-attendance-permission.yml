@@ -1,11 +1,13 @@
 name: Apply attendance user permission
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/690-attendance-user-permission
-    paths:
-      - .github/workflows/apply-690-attendance-permission.yml
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
