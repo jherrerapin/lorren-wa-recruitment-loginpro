@@ -1,0 +1,57 @@
+name: Audit data request alias
+
+on:
+  push:
+    branches:
+      - refactor/663-retire-data-request-alias
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Audit exact references
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const source = fs.readFileSync('src/routes/webhook.js', 'utf8');
+          const lines = source.split(/\r?\n/);
+          const matches = [];
+
+          for (let index = 0; index < lines.length; index += 1) {
+            if (lines[index].includes('buildDataRequestPrompt')) {
+              matches.push({ line: index + 1, text: lines[index].trim() });
+            }
+          }
+
+          const definition = matches.filter((entry) => entry.text.startsWith('function buildDataRequestPrompt('));
+          const consumers = matches.filter((entry) => !entry.text.startsWith('function buildDataRequestPrompt('));
+          const nonDirect = consumers.filter((entry) => !entry.text.includes('buildDataRequestPrompt('));
+
+          console.log(JSON.stringify({
+            totalReferences: matches.length,
+            definitionCount: definition.length,
+            consumerCount: consumers.length,
+            nonDirectCount: nonDirect.length,
+            matches
+          }, null, 2));
+
+          if (definition.length !== 1) {
+            throw new Error(`Expected exactly one definition; found ${definition.length}.`);
+          }
+          if (consumers.length < 1) {
+            throw new Error('Expected at least one consumer.');
+          }
+          if (nonDirect.length > 0) {
+            throw new Error('Found an indirect or non-call reference.');
+          }
+          NODE
