@@ -796,6 +796,7 @@ function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {},
   if (![ConversationStep.GREETING_SENT, ConversationStep.CONFIRMING_DATA, ConversationStep.COLLECTING_DATA, ConversationStep.ASK_CV].includes(candidate.currentStep)) {
     return false;
   }
+  if (isNegativeInterest(cleanText)) return false;
   if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) return true;
 
   const hasParsedCandidateData = hasMeaningfulCandidateData(localParsedData)

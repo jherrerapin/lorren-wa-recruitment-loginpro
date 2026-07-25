@@ -331,3 +331,19 @@ test('webhook omite el preview en preguntas puras de ASK_CV', () => {
   assert.ok(noDataIndex > questionIndex);
   assert.ok(returnIndex > noDataIndex);
 });
+
+test('webhook omite el preview ante rechazo explícito de interés', () => {
+  const webhookSource = fs.readFileSync('src/routes/webhook.js', 'utf8');
+  const start = webhookSource.indexOf('function shouldUseEngineFieldPreview');
+  const end = webhookSource.indexOf('async function buildEngineContext', start);
+  assert.ok(start >= 0 && end > start);
+  const policy = webhookSource.slice(start, end);
+
+  const negativeInterestIndex = policy.indexOf('isNegativeInterest(cleanText)');
+  const negativeReturnIndex = policy.indexOf('return false', negativeInterestIndex);
+  const confirmingIndex = policy.indexOf('candidate.currentStep === ConversationStep.CONFIRMING_DATA');
+
+  assert.ok(negativeInterestIndex >= 0);
+  assert.ok(negativeReturnIndex > negativeInterestIndex);
+  assert.ok(confirmingIndex > negativeReturnIndex);
+});
