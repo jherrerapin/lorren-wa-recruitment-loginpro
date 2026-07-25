@@ -1,0 +1,1 @@
+Trigger temporal para aplicar y validar el parche de #727. Este archivo se elimina en el commit funcional.
