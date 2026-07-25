@@ -7,8 +7,9 @@ import { normalizeTransportMode } from '../services/transportMode.js';
 import { recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
 import {
   DISPATCH_WORKER_EXCEL_COLUMNS,
-  buildDispatchWorkerImportTemplate,
-  importDispatchWorkerExcelWorkbook
+  applyDispatchWorkerImportBatch,
+  buildDispatchWorkerImportReview,
+  buildDispatchWorkerImportTemplate
 } from '../services/dispatchWorkerExcelImport.js';
 
 const TEMPLATE_KEY = 'DISPATCH_ASSIGNMENT_WHATSAPP';
@@ -28,6 +29,7 @@ const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
 const DISABLED_STATUSES = ['DISABLED', 'INACTIVE', 'ELIMINADO'];
 
 const MAX_EXCEL_SIZE_BYTES = 5 * 1024 * 1024;
+const DISPATCH_WORKER_IMPORT_REVIEW_TTL_MS = 2 * 60 * 60 * 1000;
 const ALLOWED_EXCEL_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/octet-stream'
@@ -56,6 +58,8 @@ const workerCvUpload = multer({
 });
 
 function normalizeString(value) { if (typeof value !== 'string') return null; const trimmed = value.trim(); return trimmed.length ? trimmed : null; }
+function dispatchWorkerImportOwnerKey(req) { return normalizeString(req.session?.username || req.username) || String(req.sessionID || 'anonymous-session'); }
+
 function normalizeDispatchContractType(value) {
   const normalized = normalizeString(value);
   return ['DIRECTO', 'CONTRATISTA'].includes(normalized) ? normalized : 'DIRECTO';
@@ -376,6 +380,7 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
 
   router.get('/personal/importar-excel', requireOps, async (req, res) => {
+    await prisma.dispatchWorkerImportBatch.deleteMany({ where: { expiresAt: { lt: new Date() } } });
     const [cities, vacancies] = await loadWorkerFormLists(prisma);
     return res.render('operacionesPersonalImportar', {
       role: req.session?.userRole || req.userRole,
@@ -408,21 +413,74 @@ export function dispatchOpsExtrasRouter(prisma) {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(req.file.buffer);
       const [cities, vacancies] = await loadWorkerFormLists(prisma);
-      const result = await importDispatchWorkerExcelWorkbook({ prisma, workbook, cities, vacancies });
+      const review = await buildDispatchWorkerImportReview({ prisma, workbook, cities, vacancies });
+      const now = new Date();
+      await prisma.dispatchWorkerImportBatch.deleteMany({ where: { expiresAt: { lt: now } } });
+      const batch = await prisma.dispatchWorkerImportBatch.create({
+        data: {
+          createdByUsername: dispatchWorkerImportOwnerKey(req),
+          originalFileName: normalizeString(req.file.originalname),
+          status: 'PENDING',
+          items: review.items,
+          summary: review.summary,
+          expiresAt: new Date(now.getTime() + DISPATCH_WORKER_IMPORT_REVIEW_TTL_MS)
+        }
+      });
+      return res.redirect(`/admin/operaciones/personal/importar-excel/${batch.id}/revision`);
+    } catch (error) {
+      console.error('[Dispatch worker Excel review]', {
+        name: error?.name || 'Error',
+        statusCode: error?.statusCode || null,
+        errorCount: Array.isArray(error?.errors) ? error.errors.length : null
+      });
+      return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(error.message || 'Error al analizar el archivo.'));
+    }
+  });
+
+  router.get('/personal/importar-excel/:batchId/revision', requireOps, async (req, res) => {
+    const ownerKey = dispatchWorkerImportOwnerKey(req);
+    const batch = await prisma.dispatchWorkerImportBatch.findFirst({
+      where: { id: req.params.batchId, createdByUsername: ownerKey, status: 'PENDING' }
+    });
+    if (!batch || new Date(batch.expiresAt).getTime() <= Date.now()) {
+      if (batch) await prisma.dispatchWorkerImportBatch.delete({ where: { id: batch.id } });
+      return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent('La revisión no existe o expiró. Vuelve a subir el archivo.'));
+    }
+    return res.render('operacionesPersonalImportarRevision', {
+      role: req.session?.userRole || req.userRole,
+      batchId: batch.id,
+      fileName: batch.originalFileName,
+      expiresAt: batch.expiresAt,
+      items: Array.isArray(batch.items) ? batch.items : [],
+      summary: batch.summary || {}
+    });
+  });
+
+  router.post('/personal/importar-excel/:batchId/aplicar', requireOps, async (req, res) => {
+    try {
+      const selectedItemIds = normalizeStringList(req.body.selectedItemIds);
+      const result = await applyDispatchWorkerImportBatch({
+        prisma,
+        batchId: req.params.batchId,
+        ownerKey: dispatchWorkerImportOwnerKey(req),
+        selectedItemIds,
+        applyAll: normalizeString(req.body.applyMode) === 'all'
+      });
       const parts = [];
       if (result.created) parts.push(`${result.created} auxiliar${result.created !== 1 ? 'es creados' : ' creado'}`);
       if (result.updated) parts.push(`${result.updated} auxiliar${result.updated !== 1 ? 'es actualizados' : ' actualizado'}`);
-      if (result.skipped) parts.push(`${result.skipped} omitido${result.skipped !== 1 ? 's' : ''} por documento ya activo`);
-      const summary = parts.length ? parts.join(', ') : 'Sin cambios';
-      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importación completada: ${summary}.`));
+      if (result.conflicts) parts.push(`${result.conflicts} omitido${result.conflicts !== 1 ? 's' : ''} porque cambió después de la revisión`);
+      return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent(`Importación aplicada: ${parts.join(', ') || 'sin cambios'}.`));
     } catch (error) {
-      console.error('[Dispatch worker Excel import]', {
-    name: error?.name || 'Error',
-    statusCode: error?.statusCode || null,
-    errorCount: Array.isArray(error?.errors) ? error.errors.length : null
-  });
-      return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(error.message || 'Error al procesar el archivo.'));
+      return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent(error.message || 'No fue posible aplicar la revisión.'));
     }
+  });
+
+  router.post('/personal/importar-excel/:batchId/cancelar', requireOps, async (req, res) => {
+    await prisma.dispatchWorkerImportBatch.deleteMany({
+      where: { id: req.params.batchId, createdByUsername: dispatchWorkerImportOwnerKey(req), status: 'PENDING' }
+    });
+    return res.redirect('/admin/operaciones/personal/importar-excel?message=' + encodeURIComponent('Revisión cancelada. No se aplicó ningún cambio.'));
   });
 
   router.get('/personal/nuevo', requireOps, async (req, res) => {
