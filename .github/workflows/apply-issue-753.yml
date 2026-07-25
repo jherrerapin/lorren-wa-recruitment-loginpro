@@ -1,0 +1,124 @@
+name: Apply issue 753 dispatch WhatsApp recovery
+
+on:
+  pull_request:
+    branches:
+      - automation/753-whatsapp-init-dev-client
+    types:
+      - opened
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.head_ref == 'fix/753-dispatch-whatsapp-init-dev-test-client'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out functional branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/753-dispatch-whatsapp-init-dev-test-client
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Load exact implementation
+        run: |
+          git fetch origin automation/753-whatsapp-init-dev-client main
+          git show origin/automation/753-whatsapp-init-dev-client:.github/scripts/apply-issue-753.py > /tmp/apply-issue-753.py
+
+      - name: Apply implementation
+        run: |
+          python3 /tmp/apply-issue-753.py
+          rm -f .github/issue-753-trigger
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Validate Prisma and syntax
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check src/routes/publicDispatchClient.js
+          node --check src/routes/dispatchBridgeCore.js
+          node --check test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+
+      - name: Run focused regressions
+        run: |
+          node --test test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+          node --test test/dispatchWhatsappRuntimeContracts.test.js
+          node --test test/dispatchTestClientRequestPolicy.test.js
+          node --test test/dispatchOperationsUxRulesContracts.test.js
+          node --test test/dispatchCrudContracts.test.js
+          node --test test/dispatchClientsOperationsContracts.test.js
+
+      - name: Compare full suite with exact main
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.tap 2>&1
+          HEAD_STATUS=$?
+          git worktree add /tmp/issue-753-base origin/main
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/issue-753-base/node_modules
+          (cd /tmp/issue-753-base && npm test > /tmp/base.tap 2>&1)
+          BASE_STATUS=$?
+          set -e
+          python3 - "$HEAD_STATUS" "$BASE_STATUS" <<'PY'
+          import collections
+          import re
+          import sys
+          from pathlib import Path
+
+          head_status = int(sys.argv[1])
+          base_status = int(sys.argv[2])
+
+          def failures(path):
+              names = []
+              for line in Path(path).read_text(encoding='utf-8', errors='replace').splitlines():
+                  match = re.match(r'^not ok\s+\d+\s+-\s+(.+)$', line.strip())
+                  if match:
+                      names.append(match.group(1).strip())
+              return collections.Counter(names)
+
+          head_failures = failures('/tmp/head.tap')
+          base_failures = failures('/tmp/base.tap')
+          new_failures = head_failures - base_failures
+          print('base_status=', base_status, 'head_status=', head_status)
+          print('base_failures=', dict(base_failures))
+          print('head_failures=', dict(head_failures))
+          if new_failures:
+              print('new_failures=', dict(new_failures))
+              raise SystemExit(1)
+          if base_status == 0 and head_status != 0:
+              raise SystemExit(1)
+          PY
+
+      - name: Validate diff
+        run: |
+          git diff --check
+          git status --short
+
+      - name: Commit functional correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/dispatchWhatsappWebService.js \
+                  src/views/operacionesWhatsappEstado.ejs \
+                  src/views/operacionesClientes.ejs \
+                  src/routes/publicDispatchClient.js \
+                  src/routes/dispatchBridgeCore.js \
+                  test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+          git commit -m "fix: recuperar WhatsApp despacho y restringir cliente de prueba (#753)"
+          git push origin HEAD:fix/753-dispatch-whatsapp-init-dev-test-client
