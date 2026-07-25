@@ -42,6 +42,21 @@ function latestMark(marks, markType) {
     .sort((left, right) => new Date(right.serverReceivedAt || 0) - new Date(left.serverReceivedAt || 0))[0] || null;
 }
 
+function numericCoordinate(value, min, max) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
+
+function validDate(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+function reportedLateMinutes(arrivalAt, expectedStartAt) {
+  if (!validDate(arrivalAt) || !validDate(expectedStartAt)) return 0;
+  return Math.max(0, Math.floor((arrivalAt.getTime() - expectedStartAt.getTime()) / 60_000));
+}
+
 export async function enrichAttendanceBoardWithWorkday(prisma, board) {
   const rows = Array.isArray(board?.rows) ? board.rows : [];
   if (!rows.length) return board;
@@ -71,6 +86,7 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
       const departureMark = latestMark(session?.marks, 'DEPARTURE');
       const arrivalAt = session?.arrivalReportedAt ? new Date(session.arrivalReportedAt) : null;
       const departureAt = session?.departureReportedAt ? new Date(session.departureReportedAt) : null;
+      const expectedStartAt = row.expectedStartAt ? new Date(row.expectedStartAt) : null;
       const grossWorkedMinutes = arrivalAt && departureAt
         ? Math.max(0, Math.floor((departureAt.getTime() - arrivalAt.getTime()) / 60_000))
         : null;
@@ -87,6 +103,11 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
         departureMarkId: departureMark?.id || null,
         arrivalEvidenceAvailable: Boolean(arrivalMark?.evidenceStorageKey),
         departureEvidenceAvailable: Boolean(departureMark?.evidenceStorageKey),
+        arrivalLatitude: numericCoordinate(arrivalMark?.latitude, -90, 90),
+        arrivalLongitude: numericCoordinate(arrivalMark?.longitude, -180, 180),
+        departureLatitude: numericCoordinate(departureMark?.latitude, -90, 90),
+        departureLongitude: numericCoordinate(departureMark?.longitude, -180, 180),
+        lateMinutes: reportedLateMinutes(arrivalAt, expectedStartAt),
         departureReportedAt: session?.departureReportedAt?.toISOString?.() || null,
         departureReportedLabel: formatDateTime(session?.departureReportedAt),
         grossWorkedMinutes,
