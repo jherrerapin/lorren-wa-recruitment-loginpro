@@ -54,7 +54,9 @@
             <div class="field"><label for="contactPhone">Teléfono</label><input id="contactPhone" name="contactPhone" value="<%= formClient.contactPhone || '' %>" placeholder="Celular o fijo" /></div>
             <div class="field"><label for="contactEmail">Correo</label><input id="contactEmail" name="contactEmail" type="email" value="<%= formClient.contactEmail || '' %>" placeholder="correo@cliente.com" /></div>
             <div class="field"><label for="isActive">Estado</label><select id="isActive" name="isActive"><option value="true" <%= formClient.isActive !== false ? 'selected' : '' %>>Activo</option><option value="false" <%= formClient.isActive === false ? 'selected' : '' %>>Inactivo</option></select></div>
-            <div class="field"><label for="isTestClient">Tipo de cliente</label><select id="isTestClient" name="isTestClient"><option value="false" <%= formClient.isTestClient !== true ? 'selected' : '' %>>Cliente real</option><option value="true" <%= formClient.isTestClient === true ? 'selected' : '' %>>Cliente de prueba</option></select><small class="muted">Las solicitudes de un cliente de prueba pueden eliminarse en cualquier momento. La edición conserva el límite de dos horas.</small></div>
+            <% if (role === 'dev') { %>
+              <div class="field"><label for="isTestClient">Tipo de cliente</label><select id="isTestClient" name="isTestClient"><option value="false" <%= formClient.isTestClient !== true ? 'selected' : '' %>>Cliente real</option><option value="true" <%= formClient.isTestClient === true ? 'selected' : '' %>>Cliente de prueba</option></select><small class="muted">Configuración exclusiva de DEV. Las solicitudes de un cliente de prueba pueden eliminarse en cualquier momento; la edición conserva el límite de dos horas.</small></div>
+            <% } %>
             <div class="field full"><label for="notes">Notas</label><textarea id="notes" name="notes" placeholder="Condiciones, observaciones o información relevante"><%= formClient.notes || '' %></textarea></div>
             <% if (!isEditingClient) { %>
               <div class="field full">
