@@ -31,10 +31,12 @@ jobs:
         run: |
           git fetch origin automation/753-whatsapp-init-dev-client main
           git show origin/automation/753-whatsapp-init-dev-client:.github/scripts/apply-issue-753.py > /tmp/apply-issue-753.py
+          git show origin/automation/753-whatsapp-init-dev-client:.github/scripts/refine-issue-753-test.py > /tmp/refine-issue-753-test.py
 
       - name: Apply implementation
         run: |
           python3 /tmp/apply-issue-753.py
+          python3 /tmp/refine-issue-753-test.py
           rm -f .github/issue-753-trigger
 
       - name: Set up Node.js
