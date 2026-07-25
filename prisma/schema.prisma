@@ -831,9 +831,11 @@ model DispatchWhatsappConfirmation {
   serviceRequestId  String?
   phone             String?
   chatId            String?
-  providerMessageId String?
-  status            String             @default("PENDING")
-  expiresAt         DateTime
+  providerMessageId       String?
+  confirmationMessageId String?
+  confirmationReceivedAt DateTime?
+  status                  String             @default("PENDING")
+  expiresAt               DateTime
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
@@ -841,6 +843,7 @@ model DispatchWhatsappConfirmation {
   @@index([phone, status, expiresAt])
   @@index([chatId, status, expiresAt])
   @@index([providerMessageId])
+  @@index([status, confirmationReceivedAt], map: "DispatchWaConfirmation_reply_evidence_idx")
 }
 
 model DispatchIncident {

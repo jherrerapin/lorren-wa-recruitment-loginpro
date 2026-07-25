@@ -227,6 +227,23 @@ function inboundKey(message = {}) {
   return String(message.id?._serialized || message.id?.id || `${message.from || ''}|${message.timestamp || ''}|${confirmationTextFromMessage(message)}`);
 }
 
+function isOwnWhatsappMessage(message = {}) {
+  return Boolean(
+    message.fromMe
+    || message.id?.fromMe
+    || message._data?.id?.fromMe
+    || message.rawData?.id?.fromMe
+  );
+}
+
+function confirmationEvidenceFromMessage(message = {}) {
+  const confirmationMessageId = inboundKey(message).trim();
+  const timestamp = messageTimestamp(message);
+  const confirmationReceivedAt = timestamp ? new Date(timestamp * 1000) : new Date();
+  if (!confirmationMessageId || Number.isNaN(confirmationReceivedAt.getTime())) return null;
+  return { confirmationMessageId, confirmationReceivedAt };
+}
+
 function cleanupInboundLocks(now = Date.now()) {
   for (const [key, value] of inboundLocks.entries()) {
     if (value.expiresAt <= now) inboundLocks.delete(key);
@@ -649,7 +666,11 @@ async function findPersistedPendingAssignmentByLink({ phone = '', chatId = '', m
   if (!link?.assignmentId || !link?.serviceRequestId) return null;
 
   const assignment = await prisma.dispatchAssignment.findFirst({
-    where: { id: link.assignmentId, serviceRequestId: link.serviceRequestId, status: { in: PENDING_ASSIGNMENT_STATUSES } },
+    where: {
+      id: link.assignmentId,
+      serviceRequestId: link.serviceRequestId,
+      status: { in: [...PENDING_ASSIGNMENT_STATUSES, CONFIRMED_ASSIGNMENT_STATUS] }
+    },
     include: { worker: true }
   });
   if (!assignment) return null;
@@ -672,8 +693,28 @@ async function setPersistedConfirmationLinksStatus({ assignmentId, status = 'CON
   }
 }
 
-export async function claimDispatchAssignmentConfirmation({ assignment, phone = '', chatId = '', prismaClient = prisma } = {}) {
-  if (!assignment?.id) return { assignmentConfirmed: false, shouldReply: false, repaired: false };
+export async function claimDispatchAssignmentConfirmation({
+  assignment,
+  phone = '',
+  chatId = '',
+  confirmationMessageId = '',
+  confirmationReceivedAt = null,
+  prismaClient = prisma
+} = {}) {
+  const evidenceMessageId = String(confirmationMessageId || '').trim();
+  const evidenceReceivedAt = confirmationReceivedAt instanceof Date
+    ? confirmationReceivedAt
+    : new Date(confirmationReceivedAt || Number.NaN);
+  if (!assignment?.id || !evidenceMessageId || Number.isNaN(evidenceReceivedAt.getTime())) {
+    return { assignmentConfirmed: false, shouldReply: false, repaired: false };
+  }
+
+  const replyEvidence = {
+    status: CONFIRMED_REPLY_PENDING_STATUS,
+    confirmationMessageId: evidenceMessageId,
+    confirmationReceivedAt: evidenceReceivedAt
+  };
+
   return prismaClient.$transaction(async (tx) => {
     const updated = await tx.dispatchAssignment.updateMany({
       where: { id: assignment.id, status: { in: PENDING_ASSIGNMENT_STATUSES } },
@@ -683,7 +724,7 @@ export async function claimDispatchAssignmentConfirmation({ assignment, phone = 
     if (updated.count) {
       const links = await tx.dispatchWhatsappConfirmation.updateMany({
         where: { assignmentId: assignment.id, status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES } },
-        data: { status: CONFIRMED_REPLY_PENDING_STATUS }
+        data: replyEvidence
       });
       if (!links.count) {
         await tx.dispatchWhatsappConfirmation.create({
@@ -692,7 +733,7 @@ export async function claimDispatchAssignmentConfirmation({ assignment, phone = 
             serviceRequestId: assignment.serviceRequestId,
             phone: normalizePhone(phone) || null,
             chatId: normalizeChatId(chatId) || null,
-            status: CONFIRMED_REPLY_PENDING_STATUS,
+            ...replyEvidence,
             expiresAt: new Date(Date.now() + CONFIRMATION_MEMORY_TTL_MS)
           }
         });
@@ -710,7 +751,7 @@ export async function claimDispatchAssignmentConfirmation({ assignment, phone = 
 
     const repaired = await tx.dispatchWhatsappConfirmation.updateMany({
       where: { assignmentId: assignment.id, status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES } },
-      data: { status: CONFIRMED_REPLY_PENDING_STATUS }
+      data: replyEvidence
     });
     return { assignmentConfirmed: false, shouldReply: repaired.count > 0, repaired: repaired.count > 0 };
   });
@@ -732,9 +773,11 @@ async function sendAutomaticConfirmationReply(activeClient, chatId) {
   }
 }
 
-async function applyAssignmentConfirmation({ activeClient, assignment, phone = '', chatId = '', eventName = 'message' } = {}) {
+async function applyAssignmentConfirmation({ activeClient, assignment, phone = '', chatId = '', message = {}, eventName = 'message' } = {}) {
   if (!assignment?.id || !chatId) return false;
-  const claim = await claimDispatchAssignmentConfirmation({ assignment, phone, chatId });
+  const evidence = confirmationEvidenceFromMessage(message);
+  if (!evidence) return false;
+  const claim = await claimDispatchAssignmentConfirmation({ assignment, phone, chatId, ...evidence });
   if (!claim.shouldReply) return false;
   if (claim.assignmentConfirmed) await recalculateServiceRequestStatus(assignment.serviceRequestId);
   if (phone) pendingConfirmationByPhone.delete(phone);
@@ -759,7 +802,7 @@ async function resolveAssignmentForInboundConfirmation({ phone = '', senders = [
 }
 
 async function confirmAssignmentFromInboundMessage(activeClient, message, eventName = 'message') {
-  if (message?.fromMe) return false;
+  if (isOwnWhatsappMessage(message)) return false;
   const sender = String(message?.from || '');
   if (!isSupportedSenderId(sender)) return false;
   const replyText = confirmationTextFromMessage(message);
@@ -782,7 +825,7 @@ async function confirmAssignmentFromInboundMessage(activeClient, message, eventN
   }
   if (!reserveInbound(message)) return false;
   try {
-    return await applyAssignmentConfirmation({ activeClient, assignment, phone, chatId: sender, eventName });
+    return await applyAssignmentConfirmation({ activeClient, assignment, phone, chatId: sender, message, eventName });
   } catch (error) {
     releaseInbound(message);
     throw error;
@@ -846,32 +889,15 @@ async function processPersistedConfirmationTarget(activeClient, link) {
   return 0;
 }
 
-async function repairConfirmedAssignmentsAwaitingReply() {
-  const orphanedLinks = await prisma.dispatchWhatsappConfirmation.findMany({
-    where: {
-      status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES },
-      assignment: { status: CONFIRMED_ASSIGNMENT_STATUS }
-    },
-    select: { assignmentId: true, createdAt: true, id: true },
-    orderBy: { createdAt: 'desc' },
-    take: PENDING_RECONCILIATION_LIMIT
-  });
-  const targets = selectLatestPendingConfirmationTargets(orphanedLinks);
-  let repaired = 0;
-  for (const target of targets) {
-    const result = await prisma.dispatchWhatsappConfirmation.updateMany({
-      where: { assignmentId: target.assignmentId, status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES } },
-      data: { status: CONFIRMED_REPLY_PENDING_STATUS }
-    });
-    if (result.count) repaired += 1;
-  }
-  return repaired;
-}
-
 async function retryPendingAutomaticReplies(activeClient) {
   if (!activeClient) return 0;
   const pendingReplyLinks = await prisma.dispatchWhatsappConfirmation.findMany({
-    where: { status: CONFIRMED_REPLY_PENDING_STATUS },
+    where: {
+      status: CONFIRMED_REPLY_PENDING_STATUS,
+      confirmationMessageId: { not: null },
+      confirmationReceivedAt: { not: null },
+      assignment: { status: CONFIRMED_ASSIGNMENT_STATUS }
+    },
     select: {
       id: true,
       assignmentId: true,
@@ -918,9 +944,7 @@ async function processPersistedPendingConfirmations(activeClient, reason = 'inte
     });
     const targets = selectLatestPendingConfirmationTargets(links);
     for (const target of targets) processed += await processPersistedConfirmationTarget(activeClient, target);
-    const orphanedRepliesRepaired = await repairConfirmedAssignmentsAwaitingReply();
     repliesRetried = await retryPendingAutomaticReplies(activeClient);
-    if (orphanedRepliesRepaired) console.log(`[dispatch-wa] Respuestas automáticas huérfanas reparadas=${orphanedRepliesRepaired}.`);
     lastPendingReconciliationAt = new Date().toISOString();
     lastPendingReconciliationProcessed = processed + repliesRetried;
     console.log(`[dispatch-wa] Reconciliación persistente finalizada. reason=${reason} pendientes=${targets.length} confirmaciones=${processed} graciasReintentados=${repliesRetried}.`);
