@@ -347,3 +347,26 @@ test('webhook omite el preview ante rechazo explícito de interés', () => {
   assert.ok(negativeReturnIndex > negativeInterestIndex);
   assert.ok(confirmingIndex > negativeReturnIndex);
 });
+
+test('webhook omite el preview en aclaración pura de restricciones médicas', () => {
+  const webhookSource = fs.readFileSync('src/routes/webhook.js', 'utf8');
+  const start = webhookSource.indexOf('function shouldUseEngineFieldPreview');
+  const end = webhookSource.indexOf('async function buildEngineContext', start);
+  assert.ok(start >= 0 && end > start);
+  const policy = webhookSource.slice(start, end);
+
+  assert.match(policy, /missingFields = \[\]/);
+  const dataIndex = policy.indexOf('const hasParsedCandidateData');
+  const clarificationIndex = policy.indexOf('isMedicalRestrictionsClarificationRequest(cleanText)');
+  const noDataIndex = policy.indexOf('!hasParsedCandidateData', clarificationIndex);
+  const skipIndex = policy.indexOf('return false', noDataIndex);
+  const confirmingIndex = policy.indexOf('if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) return true');
+
+  assert.ok(dataIndex >= 0);
+  assert.ok(clarificationIndex > dataIndex);
+  assert.ok(policy.indexOf("missingFields[0] === 'restricciones medicas'", dataIndex) > dataIndex);
+  assert.ok(noDataIndex > clarificationIndex);
+  assert.ok(skipIndex > noDataIndex);
+  assert.ok(confirmingIndex > skipIndex);
+  assert.match(webhookSource, /shouldUseEngineFieldPreview\(candidate, cleanText, localParsedData, aiFields, sanitizerContext\.pendingFields\)/);
+});

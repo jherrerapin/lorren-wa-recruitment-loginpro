@@ -790,17 +790,26 @@ function inferNaturalOverwriteFields(text, normalizedData = {}, current = {}, cu
   return [...allow];
 }
 
-function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {}, aiFields = {}) {
+function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {}, aiFields = {}, missingFields = []) {
   if (!USE_CONVERSATION_ENGINE) return false;
   if (!candidate || !cleanText) return false;
   if (![ConversationStep.GREETING_SENT, ConversationStep.CONFIRMING_DATA, ConversationStep.COLLECTING_DATA, ConversationStep.ASK_CV].includes(candidate.currentStep)) {
     return false;
   }
   if (isNegativeInterest(cleanText)) return false;
-  if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) return true;
 
   const hasParsedCandidateData = hasMeaningfulCandidateData(localParsedData)
     || hasMeaningfulCandidateData(aiFields);
+  if (
+    candidate.currentStep === ConversationStep.CONFIRMING_DATA
+    && missingFields.length === 1
+    && missingFields[0] === 'restricciones medicas'
+    && isMedicalRestrictionsClarificationRequest(cleanText)
+    && !hasParsedCandidateData
+  ) {
+    return false;
+  }
+  if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) return true;
   if (
     candidate.currentStep === ConversationStep.ASK_CV
     && isQuestionLike(cleanText)
@@ -1637,7 +1646,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   };
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
-  const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields)
+  const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields, sanitizerContext.pendingFields)
     ? await previewEngineCandidateFields(prisma, candidate, cleanText, currentVacancy)
     : { fields: {}, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
   const understanding = await conversationUnderstanding(cleanText, {
