@@ -1,11 +1,10 @@
-name: Apply issue 728 Excel worker review
+name: Refine issue 728 Excel worker review
 
 on:
   pull_request:
     branches:
       - automation/728-excel-review-runner
     types:
-      - opened
       - synchronize
       - reopened
 
@@ -28,16 +27,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Load exact correction
+      - name: Load refinement
         run: |
           git fetch origin automation/728-excel-review-runner
-          git show origin/automation/728-excel-review-runner:.github/scripts/apply-issue-728.py > /tmp/apply-issue-728.py
+          git show origin/automation/728-excel-review-runner:.github/scripts/refine-issue-728.py > /tmp/refine-issue-728.py
 
-      - name: Apply exact correction
-        run: python3 /tmp/apply-issue-728.py
+      - name: Apply refinement
+        run: python3 /tmp/refine-issue-728.py
 
       - name: Remove functional trigger
-        run: rm -f .github/issue-728-trigger
+        run: rm -f .github/issue-728-refine
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -59,10 +58,10 @@ jobs:
           node --test test/dispatchWorkerContractAutoAssignment.test.js
           git diff --check
 
-      - name: Commit canonical correction
+      - name: Commit refined correction
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: revisar y aprobar cambios de importación Excel (#728)"
+          git commit -m "fix: reforzar aprobación de cambios Excel (#728)"
           git push origin HEAD:fix/728-excel-worker-review
