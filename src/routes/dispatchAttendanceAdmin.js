@@ -100,6 +100,47 @@ function validAttendanceEvidenceKey(value) {
     && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120}\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
 }
 
+function validDate(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+function automaticLateReason(minutesLate) {
+  const minutes = Math.max(0, Number.isFinite(minutesLate) ? Math.floor(minutesLate) : 0);
+  if (minutes === 1) return 'Llegada tarde por 1 minuto frente a la hora programada.';
+  if (minutes > 1) return `Llegada tarde por ${minutes} minutos frente a la hora programada.`;
+  return 'Llegada clasificada como tarde.';
+}
+
+export async function resolveAttendanceReviewReason(prisma, input = {}) {
+  const action = normalizeString(input.action)?.toUpperCase();
+  const attendanceStatus = normalizeString(input.attendanceStatus)?.toUpperCase();
+  const providedReason = normalizeString(input.reason);
+
+  if (action !== 'VALIDATE') return input.reason;
+  if (providedReason && providedReason.length >= 5) return providedReason.slice(0, 500);
+  if (attendanceStatus === 'ON_TIME') return 'Validación de llegada a tiempo.';
+  if (attendanceStatus !== 'LATE') return input.reason;
+
+  let minutesLate = 0;
+  if (prisma?.dispatchAttendanceSession && typeof prisma.dispatchAttendanceSession.findUnique === 'function') {
+    const session = await prisma.dispatchAttendanceSession.findUnique({
+      where: { id: input.sessionId },
+      select: { arrivalReportedAt: true, expectedStartAt: true }
+    });
+    const arrivalAt = session?.arrivalReportedAt instanceof Date
+      ? session.arrivalReportedAt
+      : new Date(session?.arrivalReportedAt || Number.NaN);
+    const expectedStartAt = session?.expectedStartAt instanceof Date
+      ? session.expectedStartAt
+      : new Date(session?.expectedStartAt || Number.NaN);
+    if (validDate(arrivalAt) && validDate(expectedStartAt)) {
+      minutesLate = Math.max(0, Math.floor((arrivalAt.getTime() - expectedStartAt.getTime()) / 60_000));
+    }
+  }
+
+  return automaticLateReason(minutesLate);
+}
+
 export function dispatchAttendanceAdminRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: false, limit: '16kb' });
@@ -156,11 +197,17 @@ export function dispatchAttendanceAdminRouter(prisma) {
 
   router.post('/sessions/:sessionId/review', formParser, async (req, res) => {
     try {
+      const reason = await resolveAttendanceReviewReason(prisma, {
+        sessionId: req.params.sessionId,
+        action: req.body.action,
+        attendanceStatus: req.body.attendanceStatus,
+        reason: req.body.reason
+      });
       await reviewAttendanceWorkdaySession(prisma, {
         sessionId: req.params.sessionId,
         action: req.body.action,
         attendanceStatus: req.body.attendanceStatus,
-        reason: req.body.reason,
+        reason,
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
