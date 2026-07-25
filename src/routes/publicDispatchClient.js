@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
+import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 
 const workerCvUpload = multer({
   storage: multer.memoryStorage(),
@@ -115,7 +116,8 @@ function buildClientData(body) {
     contactPhone: normalizeString(body.contactPhone),
     contactEmail: normalizeString(body.contactEmail),
     notes: normalizeString(body.notes),
-    isActive: normalizeString(body.isActive) !== 'false'
+    isActive: normalizeString(body.isActive) !== 'false',
+    isTestClient: normalizeString(body.isTestClient) === 'true'
   };
 }
 
@@ -356,17 +358,12 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-delete/solicitudes/:serviceRequestId', requireOps, async (req, res) => {
-    const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } });
-    if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
-
-    return runDelete(
-      res,
-      '/admin/operaciones/asignaciones',
-      `/admin/operaciones/asignaciones?serviceRequestId=${serviceRequest.id}`,
-      () => prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }),
-      'Solicitud eliminada correctamente.',
-      'No fue posible eliminar la solicitud porque tiene asignaciones o dependencias operativas.'
-    );
+    const result = await deleteDispatchServiceRequestWithPolicy(prisma, req.params.serviceRequestId);
+    if (result.status === 'NOT_FOUND') return res.status(404).send('Solicitud no encontrada');
+    if (result.status === 'BLOCKED') {
+      return res.redirect(redirectWithMessage('/admin/operaciones/asignaciones', result.policy.deleteBlockedReason));
+    }
+    return res.redirect(redirectWithMessage('/admin/operaciones/asignaciones', 'Solicitud eliminada correctamente.'));
   });
 
   router.post('/admin-delete/personal/:workerId', requireOps, async (req, res) => {

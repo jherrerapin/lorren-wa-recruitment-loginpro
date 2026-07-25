@@ -482,6 +482,7 @@ model DispatchClient {
   publicToken       String                   @unique
   notes             String?
   isActive          Boolean                  @default(true)
+  isTestClient      Boolean                  @default(false)
   createdByUsername String?
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
@@ -491,6 +492,7 @@ model DispatchClient {
   @@index([name])
   @@index([cityName])
   @@index([isActive])
+  @@index([isTestClient])
 }
 
 model DispatchClientService {

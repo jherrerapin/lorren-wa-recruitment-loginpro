@@ -132,9 +132,9 @@
         </div>
         <div class="request-list">
           <% if (!serviceRequests.length) { %><div class="empty"><strong>No hay solicitudes.</strong>Crea clientes y comparte links públicos para recibir solicitudes.</div><% } %>
-          <% serviceRequests.forEach((request)=>{ const assignedCount = request.assignments.length; const complete = assignedCount >= request.requiredWorkers; %>
+          <% serviceRequests.forEach((request)=>{ const assignedCount = request.assignments.length; const complete = assignedCount >= request.requiredWorkers; const requestPolicy = resolveServiceRequestPolicy(request); %>
             <article class="request-card <%= selectedServiceRequestId===request.id?'active':'' %>">
-              <div class="top"><strong><%= request.clientName %></strong><span class="status-pill <%= complete ? 'complete' : '' %>"><%= request.status %></span></div>
+              <div class="top"><strong><%= request.clientName %><% if (requestPolicy.isTestClient) { %> · Prueba<% } %></strong><span class="status-pill <%= complete ? 'complete' : '' %>"><%= request.status %></span></div>
               <div class="meta">
                 <span><%= request.operationPointName || 'Sin punto' %> · <%= request.cityName || 'Sin ciudad' %></span>
                 <span>Servicio: <%= request.serviceName || request.service?.name || 'Sin servicio' %></span>
@@ -143,8 +143,9 @@
               </div>
               <div class="request-actions">
                 <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Seleccionar</a>
-                <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a>
-                <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio?');"><button class="btn" type="submit">Eliminar</button></form>
+                <% if (requestPolicy.canEdit) { %><a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar">Editar</a><% } %>
+                <% if (requestPolicy.canDelete) { %><form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio y sus dependencias?');"><button class="btn" type="submit">Eliminar</button></form><% } %>
+                <% if (!requestPolicy.canEdit && requestPolicy.isTestClient) { %><span class="meta">Prueba: solo eliminación disponible.</span><% } %>
               </div>
             </article>
           <% }) %>

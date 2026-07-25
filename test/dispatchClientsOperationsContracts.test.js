@@ -5,6 +5,7 @@ import fs from 'node:fs';
 test('dispatch clients operations contracts', () => {
   const schema = fs.readFileSync('prisma/schema.prisma', 'utf8');
   const route = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+  const coreRoute = fs.readFileSync('src/routes/dispatchBridgeCore.js', 'utf8');
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const server = fs.readFileSync('src/server.js', 'utf8');
   const view = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
@@ -18,7 +19,7 @@ test('dispatch clients operations contracts', () => {
   assert.ok(fs.readdirSync('prisma/migrations').some((m) => m.includes('add_dispatch_client_public_token')));
 
   ["get('/clientes'", "post('/clientes'", "get('/clientes/:clientId/operaciones'", "post('/clientes/:clientId/operaciones'", "get('/solicitud/:publicToken'", "post('/solicitud/:publicToken'", "get('/personal/nuevo'", "post('/personal/nuevo'", "get('/asignaciones/solicitudes/:id/editar'", "post('/asignaciones/solicitudes/:id/editar'"]
-    .forEach((s) => assert.match(route, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
+    .forEach((s) => assert.match(coreRoute, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 
   assert.match(publicRoute, /get\('\/cliente\/:publicToken'/);
   assert.match(publicRoute, /post\('\/cliente\/:publicToken'/);

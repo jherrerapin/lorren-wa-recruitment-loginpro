@@ -93,21 +93,21 @@
       </div>
     </section>
 
-    <div class="readonly-note">Las solicitudes solo se pueden editar o eliminar hasta 2 horas después de la hora de inicio del servicio. Después quedan disponibles únicamente para consulta.</div>
+    <div class="readonly-note">Clientes reales: edición y eliminación hasta 2 horas después del inicio. Clientes de prueba: la edición conserva ese límite, pero sus solicitudes pueden eliminarse en cualquier momento.</div>
 
     <section class="request-list">
       <% if (!requests.length) { %>
         <div class="empty-state"><strong>No hay solicitudes para este indicador.</strong>Cambia de indicador o vuelve al panel de Operaciones para seleccionar otra fecha.</div>
       <% } %>
 
-      <% requests.forEach((request) => { const required = Number(request.requiredWorkers || 0); const active = activeCount(request); const confirmed = confirmedCount(request); const editLocked = isServiceRequestEditLocked(request); const requestDate = formatDate(request.serviceDate); %>
+      <% requests.forEach((request) => { const required = Number(request.requiredWorkers || 0); const active = activeCount(request); const confirmed = confirmedCount(request); const policy = resolveServiceRequestPolicy(request); const editLocked = !policy.canEdit; const requestDate = formatDate(request.serviceDate); %>
         <article class="request-card">
           <div class="request-head">
             <div>
               <h2><%= request.clientName || 'Sin cliente' %></h2>
               <p><%= request.operationPointName || 'Sin operación' %> · <%= request.cityName || 'Sin ciudad' %></p>
             </div>
-            <span class="pill <%= statusClass(request.status) %>"><%= statusLabel(request.status) %></span>
+            <div><% if (policy.isTestClient) { %><span class="pill pill-blue">Cliente de prueba</span> <% } %><span class="pill <%= statusClass(request.status) %>"><%= statusLabel(request.status) %></span></div>
           </div>
 
           <div class="detail-grid">
@@ -149,17 +149,19 @@
           <% } %>
 
           <div class="card-actions">
-            <% if (!editLocked) { %>
+            <% if (policy.canEdit) { %>
               <a class="btn btn-primary" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>">Asignar / revisar</a>
             <% } %>
-            <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar" data-expired-edit-link="true" data-expired-edit="<%= editLocked ? 'true' : 'false' %>" data-service-date="<%= requestDate %>" data-start-time="<%= request.startTime || '' %>" data-expired-message="<%= expiredMessage %>">Editar solicitud</a>
-            <% if (!editLocked) { %>
-              <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" onsubmit="return confirm('¿Eliminar esta solicitud de servicio? También se eliminarán sus asignaciones y novedades asociadas.');">
+            <a class="btn" href="/admin/operaciones/asignaciones/solicitudes/<%= request.id %>/editar" data-expired-edit-link="true" data-expired-edit="<%= policy.canEdit ? 'false' : 'true' %>" data-edit-lock-at="<%= policy.editLockAt || '' %>" data-expired-message="<%= policy.editBlockedReason || expiredMessage %>">Editar solicitud</a>
+            <% if (policy.canDelete) { %>
+              <form method="post" action="/admin/operaciones/solicitudes/<%= request.id %>/eliminar" data-expired-delete-form="true" data-expired-edit="false" onsubmit="return confirm('¿Eliminar esta solicitud de servicio? También se eliminarán sus asignaciones, novedades y datos de asistencia asociados.');">
                 <button class="btn danger-btn" type="submit">Eliminar</button>
               </form>
             <% } %>
-            <% if (editLocked) { %>
-              <span class="muted">Modo consulta: edición y eliminación bloqueadas porque ya pasaron más de 2 horas desde la hora del servicio.</span>
+            <% if (!policy.canEdit && !policy.canDelete) { %>
+              <span class="muted">Modo consulta: edición y eliminación bloqueadas porque ya pasaron más de 2 horas desde el inicio.</span>
+            <% } else if (!policy.canEdit && policy.isTestClient) { %>
+              <span class="muted">Cliente de prueba: edición bloqueada por tiempo; eliminación disponible sin límite.</span>
             <% } %>
           </div>
 
