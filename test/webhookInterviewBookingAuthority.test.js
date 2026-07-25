@@ -26,6 +26,16 @@ const initialBookingBranch = between(
   'if (candidate.currentStep === ConversationStep.SCHEDULING && isSchedulingConfirmationIntent(cleanText))',
   'if (candidate.currentStep === ConversationStep.SCHEDULED && isSchedulingConfirmationIntent(cleanText))'
 );
+const engineReply = between(source, 'async function replyWithEngine', 'function shouldForceFlowFollowUp');
+
+test('webhook persiste la alternativa exacta ofrecida por el engine', () => {
+  assert.match(engineReply, /engineResult\.handledInterviewIntent === ['"]reschedule_interview['"]/);
+  assert.match(engineReply, /engineResult\.interviewOffer\?\.slot/);
+  assert.match(engineReply, /source = ['"]interview_reschedule['"]/);
+  assert.match(engineReply, /const interviewReplySlot = engineInterviewOffer \|\| nextSlot/);
+  assert.match(engineReply, /buildInterviewReplyPayload\(body, source, interviewReplySlot\)/);
+  assert.doesNotMatch(engineReply, /buildInterviewReplyPayload\(body, source, nextSlot\)/);
+});
 
 test('webhook delega respuestas de reserva exacta en la autoridad compartida', () => {
   assert.match(source, /import \{ applyInterviewReminderResponse \} from '\.\.\/services\/interviewBookingStateService\.js';/);

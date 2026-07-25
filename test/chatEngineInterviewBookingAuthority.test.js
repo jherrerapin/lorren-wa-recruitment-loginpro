@@ -85,6 +85,7 @@ test('la reprogramación conserva la reserva, busca alternativa y delega el refl
   assert.ok(replyIndex >= 0, 'No se encontró la construcción de la respuesta final.');
   assert.ok(alternativeIndex < progressIndex, 'La búsqueda de alternativa debe conservar su orden previo.');
   assert.ok(progressIndex < replyIndex, 'El CAS debe resolverse antes de construir la respuesta final.');
+  assert.match(rescheduleBranch, /interviewOffer:\s*alternative\?\.slot\s*\?\s*alternative\s*:\s*null/);
   assert.doesNotMatch(rescheduleBranch, /prisma\.candidate\.update\s*\(/);
 });
 

@@ -232,7 +232,10 @@ async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inb
       ? `Listo, dejé marcada la solicitud de reprogramación. Te puedo ofrecer ${alternative.formattedDate}; si te sirve, respóndeme confirmando ese horario.`
       : 'Listo, dejé marcada la solicitud de reprogramación. En este momento no tengo otro horario válido para ofrecerte, así que el equipo te contactará para ayudarte con la reprogramación.';
 
-    return buildEngineHandledResult({ currentStep: ConversationStep.SCHEDULING, intent, classification, reply });
+    return {
+      ...buildEngineHandledResult({ currentStep: ConversationStep.SCHEDULING, intent, classification, reply }),
+      interviewOffer: alternative?.slot ? alternative : null
+    };
   }
 
   return null;
