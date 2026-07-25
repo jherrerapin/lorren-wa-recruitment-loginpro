@@ -46,14 +46,23 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
 
-      - name: Validate Prisma and syntax
-        run: |
-          npx prisma validate
-          npm run prisma:generate
-          node --check src/services/dispatchWhatsappWebService.js
-          node --check src/routes/publicDispatchClient.js
-          node --check src/routes/dispatchBridgeCore.js
-          node --check test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Check WhatsApp facade syntax
+        run: node --check src/services/dispatchWhatsappWebService.js
+
+      - name: Check public dispatch client syntax
+        run: node --check src/routes/publicDispatchClient.js
+
+      - name: Check dispatch core syntax
+        run: node --check src/routes/dispatchBridgeCore.js
+
+      - name: Check regression test syntax
+        run: node --check test/dispatchWhatsappLoadingAndTestClientAccess.test.js
 
       - name: Run focused regressions
         run: |
