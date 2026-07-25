@@ -15,7 +15,7 @@ const structuredHelpers = `function valuePattern(value) {
 
 function normalizeStructuredSegments(text = '') {
   return String(text || '')
-    .split(/[\n,;]+/)
+    .split(/[\\n,;]+/)
     .map((segment) => normalizeText(segment))
     .filter(Boolean);
 }
@@ -23,8 +23,8 @@ function normalizeStructuredSegments(text = '') {
 function hasStructuredAgeSegment(value, text = '') {
   const number = valuePattern(value);
   if (!number) return false;
-  const labeled = new RegExp(\`^edad\\s*(?:es\\s*)?[:\\-]?\\s*\${number}(?:\\s+anos?(?:\\s+de\\s+edad)?)?$\`);
-  const yearsOnly = new RegExp(\`^\${number}\\s+anos?(?:\\s+de\\s+edad)?$\`);
+  const labeled = new RegExp(\`^edad\\\\s*(?:es\\\\s*)?[:\\\\-]?\\\\s*\${number}(?:\\\\s+anos?(?:\\\\s+de\\\\s+edad)?)?$\`);
+  const yearsOnly = new RegExp(\`^\${number}\\\\s+anos?(?:\\\\s+de\\\\s+edad)?$\`);
   return normalizeStructuredSegments(text).some((segment) => labeled.test(segment) || yearsOnly.test(segment));
 }
 
@@ -32,14 +32,14 @@ function isFutureBirthdayNumber(value, text = '') {
   const number = valuePattern(value);
   if (!number) return false;
   const normalized = normalizeText(text);
-  return new RegExp(\`\\b(?:cumplo|cumplire|voy\\s+a\\s+cumplir)(?:\\s+los)?\\s+\${number}\\b\`).test(normalized);
+  return new RegExp(\`\\\\b(?:cumplo|cumplire|voy\\\\s+a\\\\s+cumplir)(?:\\\\s+los)?\\\\s+\${number}\\\\b\`).test(normalized);
 }
 
 function hasCurrentAgeBeforeFutureBirthday(value, text = '') {
   const number = valuePattern(value);
   if (!number) return false;
   const normalized = normalizeText(text);
-  return new RegExp(\`\\b\${number}\\s+anos?\\b.{0,70}\\b(?:cumplo|cumplire|voy\\s+a\\s+cumplir)(?:\\s+los)?\\s+\\d{1,2}\\b\`).test(normalized);
+  return new RegExp(\`\\\\b\${number}\\\\s+anos?\\\\b.{0,70}\\\\b(?:cumplo|cumplire|voy\\\\s+a\\\\s+cumplir)(?:\\\\s+los)?\\\\s+\\\\d{1,2}\\\\b\`).test(normalized);
 }`;
 
 if (!ageSource.includes('function normalizeStructuredSegments(')) {
