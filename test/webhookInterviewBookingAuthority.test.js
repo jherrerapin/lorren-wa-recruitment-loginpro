@@ -54,30 +54,34 @@ test('reserva ausente o carrera producen silencio trazado antes de efectos poste
   assert.ok(returnIndex > silenceIndex, 'La carrera debe terminar sin éxito.');
 });
 
-test('cancelación persiste antes de limpiar candidato y responder', () => {
+test('cancelación usa la autoridad CAS del recordatorio antes de responder', () => {
   const authorityIndex = cancelBranch.indexOf('applyActiveInterviewResponse');
-  const candidateIndex = cancelBranch.indexOf('prisma.candidate.update');
+  const reminderIndex = cancelBranch.indexOf('reflectCandidateInterviewCancellationReminder');
+  const conflictIndex = cancelBranch.indexOf('STALE_CANDIDATE_CANCELLATION_REMINDER');
   const replyIndex = cancelBranch.indexOf('return reply');
-  assert.ok(authorityIndex >= 0 && candidateIndex > authorityIndex);
-  assert.ok(replyIndex > candidateIndex);
+  assert.ok(authorityIndex >= 0 && reminderIndex > authorityIndex);
+  assert.ok(conflictIndex > reminderIndex);
+  assert.ok(replyIndex > conflictIndex);
+  assert.doesNotMatch(cancelBranch, /prisma\.candidate\.update\s*\(/);
   assert.match(cancelBranch, /Listo, ya registré la cancelación de tu entrevista\. Si más adelante deseas retomarla, me escribes por aquí\./);
   assert.match(cancelBranch, /source:\s*['"]interview_booking_cancel['"]/);
 });
 
-test('reprogramación distingue reserva activa de una oferta pendiente', () => {
+test('reprogramación usa CAS y suprime una respuesta basada en estado obsoleto', () => {
   const activeGuardIndex = rescheduleBranch.indexOf('if (activeBooking?.id && activeBooking?.status)');
   const authorityIndex = rescheduleBranch.indexOf('applyActiveInterviewResponse');
   const missingBookingIndex = rescheduleBranch.indexOf("else if (interviewIntent === 'reschedule_interview')");
   const silenceIndex = rescheduleBranch.indexOf('recordIntentionalSilence', missingBookingIndex);
   const noSlotIndex = rescheduleBranch.indexOf('if (!nextSlot?.slot)');
-  const pauseIndex = rescheduleBranch.indexOf('pauseInterviewFlow');
-  const candidateIndex = rescheduleBranch.indexOf('prisma.candidate.update');
+  const progressIndex = rescheduleBranch.indexOf('reflectCandidateInterviewRescheduleProgress');
+  const conflictIndex = rescheduleBranch.indexOf('STALE_CANDIDATE_RESCHEDULE_PROGRESS');
 
   assert.ok(activeGuardIndex >= 0 && authorityIndex > activeGuardIndex);
   assert.ok(missingBookingIndex > authorityIndex && silenceIndex > missingBookingIndex);
   assert.ok(noSlotIndex > silenceIndex, 'La oferta pendiente debe continuar hacia la resolución del siguiente slot.');
-  assert.ok(pauseIndex > authorityIndex);
-  assert.ok(candidateIndex > authorityIndex);
+  assert.ok(progressIndex > silenceIndex && progressIndex < noSlotIndex, 'El CAS del candidato debe ejecutarse antes de cualquier respuesta de reprogramación.');
+  assert.ok(conflictIndex > progressIndex);
+  assert.doesNotMatch(rescheduleBranch, /prisma\.candidate\.update\s*\(/);
   assert.doesNotMatch(rescheduleBranch, /RESCHEDULED/);
   assert.match(rescheduleBranch, /En este momento no tengo un siguiente horario válido para ofrecerte\. El equipo te contactará para ayudarte con la reprogramación\./);
   assert.match(rescheduleBranch, /buildInterviewReplyPayload\(body, ['"]interview_reschedule['"]/);
