@@ -4,6 +4,8 @@ import {
   registerManualAttendance,
   reviewAttendanceSession
 } from '../modules/dispatch-attendance/application/adminAttendance.js';
+import { enrichAttendanceBoardWithWorkday } from '../modules/dispatch-attendance/application/attendanceAdminWorkday.js';
+import { upsertDispatchAttendanceBreakPolicy } from '../modules/dispatch-attendance/infrastructure/dispatchAttendanceBreakPolicyRepository.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 
 const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
@@ -54,6 +56,9 @@ function publicErrorMessage(error) {
     attendance_manual_status_invalid: 'Selecciona si la llegada fue a tiempo o tarde.',
     attendance_manual_reason_required: 'Escribe el motivo de la marcación manual.',
     attendance_manual_reason_too_short: 'El motivo debe tener al menos 5 caracteres.',
+    attendance_break_policy_invalid: 'Selecciona una política de descanso válida.',
+    attendance_break_minutes_invalid: 'El descanso flexible debe estar entre 1 y 240 minutos.',
+    attendance_break_service_request_id_invalid: 'La solicitud de servicio no es válida.',
     service_start_time_required: 'La solicitud no tiene una hora de inicio válida.',
     service_start_time_invalid: 'La hora de inicio de la solicitud no es válida.'
   };
@@ -68,7 +73,7 @@ function applyNoStore(res) {
 
 function validAttendanceEvidenceKey(value) {
   return typeof value === 'string'
-    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120}\/arrival\/[A-Za-z0-9_.-]{1,180}$/.test(value);
+    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120}\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
 }
 
 export function dispatchAttendanceAdminRouter(prisma) {
@@ -78,7 +83,8 @@ export function dispatchAttendanceAdminRouter(prisma) {
   router.get('/', async (req, res) => {
     applyNoStore(res);
     try {
-      const board = await loadAttendanceAdminBoard(prisma, req.query || {});
+      const baseBoard = await loadAttendanceAdminBoard(prisma, req.query || {});
+      const board = await enrichAttendanceBoardWithWorkday(prisma, baseBoard);
       return res.render('operacionesAsistencia', {
         pageTitle: 'Asistencia operativa',
         role: req.session?.userRole || req.userRole,
@@ -94,21 +100,32 @@ export function dispatchAttendanceAdminRouter(prisma) {
         board: {
           range: { from: '', to: '' },
           filters: { status: 'ALL', client: 'ALL', q: '' },
-          clients: [],
-          rows: [],
-          metrics: {
-            total: 0,
-            pendingReview: 0,
-            autoValidated: 0,
-            manualValidated: 0,
-            late: 0,
-            rejected: 0,
-            noShow: 0
-          }
+          clients: [], rows: [],
+          metrics: { total: 0, pendingReview: 0, autoValidated: 0, manualValidated: 0, late: 0, rejected: 0, noShow: 0 }
         },
         success: null,
         error: 'No fue posible cargar el panel de asistencia.'
       });
+    }
+  });
+
+  router.post('/service-requests/:serviceRequestId/break-policy', formParser, async (req, res) => {
+    try {
+      const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+        where: { id: req.params.serviceRequestId },
+        select: { id: true }
+      });
+      if (!serviceRequest) throw new Error('attendance_break_service_request_id_invalid');
+      await upsertDispatchAttendanceBreakPolicy(prisma, {
+        serviceRequestId: serviceRequest.id,
+        policy: req.body.policy,
+        unpaidBreakMinutes: req.body.unpaidBreakMinutes,
+        actorUsername: actorFromRequest(req).actorUsername
+      });
+      return redirectToBoard(res, req.body, { success: 'La política de descanso no remunerado quedó guardada.' });
+    } catch (error) {
+      console.warn('[ATTENDANCE_BREAK_POLICY_UPDATE_FAILED]', { code: error?.message, serviceRequestId: req.params.serviceRequestId });
+      return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
     }
   });
 
@@ -122,14 +139,9 @@ export function dispatchAttendanceAdminRouter(prisma) {
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, {
-        success: 'La decisión quedó guardada con auditoría.'
-      });
+      return redirectToBoard(res, req.body, { success: 'La decisión quedó guardada con auditoría.' });
     } catch (error) {
-      console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', {
-        code: error?.message,
-        sessionId: req.params.sessionId
-      });
+      console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', { code: error?.message, sessionId: req.params.sessionId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
     }
   });
@@ -144,14 +156,9 @@ export function dispatchAttendanceAdminRouter(prisma) {
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, {
-        success: 'La asistencia manual quedó registrada con auditoría.'
-      });
+      return redirectToBoard(res, req.body, { success: 'La asistencia manual quedó registrada con auditoría.' });
     } catch (error) {
-      console.warn('[ATTENDANCE_ADMIN_MANUAL_FAILED]', {
-        code: error?.message,
-        assignmentId: req.params.assignmentId
-      });
+      console.warn('[ATTENDANCE_ADMIN_MANUAL_FAILED]', { code: error?.message, assignmentId: req.params.assignmentId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
     }
   });
@@ -164,11 +171,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
         select: {
           evidenceStorageKey: true,
           evidenceMimeType: true,
-          attendanceSession: {
-            select: {
-              assignment: { select: { id: true } }
-            }
-          }
+          attendanceSession: { select: { assignment: { select: { id: true } } } }
         }
       });
       if (!mark?.attendanceSession?.assignment?.id
@@ -179,10 +182,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
       const url = await getSignedDownloadUrl(mark.evidenceStorageKey);
       return res.redirect(302, url);
     } catch (error) {
-      console.error('[ATTENDANCE_ADMIN_EVIDENCE_FAILED]', {
-        code: error?.message,
-        markId: req.params.markId
-      });
+      console.error('[ATTENDANCE_ADMIN_EVIDENCE_FAILED]', { code: error?.message, markId: req.params.markId });
       return res.status(503).send('La evidencia no está disponible temporalmente.');
     }
   });
