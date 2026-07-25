@@ -8,6 +8,8 @@ function normalize(text = '') {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9ñ\s]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -28,6 +30,76 @@ function toBogotaDateParts(date) {
 
 export function hasActiveInterviewBooking(booking) {
   return Boolean(booking && ACTIVE_BOOKING_STATUSES.has(booking.status));
+}
+
+export function classifyLocalInterviewIntent(text = '') {
+  const n = normalize(text);
+  if (!n) {
+    return {
+      intent: 'none',
+      confidence: 0,
+      source: 'semantic_local',
+      confirmationKind: null
+    };
+  }
+
+  const asksAlternative = /\b(reagend(?:ar|o|a|emos|ada|ado|amiento)?|reprogram(?:ar|o|a|emos|ada|ado|acion)?|aplaz(?:ar|o|a|amos|ada|ado)?|pospon(?:er|go|es|emos|ida|ido)?|otro horario|otra hora|otro dia|otra fecha|mas tarde|mas temprano|puedo ir luego|puedo ir mas tarde|hay otro|me pasas otra fecha|puede ser manana|podemos cambiar|puedo cambiar|me queda mejor|mover cita|cambiar(?: la)? (?:cita|hora|horario|fecha)|cambiarla|llego tarde|voy tarde|no llego a tiempo)\b/.test(n);
+  const hasDifficulty = /\b(se me complic(?:o|a|ado|ada|aria|ara)?|complicado|me queda dificil|inconveniente|no alcanzo|no llego|voy tarde|llego tarde|me demoro|se me presento|no puedo en ese horario|no puedo a esa hora|no puedo ir)\b/.test(n);
+  const hasAlternativeQualifier = /\b(puedo|podria|sera|habra|hay|otro|otra|mas tarde|mas temprano|manana|despues|luego|cambiar|mover)\b/.test(n);
+
+  if (asksAlternative || (hasDifficulty && hasAlternativeQualifier)) {
+    return {
+      intent: 'reschedule_interview',
+      confidence: 0.82,
+      source: 'semantic_local',
+      confirmationKind: null
+    };
+  }
+
+  const hasCancellationSignal = /\b(cancel|cancelar|cancelo|cancele|cancelada|cancelado|ya no voy|no voy|no asistire|no puedo asistir|no puedo ir|no podre asistir|no podre ir|no alcanzo|no estoy disponible|no me presento|no puedo presentarme|imposible asistir|se me dificulta asistir|se me complica asistir)\b/.test(n);
+  if (hasCancellationSignal) {
+    return {
+      intent: 'cancel_interview',
+      confidence: 0.8,
+      source: 'semantic_local',
+      confirmationKind: null
+    };
+  }
+
+  const hasStrongAffirmativeInterviewSignal = /\b(confirmo|confirmada|confirmado|confirmo asistencia|confirmo mi asistencia|te confirmo|si voy|si ire|si asistire|si puedo asistir|voy a asistir|voy para alla|voy en camino|en camino|ya voy|voy saliendo|ya sali|alla estare|ahi estare|estare ahi|estare alla|estare puntual|asistire|me presento|nos vemos|llego puntual|cuenten conmigo|cuenta conmigo)\b/.test(n);
+  if (hasStrongAffirmativeInterviewSignal) {
+    return {
+      intent: 'confirm_attendance',
+      confidence: 0.8,
+      source: 'semantic_local',
+      confirmationKind: 'strong'
+    };
+  }
+
+  if (/^(si|sii|ok|okay|vale|dale|listo|perfecto|claro|voy)$/.test(n)) {
+    return {
+      intent: 'confirm_attendance',
+      confidence: 0.76,
+      source: 'semantic_local',
+      confirmationKind: 'short'
+    };
+  }
+
+  if (/\b(direccion|ubicacion|donde queda|hora|documentos|que llevo|a quien pregunto|contacto)\b/.test(n)) {
+    return {
+      intent: 'none',
+      confidence: 0.72,
+      source: 'semantic_local_logistics',
+      confirmationKind: null
+    };
+  }
+
+  return {
+    intent: 'none',
+    confidence: 0,
+    source: 'semantic_local',
+    confirmationKind: null
+  };
 }
 
 export function shouldStopInterviewAutomation(booking, now = new Date()) {
@@ -54,27 +126,16 @@ export function isWithinInterviewConfirmationWindow(booking, now = new Date()) {
 export function detectInterviewIntent({ text = '', booking = null, now = new Date() } = {}) {
   if (!hasActiveInterviewBooking(booking)) return 'none';
 
-  const n = normalize(text)
-    .replace(/[^a-z0-9ñ\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!n) return 'none';
+  const local = classifyLocalInterviewIntent(text);
+  if (local.intent === 'cancel_interview' || local.intent === 'reschedule_interview') {
+    return local.intent;
+  }
+  if (local.intent !== 'confirm_attendance') return 'none';
 
   const reminderContext = Boolean(booking?.reminderSentAt || booking?.reminderWindowClosed);
-
-  const hasCancellationSignal = /\b(cancel|cancelar|cancelo|cancele|cancelada|cancelado|ya no voy|no voy|no asistire|no asistir[eé]|no puedo asistir|no puedo ir|no podre asistir|no podr[eé] asistir|no podre ir|no podr[eé] ir|no alcanzo|no estoy disponible|no me presento|no puedo presentarme|imposible asistir|se me dificulta asistir|se me complica asistir)\b/.test(n);
-  if (hasCancellationSignal) {
-    return 'cancel_interview';
+  if (local.confirmationKind === 'short') {
+    return reminderContext ? 'confirm_attendance' : 'none';
   }
-
-  const hasRescheduleSignal = /\b(reagend(?:ar|o|a|emos|ada|ado|amiento)?|reprogram(?:ar|o|a|emos|ada|ado|acion)?|aplazar|posponer|otro horario|otra hora|otro dia|otro d[ií]a|otra fecha|cambiar horario|cambiar la cita|cambiarla|mover cita|mas tarde|m[aá]s tarde|mas temprano|m[aá]s temprano|me pasas otra fecha|puede ser manana|puede ser ma[ñn]ana|podemos cambiar|puedo cambiar|me queda mejor|llego tarde|voy tarde|no llego a tiempo)\b/.test(n);
-  if (hasRescheduleSignal) {
-    return 'reschedule_interview';
-  }
-
-  const hasStrongAffirmativeInterviewSignal = /\b(confirmo|confirmada|confirmado|confirmo asistencia|confirmo mi asistencia|te confirmo|si voy|s[ií] voy|si ire|s[ií] ire|si asistire|s[ií] asistire|si puedo asistir|s[ií] puedo asistir|voy a asistir|voy para alla|voy para all[aá]|voy en camino|alla estare|all[aá] estare|ahi estare|ah[ií] estare|estare ahi|estar[eé] ahi|estar[eé] all[aá]|estare puntual|estar[eé] puntual|asistire|asistir[eé]|me presento|nos vemos|cuenten conmigo|cuenta conmigo)\b/.test(n);
-  const hasShortReminderAffirmation = reminderContext && /^(si|s[ií]|sii|claro|ok|okay|vale|dale|listo|perfecto|confirmo|confirmada|confirmado|alla estare|all[aá] estare|ahi estare|ah[ií] estare|voy|voy en camino)$/.test(n);
-  if (!hasStrongAffirmativeInterviewSignal && !hasShortReminderAffirmation) return 'none';
 
   if (!reminderContext && !isWithinInterviewConfirmationWindow(booking, now)) return 'none';
   return 'confirm_attendance';
