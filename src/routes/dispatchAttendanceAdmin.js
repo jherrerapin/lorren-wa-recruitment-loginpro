@@ -18,6 +18,27 @@ function normalizeString(value) {
   return normalized.length ? normalized : null;
 }
 
+function safeHtmlAttributeState(value, fallback = '') {
+  const normalized = normalizeString(value);
+  if (!normalized) return fallback;
+  return normalized.replace(/[&<>"'`]/g, '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 180);
+}
+
+function sanitizeBoardFilterState(board) {
+  return {
+    ...board,
+    range: {
+      from: safeHtmlAttributeState(board?.range?.from),
+      to: safeHtmlAttributeState(board?.range?.to)
+    },
+    filters: {
+      status: safeHtmlAttributeState(board?.filters?.status, 'ALL'),
+      client: safeHtmlAttributeState(board?.filters?.client, 'ALL'),
+      q: safeHtmlAttributeState(board?.filters?.q)
+    }
+  };
+}
+
 function actorFromRequest(req) {
   return {
     actorUsername: normalizeString(req.session?.username || req.username) || 'operaciones',
@@ -28,8 +49,8 @@ function actorFromRequest(req) {
 function safeReturnParams(source = {}) {
   const params = new URLSearchParams();
   SAFE_FILTER_KEYS.forEach((key) => {
-    const value = normalizeString(source?.[key]);
-    if (value && value.length <= 180) params.set(key, value);
+    const value = safeHtmlAttributeState(source?.[key]);
+    if (value) params.set(key, value);
   });
   return params;
 }
@@ -87,7 +108,8 @@ export function dispatchAttendanceAdminRouter(prisma) {
     applyNoStore(res);
     try {
       const baseBoard = await loadAttendanceAdminBoard(prisma, req.query || {});
-      const board = await enrichAttendanceBoardWithWorkday(prisma, baseBoard);
+      const enrichedBoard = await enrichAttendanceBoardWithWorkday(prisma, baseBoard);
+      const board = sanitizeBoardFilterState(enrichedBoard);
       return res.render('operacionesAsistencia', {
         pageTitle: 'Asistencia operativa',
         role: req.session?.userRole || req.userRole,
