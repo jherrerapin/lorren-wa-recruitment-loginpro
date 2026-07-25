@@ -1,5 +1,9 @@
 import { tryOpenAIParse } from './aiParser.js';
-import { detectInterviewIntent, hasActiveInterviewBooking } from './interviewLifecycle.js';
+import {
+  classifyLocalInterviewIntent,
+  detectInterviewIntent,
+  hasActiveInterviewBooking
+} from './interviewLifecycle.js';
 
 const APPOINTMENT_ACTION_INTENTS = new Set(['confirm_attendance', 'cancel_interview', 'reschedule_interview']);
 
@@ -11,35 +15,6 @@ function normalize(text = '') {
     .replace(/[^a-z0-9ñ\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function classifyFromNaturalText(text = '') {
-  const n = normalize(text);
-  if (!n) return { intent: 'none', confidence: 0, source: 'semantic_local' };
-
-  const asksAlternative = /\b(reagend|reprogram|aplaz|pospon|cambiar|otro horario|otra hora|otro dia|otra fecha|mas tarde|mas temprano|mañana|manana|despues|despu[eé]s|puedo ir luego|puedo ir mas tarde|puedo ir m[aá]s tarde|hay otro|me puede ubicar|me puedes ubicar)\b/.test(n);
-  const hasDifficulty = /\b(se me complic|complicado|me queda dificil|me queda d[ií]ficil|inconveniente|no alcanzo|no llego|voy tarde|llego tarde|me demoro|se me presento|se me present[oó]|no puedo en ese horario|no puedo a esa hora)\b/.test(n);
-  if (asksAlternative || (hasDifficulty && /\b(puedo|podria|podr[ií]a|ser[aá]|habra|hay|otro|otra|mas tarde|mañana|manana|despues|despu[eé]s)\b/.test(n))) {
-    return { intent: 'reschedule_interview', confidence: 0.82, source: 'semantic_local' };
-  }
-
-  if (/\b(ya no voy|no voy|no puedo asistir|no puedo ir|no asistire|no asistir[eé]|cancel|cancela|cancelar|cancelo|no me presento|imposible asistir|no estoy disponible)\b/.test(n)) {
-    return { intent: 'cancel_interview', confidence: 0.8, source: 'semantic_local' };
-  }
-
-  if (/\b(confirmo|confirmada|confirmado|si voy|s[ií] voy|si ire|s[ií] ire|asistire|asistir[eé]|voy en camino|en camino|ya voy|voy saliendo|ya sali|ya sal[ií]|alla estare|all[aá] estare|ahi estare|ah[ií] estare|llego puntual|cuenta conmigo|cuenten conmigo)\b/.test(n)) {
-    return { intent: 'confirm_attendance', confidence: 0.8, source: 'semantic_local' };
-  }
-
-  if (/^(si|s[ií]|ok|okay|vale|dale|listo|perfecto|claro|voy)$/.test(n)) {
-    return { intent: 'confirm_attendance', confidence: 0.76, source: 'semantic_local' };
-  }
-
-  if (/\b(direccion|ubicacion|donde queda|hora|documentos|que llevo|a quien pregunto|contacto)\b/.test(n)) {
-    return { intent: 'none', confidence: 0.72, source: 'semantic_local_logistics' };
-  }
-
-  return { intent: 'none', confidence: 0, source: 'semantic_local' };
 }
 
 function mapAiRecruitmentIntent(aiResult = {}) {
@@ -79,19 +54,38 @@ function mapAiRecruitmentIntent(aiResult = {}) {
   return { intent: 'none', confidence: 0, source: 'openai_recruitment_no_match' };
 }
 
-export async function classifyInterviewIntent({ text = '', booking = null, now = new Date() } = {}) {
+export async function classifyInterviewIntent({
+  text = '',
+  booking = null,
+  now = new Date(),
+  parseIntent = tryOpenAIParse
+} = {}) {
   const fallbackIntent = detectInterviewIntent({ text, booking, now });
-  if (!hasActiveInterviewBooking(booking)) return { intent: 'none', confidence: 0, source: 'no_active_booking', fallbackIntent };
+  if (!hasActiveInterviewBooking(booking)) {
+    return { intent: 'none', confidence: 0, source: 'no_active_booking', fallbackIntent };
+  }
 
-  const reminderContext = Boolean(booking?.reminderSentAt || booking?.reminderWindowClosed);
-  if (!reminderContext && fallbackIntent === 'none') return { intent: 'none', confidence: 0, source: 'outside_reminder_context', fallbackIntent };
-
-  const local = classifyFromNaturalText(text);
-  if (APPOINTMENT_ACTION_INTENTS.has(local.intent) && local.confidence >= 0.76) {
+  const local = classifyLocalInterviewIntent(text);
+  if (local.intent === 'cancel_interview' || local.intent === 'reschedule_interview') {
+    return { ...local, fallbackIntent };
+  }
+  if (local.intent === 'confirm_attendance' && fallbackIntent === 'confirm_attendance') {
+    return { ...local, fallbackIntent };
+  }
+  if (local.source === 'semantic_local_logistics') {
     return { ...local, fallbackIntent };
   }
 
-  const aiResult = await tryOpenAIParse(text, {
+  const reminderContext = Boolean(booking?.reminderSentAt || booking?.reminderWindowClosed);
+  if (!reminderContext) {
+    if (APPOINTMENT_ACTION_INTENTS.has(fallbackIntent)) {
+      return { intent: fallbackIntent, confidence: 0.72, source: 'deterministic_fallback', fallbackIntent };
+    }
+    return { intent: 'none', confidence: 0, source: 'outside_reminder_context', fallbackIntent };
+  }
+
+  const parser = typeof parseIntent === 'function' ? parseIntent : tryOpenAIParse;
+  const aiResult = await parser(text, {
     mode: 'interview_reminder_intent',
     booking: {
       status: booking.status || null,
@@ -108,10 +102,6 @@ export async function classifyInterviewIntent({ text = '', booking = null, now =
 
   if (APPOINTMENT_ACTION_INTENTS.has(fallbackIntent)) {
     return { intent: fallbackIntent, confidence: 0.72, source: 'deterministic_fallback', fallbackIntent };
-  }
-
-  if (local.source === 'semantic_local_logistics') {
-    return { ...local, fallbackIntent };
   }
 
   return { intent: 'none', confidence: 0, source: 'no_match', fallbackIntent };
