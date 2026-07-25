@@ -2,7 +2,7 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v2';
+const CACHE_NAME = 'lorren-worker-portal-shell-v3';
 const STATIC_ASSETS = [
   '/operaciones/portal/offline.js',
   '/operaciones/portal/manifest.webmanifest',
@@ -28,6 +28,10 @@ function transactionDone(transaction) {
     transaction.addEventListener('abort', () => reject(transaction.error || new Error('indexeddb_transaction_aborted')), { once: true });
     transaction.addEventListener('error', () => reject(transaction.error || new Error('indexeddb_transaction_failed')), { once: true });
   });
+}
+
+function normalizeLegacyRecord(record) {
+  return { ...record, markType: record?.markType === 'DEPARTURE' ? 'DEPARTURE' : 'ARRIVAL' };
 }
 
 function openDatabase() {
@@ -57,10 +61,8 @@ async function readQueue() {
     const transaction = database.transaction(QUEUE_STORE, 'readonly');
     const records = await requestPromise(transaction.objectStore(QUEUE_STORE).getAll());
     await transactionDone(transaction);
-    return Array.isArray(records) ? records : [];
-  } finally {
-    database.close();
-  }
+    return (Array.isArray(records) ? records : []).map(normalizeLegacyRecord);
+  } finally { database.close(); }
 }
 
 async function putQueueRecord(record) {
@@ -69,9 +71,7 @@ async function putQueueRecord(record) {
     const transaction = database.transaction(QUEUE_STORE, 'readwrite');
     transaction.objectStore(QUEUE_STORE).put(record);
     await transactionDone(transaction);
-  } finally {
-    database.close();
-  }
+  } finally { database.close(); }
 }
 
 async function completeQueueRecord(record, receipt) {
@@ -82,15 +82,14 @@ async function completeQueueRecord(record, receipt) {
     transaction.objectStore(RECEIPT_STORE).put({
       idempotencyKey: record.idempotencyKey,
       assignmentId: record.assignmentId,
+      markType: record.markType || 'ARRIVAL',
       capturedAt: record.clientCapturedAt,
       queuedAt: record.queuedAt,
       completedAt: new Date().toISOString(),
       ...receipt
     });
     await transactionDone(transaction);
-  } finally {
-    database.close();
-  }
+  } finally { database.close(); }
 }
 
 async function notifyClients(message) {
@@ -99,8 +98,7 @@ async function notifyClients(message) {
 }
 
 function offlineFallbackResponse() {
-  return new Response(`<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Portal del Auxiliar · Lórren</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f4f6f8;color:#17212b;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(100%,480px);background:#fff;border:1px solid #dfe4ea;border-radius:20px;padding:26px;box-shadow:0 16px 44px rgba(23,33,43,.09)}h1{margin:0 0 10px;font-size:30px}p{margin:0;color:#4d5b69;line-height:1.55}.status{margin-top:18px;padding:14px;border-radius:12px;background:#fff6df;color:#76520b;font-weight:700}</style></head><body><main class="card"><h1>Sin conexión</h1><p>Abre el portal una vez con internet para guardar tu programación en este dispositivo. Las marcaciones pendientes se sincronizarán cuando vuelva la conexión.</p><div class="status">No hay una copia offline disponible todavía.</div></main></body></html>`, {
+  return new Response(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Portal del Auxiliar · Lórren</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f4f6f8;color:#17212b;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(100%,480px);background:#fff;border:1px solid #dfe4ea;border-radius:20px;padding:26px}h1{margin:0 0 10px}p{color:#4d5b69;line-height:1.55}.status{margin-top:18px;padding:14px;border-radius:12px;background:#fff6df;color:#76520b;font-weight:700}</style></head><body><main class="card"><h1>Sin conexión</h1><p>Abre el portal una vez con internet para guardar tu programación. Las llegadas y salidas pendientes se sincronizarán cuando vuelva la conexión.</p><div class="status">No hay una copia offline disponible todavía.</div></main></body></html>`, {
     status: 503,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
@@ -111,11 +109,7 @@ function offlineFallbackResponse() {
 }
 
 async function cacheActivePortal() {
-  const response = await fetch(PORTAL_PATH, {
-    credentials: 'include',
-    cache: 'no-store',
-    headers: { Accept: 'text/html' }
-  });
+  const response = await fetch(PORTAL_PATH, { credentials: 'include', cache: 'no-store', headers: { Accept: 'text/html' } });
   const mode = response.headers.get('X-Lorren-Worker-Portal-Mode');
   const cache = await caches.open(CACHE_NAME);
   if (response.ok && mode === 'active') {
@@ -132,15 +126,10 @@ async function networkFirstPortal(request) {
   try {
     const response = await fetch(request);
     const mode = response.headers.get('X-Lorren-Worker-Portal-Mode');
-    if (response.ok && mode === 'active') {
-      await cache.put(PORTAL_CACHE_KEY, response.clone());
-    } else if (mode === 'inactive') {
-      await cache.delete(PORTAL_CACHE_KEY);
-    }
+    if (response.ok && mode === 'active') await cache.put(PORTAL_CACHE_KEY, response.clone());
+    else if (mode === 'inactive') await cache.delete(PORTAL_CACHE_KEY);
     return response;
-  } catch {
-    return await cache.match(PORTAL_CACHE_KEY) || offlineFallbackResponse();
-  }
+  } catch { return await cache.match(PORTAL_CACHE_KEY) || offlineFallbackResponse(); }
 }
 
 async function cacheFirst(request) {
@@ -164,7 +153,8 @@ function buildArrivalForm(record) {
   form.set('photoConsent', record.selfie && record.photoConsent ? 'true' : 'false');
   if (record.selfie instanceof Blob) {
     const extension = record.selfie.type === 'image/png' ? 'png' : record.selfie.type === 'image/webp' ? 'webp' : 'jpg';
-    form.set('selfie', record.selfie, `selfie-llegada-offline.${extension}`);
+    const label = record.markType === 'DEPARTURE' ? 'salida' : 'llegada';
+    form.set('selfie', record.selfie, `selfie-${label}-offline.${extension}`);
   }
   return form;
 }
@@ -174,50 +164,36 @@ function terminalRejection(status, error) {
   return status === 409 && [
     'arrival_already_registered',
     'arrival_window_not_open',
+    'departure_already_registered',
+    'departure_arrival_required',
+    'departure_before_arrival',
     'offline_capture_expired',
     'assignment_not_available',
     'attendance_not_enabled'
   ].includes(error);
 }
 
-async function syncRecord(record) {
+async function syncRecord(rawRecord) {
+  const record = normalizeLegacyRecord(rawRecord);
   const queuedAt = new Date(record.queuedAt || 0).getTime();
   if (!Number.isFinite(queuedAt) || Date.now() - queuedAt > MAX_QUEUE_AGE_MS) {
-    await completeQueueRecord(record, {
-      state: 'REJECTED',
-      error: 'offline_capture_expired',
-      message: 'La marcación offline venció antes de sincronizarse.'
-    });
-    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, error: 'offline_capture_expired' });
+    await completeQueueRecord(record, { state: 'REJECTED', error: 'offline_capture_expired', message: 'La marcación offline venció antes de sincronizarse.' });
+    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, markType: record.markType, error: 'offline_capture_expired' });
     return { retry: false, sessionRequired: false };
   }
 
-  const inProgress = {
-    ...record,
-    state: 'SYNCING',
-    attempts: Number(record.attempts || 0) + 1,
-    updatedAt: new Date().toISOString(),
-    lastError: null
-  };
+  const inProgress = { ...record, state: 'SYNCING', attempts: Number(record.attempts || 0) + 1, updatedAt: new Date().toISOString(), lastError: null };
   await putQueueRecord(inProgress);
-  await notifyClients({ type: 'ARRIVAL_QUEUE_UPDATED', assignmentId: record.assignmentId, state: 'SYNCING' });
-
+  await notifyClients({ type: 'ARRIVAL_QUEUE_UPDATED', assignmentId: record.assignmentId, markType: record.markType, state: 'SYNCING' });
+  const endpoint = record.markType === 'DEPARTURE' ? 'salida' : 'llegada';
   let response;
   try {
-    response = await fetch(`${PORTAL_PATH}/asignaciones/${encodeURIComponent(record.assignmentId)}/llegada`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'X-Requested-With': 'worker-portal' },
-      body: buildArrivalForm(record)
+    response = await fetch(`${PORTAL_PATH}/asignaciones/${encodeURIComponent(record.assignmentId)}/${endpoint}`, {
+      method: 'POST', credentials: 'include', headers: { 'X-Requested-With': 'worker-portal' }, body: buildArrivalForm(record)
     });
   } catch (error) {
-    await putQueueRecord({
-      ...inProgress,
-      state: 'PENDING',
-      lastError: 'network_unavailable',
-      updatedAt: new Date().toISOString()
-    });
-    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: 'network_unavailable' });
+    await putQueueRecord({ ...inProgress, state: 'PENDING', lastError: 'network_unavailable', updatedAt: new Date().toISOString() });
+    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, markType: record.markType, error: 'network_unavailable' });
     return { retry: true, sessionRequired: false, error };
   }
 
@@ -229,43 +205,32 @@ async function syncRecord(record) {
       validationStatus: payload.validationStatus || null,
       attendanceStatus: payload.attendanceStatus || null,
       punctualityStatus: payload.punctualityStatus || null,
+      workedMinutes: payload.workedMinutes ?? null,
       message: payload.message || 'Marcación sincronizada.'
     });
-    await notifyClients({ type: 'ARRIVAL_SYNCED', assignmentId: record.assignmentId, state, payload });
+    await notifyClients({ type: 'ARRIVAL_SYNCED', assignmentId: record.assignmentId, markType: record.markType, state, payload });
     return { retry: false, sessionRequired: false };
   }
 
   if (response.status === 401) {
-    await putQueueRecord({
-      ...inProgress,
-      state: 'SESSION_REQUIRED',
-      lastError: payload.error || 'portal_session_required',
-      updatedAt: new Date().toISOString()
-    });
-    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: 'portal_session_required' });
+    await putQueueRecord({ ...inProgress, state: 'SESSION_REQUIRED', lastError: payload.error || 'portal_session_required', updatedAt: new Date().toISOString() });
+    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, markType: record.markType, error: 'portal_session_required' });
     return { retry: false, sessionRequired: true };
   }
 
   if (terminalRejection(response.status, payload.error)) {
-    const alreadyRecorded = payload.error === 'arrival_already_registered';
+    const alreadyRecorded = ['arrival_already_registered', 'departure_already_registered'].includes(payload.error);
     await completeQueueRecord(record, {
       state: alreadyRecorded ? 'ALREADY_RECORDED' : 'REJECTED',
-      error: payload.error || 'arrival_rejected',
-      message: alreadyRecorded
-        ? 'La llegada ya estaba registrada en Lórren.'
-        : 'La marcación offline fue rechazada por el servidor.'
+      error: payload.error || 'mark_rejected',
+      message: alreadyRecorded ? 'La marcación ya estaba registrada en Lórren.' : 'La marcación offline fue rechazada por el servidor.'
     });
-    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, error: payload.error || 'arrival_rejected' });
+    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, markType: record.markType, error: payload.error || 'mark_rejected' });
     return { retry: false, sessionRequired: false };
   }
 
-  await putQueueRecord({
-    ...inProgress,
-    state: 'PENDING',
-    lastError: payload.error || `http_${response.status}`,
-    updatedAt: new Date().toISOString()
-  });
-  await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, error: payload.error || `http_${response.status}` });
+  await putQueueRecord({ ...inProgress, state: 'PENDING', lastError: payload.error || `http_${response.status}`, updatedAt: new Date().toISOString() });
+  await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, markType: record.markType, error: payload.error || `http_${response.status}` });
   return { retry: response.status >= 500, sessionRequired: false };
 }
 
@@ -280,51 +245,21 @@ async function syncQueue({ throwOnRetry = false } = {}) {
   if (throwOnRetry && shouldRetry) throw new Error('arrival_sync_retry_required');
 }
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(STATIC_ASSETS))
-      .then(() => self.skipWaiting())
-  );
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    Promise.all([
-      caches.keys().then((names) => Promise.all(names.filter((name) => name.startsWith('lorren-worker-portal-') && name !== CACHE_NAME).map((name) => caches.delete(name)))),
-      self.clients.claim()
-    ])
-  );
-});
-
+self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting())));
+self.addEventListener('activate', (event) => event.waitUntil(Promise.all([
+  caches.keys().then((names) => Promise.all(names.filter((name) => name.startsWith('lorren-worker-portal-') && name !== CACHE_NAME).map((name) => caches.delete(name)))),
+  self.clients.claim()
+])));
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-
-  if (request.mode === 'navigate' && (url.pathname === PORTAL_PATH || url.pathname === `${PORTAL_PATH}/`)) {
-    event.respondWith(networkFirstPortal(request));
-    return;
-  }
-
-  if (STATIC_ASSETS.includes(url.pathname)) {
-    event.respondWith(cacheFirst(request));
-  }
+  if (request.mode === 'navigate' && (url.pathname === PORTAL_PATH || url.pathname === `${PORTAL_PATH}/`)) { event.respondWith(networkFirstPortal(request)); return; }
+  if (STATIC_ASSETS.includes(url.pathname)) event.respondWith(cacheFirst(request));
 });
-
-self.addEventListener('sync', (event) => {
-  if (event.tag === SYNC_TAG) {
-    event.waitUntil(syncQueue({ throwOnRetry: true }));
-  }
-});
-
+self.addEventListener('sync', (event) => { if (event.tag === SYNC_TAG) event.waitUntil(syncQueue({ throwOnRetry: true })); });
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SYNC_ARRIVALS') {
-    event.waitUntil(syncQueue().catch(() => {}));
-    return;
-  }
-  if (event.data?.type === 'CACHE_PORTAL') {
-    event.waitUntil(cacheActivePortal().catch(() => false));
-  }
+  if (event.data?.type === 'SYNC_ARRIVALS') { event.waitUntil(syncQueue().catch(() => {})); return; }
+  if (event.data?.type === 'CACHE_PORTAL') event.waitUntil(cacheActivePortal().catch(() => false));
 });

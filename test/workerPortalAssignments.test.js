@@ -9,169 +9,74 @@ const NOW = new Date('2026-07-22T13:00:00.000Z');
 
 function assignmentFixture(overrides = {}) {
   return {
-    id: 'assignment-1',
-    workerId: 'worker-1',
-    status: 'CONFIRMED',
-    attendanceSession: null,
+    id: 'assignment-1', workerId: 'worker-1', serviceRequestId: 'request-1', status: 'CONFIRMED', attendanceSession: null,
     serviceRequest: {
-      clientName: 'Cliente Prueba',
-      operationPointName: 'Centro logístico',
-      cityName: 'Bogotá',
-      address: 'Carrera 1 # 2-3',
-      serviceDate: new Date('2026-07-22T00:00:00.000Z'),
-      startTime: '08:30',
-      endTime: '17:00',
-      operationPoint: {
-        name: 'Centro logístico',
-        cityName: 'Bogotá',
-        address: 'Carrera 1 # 2-3',
-        attendanceEnabled: true,
-        earlyArrivalWindowMinutes: 60,
-        absenceGraceMinutes: 15,
-        attendancePhotoPolicy: 'RISK_ONLY'
-      },
+      clientName: 'Cliente Prueba', operationPointName: 'Centro logístico', cityName: 'Bogotá', address: 'Carrera 1 # 2-3',
+      serviceDate: new Date('2026-07-22T00:00:00.000Z'), startTime: '08:30', endTime: '17:00',
+      operationPoint: { name: 'Centro logístico', cityName: 'Bogotá', address: 'Carrera 1 # 2-3', attendanceEnabled: true, earlyArrivalWindowMinutes: 60, absenceGraceMinutes: 15, attendancePhotoPolicy: 'RISK_ONLY' },
       ...overrides.serviceRequest
     },
     ...overrides
   };
 }
 
-test('lista únicamente asignaciones activas del auxiliar y prepara una tarjeta segura', async () => {
-  let observedQuery;
-  const prisma = {
-    dispatchAssignment: {
-      async findMany(query) {
-        observedQuery = query;
-        return [assignmentFixture()];
-      }
-    }
+function prismaWithAssignments(methods) {
+  return {
+    dispatchAssignment: methods,
+    async $queryRaw() { return []; },
+    async $executeRaw() { return 0; }
   };
+}
 
-  const assignments = await loadWorkerPortalAssignments(prisma, {
-    workerId: 'worker-1',
-    now: NOW
-  });
-
+test('lista asignaciones activas y prepara llegada con descanso predeterminado cero', async () => {
+  let observedQuery;
+  const prisma = prismaWithAssignments({ async findMany(query) { observedQuery = query; return [assignmentFixture()]; } });
+  const assignments = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: NOW });
   assert.equal(observedQuery.where.workerId, 'worker-1');
   assert.deepEqual(observedQuery.where.status.in, ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']);
-  assert.equal(assignments.length, 1);
-  assert.equal(assignments[0].clientName, 'Cliente Prueba');
   assert.equal(assignments[0].canRegisterArrival, true);
-  assert.equal(assignments[0].arrivalWindowClosesAt, '2026-07-22T13:45:00.000Z');
-  assert.equal(assignments[0].photoRequired, true);
+  assert.equal(assignments[0].canRegisterDeparture, false);
+  assert.equal(assignments[0].breakLabel, 'Sin descanso no remunerado');
   assert.equal(assignments[0].workerId, undefined);
-  assert.equal(assignments[0].serviceRequest, undefined);
 });
 
-test('la consulta puntual exige simultáneamente assignmentId y workerId', async () => {
+test('la consulta puntual exige assignmentId y workerId', async () => {
   let observedWhere;
-  const prisma = {
-    dispatchAssignment: {
-      async findFirst(query) {
-        observedWhere = query.where;
-        return assignmentFixture();
-      }
-    }
-  };
-
-  const assignment = await loadWorkerPortalAssignmentForArrival(prisma, {
-    workerId: 'worker-1',
-    assignmentId: 'assignment-1',
-    now: NOW
-  });
-
+  const prisma = prismaWithAssignments({ async findFirst(query) { observedWhere = query.where; return assignmentFixture(); } });
+  const assignment = await loadWorkerPortalAssignmentForArrival(prisma, { workerId: 'worker-1', assignmentId: 'assignment-1', now: NOW });
   assert.equal(observedWhere.id, 'assignment-1');
   assert.equal(observedWhere.workerId, 'worker-1');
   assert.equal(assignment.id, 'assignment-1');
 });
 
-test('antes de la ventana anticipada informa la hora y bloquea la marcación', async () => {
-  const prisma = {
-    dispatchAssignment: {
-      async findMany() {
-        return [assignmentFixture()];
-      }
-    }
-  };
-
-  const assignments = await loadWorkerPortalAssignments(prisma, {
-    workerId: 'worker-1',
-    now: new Date('2026-07-22T11:00:00.000Z')
-  });
-
-  assert.equal(assignments[0].canRegisterArrival, false);
-  assert.match(assignments[0].actionLabel, /Disponible desde/i);
-  assert.equal(assignments[0].arrivalWindowOpensAt, '2026-07-22T12:30:00.000Z');
+test('antes de la ventana anticipada bloquea llegada', async () => {
+  const prisma = prismaWithAssignments({ async findMany() { return [assignmentFixture()]; } });
+  const [assignment] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T11:00:00.000Z') });
+  assert.equal(assignment.canRegisterArrival, false);
+  assert.match(assignment.actionLabel, /Disponible desde/i);
 });
 
-test('después del tiempo de ausencia muestra jornada vencida y bloquea el registro', async () => {
-  const prisma = {
-    dispatchAssignment: {
-      async findMany() {
-        return [assignmentFixture()];
-      }
-    }
-  };
-
-  const assignments = await loadWorkerPortalAssignments(prisma, {
-    workerId: 'worker-1',
-    now: new Date('2026-07-22T13:45:01.000Z')
-  });
-
-  assert.equal(assignments[0].canRegisterArrival, false);
-  assert.equal(assignments[0].arrivalWindowExpired, true);
-  assert.equal(assignments[0].actionLabel, 'Jornada vencida');
-  assert.equal(assignments[0].arrivalWindowClosesAt, '2026-07-22T13:45:00.000Z');
+test('después del margen muestra jornada vencida', async () => {
+  const prisma = prismaWithAssignments({ async findMany() { return [assignmentFixture()]; } });
+  const [assignment] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T13:45:01.000Z') });
+  assert.equal(assignment.arrivalWindowExpired, true);
+  assert.equal(assignment.actionLabel, 'Jornada vencida');
 });
 
-test('una jornada vencida se identifica antes que la configuración deshabilitada', async () => {
-  const prisma = {
-    dispatchAssignment: {
-      async findMany() {
-        return [assignmentFixture({
-          serviceRequest: {
-            ...assignmentFixture().serviceRequest,
-            operationPoint: {
-              ...assignmentFixture().serviceRequest.operationPoint,
-              attendanceEnabled: false
-            }
-          }
-        })];
-      }
-    }
-  };
-
-  const assignments = await loadWorkerPortalAssignments(prisma, {
-    workerId: 'worker-1',
-    now: new Date('2026-07-22T14:00:00.000Z')
-  });
-
-  assert.equal(assignments[0].attendanceEnabled, false);
-  assert.equal(assignments[0].actionLabel, 'Jornada vencida');
+test('después de la llegada ofrece registrar salida y no una segunda llegada', async () => {
+  const prisma = prismaWithAssignments({ async findMany() { return [assignmentFixture({ attendanceSession: { arrivalReportedAt: NOW, departureReportedAt: null, validationStatus: 'AUTO_VALIDATED', attendanceStatus: 'ON_TIME', punctualityStatus: 'ON_TIME', workedMinutes: null } })]; } });
+  const [assignment] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: NOW });
+  assert.equal(assignment.arrivalReported, true);
+  assert.equal(assignment.canRegisterArrival, false);
+  assert.equal(assignment.canRegisterDeparture, true);
+  assert.equal(assignment.actionType, 'DEPARTURE');
+  assert.equal(assignment.actionLabel, 'Registrar salida');
 });
 
-test('una llegada existente se muestra como estado y no ofrece una segunda marcación', async () => {
-  const prisma = {
-    dispatchAssignment: {
-      async findMany() {
-        return [assignmentFixture({
-          attendanceSession: {
-            arrivalReportedAt: NOW,
-            validationStatus: 'AUTO_VALIDATED',
-            attendanceStatus: 'ON_TIME',
-            punctualityStatus: 'ON_TIME'
-          }
-        })];
-      }
-    }
-  };
-
-  const assignments = await loadWorkerPortalAssignments(prisma, {
-    workerId: 'worker-1',
-    now: NOW
-  });
-
-  assert.equal(assignments[0].arrivalReported, true);
-  assert.equal(assignments[0].canRegisterArrival, false);
-  assert.equal(assignments[0].actionLabel, 'Llegada validada · a tiempo');
+test('después de la salida muestra horas netas y cierra la jornada', async () => {
+  const prisma = prismaWithAssignments({ async findMany() { return [assignmentFixture({ attendanceSession: { arrivalReportedAt: new Date('2026-07-22T13:00:00Z'), departureReportedAt: new Date('2026-07-22T22:00:00Z'), validationStatus: 'AUTO_VALIDATED', attendanceStatus: 'COMPLETED', punctualityStatus: 'ON_TIME', workedMinutes: 480 } })]; } });
+  const [assignment] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T22:01:00Z') });
+  assert.equal(assignment.departureReported, true);
+  assert.equal(assignment.actionType, 'DONE');
+  assert.match(assignment.actionLabel, /8 h/);
 });

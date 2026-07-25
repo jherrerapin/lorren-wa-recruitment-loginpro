@@ -3,6 +3,11 @@ import {
   buildDispatchAttendanceExpectedWindow,
   getDispatchArrivalWindowState
 } from './registerArrival.js';
+import {
+  getDispatchAttendanceBreakPolicies,
+  getDispatchAttendanceBreakPolicy
+} from '../infrastructure/dispatchAttendanceBreakPolicyRepository.js';
+import { formatDispatchMinutes } from '../domain/attendanceWorkdayPolicy.js';
 
 const PORTAL_PAST_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PORTAL_FUTURE_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
@@ -14,13 +19,9 @@ function requireNonEmptyString(value, label) {
   return value.trim();
 }
 
-function validDate(value) {
-  return value instanceof Date && !Number.isNaN(value.getTime());
-}
-
 function requireDate(value, label) {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  if (!validDate(date)) throw new Error(`${label}_invalid`);
+  if (Number.isNaN(date.getTime())) throw new Error(`${label}_invalid`);
   return date;
 }
 
@@ -58,7 +59,19 @@ function formatTime(value) {
   }).format(value);
 }
 
-function attendanceLabel(session) {
+function formatDateTime(value) {
+  if (!value) return null;
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: BOGOTA_TIME_ZONE,
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  }).format(value);
+}
+
+function arrivalLabel(session) {
   if (!session?.arrivalReportedAt) return null;
   if (session.validationStatus === 'AUTO_VALIDATED') {
     return session.punctualityStatus === 'LATE'
@@ -94,7 +107,13 @@ function boundedArrivalWindow({ now, expectedStartAt, point }) {
   };
 }
 
-function buildPortalAssignment(assignment, now) {
+function breakLabel(policy) {
+  return policy.unpaidBreakMinutes > 0
+    ? `${policy.unpaidBreakMinutes} min no remunerados`
+    : 'Sin descanso no remunerado';
+}
+
+function buildPortalAssignment(assignment, now, breakPolicy) {
   const request = assignment?.serviceRequest;
   if (!request) throw new Error('worker_portal_assignment_service_request_required');
 
@@ -112,16 +131,27 @@ function buildPortalAssignment(assignment, now) {
   }
 
   const arrivalReported = Boolean(session?.arrivalReportedAt);
+  const departureReported = Boolean(session?.departureReportedAt);
   const attendanceEnabled = point?.attendanceEnabled === true;
   const canRegisterArrival = attendanceEnabled
     && Boolean(expectedStartAt)
     && windowState.open
     && !arrivalReported;
+  const canRegisterDeparture = attendanceEnabled
+    && arrivalReported
+    && !departureReported
+    && session?.validationStatus !== 'REJECTED';
   const photoPolicy = normalizePhotoPolicy(point?.attendancePhotoPolicy);
 
+  let actionType = 'ARRIVAL';
   let actionLabel = 'Registrar llegada';
-  if (arrivalReported) actionLabel = attendanceLabel(session);
-  else if (!expectedStartAt) actionLabel = 'Horario pendiente';
+  if (departureReported) {
+    actionType = 'DONE';
+    actionLabel = `Jornada finalizada · ${formatDispatchMinutes(session?.workedMinutes)}`;
+  } else if (arrivalReported) {
+    actionType = 'DEPARTURE';
+    actionLabel = 'Registrar salida';
+  } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
   else if (windowState.expired) actionLabel = 'Jornada vencida';
   else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
   else if (!windowState.open) actionLabel = `Disponible desde ${formatTime(windowState.opensAt)}`;
@@ -144,18 +174,35 @@ function buildPortalAssignment(assignment, now) {
     arrivalWindowExpired: windowState.expired,
     attendanceEnabled,
     arrivalReported,
+    arrivalReportedLabel: formatDateTime(session?.arrivalReportedAt),
+    departureReported,
+    departureReportedLabel: formatDateTime(session?.departureReportedAt),
+    workedMinutes: session?.workedMinutes ?? null,
+    workedLabel: session?.workedMinutes === null || session?.workedMinutes === undefined
+      ? null
+      : formatDispatchMinutes(session.workedMinutes),
+    breakPolicy: breakPolicy.policy,
+    unpaidBreakMinutes: breakPolicy.unpaidBreakMinutes,
+    breakLabel: breakLabel(breakPolicy),
     attendanceStatus: session?.attendanceStatus || 'PENDING',
     validationStatus: session?.validationStatus || 'PENDING',
     punctualityStatus: session?.punctualityStatus || null,
+    arrivalStatusLabel: arrivalLabel(session),
+    actionType,
     actionLabel,
     canRegisterArrival,
+    canRegisterDeparture,
     photoPolicy,
     photoRequired: photoPolicy !== 'NEVER'
   };
 }
 
 function isPortalRelevant(assignment, now) {
-  if (assignment.arrivalReported) return true;
+  if (assignment.arrivalReported && !assignment.departureReported) return true;
+  if (assignment.departureReported) {
+    const departure = assignment.departureReportedLabel ? new Date(assignment.expectedStartAt || 0).getTime() : 0;
+    return !departure || departure >= now.getTime() - PORTAL_PAST_WINDOW_MS;
+  }
   if (!assignment.expectedStartAt) return true;
   const start = new Date(assignment.expectedStartAt).getTime();
   return start >= now.getTime() - PORTAL_PAST_WINDOW_MS
@@ -176,9 +223,17 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
       serviceRequest: { include: { operationPoint: true } }
     }
   });
+  const policies = await getDispatchAttendanceBreakPolicies(
+    prisma,
+    records.map((record) => record.serviceRequestId)
+  );
 
   return records
-    .map((record) => buildPortalAssignment(record, now))
+    .map((record) => buildPortalAssignment(
+      record,
+      now,
+      policies.get(record.serviceRequestId) || { policy: 'NONE', unpaidBreakMinutes: 0 }
+    ))
     .filter((record) => isPortalRelevant(record, now))
     .sort((left, right) => {
       const leftTime = left.expectedStartAt ? new Date(left.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
@@ -187,7 +242,7 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
     });
 }
 
-export async function loadWorkerPortalAssignmentForArrival(prisma, input = {}) {
+export async function loadWorkerPortalAssignmentForMark(prisma, input = {}) {
   requireAssignmentReader(prisma, 'findFirst');
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
   const assignmentId = requireNonEmptyString(input.assignmentId, 'worker_portal_assignment_id');
@@ -203,6 +258,9 @@ export async function loadWorkerPortalAssignmentForArrival(prisma, input = {}) {
       serviceRequest: { include: { operationPoint: true } }
     }
   });
-
-  return assignment ? buildPortalAssignment(assignment, now) : null;
+  if (!assignment) return null;
+  const policy = await getDispatchAttendanceBreakPolicy(prisma, assignment.serviceRequestId);
+  return buildPortalAssignment(assignment, now, policy);
 }
+
+export const loadWorkerPortalAssignmentForArrival = loadWorkerPortalAssignmentForMark;

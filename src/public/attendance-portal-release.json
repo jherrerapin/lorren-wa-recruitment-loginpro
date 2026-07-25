@@ -1,9 +1,9 @@
 {
   "service": "lorren-attendance-portal",
-  "release": "attendance-portal-2026-07-23-r7",
+  "release": "attendance-portal-2026-07-25-r8",
   "legacyAdminRedirect": true,
   "publicPortalPath": "/operaciones/portal",
-  "features": ["assignments", "arrival", "geolocation", "selfie-evidence", "attendance-point-map", "resilient-server-side-geocoding", "bounded-arrival-window", "attendance-admin-review", "manual-attendance-audit", "pwa-installable", "offline-web-arrival", "indexeddb-queue", "background-sync", "offline-manual-review"],
+  "features": ["assignments", "arrival", "departure", "worked-hours", "unpaid-flexible-break", "geolocation", "selfie-evidence", "attendance-point-map", "resilient-server-side-geocoding", "bounded-arrival-window", "attendance-admin-review", "manual-attendance-audit", "pwa-installable", "offline-web-arrival", "offline-web-departure", "indexeddb-queue", "background-sync", "offline-manual-review"],
   "offlineQueueMaximumHours": 72,
   "defaultGeofenceRadiusMeters": 100,
   "defaultMaxLocationAccuracyMeters": 50

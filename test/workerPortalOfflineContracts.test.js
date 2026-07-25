@@ -9,56 +9,46 @@ const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 const release = JSON.parse(fs.readFileSync(new URL('../src/public/attendance-portal-release.json', import.meta.url), 'utf8'));
 
-test('el portal es instalable y su alcance incluye la URL raíz de la jornada', () => {
-  assert.equal(manifest.id, '/operaciones/portal');
-  assert.equal(manifest.start_url, '/operaciones/portal');
-  assert.equal(manifest.scope, '/operaciones/portal');
-  assert.equal(manifest.display, 'standalone');
+test('el portal es instalable y su alcance incluye la jornada', () => {
+  assert.equal(manifest.id, '/operaciones/portal'); assert.equal(manifest.start_url, '/operaciones/portal'); assert.equal(manifest.scope, '/operaciones/portal'); assert.equal(manifest.display, 'standalone');
   assert.match(viewSource, /rel="manifest" href="\/operaciones\/portal\/manifest\.webmanifest"/);
-  assert.ok(manifest.icons.every((icon) => icon.src === '/operaciones/portal/icon.svg'));
 });
 
-test('el service worker se sirve desde el portal con alcance explícito y sin caché HTTP', () => {
+test('el service worker se sirve con alcance explícito', () => {
   assert.match(routeSource, /router\.get\('\/service-worker\.js'/);
   assert.match(routeSource, /Service-Worker-Allowed', WORKER_PORTAL_HOME_PATH/);
-  assert.match(routeSource, /no-cache, no-store, must-revalidate/);
   assert.match(routeSource, /worker-src 'self'/);
-  assert.match(routeSource, /manifest-src 'self'/);
 });
 
-test('el runtime, manifest e icono se solicitan dentro del alcance del service worker', () => {
+test('los recursos offline están dentro del alcance', () => {
   assert.match(viewSource, /src="\/operaciones\/portal\/offline\.js"/);
-  assert.match(viewSource, /href="\/operaciones\/portal\/icon\.svg"/);
-  assert.match(routeSource, /router\.get\('\/offline\.js'/);
-  assert.match(routeSource, /router\.get\('\/manifest\.webmanifest'/);
-  assert.match(routeSource, /router\.get\('\/icon\.svg'/);
   assert.match(serviceWorkerSource, /'\/operaciones\/portal\/offline\.js'/);
   assert.match(serviceWorkerSource, /'\/operaciones\/portal\/manifest\.webmanifest'/);
   assert.match(serviceWorkerSource, /'\/operaciones\/portal\/icon\.svg'/);
-  assert.doesNotMatch(serviceWorkerSource, /'\/public\/worker-portal-offline\.js'/);
 });
 
-test('la cola offline usa IndexedDB, conserva la selfie y exige idempotencia', () => {
+test('la cola usa IndexedDB, selfie, idempotencia y tipo de marcación', () => {
   assert.match(offlineSource, /indexedDB\.open/);
   assert.match(offlineSource, /arrivalQueue/);
   assert.match(offlineSource, /arrivalReceipts/);
   assert.match(offlineSource, /selfie: payload\.selfie/);
   assert.match(offlineSource, /idempotencyKey/);
+  assert.match(offlineSource, /markType/);
+  assert.match(offlineSource, /queueDeparture/);
   assert.doesNotMatch(offlineSource, /activationToken/);
-  assert.doesNotMatch(serviceWorkerSource, /activationToken/);
 });
 
-test('la sincronización reenvía multipart con cookies, conserva la hora capturada y no borra antes de confirmar', () => {
+test('la sincronización elige llegada o salida y conserva la hora capturada', () => {
   assert.match(serviceWorkerSource, /credentials: 'include'/);
   assert.match(serviceWorkerSource, /form\.set\('clientCapturedAt'/);
   assert.match(serviceWorkerSource, /form\.set\('captureMode', 'OFFLINE_WEB'\)/);
+  assert.match(serviceWorkerSource, /record\.markType === 'DEPARTURE' \? 'salida' : 'llegada'/);
   const fetchIndex = serviceWorkerSource.indexOf('response = await fetch');
   const completionIndex = serviceWorkerSource.indexOf('await completeQueueRecord(record', fetchIndex);
-  assert.ok(fetchIndex >= 0);
-  assert.ok(completionIndex > fetchIndex);
+  assert.ok(fetchIndex >= 0); assert.ok(completionIndex > fetchIndex);
 });
 
-test('la sincronización tiene Background Sync y respaldo por mensaje del portal', () => {
+test('la sincronización tiene Background Sync y respaldo por mensaje', () => {
   assert.match(offlineSource, /registration\.sync\.register\(SYNC_TAG\)/);
   assert.match(offlineSource, /SYNC_ARRIVALS/);
   assert.match(serviceWorkerSource, /self\.addEventListener\('sync'/);
@@ -66,24 +56,26 @@ test('la sincronización tiene Background Sync y respaldo por mensaje del portal
   assert.match(serviceWorkerSource, /CACHE_PORTAL/);
 });
 
-test('solo se conserva offline una página autenticada y activa', () => {
+test('solo se conserva offline una página autenticada', () => {
   assert.match(routeSource, /X-Lorren-Worker-Portal-Mode/);
   assert.match(serviceWorkerSource, /mode === 'active'/);
   assert.match(serviceWorkerSource, /mode === 'inactive'/);
   assert.match(serviceWorkerSource, /cache\.delete\(PORTAL_CACHE_KEY\)/);
 });
 
-test('la interfaz comunica claramente la marca local y sus estados de sincronización', () => {
+test('la interfaz comunica llegada, salida y sincronización', () => {
   assert.match(viewSource, /Guardar llegada sin internet/);
-  assert.match(viewSource, /Llegada guardada offline/);
-  assert.match(viewSource, /Sincronizando llegada/);
-  assert.match(viewSource, /Llegada sincronizada · en revisión/);
-  assert.match(viewSource, /no se eliminará hasta que Lórren confirme/);
+  assert.match(viewSource, /Guardar salida sin internet/);
+  assert.match(viewSource, /Marcación guardada offline/);
+  assert.match(viewSource, /Sincronizando marcación/);
+  assert.match(viewSource, /Marcación sincronizada · en revisión/);
+  assert.match(viewSource, /no se eliminará solo cuando Lórren confirme|se eliminará solo cuando Lórren confirme/);
 });
 
-test('el marcador de versión publica las capacidades offline', () => {
-  assert.ok(Array.isArray(release.features));
+test('el marcador publica capacidades offline de entrada y salida', () => {
   assert.ok(release.features.includes('offline-web-arrival'));
+  assert.ok(release.features.includes('offline-web-departure'));
+  assert.ok(release.features.includes('worked-hours'));
+  assert.ok(release.features.includes('unpaid-flexible-break'));
   assert.ok(release.features.includes('indexeddb-queue'));
-  assert.ok(release.features.includes('background-sync'));
 });

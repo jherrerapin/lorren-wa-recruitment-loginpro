@@ -6,6 +6,7 @@ const MIME_EXTENSIONS = Object.freeze({
   'image/png': 'png',
   'image/webp': 'webp'
 });
+const MARK_PATHS = Object.freeze({ ARRIVAL: 'arrival', DEPARTURE: 'departure' });
 
 function requireSafeIdentifier(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}_required`);
@@ -28,12 +29,19 @@ function normalizeEvidenceFile(file) {
   return { buffer: file.buffer, mimeType, extension };
 }
 
+function normalizeMarkType(value) {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : 'ARRIVAL';
+  if (!MARK_PATHS[normalized]) throw new Error('attendance_evidence_mark_type_invalid');
+  return normalized;
+}
+
 export function buildAttendanceEvidenceStorageKey(input = {}) {
   const workerId = requireSafeIdentifier(input.workerId, 'attendance_evidence_worker_id');
   const assignmentId = requireSafeIdentifier(input.assignmentId, 'attendance_evidence_assignment_id');
   const idempotencyKey = requireSafeIdentifier(input.idempotencyKey, 'attendance_evidence_idempotency_key');
   const extension = requireSafeIdentifier(input.extension, 'attendance_evidence_extension');
-  return `attendance/${workerId}/${assignmentId}/arrival/${idempotencyKey}.${extension}`;
+  const markType = normalizeMarkType(input.markType);
+  return `attendance/${workerId}/${assignmentId}/${MARK_PATHS[markType]}/${idempotencyKey}.${extension}`;
 }
 
 function isObjectAlreadyPresentError(error) {
@@ -42,7 +50,7 @@ function isObjectAlreadyPresentError(error) {
     || error?.Code === 'PreconditionFailed';
 }
 
-export async function storeAttendanceArrivalEvidence(input = {}) {
+export async function storeAttendanceEvidence(input = {}) {
   const file = normalizeEvidenceFile(input.file);
   if (!file) return { storageKey: null, mimeType: null, created: false };
   if (!isStorageConfigured()) throw new Error('attendance_evidence_storage_unavailable');
@@ -51,7 +59,8 @@ export async function storeAttendanceArrivalEvidence(input = {}) {
     workerId: input.workerId,
     assignmentId: input.assignmentId,
     idempotencyKey: input.idempotencyKey,
-    extension: file.extension
+    extension: file.extension,
+    markType: input.markType
   });
 
   try {
@@ -65,9 +74,20 @@ export async function storeAttendanceArrivalEvidence(input = {}) {
   }
 }
 
-export async function discardAttendanceArrivalEvidence(evidence) {
+export function storeAttendanceArrivalEvidence(input = {}) {
+  return storeAttendanceEvidence({ ...input, markType: 'ARRIVAL' });
+}
+
+export function storeAttendanceDepartureEvidence(input = {}) {
+  return storeAttendanceEvidence({ ...input, markType: 'DEPARTURE' });
+}
+
+export async function discardAttendanceEvidence(evidence) {
   if (!evidence?.created || !evidence.storageKey) return;
   await deleteObjectFromR2(evidence.storageKey);
 }
+
+export const discardAttendanceArrivalEvidence = discardAttendanceEvidence;
+export const discardAttendanceDepartureEvidence = discardAttendanceEvidence;
 
 export { MAX_ATTENDANCE_EVIDENCE_BYTES };
