@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { ConversationStep, Gender, ReminderState } from '@prisma/client';
 import { act, prepareEngineDecisionContext } from '../src/services/conversationEngine.js';
 import { runChatEngine } from '../src/services/chatEngine.js';
+import { hasMeaningfulCandidateData } from '../src/services/candidateData.js';
 
 function baseCandidate(overrides = {}) {
   return {
@@ -302,4 +303,31 @@ test('la huella cambia cuando cambia el historial o el slot', async () => {
 
   assert.notEqual(original.contextFingerprint, withHistory.contextFingerprint);
   assert.notEqual(original.contextFingerprint, withSlot.contextFingerprint);
+});
+
+test('datos significativos separan pistas de vacante de datos del candidato', () => {
+  assert.equal(hasMeaningfulCandidateData({ city: 'Bogotá', roleHint: 'Auxiliar' }), false);
+  assert.equal(hasMeaningfulCandidateData({ transportMode: 'Moto' }), true);
+});
+
+test('webhook omite el preview en preguntas puras de ASK_CV', () => {
+  const webhookSource = fs.readFileSync('src/routes/webhook.js', 'utf8');
+  const start = webhookSource.indexOf('function shouldUseEngineFieldPreview');
+  const end = webhookSource.indexOf('async function buildEngineContext', start);
+  assert.ok(start >= 0 && end > start);
+  const policy = webhookSource.slice(start, end);
+
+  const dataIndex = policy.indexOf('const hasParsedCandidateData');
+  const askCvIndex = policy.indexOf('candidate.currentStep === ConversationStep.ASK_CV');
+  const questionIndex = policy.indexOf('isQuestionLike(cleanText)', askCvIndex);
+  const noDataIndex = policy.indexOf('!hasParsedCandidateData', questionIndex);
+  const returnIndex = policy.indexOf('return false', noDataIndex);
+
+  assert.ok(dataIndex >= 0);
+  assert.match(policy, /hasMeaningfulCandidateData\(localParsedData\)/);
+  assert.match(policy, /hasMeaningfulCandidateData\(aiFields\)/);
+  assert.ok(askCvIndex > dataIndex);
+  assert.ok(questionIndex > askCvIndex);
+  assert.ok(noDataIndex > questionIndex);
+  assert.ok(returnIndex > noDataIndex);
 });

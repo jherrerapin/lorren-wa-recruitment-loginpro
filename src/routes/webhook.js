@@ -797,6 +797,17 @@ function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {},
     return false;
   }
   if (candidate.currentStep === ConversationStep.CONFIRMING_DATA) return true;
+
+  const hasParsedCandidateData = hasMeaningfulCandidateData(localParsedData)
+    || hasMeaningfulCandidateData(aiFields);
+  if (
+    candidate.currentStep === ConversationStep.ASK_CV
+    && isQuestionLike(cleanText)
+    && !hasParsedCandidateData
+  ) {
+    return false;
+  }
+
   if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
     return Boolean(Object.keys(localParsedData || {}).length || Object.keys(aiFields || {}).length);
   }
