@@ -104,8 +104,10 @@
         <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">+ Crear auxiliar manual</a>
         <a class="btn btn-secondary" href="/admin/operaciones/personal/importar-excel">&#11014; Importar Excel</a>
         <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
-        <% if (role === 'dev') { %>
+        <% if (role === 'dev' || (typeof canAccessAttendance !== 'undefined' && canAccessAttendance)) { %>
           <a class="btn btn-success" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a>
+        <% } %>
+        <% if (role === 'dev') { %>
           <form method="post" action="/admin/operaciones/sync-contratados">
             <button type="submit" class="btn btn-primary">Sincronizar contratados</button>
           </form>
@@ -140,8 +142,7 @@
           <%
             /* DISABLED = desactivados manualmente (toggle). Incluye INACTIVE para
                rescatar auxiliares desactivados antes del fix que quedaron con INACTIVE.
-               El backend filtra por operationalStatus IN ['DISABLED','INACTIVE']
-               cuando recibe status=DISABLED. */
+               ELIMINADO tambien se incluye temporalmente desde el router. */
           %>
           <select id="status" name="status">
             <option value="" <%= !filters.status ? 'selected' : '' %>>Activos (Contratados)</option>
