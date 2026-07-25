@@ -121,8 +121,12 @@ test('aplica únicamente los cambios seleccionados y elimina el lote', async () 
       delete: async () => { deletedBatch = true; }
     },
     dispatchWorker: {
-      findUnique: async () => ({ id: 'worker-1', updatedAt: new Date('2026-07-25T03:00:00.000Z') }),
-      update: async ({ data }) => { updates.push(data); }
+      updateMany: async ({ where, data }) => {
+        assert.equal(where.id, 'worker-1');
+        assert.equal(new Date(where.updatedAt).toISOString(), '2026-07-25T03:00:00.000Z');
+        updates.push(data);
+        return { count: 1 };
+      }
     },
     dispatchWorkerCity: { deleteMany: async () => null, createMany: async () => null },
     dispatchWorkerVacancy: { deleteMany: async () => null, createMany: async () => null }
@@ -140,13 +144,13 @@ test('un cambio concurrente se omite y no sobrescribe el auxiliar', async () => 
   const item = { id: 'row-2', type: 'UPDATE', actionable: true, workerId: 'worker-1', workerUpdatedAt: '2026-07-25T03:00:00.000Z', incoming: { workerData: {}, providedWorkerFields: [], relationsProvided: { cities: false, vacancies: false }, cityIds: [], vacancyIds: [] } };
   const tx = {
     dispatchWorkerImportBatch: { findFirst: async () => ({ id: 'batch', expiresAt: new Date('2026-07-25T06:00:00.000Z'), items: [item] }), delete: async () => null },
-    dispatchWorker: { findUnique: async () => ({ id: 'worker-1', updatedAt: new Date('2026-07-25T03:30:00.000Z') }), update: async () => { updateCalls += 1; } },
+    dispatchWorker: { updateMany: async () => { updateCalls += 1; return { count: 0 }; } },
     dispatchWorkerCity: { deleteMany: async () => null, createMany: async () => null },
     dispatchWorkerVacancy: { deleteMany: async () => null, createMany: async () => null }
   };
   const result = await applyDispatchWorkerImportBatch({ prisma: { $transaction: async (callback) => callback(tx) }, batchId: 'batch', ownerKey: 'coord', selectedItemIds: ['row-2'], now: new Date('2026-07-25T04:00:00.000Z') });
   assert.equal(result.conflicts, 1);
-  assert.equal(updateCalls, 0);
+  assert.equal(updateCalls, 1);
 });
 
 test('la plantilla conserva Nombres y Apellidos separados', () => {
@@ -179,4 +183,12 @@ test('rechaza documentos repetidos dentro del mismo archivo', () => {
   const workbook = workbookWithRows(minimalHeaders(), [minimalRow(), minimalRow({ firstNames: 'Otra', lastNames: 'Persona' })]);
   const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
   assert.throws(() => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }), DispatchWorkerExcelValidationError);
+});
+
+
+test('la pantalla aclara que el estado vacío conserva auxiliares existentes', () => {
+  const view = fs.readFileSync('src/views/operacionesPersonalImportar.ejs', 'utf8');
+  const route = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
+  assert.match(view, /En auxiliares existentes, una celda vacía conserva el estado actual/);
+  assert.match(route, /dispatchWorkerImportBatch\.deleteMany\(\{ where: \{ expiresAt/);
 });

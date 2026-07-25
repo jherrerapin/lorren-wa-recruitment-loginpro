@@ -380,6 +380,7 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
 
   router.get('/personal/importar-excel', requireOps, async (req, res) => {
+    await prisma.dispatchWorkerImportBatch.deleteMany({ where: { expiresAt: { lt: new Date() } } });
     const [cities, vacancies] = await loadWorkerFormLists(prisma);
     return res.render('operacionesPersonalImportar', {
       role: req.session?.userRole || req.userRole,

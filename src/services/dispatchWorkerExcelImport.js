@@ -3,8 +3,6 @@ import { normalizeTransportMode } from './transportMode.js';
 
 const MAX_IMPORT_ROWS = 2000;
 const ACTIVE_STATUS = 'CONTRATADO';
-const DISABLED_STATUSES = ['DISABLED', 'INACTIVE', 'ELIMINADO'];
-const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
 const ALLOWED_TRANSPORT_MODES = new Set(['Publico', 'Moto', 'Bicicleta', 'Carro']);
 
 const LEGACY_FULL_NAME_COLUMN = {
@@ -595,7 +593,6 @@ export async function applyDispatchWorkerImportBatch({
     });
     if (!batch) throw new DispatchWorkerExcelValidationError(['La revisión no existe, ya fue aplicada o pertenece a otro usuario.']);
     if (new Date(batch.expiresAt).getTime() <= now.getTime()) {
-      await tx.dispatchWorkerImportBatch.delete({ where: { id: batch.id } });
       throw new DispatchWorkerExcelValidationError(['La revisión expiró. Vuelve a subir el archivo.']);
     }
 
@@ -625,26 +622,27 @@ export async function applyDispatchWorkerImportBatch({
       }
 
       if (item.type !== 'UPDATE' || !item.workerId) continue;
-      const current = await tx.dispatchWorker.findUnique({
-        where: { id: item.workerId },
-        select: { id: true, updatedAt: true }
-      });
-      if (!current || new Date(current.updatedAt).toISOString() !== item.workerUpdatedAt) {
-        result.conflicts += 1;
-        continue;
-      }
-
       const updateData = {};
       for (const field of incoming.providedWorkerFields || []) {
         if (field === 'documentNumber' || field === 'source') continue;
         updateData[field] = workerData[field] ?? null;
       }
-      if (Object.keys(updateData).length) {
-        await tx.dispatchWorker.update({ where: { id: current.id }, data: updateData });
+      const expectedUpdatedAt = new Date(item.workerUpdatedAt || Number.NaN);
+      if (Number.isNaN(expectedUpdatedAt.getTime())) {
+        result.conflicts += 1;
+        continue;
+      }
+      const updated = await tx.dispatchWorker.updateMany({
+        where: { id: item.workerId, updatedAt: expectedUpdatedAt },
+        data: Object.keys(updateData).length ? updateData : { updatedAt: now }
+      });
+      if (!updated.count) {
+        result.conflicts += 1;
+        continue;
       }
       await replaceWorkerRelations(
         tx,
-        current.id,
+        item.workerId,
         incoming.cityIds || [],
         incoming.vacancyIds || [],
         incoming.relationsProvided || { cities: false, vacancies: false }

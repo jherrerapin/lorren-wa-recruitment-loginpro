@@ -98,6 +98,7 @@
     </section>
 
     <% if (error) { %><div class="alert-error">⚠ <%= error %></div><% } %>
+    <% if (message) { %><div class="warning-box" style="background:#ecfdf5;border-color:#86efac;color:#166534;"><%= message %></div><% } %>
 
     <div class="grid">
       <section class="card">
@@ -149,7 +150,7 @@
           </div>
           <div class="rule">
             <strong>Estado automático</strong>
-            <p>Estado operativo es opcional. Si la columna no existe o la celda está vacía, el auxiliar se guarda como <strong>Contratado</strong>.</p>
+            <p>En auxiliares nuevos, una celda vacía se guarda como <strong>Contratado</strong>. En auxiliares existentes, una celda vacía conserva el estado actual.</p>
           </div>
           <div class="rule">
             <strong>Asignación operativa opcional</strong>
