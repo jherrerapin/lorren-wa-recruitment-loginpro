@@ -952,6 +952,12 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
   }
 
   const candidateAfterActions = await prisma.candidate.findUnique({ where: { id: candidate.id } }) || candidate;
+  const engineInterviewOffer = (
+    engineResult.handledInterviewIntent === 'reschedule_interview'
+    && engineResult.interviewOffer?.slot
+  )
+    ? engineResult.interviewOffer
+    : null;
 
   const primaryAction = getPrimaryEngineAction(engineResult.actions);
   let body = engineResult.reply;
@@ -965,12 +971,15 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
   } else if (primaryAction === 'confirm_booking') {
     body = await buildInterviewConfirmationReply(candidateAfterActions, vacancy, nextSlot);
     source = 'interview_booking_confirmation';
+  } else if (engineInterviewOffer) {
+    source = 'interview_reschedule';
   } else if (shouldForceFlowFollowUp(body, candidateAfterActions, primaryAction)) {
     body = appendUniqueReplySegment(body, buildVacancyContinuePrompt(candidateAfterActions, vacancy));
   }
 
+  const interviewReplySlot = engineInterviewOffer || nextSlot;
   const rawPayload = source.startsWith('interview_')
-    ? { ...buildInterviewReplyPayload(body, source, nextSlot), safetyVacancy: vacancy }
+    ? { ...buildInterviewReplyPayload(body, source, interviewReplySlot), safetyVacancy: vacancy }
     : { body, source, safetyVacancy: vacancy };
   if (engineResult.replySafety?.blocked && options.debugTrace) {
     options.debugTrace.blockedClaims = engineResult.replySafety.blockedClaims;
