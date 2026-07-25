@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 test('dispatch CRUD contracts for clients operations services and every worker source', () => {
   const route = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+  const coreRoute = fs.readFileSync('src/routes/dispatchBridgeCore.js', 'utf8');
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const opsExtrasRoute = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
   const deleteRoute = fs.readFileSync('src/routes/dispatchDeleteRouter.js', 'utf8');
@@ -28,13 +29,13 @@ test('dispatch CRUD contracts for clients operations services and every worker s
     "post('/personal/:workerId/editar'",
     "post('/personal/:workerId/toggle'",
     "post('/personal/:workerId/eliminar'"
-  ].forEach((s) => assert.match(route, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
+  ].forEach((s) => assert.match(coreRoute, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 
-  assert.match(route, /source:\s*'MANUAL'/);
-  assert.match(route, /findWorkerOr404/);
-  assert.match(route, /dispatchOperationPoint\.update/);
-  assert.match(route, /dispatchClientService\.update/);
-  assert.match(route, /regenerar-link/);
+  assert.match(coreRoute, /source:\s*'MANUAL'/);
+  assert.match(coreRoute, /findWorkerOr404/);
+  assert.match(coreRoute, /dispatchOperationPoint\.update/);
+  assert.match(coreRoute, /dispatchClientService\.update/);
+  assert.match(coreRoute, /regenerar-link/);
 
   ['Editar', 'Desactivar', 'Reactivar', 'Regenerar link', 'Eliminar'].forEach((label) => assert.match(clientsView, new RegExp(label)));
   assert.doesNotMatch(clientsView, /Acciones CRUD/);
