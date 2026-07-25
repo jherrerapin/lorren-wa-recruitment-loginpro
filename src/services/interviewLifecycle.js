@@ -43,7 +43,7 @@ export function classifyLocalInterviewIntent(text = '') {
     };
   }
 
-  const asksAlternative = /\b(reagend(?:ar|o|a|emos|ada|ado|amiento)?|reprogram(?:ar|o|a|emos|ada|ado|acion)?|aplaz(?:ar|o|a|amos|ada|ado)?|pospon(?:er|go|es|emos|ida|ido)?|cambiar|otro horario|otra hora|otro dia|otra fecha|mas tarde|mas temprano|puedo ir luego|puedo ir mas tarde|hay otro|me puede ubicar|me puedes ubicar|me pasas otra fecha|puede ser manana|podemos cambiar|puedo cambiar|me queda mejor|mover cita)\b/.test(n);
+  const asksAlternative = /\b(reagend(?:ar|o|a|emos|ada|ado|amiento)?|reprogram(?:ar|o|a|emos|ada|ado|acion)?|aplaz(?:ar|o|a|amos|ada|ado)?|pospon(?:er|go|es|emos|ida|ido)?|otro horario|otra hora|otro dia|otra fecha|mas tarde|mas temprano|puedo ir luego|puedo ir mas tarde|hay otro|me pasas otra fecha|puede ser manana|podemos cambiar|puedo cambiar|me queda mejor|mover cita|cambiar(?: la)? (?:cita|hora|horario|fecha)|cambiarla|llego tarde|voy tarde|no llego a tiempo)\b/.test(n);
   const hasDifficulty = /\b(se me complic|complicado|me queda dificil|inconveniente|no alcanzo|no llego|voy tarde|llego tarde|me demoro|se me presento|no puedo en ese horario|no puedo a esa hora|no puedo ir)\b/.test(n);
   const hasAlternativeQualifier = /\b(puedo|podria|sera|habra|hay|otro|otra|mas tarde|mas temprano|manana|despues|luego|cambiar|mover)\b/.test(n);
 
