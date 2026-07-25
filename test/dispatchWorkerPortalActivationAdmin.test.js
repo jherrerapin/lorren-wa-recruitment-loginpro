@@ -32,13 +32,21 @@ function responseDouble() {
   return { res, state };
 }
 
-function requestDouble({ method = 'GET', role = 'dev', username = 'dev', body = {}, headers = {} } = {}) {
+function requestDouble({
+  method = 'GET',
+  role = 'dev',
+  username = 'dev',
+  canAccessAttendanceFeature = false,
+  body = {},
+  headers = {}
+} = {}) {
   const normalizedHeaders = Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])
   );
   return {
     method,
     body,
+    canAccessAttendanceFeature,
     session: role ? { userRole: role, username } : {},
     get(name) { return normalizedHeaders[String(name).toLowerCase()] ?? undefined; },
     is(type) { return type === 'application/json' && normalizedHeaders['content-type'] === 'application/json'; }
@@ -91,6 +99,18 @@ function buildRouter(options = {}) {
   });
 }
 
+function validPostRequest(overrides = {}) {
+  return requestDouble({
+    method: 'POST',
+    body: { workerId: WORKER_ID },
+    headers: {
+      'content-type': 'application/json',
+      'x-requested-with': WORKER_PORTAL_ACTIVATION_ADMIN_HEADER
+    },
+    ...overrides
+  });
+}
+
 test('resuelve primero el origen explícito y luego RAILWAY_PUBLIC_DOMAIN', () => {
   assert.equal(
     resolveWorkerPortalPublicOrigin({
@@ -120,26 +140,37 @@ test('rechaza orígenes inseguros, con rutas o credenciales', () => {
   );
 });
 
-test('GET exige DEV y nunca muestra la pantalla a reclutadores', async () => {
+test('GET niega por defecto a un administrador sin permiso de Asistencia', async () => {
   const router = buildRouter();
   const { res, state } = responseDouble();
   await runRoute(router, '/', 'get', requestDouble({ role: 'admin' }), res);
   assert.equal(state.statusCode, 403);
-  assert.equal(state.send, 'Acceso restringido a DEV');
+  assert.equal(state.send, 'No tienes permiso para gestionar activaciones del Portal del Auxiliar');
   assert.equal(state.render, null);
 });
 
-test('GET DEV muestra tipo de contrato y no expone documento', async () => {
+test('GET permite a DEV y mantiene respuesta sin almacenamiento', async () => {
   const router = buildRouter();
   const { res, state } = responseDouble();
   await runRoute(router, '/', 'get', requestDouble(), res);
   assert.equal(state.statusCode, 200);
   assert.equal(state.render.view, 'operacionesPortalActivaciones');
-  assert.equal(state.render.locals.workers[0].id, WORKER_ID);
   assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · Directo');
-  assert.equal(state.render.locals.workers[0].contractType, 'Directo');
   assert.equal(state.render.locals.workers[0].documentNumber, undefined);
   assert.match(state.headers['Cache-Control'], /no-store/);
+});
+
+test('GET permite al administrador con permiso individual de Asistencia', async () => {
+  const router = buildRouter();
+  const { res, state } = responseDouble();
+  await runRoute(router, '/', 'get', requestDouble({
+    role: 'admin',
+    username: 'operaciones-autorizado',
+    canAccessAttendanceFeature: true
+  }), res);
+  assert.equal(state.statusCode, 200);
+  assert.equal(state.render.view, 'operacionesPortalActivaciones');
+  assert.equal(state.render.locals.role, 'admin');
 });
 
 test('la consulta predeterminada replica Personal operativo: solo CONTRATADO de DispatchWorker', async () => {
@@ -168,10 +199,28 @@ test('la consulta predeterminada replica Personal operativo: solo CONTRATADO de 
   assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · Contratista');
 });
 
+test('POST niega a un administrador sin permiso antes de emitir', async () => {
+  let issueCalls = 0;
+  const router = buildRouter({
+    issueActivationFn: async () => {
+      issueCalls += 1;
+      return null;
+    }
+  });
+  const { res, state } = responseDouble();
+  await runRoute(router, '/emitir', 'post', validPostRequest({ role: 'admin' }), res);
+  assert.equal(state.statusCode, 403);
+  assert.deepEqual(state.json, { ok: false, error: 'forbidden' });
+  assert.equal(issueCalls, 0);
+});
+
 test('POST rechaza solicitudes sin cabecera personalizada antes de emitir', async () => {
   let issueCalls = 0;
   const router = buildRouter({
-    issueActivationFn: async () => { issueCalls += 1; return null; }
+    issueActivationFn: async () => {
+      issueCalls += 1;
+      return null;
+    }
   });
   const { res, state } = responseDouble();
   await runRoute(router, '/emitir', 'post', requestDouble({
@@ -184,7 +233,7 @@ test('POST rechaza solicitudes sin cabecera personalizada antes de emitir', asyn
   assert.equal(issueCalls, 0);
 });
 
-test('POST DEV emite enlace, registra actor y devuelve tipo de contrato sin token separado', async () => {
+test('POST con permiso emite enlace y registra al usuario autorizado como actor', async () => {
   let observedInput;
   const router = buildRouter({
     issueActivationFn: async (input) => {
@@ -198,19 +247,15 @@ test('POST DEV emite enlace, registra actor y devuelve tipo de contrato sin toke
     }
   });
   const { res, state } = responseDouble();
-  await runRoute(router, '/emitir', 'post', requestDouble({
-    method: 'POST',
-    username: 'dev-principal',
-    body: { workerId: WORKER_ID },
-    headers: {
-      'content-type': 'application/json',
-      'x-requested-with': WORKER_PORTAL_ACTIVATION_ADMIN_HEADER
-    }
+  await runRoute(router, '/emitir', 'post', validPostRequest({
+    role: 'admin',
+    username: 'operaciones-autorizado',
+    canAccessAttendanceFeature: true
   }), res);
 
   assert.equal(state.statusCode, 201);
   assert.equal(observedInput.workerId, WORKER_ID);
-  assert.equal(observedInput.createdByUsername, 'dev-principal');
+  assert.equal(observedInput.createdByUsername, 'operaciones-autorizado');
   assert.equal(observedInput.ttlMinutes, 30);
   assert.equal(state.json.ok, true);
   assert.equal(state.json.worker.contractType, 'Directo');
@@ -225,17 +270,12 @@ test('un origen público faltante falla cerrado sin filtrar el token', async () 
   console.error = (...values) => logs.push(values);
   try {
     const router = buildRouter({
-      resolveOriginFn: () => { throw new Error('attendance_portal_public_origin_required'); }
+      resolveOriginFn: () => {
+        throw new Error('attendance_portal_public_origin_required');
+      }
     });
     const { res, state } = responseDouble();
-    await runRoute(router, '/emitir', 'post', requestDouble({
-      method: 'POST',
-      body: { workerId: WORKER_ID },
-      headers: {
-        'content-type': 'application/json',
-        'x-requested-with': WORKER_PORTAL_ACTIVATION_ADMIN_HEADER
-      }
-    }), res);
+    await runRoute(router, '/emitir', 'post', validPostRequest(), res);
     assert.equal(state.statusCode, 503);
     assert.deepEqual(state.json, { ok: false, error: 'activation_service_unavailable' });
     assert.equal(JSON.stringify(logs).includes(TOKEN), false);
@@ -244,26 +284,30 @@ test('un origen público faltante falla cerrado sin filtrar el token', async () 
   }
 });
 
-test('la pantalla explica la fuente, muestra contrato y copia únicamente mediante clic', () => {
+test('la pantalla informa el alcance del permiso y mantiene copia solo mediante clic', () => {
   const view = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
   const copyListenerIndex = view.indexOf("copyButton?.addEventListener('click'");
   const clipboardIndex = view.indexOf('navigator.clipboard.writeText');
   assert.ok(copyListenerIndex >= 0);
   assert.ok(clipboardIndex > copyListenerIndex);
-  assert.match(view, /únicamente los auxiliares con estado <strong>Contratado<\/strong> que aparecen en Personal operativo/);
-  assert.match(view, /Directo<\/strong> o <strong>Contratista/);
-  assert.match(view, /payload\.worker\.contractType/);
-  assert.match(view, /activationUrl\.focus\(\)/);
-  assert.match(view, /activationUrl\.select\(\)/);
+  assert.match(view, /Gestión de asistencia/);
+  assert.match(view, /usuarios con permiso de Asistencia/);
+  assert.doesNotMatch(view, /Control exclusivo DEV/);
   assert.match(view, /No abras este enlace en tu computador/);
   assert.doesNotMatch(view, /window\.open\(|location\.href\s*=\s*activationUrl/);
 });
 
-test('la ruta permanece bajo DEV y el botón visible está en Personal operativo', () => {
+test('la ruta y el acceso visual usan el permiso de Asistencia sin ampliar otras funciones DEV', () => {
   const bridgeSource = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
-  assert.match(bridgeSource, /dispatchWorkerPortalActivationAdminRouter/);
-  assert.match(bridgeSource, /'\/portal-activaciones',[\s\S]*requireDev,[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/);
-  assert.doesNotMatch(bridgeSource, /href="\/admin\/operaciones\/portal-activaciones"/);
-  assert.match(personalView, /<% if \(role === 'dev'\) \{ %>[\s\S]*href="\/admin\/operaciones\/portal-activaciones"[\s\S]*Activar Portal del Auxiliar/);
+  const activationSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
+
+  assert.match(
+    bridgeSource,
+    /'\/portal-activaciones',[\s\S]*requireOps,[\s\S]*requireAttendanceAccess,[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/
+  );
+  assert.match(bridgeSource, /filterOperationsPersonalAttendanceHtml/);
+  assert.match(bridgeSource, /WORKER_PORTAL_ACTIVATION_ADMIN_PATH/);
+  assert.match(activationSource, /currentRole\(req\) === 'dev' \|\| req\.canAccessAttendanceFeature === true/);
+  assert.match(personalView, /<% if \(role === 'dev'\) \{ %>[\s\S]*Sincronizar contratados/);
 });
