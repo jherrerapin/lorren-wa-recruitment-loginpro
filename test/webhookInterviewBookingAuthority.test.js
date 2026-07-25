@@ -63,7 +63,8 @@ test('cancelación usa la autoridad CAS del recordatorio antes de responder', ()
   assert.ok(conflictIndex > reminderIndex);
   assert.ok(replyIndex > conflictIndex);
   assert.doesNotMatch(cancelBranch, /prisma\.candidate\.update\s*\(/);
-  assert.match(cancelBranch, /Listo, ya registré la cancelación de tu entrevista\. Si más adelante deseas retomarla, me escribes por aquí\./);
+  assert.match(cancelBranch, /const body = buildInterviewCancellationReply\(\);/);
+  assert.doesNotMatch(cancelBranch, /Listo, ya registré la cancelación de tu entrevista/);
   assert.match(cancelBranch, /source:\s*['"]interview_booking_cancel['"]/);
 });
 
@@ -91,7 +92,8 @@ test('confirmación de asistencia persiste antes de responder y conserva texto',
   const authorityIndex = confirmBranch.indexOf('applyActiveInterviewResponse');
   const replyIndex = confirmBranch.indexOf('return reply');
   assert.ok(authorityIndex >= 0 && replyIndex > authorityIndex);
-  assert.match(confirmBranch, /Perfecto, gracias por confirmar asistencia\. Te esperamos/);
+  assert.match(confirmBranch, /buildInterviewAttendanceConfirmedReply\(nextSlot\?\.formattedDate\)/);
+  assert.doesNotMatch(confirmBranch, /Perfecto, gracias por confirmar asistencia\. Te esperamos/);
   assert.match(confirmBranch, /source:\s*['"]interview_attendance_confirmed['"]/);
 });
 
