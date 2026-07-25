@@ -54,20 +54,29 @@ jobs:
       - name: Generate Prisma client
         run: npm run prisma:generate
 
-      - name: Check WhatsApp facade syntax
-        run: node --check src/services/dispatchWhatsappWebService.js
-
-      - name: Check public dispatch client syntax
-        run: node --check src/routes/publicDispatchClient.js
-
-      - name: Check dispatch core syntax
-        run: node --check src/routes/dispatchBridgeCore.js
-
-      - name: Check regression test syntax
-        run: node --check test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+      - name: Check syntax
+        run: |
+          node --check src/services/dispatchWhatsappWebService.js
+          node --check src/routes/publicDispatchClient.js
+          node --check src/routes/dispatchBridgeCore.js
+          node --check test/dispatchWhatsappLoadingAndTestClientAccess.test.js
 
       - name: Test loading recovery and dev access
-        run: node --test test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+        id: new-regression
+        continue-on-error: true
+        run: node --test test/dispatchWhatsappLoadingAndTestClientAccess.test.js > /tmp/issue-753-new-regression.tap 2>&1
+
+      - name: Upload new regression diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-753-new-regression-${{ github.run_number }}
+          path: /tmp/issue-753-new-regression.tap
+          retention-days: 1
+
+      - name: Stop on new regression failure
+        if: steps.new-regression.outcome == 'failure'
+        run: exit 1
 
       - name: Test WhatsApp runtime contracts
         run: node --test test/dispatchWhatsappRuntimeContracts.test.js
