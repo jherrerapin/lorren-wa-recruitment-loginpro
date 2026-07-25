@@ -79,7 +79,7 @@ test('reprogramación usa CAS y suprime una respuesta basada en estado obsoleto'
   assert.ok(activeGuardIndex >= 0 && authorityIndex > activeGuardIndex);
   assert.ok(missingBookingIndex > authorityIndex && silenceIndex > missingBookingIndex);
   assert.ok(noSlotIndex > silenceIndex, 'La oferta pendiente debe continuar hacia la resolución del siguiente slot.');
-  assert.ok(progressIndex > noSlotIndex, 'El CAS del candidato debe ejecutarse después de resolver el slot y antes de responder.');
+  assert.ok(progressIndex > silenceIndex && progressIndex < noSlotIndex, 'El CAS del candidato debe ejecutarse antes de cualquier respuesta de reprogramación.');
   assert.ok(conflictIndex > progressIndex);
   assert.doesNotMatch(rescheduleBranch, /prisma\.candidate\.update\s*\(/);
   assert.doesNotMatch(rescheduleBranch, /RESCHEDULED/);
