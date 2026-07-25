@@ -6,6 +6,7 @@ import { reviewAttendanceSession } from './adminAttendance.js';
 
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 const VALID_WORKDAY_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN']);
+const VALID_PUNCTUALITY_STATUSES = new Set(['ON_TIME', 'LATE']);
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -126,11 +127,20 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
   };
 }
 
-function workdayTransition(session, action, now) {
+function workdayTransition(session, action, now, requestedAttendanceStatus) {
   if (action === 'VALIDATE') {
+    const punctualityStatus = requireString(
+      requestedAttendanceStatus,
+      'attendance_review_status',
+      { maxLength: 40 }
+    ).toUpperCase();
+    if (!VALID_PUNCTUALITY_STATUSES.has(punctualityStatus)) {
+      throw new Error('attendance_review_status_invalid');
+    }
     return {
       attendanceStatus: 'COMPLETED',
       validationStatus: 'MANUAL_VALIDATED',
+      punctualityStatus,
       arrivalValidatedAt: session.arrivalValidatedAt || now,
       departureValidatedAt: now
     };
@@ -191,7 +201,7 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
     if (!session) throw new Error('attendance_review_session_not_found');
     if (!session.departureReportedAt) throw new Error('attendance_review_departure_required');
 
-    const transition = workdayTransition(session, action, now);
+    const transition = workdayTransition(session, action, now, input.attendanceStatus);
     const updated = await tx.dispatchAttendanceSession.update({
       where: { id: session.id },
       data: transition
@@ -224,7 +234,8 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
           serviceRequestId: session.assignment.serviceRequestId,
           assignmentId: session.assignmentId,
           departureReportedAt: session.departureReportedAt.toISOString(),
-          workedMinutes: session.workedMinutes
+          workedMinutes: session.workedMinutes,
+          punctualityStatus: transition.punctualityStatus || session.punctualityStatus || null
         }
       }
     });

@@ -40,22 +40,36 @@ function fixture() {
   return { prisma, session, state };
 }
 
-test('validar una salida conserva COMPLETED y las horas netas', async () => {
+test('validar una salida conserva COMPLETED y aplica la puntualidad seleccionada', async () => {
   const { prisma, session, state } = fixture();
   const now = new Date('2026-07-25T22:10:00.000Z');
   const result = await reviewAttendanceWorkdaySession(prisma, {
-    sessionId: 'session-1', action: 'VALIDATE', attendanceStatus: 'ON_TIME',
-    reason: 'Coordinador confirmó la salida y la evidencia.',
+    sessionId: 'session-1', action: 'VALIDATE', attendanceStatus: 'LATE',
+    reason: 'Llegada tarde por 18 minutos frente a la hora programada.',
     actorUsername: 'dev', actorRole: 'dev', now
   });
   assert.equal(result.attendanceStatus, 'COMPLETED');
   assert.equal(result.validationStatus, 'MANUAL_VALIDATED');
+  assert.equal(result.punctualityStatus, 'LATE');
   assert.equal(result.workedMinutes, 480);
   assert.equal(state.update.departureValidatedAt.toISOString(), now.toISOString());
   assert.equal(state.markUpdate.decision, 'MANUAL_VALIDATED');
   assert.equal(state.review.action, 'WORKDAY_VALIDATE');
   assert.equal(state.review.metadata.workedMinutes, 480);
-  assert.equal(session.punctualityStatus, 'ON_TIME');
+  assert.equal(state.review.metadata.punctualityStatus, 'LATE');
+  assert.equal(session.punctualityStatus, 'LATE');
+});
+
+test('rechaza una puntualidad inválida al validar una jornada cerrada', async () => {
+  const { prisma } = fixture();
+  await assert.rejects(
+    reviewAttendanceWorkdaySession(prisma, {
+      sessionId: 'session-1', action: 'VALIDATE', attendanceStatus: 'UNKNOWN',
+      reason: 'Intento de validación con estado inválido.',
+      actorUsername: 'dev'
+    }),
+    /attendance_review_status_invalid/
+  );
 });
 
 test('reabrir una jornada conserva salida y horas, pero exige revisión', async () => {
