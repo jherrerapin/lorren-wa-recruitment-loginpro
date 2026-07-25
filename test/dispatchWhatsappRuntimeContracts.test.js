@@ -63,8 +63,11 @@ test('watchdog recovers a stalled Chromium initialization without logging out th
   );
   assert.match(source, /let initializingSeenAtMs = null/);
   assert.match(source, /DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS/);
-  assert.match(source, /status\.initializing && !status\.ready && !status\.lastQr && !status\.lastError/);
-  assert.match(watchdog, /await restartDispatchWhatsappClient\(`watchdog:\$\{reason\}`\)/);
+  assert.match(source, /async function recoverStalledInitialization/);
+  assert.match(source, /status\.initializing/);
+  assert.match(source, /await restartDispatchWhatsappClient\(`stalled:\$\{reason\}`\)/);
+  assert.match(watchdog, /await recoverStalledInitialization\(status, `watchdog:\$\{reason\}`\)/);
+  assert.match(source, /await recoverStalledInitialization\(status, 'status-view'\)/);
   assert.doesNotMatch(source, /scheduleStalledRecoveryProbe/);
   assert.doesNotMatch(watchdog, /closeDispatchWhatsappSession|closeRuntimeSession/);
 });

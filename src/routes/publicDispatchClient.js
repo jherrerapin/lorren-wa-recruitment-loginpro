@@ -56,6 +56,10 @@ function isOpsUser(req) {
   return Boolean(username?.startsWith('operaciones-despacho'));
 }
 
+function isDev(req) {
+  return (req.session?.userRole || req.userRole) === 'dev';
+}
+
 function canUseOps(req) {
   const role = req.session?.userRole || req.userRole;
   const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch);
@@ -107,7 +111,7 @@ function buildWorkerData(body) {
   };
 }
 
-function buildClientData(body) {
+function buildClientData(body, { canManageTestClient = false } = {}) {
   return {
     name: normalizeString(body.name),
     nit: normalizeString(body.nit),
@@ -117,7 +121,7 @@ function buildClientData(body) {
     contactEmail: normalizeString(body.contactEmail),
     notes: normalizeString(body.notes),
     isActive: normalizeString(body.isActive) !== 'false',
-    isTestClient: normalizeString(body.isTestClient) === 'true'
+    ...(canManageTestClient ? { isTestClient: normalizeString(body.isTestClient) === 'true' } : {})
   };
 }
 
@@ -289,7 +293,7 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-clientes', requireOps, async (req, res) => {
-    const data = buildClientData(req.body);
+    const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
     if (!data.name) return res.status(400).send('Nombre requerido');
     const serviceNames = buildInitialClientServiceNames(req.body);
     const createdByUsername = req.session?.username || req.username || null;
@@ -309,7 +313,7 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-clientes/:clientId/editar', requireOps, async (req, res) => {
-    const data = buildClientData(req.body);
+    const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
     if (!data.name) return res.status(400).send('Nombre requerido');
     await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data });
     return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente actualizado.'));
