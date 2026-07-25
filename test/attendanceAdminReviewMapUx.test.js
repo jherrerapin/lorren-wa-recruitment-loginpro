@@ -55,7 +55,7 @@ test('el servidor genera un motivo auditable para una validación a tiempo sin t
   assert.equal(reads, 0);
 });
 
-test('el servidor calcula el retraso con las horas persistidas y no con el navegador', async () => {
+test('el servidor recalcula el retraso persistido aunque el navegador envíe otros minutos', async () => {
   const reason = await resolveAttendanceReviewReason({
     dispatchAttendanceSession: {
       async findUnique(input) {
@@ -73,7 +73,7 @@ test('el servidor calcula el retraso con las horas persistidas y no con el naveg
     sessionId: 'session-2',
     action: 'VALIDATE',
     attendanceStatus: 'LATE',
-    reason: ''
+    reason: 'Llegada tarde por 999 minutos frente a la hora programada.'
   });
 
   assert.equal(reason, 'Llegada tarde por 17 minutos frente a la hora programada.');
