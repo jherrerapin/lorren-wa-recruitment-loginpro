@@ -66,14 +66,23 @@ jobs:
       - name: Check regression test syntax
         run: node --check test/dispatchWhatsappLoadingAndTestClientAccess.test.js
 
-      - name: Run focused regressions
-        run: |
-          node --test test/dispatchWhatsappLoadingAndTestClientAccess.test.js
-          node --test test/dispatchWhatsappRuntimeContracts.test.js
-          node --test test/dispatchTestClientRequestPolicy.test.js
-          node --test test/dispatchOperationsUxRulesContracts.test.js
-          node --test test/dispatchCrudContracts.test.js
-          node --test test/dispatchClientsOperationsContracts.test.js
+      - name: Test loading recovery and dev access
+        run: node --test test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+
+      - name: Test WhatsApp runtime contracts
+        run: node --test test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Test request policy contracts
+        run: node --test test/dispatchTestClientRequestPolicy.test.js
+
+      - name: Test operations UX contracts
+        run: node --test test/dispatchOperationsUxRulesContracts.test.js
+
+      - name: Test CRUD contracts
+        run: node --test test/dispatchCrudContracts.test.js
+
+      - name: Test clients and operations contracts
+        run: node --test test/dispatchClientsOperationsContracts.test.js
 
       - name: Compare full suite with exact main
         shell: bash
