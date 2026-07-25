@@ -1,22 +1,8 @@
 name: Admin session contract
 
+# Pausado temporalmente para controlar el consumo mensual de GitHub Actions.
+# Se conserva la ejecución manual desde la pestaña Actions.
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'src/server.js'
-      - 'src/services/adminSession.js'
-      - 'test/adminSession.test.js'
-      - '.github/workflows/admin-session-contract.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/server.js'
-      - 'src/services/adminSession.js'
-      - 'test/adminSession.test.js'
-      - '.github/workflows/admin-session-contract.yml'
   workflow_dispatch:
 
 permissions:
