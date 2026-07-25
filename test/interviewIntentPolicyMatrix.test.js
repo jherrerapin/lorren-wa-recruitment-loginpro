@@ -73,6 +73,20 @@ const zeroCostScenarios = [
     expected: 'reschedule_interview'
   },
   {
+    name: 'tardanza explícita conserva reprogramación',
+    text: 'Voy tarde y no llego a tiempo',
+    booking: activeBooking,
+    now: sameDay,
+    expected: 'reschedule_interview'
+  },
+  {
+    name: 'cambio de dato personal no altera la cita',
+    text: 'Necesito cambiar mi número de contacto',
+    booking: activeBooking,
+    now: previousDay,
+    expected: 'none'
+  },
+  {
     name: 'confirmación fuerte el mismo día',
     text: 'Sí voy, confirmo asistencia',
     booking: activeBooking,
