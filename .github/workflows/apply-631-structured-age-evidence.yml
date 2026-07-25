@@ -1,8 +1,9 @@
 name: Validate structured age evidence
 
+# Pausado temporalmente para controlar el consumo mensual de GitHub Actions.
+# Se conserva la ejecución manual desde la pestaña Actions.
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
