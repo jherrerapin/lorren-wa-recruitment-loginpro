@@ -13,6 +13,7 @@ export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
 const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
 const ATTENDANCE_MAP_RELIABILITY_SCRIPT = '/public/attendance-map-reliability.js';
+const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
 
@@ -125,6 +126,14 @@ function injectAttendanceMapReliability(html) {
   );
 }
 
+function injectAttendanceAdminRuntime(html) {
+  if (html.includes(ATTENDANCE_ADMIN_RUNTIME_SCRIPT)) return html;
+  return html.replace(
+    /<\/body>/i,
+    `  <script src="${ATTENDANCE_ADMIN_RUNTIME_SCRIPT}"></script>\n</body>`
+  );
+}
+
 function normalizeAttendanceGeocodingEndpoint(html) {
   return html.split(NOMINATIM_BROWSER_SEARCH_URL).join(ATTENDANCE_GEOCODING_PATH);
 }
@@ -158,7 +167,8 @@ export function filterAttendanceFeatureHtml(html, { allowed = false } = {}) {
 
 export function filterAttendanceAdminHtml(html) {
   if (typeof html !== 'string') return html;
-  return injectAttendanceMapReliability(normalizeLeafletScriptIntegrity(html));
+  const reliableHtml = injectAttendanceMapReliability(normalizeLeafletScriptIntegrity(html));
+  return injectAttendanceAdminRuntime(reliableHtml);
 }
 
 function installAttendanceRenderGate(req, res, next) {
