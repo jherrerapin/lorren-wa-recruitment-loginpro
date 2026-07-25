@@ -2,8 +2,24 @@ import {
   getDispatchAttendanceBreakPolicies
 } from '../infrastructure/dispatchAttendanceBreakPolicyRepository.js';
 import { formatDispatchMinutes } from '../domain/attendanceWorkdayPolicy.js';
+import { reviewAttendanceSession } from './adminAttendance.js';
 
 const BOGOTA_TIME_ZONE = 'America/Bogota';
+const VALID_WORKDAY_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN']);
+
+function normalizeString(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized.length ? normalized : null;
+}
+
+function requireString(value, label, { minLength = 1, maxLength = 500 } = {}) {
+  const normalized = normalizeString(value);
+  if (!normalized) throw new Error(`${label}_required`);
+  if (normalized.length < minLength) throw new Error(`${label}_too_short`);
+  if (normalized.length > maxLength) throw new Error(`${label}_too_long`);
+  return normalized;
+}
 
 function formatDateTime(value) {
   if (!value) return 'Sin registro';
@@ -87,4 +103,110 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
       };
     })
   };
+}
+
+function workdayTransition(session, action, now) {
+  if (action === 'VALIDATE') {
+    return {
+      attendanceStatus: 'COMPLETED',
+      validationStatus: 'MANUAL_VALIDATED',
+      arrivalValidatedAt: session.arrivalValidatedAt || now,
+      departureValidatedAt: now
+    };
+  }
+  if (action === 'REJECT') {
+    return {
+      attendanceStatus: 'REJECTED',
+      validationStatus: 'REJECTED',
+      arrivalValidatedAt: null,
+      departureValidatedAt: null
+    };
+  }
+  if (action === 'REOPEN') {
+    return {
+      attendanceStatus: 'DEPARTURE_REPORTED',
+      validationStatus: 'REVIEW_REQUIRED',
+      departureValidatedAt: null
+    };
+  }
+  throw new Error('attendance_review_action_invalid');
+}
+
+/**
+ * Conserva la semántica de jornada cerrada cuando ya existe una salida.
+ * Las asistencias que solo tienen llegada siguen usando la autoridad histórica.
+ */
+export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
+  const sessionId = requireString(input.sessionId, 'attendance_review_session_id', { maxLength: 120 });
+  if (!prisma?.dispatchAttendanceSession || typeof prisma.dispatchAttendanceSession.findUnique !== 'function') {
+    throw new Error('attendance_workday_session_reader_required');
+  }
+  const snapshot = await prisma.dispatchAttendanceSession.findUnique({
+    where: { id: sessionId },
+    select: { departureReportedAt: true }
+  });
+  if (!snapshot) throw new Error('attendance_review_session_not_found');
+  if (!snapshot.departureReportedAt) return reviewAttendanceSession(prisma, input);
+
+  const action = requireString(input.action, 'attendance_review_action', { maxLength: 40 }).toUpperCase();
+  if (!VALID_WORKDAY_REVIEW_ACTIONS.has(action)) throw new Error('attendance_review_action_invalid');
+  const reason = requireString(input.reason, 'attendance_review_reason', { minLength: 5, maxLength: 500 });
+  const notes = normalizeString(input.notes)?.slice(0, 1000) || null;
+  const actorUsername = requireString(input.actorUsername, 'attendance_review_actor', { maxLength: 120 });
+  const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
+  const now = input.now instanceof Date ? input.now : new Date();
+  if (Number.isNaN(now.getTime())) throw new Error('attendance_review_now_invalid');
+  if (typeof prisma.$transaction !== 'function') throw new Error('attendance_workday_transaction_required');
+
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.dispatchAttendanceSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        assignment: {
+          include: { worker: true, serviceRequest: true }
+        }
+      }
+    });
+    if (!session) throw new Error('attendance_review_session_not_found');
+    if (!session.departureReportedAt) throw new Error('attendance_review_departure_required');
+
+    const transition = workdayTransition(session, action, now);
+    const updated = await tx.dispatchAttendanceSession.update({
+      where: { id: session.id },
+      data: transition
+    });
+    const departureMark = await tx.dispatchAttendanceMark.findFirst({
+      where: { attendanceSessionId: session.id, markType: 'DEPARTURE' },
+      orderBy: { serverReceivedAt: 'desc' }
+    });
+    if (departureMark) {
+      await tx.dispatchAttendanceMark.update({
+        where: { id: departureMark.id },
+        data: { decision: transition.validationStatus }
+      });
+    }
+    await tx.dispatchAttendanceReview.create({
+      data: {
+        attendanceSessionId: session.id,
+        action: `WORKDAY_${action}`,
+        previousAttendanceStatus: session.attendanceStatus,
+        newAttendanceStatus: transition.attendanceStatus,
+        previousValidationStatus: session.validationStatus,
+        newValidationStatus: transition.validationStatus,
+        reason,
+        notes,
+        actorUsername,
+        actorRole,
+        metadata: {
+          workerId: session.assignment.workerId,
+          workerName: session.assignment.worker?.fullName || null,
+          serviceRequestId: session.assignment.serviceRequestId,
+          assignmentId: session.assignmentId,
+          departureReportedAt: session.departureReportedAt.toISOString(),
+          workedMinutes: session.workedMinutes
+        }
+      }
+    });
+    return updated;
+  });
 }
