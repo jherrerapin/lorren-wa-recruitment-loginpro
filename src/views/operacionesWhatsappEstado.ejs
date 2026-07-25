@@ -77,11 +77,11 @@
           <img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de WhatsApp despacho" />
           <p class="muted-strong">Escanea este QR desde el celular de despacho para vincular la sesión.</p>
         </div>
-        <div id="waitingQr" <%= !ready && !qrImage && (!lastError || initializing || reconnecting) ? '' : 'hidden' %>>
+        <div id="waitingQr" <%= !ready && !qrImage && !lastError ? '' : 'hidden' %>>
           <h2>Preparando conexión...</h2>
           <p class="muted-strong">La pantalla se actualiza automáticamente cada 3 segundos.</p>
         </div>
-        <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError && !initializing && !reconnecting ? '' : 'hidden' %>>
+        <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError ? '' : 'hidden' %>>
           La conexión aún no está disponible. Actualiza el estado en unos segundos. Si continúa igual, avisa al responsable técnico.
         </div>
       </article>
@@ -144,8 +144,8 @@
       if (technicalError) technicalError.textContent = data.technicalLastError || '';
       setHidden(connectedMessage, !data.ready);
       setHidden(qrContainer, data.ready || !data.qrImage);
-      setHidden(waitingQr, data.ready || Boolean(data.qrImage) || (hasError && !isPreparingConnection));
-      setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError || isPreparingConnection);
+      setHidden(waitingQr, data.ready || Boolean(data.qrImage) || hasError);
+      setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError);
       if (data.qrImage && qrImage && qrImage.src !== data.qrImage) qrImage.src = data.qrImage;
     }
     function renderStatusError() {

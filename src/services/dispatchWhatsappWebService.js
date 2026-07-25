@@ -19,7 +19,8 @@ const WATCHDOG_ENABLED = AUTO_START_ENABLED
   && process.env.NODE_ENV !== 'test';
 const WATCHDOG_INTERVAL_MS = Math.max(30000, Number(process.env.DISPATCH_WWEB_WATCHDOG_INTERVAL_MS || 60000));
 const WATCHDOG_START_DELAY_MS = Math.max(0, Number(process.env.DISPATCH_WWEB_WATCHDOG_START_DELAY_MS || 5000));
-const STALLED_INITIALIZATION_TIMEOUT_MS = Math.max(60000, Number(process.env.DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS || 60000));
+const STALLED_INITIALIZATION_TIMEOUT_MS = Math.max(15000, Number(process.env.DISPATCH_WWEB_STALLED_INIT_TIMEOUT_MS || 60000));
+const STALLED_INITIALIZATION_ERROR = 'La inicialización de WhatsApp de despacho superó el tiempo máximo. El sistema reinició la conexión automáticamente.';
 const HEALTH_PROBE_TIMEOUT_MS = Math.max(3000, Number(process.env.DISPATCH_WWEB_HEALTH_TIMEOUT_MS || 10000));
 const HEALTH_FAILURE_THRESHOLD = Math.max(1, Number(process.env.DISPATCH_WWEB_HEALTH_FAILURE_THRESHOLD || 2));
 const STALE_LINK_CLEANUP_LIMIT = Math.max(50, Number(process.env.DISPATCH_WA_STALE_LINK_CLEANUP_LIMIT || 1000));
@@ -30,6 +31,7 @@ let watchdogTimer = null;
 let watchdogStartTimer = null;
 let watchdogInFlight = false;
 let initializingSeenAtMs = null;
+let stalledInitializationError = null;
 let runtimeEnvironmentPrepared = false;
 let readyHealthFailures = 0;
 
@@ -201,6 +203,31 @@ async function expirePastConfirmationLinks(reason = 'watchdog') {
   return result.count;
 }
 
+function hasInitializationProgress(status = {}) {
+  return Boolean(status.ready || status.lastQr || status.lastError || status.manualLogoutRequested);
+}
+
+async function recoverStalledInitialization(status = getRuntimeStatus(), reason = 'status') {
+  if (!status.initializing || hasInitializationProgress(status)) {
+    initializingSeenAtMs = null;
+    if (status.ready || status.lastQr) stalledInitializationError = null;
+    return false;
+  }
+
+  const now = Date.now();
+  if (!initializingSeenAtMs) {
+    initializingSeenAtMs = now;
+    return false;
+  }
+  if (now - initializingSeenAtMs < STALLED_INITIALIZATION_TIMEOUT_MS) return false;
+
+  initializingSeenAtMs = null;
+  stalledInitializationError = STALLED_INITIALIZATION_ERROR;
+  console.warn(`[dispatch-wa] ${STALLED_INITIALIZATION_ERROR} reason=${reason}`);
+  await restartDispatchWhatsappClient(`stalled:${reason}`);
+  return true;
+}
+
 async function runDispatchWhatsappWatchdog(reason = 'interval') {
   if (watchdogInFlight) return;
   watchdogInFlight = true;
@@ -230,19 +257,7 @@ async function runDispatchWhatsappWatchdog(reason = 'interval') {
     }
 
     readyHealthFailures = 0;
-    if (status.initializing && !status.ready && !status.lastQr && !status.lastError) {
-      const now = Date.now();
-      if (!initializingSeenAtMs) {
-        initializingSeenAtMs = now;
-      } else if (now - initializingSeenAtMs >= STALLED_INITIALIZATION_TIMEOUT_MS) {
-        console.warn('[dispatch-wa] Watchdog detectó una inicialización atascada. Reiniciando el cliente sin cerrar la sesión persistida.');
-        initializingSeenAtMs = null;
-        await restartDispatchWhatsappClient(`watchdog:${reason}`);
-        return;
-      }
-    } else {
-      initializingSeenAtMs = null;
-    }
+    if (await recoverStalledInitialization(status, `watchdog:${reason}`)) return;
 
     initDispatchWhatsappClient();
   } catch (error) {
@@ -279,28 +294,43 @@ export function stopDispatchWhatsappWatchdog() {
 
 export function initDispatchWhatsappClient() {
   if (!runtimeEnvironmentPrepared) prepareRuntimeEnvironment({ cleanupStaleProcesses: true });
+  const status = getRuntimeStatus();
+  if (!status.ready && !status.initializing && !status.lastQr && !status.lastError) {
+    initializingSeenAtMs = Date.now();
+  }
   return initRuntimeClient();
 }
 
 export function getDispatchWhatsappStatus() {
-  return getRuntimeStatus();
+  const status = getRuntimeStatus();
+  if (status.ready || status.lastQr) stalledInitializationError = null;
+  return { ...status, lastError: status.lastError || stalledInitializationError };
 }
 
 export async function getDispatchWhatsappStatusView(options = {}) {
-  return getRuntimeStatusView(options);
+  let status = await getRuntimeStatusView(options);
+  if (await recoverStalledInitialization(status, 'status-view')) {
+    status = await getRuntimeStatusView({ autoStart: false });
+  }
+  if (status.ready || status.lastQr) stalledInitializationError = null;
+  return { ...status, lastError: status.lastError || stalledInitializationError };
 }
 
 export async function restartDispatchWhatsappClient(reason = 'recuperación automática') {
   if (!runtimeEnvironmentPrepared) prepareRuntimeEnvironment({ cleanupStaleProcesses: true });
   const status = getRuntimeStatus();
   killStaleChromiumProcesses(status.authDataPath || resolveAuthDataPath());
-  return restartRuntimeClient(reason);
+  const restarted = await restartRuntimeClient(reason);
+  initializingSeenAtMs = Date.now();
+  return restarted;
 }
 
 export async function closeDispatchWhatsappSession() {
   stopDispatchWhatsappWatchdog();
   runtimeEnvironmentPrepared = false;
   readyHealthFailures = 0;
+  initializingSeenAtMs = null;
+  stalledInitializationError = null;
   return closeRuntimeSession();
 }
 
