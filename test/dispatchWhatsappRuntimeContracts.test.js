@@ -262,19 +262,32 @@ test('runtime reports whether LocalAuth storage is persistent', () => {
   assert.match(source, /DISPATCH_WWEB_AUTH_PERSISTENT/);
 });
 
-test('automatic thanks are persisted before sending and orphaned confirmations are repaired', () => {
+test('automatic thanks require inbound evidence and ready reconciliation cannot manufacture replies', () => {
   const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const schema = readSource('prisma/schema.prisma');
+  const migration = readSource('prisma/migrations/20260725004500_dispatch_whatsapp_reply_evidence/migration.sql');
   const applyBlock = between(
     source,
     'async function applyAssignmentConfirmation',
     'async function resolveAssignmentForInboundConfirmation'
   );
+  const retryBlock = between(
+    source,
+    'async function retryPendingAutomaticReplies',
+    'async function processPersistedPendingConfirmations'
+  );
   assert.match(source, /CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING'/);
+  assert.match(source, /function confirmationEvidenceFromMessage/);
   assert.match(source, /export async function claimDispatchAssignmentConfirmation/);
-  assert.ok(applyBlock.indexOf('claimDispatchAssignmentConfirmation') < applyBlock.indexOf('sendAutomaticConfirmationReply'));
-  assert.match(source, /async function repairConfirmedAssignmentsAwaitingReply/);
-  assert.match(source, /assignment: \{ status: CONFIRMED_ASSIGNMENT_STATUS \}/);
-  assert.match(source, /await repairConfirmedAssignmentsAwaitingReply\(\)/);
+  assert.ok(applyBlock.indexOf('confirmationEvidenceFromMessage') < applyBlock.indexOf('sendAutomaticConfirmationReply'));
+  assert.match(retryBlock, /confirmationMessageId: \{ not: null \}/);
+  assert.match(retryBlock, /confirmationReceivedAt: \{ not: null \}/);
+  assert.match(retryBlock, /assignment: \{ status: CONFIRMED_ASSIGNMENT_STATUS \}/);
+  assert.doesNotMatch(source, /repairConfirmedAssignmentsAwaitingReply|orphanedRepliesRepaired/);
+  assert.match(schema, /confirmationMessageId\s+String\?/);
+  assert.match(schema, /confirmationReceivedAt\s+DateTime\?/);
+  assert.match(migration, /WHERE "status" = 'CONFIRMED_REPLY_PENDING'/);
+  assert.match(migration, /"confirmationReceivedAt" IS NULL/);
 });
 
 test('runtime identifies only an auth directory inside the Railway volume as persistent', async () => {
@@ -344,6 +357,19 @@ test('PN and LID aliases are resolved and persisted before the confirmation requ
   else process.env.NODE_ENV = previousNodeEnv;
 });
 
+test('message_create cannot treat outbound messages as confirmations', () => {
+  const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
+  const inbound = between(
+    source,
+    'async function confirmAssignmentFromInboundMessage',
+    'function bindInboundMessageListeners'
+  );
+  assert.match(source, /function isOwnWhatsappMessage/);
+  assert.match(source, /message\.id\?\.fromMe/);
+  assert.match(source, /message\._data\?\.id\?\.fromMe/);
+  assert.match(inbound, /if \(isOwnWhatsappMessage\(message\)\) return false/);
+});
+
 test('an incomplete duplicate event cannot reserve the inbound lock before assignment resolution', () => {
   const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
   const inbound = between(
@@ -355,10 +381,10 @@ test('an incomplete duplicate event cannot reserve the inbound lock before assig
   assert.match(inbound, /releaseInbound\(message\)/);
 });
 
-test('confirmation claim atomically leaves the automatic reply pending and repairs confirmed assignments', async () => {
+test('confirmation claim requires inbound evidence and remains durable across a restart', async () => {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'test';
-  const runtime = await import('../src/services/dispatchWhatsappWebServiceV6.js?claim-test=677');
+  const runtime = await import('../src/services/dispatchWhatsappWebServiceV6.js?claim-test=704');
   const operations = [];
   const tx = {
     dispatchAssignment: {
@@ -366,7 +392,10 @@ test('confirmation claim atomically leaves the automatic reply pending and repai
       findUnique: async () => ({ status: 'CONFIRMED' })
     },
     dispatchWhatsappConfirmation: {
-      updateMany: async ({ data }) => { operations.push(`links-${data.status}`); return { count: 1 }; },
+      updateMany: async ({ data }) => {
+        operations.push(`links-${data.status}-${Boolean(data.confirmationMessageId)}-${data.confirmationReceivedAt instanceof Date}`);
+        return { count: 1 };
+      },
       create: async () => { operations.push('link-created'); return { id: 'link' }; }
     }
   };
@@ -375,10 +404,25 @@ test('confirmation claim atomically leaves the automatic reply pending and repai
     assignment: { id: 'a1', serviceRequestId: 'r1' },
     phone: '3001234567',
     chatId: '573001234567@c.us',
+    confirmationMessageId: 'incoming-message-1',
+    confirmationReceivedAt: new Date('2026-07-25T00:20:00.000Z'),
     prismaClient
   });
   assert.deepEqual(result, { assignmentConfirmed: true, shouldReply: true, repaired: false });
-  assert.deepEqual(operations, ['assignment-confirmed', 'links-CONFIRMED_REPLY_PENDING']);
+  assert.deepEqual(operations, ['assignment-confirmed', 'links-CONFIRMED_REPLY_PENDING-true-true']);
+
+  let transactionCalled = false;
+  const withoutEvidence = await runtime.claimDispatchAssignmentConfirmation({
+    assignment: { id: 'manual-confirmed', serviceRequestId: 'r2' },
+    prismaClient: {
+      $transaction: async () => {
+        transactionCalled = true;
+        return null;
+      }
+    }
+  });
+  assert.deepEqual(withoutEvidence, { assignmentConfirmed: false, shouldReply: false, repaired: false });
+  assert.equal(transactionCalled, false);
 
   const repairTx = {
     dispatchAssignment: {
@@ -386,15 +430,19 @@ test('confirmation claim atomically leaves the automatic reply pending and repai
       findUnique: async () => ({ status: 'CONFIRMED' })
     },
     dispatchWhatsappConfirmation: {
-      updateMany: async () => ({ count: 1 }),
+      updateMany: async ({ data }) => ({
+        count: data.confirmationMessageId === 'incoming-after-manual' && data.confirmationReceivedAt instanceof Date ? 1 : 0
+      }),
       create: async () => ({ id: 'unused' })
     }
   };
-  const repaired = await runtime.claimDispatchAssignmentConfirmation({
+  const repairedFromRealInbound = await runtime.claimDispatchAssignmentConfirmation({
     assignment: { id: 'a2', serviceRequestId: 'r2' },
+    confirmationMessageId: 'incoming-after-manual',
+    confirmationReceivedAt: new Date('2026-07-25T00:21:00.000Z'),
     prismaClient: { $transaction: async (callback) => callback(repairTx) }
   });
-  assert.deepEqual(repaired, { assignmentConfirmed: false, shouldReply: true, repaired: true });
+  assert.deepEqual(repairedFromRealInbound, { assignmentConfirmed: false, shouldReply: true, repaired: true });
   if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = previousNodeEnv;
 });
