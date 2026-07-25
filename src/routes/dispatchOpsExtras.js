@@ -5,6 +5,7 @@ import { sendDispatchCompletionEmail } from '../services/dispatchCompletionEmail
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
+import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 import {
   DISPATCH_WORKER_EXCEL_COLUMNS,
   applyDispatchWorkerImportBatch,
@@ -318,7 +319,16 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud creada.')}&created=${created.id}`);
   });
 
-  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => { const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchServiceRequest.delete({ where: { id: serviceRequest.id } }); return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent('Solicitud eliminada.')}`);
+  router.post('/solicitudes/:serviceRequestId/eliminar', requireOps, async (req, res) => {
+    const result = await deleteDispatchServiceRequestWithPolicy(prisma, req.params.serviceRequestId);
+    if (result.status === 'NOT_FOUND') return res.status(404).send('Solicitud no encontrada');
+    if (result.status === 'BLOCKED') {
+      return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(result.policy.deleteBlockedReason)}`);
+    }
+    const message = result.policy?.isTestClient
+      ? 'Solicitud de prueba eliminada sin límite de antigüedad.'
+      : 'Solicitud eliminada.';
+    return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(message)}`);
   });
 
   router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }); if (activeCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmacion de los auxiliares.')); } const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (existing) { if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya esta asignado a esta solicitud.')); await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } }); } else { await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } }); } await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmacion.')); });

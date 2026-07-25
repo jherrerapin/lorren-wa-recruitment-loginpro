@@ -8,12 +8,15 @@ import {
 } from '../services/dispatchDate.js';
 import { confirmedOperationalAssignments, deriveDispatchRequestOperationalState, operationalAssignments } from '../services/dispatchOperationalCoverage.js';
 import { resolveAttendanceFeatureAccess } from '../services/attendanceFeatureAccess.js';
+import {
+  DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
+  resolveDispatchServiceRequestPolicy
+} from '../services/dispatchServiceRequestPolicy.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const PENDING_REQUEST_STATUSES = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
 const OPEN_INCIDENT_STATUSES = ['OPEN', 'IN_PROGRESS'];
-const EDIT_GRACE_PERIOD_MS = 2 * 60 * 60 * 1000;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -120,19 +123,6 @@ function buildCoverageText(request) {
   return `${active}/${required} asignados · ${confirmed}/${required} confirmados`;
 }
 
-function serviceRequestStartAt(request) {
-  const date = dispatchServiceDateKey(request?.serviceDate);
-  const startTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(request?.startTime || '')) ? request.startTime : '00:00';
-  const start = new Date(`${date}T${startTime}:00-05:00`);
-  return Number.isNaN(start.getTime()) ? null : start;
-}
-
-function isServiceRequestEditLocked(request, now = new Date()) {
-  const start = serviceRequestStartAt(request);
-  if (!start) return false;
-  return now.getTime() > start.getTime() + EDIT_GRACE_PERIOD_MS;
-}
-
 function normalizeSummaryType(value) {
   const type = normalizeString(value) || 'total';
   return ['total', 'pending', 'complete', 'incidents'].includes(type) ? type : 'total';
@@ -181,6 +171,7 @@ async function loadServiceRequestsForDate(prisma, selectedDate) {
     where: broadWhere,
     include: {
       service: true,
+      ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
       assignments: {
         include: { worker: true },
         orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
@@ -303,7 +294,7 @@ function renderSummary(res, req, selectedDate, type, requests) {
     assignmentStatusLabel,
     buildHorario,
     buildCoverageText,
-    isServiceRequestEditLocked,
+    resolveServiceRequestPolicy: resolveDispatchServiceRequestPolicy,
     canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
   });
 }

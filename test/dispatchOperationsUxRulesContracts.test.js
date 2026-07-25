@@ -5,6 +5,7 @@ import fs from 'node:fs';
 test('dispatch operations UX rules for delete, time inputs, manual CV and dependent vacancies', () => {
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const dispatchRoute = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+  const dispatchCoreRoute = fs.readFileSync('src/routes/dispatchBridgeCore.js', 'utf8');
   const dashboardMetricsRoute = fs.readFileSync('src/routes/dispatchDashboardMetrics.js', 'utf8');
   const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
   const clientOpsView = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
@@ -32,12 +33,13 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(publicRoute, /normalizeOptionalTime/);
   assert.match(publicRoute, /Horario invalido\. Usa formato HH:mm/);
   assert.match(publicRoute, /startTime,\r?\n\s*endTime/);
-  assert.match(dispatchRoute, /TIME_HH_MM_PATTERN/);
-  assert.match(dispatchRoute, /normalizeOptionalTime/);
-  assert.match(dispatchRoute, /resolveRequestTimes/);
-  assert.match(dispatchRoute, /Horario invalido\. Usa formato HH:mm/);
-  assert.match(dispatchRoute, /\.\.\.requestTimes/);
-  assert.match(dashboardMetricsRoute, /serviceRequest:\s*\{\s*is:\s*whereForDate\s*\}/);
+  assert.match(dispatchCoreRoute, /TIME_HH_MM_PATTERN/);
+  assert.match(dispatchCoreRoute, /normalizeOptionalTime/);
+  assert.match(dispatchCoreRoute, /resolveRequestTimes/);
+  assert.match(dispatchCoreRoute, /Horario invalido\. Usa formato HH:mm/);
+  assert.match(dispatchCoreRoute, /\.\.\.requestTimes/);
+  assert.match(dashboardMetricsRoute, /buildDispatchServiceDateWhere/);
+  assert.match(dashboardMetricsRoute, /filterDispatchServiceRequestsByDate/);
 
   assert.match(workerFormView, /enctype="multipart\/form-data"/);
   assert.match(workerFormView, /name="cvFile"/);
@@ -62,7 +64,8 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(clientsView, /onsubmit="return confirm\('¿Eliminar este cliente\?/);
   assert.match(clientOpsView, /Eliminar/);
   assert.match(personalView, />Acciones<\/th>/);
-  assert.doesNotMatch(personalView, />Estado<\/th>/);
+  assert.match(personalView, /<th>Estado<\/th>/);
+  assert.match(personalView, /operationalStatus === 'CONTRATADO'/);
 
   assert.doesNotMatch(dispatchRoute, /DISPATCH_MODULE_URL/);
   assert.doesNotMatch(publicRoute, /conversationEngine|webhook|whatsapp/i);
