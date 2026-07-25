@@ -111,14 +111,21 @@ function automaticLateReason(minutesLate) {
   return 'Llegada clasificada como tarde.';
 }
 
+function isAutomaticLateReason(value) {
+  return /^Llegada (?:tarde por \d+ minutos? frente a la hora programada|clasificada como tarde)\.$/.test(value);
+}
+
 export async function resolveAttendanceReviewReason(prisma, input = {}) {
   const action = normalizeString(input.action)?.toUpperCase();
   const attendanceStatus = normalizeString(input.attendanceStatus)?.toUpperCase();
   const providedReason = normalizeString(input.reason);
 
   if (action !== 'VALIDATE') return input.reason;
-  if (providedReason && providedReason.length >= 5) return providedReason.slice(0, 500);
-  if (attendanceStatus === 'ON_TIME') return 'Validación de llegada a tiempo.';
+  if (attendanceStatus === 'ON_TIME') {
+    return providedReason && providedReason.length >= 5
+      ? providedReason.slice(0, 500)
+      : 'Validación de llegada a tiempo.';
+  }
   if (attendanceStatus !== 'LATE') return input.reason;
 
   let minutesLate = 0;
@@ -138,7 +145,12 @@ export async function resolveAttendanceReviewReason(prisma, input = {}) {
     }
   }
 
-  return automaticLateReason(minutesLate);
+  const automaticReason = automaticLateReason(minutesLate);
+  if (providedReason && providedReason.length >= 5 && !isAutomaticLateReason(providedReason)) {
+    const observation = providedReason.slice(0, 350);
+    return `${automaticReason} Observación administrativa: ${observation}`.slice(0, 500);
+  }
+  return automaticReason;
 }
 
 export function dispatchAttendanceAdminRouter(prisma) {
