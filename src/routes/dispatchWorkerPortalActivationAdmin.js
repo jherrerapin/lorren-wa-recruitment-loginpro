@@ -24,17 +24,23 @@ function currentRole(req) {
 }
 
 function currentUsername(req) {
-  return normalizeString(req.session?.username || req.username) || 'dev';
+  return normalizeString(req.session?.username || req.username);
 }
 
-function requireDev(req, res, next) {
+function canManagePortalActivations(req) {
+  return currentRole(req) === 'dev' || req.canAccessAttendanceFeature === true;
+}
+
+function requireAttendancePermission(req, res, next) {
   setNoStore(res);
   if (!currentRole(req)) {
     if (req.method === 'GET') return res.redirect('/login');
     return res.status(401).json({ ok: false, error: 'authentication_required' });
   }
-  if (currentRole(req) !== 'dev') {
-    if (req.method === 'GET') return res.status(403).send('Acceso restringido a DEV');
+  if (!canManagePortalActivations(req)) {
+    if (req.method === 'GET') {
+      return res.status(403).send('No tienes permiso para gestionar activaciones del Portal del Auxiliar');
+    }
     return res.status(403).json({ ok: false, error: 'forbidden' });
   }
   return next();
@@ -142,7 +148,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     return repository;
   }
 
-  router.get('/', requireDev, async (req, res) => {
+  router.get('/', requireAttendancePermission, async (req, res) => {
     try {
       const workers = await loadWorkersFn();
       return res.render('operacionesPortalActivaciones', {
@@ -167,7 +173,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     }
   });
 
-  router.post('/emitir', requireDev, requireAdminJson, async (req, res) => {
+  router.post('/emitir', requireAttendancePermission, requireAdminJson, async (req, res) => {
     const workerId = normalizeString(req.body?.workerId);
     if (!workerId) return res.status(400).json({ ok: false, error: 'worker_required' });
 
