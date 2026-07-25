@@ -1,72 +1,8 @@
 name: Candidate progress authority
 
+# Pausado temporalmente para controlar el consumo mensual de GitHub Actions.
+# Se conserva la ejecución manual desde la pestaña Actions.
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - prisma/schema.prisma
-      - src/services/candidateStateService.js
-      - src/services/consentStateService.js
-      - src/services/dataConsentGate.js
-      - src/services/conversationEngine.js
-      - src/services/chatEngine.js
-      - src/routes/webhook.js
-      - config/candidate-progress-authority.json
-      - docs/architecture/candidate-state-transition-inventory.md
-      - test/candidateMultilineStateService.test.js
-      - test/candidateConversationStepStateService.test.js
-      - test/candidateNoInterestStateService.test.js
-      - test/candidateRequirementRejectionStateService.test.js
-      - test/candidateExplicitPauseStateService.test.js
-      - test/candidateConsentStepStateService.test.js
-      - test/candidateVacancyFirstGateStateService.test.js
-      - test/candidateSilentProfileCaptureStateService.test.js
-      - test/consentStateService.test.js
-      - test/dataConsentGateConsentStepAuthority.test.js
-      - test/webhookVacancyFirstGateAuthority.test.js
-      - test/webhookSilentProfileCaptureAuthority.test.js
-      - test/turnOrchestratorContracts.test.js
-      - test/conversationEngineNoInterestAuthority.test.js
-      - test/conversationEngineRequirementRejectionAuthority.test.js
-      - test/conversationEngineExplicitPauseAuthority.test.js
-      - test/conversationEngineStepAuthority.test.js
-      - test/conversationEngineGuardRails.test.js
-      - test/candidateProgressAuthority.test.js
-      - .github/workflows/candidate-progress-authority.yml
-  push:
-    branches:
-      - main
-    paths:
-      - prisma/schema.prisma
-      - src/services/candidateStateService.js
-      - src/services/consentStateService.js
-      - src/services/dataConsentGate.js
-      - src/services/conversationEngine.js
-      - src/services/chatEngine.js
-      - src/routes/webhook.js
-      - config/candidate-progress-authority.json
-      - docs/architecture/candidate-state-transition-inventory.md
-      - test/candidateMultilineStateService.test.js
-      - test/candidateConversationStepStateService.test.js
-      - test/candidateNoInterestStateService.test.js
-      - test/candidateRequirementRejectionStateService.test.js
-      - test/candidateExplicitPauseStateService.test.js
-      - test/candidateConsentStepStateService.test.js
-      - test/candidateVacancyFirstGateStateService.test.js
-      - test/candidateSilentProfileCaptureStateService.test.js
-      - test/consentStateService.test.js
-      - test/dataConsentGateConsentStepAuthority.test.js
-      - test/webhookVacancyFirstGateAuthority.test.js
-      - test/webhookSilentProfileCaptureAuthority.test.js
-      - test/turnOrchestratorContracts.test.js
-      - test/conversationEngineNoInterestAuthority.test.js
-      - test/conversationEngineRequirementRejectionAuthority.test.js
-      - test/conversationEngineExplicitPauseAuthority.test.js
-      - test/conversationEngineStepAuthority.test.js
-      - test/conversationEngineGuardRails.test.js
-      - test/candidateProgressAuthority.test.js
-      - .github/workflows/candidate-progress-authority.yml
   workflow_dispatch:
 
 permissions:
