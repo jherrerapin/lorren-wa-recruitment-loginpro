@@ -5,9 +5,10 @@ import ExcelJS from 'exceljs';
 import {
   DISPATCH_WORKER_EXCEL_COLUMNS,
   DispatchWorkerExcelValidationError,
+  applyDispatchWorkerImportBatch,
   buildDispatchWorkerFullName,
+  buildDispatchWorkerImportReview,
   buildDispatchWorkerImportTemplate,
-  importDispatchWorkerExcelWorkbook,
   parseDispatchWorkerExcelWorksheet,
   prepareDispatchWorkerExcelRows
 } from '../src/services/dispatchWorkerExcelImport.js';
@@ -16,10 +17,8 @@ const cities = [
   { id: 'city-bogota', name: 'Bogotá' },
   { id: 'city-siberia', name: 'Siberia' }
 ];
-
 const vacancies = [
-  { id: 'vac-bogota', title: 'Auxiliar de cargue y descargue', city: 'Bogotá' },
-  { id: 'vac-siberia', title: 'Auxiliar de cargue y descargue', city: 'Siberia' }
+  { id: 'vac-bogota', title: 'Auxiliar de cargue y descargue', city: 'Bogotá' }
 ];
 
 function workbookWithRows(headers, rows) {
@@ -30,210 +29,154 @@ function workbookWithRows(headers, rows) {
   return workbook;
 }
 
-function completeHeaders() {
-  return DISPATCH_WORKER_EXCEL_COLUMNS.map((column) => column.header);
-}
-
-function completeRow(overrides = {}) {
-  const values = {
-    firstNames: 'Ana María',
-    lastNames: 'Pérez Gómez',
-    phone: '3001234567',
-    documentType: 'CC',
-    documentNumber: '1020304050',
-    residenceCity: 'Bogotá',
-    residenceLocality: 'Suba',
-    transportMode: 'TransMilenio',
-    contractType: 'Directo',
-    operationalStatus: 'Disponible',
-    operationalCities: 'Bogotá; Siberia',
-    vacancies: 'Auxiliar de cargue y descargue — Bogotá',
-    notes: 'Disponible fines de semana',
-    ...overrides
-  };
-  return DISPATCH_WORKER_EXCEL_COLUMNS.map((column) => values[column.field] ?? '');
-}
-
 function minimalHeaders() {
-  return [
-    'Nombres',
-    'Apellidos',
-    'Teléfono',
-    'Tipo de documento',
-    'Número de documento',
-    'Ciudad de residencia',
-    'Localidad / barrio',
-    'Tipo de contrato'
-  ];
+  return ['Nombres', 'Apellidos', 'Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'];
 }
 
 function minimalRow(overrides = {}) {
   const values = {
-    firstNames: 'Ana María',
-    lastNames: 'Pérez Gómez',
-    phone: '3001234567',
-    documentType: 'CC',
-    documentNumber: '1020304050',
-    residenceCity: 'Bogotá',
-    residenceLocality: 'Suba',
-    contractType: 'DIRECTO',
+    firstNames: 'Ana María', lastNames: 'Pérez Gómez', phone: '3001234567', documentType: 'CC',
+    documentNumber: '1020304050', residenceCity: 'Bogotá', residenceLocality: 'Suba', contractType: 'DIRECTO',
     ...overrides
   };
-  return [
-    values.firstNames,
-    values.lastNames,
-    values.phone,
-    values.documentType,
-    values.documentNumber,
-    values.residenceCity,
-    values.residenceLocality,
-    values.contractType
-  ];
+  return [values.firstNames, values.lastNames, values.phone, values.documentType, values.documentNumber, values.residenceCity, values.residenceLocality, values.contractType];
 }
 
-test('reconoce nombres y apellidos separados por encabezado aunque cambie el orden', () => {
+function existingWorker(overrides = {}) {
+  return {
+    id: 'worker-1', fullName: 'Ana María', phone: '3001234567', documentType: 'CC', documentNumber: '1020304050',
+    residenceCity: 'Bogotá', residenceLocality: 'Suba', transportMode: 'Moto', contractType: 'DIRECTO',
+    operationalStatus: 'INACTIVE', notes: 'Conservar', updatedAt: new Date('2026-07-25T03:00:00.000Z'),
+    cities: [{ city: { id: 'city-bogota', name: 'Bogotá' } }], vacancies: [], ...overrides
+  };
+}
+
+test('Nombre singular y Apellidos se unen como nombre completo', () => {
   const workbook = workbookWithRows(
-    ['Celular', 'Apellidos', 'Nombres', 'Cédula', 'Tipo documento', 'Ciudad', 'Barrio', 'Contrato'],
-    [['3001234567', 'Pérez Gómez', 'Ana María', '1020304050', 'CC', 'Bogotá', 'Suba', 'DIRECTO']]
+    ['Nombre', 'Apellidos', 'Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'],
+    [['Juan Carlos', 'Pérez Gómez', '3001234567', 'CC', '123', 'Bogotá', 'Suba', 'DIRECTO']]
   );
-
-  const rows = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].firstNames, 'Ana María');
-  assert.equal(rows[0].lastNames, 'Pérez Gómez');
-  assert.equal(rows[0].documentNumber, '1020304050');
+  const prepared = prepareDispatchWorkerExcelRows(parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]), { cities, vacancies });
+  assert.equal(prepared[0].workerData.fullName, 'Juan Carlos Pérez Gómez');
 });
 
-test('une nombres y apellidos limpiando espacios sobrantes', () => {
-  assert.equal(
-    buildDispatchWorkerFullName({ firstNames: '  Juan   Carlos ', lastNames: ' Pérez   Gómez  ' }),
-    'Juan Carlos Pérez Gómez'
-  );
+test('las columnas separadas tienen prioridad sobre Nombre completo', () => {
+  assert.equal(buildDispatchWorkerFullName({ fullName: 'Solo nombres', firstNames: 'Juan', lastNames: 'Pérez' }), 'Juan Pérez');
 });
 
-test('mantiene compatibilidad con la columna anterior Nombre completo', () => {
-  const workbook = workbookWithRows(
-    ['Nombre completo', 'Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'],
-    [['  Ana   María Pérez Gómez  ', '3001234567', 'CC', '1020304050', 'Bogotá', 'Suba', 'DIRECTO']]
-  );
-  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  const prepared = prepareDispatchWorkerExcelRows(parsed, { cities, vacancies });
-  assert.equal(prepared[0].workerData.fullName, 'Ana María Pérez Gómez');
+test('Nombre completo continúa funcionando cuando no hay columnas separadas', () => {
+  assert.equal(buildDispatchWorkerFullName({ fullName: '  Ana   Pérez  ' }), 'Ana Pérez');
 });
 
-test('rechaza el archivo cuando no trae una modalidad de nombre compatible', () => {
-  const workbook = workbookWithRows(
-    ['Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'],
-    [['3001234567', 'CC', '1020304050', 'Bogotá', 'Suba', 'DIRECTO']]
-  );
-  assert.throws(
-    () => parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]),
-    (error) => error instanceof DispatchWorkerExcelValidationError
-      && error.message.includes('Nombres + Apellidos')
-  );
-});
-
-test('ciudades operativas, vacantes y estado pueden omitirse', () => {
+test('la revisión clasifica un auxiliar activo con apellido nuevo como UPDATE', async () => {
   const workbook = workbookWithRows(minimalHeaders(), [minimalRow()]);
-  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  const prepared = prepareDispatchWorkerExcelRows(parsed, { cities, vacancies });
-
-  assert.equal(prepared[0].workerData.fullName, 'Ana María Pérez Gómez');
-  assert.equal(prepared[0].workerData.operationalStatus, 'CONTRATADO');
-  assert.deepEqual(prepared[0].cityIds, []);
-  assert.deepEqual(prepared[0].vacancyIds, []);
+  const prisma = { dispatchWorker: { findMany: async () => [existingWorker()] } };
+  const review = await buildDispatchWorkerImportReview({ prisma, workbook, cities, vacancies });
+  assert.equal(review.summary.updateCount, 1);
+  assert.equal(review.items[0].type, 'UPDATE');
+  assert.equal(review.items[0].changes.find((change) => change.field === 'fullName').incomingValue, 'Ana María Pérez Gómez');
 });
 
-test('un estado informado pero inválido continúa rechazándose', () => {
-  const workbook = workbookWithRows(completeHeaders(), [completeRow({ operationalStatus: 'PENDIENTE' })]);
-  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  assert.throws(
-    () => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }),
-    /Estado operativo debe ser CONTRATADO o INACTIVE/
-  );
-});
-
-test('normaliza contrato, estado, transporte y relaciones múltiples cuando se informan', () => {
-  const workbook = workbookWithRows(completeHeaders(), [completeRow()]);
-  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  const prepared = prepareDispatchWorkerExcelRows(parsed, { cities, vacancies });
-
-  assert.equal(prepared.length, 1);
-  assert.deepEqual(prepared[0].cityIds, ['city-bogota', 'city-siberia']);
-  assert.deepEqual(prepared[0].vacancyIds, ['vac-bogota']);
-  assert.equal(prepared[0].workerData.contractType, 'DIRECTO');
-  assert.equal(prepared[0].workerData.operationalStatus, 'CONTRATADO');
-  assert.equal(prepared[0].workerData.transportMode, 'Publico');
-  assert.equal(prepared[0].workerData.residenceCity, 'Bogotá');
-});
-
-test('rechaza filas con un nombre sin su apellido', () => {
+test('campos opcionales vacíos conservan valores existentes y no aparecen como cambios', async () => {
   const workbook = workbookWithRows(minimalHeaders(), [minimalRow({ lastNames: '' })]);
-  const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  assert.throws(
-    () => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }),
-    /Nombres y Apellidos/
-  );
+  assert.throws(() => parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]) && prepareDispatchWorkerExcelRows(parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]), { cities, vacancies }), /Nombres y Apellidos/);
+
+  const validWorkbook = workbookWithRows(minimalHeaders(), [minimalRow()]);
+  const current = existingWorker({ fullName: 'Ana María Pérez Gómez' });
+  const prisma = { dispatchWorker: { findMany: async () => [current] } };
+  const review = await buildDispatchWorkerImportReview({ prisma, workbook: validWorkbook, cities, vacancies });
+  const changedFields = review.items[0].changes.map((change) => change.field);
+  assert.doesNotMatch(changedFields.join(','), /transportMode|operationalStatus|notes|cities|vacancies/);
+  assert.equal(review.items[0].type, 'UNCHANGED');
+});
+
+test('un auxiliar nuevo queda pendiente de aprobación y no se crea durante el análisis', async () => {
+  let created = 0;
+  const prisma = {
+    dispatchWorker: {
+      findMany: async () => [],
+      create: async () => { created += 1; }
+    }
+  };
+  const review = await buildDispatchWorkerImportReview({ prisma, workbook: workbookWithRows(minimalHeaders(), [minimalRow()]), cities, vacancies });
+  assert.equal(review.items[0].type, 'NEW');
+  assert.equal(review.items[0].actionable, true);
+  assert.equal(created, 0);
+});
+
+test('aplica únicamente los cambios seleccionados y elimina el lote', async () => {
+  const updates = [];
+  let deletedBatch = false;
+  const item = {
+    id: 'row-2', type: 'UPDATE', actionable: true, workerId: 'worker-1', workerUpdatedAt: '2026-07-25T03:00:00.000Z',
+    incoming: {
+      workerData: { fullName: 'Ana María Pérez Gómez', phone: '3001234567', documentType: 'CC', documentNumber: '1020304050', residenceCity: 'Bogotá', residenceLocality: 'Suba', transportMode: null, contractType: 'DIRECTO', operationalStatus: 'CONTRATADO', notes: null },
+      providedWorkerFields: ['fullName', 'phone', 'documentType', 'documentNumber', 'residenceCity', 'residenceLocality', 'contractType'],
+      relationsProvided: { cities: false, vacancies: false }, cityIds: [], vacancyIds: []
+    }
+  };
+  const tx = {
+    dispatchWorkerImportBatch: {
+      findFirst: async () => ({ id: 'batch-1', status: 'PENDING', expiresAt: new Date('2026-07-25T06:00:00.000Z'), items: [item] }),
+      delete: async () => { deletedBatch = true; }
+    },
+    dispatchWorker: {
+      findUnique: async () => ({ id: 'worker-1', updatedAt: new Date('2026-07-25T03:00:00.000Z') }),
+      update: async ({ data }) => { updates.push(data); }
+    },
+    dispatchWorkerCity: { deleteMany: async () => null, createMany: async () => null },
+    dispatchWorkerVacancy: { deleteMany: async () => null, createMany: async () => null }
+  };
+  const prisma = { $transaction: async (callback) => callback(tx) };
+  const result = await applyDispatchWorkerImportBatch({ prisma, batchId: 'batch-1', ownerKey: 'coord', selectedItemIds: ['row-2'], now: new Date('2026-07-25T04:00:00.000Z') });
+  assert.equal(result.updated, 1);
+  assert.equal(updates[0].fullName, 'Ana María Pérez Gómez');
+  assert.equal('operationalStatus' in updates[0], false);
+  assert.equal(deletedBatch, true);
+});
+
+test('un cambio concurrente se omite y no sobrescribe el auxiliar', async () => {
+  let updateCalls = 0;
+  const item = { id: 'row-2', type: 'UPDATE', actionable: true, workerId: 'worker-1', workerUpdatedAt: '2026-07-25T03:00:00.000Z', incoming: { workerData: {}, providedWorkerFields: [], relationsProvided: { cities: false, vacancies: false }, cityIds: [], vacancyIds: [] } };
+  const tx = {
+    dispatchWorkerImportBatch: { findFirst: async () => ({ id: 'batch', expiresAt: new Date('2026-07-25T06:00:00.000Z'), items: [item] }), delete: async () => null },
+    dispatchWorker: { findUnique: async () => ({ id: 'worker-1', updatedAt: new Date('2026-07-25T03:30:00.000Z') }), update: async () => { updateCalls += 1; } },
+    dispatchWorkerCity: { deleteMany: async () => null, createMany: async () => null },
+    dispatchWorkerVacancy: { deleteMany: async () => null, createMany: async () => null }
+  };
+  const result = await applyDispatchWorkerImportBatch({ prisma: { $transaction: async (callback) => callback(tx) }, batchId: 'batch', ownerKey: 'coord', selectedItemIds: ['row-2'], now: new Date('2026-07-25T04:00:00.000Z') });
+  assert.equal(result.conflicts, 1);
+  assert.equal(updateCalls, 0);
+});
+
+test('la plantilla conserva Nombres y Apellidos separados', () => {
+  const workbook = buildDispatchWorkerImportTemplate({ cities, vacancies });
+  const sheet = workbook.getWorksheet('Auxiliares');
+  assert.equal(sheet.getCell('A1').value, 'Nombres');
+  assert.equal(sheet.getCell('B1').value, 'Apellidos');
+});
+
+test('las rutas usan revisión y aprobación en vez de importación inmediata', () => {
+  const route = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
+  const view = fs.readFileSync('src/views/operacionesPersonalImportarRevision.ejs', 'utf8');
+  assert.match(route, /buildDispatchWorkerImportReview/);
+  assert.match(route, /dispatchWorkerImportBatch\.create/);
+  assert.match(route, /importar-excel\/:batchId\/aplicar/);
+  assert.doesNotMatch(route, /importDispatchWorkerExcelWorkbook/);
+  assert.match(view, /Aplicar seleccionados/);
+  assert.match(view, /Aplicar todos/);
+  assert.match(view, /selectAll/);
+});
+
+test('la migración crea almacenamiento temporal de revisión', () => {
+  const migration = fs.readFileSync('prisma/migrations/20260725043000_dispatch_worker_import_review/migration.sql', 'utf8');
+  assert.match(migration, /CREATE TABLE "DispatchWorkerImportBatch"/);
+  assert.match(migration, /"items" JSONB NOT NULL/);
+  assert.match(migration, /"expiresAt" TIMESTAMP/);
 });
 
 test('rechaza documentos repetidos dentro del mismo archivo', () => {
   const workbook = workbookWithRows(minimalHeaders(), [minimalRow(), minimalRow({ firstNames: 'Otra', lastNames: 'Persona' })]);
   const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  assert.throws(
-    () => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }),
-    /repetido dentro del archivo/
-  );
-});
-
-test('la plantilla usa Nombres y Apellidos y deja el estado opcional', () => {
-  const workbook = buildDispatchWorkerImportTemplate({ cities, vacancies });
-  const sheet = workbook.getWorksheet('Auxiliares');
-  const statusColumn = DISPATCH_WORKER_EXCEL_COLUMNS.findIndex((column) => column.field === 'operationalStatus') + 1;
-
-  assert.deepEqual(workbook.worksheets.map((item) => item.name), ['Auxiliares', 'Instrucciones', 'Catalogos']);
-  assert.equal(sheet.getCell('A1').value, 'Nombres');
-  assert.equal(sheet.getCell('B1').value, 'Apellidos');
-  assert.equal(sheet.getRow(2).getCell(statusColumn).dataValidation.allowBlank, true);
-  assert.equal(workbook.getWorksheet('Catalogos').getCell('A2').value, 'Bogotá');
-});
-
-test('la importación crea un auxiliar contratado sin relaciones opcionales', async () => {
-  const workbook = workbookWithRows(minimalHeaders(), [minimalRow({ documentNumber: '222' })]);
-  const createdWorkers = [];
-  let cityRelationsCreated = 0;
-  let vacancyRelationsCreated = 0;
-  const prisma = {
-    $transaction: async (callback) => callback(prisma),
-    dispatchWorker: {
-      findFirst: async () => null,
-      create: async ({ data }) => {
-        createdWorkers.push(data);
-        return { id: 'new-worker' };
-      },
-      update: async () => null
-    },
-    dispatchWorkerCity: {
-      deleteMany: async () => null,
-      createMany: async ({ data }) => { cityRelationsCreated += data.length; }
-    },
-    dispatchWorkerVacancy: {
-      deleteMany: async () => null,
-      createMany: async ({ data }) => { vacancyRelationsCreated += data.length; }
-    }
-  };
-
-  const result = await importDispatchWorkerExcelWorkbook({ prisma, workbook, cities, vacancies });
-  assert.deepEqual(result, { created: 1, updated: 0, skipped: 0, total: 1 });
-  assert.equal(createdWorkers[0].fullName, 'Ana María Pérez Gómez');
-  assert.equal(createdWorkers[0].operationalStatus, 'CONTRATADO');
-  assert.equal(cityRelationsCreated, 0);
-  assert.equal(vacancyRelationsCreated, 0);
-});
-
-test('la ruta restringe el archivo y evita registrar el error completo con datos de filas', () => {
-  const route = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
-  assert.match(route, /MAX_EXCEL_SIZE_BYTES = 5 \* 1024 \* 1024/);
-  assert.match(route, /originalName\.endsWith\('\.xlsx'\)/);
-  assert.match(route, /errorCount: Array\.isArray\(error\?\.errors\)/);
-  assert.doesNotMatch(route, /console\.error\('\[Dispatch worker Excel import\]', error\)/);
+  assert.throws(() => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }), DispatchWorkerExcelValidationError);
 });

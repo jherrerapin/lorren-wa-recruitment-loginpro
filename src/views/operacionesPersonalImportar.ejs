@@ -129,7 +129,7 @@
 
       <aside class="card upload-card">
         <h2>Subir archivo</h2>
-        <p class="sub" style="margin-bottom:18px;">Solo se acepta un archivo <strong>.xlsx</strong> de máximo <strong>5 MB</strong>. El sistema valida todas las filas antes de crear o actualizar auxiliares.</p>
+        <p class="sub" style="margin-bottom:18px;">Solo se acepta un archivo <strong>.xlsx</strong> de máximo <strong>5 MB</strong>. El sistema analiza todas las filas y muestra una revisión antes de crear o actualizar cualquier auxiliar.</p>
 
         <form method="post" action="/admin/operaciones/personal/importar-excel" enctype="multipart/form-data">
           <div class="field">
@@ -137,7 +137,7 @@
             <input type="file" id="excelFile" name="excelFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
           </div>
           <div class="actions">
-            <button type="submit" class="btn btn-primary">Validar e importar</button>
+            <button type="submit" class="btn btn-primary">Analizar archivo</button>
             <a class="btn btn-secondary" href="/admin/operaciones/personal">Cancelar</a>
           </div>
         </form>
@@ -160,8 +160,8 @@
             <p>Cuando las diligencies, sepáralas usando coma, punto y coma, barra vertical <strong>|</strong> o un salto de línea.</p>
           </div>
           <div class="rule">
-            <strong>Documentos duplicados</strong>
-            <p>Un documento ya activo se omite. Un auxiliar desactivado se actualiza con los datos del Excel.</p>
+            <strong>Auxiliares existentes</strong>
+            <p>Un documento existente no se rechaza ni se modifica automáticamente. Verás sus diferencias y podrás aprobarlas individualmente o en grupo.</p>
           </div>
           <div class="rule">
             <strong>Valores controlados</strong>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Revisar importación — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <style>
+    * { box-sizing: border-box; }
+    :root { --bg:#f4f5f7; --surface:#fff; --border:#dbe1e8; --text:#172033; --muted:#667085; --navy:#1e2d3d; --teal:#0d7a6b; --green:#166534; --amber:#92400e; --red:#991b1b; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
+    .navbar { min-height:52px; padding:0 24px; background:var(--navy); display:flex; align-items:center; gap:18px; }
+    .navbar a { color:#d8e0e8; text-decoration:none; font-size:13px; font-weight:700; }
+    .navbar .brand img { height:28px; display:block; }
+    .navbar .spacer { flex:1; }
+    .logout { color:#fff; background:transparent; border:1px solid rgba(255,255,255,.28); border-radius:8px; padding:7px 12px; }
+    main { max-width:1180px; margin:0 auto; padding:30px 18px 60px; display:grid; gap:18px; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; box-shadow:0 8px 24px rgba(15,23,42,.06); }
+    h1,h2 { margin:0 0 8px; color:var(--navy); }
+    .sub { margin:0; color:var(--muted); line-height:1.55; }
+    .summary { display:grid; grid-template-columns:repeat(5,minmax(120px,1fr)); gap:12px; }
+    .metric { background:#f8fafc; border:1px solid var(--border); border-radius:12px; padding:14px; }
+    .metric strong { display:block; font-size:24px; color:var(--navy); }
+    .metric span { color:var(--muted); font-size:12px; font-weight:700; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+    .buttons { display:flex; gap:9px; flex-wrap:wrap; }
+    button,.button { min-height:40px; border-radius:9px; padding:9px 15px; border:1px solid var(--border); background:#fff; color:var(--navy); font-weight:800; cursor:pointer; text-decoration:none; }
+    .primary { background:var(--teal); border-color:var(--teal); color:#fff; }
+    .danger { color:var(--red); }
+    .item { border:1px solid var(--border); border-radius:12px; margin-top:12px; overflow:hidden; }
+    .item-head { display:flex; align-items:flex-start; gap:12px; padding:14px; background:#f8fafc; }
+    .item-head input { margin-top:5px; width:18px; height:18px; }
+    .grow { flex:1; min-width:0; }
+    .name { font-size:15px; font-weight:900; color:var(--navy); }
+    .doc { color:var(--muted); font-size:12px; margin-top:3px; }
+    .badge { display:inline-flex; border-radius:999px; padding:4px 9px; font-size:10px; font-weight:900; }
+    .badge-new { background:#dcfce7; color:var(--green); }
+    .badge-update { background:#fef3c7; color:var(--amber); }
+    .badge-unchanged { background:#e2e8f0; color:#475569; }
+    .badge-conflict { background:#fee2e2; color:var(--red); }
+    .changes { width:100%; border-collapse:collapse; font-size:12px; }
+    .changes th,.changes td { padding:10px 12px; border-top:1px solid var(--border); text-align:left; vertical-align:top; }
+    .changes th { color:var(--muted); background:#fcfcfd; }
+    .current { color:#667085; }
+    .incoming { color:#0f766e; font-weight:800; }
+    .reason { padding:12px 14px; border-top:1px solid var(--border); color:var(--muted); font-size:12px; }
+    @media(max-width:780px){ .summary{grid-template-columns:repeat(2,1fr)} .changes thead{display:none} .changes tr{display:grid} .changes td{display:block} }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin/operaciones">Operaciones / Despacho</a>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button class="logout" type="submit">Cerrar sesión</button></form>
+  </nav>
+  <main>
+    <section class="card">
+      <h1>Revisar cambios del Excel</h1>
+      <p class="sub">Archivo: <strong><%= fileName || 'archivo.xlsx' %></strong>. Todavía no se ha creado ni modificado ningún auxiliar. Selecciona lo que deseas aprobar.</p>
+    </section>
+
+    <section class="summary">
+      <div class="metric"><strong><%= summary.total || 0 %></strong><span>Filas analizadas</span></div>
+      <div class="metric"><strong><%= summary.newCount || 0 %></strong><span>Nuevos</span></div>
+      <div class="metric"><strong><%= summary.updateCount || 0 %></strong><span>Con cambios</span></div>
+      <div class="metric"><strong><%= summary.unchangedCount || 0 %></strong><span>Sin cambios</span></div>
+      <div class="metric"><strong><%= summary.conflictCount || 0 %></strong><span>Conflictos</span></div>
+    </section>
+
+    <form class="card" method="post" action="/admin/operaciones/personal/importar-excel/<%= batchId %>/aplicar" id="reviewForm">
+      <div class="toolbar">
+        <label><input type="checkbox" id="selectAll" /> Seleccionar todos los aplicables</label>
+        <div class="buttons">
+          <button type="submit" name="applyMode" value="selected" class="primary">Aplicar seleccionados</button>
+          <button type="submit" name="applyMode" value="all">Aplicar todos</button>
+        </div>
+      </div>
+
+      <% items.forEach((item) => { %>
+        <article class="item">
+          <div class="item-head">
+            <% if (item.actionable) { %><input class="item-check" type="checkbox" name="selectedItemIds" value="<%= item.id %>" checked /><% } %>
+            <div class="grow">
+              <div class="name"><%= item.displayName %></div>
+              <div class="doc">Documento: <%= item.documentNumber %> · Fila <%= item.rowNumber %></div>
+            </div>
+            <span class="badge badge-<%= item.type.toLowerCase() %>"><%= item.type === 'NEW' ? 'Nuevo' : item.type === 'UPDATE' ? 'Cambios' : item.type === 'UNCHANGED' ? 'Sin cambios' : 'Conflicto' %></span>
+          </div>
+          <% if (item.changes && item.changes.length) { %>
+            <table class="changes">
+              <thead><tr><th>Campo</th><th>Actual</th><th>Excel</th></tr></thead>
+              <tbody>
+                <% item.changes.forEach((change) => { %>
+                  <tr><td><strong><%= change.label %></strong></td><td class="current"><%= change.currentValue %></td><td class="incoming"><%= change.incomingValue %></td></tr>
+                <% }) %>
+              </tbody>
+            </table>
+          <% } %>
+          <% if (item.reason) { %><div class="reason"><%= item.reason %></div><% } %>
+        </article>
+      <% }) %>
+    </form>
+
+    <form class="card" method="post" action="/admin/operaciones/personal/importar-excel/<%= batchId %>/cancelar">
+      <div class="toolbar">
+        <p class="sub">La revisión expira automáticamente. Cancelarla elimina la propuesta y no modifica ningún auxiliar.</p>
+        <button type="submit" class="danger">Cancelar importación</button>
+      </div>
+    </form>
+  </main>
+  <script>
+    const selectAll = document.getElementById('selectAll');
+    const checks = () => Array.from(document.querySelectorAll('.item-check'));
+    if (selectAll) {
+      selectAll.checked = checks().length > 0 && checks().every((item) => item.checked);
+      selectAll.addEventListener('change', () => checks().forEach((item) => { item.checked = selectAll.checked; }));
+      checks().forEach((item) => item.addEventListener('change', () => { selectAll.checked = checks().every((current) => current.checked); }));
+    }
+  </script>
+</body>
+</html>

@@ -13,7 +13,7 @@ const LEGACY_FULL_NAME_COLUMN = {
   required: false,
   example: 'Oscar Antonio Montoya Hernández',
   help: 'Formato compatible con plantillas anteriores.',
-  aliases: ['nombre', 'nombre y apellidos', 'auxiliar', 'nombre auxiliar']
+  aliases: ['nombre y apellidos', 'auxiliar', 'nombre auxiliar']
 };
 
 export const DISPATCH_WORKER_EXCEL_COLUMNS = [
@@ -23,7 +23,7 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
     required: true,
     example: 'Oscar Antonio',
     help: 'Uno o varios nombres. Se unirán automáticamente con los apellidos.',
-    aliases: ['nombres del auxiliar', 'primer nombre', 'segundo nombre']
+    aliases: ['nombre', 'nombres del auxiliar', 'primer nombre', 'segundo nombre']
   },
   {
     field: 'lastNames',
@@ -137,12 +137,13 @@ function normalizeNamePart(value) {
 }
 
 export function buildDispatchWorkerFullName(row = {}) {
-  const legacyFullName = normalizeNamePart(row.fullName);
-  if (legacyFullName) return legacyFullName;
   const firstNames = normalizeNamePart(row.firstNames);
   const lastNames = normalizeNamePart(row.lastNames);
-  if (!firstNames || !lastNames) return null;
-  return `${firstNames} ${lastNames}`;
+  if (firstNames || lastNames) {
+    if (!firstNames || !lastNames) return null;
+    return `${firstNames} ${lastNames}`;
+  }
+  return normalizeNamePart(row.fullName);
 }
 
 export function normalizeExcelLookup(value) {
@@ -269,13 +270,16 @@ export function parseDispatchWorkerExcelWorksheet(worksheet) {
   for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
     const row = worksheet.getRow(rowNumber);
     const values = {};
+    const providedFields = [];
     for (const column of PARSABLE_EXCEL_COLUMNS) {
-      values[column.field] = headerMap.has(column.field)
+      const value = headerMap.has(column.field)
         ? readCellText(row.getCell(headerMap.get(column.field)))
         : null;
+      values[column.field] = value;
+      if (headerMap.has(column.field) && normalizeString(value)) providedFields.push(column.field);
     }
     if (!Object.values(values).some(Boolean)) continue;
-    rows.push({ rowNumber, ...values });
+    rows.push({ rowNumber, providedFields, ...values });
   }
 
   if (!rows.length) {
@@ -346,6 +350,20 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
     }
     if (documentKey) documentNumbers.add(documentKey);
 
+    const providedFields = new Set(row.providedFields || []);
+    const providedWorkerFields = new Set([
+      'fullName',
+      'phone',
+      'documentType',
+      'documentNumber',
+      'residenceCity',
+      'residenceLocality',
+      'contractType'
+    ]);
+    for (const field of ['transportMode', 'operationalStatus', 'notes']) {
+      if (providedFields.has(field)) providedWorkerFields.add(field);
+    }
+
     prepared.push({
       rowNumber: row.rowNumber,
       workerData: {
@@ -358,11 +376,17 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
         transportMode,
         contractType,
         operationalStatus,
-        notes: normalizeString(row.notes),
-        source: 'EXCEL_IMPORT'
+        notes: normalizeString(row.notes)
+      },
+      providedWorkerFields: [...providedWorkerFields],
+      relationsProvided: {
+        cities: providedFields.has('operationalCities'),
+        vacancies: providedFields.has('vacancies')
       },
       cityIds,
-      vacancyIds
+      cityLabels: operationalCities.map((city) => city.name),
+      vacancyIds,
+      vacancyLabels: vacancies.map(vacancyLabel)
     });
   }
 
@@ -370,60 +394,265 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
   return prepared;
 }
 
-async function replaceWorkerRelations(prisma, workerId, cityIds, vacancyIds) {
-  await prisma.dispatchWorkerCity.deleteMany({ where: { workerId } });
-  await prisma.dispatchWorkerVacancy.deleteMany({ where: { workerId } });
-  if (cityIds.length) {
-    await prisma.dispatchWorkerCity.createMany({
-      data: cityIds.map((cityId) => ({ workerId, cityId })),
-      skipDuplicates: true
+export const DISPATCH_WORKER_IMPORT_FIELD_LABELS = {
+  fullName: 'Nombre completo',
+  phone: 'Teléfono',
+  documentType: 'Tipo de documento',
+  residenceCity: 'Ciudad de residencia',
+  residenceLocality: 'Localidad / barrio',
+  transportMode: 'Medio de transporte',
+  contractType: 'Tipo de contrato',
+  operationalStatus: 'Estado operativo',
+  notes: 'Notas operativas',
+  cities: 'Ciudades operativas',
+  vacancies: 'Vacantes / perfiles'
+};
+
+function comparableScalar(value) {
+  return normalizeString(value) || '';
+}
+
+function comparableList(values = []) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value)).filter(Boolean))].sort();
+}
+
+function valuesEqual(currentValue, incomingValue) {
+  if (Array.isArray(currentValue) || Array.isArray(incomingValue)) {
+    return JSON.stringify(comparableList(currentValue)) === JSON.stringify(comparableList(incomingValue));
+  }
+  return comparableScalar(currentValue) === comparableScalar(incomingValue);
+}
+
+function visibleValue(value) {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : 'Sin información';
+  return normalizeString(value) || 'Sin información';
+}
+
+function existingWorkerSnapshot(worker) {
+  return {
+    fullName: worker.fullName,
+    phone: worker.phone,
+    documentType: worker.documentType,
+    documentNumber: worker.documentNumber,
+    residenceCity: worker.residenceCity,
+    residenceLocality: worker.residenceLocality,
+    transportMode: worker.transportMode,
+    contractType: worker.contractType,
+    operationalStatus: worker.operationalStatus,
+    notes: worker.notes,
+    cities: (worker.cities || []).map((row) => row.city?.name).filter(Boolean),
+    vacancies: (worker.vacancies || []).map((row) => vacancyLabel(row.vacancy || {})).filter(Boolean)
+  };
+}
+
+function incomingWorkerSnapshot(row) {
+  return {
+    ...row.workerData,
+    cities: row.cityLabels,
+    vacancies: row.vacancyLabels
+  };
+}
+
+function buildReviewChanges(row, existing = null) {
+  const incoming = incomingWorkerSnapshot(row);
+  const current = existing ? existingWorkerSnapshot(existing) : {};
+  const changes = [];
+  const scalarFields = row.providedWorkerFields.filter((field) => field !== 'documentNumber');
+  for (const field of scalarFields) {
+    if (existing && valuesEqual(current[field], incoming[field])) continue;
+    changes.push({
+      field,
+      label: DISPATCH_WORKER_IMPORT_FIELD_LABELS[field] || field,
+      currentValue: existing ? visibleValue(current[field]) : 'No existe',
+      incomingValue: visibleValue(incoming[field])
     });
   }
-  if (vacancyIds.length) {
-    await prisma.dispatchWorkerVacancy.createMany({
-      data: vacancyIds.map((vacancyId) => ({ workerId, vacancyId })),
-      skipDuplicates: true
+  if (row.relationsProvided.cities && (!existing || !valuesEqual(current.cities, incoming.cities))) {
+    changes.push({
+      field: 'cities',
+      label: DISPATCH_WORKER_IMPORT_FIELD_LABELS.cities,
+      currentValue: existing ? visibleValue(current.cities) : 'No existe',
+      incomingValue: visibleValue(incoming.cities)
     });
+  }
+  if (row.relationsProvided.vacancies && (!existing || !valuesEqual(current.vacancies, incoming.vacancies))) {
+    changes.push({
+      field: 'vacancies',
+      label: DISPATCH_WORKER_IMPORT_FIELD_LABELS.vacancies,
+      currentValue: existing ? visibleValue(current.vacancies) : 'No existe',
+      incomingValue: visibleValue(incoming.vacancies)
+    });
+  }
+  return changes;
+}
+
+function normalizeDocumentKey(value) {
+  return normalizeString(value)?.toUpperCase() || '';
+}
+
+export async function buildDispatchWorkerImportReview({ prisma, workbook, cities = [], vacancies = [] } = {}) {
+  const parsedRows = parseDispatchWorkerExcelWorksheet(workbook?.worksheets?.[0]);
+  const preparedRows = prepareDispatchWorkerExcelRows(parsedRows, { cities, vacancies });
+  const documentNumbers = [...new Set(preparedRows.map((row) => row.workerData.documentNumber).filter(Boolean))];
+  const existingWorkers = documentNumbers.length
+    ? await prisma.dispatchWorker.findMany({
+      where: { documentNumber: { in: documentNumbers } },
+      include: {
+        cities: { include: { city: true } },
+        vacancies: { include: { vacancy: true } }
+      }
+    })
+    : [];
+  const byDocument = new Map();
+  for (const worker of existingWorkers) {
+    const key = normalizeDocumentKey(worker.documentNumber);
+    const rows = byDocument.get(key) || [];
+    rows.push(worker);
+    byDocument.set(key, rows);
+  }
+
+  const items = preparedRows.map((row) => {
+    const matches = byDocument.get(normalizeDocumentKey(row.workerData.documentNumber)) || [];
+    if (matches.length > 1) {
+      return {
+        id: `row-${row.rowNumber}`,
+        rowNumber: row.rowNumber,
+        type: 'CONFLICT',
+        actionable: false,
+        displayName: row.workerData.fullName,
+        documentNumber: row.workerData.documentNumber,
+        reason: 'Existen varios auxiliares con el mismo número de documento. Debe corregirse manualmente antes de importar.',
+        changes: [],
+        incoming: row
+      };
+    }
+    const existing = matches[0] || null;
+    const changes = buildReviewChanges(row, existing);
+    const type = !existing ? 'NEW' : (changes.length ? 'UPDATE' : 'UNCHANGED');
+    return {
+      id: `row-${row.rowNumber}`,
+      rowNumber: row.rowNumber,
+      type,
+      actionable: type === 'NEW' || type === 'UPDATE',
+      displayName: row.workerData.fullName,
+      documentNumber: row.workerData.documentNumber,
+      workerId: existing?.id || null,
+      workerUpdatedAt: existing?.updatedAt ? new Date(existing.updatedAt).toISOString() : null,
+      reason: type === 'UNCHANGED' ? 'El archivo coincide con la información actual.' : null,
+      changes,
+      incoming: row
+    };
+  });
+
+  const summary = {
+    total: items.length,
+    newCount: items.filter((item) => item.type === 'NEW').length,
+    updateCount: items.filter((item) => item.type === 'UPDATE').length,
+    unchangedCount: items.filter((item) => item.type === 'UNCHANGED').length,
+    conflictCount: items.filter((item) => item.type === 'CONFLICT').length,
+    actionableCount: items.filter((item) => item.actionable).length
+  };
+  return { items, summary };
+}
+
+async function replaceWorkerRelations(prisma, workerId, cityIds, vacancyIds, relationsProvided = { cities: true, vacancies: true }) {
+  if (relationsProvided.cities) {
+    await prisma.dispatchWorkerCity.deleteMany({ where: { workerId } });
+    if (cityIds.length) {
+      await prisma.dispatchWorkerCity.createMany({
+        data: cityIds.map((cityId) => ({ workerId, cityId })),
+        skipDuplicates: true
+      });
+    }
+  }
+  if (relationsProvided.vacancies) {
+    await prisma.dispatchWorkerVacancy.deleteMany({ where: { workerId } });
+    if (vacancyIds.length) {
+      await prisma.dispatchWorkerVacancy.createMany({
+        data: vacancyIds.map((vacancyId) => ({ workerId, vacancyId })),
+        skipDuplicates: true
+      });
+    }
   }
 }
 
-export async function importDispatchWorkerExcelWorkbook({ prisma, workbook, cities = [], vacancies = [] } = {}) {
-  const parsedRows = parseDispatchWorkerExcelWorksheet(workbook?.worksheets?.[0]);
-  const preparedRows = prepareDispatchWorkerExcelRows(parsedRows, { cities, vacancies });
+function selectedReviewItems(items, selectedItemIds, applyAll) {
+  const selected = new Set((selectedItemIds || []).map(String));
+  return items.filter((item) => item?.actionable && (applyAll || selected.has(String(item.id))));
+}
 
+export async function applyDispatchWorkerImportBatch({
+  prisma,
+  batchId,
+  ownerKey,
+  selectedItemIds = [],
+  applyAll = false,
+  now = new Date()
+} = {}) {
   return prisma.$transaction(async (tx) => {
-    const result = { created: 0, updated: 0, skipped: 0, total: preparedRows.length };
-    for (const row of preparedRows) {
-      const documentNumber = row.workerData.documentNumber;
-      const activeExisting = await tx.dispatchWorker.findFirst({
-        where: { documentNumber, operationalStatus: ACTIVE_STATUS },
-        select: { id: true }
-      });
-      if (activeExisting) {
-        result.skipped += 1;
-        continue;
-      }
-
-      const disabledExisting = await tx.dispatchWorker.findFirst({
-        where: {
-          documentNumber,
-          source: { in: DISPATCH_OWNED_SOURCES },
-          operationalStatus: { in: DISABLED_STATUSES }
-        },
-        select: { id: true }
-      });
-
-      if (disabledExisting) {
-        await tx.dispatchWorker.update({ where: { id: disabledExisting.id }, data: row.workerData });
-        await replaceWorkerRelations(tx, disabledExisting.id, row.cityIds, row.vacancyIds);
-        result.updated += 1;
-        continue;
-      }
-
-      const worker = await tx.dispatchWorker.create({ data: row.workerData });
-      await replaceWorkerRelations(tx, worker.id, row.cityIds, row.vacancyIds);
-      result.created += 1;
+    const batch = await tx.dispatchWorkerImportBatch.findFirst({
+      where: { id: batchId, createdByUsername: ownerKey, status: 'PENDING' }
+    });
+    if (!batch) throw new DispatchWorkerExcelValidationError(['La revisión no existe, ya fue aplicada o pertenece a otro usuario.']);
+    if (new Date(batch.expiresAt).getTime() <= now.getTime()) {
+      await tx.dispatchWorkerImportBatch.delete({ where: { id: batch.id } });
+      throw new DispatchWorkerExcelValidationError(['La revisión expiró. Vuelve a subir el archivo.']);
     }
+
+    const items = Array.isArray(batch.items) ? batch.items : [];
+    const targets = selectedReviewItems(items, selectedItemIds, applyAll);
+    if (!targets.length) throw new DispatchWorkerExcelValidationError(['Selecciona al menos un auxiliar nuevo o un cambio para aprobar.']);
+
+    const result = { created: 0, updated: 0, conflicts: 0, selected: targets.length };
+    for (const item of targets) {
+      const incoming = item.incoming || {};
+      const workerData = incoming.workerData || {};
+      if (item.type === 'NEW') {
+        const existing = await tx.dispatchWorker.findFirst({
+          where: { documentNumber: workerData.documentNumber },
+          select: { id: true }
+        });
+        if (existing) {
+          result.conflicts += 1;
+          continue;
+        }
+        const worker = await tx.dispatchWorker.create({
+          data: { ...workerData, source: 'EXCEL_IMPORT' }
+        });
+        await replaceWorkerRelations(tx, worker.id, incoming.cityIds || [], incoming.vacancyIds || [], { cities: true, vacancies: true });
+        result.created += 1;
+        continue;
+      }
+
+      if (item.type !== 'UPDATE' || !item.workerId) continue;
+      const current = await tx.dispatchWorker.findUnique({
+        where: { id: item.workerId },
+        select: { id: true, updatedAt: true }
+      });
+      if (!current || new Date(current.updatedAt).toISOString() !== item.workerUpdatedAt) {
+        result.conflicts += 1;
+        continue;
+      }
+
+      const updateData = {};
+      for (const field of incoming.providedWorkerFields || []) {
+        if (field === 'documentNumber' || field === 'source') continue;
+        updateData[field] = workerData[field] ?? null;
+      }
+      if (Object.keys(updateData).length) {
+        await tx.dispatchWorker.update({ where: { id: current.id }, data: updateData });
+      }
+      await replaceWorkerRelations(
+        tx,
+        current.id,
+        incoming.cityIds || [],
+        incoming.vacancyIds || [],
+        incoming.relationsProvided || { cities: false, vacancies: false }
+      );
+      result.updated += 1;
+    }
+
+    await tx.dispatchWorkerImportBatch.delete({ where: { id: batch.id } });
     return result;
   });
 }
