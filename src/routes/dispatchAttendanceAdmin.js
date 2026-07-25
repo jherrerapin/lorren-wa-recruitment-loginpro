@@ -1,10 +1,12 @@
 import express from 'express';
 import {
   loadAttendanceAdminBoard,
-  registerManualAttendance,
-  reviewAttendanceSession
+  registerManualAttendance
 } from '../modules/dispatch-attendance/application/adminAttendance.js';
-import { enrichAttendanceBoardWithWorkday } from '../modules/dispatch-attendance/application/attendanceAdminWorkday.js';
+import {
+  enrichAttendanceBoardWithWorkday,
+  reviewAttendanceWorkdaySession
+} from '../modules/dispatch-attendance/application/attendanceAdminWorkday.js';
 import { upsertDispatchAttendanceBreakPolicy } from '../modules/dispatch-attendance/infrastructure/dispatchAttendanceBreakPolicyRepository.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 
@@ -45,6 +47,7 @@ function publicErrorMessage(error) {
   const messages = {
     attendance_review_session_not_found: 'La marcación ya no existe o fue eliminada.',
     attendance_review_arrival_required: 'No existe una llegada reportada para revisar.',
+    attendance_review_departure_required: 'No existe una salida reportada para revisar.',
     attendance_review_action_invalid: 'La acción seleccionada no es válida.',
     attendance_review_status_invalid: 'Selecciona si la llegada fue a tiempo o tarde.',
     attendance_review_reason_required: 'Escribe el motivo de la decisión.',
@@ -131,7 +134,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
 
   router.post('/sessions/:sessionId/review', formParser, async (req, res) => {
     try {
-      await reviewAttendanceSession(prisma, {
+      await reviewAttendanceWorkdaySession(prisma, {
         sessionId: req.params.sessionId,
         action: req.body.action,
         attendanceStatus: req.body.attendanceStatus,
