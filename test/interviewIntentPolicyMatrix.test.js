@@ -149,9 +149,8 @@ test('la política local expone evidencia estable para el conflicto cancelación
 
 test('solo una ambigüedad dentro del recordatorio escala una vez al parser enriquecido', async () => {
   const parser = createParser({
-    intent: 'request_reschedule',
-    parsedFields: {},
-    extraction: { replyIntent: 'request_reschedule' }
+    intent: 'unknown',
+    parsedFields: { reason: 'Necesito otra hora' }
   });
   const booking = bookingWithReminder();
   const text = '¿Podemos revisar lo de la entrevista?';
@@ -166,7 +165,7 @@ test('solo una ambigüedad dentro del recordatorio escala una vez al parser enri
   });
 
   assert.equal(result.intent, 'reschedule_interview');
-  assert.equal(result.source, 'openai_recruitment_intent');
+  assert.equal(result.source, 'openai_recruitment_fields');
   assert.equal(parser.calls.length, 1);
   assert.equal(parser.calls[0].options.mode, 'interview_reminder_intent');
 });
