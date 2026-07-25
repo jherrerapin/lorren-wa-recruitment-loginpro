@@ -81,6 +81,15 @@ export function buildInterviewDocumentsSentence(documents = '') {
   return cleanDocuments ? `Para la entrevista, lleva ${cleanDocuments}.` : '';
 }
 
+export function buildInterviewAttendanceConfirmedReply(formattedDate = null) {
+  const schedule = String(formattedDate || '').trim() || 'en el horario acordado';
+  return `Perfecto, gracias por confirmar asistencia. Te esperamos ${schedule}.`;
+}
+
+export function buildInterviewCancellationReply() {
+  return 'Listo, ya registré la cancelación de tu entrevista. Si más adelante deseas retomarla, me escribes por aquí.';
+}
+
 function naturalizeConfiguredDocumentsWording(reply = '') {
   return String(reply || '')
     .replace(/Para la entrevista,?\s+los documentos\s+\w+\s+son:?\s*/gi, 'Para la entrevista, lleva ')
