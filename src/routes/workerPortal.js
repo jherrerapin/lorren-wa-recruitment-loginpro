@@ -17,8 +17,10 @@ import {
   resolveWorkerPortalSession
 } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { registerDispatchArrival } from '../modules/dispatch-attendance/application/registerArrival.js';
+import { registerDispatchDeparture } from '../modules/dispatch-attendance/application/registerDeparture.js';
 import {
   loadWorkerPortalAssignmentForArrival,
+  loadWorkerPortalAssignmentForMark,
   loadWorkerPortalAssignments
 } from '../modules/dispatch-attendance/application/workerPortalAssignments.js';
 import { createPrismaWorkerPortalSessionRepository } from '../modules/dispatch-attendance/infrastructure/prismaWorkerPortalSessionRepository.js';
@@ -26,7 +28,9 @@ import { createWorkerPortalActivationAbuseGuard } from '../services/workerPortal
 import {
   MAX_ATTENDANCE_EVIDENCE_BYTES,
   discardAttendanceArrivalEvidence,
-  storeAttendanceArrivalEvidence
+  discardAttendanceDepartureEvidence,
+  storeAttendanceArrivalEvidence,
+  storeAttendanceDepartureEvidence
 } from '../services/attendanceEvidenceStorage.js';
 
 export const WORKER_PORTAL_HOME_PATH = '/operaciones/portal';
@@ -34,18 +38,10 @@ export const WORKER_PORTAL_ACTIVATION_PATH = '/operaciones/portal/activar';
 export const WORKER_PORTAL_INSTALLATION_COOKIE_NAME = '__Secure-lorren-installation';
 export const WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
-const WORKER_PORTAL_SERVICE_WORKER_FILE = fileURLToPath(
-  new URL('../public/worker-portal-sw.js', import.meta.url)
-);
-const WORKER_PORTAL_OFFLINE_RUNTIME_FILE = fileURLToPath(
-  new URL('../public/worker-portal-offline.js', import.meta.url)
-);
-const WORKER_PORTAL_MANIFEST_FILE = fileURLToPath(
-  new URL('../public/worker-portal.webmanifest', import.meta.url)
-);
-const WORKER_PORTAL_ICON_FILE = fileURLToPath(
-  new URL('../public/worker-portal-icon.svg', import.meta.url)
-);
+const WORKER_PORTAL_SERVICE_WORKER_FILE = fileURLToPath(new URL('../public/worker-portal-sw.js', import.meta.url));
+const WORKER_PORTAL_OFFLINE_RUNTIME_FILE = fileURLToPath(new URL('../public/worker-portal-offline.js', import.meta.url));
+const WORKER_PORTAL_MANIFEST_FILE = fileURLToPath(new URL('../public/worker-portal.webmanifest', import.meta.url));
+const WORKER_PORTAL_ICON_FILE = fileURLToPath(new URL('../public/worker-portal-icon.svg', import.meta.url));
 const GENERIC_ACTIVATION_ERROR = 'activation_invalid_or_expired';
 const ACTIVATION_RATE_LIMIT_ERROR = 'activation_temporarily_limited';
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
@@ -55,7 +51,8 @@ const CONFIGURATION_ERROR_CODES = new Set([
   'installation_pepper_required',
   'installation_pepper_too_short',
   'worker_portal_session_ttl_invalid',
-  'attendance_evidence_storage_unavailable'
+  'attendance_evidence_storage_unavailable',
+  'attendance_break_repository_prisma_required'
 ]);
 const EXPECTED_ACTIVATION_REJECTION_CODES = new Set([
   'activation_token_required',
@@ -65,17 +62,16 @@ const EXPECTED_ACTIVATION_REJECTION_CODES = new Set([
   'worker_portal_session_repository_expiry_invalid',
   'worker_portal_session_repository_expired'
 ]);
-const INVALID_SESSION_COOKIE_CODES = new Set([
-  'worker_portal_session_token_invalid'
-]);
-const EXPECTED_ARRIVAL_INPUT_CODES = new Set([
+const INVALID_SESSION_COOKIE_CODES = new Set(['worker_portal_session_token_invalid']);
+const EXPECTED_MARK_INPUT_CODES = new Set([
   'attendance_assignment_not_found',
   'attendance_evidence_file_invalid',
   'attendance_evidence_file_too_large',
   'attendance_evidence_mime_not_allowed',
   'attendance_evidence_worker_id_invalid',
   'attendance_evidence_assignment_id_invalid',
-  'attendance_evidence_idempotency_key_invalid'
+  'attendance_evidence_idempotency_key_invalid',
+  'attendance_evidence_mark_type_invalid'
 ]);
 
 function validDate(value) {
@@ -84,9 +80,7 @@ function validDate(value) {
 
 function createNonce(randomBytesFn = randomBytes) {
   const value = randomBytesFn(18);
-  if (!Buffer.isBuffer(value) || value.length !== 18) {
-    throw new Error('worker_portal_nonce_source_invalid');
-  }
+  if (!Buffer.isBuffer(value) || value.length !== 18) throw new Error('worker_portal_nonce_source_invalid');
   return value.toString('base64');
 }
 
@@ -129,14 +123,6 @@ function isConfigurationError(error) {
     || code === 'R2_storage_is_not_configured';
 }
 
-function isExpectedActivationRejection(error) {
-  return EXPECTED_ACTIVATION_REJECTION_CODES.has(errorCode(error));
-}
-
-function isInvalidSessionCookie(error) {
-  return INVALID_SESSION_COOKIE_CODES.has(errorCode(error));
-}
-
 function isActivationBodyParserError(error) {
   return error?.type === 'entity.parse.failed'
     || error?.type === 'entity.too.large'
@@ -176,26 +162,18 @@ function normalizeCaptureMode(value) {
 
 function arrivalPublicError(result) {
   const firstFlag = result?.validation?.riskFlags?.[0];
-  const errors = {
+  return ({
     ARRIVAL_WINDOW_NOT_OPEN: 'arrival_window_not_open',
     DUPLICATE_ARRIVAL: 'arrival_already_registered',
     ATTENDANCE_NOT_ENABLED: 'attendance_not_enabled',
     ASSIGNMENT_NOT_ACTIVE: 'assignment_not_available'
-  };
-  return errors[firstFlag] || 'arrival_not_recorded';
+  })[firstFlag] || 'arrival_not_recorded';
 }
 
 function arrivalPublicResult(result) {
   if (!result?.recorded) {
-    return {
-      status: 409,
-      payload: {
-        ok: false,
-        error: arrivalPublicError(result)
-      }
-    };
+    return { status: 409, payload: { ok: false, error: arrivalPublicError(result) } };
   }
-
   const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
   const punctualityStatus = result.validation?.reportedPunctuality || null;
   const riskFlags = Array.isArray(result.validation?.riskFlags) ? result.validation.riskFlags : [];
@@ -207,11 +185,11 @@ function arrivalPublicResult(result) {
       ? 'Llegada registrada y validada. Se registró como llegada tarde.'
       : 'Llegada registrada y validada a tiempo.';
   }
-
   return {
     status: 200,
     payload: {
       ok: true,
+      markType: 'ARRIVAL',
       recorded: true,
       replayed: Boolean(result.replayed),
       validationStatus,
@@ -223,18 +201,42 @@ function arrivalPublicResult(result) {
   };
 }
 
-export function workerPortalCookieOptions(maxAge) {
-  if (!Number.isFinite(maxAge) || maxAge <= 0) {
-    throw new Error('worker_portal_cookie_max_age_invalid');
+function departurePublicResult(result) {
+  const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
+  const riskFlags = Array.isArray(result.validation?.riskFlags) ? result.validation.riskFlags : [];
+  const workedMinutes = Number(result.validation?.workedMinutes);
+  const hours = Number.isFinite(workedMinutes) ? Math.floor(workedMinutes / 60) : null;
+  const minutes = Number.isFinite(workedMinutes) ? workedMinutes % 60 : null;
+  const workedLabel = hours === null ? null : `${hours} h${minutes ? ` ${minutes} min` : ''}`;
+  let message = workedLabel
+    ? `Salida registrada. Tiempo trabajado neto: ${workedLabel}.`
+    : 'Salida registrada correctamente.';
+  if (riskFlags.includes('OFFLINE_WEB_CAPTURE')) {
+    message = `${message} La marcación sin conexión quedó pendiente de revisión.`;
+  } else if (validationStatus === 'REVIEW_REQUIRED') {
+    message = `${message} Quedó pendiente de revisión.`;
   }
-
   return {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'strict',
-    path: WORKER_PORTAL_SESSION_COOKIE_PATH,
-    maxAge
+    status: 200,
+    payload: {
+      ok: true,
+      markType: 'DEPARTURE',
+      recorded: true,
+      replayed: Boolean(result.replayed),
+      validationStatus,
+      attendanceStatus: result.attendanceSession?.attendanceStatus || null,
+      workedMinutes: Number.isFinite(workedMinutes) ? workedMinutes : null,
+      grossWorkedMinutes: result.validation?.grossWorkedMinutes ?? null,
+      unpaidBreakMinutesDeducted: result.validation?.unpaidBreakMinutesDeducted ?? null,
+      requiresReview: validationStatus === 'REVIEW_REQUIRED',
+      message
+    }
   };
+}
+
+export function workerPortalCookieOptions(maxAge) {
+  if (!Number.isFinite(maxAge) || maxAge <= 0) throw new Error('worker_portal_cookie_max_age_invalid');
+  return { httpOnly: true, secure: true, sameSite: 'strict', path: WORKER_PORTAL_SESSION_COOKIE_PATH, maxAge };
 }
 
 export function applyWorkerPortalSecurityHeaders(res, nonce = null) {
@@ -245,10 +247,7 @@ export function applyWorkerPortalSecurityHeaders(res, nonce = null) {
   res.set('Referrer-Policy', 'no-referrer');
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('X-Frame-Options', 'DENY');
-  res.set(
-    'Content-Security-Policy',
-    `default-src 'none'; script-src ${scriptSource} 'self'; worker-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
-  );
+  res.set('Content-Security-Policy', `default-src 'none'; script-src ${scriptSource} 'self'; worker-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
 }
 
 export function redactWorkerPortalActivationUrlForLogging(req, _res, next) {
@@ -262,26 +261,18 @@ export function resolveWorkerPortalInstallationId(req, randomUUIDFn = randomUUID
   const current = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
   if (current) {
     try {
-      return {
-        installationId: normalizeInstallationId(current),
-        shouldSetCookie: false
-      };
+      return { installationId: normalizeInstallationId(current), shouldSetCookie: false };
     } catch {
-      // Replace malformed or legacy values only after a successful activation.
+      // A malformed legacy value is replaced after successful activation.
     }
   }
-
-  return {
-    installationId: normalizeInstallationId(randomUUIDFn()),
-    shouldSetCookie: true
-  };
+  return { installationId: normalizeInstallationId(randomUUIDFn()), shouldSetCookie: true };
 }
 
 export function setWorkerPortalInstallationCookie(res, installationId) {
-  const normalized = normalizeInstallationId(installationId);
   res.cookie(
     WORKER_PORTAL_INSTALLATION_COOKIE_NAME,
-    normalized,
+    normalizeInstallationId(installationId),
     workerPortalCookieOptions(WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS)
   );
 }
@@ -317,11 +308,9 @@ export function createWorkerPortalActivationAttemptMiddleware(attemptGuard) {
   if (!attemptGuard || typeof attemptGuard.consume !== 'function') {
     throw new Error('worker_portal_activation_attempt_guard_required');
   }
-
   return function workerPortalActivationAttemptMiddleware(req, res, next) {
     const decision = attemptGuard.consume(requestIp(req));
     if (decision.allowed) return next();
-
     applyWorkerPortalSecurityHeaders(res);
     res.set('Retry-After', String(decision.retryAfterSeconds));
     return res.status(429).json({ ok: false, error: ACTIVATION_RATE_LIMIT_ERROR });
@@ -330,17 +319,20 @@ export function createWorkerPortalActivationAttemptMiddleware(attemptGuard) {
 
 export function workerPortalActivationJsonErrorHandler(error, _req, res, next) {
   if (!isActivationBodyParserError(error)) return next(error);
-
   applyWorkerPortalSecurityHeaders(res);
-  const status = error?.type === 'entity.too.large' ? 413 : 400;
-  return res.status(status).json({ ok: false, error: GENERIC_ACTIVATION_ERROR });
+  return res.status(error?.type === 'entity.too.large' ? 413 : 400).json({
+    ok: false,
+    error: GENERIC_ACTIVATION_ERROR
+  });
 }
 
 export function workerPortalArrivalUploadErrorHandler(error, _req, res, next) {
   if (!(error instanceof multer.MulterError)) return next(error);
   applyWorkerPortalSecurityHeaders(res);
-  const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-  return res.status(status).json({ ok: false, error: 'arrival_evidence_invalid' });
+  return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+    ok: false,
+    error: 'arrival_evidence_invalid'
+  });
 }
 
 export function workerPortalRouter(prisma, options = {}) {
@@ -351,13 +343,15 @@ export function workerPortalRouter(prisma, options = {}) {
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
   const loadAssignmentsFn = options.loadAssignmentsFn || loadWorkerPortalAssignments;
   const loadAssignmentForArrivalFn = options.loadAssignmentForArrivalFn || loadWorkerPortalAssignmentForArrival;
+  const loadAssignmentForDepartureFn = options.loadAssignmentForDepartureFn || loadWorkerPortalAssignmentForMark;
   const registerArrivalFn = options.registerArrivalFn || registerDispatchArrival;
+  const registerDepartureFn = options.registerDepartureFn || registerDispatchDeparture;
   const storeArrivalEvidenceFn = options.storeArrivalEvidenceFn || storeAttendanceArrivalEvidence;
   const discardArrivalEvidenceFn = options.discardArrivalEvidenceFn || discardAttendanceArrivalEvidence;
+  const storeDepartureEvidenceFn = options.storeDepartureEvidenceFn || storeAttendanceDepartureEvidence;
+  const discardDepartureEvidenceFn = options.discardDepartureEvidenceFn || discardAttendanceDepartureEvidence;
   const installationPepper = options.installationPepper ?? process.env.ATTENDANCE_INSTALLATION_PEPPER;
-  const sessionTtlMinutes = optionalInteger(
-    options.sessionTtlMinutes ?? process.env.ATTENDANCE_PORTAL_SESSION_TTL_MINUTES
-  );
+  const sessionTtlMinutes = optionalInteger(options.sessionTtlMinutes ?? process.env.ATTENDANCE_PORTAL_SESSION_TTL_MINUTES);
   const randomUUIDFn = options.randomUUIDFn || randomUUID;
   const randomSessionBytesFn = options.randomSessionBytesFn;
   const nonceBytesFn = options.nonceBytesFn || randomBytes;
@@ -365,14 +359,9 @@ export function workerPortalRouter(prisma, options = {}) {
   const activationAttemptGuard = options.activationAttemptGuard || createWorkerPortalActivationAbuseGuard();
   const activationAttemptMiddleware = createWorkerPortalActivationAttemptMiddleware(activationAttemptGuard);
   const activationJsonParser = express.json({ limit: '4kb', strict: true, type: 'application/json' });
-  const arrivalUpload = options.arrivalUpload || multer({
+  const markUpload = options.arrivalUpload || multer({
     storage: multer.memoryStorage(),
-    limits: {
-      fileSize: MAX_ATTENDANCE_EVIDENCE_BYTES,
-      files: 1,
-      fields: 12,
-      fieldSize: 4 * 1024
-    }
+    limits: { fileSize: MAX_ATTENDANCE_EVIDENCE_BYTES, files: 1, fields: 12, fieldSize: 4 * 1024 }
   }).single('selfie');
 
   function getRepository() {
@@ -387,9 +376,117 @@ export function workerPortalRouter(prisma, options = {}) {
     return resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
   }
 
+  async function handleMark(req, res, markType) {
+    let evidence = null;
+    const isDeparture = markType === 'DEPARTURE';
+    const loadAssignment = isDeparture ? loadAssignmentForDepartureFn : loadAssignmentForArrivalFn;
+    const register = isDeparture ? registerDepartureFn : registerArrivalFn;
+    const storeEvidence = isDeparture ? storeDepartureEvidenceFn : storeArrivalEvidenceFn;
+    const discardEvidence = isDeparture ? discardDepartureEvidenceFn : discardArrivalEvidenceFn;
+    try {
+      const now = nowFn();
+      if (!validDate(now)) throw new Error('worker_portal_mark_now_invalid');
+      const session = await resolveRequestSession(req, now);
+      if (!session) {
+        clearWorkerPortalSessionCookie(res);
+        return res.status(401).json({ ok: false, error: 'portal_session_required' });
+      }
+
+      const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotencyKey);
+      const captureMode = normalizeCaptureMode(req.body?.captureMode);
+      const clientCapturedAt = optionalBodyDate(req.body?.clientCapturedAt, 'attendance_client_captured_at');
+      if (captureMode === OFFLINE_WEB_CAPTURE_MODE && !clientCapturedAt) {
+        throw new Error('attendance_client_captured_at_required');
+      }
+
+      const assignment = await loadAssignment(prisma, {
+        workerId: session.workerId,
+        assignmentId: req.params.assignmentId,
+        now
+      });
+      if (!assignment) return res.status(404).json({ ok: false, error: 'assignment_not_available' });
+      if (!assignment.attendanceEnabled) return res.status(409).json({ ok: false, error: 'attendance_not_enabled' });
+      if (!isDeparture && captureMode !== OFFLINE_WEB_CAPTURE_MODE && !assignment.canRegisterArrival && !assignment.arrivalReported) {
+        return res.status(409).json({ ok: false, error: 'arrival_window_not_open', opensAt: assignment.arrivalWindowOpensAt });
+      }
+      if (isDeparture) {
+        if (!assignment.arrivalReported) return res.status(409).json({ ok: false, error: 'departure_arrival_required' });
+        if (assignment.departureReported) return res.status(409).json({ ok: false, error: 'departure_already_registered' });
+      }
+
+      const latitude = requiredBodyNumber(req.body?.latitude, 'attendance_latitude', { min: -90, max: 90 });
+      const longitude = requiredBodyNumber(req.body?.longitude, 'attendance_longitude', { min: -180, max: 180 });
+      const accuracyMeters = requiredBodyNumber(req.body?.accuracyMeters, 'attendance_accuracy', { min: 0, max: 100_000 });
+      if (assignment.photoRequired && !req.file) return res.status(400).json({ ok: false, error: 'selfie_required' });
+      if (req.file && req.body?.photoConsent !== 'true') {
+        return res.status(400).json({ ok: false, error: 'photo_consent_required' });
+      }
+
+      const rawInstallationId = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
+      if (!rawInstallationId) return res.status(401).json({ ok: false, error: 'device_activation_required' });
+      const installationIdHash = hashInstallationId(normalizeInstallationId(rawInstallationId), installationPepper);
+      evidence = await storeEvidence({
+        workerId: session.workerId,
+        assignmentId: assignment.id,
+        idempotencyKey,
+        file: req.file || null
+      });
+
+      const result = await register(prisma, {
+        assignmentId: assignment.id,
+        expectedWorkerId: session.workerId,
+        idempotencyKey,
+        now,
+        captureMode,
+        clientCapturedAt,
+        latitude,
+        longitude,
+        accuracyMeters,
+        installationIdHash,
+        persistentStorageAvailable: captureMode === OFFLINE_WEB_CAPTURE_MODE
+          ? req.body?.persistentStorageAvailable === 'true'
+          : true,
+        hasFreshPhoto: Boolean(evidence?.storageKey),
+        evidenceStorageKey: evidence?.storageKey || null,
+        evidenceMimeType: evidence?.mimeType || null,
+        ipAddress: requestIp(req),
+        userAgent: requestUserAgent(req)
+      });
+
+      if (!result.recorded && evidence?.created) await discardEvidence(evidence).catch(() => {});
+      const publicResult = isDeparture ? departurePublicResult(result) : arrivalPublicResult(result);
+      return res.status(publicResult.status).json(publicResult.payload);
+    } catch (error) {
+      const code = errorCode(error);
+      if (INVALID_SESSION_COOKIE_CODES.has(code)) {
+        clearWorkerPortalSessionCookie(res);
+        return res.status(401).json({ ok: false, error: 'portal_session_required' });
+      }
+      if (isConfigurationError(error)) {
+        console.error('[WORKER_PORTAL_MARK_CONFIGURATION_ERROR]', { markType, code });
+        return res.status(503).json({ ok: false, error: 'mark_temporarily_unavailable' });
+      }
+      const publicCodes = {
+        attendance_assignment_not_found: [404, 'assignment_not_available'],
+        attendance_assignment_inactive: [409, 'assignment_not_available'],
+        attendance_not_enabled: [409, 'attendance_not_enabled'],
+        attendance_departure_arrival_required: [409, 'departure_arrival_required'],
+        attendance_departure_already_registered: [409, 'departure_already_registered'],
+        attendance_departure_before_arrival: [409, 'departure_before_arrival'],
+        attendance_offline_capture_expired: [409, 'offline_capture_expired'],
+        attendance_offline_capture_future_invalid: [400, 'offline_capture_time_invalid']
+      };
+      if (publicCodes[code]) return res.status(publicCodes[code][0]).json({ ok: false, error: publicCodes[code][1] });
+      if (EXPECTED_MARK_INPUT_CODES.has(code) || code.endsWith('_invalid') || code.endsWith('_required')) {
+        return res.status(400).json({ ok: false, error: 'mark_request_invalid' });
+      }
+      console.error('[WORKER_PORTAL_MARK_ERROR]', { markType, code });
+      return res.status(500).json({ ok: false, error: 'mark_failed' });
+    }
+  }
+
   router.use(cookieParser());
   router.use(redactWorkerPortalActivationUrlForLogging);
-
   router.get('/service-worker.js', (_req, res) => {
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -397,21 +494,18 @@ export function workerPortalRouter(prisma, options = {}) {
     res.set('X-Content-Type-Options', 'nosniff');
     return res.sendFile(WORKER_PORTAL_SERVICE_WORKER_FILE);
   });
-
   router.get('/offline.js', (_req, res) => {
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.set('X-Content-Type-Options', 'nosniff');
     return res.sendFile(WORKER_PORTAL_OFFLINE_RUNTIME_FILE);
   });
-
   router.get('/manifest.webmanifest', (_req, res) => {
     res.set('Content-Type', 'application/manifest+json; charset=utf-8');
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.set('X-Content-Type-Options', 'nosniff');
     return res.sendFile(WORKER_PORTAL_MANIFEST_FILE);
   });
-
   router.get('/icon.svg', (_req, res) => {
     res.set('Content-Type', 'image/svg+xml; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=86400');
@@ -424,14 +518,10 @@ export function workerPortalRouter(prisma, options = {}) {
     applyWorkerPortalSecurityHeaders(res, nonce);
     return renderPortal(res, 'activation', nonce);
   });
-
   router.post('/activar', activationAttemptMiddleware, activationJsonParser, async (req, res) => {
     applyWorkerPortalSecurityHeaders(res);
-
     try {
-      if (req.get?.('x-requested-with') !== 'worker-portal') {
-        throw new Error('worker_portal_activation_request_invalid');
-      }
+      if (req.get?.('x-requested-with') !== 'worker-portal') throw new Error('worker_portal_activation_request_invalid');
       const now = nowFn();
       if (!validDate(now)) throw new Error('worker_portal_activation_now_invalid');
       const installation = resolveWorkerPortalInstallationId(req, randomUUIDFn);
@@ -447,10 +537,7 @@ export function workerPortalRouter(prisma, options = {}) {
         platform: requestPlatform(req),
         ipAddress: requestIp(req)
       });
-
-      if (installation.shouldSetCookie) {
-        setWorkerPortalInstallationCookie(res, installation.installationId);
-      }
+      if (installation.shouldSetCookie) setWorkerPortalInstallationCookie(res, installation.installationId);
       res.cookie(result.cookie.name, result.rawSessionToken, result.cookie.options);
       return res.status(200).json({ ok: true, redirectTo: WORKER_PORTAL_HOME_PATH });
     } catch (error) {
@@ -459,148 +546,26 @@ export function workerPortalRouter(prisma, options = {}) {
         console.error('[WORKER_PORTAL_CONFIGURATION_ERROR]', { code });
         return res.status(503).json({ ok: false, error: 'portal_temporarily_unavailable' });
       }
-      if (!isExpectedActivationRejection(error)) {
-        console.error('[WORKER_PORTAL_ACTIVATION_ERROR]', { code });
-      }
+      if (!EXPECTED_ACTIVATION_REJECTION_CODES.has(code)) console.error('[WORKER_PORTAL_ACTIVATION_ERROR]', { code });
       return res.status(400).json({ ok: false, error: GENERIC_ACTIVATION_ERROR });
     }
   });
-
   router.use('/activar', workerPortalActivationJsonErrorHandler);
 
-  router.post(
-    '/asignaciones/:assignmentId/llegada',
-    (req, res, next) => {
-      applyWorkerPortalSecurityHeaders(res);
-      if (req.get?.('x-requested-with') !== 'worker-portal') {
-        return res.status(400).json({ ok: false, error: 'arrival_request_invalid' });
-      }
-      return next();
-    },
-    arrivalUpload,
-    async (req, res) => {
-      let evidence = null;
-      try {
-        const now = nowFn();
-        if (!validDate(now)) throw new Error('worker_portal_arrival_now_invalid');
-        const session = await resolveRequestSession(req, now);
-        if (!session) {
-          clearWorkerPortalSessionCookie(res);
-          return res.status(401).json({ ok: false, error: 'portal_session_required' });
-        }
-
-        const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotencyKey);
-        const captureMode = normalizeCaptureMode(req.body?.captureMode);
-        const clientCapturedAt = optionalBodyDate(req.body?.clientCapturedAt, 'attendance_client_captured_at');
-        if (captureMode === OFFLINE_WEB_CAPTURE_MODE && !clientCapturedAt) {
-          throw new Error('attendance_client_captured_at_required');
-        }
-
-        const assignment = await loadAssignmentForArrivalFn(prisma, {
-          workerId: session.workerId,
-          assignmentId: req.params.assignmentId,
-          now
-        });
-        if (!assignment) return res.status(404).json({ ok: false, error: 'assignment_not_available' });
-        if (!assignment.attendanceEnabled) {
-          return res.status(409).json({ ok: false, error: 'attendance_not_enabled' });
-        }
-        if (captureMode !== OFFLINE_WEB_CAPTURE_MODE && !assignment.canRegisterArrival && !assignment.arrivalReported) {
-          return res.status(409).json({
-            ok: false,
-            error: 'arrival_window_not_open',
-            opensAt: assignment.arrivalWindowOpensAt
-          });
-        }
-
-        const latitude = requiredBodyNumber(req.body?.latitude, 'attendance_latitude', { min: -90, max: 90 });
-        const longitude = requiredBodyNumber(req.body?.longitude, 'attendance_longitude', { min: -180, max: 180 });
-        const accuracyMeters = requiredBodyNumber(req.body?.accuracyMeters, 'attendance_accuracy', { min: 0, max: 100_000 });
-        const photoRequired = assignment.photoRequired === true;
-        if (photoRequired && !req.file) {
-          return res.status(400).json({ ok: false, error: 'selfie_required' });
-        }
-        if (req.file && req.body?.photoConsent !== 'true') {
-          return res.status(400).json({ ok: false, error: 'photo_consent_required' });
-        }
-
-        const rawInstallationId = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
-        if (!rawInstallationId) {
-          return res.status(401).json({ ok: false, error: 'device_activation_required' });
-        }
-        const installationId = normalizeInstallationId(rawInstallationId);
-        const installationIdHash = hashInstallationId(installationId, installationPepper);
-
-        evidence = await storeArrivalEvidenceFn({
-          workerId: session.workerId,
-          assignmentId: assignment.id,
-          idempotencyKey,
-          file: req.file || null
-        });
-
-        const result = await registerArrivalFn(prisma, {
-          assignmentId: assignment.id,
-          expectedWorkerId: session.workerId,
-          idempotencyKey,
-          now,
-          captureMode,
-          clientCapturedAt,
-          latitude,
-          longitude,
-          accuracyMeters,
-          installationIdHash,
-          persistentStorageAvailable: captureMode === OFFLINE_WEB_CAPTURE_MODE
-            ? req.body?.persistentStorageAvailable === 'true'
-            : true,
-          hasFreshPhoto: Boolean(evidence?.storageKey),
-          evidenceStorageKey: evidence?.storageKey || null,
-          evidenceMimeType: evidence?.mimeType || null,
-          ipAddress: requestIp(req),
-          userAgent: requestUserAgent(req)
-        });
-
-        if (!result.recorded && evidence?.created) {
-          await discardArrivalEvidenceFn(evidence).catch((cleanupError) => {
-            console.warn('[WORKER_PORTAL_EVIDENCE_CLEANUP_FAILED]', { code: errorCode(cleanupError) });
-          });
-        }
-
-        const publicResult = arrivalPublicResult(result);
-        return res.status(publicResult.status).json(publicResult.payload);
-      } catch (error) {
-        const code = errorCode(error);
-        if (isInvalidSessionCookie(error)) {
-          clearWorkerPortalSessionCookie(res);
-          return res.status(401).json({ ok: false, error: 'portal_session_required' });
-        }
-        if (isConfigurationError(error)) {
-          console.error('[WORKER_PORTAL_ARRIVAL_CONFIGURATION_ERROR]', { code });
-          return res.status(503).json({ ok: false, error: 'arrival_temporarily_unavailable' });
-        }
-        if (code === 'attendance_assignment_not_found') {
-          return res.status(404).json({ ok: false, error: 'assignment_not_available' });
-        }
-        if (code === 'attendance_offline_capture_expired') {
-          return res.status(409).json({ ok: false, error: 'offline_capture_expired' });
-        }
-        if (code === 'attendance_offline_capture_future_invalid') {
-          return res.status(400).json({ ok: false, error: 'offline_capture_time_invalid' });
-        }
-        if (EXPECTED_ARRIVAL_INPUT_CODES.has(code) || code.endsWith('_invalid') || code.endsWith('_required')) {
-          return res.status(400).json({ ok: false, error: 'arrival_request_invalid' });
-        }
-        console.error('[WORKER_PORTAL_ARRIVAL_ERROR]', { code });
-        return res.status(500).json({ ok: false, error: 'arrival_failed' });
-      }
+  const markRequestGuard = (req, res, next) => {
+    applyWorkerPortalSecurityHeaders(res);
+    if (req.get?.('x-requested-with') !== 'worker-portal') {
+      return res.status(400).json({ ok: false, error: 'mark_request_invalid' });
     }
-  );
-
+    return next();
+  };
+  router.post('/asignaciones/:assignmentId/llegada', markRequestGuard, markUpload, (req, res) => handleMark(req, res, 'ARRIVAL'));
+  router.post('/asignaciones/:assignmentId/salida', markRequestGuard, markUpload, (req, res) => handleMark(req, res, 'DEPARTURE'));
   router.use('/asignaciones', workerPortalArrivalUploadErrorHandler);
 
   router.get('/', async (req, res) => {
     const nonce = createNonce(nonceBytesFn);
     applyWorkerPortalSecurityHeaders(res, nonce);
-
     try {
       const now = nowFn();
       if (!validDate(now)) throw new Error('worker_portal_resolution_now_invalid');
@@ -612,7 +577,7 @@ export function workerPortalRouter(prisma, options = {}) {
       const assignments = await loadAssignmentsFn(prisma, { workerId: session.workerId, now });
       return renderPortal(res, 'active', nonce, { expiresAt: session.expiresAt, assignments });
     } catch (error) {
-      if (isInvalidSessionCookie(error)) {
+      if (INVALID_SESSION_COOKIE_CODES.has(errorCode(error))) {
         clearWorkerPortalSessionCookie(res);
         return renderPortal(res, 'inactive', nonce);
       }
