@@ -16,6 +16,7 @@ import { detectConversationIntent } from './conversationIntent.js';
 import { classifyInterviewIntent } from './interviewIntentClassifier.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
 import { OPENAI_EXTRACTION_MODEL } from './openAiModelConfig.js';
+import { buildInterviewAttendanceConfirmedReply, buildInterviewCancellationReply } from './naturalReply.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PAUSED_VACANCY_FLAG = 'paused_vacancy';
@@ -152,7 +153,7 @@ async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inb
       currentStep,
       intent,
       classification,
-      reply: `Perfecto, gracias por confirmar asistencia. Te esperamos ${formatInterviewDate(new Date(booking.scheduledAt))}.`
+      reply: buildInterviewAttendanceConfirmedReply(formatInterviewDate(new Date(booking.scheduledAt)))
     });
   }
 
@@ -181,7 +182,7 @@ async function handleAppointmentIntentDirectly({ prisma, candidate, vacancy, inb
         currentStep,
         intent,
         classification,
-        reply: 'Listo, ya registré la cancelación de tu entrevista. Si más adelante deseas retomarla, me escribes por aquí.'
+        reply: buildInterviewCancellationReply()
       }),
       candidateReminderConflict
     };

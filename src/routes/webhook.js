@@ -41,7 +41,16 @@ import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVa
 import { createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
 import { detectInterviewIntent } from '../services/interviewLifecycle.js';
 import { applyInterviewReminderResponse } from '../services/interviewBookingStateService.js';
-import { buildInterviewDocumentsSentence, buildUnavailableVacancyInfoReply, buildVacancyOptionsReply, generateBookingConfirmation, generateInterviewOffer, sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
+import {
+  buildInterviewAttendanceConfirmedReply,
+  buildInterviewCancellationReply,
+  buildInterviewDocumentsSentence,
+  buildUnavailableVacancyInfoReply,
+  buildVacancyOptionsReply,
+  generateBookingConfirmation,
+  generateInterviewOffer,
+  sanitizeRequiredDocumentsForBot
+} from '../services/naturalReply.js';
 import { sanitizeOutboundReply, buildSafeFallbackReply } from '../services/replySafety.js';
 import { appendUniqueReplySegment } from '../services/replyComposition.js';
 import { buildCandidateDataCollectionMessage, evaluateCandidateEligibility, getCandidateReadiness, getFieldLabel as getReadinessFieldLabel, getMissingFieldLabels, getRequiredCandidateFieldKeys, hasValidCv } from '../services/readinessGuard.js';
@@ -2275,7 +2284,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
           observedReminderState: observedCandidate?.reminderState || null
         }));
       }
-      const body = 'Listo, ya registré la cancelación de tu entrevista. Si más adelante deseas retomarla, me escribes por aquí.';
+      const body = buildInterviewCancellationReply();
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'interview_booking_cancel' });
     }
 
@@ -2334,7 +2343,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'confirm_attendance');
       if (!transition) return;
 
-      const body = `Perfecto, gracias por confirmar asistencia. Te esperamos ${nextSlot?.formattedDate || 'en el horario acordado'}.`;
+      const body = buildInterviewAttendanceConfirmedReply(nextSlot?.formattedDate);
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'interview_attendance_confirmed' });
     }
 
