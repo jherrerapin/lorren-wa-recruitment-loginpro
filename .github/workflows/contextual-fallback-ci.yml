@@ -1,34 +1,8 @@
 name: Contextual fallback gate
 
+# Pausado temporalmente para controlar el consumo mensual de GitHub Actions.
+# Se conserva la ejecución manual desde la pestaña Actions.
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - src/services/contextualReply.js
-      - src/services/responsePolicy.js
-      - test/contextualReply.test.js
-      - test/contextualReplyRobustness.test.js
-      - test/contextualReplyLogging.test.js
-      - test/hardeningP0.test.js
-      - test/p9CvOnlyPdfDocx.test.js
-      - test/replySimilarityPolicy.test.js
-      - test/responsePolicyRemoval.test.js
-      - .github/workflows/contextual-fallback-ci.yml
-  push:
-    branches:
-      - main
-    paths:
-      - src/services/contextualReply.js
-      - src/services/responsePolicy.js
-      - test/contextualReply.test.js
-      - test/contextualReplyRobustness.test.js
-      - test/contextualReplyLogging.test.js
-      - test/hardeningP0.test.js
-      - test/p9CvOnlyPdfDocx.test.js
-      - test/replySimilarityPolicy.test.js
-      - test/responsePolicyRemoval.test.js
-      - .github/workflows/contextual-fallback-ci.yml
   workflow_dispatch:
 
 permissions:
