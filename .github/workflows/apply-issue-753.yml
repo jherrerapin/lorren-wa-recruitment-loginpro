@@ -32,11 +32,13 @@ jobs:
           git fetch origin automation/753-whatsapp-init-dev-client main
           git show origin/automation/753-whatsapp-init-dev-client:.github/scripts/apply-issue-753.py > /tmp/apply-issue-753.py
           git show origin/automation/753-whatsapp-init-dev-client:.github/scripts/refine-issue-753-test.py > /tmp/refine-issue-753-test.py
+          git show origin/automation/753-whatsapp-init-dev-client:.github/scripts/refine-issue-753-runtime-contract.py > /tmp/refine-issue-753-runtime-contract.py
 
       - name: Apply implementation
         run: |
           python3 /tmp/apply-issue-753.py
           python3 /tmp/refine-issue-753-test.py
+          python3 /tmp/refine-issue-753-runtime-contract.py
           rm -f .github/issue-753-trigger
 
       - name: Set up Node.js
@@ -60,23 +62,10 @@ jobs:
           node --check src/routes/publicDispatchClient.js
           node --check src/routes/dispatchBridgeCore.js
           node --check test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+          node --check test/dispatchWhatsappRuntimeContracts.test.js
 
       - name: Test loading recovery and dev access
-        id: new-regression
-        continue-on-error: true
-        run: node --test test/dispatchWhatsappLoadingAndTestClientAccess.test.js > /tmp/issue-753-new-regression.tap 2>&1
-
-      - name: Upload new regression diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-753-new-regression-${{ github.run_number }}
-          path: /tmp/issue-753-new-regression.tap
-          retention-days: 1
-
-      - name: Stop on new regression failure
-        if: steps.new-regression.outcome == 'failure'
-        run: exit 1
+        run: node --test test/dispatchWhatsappLoadingAndTestClientAccess.test.js
 
       - name: Test WhatsApp runtime contracts
         run: node --test test/dispatchWhatsappRuntimeContracts.test.js
@@ -148,6 +137,7 @@ jobs:
                   src/views/operacionesClientes.ejs \
                   src/routes/publicDispatchClient.js \
                   src/routes/dispatchBridgeCore.js \
-                  test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+                  test/dispatchWhatsappLoadingAndTestClientAccess.test.js \
+                  test/dispatchWhatsappRuntimeContracts.test.js
           git commit -m "fix: recuperar WhatsApp despacho y restringir cliente de prueba (#753)"
           git push origin HEAD:fix/753-dispatch-whatsapp-init-dev-test-client
