@@ -44,6 +44,10 @@ function normalizeCaptureMode(value) {
   return normalized;
 }
 
+function markMoment(mark) {
+  return dateValue(mark?.clientCapturedAt ?? mark?.serverReceivedAt, 'attendance_break_mark_time', true);
+}
+
 function normalizeInput(input = {}) {
   const now = dateValue(input.now ?? new Date(), 'attendance_server_now', true);
   const captureMode = normalizeCaptureMode(input.captureMode);
@@ -156,7 +160,7 @@ async function insideTransaction(client, input) {
   if (input.markType === 'BREAK_END' && breakEnd) {
     throw new Error('attendance_break_already_completed');
   }
-  if (input.markType === 'BREAK_END' && input.reportedAt.getTime() < breakStart.serverReceivedAt.getTime()) {
+  if (input.markType === 'BREAK_END' && input.reportedAt.getTime() < markMoment(breakStart).getTime()) {
     throw new Error('attendance_break_end_before_start');
   }
 
