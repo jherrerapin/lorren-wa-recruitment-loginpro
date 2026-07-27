@@ -42,16 +42,15 @@ jobs:
       - name: Capture exact base suite
         shell: bash
         run: |
+          git worktree add /tmp/issue-763-base "${{ github.event.pull_request.base.sha }}"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/issue-763-base/node_modules
           set +e
-          npm test > /tmp/base.log 2>&1
+          (cd /tmp/issue-763-base && npm test) > /tmp/base.log 2>&1
           base_exit=$?
           set -e
           grep '^not ok' /tmp/base.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/base.failures || true
           echo "BASE_EXIT=$base_exit" >> "$GITHUB_ENV"
           echo "Base failures: $(wc -l < /tmp/base.failures)"
-
-      - name: Apply exact fixture patch
-        run: node .github/scripts/apply-issue-763.mjs
 
       - name: Validate focused scheduling matrix
         id: focused
@@ -100,17 +99,4 @@ jobs:
           fi
 
       - name: Validate clean diff
-        run: git diff --check
-
-      - name: Commit functional files only
-        shell: bash
-        run: |
-          git add test/fixtures/conversationParityCases.js test/helpers/runConversationParityCases.js test/conversationEngineParity.test.js
-          if git diff --cached --quiet; then
-            echo 'No functional changes to commit.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'test: aislar paridad de agenda #763'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+        run: git diff --check "${{ github.event.pull_request.base.sha }}"...HEAD
