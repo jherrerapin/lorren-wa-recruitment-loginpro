@@ -15,9 +15,9 @@ const SCENARIOS = [
   { key: 'cv_received', coverage: 'pending_webhook', reason: 'La recepción real de CV ocurre en la rama document del webhook.' },
   { key: 'question_during_ask_cv', caseId: 'ask-cv-out-of-scope-question-pauses-for-dev-review', coverage: 'text' },
   { key: 'interview_offer', caseId: 'future-birthday-keeps-current-age-and-does-not-repeat-transport', coverage: 'text' },
-  { key: 'schedule_confirmation', caseId: 'scheduling-offer-reschedule-confirm', coverage: 'text' },
+  { key: 'schedule_confirmation', caseId: 'parity-schedule-confirmation', coverage: 'text' },
   { key: 'interview_cancellation', coverage: 'pending_webhook', reason: 'Requiere fixture focal de booking activo y cancelación.' },
-  { key: 'interview_reschedule', caseId: 'scheduling-offer-reschedule-confirm', coverage: 'text' },
+  { key: 'interview_reschedule', caseId: 'parity-interview-reschedule', coverage: 'text' },
   { key: 'attendance_confirmation', coverage: 'pending_webhook', reason: 'Requiere ventana de recordatorio y booking activo.' },
   { key: 'reminder_logistics_question', caseId: 'scheduled-question-uses-context-instead-of-repeating-flow', coverage: 'text' },
   { key: 'no_available_slots', coverage: 'pending_webhook', reason: 'Requiere fixture de agenda sin slots válidos.' },
@@ -63,6 +63,14 @@ test('el manifiesto conserva los 23 escenarios exactos del plan', () => {
   const pending = SCENARIOS.filter((item) => item.coverage !== 'text');
   assert.equal(pending.length, 6);
   for (const item of pending) assert.ok(item.reason, `${item.key} debe explicar su cobertura pendiente`);
+});
+
+test('confirmación y reprogramación usan fixtures focales independientes', () => {
+  const confirmation = SCENARIOS.find((item) => item.key === 'schedule_confirmation');
+  const reschedule = SCENARIOS.find((item) => item.key === 'interview_reschedule');
+  assert.equal(confirmation.caseId, 'parity-schedule-confirmation');
+  assert.equal(reschedule.caseId, 'parity-interview-reschedule');
+  assert.notEqual(confirmation.caseId, reschedule.caseId);
 });
 
 test('la matriz ejecuta ambos modos en procesos aislados y reporta divergencias de dominio', () => {
