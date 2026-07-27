@@ -1,0 +1,126 @@
+import { buildFutureSlot } from '../helpers/mockScheduler.js';
+
+const OP_BOG = {
+  id: 'op-bogota-parity',
+  name: 'Operacion Bogota Parity',
+  city: { id: 'city-bogota-parity', name: 'Bogota' }
+};
+
+const VACANCY = {
+  id: 'vac-sched-parity',
+  title: 'Mensajero Bogota Parity',
+  role: 'Mensajero',
+  city: 'Bogota',
+  operationId: OP_BOG.id,
+  operation: OP_BOG,
+  operationAddress: 'Calle 80 # 10-20',
+  interviewAddress: 'Calle 80 # 10-20',
+  requirements: 'Conocimiento de direcciones y disponibilidad',
+  conditions: 'Contrato por obra y proceso con entrevista',
+  roleDescription: 'Mensajeria y entregas urbanas',
+  requiredDocuments: 'Documento y hoja de vida',
+  acceptingApplications: true,
+  isActive: true,
+  schedulingEnabled: true,
+  updatedAt: new Date('2026-07-27T12:00:00.000Z')
+};
+
+function completeCandidate(overrides = {}) {
+  return {
+    id: overrides.id || 'candidate-parity-scheduling',
+    phone: overrides.phone || '573001119999',
+    status: 'REGISTRADO',
+    currentStep: 'SCHEDULING',
+    vacancyId: VACANCY.id,
+    fullName: 'Candidato Agenda Parity',
+    documentType: 'CC',
+    documentNumber: '1000000009',
+    age: 28,
+    gender: 'MALE',
+    neighborhood: null,
+    locality: 'Suba',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    experienceInfo: null,
+    experienceTime: null,
+    cvData: Buffer.from('pdf'),
+    cvOriginalName: 'hv.pdf',
+    cvMimeType: 'application/pdf',
+    reminderState: 'SKIPPED',
+    reminderScheduledFor: null,
+    botPaused: false,
+    botPausedAt: null,
+    botPausedBy: null,
+    botPauseReason: null,
+    botResumeMode: null,
+    lastInboundAt: new Date(),
+    lastOutboundAt: null,
+    createdAt: new Date('2026-07-27T10:00:00.000Z'),
+    ...overrides
+  };
+}
+
+function scheduledAtForSlot(slot) {
+  const datePart = new Date(slot.specificDate).toISOString().slice(0, 10);
+  return new Date(`${datePart}T${slot.startTime}:00-05:00`);
+}
+
+const offeredSlot = buildFutureSlot({
+  vacancyId: VACANCY.id,
+  id: 'slot-parity-offered',
+  hoursFromNow: 8
+});
+const offeredAt = scheduledAtForSlot(offeredSlot);
+
+const activeSlot = buildFutureSlot({
+  vacancyId: VACANCY.id,
+  id: 'slot-parity-active',
+  hoursFromNow: 8
+});
+const alternativeSlot = buildFutureSlot({
+  vacancyId: VACANCY.id,
+  id: 'slot-parity-alternative',
+  hoursFromNow: 14
+});
+const activeAt = scheduledAtForSlot(activeSlot);
+
+export const conversationParityCases = [
+  {
+    id: 'parity-schedule-confirmation',
+    steps: ['ese horario me sirve'],
+    candidate: completeCandidate({ currentStep: 'SCHEDULING' }),
+    vacancies: [VACANCY],
+    operations: [OP_BOG],
+    interviewSlots: [offeredSlot],
+    preMessages: [{
+      direction: 'OUTBOUND',
+      body: 'Te puedo ofrecer un horario disponible. Me confirmas si te sirve.',
+      rawPayload: {
+        source: 'interview_offer',
+        slotId: offeredSlot.id,
+        scheduledAt: offeredAt.toISOString(),
+        formattedDate: 'horario ofrecido'
+      },
+      createdAt: new Date(Date.now() - 5 * 60 * 1000)
+    }]
+  },
+  {
+    id: 'parity-interview-reschedule',
+    steps: ['no puedo asistir, necesito otro horario'],
+    candidate: completeCandidate({ currentStep: 'SCHEDULED' }),
+    vacancies: [VACANCY],
+    operations: [OP_BOG],
+    interviewSlots: [activeSlot, alternativeSlot],
+    interviewBookings: [{
+      id: 'booking-parity-active',
+      candidateId: 'candidate-parity-scheduling',
+      vacancyId: VACANCY.id,
+      slotId: activeSlot.id,
+      scheduledAt: activeAt,
+      status: 'SCHEDULED',
+      reminderSentAt: null,
+      reminderWindowClosed: false,
+      createdAt: new Date(Date.now() - 60 * 60 * 1000)
+    }]
+  }
+];
