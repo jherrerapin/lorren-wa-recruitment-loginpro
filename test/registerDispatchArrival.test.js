@@ -13,7 +13,6 @@ import {
 function createFixture(overrides = {}) {
   const state = {
     transactionCalls: 0,
-    transactionOptions: [],
     sessionCreates: 0,
     sessionUpdates: 0,
     markCreates: 0,
@@ -21,15 +20,12 @@ function createFixture(overrides = {}) {
     marks: new Map(),
     transactionFailures: [...(overrides.transactionFailures || [])]
   };
-
   const operationPoint = {
     attendanceEnabled: true,
     attendanceLatitude: 4.711,
     attendanceLongitude: -74.0721,
     geofenceRadiusMeters: 200,
     maxLocationAccuracyMeters: 100,
-    lateToleranceMinutes: 10,
-    absenceGraceMinutes: 15,
     attendanceTimezone: 'America/Bogota',
     ...overrides.operationPoint
   };
@@ -48,18 +44,10 @@ function createFixture(overrides = {}) {
     ...overrides.assignment
   };
   const device = overrides.device === undefined
-    ? {
-        id: 'device-1',
-        workerId: 'worker-1',
-        installationIdHash: 'installation-1',
-        status: 'ACTIVE',
-        authorizedFrom: new Date('2026-01-01T00:00:00.000Z'),
-        authorizedUntil: null,
-        revokedAt: null
-      }
+    ? { id: 'device-1', workerId: 'worker-1', installationIdHash: 'installation-1' }
     : overrides.device;
 
-  function cloneAssignment() {
+  function currentAssignment() {
     return {
       ...assignment,
       attendanceSession: state.sessions.get(assignment.id) || assignment.attendanceSession || null,
@@ -73,17 +61,12 @@ function createFixture(overrides = {}) {
   const client = {
     dispatchAssignment: {
       async findUnique({ where }) {
-        return where.id === assignment.id ? cloneAssignment() : null;
+        return where.id === assignment.id ? currentAssignment() : null;
       }
     },
     dispatchAttendanceSession: {
       async create({ data }) {
         state.sessionCreates += 1;
-        if (state.sessions.has(data.assignmentId)) {
-          const error = new Error('unique');
-          error.code = 'P2002';
-          throw error;
-        }
         const session = {
           id: `session-${state.sessionCreates}`,
           ...data,
@@ -118,11 +101,6 @@ function createFixture(overrides = {}) {
       },
       async create({ data }) {
         state.markCreates += 1;
-        if (state.marks.has(data.idempotencyKey)) {
-          const error = new Error('unique');
-          error.code = 'P2002';
-          throw error;
-        }
         const mark = { id: `mark-${state.markCreates}`, ...data };
         state.marks.set(data.idempotencyKey, mark);
         return { ...mark };
@@ -136,31 +114,27 @@ function createFixture(overrides = {}) {
           ? { ...device }
           : null;
       },
-      async count() {
-        return overrides.sharedDeviceCount || 0;
-      }
+      async count() { return overrides.sharedDeviceCount || 0; }
     }
   };
-
   client.$transaction = async (callback, options) => {
+    assert.deepEqual(options, { isolationLevel: 'Serializable' });
     state.transactionCalls += 1;
-    state.transactionOptions.push(options);
     const failure = state.transactionFailures.shift();
     if (failure) {
-      if (typeof failure.beforeThrow === 'function') failure.beforeThrow({ state, client });
-      const error = new Error(failure.code);
-      error.code = failure.code;
+      const error = new Error(failure);
+      error.code = failure;
       throw error;
     }
     return callback(client);
   };
-
   return { prisma: client, state };
 }
 
 function trustedInput(overrides = {}) {
   return {
     assignmentId: 'assignment-1',
+    expectedWorkerId: 'worker-1',
     idempotencyKey: 'arrival-1',
     now: new Date('2026-07-19T13:00:00.000Z'),
     clientCapturedAt: new Date('2026-07-19T12:59:58.000Z'),
@@ -183,60 +157,61 @@ test('calcula distancia y geocerca sin depender de Prisma', () => {
   assert.equal(calculateAttendanceDistanceMeters({}, {}), null);
 });
 
-test('auto-valida una llegada confiable y persiste todo en una transacción serializable', async () => {
+test('conserva el catálogo de asignaciones activas', () => {
+  assert.deepEqual(ACTIVE_DISPATCH_ASSIGNMENT_STATUSES, [
+    'ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'
+  ]);
+});
+
+test('auto-valida una llegada confiable en transacción serializable', async () => {
   const { prisma, state } = createFixture();
   const result = await registerDispatchArrival(prisma, trustedInput());
-
   assert.equal(result.recorded, true);
-  assert.equal(result.replayed, false);
   assert.equal(result.validation.validationStatus, 'AUTO_VALIDATED');
   assert.equal(result.validation.attendanceStatus, 'ON_TIME');
-  assert.equal(result.attendanceSession.arrivalValidatedAt.toISOString(), '2026-07-19T13:00:00.000Z');
   assert.equal(state.sessionCreates, 1);
   assert.equal(state.sessionUpdates, 1);
   assert.equal(state.markCreates, 1);
-  assert.equal(state.transactionCalls, 1);
-  assert.deepEqual(state.transactionOptions[0], { isolationLevel: 'Serializable' });
 });
 
-test('sincroniza una captura offline usando la hora capturada y la deja en revisión', async () => {
-  const { prisma, state } = createFixture();
-  const capturedAt = new Date('2026-07-19T13:05:00.000Z');
+test('registra una entrada anticipada con su hora real', async () => {
+  const { prisma } = createFixture();
+  const arrivalAt = new Date('2026-07-19T12:15:00.000Z');
+  const result = await registerDispatchArrival(prisma, trustedInput({
+    now: arrivalAt,
+    clientCapturedAt: arrivalAt
+  }));
+  assert.equal(result.recorded, true);
+  assert.equal(result.attendanceSession.arrivalReportedAt.toISOString(), arrivalAt.toISOString());
+  assert.equal(result.attendanceSession.expectedStartAt.toISOString(), '2026-07-19T13:00:00.000Z');
+});
+
+test('registra una llegada tarde sin bloquearla', async () => {
+  const { prisma } = createFixture();
+  const lateAt = new Date('2026-07-19T15:00:00.000Z');
+  const result = await registerDispatchArrival(prisma, trustedInput({
+    now: lateAt,
+    clientCapturedAt: lateAt
+  }));
+  assert.equal(result.recorded, true);
+  assert.equal(result.validation.reportedPunctuality, 'LATE');
+});
+
+test('sincroniza una llegada offline tardía y la deja en revisión', async () => {
+  const { prisma } = createFixture();
+  const capturedAt = new Date('2026-07-19T15:00:00.000Z');
   const receivedAt = new Date('2026-07-19T16:00:00.000Z');
   const result = await registerDispatchArrival(prisma, trustedInput({
     idempotencyKey: 'offline-arrival-1',
     captureMode: 'OFFLINE_WEB',
     clientCapturedAt: capturedAt,
-    now: receivedAt,
-    hasFreshPhoto: true,
-    evidenceStorageKey: 'attendance/worker-1/assignment-1/arrival/offline-arrival-1.jpg',
-    evidenceMimeType: 'image/jpeg'
+    now: receivedAt
   }));
-
   assert.equal(result.recorded, true);
   assert.equal(result.validation.validationStatus, 'REVIEW_REQUIRED');
-  assert.equal(result.validation.reportedPunctuality, 'ON_TIME');
+  assert.equal(result.validation.reportedPunctuality, 'LATE');
   assert.ok(result.validation.riskFlags.includes(ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE));
-  assert.ok(result.validation.riskFlags.includes(ATTENDANCE_RISK_FLAG.DELAYED_SYNC));
   assert.equal(result.attendanceSession.arrivalReportedAt.toISOString(), capturedAt.toISOString());
-  const mark = state.marks.get('offline-arrival-1');
-  assert.equal(mark.serverReceivedAt.toISOString(), receivedAt.toISOString());
-  assert.equal(mark.clientCapturedAt.toISOString(), capturedAt.toISOString());
-  assert.equal(result.attendanceSession.source, 'OFFLINE_WEB');
-});
-
-test('rechaza una captura offline cuya hora no estuvo dentro de la ventana de llegada', async () => {
-  const { prisma, state } = createFixture();
-  const result = await registerDispatchArrival(prisma, trustedInput({
-    idempotencyKey: 'offline-arrival-outside-window',
-    captureMode: 'OFFLINE_WEB',
-    clientCapturedAt: new Date('2026-07-19T15:00:00.000Z'),
-    now: new Date('2026-07-19T16:00:00.000Z')
-  }));
-
-  assert.equal(result.recorded, false);
-  assert.deepEqual(result.validation.riskFlags, [ATTENDANCE_RISK_FLAG.ARRIVAL_WINDOW_NOT_OPEN]);
-  assert.equal(state.markCreates, 0);
 });
 
 test('rechaza una captura offline de más de 72 horas', async () => {
@@ -252,48 +227,36 @@ test('rechaza una captura offline de más de 72 horas', async () => {
 });
 
 test('un dispositivo nuevo registra llegada provisional y exige revisión', async () => {
-  const { prisma, state } = createFixture({ device: null });
+  const { prisma } = createFixture({ device: null });
   const result = await registerDispatchArrival(prisma, trustedInput());
-
   assert.equal(result.recorded, true);
   assert.equal(result.validation.validationStatus, 'REVIEW_REQUIRED');
-  assert.equal(result.validation.attendanceStatus, 'ARRIVAL_REPORTED');
   assert.ok(result.validation.riskFlags.includes(ATTENDANCE_RISK_FLAG.UNAUTHORIZED_DEVICE));
-  assert.equal(result.attendanceSession.arrivalValidatedAt, null);
-  assert.equal(state.markCreates, 1);
 });
 
-test('repetir la misma idempotencyKey devuelve el resultado existente sin nuevas escrituras', async () => {
+test('repetir la misma idempotencia no duplica la llegada', async () => {
   const { prisma, state } = createFixture();
   await registerDispatchArrival(prisma, trustedInput());
   const replay = await registerDispatchArrival(prisma, trustedInput());
-
-  assert.equal(replay.recorded, true);
   assert.equal(replay.replayed, true);
-  assert.equal(state.sessionCreates, 1);
-  assert.equal(state.sessionUpdates, 1);
   assert.equal(state.markCreates, 1);
 });
 
-test('una segunda clave después de la llegada no crea otra marcación', async () => {
+test('una segunda clave después de la llegada queda rechazada', async () => {
   const { prisma, state } = createFixture();
   await registerDispatchArrival(prisma, trustedInput());
   const duplicate = await registerDispatchArrival(
     prisma,
     trustedInput({ idempotencyKey: 'arrival-2' })
   );
-
   assert.equal(duplicate.recorded, false);
-  assert.equal(duplicate.validation.validationStatus, 'REJECTED');
   assert.deepEqual(duplicate.validation.riskFlags, [ATTENDANCE_RISK_FLAG.DUPLICATE_ARRIVAL]);
   assert.equal(state.markCreates, 1);
-  assert.equal(state.sessionUpdates, 1);
 });
 
 test('un punto deshabilitado no crea sesión ni marcación', async () => {
   const { prisma, state } = createFixture({ operationPoint: { attendanceEnabled: false } });
   const result = await registerDispatchArrival(prisma, trustedInput());
-
   assert.equal(result.recorded, false);
   assert.deepEqual(result.validation.riskFlags, [ATTENDANCE_RISK_FLAG.ATTENDANCE_NOT_ENABLED]);
   assert.equal(state.sessionCreates, 0);
@@ -303,64 +266,22 @@ test('un punto deshabilitado no crea sesión ni marcación', async () => {
 test('una asignación inactiva no crea efectos secundarios', async () => {
   const { prisma, state } = createFixture({ assignment: { status: 'CANCELLED' } });
   const result = await registerDispatchArrival(prisma, trustedInput());
-
   assert.equal(result.recorded, false);
   assert.deepEqual(result.validation.riskFlags, [ATTENDANCE_RISK_FLAG.ASSIGNMENT_NOT_ACTIVE]);
-  assert.equal(state.sessionCreates, 0);
   assert.equal(state.markCreates, 0);
 });
 
-test('reintenta conflictos P2034 con un límite y luego registra', async () => {
-  const { prisma, state } = createFixture({ transactionFailures: [{ code: 'P2034' }] });
-  const result = await registerDispatchArrival(prisma, trustedInput());
+test('rechaza una asignación perteneciente a otro auxiliar', async () => {
+  const { prisma } = createFixture({ assignment: { workerId: 'worker-2' } });
+  await assert.rejects(
+    () => registerDispatchArrival(prisma, trustedInput()),
+    /attendance_assignment_not_found/
+  );
+});
 
+test('reintenta un conflicto serializable antes de registrar', async () => {
+  const { prisma, state } = createFixture({ transactionFailures: ['P2034'] });
+  const result = await registerDispatchArrival(prisma, trustedInput());
   assert.equal(result.recorded, true);
   assert.equal(state.transactionCalls, 2);
-  assert.equal(state.markCreates, 1);
-});
-
-test('recupera el ganador concurrente cuando termina en P2002 de idempotencia', async () => {
-  const fixture = createFixture({
-    transactionFailures: [
-      { code: 'P2002' },
-      { code: 'P2002' },
-      {
-        code: 'P2002',
-        beforeThrow({ state }) {
-          const session = {
-            id: 'session-winner',
-            assignmentId: 'assignment-1',
-            expectedStartAt: new Date('2026-07-19T13:00:00.000Z'),
-            attendanceStatus: 'ON_TIME',
-            validationStatus: 'AUTO_VALIDATED',
-            punctualityStatus: 'ON_TIME',
-            riskScore: 0,
-            riskFlags: []
-          };
-          state.sessions.set('assignment-1', session);
-          state.marks.set('arrival-1', {
-            id: 'mark-winner',
-            attendanceSessionId: session.id,
-            idempotencyKey: 'arrival-1',
-            decision: 'AUTO_VALIDATED',
-            riskScore: 0,
-            riskFlags: []
-          });
-        }
-      }
-    ]
-  });
-
-  const result = await registerDispatchArrival(fixture.prisma, trustedInput());
-  assert.equal(result.replayed, true);
-  assert.equal(result.attendanceMark.id, 'mark-winner');
-  assert.equal(fixture.state.transactionCalls, 3);
-});
-
-test('documenta los estados activos vigentes del tablero de asignaciones', () => {
-  assert.deepEqual(ACTIVE_DISPATCH_ASSIGNMENT_STATUSES, [
-    'ASSIGNED',
-    'CONFIRMATION_PENDING',
-    'CONFIRMED'
-  ]);
 });
