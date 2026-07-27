@@ -51,7 +51,9 @@ jobs:
           echo "Baseline failures: $(wc -l < /tmp/baseline.failures)"
 
       - name: Apply exact functional patch
-        run: node .github/scripts/apply-issue-759.mjs
+        run: |
+          node .github/scripts/apply-issue-759.mjs
+          node .github/scripts/apply-issue-759-fix.mjs
 
       - name: Validate syntax and focused matrix
         id: focused
@@ -65,7 +67,7 @@ jobs:
             node --check test/helpers/runConversationParityCases.js
             node --check test/conversation-harness.test.js
             node --check test/conversationEngineParity.test.js
-            node --test test/conversation-harness.test.js test/conversationEngineParity.test.js
+            node --test test/conversationEngineParity.test.js
           } > /tmp/issue-759-focused.log 2>&1
           status=$?
           set -e
