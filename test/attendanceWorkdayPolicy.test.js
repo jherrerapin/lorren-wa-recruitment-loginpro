@@ -5,59 +5,66 @@ import {
   formatDispatchMinutes
 } from '../src/modules/dispatch-attendance/domain/attendanceWorkdayPolicy.js';
 
-test('descuenta el descanso no remunerado del tiempo bruto', () => {
+test('descuenta únicamente el almuerzo realmente marcado', () => {
   const result = calculateDispatchWorkedTime({
-    arrivalAt: new Date('2026-07-25T13:00:00.000Z'),
-    departureAt: new Date('2026-07-25T22:00:00.000Z'),
-    expectedStartAt: new Date('2026-07-25T13:00:00.000Z'),
-    expectedEndAt: new Date('2026-07-25T22:00:00.000Z'),
-    unpaidBreakMinutes: 60
+    arrivalAt: '2026-07-25T13:00:00.000Z',
+    departureAt: '2026-07-25T22:00:00.000Z',
+    expectedStartAt: '2026-07-25T13:00:00.000Z',
+    breakStartAt: '2026-07-25T17:00:00.000Z',
+    breakEndAt: '2026-07-25T18:00:00.000Z'
   });
-  assert.deepEqual(result, {
-    grossWorkedMinutes: 540,
-    unpaidBreakMinutesDeducted: 60,
-    workedMinutes: 480,
-    plannedWorkedMinutes: 480,
-    differenceFromPlannedMinutes: 0
-  });
+  assert.equal(result.grossWorkedMinutes, 540);
+  assert.equal(result.unpaidBreakMinutesDeducted, 60);
+  assert.equal(result.workedMinutes, 480);
 });
 
-test('sin descanso, el tiempo bruto y neto coinciden', () => {
+test('sin almuerzo marcado, todo el tiempo efectivo cuenta', () => {
   const result = calculateDispatchWorkedTime({
     arrivalAt: '2026-07-25T13:00:00.000Z',
     departureAt: '2026-07-25T21:00:00.000Z',
-    unpaidBreakMinutes: 0
+    expectedStartAt: '2026-07-25T13:00:00.000Z'
   });
-  assert.equal(result.grossWorkedMinutes, 480);
   assert.equal(result.workedMinutes, 480);
   assert.equal(result.unpaidBreakMinutesDeducted, 0);
 });
 
-test('soporta jornadas que terminan al día siguiente', () => {
+test('registra la llegada anticipada pero cuenta desde el inicio programado', () => {
+  const result = calculateDispatchWorkedTime({
+    arrivalAt: '2026-07-25T12:30:00.000Z',
+    departureAt: '2026-07-25T21:00:00.000Z',
+    expectedStartAt: '2026-07-25T13:00:00.000Z'
+  });
+  assert.equal(result.recordedSpanMinutes, 510);
+  assert.equal(result.earlyMinutesExcluded, 30);
+  assert.equal(result.workedMinutes, 480);
+});
+
+test('el coordinador puede reconocer el tiempo anticipado', () => {
+  const result = calculateDispatchWorkedTime({
+    arrivalAt: '2026-07-25T12:30:00.000Z',
+    departureAt: '2026-07-25T21:00:00.000Z',
+    expectedStartAt: '2026-07-25T13:00:00.000Z',
+    recognizeEarlyArrival: true
+  });
+  assert.equal(result.earlyMinutesExcluded, 0);
+  assert.equal(result.workedMinutes, 510);
+});
+
+test('soporta una jornada que termina al día siguiente', () => {
   const result = calculateDispatchWorkedTime({
     arrivalAt: '2026-07-25T23:00:00.000Z',
     departureAt: '2026-07-26T08:00:00.000Z',
-    unpaidBreakMinutes: 30
+    breakStartAt: '2026-07-26T03:00:00.000Z',
+    breakEndAt: '2026-07-26T03:30:00.000Z'
   });
   assert.equal(result.grossWorkedMinutes, 540);
   assert.equal(result.workedMinutes, 510);
 });
 
-test('nunca descuenta más descanso que el tiempo transcurrido', () => {
-  const result = calculateDispatchWorkedTime({
-    arrivalAt: '2026-07-25T13:00:00.000Z',
-    departureAt: '2026-07-25T13:20:00.000Z',
-    unpaidBreakMinutes: 60
-  });
-  assert.equal(result.unpaidBreakMinutesDeducted, 20);
-  assert.equal(result.workedMinutes, 0);
-});
-
 test('rechaza una salida anterior a la llegada', () => {
   assert.throws(() => calculateDispatchWorkedTime({
     arrivalAt: '2026-07-25T14:00:00.000Z',
-    departureAt: '2026-07-25T13:00:00.000Z',
-    unpaidBreakMinutes: 0
+    departureAt: '2026-07-25T13:00:00.000Z'
   }), /attendance_work_departure_before_arrival/);
 });
 
