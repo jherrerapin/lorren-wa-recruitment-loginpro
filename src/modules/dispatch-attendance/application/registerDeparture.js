@@ -8,9 +8,6 @@ import {
 } from '../domain/attendanceDistance.js';
 import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
 import {
-  getDispatchAttendanceBreakPolicy
-} from '../infrastructure/dispatchAttendanceBreakPolicyRepository.js';
-import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
   buildDispatchAttendanceExpectedWindow
 } from './registerArrival.js';
@@ -100,7 +97,7 @@ function requirePrisma(prisma) {
   const required = {
     dispatchAssignment: ['findUnique'],
     dispatchAttendanceSession: ['update'],
-    dispatchAttendanceMark: ['findUnique', 'create'],
+    dispatchAttendanceMark: ['findUnique', 'findMany', 'create'],
     dispatchWorkerDevice: ['findFirst', 'count']
   };
   if (typeof prisma?.$transaction !== 'function') throw new Error('attendance_departure_transaction_required');
@@ -160,6 +157,27 @@ function mergeFlags(...values) {
   return [...new Set(values.flatMap((value) => Array.isArray(value) ? value : []))];
 }
 
+function markMoment(mark) {
+  const value = mark?.clientCapturedAt || mark?.serverReceivedAt;
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function resolveBreakMarks(marks = []) {
+  const ordered = [...marks].sort((left, right) => {
+    const leftTime = markMoment(left)?.getTime() || 0;
+    const rightTime = markMoment(right)?.getTime() || 0;
+    return leftTime - rightTime;
+  });
+  const breakStartMark = ordered.find((mark) => mark.markType === 'BREAK_START') || null;
+  const breakEndMark = ordered.find((mark) => mark.markType === 'BREAK_END') || null;
+  return {
+    breakStartAt: markMoment(breakStartMark),
+    breakEndAt: markMoment(breakEndMark)
+  };
+}
+
 function replayResult(mark) {
   return {
     recorded: true,
@@ -201,11 +219,20 @@ async function insideTransaction(client, input) {
     throw new Error('attendance_departure_before_arrival');
   }
 
+  const breakMarks = await client.dispatchAttendanceMark.findMany({
+    where: {
+      attendanceSessionId: session.id,
+      markType: { in: ['BREAK_START', 'BREAK_END'] }
+    },
+    orderBy: { serverReceivedAt: 'asc' }
+  });
+  const breakWindow = resolveBreakMarks(breakMarks);
+  if (breakWindow.breakStartAt && !breakWindow.breakEndAt) {
+    throw new Error('attendance_departure_break_end_required');
+  }
+
   const point = assignment.serviceRequest.operationPoint;
-  const [device, breakPolicy] = await Promise.all([
-    deviceSignals(client, { ...input, workerId: assignment.workerId }),
-    getDispatchAttendanceBreakPolicy(client, assignment.serviceRequestId)
-  ]);
+  const device = await deviceSignals(client, { ...input, workerId: assignment.workerId });
   const geofence = geofenceSignals(point, input);
   const syncDelayMinutes = Math.max(0, Math.floor((input.now.getTime() - input.reportedAt.getTime()) / 60_000));
   const departureValidation = evaluateArrivalValidation({
@@ -235,7 +262,9 @@ async function insideTransaction(client, input) {
     departureAt: input.reportedAt,
     expectedStartAt: expected.expectedStartAt,
     expectedEndAt: expected.expectedEndAt,
-    unpaidBreakMinutes: breakPolicy.unpaidBreakMinutes
+    breakStartAt: breakWindow.breakStartAt,
+    breakEndAt: breakWindow.breakEndAt,
+    recognizeEarlyArrival: false
   });
   const priorStatus = session.validationStatus;
   let validationStatus = departureValidation.validationStatus;
@@ -295,7 +324,8 @@ async function insideTransaction(client, input) {
       validationStatus,
       riskScore,
       riskFlags,
-      breakPolicy,
+      breakStartAt: breakWindow.breakStartAt,
+      breakEndAt: breakWindow.breakEndAt,
       ...work
     }
   };
