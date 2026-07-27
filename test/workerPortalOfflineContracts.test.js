@@ -10,7 +10,10 @@ const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal
 const release = JSON.parse(fs.readFileSync(new URL('../src/public/attendance-portal-release.json', import.meta.url), 'utf8'));
 
 test('el portal es instalable y su alcance incluye la jornada', () => {
-  assert.equal(manifest.id, '/operaciones/portal'); assert.equal(manifest.start_url, '/operaciones/portal'); assert.equal(manifest.scope, '/operaciones/portal'); assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.id, '/operaciones/portal');
+  assert.equal(manifest.start_url, '/operaciones/portal');
+  assert.equal(manifest.scope, '/operaciones/portal');
+  assert.equal(manifest.display, 'standalone');
   assert.match(viewSource, /rel="manifest" href="\/operaciones\/portal\/manifest\.webmanifest"/);
 });
 
@@ -27,7 +30,7 @@ test('los recursos offline están dentro del alcance', () => {
   assert.match(serviceWorkerSource, /'\/operaciones\/portal\/icon\.svg'/);
 });
 
-test('la cola usa IndexedDB, selfie, idempotencia y tipo de marcación', () => {
+test('la cola usa IndexedDB, evidencia, idempotencia y tipo de marcación', () => {
   assert.match(offlineSource, /indexedDB\.open/);
   assert.match(offlineSource, /arrivalQueue/);
   assert.match(offlineSource, /arrivalReceipts/);
@@ -38,14 +41,13 @@ test('la cola usa IndexedDB, selfie, idempotencia y tipo de marcación', () => {
   assert.doesNotMatch(offlineSource, /activationToken/);
 });
 
-test('la sincronización elige llegada o salida y conserva la hora capturada', () => {
+test('la sincronización offline se limita a llegada o salida', () => {
   assert.match(serviceWorkerSource, /credentials: 'include'/);
   assert.match(serviceWorkerSource, /form\.set\('clientCapturedAt'/);
   assert.match(serviceWorkerSource, /form\.set\('captureMode', 'OFFLINE_WEB'\)/);
   assert.match(serviceWorkerSource, /record\.markType === 'DEPARTURE' \? 'salida' : 'llegada'/);
-  const fetchIndex = serviceWorkerSource.indexOf('response = await fetch');
-  const completionIndex = serviceWorkerSource.indexOf('await completeQueueRecord(record', fetchIndex);
-  assert.ok(fetchIndex >= 0); assert.ok(completionIndex > fetchIndex);
+  assert.match(viewSource, /supportsOffline\(\) => markType === 'ARRIVAL' \|\| markType === 'DEPARTURE'/);
+  assert.match(viewSource, /El almuerzo requiere conexión/);
 });
 
 test('la sincronización tiene Background Sync y respaldo por mensaje', () => {
@@ -63,19 +65,23 @@ test('solo se conserva offline una página autenticada', () => {
   assert.match(serviceWorkerSource, /cache\.delete\(PORTAL_CACHE_KEY\)/);
 });
 
-test('la interfaz comunica llegada, salida y sincronización', () => {
-  assert.match(viewSource, /Guardar llegada sin internet/);
-  assert.match(viewSource, /Guardar salida sin internet/);
-  assert.match(viewSource, /Marcación guardada offline/);
-  assert.match(viewSource, /Sincronizando marcación/);
-  assert.match(viewSource, /Marcación sincronizada · en revisión/);
-  assert.match(viewSource, /no se eliminará solo cuando Lórren confirme|se eliminará solo cuando Lórren confirme/);
+test('la interfaz comunica la cola y el alcance offline', () => {
+  assert.match(viewSource, /Llegada y salida pueden guardarse/);
+  assert.match(viewSource, /almuerzo requiere conexión/i);
+  assert.match(viewSource, /guardada en este celular/);
+  assert.match(viewSource, /Se sincronizará automáticamente/);
 });
 
-test('el marcador publica capacidades offline de entrada y salida', () => {
+test('el marcador publica las nuevas capacidades de jornada', () => {
   assert.ok(release.features.includes('offline-web-arrival'));
   assert.ok(release.features.includes('offline-web-departure'));
   assert.ok(release.features.includes('worked-hours'));
-  assert.ok(release.features.includes('unpaid-flexible-break'));
-  assert.ok(release.features.includes('indexeddb-queue'));
+  assert.ok(release.features.includes('break-start'));
+  assert.ok(release.features.includes('break-end'));
+  assert.ok(release.features.includes('actual-break-deduction'));
+  assert.ok(release.features.includes('flexible-departure'));
+  assert.ok(release.features.includes('open-arrival-marking'));
+  assert.ok(release.features.includes('audited-early-time-recognition'));
+  assert.equal(release.features.includes('bounded-arrival-window'), false);
+  assert.equal(release.features.includes('unpaid-flexible-break'), false);
 });
