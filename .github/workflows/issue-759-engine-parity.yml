@@ -1,0 +1,121 @@
+name: Issue 759 engine parity
+
+on:
+  pull_request:
+    branches:
+      - automation/759-engine-parity-matrix
+
+permissions:
+  contents: write
+
+jobs:
+  validate-engine-parity:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+      LORREN_SEND_DELAY_MS: 0
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Capture exact baseline suite
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/baseline.log 2>&1
+          baseline_exit=$?
+          set -e
+          grep '^not ok' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
+          echo "BASELINE_EXIT=$baseline_exit" >> "$GITHUB_ENV"
+          echo "Baseline failures: $(wc -l < /tmp/baseline.failures)"
+
+      - name: Apply exact functional patch
+        run: node .github/scripts/apply-issue-759.mjs
+
+      - name: Validate syntax and focused matrix
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check test/helpers/mockOpenAI.js
+            node --check test/helpers/conversationHarness.js
+            node --check test/helpers/runConversationParityCases.js
+            node --check test/conversation-harness.test.js
+            node --check test/conversationEngineParity.test.js
+            node --test test/conversation-harness.test.js test/conversationEngineParity.test.js
+          } > /tmp/issue-759-focused.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-759-focused.log
+          exit "$status"
+
+      - name: Upload focused matrix log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-759-parity-log
+          path: /tmp/issue-759-focused.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop after focused failure
+        if: steps.focused.outcome == 'failure'
+        run: exit 1
+
+      - name: Compare full suite with exact baseline
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.log 2>&1
+          head_exit=$?
+          set -e
+          grep '^not ok' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
+          echo "Head failures: $(wc -l < /tmp/head.failures)"
+          if ! diff -u /tmp/baseline.failures /tmp/head.failures; then
+            echo 'La matriz cambió la lista de fallos de la suite.'
+            cat /tmp/head.log
+            exit 1
+          fi
+          if [ "$BASELINE_EXIT" = "0" ] && [ "$head_exit" != "0" ]; then
+            cat /tmp/head.log
+            exit 1
+          fi
+
+      - name: Validate clean diff
+        run: git diff --check
+
+      - name: Commit functional files only
+        shell: bash
+        run: |
+          git add test/helpers/mockOpenAI.js test/helpers/conversationHarness.js test/helpers/runConversationParityCases.js test/conversation-harness.test.js test/conversationEngineParity.test.js
+          if git diff --cached --quiet; then
+            echo 'No functional changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: caracterizar paridad del engine conversacional #759'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
