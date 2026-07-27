@@ -15,11 +15,13 @@ const adminViewSource = fs.readFileSync(new URL('../src/views/operacionesAsisten
 test('la geocodificación se registra antes del router general de asistencia', () => {
   const geocodingIndex = bridgeSource.indexOf("'/asistencia/geocodificar'");
   const adminIndex = bridgeSource.indexOf("'/asistencia',\n    requireOps");
-  assert.ok(geocodingIndex >= 0); assert.ok(adminIndex > geocodingIndex);
+  assert.ok(geocodingIndex >= 0);
+  assert.ok(adminIndex > geocodingIndex);
 });
 
-test('las decisiones administrativas usan la autoridad de jornada y exigen motivo', () => {
+test('las decisiones administrativas recalculan jornada y exigen motivo auditable', () => {
   assert.match(adminRouteSource, /reviewAttendanceWorkdaySession/);
+  assert.match(adminRouteSource, /recognizeEarlyArrival/);
   assert.match(adminRouteSource, /registerManualAttendance/);
   assert.match(adminViewSource, /name="reason" minlength="5"/);
   assert.match(adminViewSource, /Rechazar marcación/);
@@ -42,27 +44,33 @@ test('el dashboard resuelve la misma autoridad antes de mostrar asistencia', () 
   assert.match(dashboardSource, /href="\/admin\/operaciones\/asistencia"/);
 });
 
-test('las tarjetas comprimidas muestran entrada, salida y horas netas', () => {
+test('las tarjetas comprimidas muestran entrada, almuerzo, salida y tiempo trabajado', () => {
   assert.match(adminViewSource, /<details class="attendance-card status-card-/);
   assert.match(adminViewSource, /Desplegar todas/);
   assert.match(adminViewSource, /Comprimir todas/);
   assert.match(adminViewSource, /<span>Llegada<\/span>/);
+  assert.match(adminViewSource, /<span>Almuerzo<\/span>/);
   assert.match(adminViewSource, /<span>Salida<\/span>/);
-  assert.match(adminViewSource, /<span>Tiempo neto<\/span>/);
-  assert.match(adminViewSource, /<span>Precisión GPS<\/span>/);
+  assert.match(adminViewSource, /<span>Tiempo trabajado<\/span>/);
   assert.match(adminViewSource, /Riesgo: <%= row\.riskScore %>\/100/);
-  assert.match(adminViewSource, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
 });
 
-test('el detalle conserva mapa, geocerca, fotografías y desglose trabajado', () => {
+test('el detalle muestra cálculo real, fotografías y geocerca', () => {
   assert.match(adminViewSource, /Ver ubicación y geocerca/);
-  assert.match(adminViewSource, /Precisión GPS/);
-  assert.match(adminViewSource, /Tiempo bruto/);
-  assert.match(adminViewSource, /Descanso descontado/);
-  assert.match(adminViewSource, /Tiempo neto pagable/);
-  assert.match(adminViewSource, /Ver fotografía llegada/);
-  assert.match(adminViewSource, /Ver fotografía salida/);
+  assert.match(adminViewSource, /Desde entrada hasta salida/);
+  assert.match(adminViewSource, /Inicio contabilizado/);
+  assert.match(adminViewSource, /Tiempo anticipado excluido/);
+  assert.match(adminViewSource, /Almuerzo descontado/);
+  assert.match(adminViewSource, /Tiempo neto trabajado/);
+  assert.match(adminViewSource, /Ver fotografía de entrada/);
+  assert.match(adminViewSource, /Ver fotografía de salida/);
   assert.match(adminViewSource, /leaflet@1\.9\.4/);
+});
+
+test('el coordinador puede reconocer tiempo anticipado con auditoría', () => {
+  assert.match(adminViewSource, /name="recognizeEarlyArrival" value="true"/);
+  assert.match(adminViewSource, /Reconocer tiempo anterior al turno/);
+  assert.match(adminViewSource, /Esta decisión queda auditada/);
 });
 
 test('los filtros se normalizan antes de insertarse como atributos ocultos', () => {
