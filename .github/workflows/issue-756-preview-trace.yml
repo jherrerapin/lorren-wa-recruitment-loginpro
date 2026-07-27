@@ -50,7 +50,9 @@ jobs:
           echo "Baseline failures: $(wc -l < /tmp/baseline.failures)"
 
       - name: Apply exact functional patch
-        run: node .github/scripts/apply-issue-756.mjs
+        run: |
+          node .github/scripts/apply-issue-756.mjs
+          node .github/scripts/apply-issue-756-contract.mjs
 
       - name: Validate syntax and focused contracts
         id: focused
@@ -62,6 +64,7 @@ jobs:
             node --check src/services/debugTrace.js
             node --check src/routes/webhook.js
             node --check test/enginePreviewTrace.test.js
+            node --check test/conversationEngineStepAuthority.test.js
             node --test test/enginePreviewTrace.test.js test/conversationEngineStepAuthority.test.js
           } > /tmp/issue-756-focused.log 2>&1
           status=$?
@@ -107,7 +110,7 @@ jobs:
       - name: Commit functional files only
         shell: bash
         run: |
-          git add src/services/debugTrace.js src/routes/webhook.js test/enginePreviewTrace.test.js
+          git add src/services/debugTrace.js src/routes/webhook.js test/enginePreviewTrace.test.js test/conversationEngineStepAuthority.test.js
           if git diff --cached --quiet; then
             echo 'No functional changes to commit.'
             exit 0
