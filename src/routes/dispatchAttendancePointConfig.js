@@ -5,7 +5,6 @@ const CONFIG_ERROR_MESSAGES = Object.freeze({
   attendance_operation_point_not_found: 'La operación no existe o no pertenece al cliente.',
   attendance_point_inactive: 'Activa primero la operación antes de habilitar su asistencia.',
   attendance_geofence_coordinates_required: 'Selecciona la ubicación exacta del punto en el mapa antes de habilitar la asistencia.',
-  absence_grace_before_late_tolerance: 'La ausencia no puede declararse antes de terminar la tolerancia de tardanza.',
   attendance_photo_policy_not_allowed: 'Selecciona una política de fotografía válida.',
   attendance_timezone_not_allowed: 'Selecciona una zona horaria válida.'
 });
@@ -48,15 +47,12 @@ export function dispatchAttendancePointConfigRouter(prisma) {
         attendanceEnabled,
         attendanceLatitude: req.body.attendanceLatitude,
         attendanceLongitude: req.body.attendanceLongitude,
-        earlyArrivalWindowMinutes: req.body.earlyArrivalWindowMinutes,
-        lateToleranceMinutes: req.body.lateToleranceMinutes,
-        absenceGraceMinutes: req.body.absenceGraceMinutes,
         attendanceTimezone: req.body.attendanceTimezone,
         attendancePhotoPolicy: req.body.attendancePhotoPolicy,
         manualAttendanceAllowed: explicitAttendanceCheckbox(req.body, 'manualAttendanceAllowed')
       });
       const message = attendanceEnabled === 'true'
-        ? 'Configuración de asistencia guardada. La marcación quedó habilitada para este punto.'
+        ? 'Configuración guardada. La entrada puede marcarse antes o después del inicio y nunca se bloquea por tardanza.'
         : 'Configuración de asistencia guardada. La marcación quedó deshabilitada para este punto.';
       return res.redirect(clientOperationsPath(clientId, message));
     } catch (error) {
