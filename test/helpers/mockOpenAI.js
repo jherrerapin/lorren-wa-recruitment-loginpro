@@ -330,7 +330,7 @@ function buildNaturalReply(systemPrompt = '') {
   return `Perfecto, te puedo ofrecer ${dateText}. Me confirmas si te sirve.`;
 }
 
-export function installOpenAIMock({ whatsappMock, responder } = {}) {
+export function installOpenAIMock({ whatsappMock, responder, calls, recognizeCurrentEnginePrompt = false } = {}) {
   const originalPost = axios.post.bind(axios);
 
   axios.post = async (url, payload, config) => {
@@ -342,12 +342,21 @@ export function installOpenAIMock({ whatsappMock, responder } = {}) {
       const systemPrompt = extractMessage(payload, 'system');
       const userText = extractMessage(payload, 'user');
 
+      const extractionPrompt = /Eres un reclutador humano experto leyendo mensajes de WhatsApp/.test(systemPrompt);
+      const legacyEnginePrompt = /Sos un reclutador del equipo de seleccion de LoginPro/.test(systemPrompt)
+        && /Devuelve SOLO un objeto JSON/.test(systemPrompt);
+      const currentEnginePrompt = /PASO ACTUAL DEL FLUJO:/.test(systemPrompt);
+      const requestType = extractionPrompt
+        ? 'extraction'
+        : (currentEnginePrompt ? 'conversation_engine' : 'natural_reply');
+      if (Array.isArray(calls)) calls.push({ type: requestType });
+
       let content;
       if (typeof responder === 'function') {
         content = responder({ url, payload, systemPrompt, userText });
-      } else if (/Eres un reclutador humano experto leyendo mensajes de WhatsApp/.test(systemPrompt)) {
+      } else if (extractionPrompt) {
         content = buildAiParserResponse(userText);
-      } else if (/Sos un reclutador del equipo de seleccion de LoginPro/.test(systemPrompt) && /Devuelve SOLO un objeto JSON/.test(systemPrompt)) {
+      } else if (legacyEnginePrompt || (recognizeCurrentEnginePrompt && currentEnginePrompt)) {
         content = buildEngineDecision(systemPrompt, userText);
       } else {
         content = buildNaturalReply(systemPrompt);
