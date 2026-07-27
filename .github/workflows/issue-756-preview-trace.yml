@@ -1,0 +1,95 @@
+name: Issue 756 preview trace
+
+on:
+  pull_request:
+    branches:
+      - automation/756-engine-preview-trace
+
+permissions:
+  contents: write
+
+jobs:
+  validate-preview-trace:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Capture exact baseline suite
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/baseline.log 2>&1
+          baseline_exit=$?
+          set -e
+          grep '^not ok' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
+          echo "BASELINE_EXIT=$baseline_exit" >> "$GITHUB_ENV"
+          echo "Baseline failures: $(wc -l < /tmp/baseline.failures)"
+
+      - name: Apply exact functional patch
+        run: node .github/scripts/apply-issue-756.mjs
+
+      - name: Validate syntax and focused contracts
+        run: |
+          node --check src/services/debugTrace.js
+          node --check src/routes/webhook.js
+          node --check test/enginePreviewTrace.test.js
+          node --test test/enginePreviewTrace.test.js test/conversationEngineStepAuthority.test.js
+
+      - name: Compare full suite with exact baseline
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.log 2>&1
+          head_exit=$?
+          set -e
+          grep '^not ok' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
+          echo "Head failures: $(wc -l < /tmp/head.failures)"
+          if ! diff -u /tmp/baseline.failures /tmp/head.failures; then
+            echo 'La corrección cambió la lista de fallos de la suite.'
+            cat /tmp/head.log
+            exit 1
+          fi
+          if [ "$BASELINE_EXIT" = "0" ] && [ "$head_exit" != "0" ]; then
+            cat /tmp/head.log
+            exit 1
+          fi
+
+      - name: Validate clean diff
+        run: git diff --check
+
+      - name: Commit functional files only
+        shell: bash
+        run: |
+          git add src/services/debugTrace.js src/routes/webhook.js test/enginePreviewTrace.test.js
+          if git diff --cached --quiet; then
+            echo 'No functional changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: medir consumo del preview del engine #756'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
