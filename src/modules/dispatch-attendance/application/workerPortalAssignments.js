@@ -18,6 +18,12 @@ function requireDate(value, label) {
   return date;
 }
 
+function optionalIsoDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function requireAssignmentReader(prisma, methodName) {
   if (!prisma?.dispatchAssignment || typeof prisma.dispatchAssignment[methodName] !== 'function') {
     throw new Error(`worker_portal_assignment_${methodName}_required`);
@@ -52,7 +58,7 @@ function formatDateTime(value) {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true
-  }).format(value);
+  }).format(requireDate(value, 'worker_portal_datetime'));
 }
 
 function arrivalLabel(session) {
@@ -91,10 +97,8 @@ function buildPortalAssignment(assignment) {
   const point = request.operationPoint ?? null;
   const session = assignment.attendanceSession ?? null;
   const marks = session?.marks || [];
-  const breakStartMark = latestMark(marks, 'BREAK_START');
-  const breakEndMark = latestMark(marks, 'BREAK_END');
-  const breakStartAt = markMoment(breakStartMark);
-  const breakEndAt = markMoment(breakEndMark);
+  const breakStartAt = markMoment(latestMark(marks, 'BREAK_START'));
+  const breakEndAt = markMoment(latestMark(marks, 'BREAK_END'));
   const breakStarted = Boolean(breakStartAt);
   const breakEnded = Boolean(breakEndAt);
   const breakOpen = breakStarted && !breakEnded;
@@ -111,9 +115,7 @@ function buildPortalAssignment(assignment) {
   const departureReported = Boolean(session?.departureReportedAt);
   const attendanceEnabled = point?.attendanceEnabled === true;
   const sessionRejected = session?.validationStatus === 'REJECTED';
-  const canRegisterArrival = attendanceEnabled
-    && Boolean(expectedStartAt)
-    && !arrivalReported;
+  const canRegisterArrival = attendanceEnabled && Boolean(expectedStartAt) && !arrivalReported;
   const canStartBreak = attendanceEnabled
     && arrivalReported
     && !departureReported
@@ -170,8 +172,10 @@ function buildPortalAssignment(assignment) {
     arrivalWindowExpired: false,
     attendanceEnabled,
     arrivalReported,
+    arrivalReportedAt: optionalIsoDate(session?.arrivalReportedAt),
     arrivalReportedLabel: formatDateTime(session?.arrivalReportedAt),
     departureReported,
+    departureReportedAt: optionalIsoDate(session?.departureReportedAt),
     departureReportedLabel: formatDateTime(session?.departureReportedAt),
     breakStarted,
     breakEnded,
@@ -179,7 +183,9 @@ function buildPortalAssignment(assignment) {
     breakStartLabel: formatDateTime(breakStartAt),
     breakEndLabel: formatDateTime(breakEndAt),
     breakLabel: breakStarted
-      ? (breakEnded ? `${formatDateTime(breakStartAt)} – ${formatDateTime(breakEndAt)}` : `Inició ${formatDateTime(breakStartAt)} · pendiente de finalizar`)
+      ? (breakEnded
+          ? `${formatDateTime(breakStartAt)} – ${formatDateTime(breakEndAt)}`
+          : `Inició ${formatDateTime(breakStartAt)} · pendiente de finalizar`)
       : 'No registrado · el tiempo seguirá contando como trabajado',
     workedMinutes: session?.workedMinutes ?? null,
     workedLabel: session?.workedMinutes === null || session?.workedMinutes === undefined
@@ -204,10 +210,11 @@ function buildPortalAssignment(assignment) {
 
 function isPortalRelevant(assignment, now) {
   if (!assignment.departureReported) return true;
-  const departureAt = assignment.departureReportedLabel
-    ? new Date(assignment.expectedStartAt || 0).getTime()
-    : 0;
-  return !departureAt || departureAt >= now.getTime() - PORTAL_COMPLETED_WINDOW_MS;
+  const departureAt = assignment.departureReportedAt
+    ? new Date(assignment.departureReportedAt).getTime()
+    : Number.NaN;
+  return Number.isFinite(departureAt)
+    && departureAt >= now.getTime() - PORTAL_COMPLETED_WINDOW_MS;
 }
 
 function assignmentInclude() {
