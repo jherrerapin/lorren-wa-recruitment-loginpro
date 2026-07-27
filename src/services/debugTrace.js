@@ -44,6 +44,15 @@ export function createDebugTrace({ phone, currentStepBefore }) {
     engine_fallback_reason: null,
     engine_loop_guard: false,
     engine_actions: [],
+    engine_preview_eligible: false,
+    engine_preview_executed: false,
+    engine_preview_used: false,
+    engine_preview_fallback: false,
+    engine_preview_field_count: 0,
+    engine_preview_effective_field_count: 0,
+    engine_preview_decision_available: false,
+    engine_preview_plan_reused: false,
+    engine_preview_consumption: 'none',
     persisted_fields: [],
     consolidated_fields: [],
     rejected_fields: [],
@@ -61,6 +70,47 @@ export function createDebugTrace({ phone, currentStepBefore }) {
     cv_download_failed: false,
     error_summary: null
   };
+}
+
+export function buildEnginePreviewTrace({ eligible = false, preview = {}, turnInterpretation = {} } = {}) {
+  const previewFields = preview?.fields && typeof preview.fields === 'object'
+    ? Object.keys(preview.fields).filter(Boolean)
+    : [];
+  const interpretationFields = turnInterpretation?.fields && typeof turnInterpretation.fields === 'object'
+    ? turnInterpretation.fields
+    : {};
+  const sourceByField = turnInterpretation?.sourceByField && typeof turnInterpretation.sourceByField === 'object'
+    ? turnInterpretation.sourceByField
+    : {};
+  const effectiveFieldCount = previewFields.filter((field) => (
+    Object.hasOwn(interpretationFields, field)
+    && ['engine', 'merged'].includes(sourceByField[field])
+  )).length;
+  const executed = Boolean(eligible);
+  const fallback = executed && Boolean(preview?.fallback);
+
+  return {
+    engine_preview_eligible: Boolean(eligible),
+    engine_preview_executed: executed,
+    engine_preview_used: executed && Boolean(preview?.used),
+    engine_preview_fallback: fallback,
+    engine_preview_field_count: executed ? previewFields.length : 0,
+    engine_preview_effective_field_count: effectiveFieldCount,
+    engine_preview_decision_available: executed && !fallback && Boolean(preview?.decision),
+    engine_preview_plan_reused: false,
+    engine_preview_consumption: effectiveFieldCount > 0 ? 'fields' : 'none'
+  };
+}
+
+export function applyEnginePreviewPlanReuse(debugTrace = {}, decisionReused = false) {
+  const planReused = Boolean(decisionReused && debugTrace.engine_preview_decision_available);
+  debugTrace.engine_preview_plan_reused = planReused;
+  if (planReused) {
+    debugTrace.engine_preview_consumption = Number(debugTrace.engine_preview_effective_field_count || 0) > 0
+      ? 'fields_and_plan'
+      : 'plan_reused';
+  }
+  return debugTrace;
 }
 
 export function summarizeError(error) {

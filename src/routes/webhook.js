@@ -3,7 +3,15 @@ import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from
 import { extractMessages, sendImageMessage, sendTextMessage } from '../services/whatsapp.js';
 import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
 import { tryOpenAIParse } from '../services/aiParser.js';
-import { createDebugTrace, inferIntent, sanitizeForRawPayload, splitFieldDecisions, summarizeError } from '../services/debugTrace.js';
+import {
+  applyEnginePreviewPlanReuse,
+  buildEnginePreviewTrace,
+  createDebugTrace,
+  inferIntent,
+  sanitizeForRawPayload,
+  splitFieldDecisions,
+  summarizeError
+} from '../services/debugTrace.js';
 import { isCvMimeTypeAllowed, looksLikeCvFilenameText, resolveStepAfterDataCompletion, shouldFinalizeAfterCv } from '../services/cvFlow.js';
 import {
   alignCandidateLocationFields,
@@ -876,13 +884,14 @@ async function previewEngineCandidateFields(prisma, candidate, inboundText, prov
   const usage = preview?.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
 
   if (preview?.fallback) {
-    return { fields: {}, usage, decision: null, used: false };
+    return { fields: {}, usage, decision: null, used: false, fallback: true };
   }
   return {
     fields: extractEngineCandidateFields(preview.actions, preview.extractedFields),
     usage,
     decision: preview,
-    used: true
+    used: true,
+    fallback: false
   };
 }
 
@@ -915,6 +924,7 @@ async function replyWithEngine(prisma, candidate, from, inboundText, providedVac
   if (options.debugTrace) {
     options.debugTrace.engine_primary = true;
     options.debugTrace.engine_plan_reused = Boolean(engineResult.decisionReused);
+    applyEnginePreviewPlanReuse(options.debugTrace, engineResult.decisionReused);
     options.debugTrace.engine_actions = (engineResult.actions || []).map((action) => action?.type).filter(Boolean);
     options.debugTrace.engine_loop_guard = Boolean(engineResult.loopGuardApplied);
     options.debugTrace.blockedActions = engineResult.blockedActions || [];
@@ -1646,9 +1656,22 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   };
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
-  const rawEnginePreview = shouldUseEngineFieldPreview(candidate, cleanText, localParsedData, aiFields, sanitizerContext.pendingFields)
+  const enginePreviewEligible = shouldUseEngineFieldPreview(
+    candidate,
+    cleanText,
+    localParsedData,
+    aiFields,
+    sanitizerContext.pendingFields
+  );
+  const rawEnginePreview = enginePreviewEligible
     ? await previewEngineCandidateFields(prisma, candidate, cleanText, currentVacancy)
-    : { fields: {}, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
+    : {
+      fields: {},
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      decision: null,
+      used: false,
+      fallback: false
+    };
   const understanding = await conversationUnderstanding(cleanText, {
     aiResult,
     context: sanitizerContext,
@@ -1663,6 +1686,11 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   });
   const turnInterpretation = understanding.turnInterpretation;
   if (!turnInterpretation) throw new Error('Missing runtime turn interpretation.');
+  Object.assign(debugTrace, buildEnginePreviewTrace({
+    eligible: enginePreviewEligible,
+    preview: rawEnginePreview,
+    turnInterpretation
+  }));
   let normalizedData = turnInterpretation.fields;
   const sourceByField = turnInterpretation.sourceByField;
   const evidenceByField = turnInterpretation.evidenceByField;

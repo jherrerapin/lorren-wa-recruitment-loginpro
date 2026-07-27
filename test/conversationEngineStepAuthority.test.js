@@ -368,5 +368,5 @@ test('webhook omite el preview en aclaración pura de restricciones médicas', (
   assert.ok(noDataIndex > clarificationIndex);
   assert.ok(skipIndex > noDataIndex);
   assert.ok(confirmingIndex > skipIndex);
-  assert.match(webhookSource, /shouldUseEngineFieldPreview\(candidate, cleanText, localParsedData, aiFields, sanitizerContext\.pendingFields\)/);
+  assert.match(webhookSource, /shouldUseEngineFieldPreview\(\s*candidate,\s*cleanText,\s*localParsedData,\s*aiFields,\s*sanitizerContext\.pendingFields\s*\)/);
 });
