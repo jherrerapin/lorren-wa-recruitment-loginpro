@@ -73,7 +73,7 @@ function completeCandidate(overrides = {}) {
 
 function scheduledAtForSlot(slot) {
   const datePart = new Date(slot.specificDate).toISOString().slice(0, 10);
-  return new Date(\`${datePart}T\${slot.startTime}:00-05:00\`);
+  return new Date(\`\${datePart}T\${slot.startTime}:00-05:00\`);
 }
 
 const offeredSlot = buildFutureSlot({
