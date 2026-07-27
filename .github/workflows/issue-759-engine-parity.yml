@@ -88,6 +88,8 @@ jobs:
         run: exit 1
 
       - name: Compare full suite with exact baseline
+        id: full_suite
+        continue-on-error: true
         shell: bash
         run: |
           set +e
@@ -96,15 +98,34 @@ jobs:
           set -e
           grep '^not ok' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
           echo "Head failures: $(wc -l < /tmp/head.failures)"
-          if ! diff -u /tmp/baseline.failures /tmp/head.failures; then
+          set +e
+          diff -u /tmp/baseline.failures /tmp/head.failures | tee /tmp/failure-diff.txt
+          diff_exit=${PIPESTATUS[0]}
+          set -e
+          if [ "$diff_exit" != "0" ]; then
             echo 'La matriz cambió la lista de fallos de la suite.'
-            cat /tmp/head.log
             exit 1
           fi
           if [ "$BASELINE_EXIT" = "0" ] && [ "$head_exit" != "0" ]; then
-            cat /tmp/head.log
+            echo 'La línea base era verde y la rama no.'
             exit 1
           fi
+
+      - name: Upload suite comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-759-suite-comparison
+          path: |
+            /tmp/baseline.failures
+            /tmp/head.failures
+            /tmp/failure-diff.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop after suite difference
+        if: steps.full_suite.outcome == 'failure'
+        run: exit 1
 
       - name: Validate clean diff
         run: git diff --check
