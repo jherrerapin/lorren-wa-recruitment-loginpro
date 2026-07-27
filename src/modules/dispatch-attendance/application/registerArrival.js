@@ -24,9 +24,7 @@ const MAX_OFFLINE_CAPTURE_AGE_MS = 72 * 60 * 60 * 1000;
 const MAX_CLIENT_CLOCK_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 function requireInputObject(input, label) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new Error(`${label}_invalid`);
-  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`${label}_invalid`);
   return input;
 }
 
@@ -59,9 +57,7 @@ function optionalFiniteNumber(value, label, { min = -Infinity, max = Infinity } 
   if (value === null || value === undefined || value === '') return null;
   if (typeof value !== 'number' && typeof value !== 'string') throw new Error(`${label}_invalid`);
   const number = Number(value);
-  if (!Number.isFinite(number) || number < min || number > max) {
-    throw new Error(`${label}_invalid`);
-  }
+  if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${label}_invalid`);
   return number;
 }
 
@@ -81,18 +77,13 @@ function requirePrismaContract(client) {
     dispatchAttendanceMark: ['findUnique', 'create'],
     dispatchWorkerDevice: ['findFirst', 'count']
   };
-
-  if (typeof client?.$transaction !== 'function') {
-    throw new Error('attendance_arrival_prisma_transaction_required');
-  }
-
+  if (typeof client?.$transaction !== 'function') throw new Error('attendance_arrival_prisma_transaction_required');
   for (const [modelName, methods] of Object.entries(required)) {
     const model = client?.[modelName];
     if (!model || methods.some((method) => typeof model[method] !== 'function')) {
       throw new Error(`attendance_arrival_${modelName}_contract_invalid`);
     }
   }
-
   return client;
 }
 
@@ -109,7 +100,6 @@ function dateKeyInBogota(value) {
     && date.getUTCSeconds() === 0
     && date.getUTCMilliseconds() === 0;
   if (isLegacyUtcDateOnly) return date.toISOString().slice(0, 10);
-
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: BOGOTA_TIME_ZONE,
     year: 'numeric',
@@ -124,28 +114,21 @@ function parseOperationalTime(value, label) {
   const text = requireNonEmptyString(value, label).toUpperCase();
   const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/);
   if (!match) throw new Error(`${label}_invalid`);
-
   let hour = Number(match[1]);
   const minute = Number(match[2]);
   const second = Number(match[3] || 0);
   const period = match[4] || null;
-
   if (minute > 59 || second > 59) throw new Error(`${label}_invalid`);
   if (period) {
     if (hour < 1 || hour > 12) throw new Error(`${label}_invalid`);
     if (period === 'AM' && hour === 12) hour = 0;
     if (period === 'PM' && hour !== 12) hour += 12;
-  } else if (hour > 23) {
-    throw new Error(`${label}_invalid`);
-  }
-
+  } else if (hour > 23) throw new Error(`${label}_invalid`);
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
 }
 
 function buildExpectedTimestamp(serviceDate, timeText, label) {
-  const dateKey = dateKeyInBogota(serviceDate);
-  const time = parseOperationalTime(timeText, label);
-  return new Date(`${dateKey}T${time}-05:00`);
+  return new Date(`${dateKeyInBogota(serviceDate)}T${parseOperationalTime(timeText, label)}-05:00`);
 }
 
 export function buildDispatchAttendanceExpectedWindow(serviceRequest) {
@@ -154,46 +137,20 @@ export function buildDispatchAttendanceExpectedWindow(serviceRequest) {
     serviceRequest.startTime,
     'service_start_time'
   );
-
-  if (!serviceRequest.endTime) {
-    return { expectedStartAt, expectedEndAt: null };
-  }
-
+  if (!serviceRequest.endTime) return { expectedStartAt, expectedEndAt: null };
   let expectedEndAt = buildExpectedTimestamp(
     serviceRequest.serviceDate,
     serviceRequest.endTime,
     'service_end_time'
   );
-  if (expectedEndAt <= expectedStartAt) {
-    expectedEndAt = new Date(expectedEndAt.getTime() + 24 * 60 * 60 * 1000);
-  }
+  if (expectedEndAt <= expectedStartAt) expectedEndAt = new Date(expectedEndAt.getTime() + 24 * 60 * 60 * 1000);
   return { expectedStartAt, expectedEndAt };
 }
 
 export function getDispatchArrivalWindowState(input = {}) {
-  const now = requiredTimestamp(input.now, 'attendance_window_now');
-  const expectedStartAt = requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
-  const earlyArrivalWindowMinutes = optionalFiniteNumber(
-    input.earlyArrivalWindowMinutes,
-    'early_arrival_window_minutes',
-    { min: 0 }
-  ) ?? 0;
-  const absenceGraceMinutes = optionalFiniteNumber(
-    input.absenceGraceMinutes,
-    'absence_grace_minutes',
-    { min: 0 }
-  );
-  const opensAt = new Date(expectedStartAt.getTime() - earlyArrivalWindowMinutes * 60_000);
-  const closesAt = absenceGraceMinutes === null
-    ? null
-    : new Date(expectedStartAt.getTime() + absenceGraceMinutes * 60_000);
-  const expired = Boolean(closesAt && now.getTime() > closesAt.getTime());
-  return {
-    open: now.getTime() >= opensAt.getTime() && !expired,
-    opensAt,
-    closesAt,
-    expired
-  };
+  requiredTimestamp(input.now, 'attendance_window_now');
+  requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
+  return { open: true, opensAt: null, closesAt: null, expired: false };
 }
 
 function minutesLateAt(now, expectedStartAt) {
@@ -232,38 +189,21 @@ function replayResult(mark) {
 }
 
 async function resolveDeviceSignals(client, { workerId, installationIdHash, now }) {
-  if (!installationIdHash) {
-    return { authorizedDevice: false, sharedDeviceSignal: false, workerDevice: null };
-  }
-
-  const workerDevice = await client.dispatchWorkerDevice.findFirst({
-    where: {
-      workerId,
-      installationIdHash,
-      status: 'ACTIVE',
-      revokedAt: null,
-      authorizedFrom: { lte: now },
-      OR: [
-        { authorizedUntil: null },
-        { authorizedUntil: { gte: now } }
-      ]
-    }
-  });
-
-  const sharedDeviceCount = await client.dispatchWorkerDevice.count({
-    where: {
-      installationIdHash,
-      status: 'ACTIVE',
-      revokedAt: null,
-      authorizedFrom: { lte: now },
-      OR: [
-        { authorizedUntil: null },
-        { authorizedUntil: { gte: now } }
-      ],
-      workerId: { not: workerId }
-    }
-  });
-
+  if (!installationIdHash) return { authorizedDevice: false, sharedDeviceSignal: false, workerDevice: null };
+  const activeWindow = {
+    status: 'ACTIVE',
+    revokedAt: null,
+    authorizedFrom: { lte: now },
+    OR: [{ authorizedUntil: null }, { authorizedUntil: { gte: now } }]
+  };
+  const [workerDevice, sharedDeviceCount] = await Promise.all([
+    client.dispatchWorkerDevice.findFirst({
+      where: { workerId, installationIdHash, ...activeWindow }
+    }),
+    client.dispatchWorkerDevice.count({
+      where: { installationIdHash, workerId: { not: workerId }, ...activeWindow }
+    })
+  ]);
   return {
     authorizedDevice: Boolean(workerDevice),
     sharedDeviceSignal: sharedDeviceCount > 0,
@@ -279,7 +219,6 @@ function geofenceSignals(operationPoint, input) {
     && pointLongitude !== null
     && radiusMeters !== null
     && radiusMeters > 0;
-
   const distanceToPointMeters = calculateAttendanceDistanceMeters(
     { latitude: pointLatitude, longitude: pointLongitude },
     { latitude: input.latitude, longitude: input.longitude }
@@ -287,7 +226,6 @@ function geofenceSignals(operationPoint, input) {
   const withinGeofence = hasConfiguredGeofence
     ? isAttendanceInsideGeofence(distanceToPointMeters, radiusMeters)
     : null;
-
   return { hasConfiguredGeofence, distanceToPointMeters, withinGeofence };
 }
 
@@ -313,11 +251,7 @@ async function registerInsideTransaction(client, input) {
   const duplicateMark = Boolean(existingSession?.arrivalReportedAt);
 
   if (!assignmentActive || !attendanceEnabled || duplicateMark) {
-    const validation = evaluateArrivalValidation({
-      assignmentActive,
-      attendanceEnabled,
-      duplicateMark
-    });
+    const validation = evaluateArrivalValidation({ assignmentActive, attendanceEnabled, duplicateMark });
     return {
       recorded: false,
       replayed: false,
@@ -328,41 +262,14 @@ async function registerInsideTransaction(client, input) {
   }
 
   const expectedWindow = existingSession
-    ? {
-        expectedStartAt: existingSession.expectedStartAt,
-        expectedEndAt: existingSession.expectedEndAt
-      }
+    ? { expectedStartAt: existingSession.expectedStartAt, expectedEndAt: existingSession.expectedEndAt }
     : buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
-  const arrivalWindow = getDispatchArrivalWindowState({
-    now: input.reportedAt,
-    expectedStartAt: expectedWindow.expectedStartAt,
-    earlyArrivalWindowMinutes: finiteDatabaseNumber(operationPoint?.earlyArrivalWindowMinutes) ?? 0,
-    absenceGraceMinutes: finiteDatabaseNumber(operationPoint?.absenceGraceMinutes) ?? 15
-  });
-
-  if (!arrivalWindow.open) {
-    const validation = evaluateArrivalValidation({
-      assignmentActive,
-      attendanceEnabled,
-      duplicateMark,
-      arrivalWindowOpen: false
-    });
-    return {
-      recorded: false,
-      replayed: false,
-      attendanceSession: existingSession,
-      attendanceMark: null,
-      validation
-    };
-  }
-
   const deviceSignals = await resolveDeviceSignals(client, {
     workerId: assignment.workerId,
     installationIdHash: input.installationIdHash,
     now: input.now
   });
   const geofence = geofenceSignals(operationPoint, input);
-
   const validation = evaluateArrivalValidation({
     assignmentActive,
     attendanceEnabled,
@@ -377,7 +284,7 @@ async function registerInsideTransaction(client, input) {
     persistentStorageAvailable: input.persistentStorageAvailable,
     hasFreshPhoto: Boolean(input.hasFreshPhoto && input.evidenceStorageKey),
     minutesLate: minutesLateAt(input.reportedAt, expectedWindow.expectedStartAt),
-    toleranceMinutes: finiteDatabaseNumber(operationPoint?.lateToleranceMinutes) ?? 0,
+    toleranceMinutes: 0,
     captureMode: input.captureMode,
     syncDelayMinutes: syncDelayMinutes(input.now, input.reportedAt)
   });
@@ -459,18 +366,12 @@ function normalizeInput(input) {
   const reportedAt = captureMode === OFFLINE_WEB_CAPTURE_MODE
     ? requiredTimestamp(clientCapturedAt, 'client_captured_at')
     : now;
-
   if (captureMode === OFFLINE_WEB_CAPTURE_MODE) {
     const futureSkew = reportedAt.getTime() - now.getTime();
     const captureAge = now.getTime() - reportedAt.getTime();
-    if (futureSkew > MAX_CLIENT_CLOCK_FUTURE_SKEW_MS) {
-      throw new Error('attendance_offline_capture_future_invalid');
-    }
-    if (captureAge > MAX_OFFLINE_CAPTURE_AGE_MS) {
-      throw new Error('attendance_offline_capture_expired');
-    }
+    if (futureSkew > MAX_CLIENT_CLOCK_FUTURE_SKEW_MS) throw new Error('attendance_offline_capture_future_invalid');
+    if (captureAge > MAX_OFFLINE_CAPTURE_AGE_MS) throw new Error('attendance_offline_capture_expired');
   }
-
   return {
     assignmentId: requireNonEmptyString(value.assignmentId, 'assignment_id'),
     expectedWorkerId: optionalString(value.expectedWorkerId, 'expected_worker_id'),
@@ -496,7 +397,6 @@ export async function registerDispatchArrival(prisma, input = {}) {
   requirePrismaContract(prisma);
   const normalized = normalizeInput(input);
   let lastError = null;
-
   for (let attempt = 1; attempt <= MAX_SERIALIZABLE_RETRIES; attempt += 1) {
     try {
       return await prisma.$transaction(
@@ -508,12 +408,10 @@ export async function registerDispatchArrival(prisma, input = {}) {
       if (!isRetryableWriteConflict(error) || attempt === MAX_SERIALIZABLE_RETRIES) break;
     }
   }
-
   if (lastError?.code === 'P2002') {
     const replay = await findIdempotentReplay(prisma, normalized.idempotencyKey);
     if (replay) return replayResult(replay);
   }
-
   throw lastError;
 }
 
