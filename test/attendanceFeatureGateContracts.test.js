@@ -9,6 +9,7 @@ const sampleHtml = `<!doctype html><html><body><main class="page"><section>Opera
 const reformattedHtml = `<!doctype html><html><body><main id="operations" data-view="client" class="layout page wide"><details data-module="attendance" class='attendance-config crud-details extra'><summary>Configurar asistencia</summary><form><button>Guardar asistencia</button></form></details></main></body></html>`;
 const leafletHtmlWithInvalidIntegrity = `<!doctype html><html><body><main class="page"></main><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script></body></html>`;
 const attendanceSearchHtml = `<!doctype html><html><body><main class="page"><details class="attendance-config"><form class="attendance-map-form"><input type="checkbox" name="attendanceEnabled" value="true" /></form></details></main><script>fetch(\`https://nominatim.openstreetmap.org/search?\${params.toString()}\`);</script></body></html>`;
+const timingHtml = `<!doctype html><html><body><details class="attendance-config"><form><div class="attendance-standards"><span>Radio permitido</span></div><div class="field"><label>Entrada anticipada</label><input name="earlyArrivalWindowMinutes" value="60"></div><div class="field"><label>Tolerancia tarde</label><input name="lateToleranceMinutes" value="10"></div><div class="field"><label>Gracia ausencia</label><input name="absenceGraceMinutes" value="15"></div></form></details></body></html>`;
 
 test('una persona sin permiso no recibe la configuración de asistencia', () => {
   const output = filterAttendanceFeatureHtml(sampleHtml, { allowed: false });
@@ -41,14 +42,21 @@ test('el HTML usa el geocodificador interno y prepara la habilitación al guarda
   assert.match(output, /name="attendanceEnabled" value="true" checked/);
 });
 
-test('panel, geocodificación y configuración exigen el permiso en servidor', () => {
-  assert.match(routeSource, /router\.use\(\s*['"]\/asistencia['"]\s*,\s*requireOps\s*,\s*requireAttendanceAccess\s*,\s*dispatchAttendanceAdminRouter\(prisma\)/s);
-  assert.match(routeSource, /\/asistencia\/geocodificar[\s\S]*?requireOps[\s\S]*?requireAttendanceAccess[\s\S]*?geocodeAttendanceAddress/);
-  assert.match(routeSource, /\/clientes\/:clientId\/operaciones\/:operationId\/asistencia[\s\S]*?requireOps[\s\S]*?requireAttendanceAccess[\s\S]*?dispatchAttendancePointConfigRouter/);
+test('el HTML elimina ventanas y explica la nueva regla abierta', () => {
+  const output = filterAttendanceFeatureHtml(timingHtml, { allowed: true });
+  assert.doesNotMatch(output, /earlyArrivalWindowMinutes/);
+  assert.doesNotMatch(output, /lateToleranceMinutes/);
+  assert.doesNotMatch(output, /absenceGraceMinutes/);
+  assert.match(output, /Entrada sin ventana configurable/);
+  assert.match(output, /llegadas tarde se registran y no se bloquean/i);
+  assert.match(output, /conteo inicia a la hora programada/i);
 });
 
-test('las activaciones de dispositivos continúan restringidas a DEV', () => {
-  assert.match(routeSource, /['"]\/portal-activaciones['"][\s\S]*?requireDev[\s\S]*?dispatchWorkerPortalActivationAdminRouter/);
+test('panel, geocodificación, activaciones y configuración exigen permiso en servidor', () => {
+  assert.match(routeSource, /router\.use\(\s*['"]\/asistencia['"]\s*,\s*requireOps\s*,\s*requireAttendanceAccess\s*,\s*dispatchAttendanceAdminRouter\(prisma\)/s);
+  assert.match(routeSource, /\/asistencia\/geocodificar[\s\S]*?requireOps[\s\S]*?requireAttendanceAccess[\s\S]*?geocodeAttendanceAddress/);
+  assert.match(routeSource, /\/portal-activaciones[\s\S]*?requireOps[\s\S]*?requireAttendanceAccess[\s\S]*?dispatchWorkerPortalActivationAdminRouter/);
+  assert.match(routeSource, /\/clientes\/:clientId\/operaciones\/:operationId\/asistencia[\s\S]*?requireOps[\s\S]*?requireAttendanceAccess[\s\S]*?dispatchAttendancePointConfigRouter/);
 });
 
 test('se retiró el interruptor global temporal de reclutador-general', () => {
