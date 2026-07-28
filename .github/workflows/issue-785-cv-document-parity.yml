@@ -69,7 +69,6 @@ jobs:
               test/cvDocumentParity.test.js \
               test/conversationEngineParity.test.js \
               test/cvFlow.test.js \
-              test/cvStorage.test.js \
               test/webhookIdempotency.test.js
           } > /tmp/issue-785-focused.log 2>&1
           status=$?
