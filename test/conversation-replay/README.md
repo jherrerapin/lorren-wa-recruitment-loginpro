@@ -39,7 +39,8 @@ La validación del webhook, la resolución productiva del tenant y la descarga f
 3. **Replay de planificación:** ejecuta autoridades de consentimiento, protección de adjuntos, respuesta contextual y política de campos.
 4. **Replay integral:** ejecuta inbox, acciones, candidato, eventos de consentimiento, estado conversacional, outbox, entrega y auditoría mediante adaptadores en memoria.
 5. **Replay de recuperación:** inyecta fallos antes y después del outbox; prueba rollback, reanudación y entrega pendiente sin duplicar efectos.
-6. **Gate de CI:** impide retirar una autoridad heredada cuando cambia un comportamiento protegido.
+6. **Cobertura de bordes de producción:** enlaza fixtures integrales y contratos productivos existentes mediante `production-edge-coverage.json`.
+7. **Gate de CI:** impide retirar una autoridad heredada cuando cambia un comportamiento protegido.
 
 ## Escenarios protegidos
 
@@ -53,6 +54,27 @@ La validación del webhook, la resolución productiva del tenant y la descarga f
 - nombre enviado después de que Lórren lo solicita.
 
 La aceptación y el rechazo crean un único evento versionado y trazable. Un documento enviado antes de autorización conserva únicamente sus metadatos dentro del inbox; no genera `cvData`, `cvStorageKey`, descarga ni registro de archivo.
+
+## Bordes de producción vinculados
+
+`production-edge-coverage.json` representa explícitamente los ocho casos encontrados durante la revisión de producción:
+
+1. nombre completo etiquetado con tildes y eñe;
+2. nombre enviado después de una solicitud explícita;
+3. corrección posterior de ciudad y cargo;
+4. candidato con vacante asociada que solicita otra;
+5. metadata confiable que contradice texto ambiguo;
+6. respuesta generada que ya contiene el seguimiento requerido;
+7. fallo entre persistencia, entrega y marca `respondedAt`;
+8. oferta de vacante pausada repetida dentro y fuera de la ventana de diez minutos.
+
+La cobertura puede ser:
+
+- `fixture_replay`: turno completo dentro del replay integral;
+- `authority_contract`: autoridad productiva ejecutada mediante una prueba focal;
+- `recovery_contract`: orden de outbox, entrega, recuperación y actualización explícita de respuesta.
+
+Cada caso declara las señales de observabilidad que deben conservarse: `source_by_field`, `rejected_fields`, `vacancy_resolution`, `replyKind`, `reason`, `engine_loop_guard` y `respondedAt`. El manifiesto no contiene mensajes reales ni valores personales.
 
 ## Autoridades usadas por la planificación
 
@@ -91,4 +113,4 @@ La salida se persiste antes de entregarse. Si falla el commit, se revierten los 
 
 ## Estado actual
 
-El contrato, la interpretación, la planificación, la ejecución integral, el rollback del commit, las decisiones de consentimiento, la protección de adjuntos y la recuperación desde outbox son reproducibles y bloqueantes en CI. El replay todavía no ejecuta el webhook productivo, Prisma real, Meta WhatsApp ni proveedores externos.
+El contrato, la interpretación, la planificación, la ejecución integral, el rollback del commit, las decisiones de consentimiento, la protección de adjuntos, la recuperación desde outbox y los ocho bordes de producción están representados mediante replay o contratos focales. El replay todavía no ejecuta el webhook productivo, Prisma real, Meta WhatsApp ni proveedores externos.
