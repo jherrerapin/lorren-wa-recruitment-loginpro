@@ -15,6 +15,7 @@ import {
   enrollWorkerBiometric,
   getWorkerBiometricEnrollment,
   issueWorkerBiometricChallenge,
+  revokeWorkerBiometric,
   WORKER_BIOMETRIC_ACTION,
   WORKER_BIOMETRIC_ENTITY_TYPE
 } from '../services/workerBiometricService.js';
@@ -79,6 +80,8 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     || ((input, enrollmentOptions) => enrollWorkerBiometric(prisma, input, enrollmentOptions));
   const assessBiometricFn = options.assessBiometricFn
     || ((input, assessmentOptions) => assessWorkerBiometric(prisma, input, assessmentOptions));
+  const revokeBiometricFn = options.revokeBiometricFn
+    || ((input, revocationOptions) => revokeWorkerBiometric(prisma, input, revocationOptions));
   const issueChallengeFn = options.issueChallengeFn || issueWorkerBiometricChallenge;
   const nowFn = options.nowFn || (() => new Date());
   let sessionRepository = options.sessionRepository || null;
@@ -100,13 +103,9 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     return loader(prisma, { workerId, assignmentId, now });
   }
 
-  async function markEnrollmentAsWorkerPortal(workerId) {
+  async function markLatestWorkerEventSource(workerId, action) {
     const event = await prisma.devAuditEvent.findFirst({
-      where: {
-        entityType: WORKER_BIOMETRIC_ENTITY_TYPE,
-        entityId: workerId,
-        action: WORKER_BIOMETRIC_ACTION.ENROLLED
-      },
+      where: { entityType: WORKER_BIOMETRIC_ENTITY_TYPE, entityId: workerId, action },
       orderBy: { createdAt: 'desc' },
       select: { id: true }
     });
@@ -185,7 +184,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
           ipAddress: requestIp(req),
           userAgent: requestUserAgent(req)
         }, { now, env: options.env || process.env });
-        await markEnrollmentAsWorkerPortal(portalSession.workerId);
+        await markLatestWorkerEventSource(portalSession.workerId, WORKER_BIOMETRIC_ACTION.ENROLLED);
         enrollment = await getEnrollmentFn(portalSession.workerId);
         enrolledNow = Boolean(enrollment.enrolled && enrollment.descriptor);
       }
@@ -206,12 +205,33 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
         userAgent: requestUserAgent(req)
       }, { now, env: options.env || process.env });
 
+      if (!assessment.verified) {
+        if (enrolledNow) {
+          await revokeBiometricFn({
+            workerId: portalSession.workerId,
+            workerLabel: portalSession.workerId,
+            actorUsername: `worker-portal:${portalSession.workerId}`,
+            actorRole: 'worker',
+            reason: 'INITIAL_VERIFICATION_FAILED',
+            ipAddress: requestIp(req),
+            userAgent: requestUserAgent(req)
+          }, { now, env: options.env || process.env });
+          await markLatestWorkerEventSource(portalSession.workerId, WORKER_BIOMETRIC_ACTION.REVOKED);
+        }
+        return res.status(422).json({
+          ok: false,
+          error: 'biometric_verification_rejected',
+          verified: false,
+          requiresReview: true
+        });
+      }
+
       return res.status(200).json({
         ok: true,
         enrolledNow,
         decision: assessment.decision,
-        verified: assessment.verified,
-        requiresReview: assessment.decision !== 'VERIFIED'
+        verified: true,
+        requiresReview: false
       });
     } catch (error) {
       const code = safeErrorCode(error);
