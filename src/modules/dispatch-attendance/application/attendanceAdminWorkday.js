@@ -1,4 +1,6 @@
 import {
+  DISPATCH_BREAK_STATUS,
+  STANDARD_DISPATCH_WORKDAY_MINUTES,
   calculateDispatchWorkedTime,
   formatDispatchMinutes
 } from '../domain/attendanceWorkdayPolicy.js';
@@ -73,6 +75,20 @@ function safeWorkCalculation(input) {
   }
 }
 
+function breakRuleLabel(work) {
+  if (!work) return 'Pendiente de salida';
+  if (work.breakStatus === DISPATCH_BREAK_STATUS.INCOMPLETE) {
+    return 'Se tomó 1 h 30 min de almuerzo por no marcar la terminación.';
+  }
+  if (work.breakStatus === DISPATCH_BREAK_STATUS.NONE) {
+    return 'No tomó almuerzo; ese tiempo cuenta como trabajado.';
+  }
+  if (work.shortBreakMinutesCredited > 0) {
+    return `Tomó ${formatDispatchMinutes(work.actualBreakMinutes)} de almuerzo; ${formatDispatchMinutes(work.shortBreakMinutesCredited)} se sumaron al tiempo trabajado.`;
+  }
+  return `Almuerzo descontado según las marcaciones reales: ${formatDispatchMinutes(work.actualBreakMinutes)}.`;
+}
+
 export async function enrichAttendanceBoardWithWorkday(prisma, board) {
   const rows = Array.isArray(board?.rows) ? board.rows : [];
   if (!rows.length) return board;
@@ -138,6 +154,12 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
         && defaultWork.earlyMinutesExcluded > 0
         && workedMinutes === recognizedWork.workedMinutes
       );
+      const ordinaryWorkedMinutes = workedMinutes === null
+        ? null
+        : Math.min(workedMinutes, STANDARD_DISPATCH_WORKDAY_MINUTES);
+      const overtimeMinutes = workedMinutes === null
+        ? null
+        : Math.max(0, workedMinutes - STANDARD_DISPATCH_WORKDAY_MINUTES);
 
       return {
         ...row,
@@ -170,15 +192,24 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
         breakEndAt: breakEndAt?.toISOString() || null,
         breakStartLabel: formatDateTime(breakStartAt),
         breakEndLabel: formatDateTime(breakEndAt),
+        breakStatus: defaultWork?.breakStatus || null,
+        breakPenaltyApplied: defaultWork?.breakStatus === DISPATCH_BREAK_STATUS.INCOMPLETE,
+        actualBreakMinutes: defaultWork?.actualBreakMinutes ?? null,
+        shortBreakMinutesCredited: defaultWork?.shortBreakMinutesCredited ?? 0,
+        shortBreakMinutesCreditedLabel: formatDispatchMinutes(defaultWork?.shortBreakMinutesCredited ?? 0),
         unpaidBreakMinutesDeducted: defaultWork?.unpaidBreakMinutesDeducted ?? 0,
         unpaidBreakLabel: formatDispatchMinutes(defaultWork?.unpaidBreakMinutesDeducted ?? 0),
         workedMinutes,
         workedLabel: workedMinutes === null ? 'Pendiente de salida' : formatDispatchMinutes(workedMinutes),
-        breakPolicy: 'ACTUAL_MARKS',
+        ordinaryWorkedMinutes,
+        ordinaryWorkedLabel: ordinaryWorkedMinutes === null ? 'Pendiente de salida' : formatDispatchMinutes(ordinaryWorkedMinutes),
+        overtimeMinutes,
+        overtimeLabel: overtimeMinutes === null ? 'Pendiente de salida' : formatDispatchMinutes(overtimeMinutes),
+        standardWorkdayMinutes: STANDARD_DISPATCH_WORKDAY_MINUTES,
+        standardWorkdayLabel: formatDispatchMinutes(STANDARD_DISPATCH_WORKDAY_MINUTES),
+        breakPolicy: 'ACTUAL_MARKS_WITH_INCOMPLETE_PENALTY',
         configuredUnpaidBreakMinutes: 0,
-        configuredBreakLabel: breakStartAt && breakEndAt
-          ? 'Almuerzo descontado según marcaciones reales'
-          : 'Sin almuerzo completo marcado; no se descuenta tiempo'
+        configuredBreakLabel: breakRuleLabel(defaultWork)
       };
     })
   };
@@ -259,9 +290,6 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
 
     const breakStartAt = markMoment(latestMark(session.marks, 'BREAK_START'));
     const breakEndAt = markMoment(latestMark(session.marks, 'BREAK_END'));
-    if (breakStartAt && !breakEndAt && action === 'VALIDATE') {
-      throw new Error('attendance_review_break_end_required');
-    }
     const work = calculateDispatchWorkedTime({
       arrivalAt: session.arrivalReportedAt,
       departureAt: session.departureReportedAt,
@@ -302,8 +330,14 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
           assignmentId: session.assignmentId,
           departureReportedAt: session.departureReportedAt.toISOString(),
           workedMinutes: action === 'VALIDATE' ? work.workedMinutes : session.workedMinutes,
+          ordinaryWorkedMinutes: work.ordinaryWorkedMinutes,
+          overtimeMinutes: work.overtimeMinutes,
           recordedSpanMinutes: work.recordedSpanMinutes,
           unpaidBreakMinutesDeducted: work.unpaidBreakMinutesDeducted,
+          actualBreakMinutes: work.actualBreakMinutes,
+          shortBreakMinutesCredited: work.shortBreakMinutesCredited,
+          breakStatus: work.breakStatus,
+          breakPenaltyMinutes: work.breakPenaltyMinutes,
           earlyMinutesExcluded: work.earlyMinutesExcluded,
           recognizeEarlyArrival,
           breakStartAt: breakStartAt?.toISOString() || null,
