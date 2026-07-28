@@ -92,8 +92,8 @@ export async function resolveWorkerPortalSession({
   rawSessionToken,
   now = new Date()
 }) {
-  requireRepositoryMethod(repository, 'resolveActiveSession');
   const token = normalizeWorkerPortalSessionToken(rawSessionToken);
+  requireRepositoryMethod(repository, 'resolveActiveSession');
   const result = await repository.resolveActiveSession({
     sessionTokenHash: hashWorkerPortalSessionToken(token),
     now
