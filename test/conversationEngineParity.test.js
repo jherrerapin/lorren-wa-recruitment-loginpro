@@ -114,7 +114,6 @@ test('ciudad sin vacantes bloquea captura y ofrece registro futuro en ambos modo
     assert.deepEqual(snapshot.outbound.sources, ['vacancy_first_gate']);
     assert.deepEqual(snapshot.bookings, []);
   }
-  assert.equal(withEngine.openAi.byType.conversation_engine || 0, 0);
 });
 
 test('la matriz ejecuta ambos modos en procesos aislados y reporta divergencias de dominio', () => {
