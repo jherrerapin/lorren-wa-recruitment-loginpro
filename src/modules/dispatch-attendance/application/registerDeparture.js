@@ -227,9 +227,6 @@ async function insideTransaction(client, input) {
     orderBy: { serverReceivedAt: 'asc' }
   });
   const breakWindow = resolveBreakMarks(breakMarks);
-  if (breakWindow.breakStartAt && !breakWindow.breakEndAt) {
-    throw new Error('attendance_departure_break_end_required');
-  }
 
   const point = assignment.serviceRequest.operationPoint;
   const device = await deviceSignals(client, { ...input, workerId: assignment.workerId });
