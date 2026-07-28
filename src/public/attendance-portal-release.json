@@ -1,6 +1,6 @@
 {
   "service": "lorren-attendance-portal",
-  "release": "attendance-portal-2026-07-27-workday-r2",
+  "release": "attendance-portal-2026-07-27-workday-r1",
   "legacyAdminRedirect": true,
   "publicPortalPath": "/operaciones/portal",
   "features": ["assignments", "arrival", "departure", "break-start", "break-end", "actual-break-deduction", "incomplete-break-90-minute-penalty", "seven-hour-standard-workday", "overtime-after-seven-hours", "short-break-time-credit", "no-break-time-credit", "worked-hours", "flexible-departure", "open-arrival-marking", "scheduled-start-work-floor", "audited-early-time-recognition", "geolocation", "selfie-evidence", "attendance-point-map", "resilient-server-side-geocoding", "attendance-admin-review", "manual-attendance-audit", "pwa-installable", "offline-web-arrival", "offline-web-departure", "indexeddb-queue", "background-sync", "offline-manual-review"],
