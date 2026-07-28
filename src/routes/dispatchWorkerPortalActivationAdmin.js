@@ -80,6 +80,7 @@ function replaceRouteHandlers(targetRouter, sourceRouter, path) {
 export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) {
   const replacementRouter = express.Router();
   const biometricJson = express.json({ limit: BIOMETRIC_BODY_LIMIT, strict: true, type: 'application/json' });
+  const parsePortalCookie = cookieParser();
   const sessionRepositoryFactory = options.sessionRepositoryFactory
     || (() => createPrismaWorkerPortalSessionRepository(prisma));
   const resolvePortalSessionFn = options.resolvePortalSessionFn || resolveWorkerPortalSession;
@@ -127,9 +128,20 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     });
   }
 
-  replacementRouter.use(cookieParser());
+  async function revokeFailedInitialEnrollment(portalSession, req, now) {
+    await revokeBiometricFn({
+      workerId: portalSession.workerId,
+      workerLabel: portalSession.workerId,
+      actorUsername: `worker-portal:${portalSession.workerId}`,
+      actorRole: 'worker',
+      reason: 'INITIAL_VERIFICATION_FAILED',
+      ipAddress: requestIp(req),
+      userAgent: requestUserAgent(req)
+    }, { now, env: options.env || process.env });
+    await markLatestWorkerEventSource(portalSession.workerId, WORKER_BIOMETRIC_ACTION.REVOKED);
+  }
 
-  replacementRouter.post('/biometria/desafio', requireWorkerPortalJson, biometricJson, async (req, res) => {
+  replacementRouter.post('/biometria/desafio', parsePortalCookie, requireWorkerPortalJson, biometricJson, async (req, res) => {
     try {
       const now = nowFn();
       const portalSession = await resolvePortalRequestSession(req, now);
@@ -162,10 +174,13 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     }
   });
 
-  replacementRouter.post('/biometria/verificar', requireWorkerPortalJson, biometricJson, async (req, res) => {
+  replacementRouter.post('/biometria/verificar', parsePortalCookie, requireWorkerPortalJson, biometricJson, async (req, res) => {
+    let portalSession = null;
+    let enrolledNow = false;
+    let now = null;
     try {
-      const now = nowFn();
-      const portalSession = await resolvePortalRequestSession(req, now);
+      now = nowFn();
+      portalSession = await resolvePortalRequestSession(req, now);
       if (!portalSession) return res.status(401).json({ ok: false, error: 'portal_session_required' });
       const assignmentId = normalizeString(req.body?.assignmentId, 120);
       const idempotencyKey = normalizeString(req.body?.idempotencyKey, 120);
@@ -177,7 +192,6 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
       }
 
       let enrollment = await getEnrollmentFn(portalSession.workerId);
-      let enrolledNow = false;
       if (!enrollment.enrolled || !enrollment.descriptor) {
         await enrollBiometricFn({
           workerId: portalSession.workerId,
@@ -191,9 +205,12 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
           ipAddress: requestIp(req),
           userAgent: requestUserAgent(req)
         }, { now, env: options.env || process.env });
+        enrolledNow = true;
         await markLatestWorkerEventSource(portalSession.workerId, WORKER_BIOMETRIC_ACTION.ENROLLED);
         enrollment = await getEnrollmentFn(portalSession.workerId);
-        enrolledNow = Boolean(enrollment.enrolled && enrollment.descriptor);
+        if (!enrollment.enrolled || !enrollment.descriptor) {
+          throw new Error('attendance_biometric_enrollment_unavailable');
+        }
       }
 
       const assessment = await assessBiometricFn({
@@ -213,18 +230,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
       }, { now, env: options.env || process.env });
 
       if (!assessment.verified) {
-        if (enrolledNow) {
-          await revokeBiometricFn({
-            workerId: portalSession.workerId,
-            workerLabel: portalSession.workerId,
-            actorUsername: `worker-portal:${portalSession.workerId}`,
-            actorRole: 'worker',
-            reason: 'INITIAL_VERIFICATION_FAILED',
-            ipAddress: requestIp(req),
-            userAgent: requestUserAgent(req)
-          }, { now, env: options.env || process.env });
-          await markLatestWorkerEventSource(portalSession.workerId, WORKER_BIOMETRIC_ACTION.REVOKED);
-        }
+        if (enrolledNow) await revokeFailedInitialEnrollment(portalSession, req, now);
         return res.status(422).json({
           ok: false,
           error: 'biometric_verification_rejected',
@@ -241,6 +247,15 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
         requiresReview: false
       });
     } catch (error) {
+      if (enrolledNow && portalSession && now) {
+        try {
+          await revokeFailedInitialEnrollment(portalSession, req, now);
+        } catch (revocationError) {
+          console.error('[WORKER_BIOMETRIC_INITIAL_REVOCATION_FAILED]', {
+            code: safeErrorCode(revocationError)
+          });
+        }
+      }
       const code = safeErrorCode(error);
       console.warn('[WORKER_BIOMETRIC_VERIFICATION_FAILED]', { code });
       return res.status(400).json({ ok: false, error: code });
