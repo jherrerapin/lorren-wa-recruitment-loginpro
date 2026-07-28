@@ -62,7 +62,7 @@ test('género ambiguo no debe usarse para decisiones duras', () => {
   assert.equal(result.shouldPreventAutoDiscard, true);
 });
 
-test('documento no CV se clasifica OTHER y no CV_VALID', async () => {
+test('PDF ilegible se clasifica UNREADABLE y no CV_VALID', async () => {
   const buffer = Buffer.from('certificado bancario de apertura de cuenta');
   const result = await analyzeAttachment({
     buffer,
@@ -71,7 +71,8 @@ test('documento no CV se clasifica OTHER y no CV_VALID', async () => {
   });
 
   assert.notEqual(result.classification, 'CV_VALID');
-  assert.equal(result.classification, 'OTHER');
+  assert.equal(result.classification, 'UNREADABLE');
+  assert.equal(result.rationale, 'empty_text');
 });
 
 test('imagen se clasifica como CV_IMAGE_ONLY pero no como CV_VALID', async () => {
