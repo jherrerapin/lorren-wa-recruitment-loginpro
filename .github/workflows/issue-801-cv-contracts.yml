@@ -52,10 +52,33 @@ jobs:
         run: node .github/scripts/apply-issue-801.mjs
 
       - name: Validate focal CV contracts
+        id: focal
+        continue-on-error: true
+        shell: bash
         run: |
-          node --check test/aiFirstRecruitmentGuards.test.js
-          node --check test/hardeningP0Delta.test.js
-          node --test test/aiFirstRecruitmentGuards.test.js test/hardeningP0Delta.test.js test/cvFlow.test.js
+          set +e
+          {
+            node --check test/aiFirstRecruitmentGuards.test.js
+            node --check test/hardeningP0Delta.test.js
+            node --test test/aiFirstRecruitmentGuards.test.js test/hardeningP0Delta.test.js test/cvFlow.test.js
+          } > /tmp/issue-801-focused.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-801-focused.log
+          exit "$status"
+
+      - name: Upload focal log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-801-cv-focused-log
+          path: /tmp/issue-801-focused.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop after focal failure
+        if: steps.focal.outcome == 'failure'
+        run: exit 1
 
       - name: Compare full suite
         shell: bash
