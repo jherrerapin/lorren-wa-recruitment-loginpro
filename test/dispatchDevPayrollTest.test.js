@@ -6,6 +6,7 @@ import {
   assignDevTestWorker,
   buildDevTestTimeBlocks,
   createDevTestServiceRequests,
+  defaultDevTestTimes,
   saveDevTestAttendance
 } from '../src/services/dispatchDevPayrollTest.js';
 
@@ -70,6 +71,16 @@ test('la jornada manual exige una cronología válida', async () => {
     breakEndAt: '2026-07-28T11:00',
     departureAt: '2026-07-28T16:00'
   }), /dev_test_break_end_invalid/);
+});
+
+test('los turnos nocturnos terminan al día siguiente por defecto', () => {
+  const defaults = defaultDevTestTimes({
+    serviceDate: new Date('2026-07-28T05:00:00.000Z'),
+    startTime: '19:00',
+    endTime: '05:00'
+  });
+  assert.equal(defaults.arrivalAt, '2026-07-28T19:00');
+  assert.equal(defaults.departureAt, '2026-07-29T05:00');
 });
 
 test('las constantes aíslan solicitud y marcaciones manuales', () => {
