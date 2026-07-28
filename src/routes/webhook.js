@@ -827,7 +827,7 @@ function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {},
   }
 
   if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
-    return Boolean(Object.keys(localParsedData || {}).length || Object.keys(aiFields || {}).length);
+    return hasParsedCandidateData;
   }
   return Object.keys(aiFields || {}).length === 0 || Object.keys(localParsedData || {}).length <= 1;
 }
@@ -2259,7 +2259,20 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return replyWithVacancyContext(candidate, currentVacancy);
   }
 
-  if (!shouldPreferVacancyContextReply && !shouldPreferStructuredFieldReply && !hasDataIntent && await tryPrimaryEngineReply(candidate, currentVacancy)) {
+  const shouldDeferSchedulingConfirmationToDeterministicGuard = Boolean(
+    candidate.currentStep === ConversationStep.SCHEDULING
+    && currentVacancy
+    && isSchedulingEligibleCandidate(candidate, currentVacancy)
+    && isSchedulingConfirmationIntent(cleanText)
+  );
+
+  if (
+    !shouldDeferSchedulingConfirmationToDeterministicGuard
+    && !shouldPreferVacancyContextReply
+    && !shouldPreferStructuredFieldReply
+    && !hasDataIntent
+    && await tryPrimaryEngineReply(candidate, currentVacancy)
+  ) {
     return;
   }
 
