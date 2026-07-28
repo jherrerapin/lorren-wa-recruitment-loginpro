@@ -61,6 +61,7 @@ test('la primera marcación inscribe desde el portal y las siguientes comparan e
   assert.match(route, /consentAccepted: req\.body\?\.consentAccepted === true/);
   assert.match(route, /await assessBiometricFn\(/);
   assert.match(route, /actorSource: 'worker-portal'/);
+  assert.match(route, /INITIAL_VERIFICATION_FAILED/);
   assert.match(route, /biometric_enrollment_moved_to_worker_portal/);
   assert.match(hardening, /payload\.consentAccepted/);
   assert.match(hardening, /getElementById\('enroll-button'\)\?\.remove/);
@@ -76,7 +77,7 @@ test('entrada y salida exigen biometría verificada y geocerca antes de persisti
   assert.match(strictPortalRoute, /location_accuracy_insufficient/);
   assert.match(strictPortalRoute, /metadata\.decision === 'VERIFIED'/);
   assert.match(strictPortalRoute, /biometric_verification_required/);
-  assert.match(strictPortalRoute, /router\.post\(STRICT_MARK_PATHS, markUpload, strictMarkGuard\)/);
+  assert.match(strictPortalRoute, /prependRouteHandlers\(router, path, \[markUpload, strictMarkGuard\]\)/);
   assert.match(hardening, /Primero completa correctamente la validación facial/);
 });
 
