@@ -62,6 +62,19 @@ function publicError(error) {
   return messages[error?.message] || 'No fue posible completar la prueba de nómina.';
 }
 
+async function recalculateTestRequestStatus(prisma, request) {
+  const assignedCount = await prisma.dispatchAssignment.count({
+    where: { serviceRequestId: request.id, status: 'DEV_TEST_ASSIGNED' }
+  });
+  const status = assignedCount === 0
+    ? 'DEV_TEST_PENDING'
+    : assignedCount >= request.requiredWorkers
+      ? 'DEV_TEST_COMPLETE'
+      : 'DEV_TEST_PARTIAL';
+  await prisma.dispatchServiceRequest.update({ where: { id: request.id }, data: { status } });
+  return status;
+}
+
 export function dispatchDevPayrollTestRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: true, limit: '32kb' });
@@ -146,6 +159,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
         ]);
       }
       await prisma.dispatchAssignment.delete({ where: { id: assignment.id } });
+      await recalculateTestRequestStatus(prisma, assignment.serviceRequest);
       return redirectWorkspace(res, serviceRequestId, { message: 'Asignación de prueba eliminada.' });
     } catch (error) {
       return redirectWorkspace(res, serviceRequestId, { error: publicError(error) });
