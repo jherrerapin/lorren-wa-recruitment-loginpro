@@ -16,11 +16,11 @@ const SCENARIOS = [
   { key: 'question_during_ask_cv', caseId: 'ask-cv-out-of-scope-question-pauses-for-dev-review', coverage: 'text' },
   { key: 'interview_offer', caseId: 'future-birthday-keeps-current-age-and-does-not-repeat-transport', coverage: 'text' },
   { key: 'schedule_confirmation', caseId: 'parity-schedule-confirmation', coverage: 'text' },
-  { key: 'interview_cancellation', coverage: 'pending_webhook', reason: 'Requiere fixture focal de booking activo y cancelación.' },
+  { key: 'interview_cancellation', caseId: 'parity-interview-cancellation', coverage: 'text' },
   { key: 'interview_reschedule', caseId: 'parity-interview-reschedule', coverage: 'text' },
-  { key: 'attendance_confirmation', coverage: 'pending_webhook', reason: 'Requiere ventana de recordatorio y booking activo.' },
+  { key: 'attendance_confirmation', caseId: 'parity-attendance-confirmation', coverage: 'text' },
   { key: 'reminder_logistics_question', caseId: 'scheduled-question-uses-context-instead-of-repeating-flow', coverage: 'text' },
-  { key: 'no_available_slots', coverage: 'pending_webhook', reason: 'Requiere fixture de agenda sin slots válidos.' },
+  { key: 'no_available_slots', caseId: 'parity-no-available-slots', coverage: 'text' },
   { key: 'inactive_vacancy', caseId: 'inactive-vacancy-offers-registration-for-future-openings', coverage: 'text' },
   { key: 'city_without_vacancies', coverage: 'pending_webhook', reason: 'Requiere operación/ciudad sin vacantes activas en fixture focal.' },
   { key: 'manual_review', caseId: 'document-exception-pauses-for-manual-review', coverage: 'text' },
@@ -61,16 +61,27 @@ test('el manifiesto conserva los 23 escenarios exactos del plan', () => {
   assert.equal(SCENARIOS.length, 23);
   assert.equal(new Set(SCENARIOS.map((item) => item.key)).size, 23);
   const pending = SCENARIOS.filter((item) => item.coverage !== 'text');
-  assert.equal(pending.length, 6);
+  assert.equal(pending.length, 3);
   for (const item of pending) assert.ok(item.reason, `${item.key} debe explicar su cobertura pendiente`);
 });
 
-test('confirmación y reprogramación usan fixtures focales independientes', () => {
-  const confirmation = SCENARIOS.find((item) => item.key === 'schedule_confirmation');
-  const reschedule = SCENARIOS.find((item) => item.key === 'interview_reschedule');
-  assert.equal(confirmation.caseId, 'parity-schedule-confirmation');
-  assert.equal(reschedule.caseId, 'parity-interview-reschedule');
-  assert.notEqual(confirmation.caseId, reschedule.caseId);
+test('los escenarios de agenda usan fixtures focales independientes', () => {
+  const agendaKeys = [
+    'schedule_confirmation',
+    'interview_cancellation',
+    'interview_reschedule',
+    'attendance_confirmation',
+    'no_available_slots'
+  ];
+  const caseIds = agendaKeys.map((key) => SCENARIOS.find((item) => item.key === key)?.caseId);
+  assert.deepEqual(caseIds, [
+    'parity-schedule-confirmation',
+    'parity-interview-cancellation',
+    'parity-interview-reschedule',
+    'parity-attendance-confirmation',
+    'parity-no-available-slots'
+  ]);
+  assert.equal(new Set(caseIds).size, agendaKeys.length);
 });
 
 test('la matriz ejecuta ambos modos en procesos aislados y reporta divergencias de dominio', () => {
