@@ -43,11 +43,17 @@
     }
   }
 
-  function permissionControl({ form, userId = null, initial = false, createMode = false }) {
-    const host = form.querySelector('.field.full:has(input[name="canAccessAttendance"])')
+  function permissionHost(form) {
+    const attendanceField = [...form.querySelectorAll('.field.full')]
+      .find((field) => field.querySelector('input[name="canAccessAttendance"]'));
+    return attendanceField
       || form.querySelector('.permission-stack')
       || form.querySelector('.grid')
       || form;
+  }
+
+  function permissionControl({ form, userId = null, initial = false, createMode = false }) {
+    const host = permissionHost(form);
     if (host.querySelector('[data-payroll-permission]')) return;
 
     const label = document.createElement('label');
