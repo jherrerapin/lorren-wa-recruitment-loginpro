@@ -12,12 +12,16 @@ import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../modules/dispatch-attenda
 import { MAX_ATTENDANCE_EVIDENCE_BYTES } from '../services/attendanceEvidenceStorage.js';
 import {
   ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
-  WORKER_BIOMETRIC_ACTION
+  WORKER_BIOMETRIC_ACTION,
+  WORKER_BIOMETRIC_ENTITY_TYPE,
+  enrollWorkerBiometric,
+  getWorkerBiometricEnrollment
 } from '../services/workerBiometricService.js';
 
 export * from './workerPortalCore.js';
 
 const HUMAN_CDN_ORIGIN = 'https://cdn.jsdelivr.net';
+const WORKER_PORTAL_REQUEST_HEADER = 'worker-portal';
 const STRICT_MARK_PATHS = [
   '/asignaciones/:assignmentId/llegada',
   '/asignaciones/:assignmentId/inicio-almuerzo',
@@ -63,7 +67,7 @@ function verifiedBiometricMetadata(metadata, expected) {
 function expandBiometricCsp(value) {
   if (typeof value !== 'string') return value;
   return value
-    .replace("script-src ", `script-src ${HUMAN_CDN_ORIGIN} `)
+    .replace('script-src ', `script-src ${HUMAN_CDN_ORIGIN} `)
     .replace("connect-src 'self'", `connect-src 'self' ${HUMAN_CDN_ORIGIN}`);
 }
 
@@ -102,17 +106,30 @@ function usesInjectedAttendanceCore(options = {}) {
     .some((candidate) => typeof candidate === 'function');
 }
 
+function biometricPublicError(error) {
+  const code = typeof error?.message === 'string' ? error.message : 'worker_biometric_error';
+  if (code === 'attendance_biometric_consent_required') return [400, code];
+  if (code === 'attendance_biometric_antispoof_low' || code === 'attendance_biometric_liveness_low') return [422, code];
+  if (code === 'attendance_biometric_secret_required') return [503, 'biometric_temporarily_unavailable'];
+  return [400, /^[A-Za-z0-9_]{1,100}$/.test(code) ? code : 'worker_biometric_error'];
+}
+
 export function workerPortalRouter(prisma, options = {}) {
   const repositoryFactory = options.repositoryFactory || (() => createPrismaWorkerPortalSessionRepository(prisma));
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
   const nowFn = options.nowFn || (() => new Date());
   const injectedCore = usesInjectedAttendanceCore(options);
+  const getEnrollmentFn = options.getEnrollmentFn
+    || ((workerId) => getWorkerBiometricEnrollment(prisma, workerId, { env: options.env || process.env }));
+  const enrollBiometricFn = options.enrollBiometricFn
+    || ((input, enrollmentOptions) => enrollWorkerBiometric(prisma, input, enrollmentOptions));
   let repository = options.repository || null;
 
   const markUpload = options.strictMarkUpload || options.markUpload || options.arrivalUpload || multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_ATTENDANCE_EVIDENCE_BYTES, files: 1, fields: 12, fieldSize: 4 * 1024 }
   }).single('selfie');
+  const biometricJson = express.json({ limit: '256kb', strict: true, type: 'application/json' });
 
   function getRepository() {
     if (!repository) repository = repositoryFactory();
@@ -120,10 +137,42 @@ export function workerPortalRouter(prisma, options = {}) {
     return repository;
   }
 
+  async function resolvePortalSession(req, now) {
+    const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
+    if (!rawSessionToken) return null;
+    return resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
+  }
+
+  function requirePortalRequest(req, res) {
+    applyWorkerPortalSecurityHeaders(res);
+    if (req.get?.('x-requested-with') !== WORKER_PORTAL_REQUEST_HEADER) {
+      strictError(res, 400, 'biometric_request_invalid', 'Solicitud biométrica inválida.');
+      return false;
+    }
+    return true;
+  }
+
+  async function markLatestEnrollmentAsWorkerPortal(workerId) {
+    const event = await prisma.devAuditEvent.findFirst({
+      where: {
+        entityType: WORKER_BIOMETRIC_ENTITY_TYPE,
+        entityId: workerId,
+        action: WORKER_BIOMETRIC_ACTION.ENROLLED
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true }
+    });
+    if (!event) return;
+    await prisma.devAuditEvent.update({
+      where: { id: event.id },
+      data: { actorSource: 'worker-portal', actorRole: 'worker' }
+    });
+  }
+
   async function strictMarkGuard(req, res, next) {
     try {
       applyWorkerPortalSecurityHeaders(res);
-      if (req.get?.('x-requested-with') !== 'worker-portal') {
+      if (req.get?.('x-requested-with') !== WORKER_PORTAL_REQUEST_HEADER) {
         return strictError(res, 400, 'mark_request_invalid', 'Solicitud de marcación inválida.');
       }
 
@@ -132,9 +181,7 @@ export function workerPortalRouter(prisma, options = {}) {
         throw new Error('worker_portal_strict_now_invalid');
       }
 
-      const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
-      if (!rawSessionToken) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
-      const portalSession = await resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
+      const portalSession = await resolvePortalSession(req, now);
       if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
 
       const markType = markTypeFromPath(req.path);
@@ -180,7 +227,7 @@ export function workerPortalRouter(prisma, options = {}) {
       }
 
       if (BIOMETRIC_MARK_TYPES.has(markType)) {
-        if (String(req.body?.captureMode || '').toUpperCase() === 'OFFLINE_WEB') {
+        if (String(req.body?.captureMode || '').toUpperCase() !== 'ONLINE_WEB') {
           return strictError(res, 409, 'online_biometric_required', 'La entrada y la salida requieren conexión para validar el rostro.');
         }
         const event = await prisma.devAuditEvent.findFirst({
@@ -223,8 +270,57 @@ export function workerPortalRouter(prisma, options = {}) {
   const cspRouter = express.Router();
   cspRouter.use(installBiometricCspBridge);
   router.stack.unshift(...cspRouter.stack);
+
   if (!injectedCore) {
     STRICT_MARK_PATHS.forEach((path) => prependRouteHandlers(router, path, [markUpload, strictMarkGuard]));
   }
+
+  router.post('/biometria/estado', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const enrollment = await getEnrollmentFn(portalSession.workerId);
+      const enrolled = Boolean(enrollment?.enrolled && enrollment?.descriptor);
+      return res.status(200).json({ ok: true, enrolled, registrationRequired: !enrolled });
+    } catch (error) {
+      console.error('[WORKER_PORTAL_BIOMETRIC_STATUS_FAILED]', {
+        code: typeof error?.message === 'string' ? error.message : 'unknown'
+      });
+      return strictError(res, 503, 'biometric_temporarily_unavailable', 'No fue posible consultar el registro facial.');
+    }
+  });
+
+  router.post('/biometria/registrar', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const current = await getEnrollmentFn(portalSession.workerId);
+      if (current?.enrolled && current?.descriptor) {
+        return res.status(200).json({ ok: true, enrolled: true, alreadyEnrolled: true });
+      }
+      const result = await enrollBiometricFn({
+        workerId: portalSession.workerId,
+        workerLabel: portalSession.workerId,
+        descriptor: req.body?.descriptor,
+        realScore: req.body?.realScore,
+        liveScore: req.body?.liveScore,
+        consentAccepted: req.body?.consentAccepted === true,
+        actorUsername: `worker-portal:${portalSession.workerId}`,
+        actorRole: 'worker',
+        ipAddress: normalizedString(req.ip, 120),
+        userAgent: normalizedString(req.get?.('user-agent'), 500)
+      }, { now, env: options.env || process.env });
+      await markLatestEnrollmentAsWorkerPortal(portalSession.workerId);
+      return res.status(201).json({ ok: true, enrolled: true, enrolledAt: result.enrolledAt });
+    } catch (error) {
+      const [status, code] = biometricPublicError(error);
+      return strictError(res, status, code, 'No fue posible completar el registro facial.');
+    }
+  });
+
   return router;
 }
