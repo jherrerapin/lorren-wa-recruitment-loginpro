@@ -1,5 +1,4 @@
 import express from 'express';
-import cookieParser from 'cookie-parser';
 import multer from 'multer';
 import { workerPortalRouter as coreWorkerPortalRouter, applyWorkerPortalSecurityHeaders } from './workerPortalCore.js';
 import { resolveWorkerPortalSession } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
@@ -86,14 +85,25 @@ function installBiometricCspBridge(_req, res, next) {
   return next();
 }
 
+function routeLayer(router, path, method = 'post') {
+  return router.stack.find((layer) => layer.route?.path === path && layer.route.methods?.[method]);
+}
+
+function prependRouteHandlers(router, path, handlers) {
+  const target = routeLayer(router, path);
+  if (!target) throw new Error(`worker_portal_strict_route_missing:${path}`);
+  const temporary = express.Router();
+  temporary.post(path, ...handlers);
+  target.route.stack.unshift(...temporary.stack[0].route.stack);
+}
+
 export function workerPortalRouter(prisma, options = {}) {
-  const router = express.Router();
   const repositoryFactory = options.repositoryFactory || (() => createPrismaWorkerPortalSessionRepository(prisma));
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
   const nowFn = options.nowFn || (() => new Date());
   let repository = options.repository || null;
 
-  const markUpload = options.markUpload || options.arrivalUpload || multer({
+  const markUpload = options.strictMarkUpload || options.markUpload || options.arrivalUpload || multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_ATTENDANCE_EVIDENCE_BYTES, files: 1, fields: 12, fieldSize: 4 * 1024 }
   }).single('selfie');
@@ -117,13 +127,9 @@ export function workerPortalRouter(prisma, options = {}) {
       }
 
       const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
-      if (!rawSessionToken) {
-        return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
-      }
+      if (!rawSessionToken) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       const portalSession = await resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
-      if (!portalSession) {
-        return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
-      }
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
 
       const markType = markTypeFromPath(req.path);
       const idempotencyKey = normalizedString(req.body?.idempotencyKey, 120);
@@ -188,12 +194,7 @@ export function workerPortalRouter(prisma, options = {}) {
         }
       }
 
-      req.lorrenStrictAttendance = {
-        workerId: portalSession.workerId,
-        markType,
-        distanceMeters,
-        insideGeofence: true
-      };
+      req.lorrenStrictAttendance = { workerId: portalSession.workerId, markType, distanceMeters, insideGeofence: true };
       return next();
     } catch (error) {
       console.error('[WORKER_PORTAL_STRICT_MARK_GUARD_FAILED]', {
@@ -203,14 +204,16 @@ export function workerPortalRouter(prisma, options = {}) {
     }
   }
 
-  router.use(installBiometricCspBridge);
-  router.use(cookieParser());
-  router.post(STRICT_MARK_PATHS, markUpload, strictMarkGuard);
-  router.use(coreWorkerPortalRouter(prisma, {
+  const router = coreWorkerPortalRouter(prisma, {
     ...options,
     repository: getRepository(),
     markUpload: (_req, _res, next) => next(),
     arrivalUpload: undefined
-  }));
+  });
+
+  const cspRouter = express.Router();
+  cspRouter.use(installBiometricCspBridge);
+  router.stack.unshift(...cspRouter.stack);
+  STRICT_MARK_PATHS.forEach((path) => prependRouteHandlers(router, path, [markUpload, strictMarkGuard]));
   return router;
 }
