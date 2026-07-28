@@ -22,7 +22,7 @@ const SCENARIOS = [
   { key: 'reminder_logistics_question', caseId: 'scheduled-question-uses-context-instead-of-repeating-flow', coverage: 'text' },
   { key: 'no_available_slots', caseId: 'parity-no-available-slots', coverage: 'text' },
   { key: 'inactive_vacancy', caseId: 'inactive-vacancy-offers-registration-for-future-openings', coverage: 'text' },
-  { key: 'city_without_vacancies', coverage: 'pending_webhook', reason: 'Requiere operación/ciudad sin vacantes activas en fixture focal.' },
+  { key: 'city_without_vacancies', caseId: 'parity-city-without-active-vacancies', coverage: 'text' },
   { key: 'manual_review', caseId: 'document-exception-pauses-for-manual-review', coverage: 'text' },
   { key: 'recent_human_intervention', caseId: 'human-intervention-pauses-bot', coverage: 'text' },
   { key: 'finished_or_rejected_candidate', caseId: 'done-step-followup-about-previous-application-gets-status-ack', coverage: 'text' },
@@ -61,7 +61,7 @@ test('el manifiesto conserva los 23 escenarios exactos del plan', () => {
   assert.equal(SCENARIOS.length, 23);
   assert.equal(new Set(SCENARIOS.map((item) => item.key)).size, 23);
   const pending = SCENARIOS.filter((item) => item.coverage !== 'text');
-  assert.equal(pending.length, 3);
+  assert.equal(pending.length, 2);
   for (const item of pending) assert.ok(item.reason, `${item.key} debe explicar su cobertura pendiente`);
 });
 
@@ -98,6 +98,22 @@ test('agenda sin horarios conserva la autoridad determinística en ambos modos',
     assert.deepEqual(snapshot.outbound.sources, ['bot_flow']);
   }
   assert.equal(withEngine.openAi.byType.conversation_engine || 0, 0);
+});
+
+test('ciudad sin vacantes bloquea captura y ofrece registro futuro en ambos modos', () => {
+  const [withoutEngine] = runMode('false', ['parity-city-without-active-vacancies']);
+  const [withEngine] = runMode('true', ['parity-city-without-active-vacancies']);
+
+  assert.deepEqual(domainDifferences(withoutEngine, withEngine), []);
+  for (const snapshot of [withoutEngine, withEngine]) {
+    assert.equal(snapshot.candidate.currentStep, 'GREETING_SENT');
+    assert.equal(snapshot.candidate.vacancyId, null);
+    assert.equal(snapshot.candidate.botResumeMode, 'future_profile_offer');
+    assert.deepEqual(snapshot.candidate.capturedFields, []);
+    assert.equal(snapshot.candidate.hasCv, false);
+    assert.deepEqual(snapshot.outbound.sources, ['vacancy_first_gate']);
+    assert.deepEqual(snapshot.bookings, []);
+  }
 });
 
 test('la matriz ejecuta ambos modos en procesos aislados y reporta divergencias de dominio', () => {
