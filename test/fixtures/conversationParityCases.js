@@ -84,6 +84,20 @@ const alternativeSlot = buildFutureSlot({
 });
 const activeAt = scheduledAtForSlot(activeSlot);
 
+const cancellationSlot = buildFutureSlot({
+  vacancyId: VACANCY.id,
+  id: 'slot-parity-cancellation',
+  hoursFromNow: 10
+});
+const cancellationAt = scheduledAtForSlot(cancellationSlot);
+
+const attendanceSlot = buildFutureSlot({
+  vacancyId: VACANCY.id,
+  id: 'slot-parity-attendance',
+  hoursFromNow: 6
+});
+const attendanceAt = scheduledAtForSlot(attendanceSlot);
+
 export const conversationParityCases = [
   {
     id: 'parity-schedule-confirmation',
@@ -119,8 +133,70 @@ export const conversationParityCases = [
       scheduledAt: activeAt,
       status: 'SCHEDULED',
       reminderSentAt: null,
+      reminderResponse: null,
       reminderWindowClosed: false,
       createdAt: new Date(Date.now() - 60 * 60 * 1000)
     }]
+  },
+  {
+    id: 'parity-interview-cancellation',
+    steps: ['quiero cancelar la entrevista'],
+    candidate: completeCandidate({
+      currentStep: 'SCHEDULED',
+      reminderState: 'SCHEDULED',
+      reminderScheduledFor: new Date(Date.now() + 60 * 60 * 1000)
+    }),
+    vacancies: [VACANCY],
+    operations: [OP_BOG],
+    interviewSlots: [cancellationSlot],
+    interviewBookings: [{
+      id: 'booking-parity-cancellation',
+      candidateId: 'candidate-parity-scheduling',
+      vacancyId: VACANCY.id,
+      slotId: cancellationSlot.id,
+      scheduledAt: cancellationAt,
+      status: 'SCHEDULED',
+      reminderSentAt: null,
+      reminderResponse: null,
+      reminderWindowClosed: false,
+      createdAt: new Date(Date.now() - 60 * 60 * 1000)
+    }]
+  },
+  {
+    id: 'parity-attendance-confirmation',
+    steps: ['sí'],
+    candidate: completeCandidate({
+      currentStep: 'SCHEDULED',
+      reminderState: 'SENT',
+      reminderScheduledFor: null
+    }),
+    vacancies: [VACANCY],
+    operations: [OP_BOG],
+    interviewSlots: [attendanceSlot],
+    interviewBookings: [{
+      id: 'booking-parity-attendance',
+      candidateId: 'candidate-parity-scheduling',
+      vacancyId: VACANCY.id,
+      slotId: attendanceSlot.id,
+      scheduledAt: attendanceAt,
+      status: 'SCHEDULED',
+      reminderSentAt: new Date(Date.now() - 5 * 60 * 1000),
+      reminderResponse: null,
+      reminderWindowClosed: true,
+      createdAt: new Date(Date.now() - 60 * 60 * 1000)
+    }]
+  },
+  {
+    id: 'parity-no-available-slots',
+    steps: ['quiero agendar la entrevista'],
+    candidate: completeCandidate({
+      currentStep: 'SCHEDULING',
+      reminderState: 'SKIPPED',
+      reminderScheduledFor: null
+    }),
+    vacancies: [VACANCY],
+    operations: [OP_BOG],
+    interviewSlots: [],
+    interviewBookings: []
   }
 ];
