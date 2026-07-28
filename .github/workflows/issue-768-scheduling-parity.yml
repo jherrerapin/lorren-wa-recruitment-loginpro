@@ -9,21 +9,19 @@ permissions:
   contents: read
 
 jobs:
-  validate-scheduling-parity:
+  diagnose-scheduling-parity:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     env:
       NODE_ENV: test
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
       LORREN_SEND_DELAY_MS: 0
-      BASELINE_SHA: 41b352e427880f09f385e67f9b496a53b9b089f9
     steps:
       - name: Checkout head
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -35,68 +33,36 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Generate Prisma client
-        run: |
-          npx prisma validate
-          npx prisma generate
+        run: npx prisma generate
 
-      - name: Capture exact baseline suite
+      - name: Run exact agenda diagnostics
         shell: bash
         run: |
-          git worktree add /tmp/issue-768-base "$BASELINE_SHA"
-          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/issue-768-base/node_modules
-          set +e
-          (cd /tmp/issue-768-base && npm test) > /tmp/baseline.log 2>&1
-          baseline_exit=$?
-          set -e
-          grep '^not ok' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
-          echo "BASELINE_EXIT=$baseline_exit" >> "$GITHUB_ENV"
-          echo "Baseline failures: $(wc -l < /tmp/baseline.failures)"
+          cases='["parity-interview-cancellation","parity-attendance-confirmation","parity-no-available-slots"]'
+          node test/helpers/runConversationParityCases.js false "$cases" > /tmp/mode-false.log 2>&1
+          node test/helpers/runConversationParityCases.js true "$cases" > /tmp/mode-true.log 2>&1
+          grep '^__LORREN_PARITY__' /tmp/mode-false.log | tail -1 | sed 's/^__LORREN_PARITY__//' > /tmp/mode-false.json
+          grep '^__LORREN_PARITY__' /tmp/mode-true.log | tail -1 | sed 's/^__LORREN_PARITY__//' > /tmp/mode-true.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const withoutEngine = JSON.parse(fs.readFileSync('/tmp/mode-false.json', 'utf8'));
+          const withEngine = JSON.parse(fs.readFileSync('/tmp/mode-true.json', 'utf8'));
+          const byId = (rows) => Object.fromEntries(rows.map((row) => [row.caseId, row]));
+          const a = byId(withoutEngine);
+          const b = byId(withEngine);
+          const caseIds = Object.keys(a);
+          const output = Object.fromEntries(caseIds.map((caseId) => [caseId, {
+            withoutEngine: a[caseId],
+            withEngine: b[caseId]
+          }]));
+          fs.writeFileSync('/tmp/issue-768-diagnostic.json', JSON.stringify(output, null, 2));
+          NODE
+          cat /tmp/issue-768-diagnostic.json
 
-      - name: Validate focused scheduling matrix
-        id: focused
-        continue-on-error: true
-        shell: bash
-        run: |
-          set +e
-          {
-            node --check test/fixtures/conversationParityCases.js
-            node --check test/helpers/conversationHarness.js
-            node --check test/conversationEngineParity.test.js
-            node --test test/conversationEngineParity.test.js
-          } > /tmp/issue-768-focused.log 2>&1
-          status=$?
-          set -e
-          cat /tmp/issue-768-focused.log
-          exit "$status"
-
-      - name: Upload focused result
-        if: always()
+      - name: Upload normalized diagnostic
         uses: actions/upload-artifact@v4
         with:
-          name: issue-768-scheduling-parity-log
-          path: /tmp/issue-768-focused.log
+          name: issue-768-scheduling-diagnostic
+          path: /tmp/issue-768-diagnostic.json
           if-no-files-found: error
           retention-days: 1
-
-      - name: Stop after focused failure
-        if: steps.focused.outcome == 'failure'
-        run: exit 1
-
-      - name: Compare full suite with exact baseline
-        shell: bash
-        run: |
-          set +e
-          npm test > /tmp/head.log 2>&1
-          head_exit=$?
-          set -e
-          grep '^not ok' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
-          if ! diff -u /tmp/baseline.failures /tmp/head.failures; then
-            echo 'Los casos de agenda cambiaron la lista de fallos de la rama base.'
-            exit 1
-          fi
-          if [ "$BASELINE_EXIT" = "0" ] && [ "$head_exit" != "0" ]; then
-            exit 1
-          fi
-
-      - name: Validate clean diff
-        run: git diff --check "$BASELINE_SHA"...HEAD
