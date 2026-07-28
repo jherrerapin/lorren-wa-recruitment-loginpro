@@ -1,54 +1,64 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
-function replaceOnce(source, before, after, label) {
-  if (source.includes(after)) return source;
-  const count = source.split(before).length - 1;
-  assert.equal(count, 1, `${label}: se esperaba una coincidencia y se encontraron ${count}`);
-  return source.replace(before, after);
+function transformLines(path, transforms) {
+  const lines = fs.readFileSync(path, 'utf8').split('\n');
+  const counts = Object.fromEntries(transforms.map((item) => [item.id, 0]));
+  const next = lines.map((line) => {
+    for (const item of transforms) {
+      if (item.match(line)) {
+        counts[item.id] += 1;
+        return item.replace(line);
+      }
+    }
+    return line;
+  });
+  for (const item of transforms) {
+    assert.equal(counts[item.id], 1, `${item.id}: se esperaba una línea y se encontraron ${counts[item.id]}`);
+  }
+  fs.writeFileSync(path, next.join('\n'));
 }
 
-const guardPath = 'test/aiFirstRecruitmentGuards.test.js';
-let guard = fs.readFileSync(guardPath, 'utf8');
-guard = replaceOnce(
-  guard,
-  `test('HV .doc o storage sin MIME/nombre PDF/DOCX no cuenta como CV válido', () => {
-  assert.equal(hasValidCv(candidate({ cvMimeType: 'application/msword', cvOriginalName: 'hoja-vida.doc' })), false);`,
-  `test('HV .doc auténtico cuenta como válido y metadatos incompletos no', () => {
-  assert.equal(hasValidCv(candidate({ cvMimeType: 'application/msword', cvOriginalName: 'hoja-vida.doc' })), true);`,
-  'contrato .doc válido'
-);
-guard = replaceOnce(
-  guard,
-  `test('E: HV imagen no cuenta como CV válido y seguridad pide PDF/DOCX', async () => {`,
-  `test('E: HV imagen no cuenta como CV válido y seguridad pide PDF, DOC o DOCX', async () => {`,
-  'nombre del contrato de formatos'
-);
-guard = replaceOnce(
-  guard,
-  `  assert.match(safe.reply, /PDF o Word\/DOCX/i);`,
-  `  assert.match(safe.reply, /PDF, DOC o DOCX/i);`,
-  'texto seguro de formatos'
-);
-fs.writeFileSync(guardPath, guard);
+transformLines('test/aiFirstRecruitmentGuards.test.js', [
+  {
+    id: 'test_title_doc',
+    match: (line) => line.includes("test('HV .doc o storage sin MIME/nombre PDF/DOCX no cuenta como CV válido'"),
+    replace: () => "test('HV .doc auténtico cuenta como válido y metadatos incompletos no', () => {"
+  },
+  {
+    id: 'doc_assertion',
+    match: (line) => line.includes("cvMimeType: 'application/msword'") && line.includes("hoja-vida.doc") && line.includes('false);'),
+    replace: (line) => line.replace('false);', 'true);')
+  },
+  {
+    id: 'test_title_formats',
+    match: (line) => line.includes("test('E: HV imagen no cuenta como CV válido y seguridad pide PDF/DOCX'"),
+    replace: () => "test('E: HV imagen no cuenta como CV válido y seguridad pide PDF, DOC o DOCX', async () => {"
+  },
+  {
+    id: 'safe_reply_formats',
+    match: (line) => line.includes('assert.match(safe.reply'),
+    replace: () => '  assert.match(safe.reply, /PDF, DOC o DOCX/i);'
+  }
+]);
 
 const hardeningPath = 'test/hardeningP0Delta.test.js';
-let hardening = fs.readFileSync(hardeningPath, 'utf8');
-hardening = replaceOnce(
-  hardening,
-  `test('documento no CV se clasifica OTHER y no CV_VALID', async () => {`,
-  `test('PDF ilegible se clasifica UNREADABLE y no CV_VALID', async () => {`,
-  'nombre del contrato de PDF ilegible'
+const hardeningLines = fs.readFileSync(hardeningPath, 'utf8').split('\n');
+const titleIndex = hardeningLines.findIndex((line) => line.includes("test('documento no CV se clasifica OTHER y no CV_VALID'"));
+assert.ok(titleIndex >= 0, 'No se encontró el contrato del PDF ilegible.');
+hardeningLines[titleIndex] = "test('PDF ilegible se clasifica UNREADABLE y no CV_VALID', async () => {";
+const assertionIndex = hardeningLines.findIndex((line, index) => (
+  index > titleIndex
+  && index < titleIndex + 15
+  && line.trim() === "assert.equal(result.classification, 'OTHER');"
+));
+assert.ok(assertionIndex > titleIndex, 'No se encontró la aserción OTHER dentro del bloque del PDF ilegible.');
+hardeningLines.splice(
+  assertionIndex,
+  1,
+  "  assert.equal(result.classification, 'UNREADABLE');",
+  "  assert.equal(result.rationale, 'empty_text');"
 );
-hardening = replaceOnce(
-  hardening,
-  `  assert.notEqual(result.classification, 'CV_VALID');
-  assert.equal(result.classification, 'OTHER');`,
-  `  assert.notEqual(result.classification, 'CV_VALID');
-  assert.equal(result.classification, 'UNREADABLE');
-  assert.equal(result.rationale, 'empty_text');`,
-  'clasificación vigente de PDF ilegible'
-);
-fs.writeFileSync(hardeningPath, hardening);
+fs.writeFileSync(hardeningPath, hardeningLines.join('\n'));
 
 console.log('Contratos de HV alineados con PDF/DOC/DOCX y UNREADABLE.');
