@@ -42,17 +42,23 @@ transformLines('test/aiFirstRecruitmentGuards.test.js', [
   }
 ]);
 
-transformLines('test/hardeningP0Delta.test.js', [
-  {
-    id: 'test_title_unreadable',
-    match: (line) => line.includes("test('documento no CV se clasifica OTHER y no CV_VALID'"),
-    replace: () => "test('PDF ilegible se clasifica UNREADABLE y no CV_VALID', async () => {"
-  },
-  {
-    id: 'classification_unreadable',
-    match: (line) => line.trim() === "assert.equal(result.classification, 'OTHER');",
-    replace: () => "  assert.equal(result.classification, 'UNREADABLE');\n  assert.equal(result.rationale, 'empty_text');"
-  }
-]);
+const hardeningPath = 'test/hardeningP0Delta.test.js';
+const hardeningLines = fs.readFileSync(hardeningPath, 'utf8').split('\n');
+const titleIndex = hardeningLines.findIndex((line) => line.includes("test('documento no CV se clasifica OTHER y no CV_VALID'"));
+assert.ok(titleIndex >= 0, 'No se encontró el contrato del PDF ilegible.');
+hardeningLines[titleIndex] = "test('PDF ilegible se clasifica UNREADABLE y no CV_VALID', async () => {";
+const assertionIndex = hardeningLines.findIndex((line, index) => (
+  index > titleIndex
+  && index < titleIndex + 15
+  && line.trim() === "assert.equal(result.classification, 'OTHER');"
+));
+assert.ok(assertionIndex > titleIndex, 'No se encontró la aserción OTHER dentro del bloque del PDF ilegible.');
+hardeningLines.splice(
+  assertionIndex,
+  1,
+  "  assert.equal(result.classification, 'UNREADABLE');",
+  "  assert.equal(result.rationale, 'empty_text');"
+);
+fs.writeFileSync(hardeningPath, hardeningLines.join('\n'));
 
 console.log('Contratos de HV alineados con PDF/DOC/DOCX y UNREADABLE.');
