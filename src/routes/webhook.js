@@ -2259,7 +2259,20 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return replyWithVacancyContext(candidate, currentVacancy);
   }
 
-  if (!shouldPreferVacancyContextReply && !shouldPreferStructuredFieldReply && !hasDataIntent && await tryPrimaryEngineReply(candidate, currentVacancy)) {
+  const shouldDeferSchedulingConfirmationToDeterministicGuard = Boolean(
+    candidate.currentStep === ConversationStep.SCHEDULING
+    && currentVacancy
+    && isSchedulingEligibleCandidate(candidate, currentVacancy)
+    && isSchedulingConfirmationIntent(cleanText)
+  );
+
+  if (
+    !shouldDeferSchedulingConfirmationToDeterministicGuard
+    && !shouldPreferVacancyContextReply
+    && !shouldPreferStructuredFieldReply
+    && !hasDataIntent
+    && await tryPrimaryEngineReply(candidate, currentVacancy)
+  ) {
     return;
   }
 
