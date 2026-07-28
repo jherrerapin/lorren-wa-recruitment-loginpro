@@ -1,3 +1,13 @@
+export const STANDARD_DISPATCH_WORKDAY_MINUTES = 7 * 60;
+export const STANDARD_DISPATCH_BREAK_MINUTES = 60;
+export const INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES = 90;
+
+export const DISPATCH_BREAK_STATUS = Object.freeze({
+  NONE: 'NONE',
+  COMPLETE: 'COMPLETE',
+  INCOMPLETE: 'INCOMPLETE'
+});
+
 function validDate(value, label) {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) throw new Error(`${label}_invalid`);
@@ -30,6 +40,43 @@ export function resolveDispatchEffectiveWorkStart(input = {}) {
   return expectedStartAt;
 }
 
+function resolveBreakCalculation({ breakStartAt, breakEndAt, effectiveWorkStartAt, departureAt, grossWorkedMinutes }) {
+  if (!breakStartAt) {
+    return {
+      breakStatus: DISPATCH_BREAK_STATUS.NONE,
+      actualBreakMinutes: 0,
+      unpaidBreakMinutesDeducted: 0,
+      shortBreakMinutesCredited: STANDARD_DISPATCH_BREAK_MINUTES,
+      breakPenaltyMinutes: 0
+    };
+  }
+
+  if (!breakEndAt) {
+    const deducted = Math.min(INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES, grossWorkedMinutes);
+    return {
+      breakStatus: DISPATCH_BREAK_STATUS.INCOMPLETE,
+      actualBreakMinutes: null,
+      unpaidBreakMinutesDeducted: deducted,
+      shortBreakMinutesCredited: 0,
+      breakPenaltyMinutes: deducted
+    };
+  }
+
+  const effectiveBreakStart = clampDate(breakStartAt, effectiveWorkStartAt, departureAt);
+  const effectiveBreakEnd = clampDate(breakEndAt, effectiveWorkStartAt, departureAt);
+  const actualBreakMinutes = effectiveBreakEnd.getTime() > effectiveBreakStart.getTime()
+    ? minutesBetween(effectiveBreakStart, effectiveBreakEnd)
+    : 0;
+
+  return {
+    breakStatus: DISPATCH_BREAK_STATUS.COMPLETE,
+    actualBreakMinutes,
+    unpaidBreakMinutesDeducted: actualBreakMinutes,
+    shortBreakMinutesCredited: Math.max(0, STANDARD_DISPATCH_BREAK_MINUTES - actualBreakMinutes),
+    breakPenaltyMinutes: 0
+  };
+}
+
 export function calculateDispatchWorkedTime(input = {}) {
   const arrivalAt = validDate(input.arrivalAt, 'attendance_work_arrival');
   const departureAt = validDate(input.departureAt, 'attendance_work_departure');
@@ -54,34 +101,29 @@ export function calculateDispatchWorkedTime(input = {}) {
   const recordedSpanMinutes = minutesBetween(arrivalAt, departureAt);
   const grossWorkedMinutes = minutesBetween(effectiveWorkStartAt, departureAt);
   const earlyMinutesExcluded = Math.max(0, minutesBetween(arrivalAt, effectiveWorkStartAt));
-
-  let unpaidBreakMinutesDeducted = 0;
-  if (breakStartAt && breakEndAt) {
-    const effectiveBreakStart = clampDate(breakStartAt, effectiveWorkStartAt, departureAt);
-    const effectiveBreakEnd = clampDate(breakEndAt, effectiveWorkStartAt, departureAt);
-    if (effectiveBreakEnd.getTime() > effectiveBreakStart.getTime()) {
-      unpaidBreakMinutesDeducted = minutesBetween(effectiveBreakStart, effectiveBreakEnd);
-    }
-  }
-
-  const workedMinutes = Math.max(0, grossWorkedMinutes - unpaidBreakMinutesDeducted);
-
-  let plannedWorkedMinutes = null;
-  let differenceFromPlannedMinutes = null;
-  if (expectedStartAt && expectedEndAt && expectedEndAt.getTime() >= expectedStartAt.getTime()) {
-    plannedWorkedMinutes = minutesBetween(expectedStartAt, expectedEndAt);
-    differenceFromPlannedMinutes = workedMinutes - plannedWorkedMinutes;
-  }
+  const breakCalculation = resolveBreakCalculation({
+    breakStartAt,
+    breakEndAt,
+    effectiveWorkStartAt,
+    departureAt,
+    grossWorkedMinutes
+  });
+  const workedMinutes = Math.max(0, grossWorkedMinutes - breakCalculation.unpaidBreakMinutesDeducted);
+  const ordinaryWorkedMinutes = Math.min(workedMinutes, STANDARD_DISPATCH_WORKDAY_MINUTES);
+  const overtimeMinutes = Math.max(0, workedMinutes - STANDARD_DISPATCH_WORKDAY_MINUTES);
 
   return {
     recordedSpanMinutes,
     effectiveWorkStartAt,
     grossWorkedMinutes,
     earlyMinutesExcluded,
-    unpaidBreakMinutesDeducted,
+    ...breakCalculation,
     workedMinutes,
-    plannedWorkedMinutes,
-    differenceFromPlannedMinutes
+    ordinaryWorkedMinutes,
+    overtimeMinutes,
+    plannedWorkedMinutes: STANDARD_DISPATCH_WORKDAY_MINUTES,
+    differenceFromPlannedMinutes: workedMinutes - STANDARD_DISPATCH_WORKDAY_MINUTES,
+    expectedEndAt
   };
 }
 
