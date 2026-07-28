@@ -104,24 +104,28 @@ function validInput(overrides = {}) {
   };
 }
 
-test('registra salida y descuenta solo el almuerzo realmente marcado', async () => {
+test('registra salida, descuenta el almuerzo real y separa horas ordinarias y extras', async () => {
   const { prisma, state } = createFixture();
   const result = await registerDispatchDeparture(prisma, validInput());
   assert.equal(result.recorded, true);
   assert.equal(result.validation.workedMinutes, 480);
   assert.equal(result.validation.grossWorkedMinutes, 540);
   assert.equal(result.validation.unpaidBreakMinutesDeducted, 60);
+  assert.equal(result.validation.ordinaryWorkedMinutes, 420);
+  assert.equal(result.validation.overtimeMinutes, 60);
   assert.equal(state.updated.departureReportedAt.toISOString(), '2026-07-25T22:00:00.000Z');
   assert.equal(state.updated.workedMinutes, 480);
   assert.equal(state.updated.attendanceStatus, 'COMPLETED');
   assert.equal(state.createdMark.markType, 'DEPARTURE');
 });
 
-test('sin almuerzo marcado contabiliza todo el tiempo efectivo', async () => {
+test('sin almuerzo marcado contabiliza todo el tiempo y genera horas extra', async () => {
   const { prisma } = createFixture({ breakMarks: [] });
   const result = await registerDispatchDeparture(prisma, validInput());
   assert.equal(result.validation.unpaidBreakMinutesDeducted, 0);
+  assert.equal(result.validation.shortBreakMinutesCredited, 60);
   assert.equal(result.validation.workedMinutes, 540);
+  assert.equal(result.validation.overtimeMinutes, 120);
 });
 
 test('permite una salida antes del final programado', async () => {
@@ -132,6 +136,24 @@ test('permite una salida antes del final programado', async () => {
   }));
   assert.equal(result.recorded, true);
   assert.equal(result.validation.workedMinutes, 420);
+  assert.equal(result.validation.overtimeMinutes, 0);
+});
+
+test('permite cerrar con almuerzo abierto y aplica una hora y media de descuento', async () => {
+  const { prisma, state } = createFixture({
+    breakMarks: [{
+      markType: 'BREAK_START',
+      clientCapturedAt: new Date('2026-07-25T17:00:00.000Z'),
+      serverReceivedAt: new Date('2026-07-25T17:00:00.000Z')
+    }]
+  });
+  const result = await registerDispatchDeparture(prisma, validInput());
+  assert.equal(result.recorded, true);
+  assert.equal(result.validation.breakStatus, 'INCOMPLETE');
+  assert.equal(result.validation.unpaidBreakMinutesDeducted, 90);
+  assert.equal(result.validation.workedMinutes, 450);
+  assert.equal(result.validation.overtimeMinutes, 30);
+  assert.equal(state.updated.workedMinutes, 450);
 });
 
 test('una salida offline conserva horas pero exige revisión', async () => {
@@ -144,6 +166,7 @@ test('una salida offline conserva horas pero exige revisión', async () => {
   assert.equal(result.validation.validationStatus, 'REVIEW_REQUIRED');
   assert.ok(result.validation.riskFlags.includes('OFFLINE_WEB_CAPTURE'));
   assert.equal(result.validation.workedMinutes, 480);
+  assert.equal(result.validation.overtimeMinutes, 60);
 });
 
 test('rechaza salida cuando no existe llegada', async () => {
@@ -151,20 +174,6 @@ test('rechaza salida cuando no existe llegada', async () => {
   await assert.rejects(
     () => registerDispatchDeparture(prisma, validInput()),
     /attendance_departure_arrival_required/
-  );
-});
-
-test('exige finalizar un almuerzo abierto antes de salir', async () => {
-  const { prisma } = createFixture({
-    breakMarks: [{
-      markType: 'BREAK_START',
-      clientCapturedAt: new Date('2026-07-25T17:00:00.000Z'),
-      serverReceivedAt: new Date('2026-07-25T17:00:00.000Z')
-    }]
-  });
-  await assert.rejects(
-    () => registerDispatchDeparture(prisma, validInput()),
-    /attendance_departure_break_end_required/
   );
 });
 
