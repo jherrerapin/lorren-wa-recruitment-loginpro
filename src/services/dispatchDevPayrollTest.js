@@ -6,7 +6,7 @@ export const DEV_TEST_ATTENDANCE_SOURCE = 'DEV_TEST_MANUAL';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATETIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/;
-const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
+const ACTIVE_ASSIGNMENT_STATUSES = ['DEV_TEST_ASSIGNED'];
 
 function normalizeString(value, maxLength = 500) {
   if (typeof value !== 'string') return null;
@@ -134,7 +134,7 @@ export async function createDevTestServiceRequests(prisma, body = {}, actor = {}
     serviceId: service?.id || null,
     serviceName: testServiceName(service, groupCode),
     notes: normalizeString(body.notes),
-    status: 'PENDING_ASSIGNMENT',
+    status: 'DEV_TEST_PENDING',
     source: DEV_TEST_REQUEST_SOURCE,
     createdByUsername: normalizeString(actor.actorUsername, 160) || 'DEV'
   };
@@ -217,25 +217,25 @@ export async function assignDevTestWorker(prisma, input = {}, actor = {}) {
   const assignment = await prisma.dispatchAssignment.upsert({
     where: { serviceRequestId_workerId: { serviceRequestId, workerId } },
     update: {
-      status: 'CONFIRMED',
+      status: 'DEV_TEST_ASSIGNED',
       notes: 'Asignación confirmada para prueba DEV.',
       createdByUsername: normalizeString(actor.actorUsername, 160) || 'DEV'
     },
     create: {
       serviceRequestId,
       workerId,
-      status: 'CONFIRMED',
+      status: 'DEV_TEST_ASSIGNED',
       notes: 'Asignación confirmada para prueba DEV.',
       createdByUsername: normalizeString(actor.actorUsername, 160) || 'DEV'
     }
   });
 
   const confirmedCount = await prisma.dispatchAssignment.count({
-    where: { serviceRequestId, status: 'CONFIRMED' }
+    where: { serviceRequestId, status: 'DEV_TEST_ASSIGNED' }
   });
   await prisma.dispatchServiceRequest.update({
     where: { id: serviceRequestId },
-    data: { status: confirmedCount >= request.requiredWorkers ? 'ASSIGNMENT_COMPLETE' : 'ASSIGNMENT_PARTIAL' }
+    data: { status: confirmedCount >= request.requiredWorkers ? 'DEV_TEST_COMPLETE' : 'DEV_TEST_PARTIAL' }
   });
 
   return assignment;
