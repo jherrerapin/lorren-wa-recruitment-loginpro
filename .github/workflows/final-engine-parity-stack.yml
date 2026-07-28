@@ -1,0 +1,108 @@
+name: Final engine parity stack
+
+on:
+  pull_request:
+    branches:
+      - automation/759-final-stack-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate-final-stack:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+      LORREN_SEND_DELAY_MS: 0
+      BASELINE_SHA: 1853f6ec9a16547038e904ec5a88d1064bf08b43
+    steps:
+      - name: Checkout final stack
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Capture current-main baseline
+        shell: bash
+        run: |
+          git worktree add /tmp/final-parity-base "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/final-parity-base/node_modules
+          set +e
+          (cd /tmp/final-parity-base && npm test) > /tmp/baseline.log 2>&1
+          baseline_exit=$?
+          set -e
+          grep '^not ok' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
+          echo "BASELINE_EXIT=$baseline_exit" >> "$GITHUB_ENV"
+
+      - name: Validate all focal authorities
+        id: focal
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check src/routes/webhook.js
+            node --check test/conversationEngineParity.test.js
+            node --check test/cvDocumentParity.test.js
+            node --check test/helpers/runCvDocumentParityCase.js
+            node --test \
+              test/conversationEngineParity.test.js \
+              test/cvDocumentParity.test.js \
+              test/webhookIdempotency.test.js \
+              test/webhookInboundMessageAuthority.test.js \
+              test/candidateMultilineStateService.test.js \
+              test/vacancyFirstGate.test.js \
+              test/cityVacancyCrossAssignment.test.js \
+              test/enginePreviewTrace.test.js \
+              test/conversationEngineStepAuthority.test.js \
+              test/webhookInterviewBookingAuthority.test.js \
+              test/cvFlow.test.js
+          } > /tmp/final-parity-focused.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/final-parity-focused.log
+          exit "$status"
+
+      - name: Upload focal log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-engine-parity-stack-log
+          path: /tmp/final-parity-focused.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop after focal failure
+        if: steps.focal.outcome == 'failure'
+        run: exit 1
+
+      - name: Compare full suite with current main
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.log 2>&1
+          head_exit=$?
+          set -e
+          grep '^not ok' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
+          diff -u /tmp/baseline.failures /tmp/head.failures
+          if [ "$BASELINE_EXIT" = "0" ] && [ "$head_exit" != "0" ]; then exit 1; fi
+
+      - name: Validate clean diff
+        run: git diff --check "$BASELINE_SHA"...HEAD
