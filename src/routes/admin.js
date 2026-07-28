@@ -2142,6 +2142,7 @@ export function adminRouter(prisma) {
 
     res.render('detail', {
       candidate: detailCandidate, role: req.userRole, formatDateTimeCO,
+      canAccessDispatch: Boolean(req.canAccessDispatch),
       canManageUsers: canManageRecruiterUsers(req),
       normalizeCandidateStatusForUI, cvSizeBytes,
       formatActorRoleLabel,
