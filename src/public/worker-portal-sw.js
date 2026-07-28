@@ -98,7 +98,7 @@ async function notifyClients(message) {
 }
 
 function offlineFallbackResponse() {
-  return new Response(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Portal del Auxiliar · Lórren</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f4f6f8;color:#17212b;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(100%,480px);background:#fff;border:1px solid #dfe4ea;border-radius:20px;padding:26px}h1{margin:0 0 10px}p{color:#4d5b69;line-height:1.55}.status{margin-top:18px;padding:14px;border-radius:12px;background:#fff6df;color:#76520b;font-weight:700}</style></head><body><main class="card"><h1>Sin conexión</h1><div class="status">La asistencia requiere conexión.</div></main></body></html>`, {
+  return new Response(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Portal del Auxiliar · Lórren</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f4f6f8;color:#17212b;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(100%,480px);background:#fff;border:1px solid #dfe4ea;border-radius:20px;padding:26px}h1{margin:0 0 10px}.status{margin-top:18px;padding:14px;border-radius:12px;background:#fff6df;color:#76520b;font-weight:700}</style></head><body><main class="card"><h1>Sin conexión</h1><div class="status">La asistencia requiere conexión.</div></main></body></html>`, {
     status: 503,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
@@ -159,74 +159,112 @@ function buildArrivalForm(record) {
   return form;
 }
 
-function endpointFor(record) {
-  return record.markType === 'DEPARTURE'
-    ? `${PORTAL_PATH}/asignaciones/${encodeURIComponent(record.assignmentId)}/salida`
-    : `${PORTAL_PATH}/asignaciones/${encodeURIComponent(record.assignmentId)}/llegada`;
+function terminalRejection(status, error) {
+  if (status === 400 || status === 404) return true;
+  return status === 409 && [
+    'arrival_already_registered',
+    'arrival_window_not_open',
+    'departure_already_registered',
+    'departure_arrival_required',
+    'departure_before_arrival',
+    'offline_capture_expired',
+    'assignment_not_available',
+    'attendance_not_enabled',
+    'outside_operation_range',
+    'operation_geofence_required',
+    'location_accuracy_insufficient',
+    'online_biometric_required',
+    'biometric_verification_required'
+  ].includes(error);
 }
 
-async function syncRecord(record) {
-  const age = Date.now() - new Date(record.queuedAt).getTime();
-  if (!Number.isFinite(age) || age > MAX_QUEUE_AGE_MS) {
-    await completeQueueRecord(record, { ok: false, status: 'EXPIRED' });
-    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', idempotencyKey: record.idempotencyKey, error: 'offline_capture_expired' });
-    return;
+async function syncRecord(rawRecord) {
+  const record = normalizeLegacyRecord(rawRecord);
+  const queuedAt = new Date(record.queuedAt || 0).getTime();
+  if (!Number.isFinite(queuedAt) || Date.now() - queuedAt > MAX_QUEUE_AGE_MS) {
+    await completeQueueRecord(record, { state: 'REJECTED', error: 'offline_capture_expired', message: 'La marcación offline venció antes de sincronizarse.' });
+    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, markType: record.markType, error: 'offline_capture_expired' });
+    return { retry: false, sessionRequired: false };
   }
-  const response = await fetch(endpointFor(record), {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'X-Requested-With': 'worker-portal' },
-    body: buildArrivalForm(record)
-  });
+
+  const inProgress = { ...record, state: 'SYNCING', attempts: Number(record.attempts || 0) + 1, updatedAt: new Date().toISOString(), lastError: null };
+  await putQueueRecord(inProgress);
+  await notifyClients({ type: 'ARRIVAL_QUEUE_UPDATED', assignmentId: record.assignmentId, markType: record.markType, state: 'SYNCING' });
+  const endpoint = record.markType === 'DEPARTURE' ? 'salida' : 'llegada';
+  let response;
+  try {
+    response = await fetch(`${PORTAL_PATH}/asignaciones/${encodeURIComponent(record.assignmentId)}/${endpoint}`, {
+      method: 'POST', credentials: 'include', headers: { 'X-Requested-With': 'worker-portal' }, body: buildArrivalForm(record)
+    });
+  } catch (error) {
+    await putQueueRecord({ ...inProgress, state: 'PENDING', lastError: 'network_unavailable', updatedAt: new Date().toISOString() });
+    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, markType: record.markType, error: 'network_unavailable' });
+    return { retry: true, sessionRequired: false, error };
+  }
+
   const payload = await response.json().catch(() => ({}));
   if (response.ok && payload.ok) {
-    await completeQueueRecord(record, { ok: true, status: payload.validationStatus || 'RECORDED', replayed: Boolean(payload.replayed) });
-    await notifyClients({ type: 'ARRIVAL_SYNCED', idempotencyKey: record.idempotencyKey, assignmentId: record.assignmentId, markType: record.markType, payload });
-    return;
+    const state = payload.requiresReview ? 'REVIEW_REQUIRED' : 'SYNCED';
+    await completeQueueRecord(record, {
+      state,
+      validationStatus: payload.validationStatus || null,
+      attendanceStatus: payload.attendanceStatus || null,
+      punctualityStatus: payload.punctualityStatus || null,
+      workedMinutes: payload.workedMinutes ?? null,
+      message: payload.message || 'Marcación sincronizada.'
+    });
+    await notifyClients({ type: 'ARRIVAL_SYNCED', assignmentId: record.assignmentId, markType: record.markType, state, payload });
+    return { retry: false, sessionRequired: false };
   }
-  const terminal = [400, 401, 403, 404, 409].includes(response.status);
-  if (terminal) {
-    await completeQueueRecord(record, { ok: false, status: 'REJECTED', error: payload.error || 'sync_rejected' });
-    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', idempotencyKey: record.idempotencyKey, error: payload.error || 'sync_rejected' });
-    return;
+
+  if (response.status === 401) {
+    await putQueueRecord({ ...inProgress, state: 'SESSION_REQUIRED', lastError: payload.error || 'portal_session_required', updatedAt: new Date().toISOString() });
+    await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, markType: record.markType, error: 'portal_session_required' });
+    return { retry: false, sessionRequired: true };
   }
-  record.attempts = Number(record.attempts || 0) + 1;
-  record.lastError = payload.error || `http_${response.status}`;
-  record.updatedAt = new Date().toISOString();
-  await putQueueRecord(record);
-  await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', idempotencyKey: record.idempotencyKey, error: record.lastError });
-  throw new Error(record.lastError);
+
+  if (terminalRejection(response.status, payload.error)) {
+    const alreadyRecorded = ['arrival_already_registered', 'departure_already_registered'].includes(payload.error);
+    await completeQueueRecord(record, {
+      state: alreadyRecorded ? 'ALREADY_RECORDED' : 'REJECTED',
+      error: payload.error || 'mark_rejected',
+      message: alreadyRecorded ? 'La marcación ya estaba registrada en Lórren.' : 'La marcación offline fue rechazada por el servidor.'
+    });
+    await notifyClients({ type: 'ARRIVAL_SYNC_REJECTED', assignmentId: record.assignmentId, markType: record.markType, error: payload.error || 'mark_rejected' });
+    return { retry: false, sessionRequired: false };
+  }
+
+  await putQueueRecord({ ...inProgress, state: 'PENDING', lastError: payload.error || `http_${response.status}`, updatedAt: new Date().toISOString() });
+  await notifyClients({ type: 'ARRIVAL_SYNC_RETRY', assignmentId: record.assignmentId, markType: record.markType, error: payload.error || `http_${response.status}` });
+  return { retry: response.status >= 500, sessionRequired: false };
 }
 
-async function syncQueue() {
-  const queue = await readQueue();
-  for (const record of queue) {
-    try { await syncRecord(record); } catch { break; }
+async function syncQueue({ throwOnRetry = false } = {}) {
+  const records = (await readQueue()).sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt)));
+  let shouldRetry = false;
+  for (const record of records) {
+    const result = await syncRecord(record);
+    shouldRetry = shouldRetry || result.retry;
+    if (result.sessionRequired) break;
   }
+  if (throwOnRetry && shouldRetry) throw new Error('arrival_sync_retry_required');
 }
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting()));
-});
-self.addEventListener('activate', (event) => {
-  event.waitUntil(Promise.all([
-    self.clients.claim(),
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith('lorren-worker-portal-') && key !== CACHE_NAME).map((key) => caches.delete(key))))
-  ]));
-});
+self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting())));
+self.addEventListener('activate', (event) => event.waitUntil(Promise.all([
+  caches.keys().then((names) => Promise.all(names.filter((name) => name.startsWith('lorren-worker-portal-') && name !== CACHE_NAME).map((name) => caches.delete(name)))),
+  self.clients.claim()
+])));
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin || event.request.method !== 'GET') return;
-  if (url.pathname === PORTAL_PATH) {
-    event.respondWith(networkFirstPortal(event.request));
-    return;
-  }
-  if (STATIC_ASSETS.includes(url.pathname)) event.respondWith(cacheFirst(event.request));
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (request.mode === 'navigate' && (url.pathname === PORTAL_PATH || url.pathname === `${PORTAL_PATH}/`)) { event.respondWith(networkFirstPortal(request)); return; }
+  if (STATIC_ASSETS.includes(url.pathname)) event.respondWith(cacheFirst(request));
 });
-self.addEventListener('sync', (event) => {
-  if (event.tag === SYNC_TAG) event.waitUntil(syncQueue());
-});
+self.addEventListener('sync', (event) => { if (event.tag === SYNC_TAG) event.waitUntil(syncQueue({ throwOnRetry: true })); });
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SYNC_ARRIVALS') event.waitUntil(syncQueue());
-  if (event.data?.type === 'CACHE_PORTAL') event.waitUntil(cacheActivePortal());
+  if (event.data?.type === 'SYNC_ARRIVALS') { event.waitUntil(syncQueue().catch(() => {})); return; }
+  if (event.data?.type === 'CACHE_PORTAL') event.waitUntil(cacheActivePortal().catch(() => false));
 });
