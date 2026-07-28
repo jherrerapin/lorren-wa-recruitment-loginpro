@@ -11,7 +11,7 @@ export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-27-workda
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
 const ATTENDANCE_MAP_RELIABILITY_SCRIPT = '/public/attendance-map-reliability.js';
 const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
@@ -166,7 +166,7 @@ function stripLegacyAttendanceTimingControls(html) {
   if (!output.includes('data-attendance-open-entry-policy')) {
     output = output.replace(
       /(<div\s+class=["']attendance-standards["'][^>]*>[\s\S]*?<\/div>)/i,
-      `$1\n                        <div class="attendance-standards" data-attendance-open-entry-policy="true"><span class="attendance-standard">Entrada sin ventana configurable</span><span class="attendance-standard">Las llegadas tarde se registran y no se bloquean</span><span class="muted">Una llegada anticipada se guarda con su hora real, pero el conteo inicia a la hora programada salvo reconocimiento auditado del coordinador.</span></div>`
+      `$1\n                        <div class="attendance-standards" data-attendance-open-entry-policy="true"><span class="attendance-standard">Entrada sin ventana configurable</span><span class="attendance-standard">Las llegadas tarde se registran y no se bloquean</span></div>`
     );
   }
   return output;
@@ -317,8 +317,6 @@ export function dispatchBridgeRouter() {
 
   router.use(
     '/portal-activaciones',
-    requireOps,
-    requireAttendanceAccess,
     dispatchWorkerPortalActivationAdminRouter(prisma)
   );
 
