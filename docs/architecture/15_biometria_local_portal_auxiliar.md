@@ -20,7 +20,7 @@ La función se activa por auxiliar únicamente después de una inscripción faci
 
 No se cargan modelos de cuerpo, manos, objetos, edad, género ni emociones.
 
-Los modelos se copian desde la dependencia npm a `src/public/vendor/human` durante `build` y `start`. El navegador los obtiene desde el mismo dominio de Lórren.
+El navegador solicita un puente local en `src/public/vendor/human/human.js`. Ese puente carga desde jsDelivr la versión fija `3.3.6` del runtime y sus modelos, y fuerza `modelBasePath` al mismo origen versionado. El procesamiento continúa ocurriendo en el celular; Railway no instala ni ejecuta la librería facial.
 
 ### En el servidor
 
@@ -74,13 +74,13 @@ El secreto no debe cambiarse mientras existan plantillas activas. Si debe rotars
 
 No existe pago por consulta ni dependencia de AWS, Azure u otro proveedor biométrico. El costo operativo se concentra en:
 
-- descarga inicial de los modelos al celular;
+- descarga inicial del runtime y los modelos al celular;
 - CPU/GPU del dispositivo durante la captura;
 - una plantilla cifrada por auxiliar;
 - fotografía de evidencia según la política de asistencia;
 - eventos de auditoría pequeños.
 
-Railway no ejecuta los modelos de inteligencia artificial en esta versión.
+Railway no ejecuta los modelos de inteligencia artificial en esta versión. La primera carga biométrica requiere conectividad hacia jsDelivr; posteriormente el navegador puede reutilizar su caché HTTP.
 
 ## Limitaciones de seguridad
 

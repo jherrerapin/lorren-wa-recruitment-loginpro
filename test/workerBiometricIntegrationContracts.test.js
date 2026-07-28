@@ -3,24 +3,25 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const packageLock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
 const browser = fs.readFileSync('src/public/worker-biometric.js', 'utf8');
+const bridge = fs.readFileSync('src/public/vendor/human/human.js', 'utf8');
 const portal = fs.readFileSync('src/views/workerPortal.ejs', 'utf8');
 const admin = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
 const route = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
 const service = fs.readFileSync('src/services/workerBiometricService.js', 'utf8');
 const migration = fs.readFileSync('prisma/migrations/20260728033000_enforce_worker_biometric_review/migration.sql', 'utf8');
-const assetCopy = fs.readFileSync('scripts/copyHumanAssets.js', 'utf8');
 
-test('Human queda fijado y servido localmente sin API biométrica paga', () => {
-  assert.equal(packageJson.dependencies['@vladmandic/human'], '3.3.6');
-  assert.match(packageJson.scripts.start, /prepare:human/);
-  assert.match(assetCopy, /blazeface\.json/);
-  assert.match(assetCopy, /faceres\.json/);
-  assert.match(assetCopy, /antispoof\.json/);
-  assert.match(assetCopy, /liveness\.json/);
+test('Human queda fuera del servidor y fijado en el puente CDN del navegador', () => {
+  assert.equal(packageJson.dependencies['@vladmandic/human'], undefined);
+  assert.equal(packageLock.packages[''].dependencies['@vladmandic/human'], undefined);
+  assert.doesNotMatch(packageJson.scripts.build, /prepare:human/);
+  assert.doesNotMatch(packageJson.scripts.start, /prepare:human/);
   assert.match(browser, /\/public\/vendor\/human\/human\.js/);
   assert.match(browser, /\/public\/vendor\/human\/models\//);
-  assert.doesNotMatch(browser, /https?:\/\//);
+  assert.match(bridge, /HUMAN_VERSION = '3\.3\.6'/);
+  assert.match(bridge, /cdn\.jsdelivr\.net\/npm\/@vladmandic\/human@\$\{HUMAN_VERSION\}\/dist\/human\.js/);
+  assert.match(bridge, /modelBasePath: HUMAN_CDN_MODELS/);
 });
 
 test('el celular ejecuta detección, vivacidad, anti-spoof y desafío activo', () => {
