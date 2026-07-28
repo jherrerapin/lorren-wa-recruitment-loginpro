@@ -60,7 +60,7 @@ test('lista asignaciones activas y permite llegada sin ventana temporal', async 
   assert.deepEqual(observedQuery.where.status.in, ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']);
   assert.equal(assignments[0].canRegisterArrival, true);
   assert.equal(assignments[0].arrivalWindowExpired, false);
-  assert.equal(assignments[0].breakLabel, 'No registrado · el tiempo seguirá contando como trabajado');
+  assert.match(assignments[0].breakLabel, /si no toma almuerzo/i);
   assert.equal(assignments[0].photoRequired, false);
   assert.equal(assignments[0].workerId, undefined);
 });
@@ -92,7 +92,7 @@ test('después de la llegada ofrece almuerzo opcional y salida', async () => {
   assert.equal(assignment.actionType, 'DEPARTURE');
 });
 
-test('mientras el almuerzo está abierto exige finalizarlo antes de salir', async () => {
+test('con almuerzo abierto permite finalizarlo o registrar salida con penalización', async () => {
   const prisma = prismaWithAssignments({
     async findMany() {
       return [assignmentFixture({
@@ -107,13 +107,14 @@ test('mientras el almuerzo está abierto exige finalizarlo antes de salir', asyn
     }
   });
   const [assignment] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: NOW });
-  assert.equal(assignment.breakOpen, true);
+  assert.equal(assignment.breakPending, true);
+  assert.equal(assignment.breakOpen, false);
   assert.equal(assignment.breakActionType, 'BREAK_END');
-  assert.equal(assignment.canRegisterDeparture, false);
-  assert.match(assignment.actionLabel, /Finaliza el almuerzo/i);
+  assert.equal(assignment.canRegisterDeparture, true);
+  assert.match(assignment.actionLabel, /1 h 30 min/i);
 });
 
-test('después de la salida muestra horas netas y cierra la jornada', async () => {
+test('después de la salida separa siete horas ordinarias y horas extra', async () => {
   const prisma = prismaWithAssignments({
     async findMany() {
       return [assignmentFixture({
@@ -129,5 +130,30 @@ test('después de la salida muestra horas netas y cierra la jornada', async () =
   const [assignment] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T22:01:00Z') });
   assert.equal(assignment.departureReported, true);
   assert.equal(assignment.actionType, 'DONE');
+  assert.equal(assignment.ordinaryWorkedMinutes, 420);
+  assert.equal(assignment.overtimeMinutes, 60);
+  assert.equal(assignment.overtimeLabel, '1 h');
   assert.match(assignment.actionLabel, /8 h/);
+});
+
+test('una jornada cerrada sin fin de almuerzo muestra la penalización aplicada', async () => {
+  const prisma = prismaWithAssignments({
+    async findMany() {
+      return [assignmentFixture({
+        attendanceSession: sessionFixture({
+          departureReportedAt: new Date('2026-07-22T22:00:00Z'),
+          workedMinutes: 450,
+          marks: [{
+            markType: 'BREAK_START',
+            clientCapturedAt: new Date('2026-07-22T17:00:00Z'),
+            serverReceivedAt: new Date('2026-07-22T17:00:00Z')
+          }]
+        })
+      })];
+    }
+  });
+  const [assignment] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T22:01:00Z') });
+  assert.equal(assignment.breakPenaltyApplied, true);
+  assert.equal(assignment.breakMinutesDeducted, 90);
+  assert.match(assignment.breakLabel, /Se tomó 1 h 30 min de almuerzo/i);
 });
