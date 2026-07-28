@@ -55,7 +55,7 @@ jobs:
         run: |
           node --check test/aiFirstRecruitmentGuards.test.js
           node --check test/hardeningP0Delta.test.js
-          node --test test/aiFirstRecruitmentGuards.test.js test/hardeningP0Delta.test.js test/cvFlow.test.js test/attachmentAnalyzerDoc.test.js
+          node --test test/aiFirstRecruitmentGuards.test.js test/hardeningP0Delta.test.js test/cvFlow.test.js
 
       - name: Compare full suite
         shell: bash
