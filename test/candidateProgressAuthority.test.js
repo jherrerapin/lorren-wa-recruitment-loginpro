@@ -716,7 +716,8 @@ test('chatEngine conserva la respuesta canónica si la limpieza del recordatorio
   assert.match(cancelBranch, /reflectCandidateInterviewCancellationReminder/);
   assert.match(cancelBranch, /STALE_CANDIDATE_CANCELLATION_REMINDER/);
   assert.match(cancelBranch, /candidateReminderConflict/);
-  assert.match(cancelBranch, /Listo, ya registré la cancelación de tu entrevista/);
+  assert.match(cancelBranch, /buildInterviewCancellationReply\(\)/);
+  assert.doesNotMatch(cancelBranch, /Listo, ya registré la cancelación de tu entrevista/);
   assert.doesNotMatch(cancelBranch, /prisma\.candidate\.update\s*\(/);
   assert.doesNotMatch(cancelBranch, /suppressed:\s*true/);
 
