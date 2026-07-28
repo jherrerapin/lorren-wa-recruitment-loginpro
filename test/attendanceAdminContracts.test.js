@@ -8,7 +8,7 @@ const dashboardRouteSource = fs.readFileSync(new URL('../src/routes/dispatchDash
 const dashboardSource = fs.readFileSync(new URL('../src/views/operacionesDashboard.ejs', import.meta.url), 'utf8');
 const adminViewSource = fs.readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
 
- test('el panel administrativo se monta detrás de permisos operativos y del feature gate', () => {
+test('el panel administrativo se monta detrás de permisos operativos y del feature gate', () => {
   assert.match(bridgeSource, /router\.use\(\s*['"]\/asistencia['"]\s*,\s*requireOps\s*,\s*requireAttendanceAccess\s*,\s*dispatchAttendanceAdminRouter\(prisma\)/s);
 });
 
@@ -44,24 +44,27 @@ test('el dashboard resuelve la misma autoridad antes de mostrar asistencia', () 
   assert.match(dashboardSource, /href="\/admin\/operaciones\/asistencia"/);
 });
 
-test('las tarjetas comprimidas muestran entrada, almuerzo, salida y tiempo trabajado', () => {
+test('las tarjetas comprimidas muestran llegada, almuerzo, salida y horas extra', () => {
   assert.match(adminViewSource, /<details class="attendance-card status-card-/);
   assert.match(adminViewSource, /Desplegar todas/);
   assert.match(adminViewSource, /Comprimir todas/);
   assert.match(adminViewSource, /<span>Llegada<\/span>/);
   assert.match(adminViewSource, /<span>Almuerzo<\/span>/);
   assert.match(adminViewSource, /<span>Salida<\/span>/);
-  assert.match(adminViewSource, /<span>Tiempo trabajado<\/span>/);
+  assert.match(adminViewSource, /<span>Horas extra<\/span>/);
   assert.match(adminViewSource, /Riesgo: <%= row\.riskScore %>\/100/);
 });
 
-test('el detalle muestra cálculo real, fotografías y geocerca', () => {
+test('el detalle muestra desglose ordinario, extra, penalización, fotografías y geocerca', () => {
   assert.match(adminViewSource, /Ver ubicación y geocerca/);
-  assert.match(adminViewSource, /Desde entrada hasta salida/);
+  assert.match(adminViewSource, /Entrada a salida/);
   assert.match(adminViewSource, /Inicio contabilizado/);
-  assert.match(adminViewSource, /Tiempo anticipado excluido/);
+  assert.match(adminViewSource, /Anticipado excluido/);
   assert.match(adminViewSource, /Almuerzo descontado/);
-  assert.match(adminViewSource, /Tiempo neto trabajado/);
+  assert.match(adminViewSource, /Horas ordinarias/);
+  assert.match(adminViewSource, /Horas extra/);
+  assert.match(adminViewSource, /Total trabajado/);
+  assert.match(adminViewSource, /1 h 30 min/);
   assert.match(adminViewSource, /Ver fotografía de entrada/);
   assert.match(adminViewSource, /Ver fotografía de salida/);
   assert.match(adminViewSource, /leaflet@1\.9\.4/);
