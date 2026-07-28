@@ -101,3 +101,30 @@ export async function isDispatchTestGeofenceBypassEnabled(prisma, input = {}) {
   const event = await latestEvent(prisma, operationPointId);
   return event?.action === DISPATCH_TEST_GEOFENCE_BYPASS_ACTION.ENABLED;
 }
+
+export async function applyDispatchTestGeofenceBypassToAssignment(prisma, assignment) {
+  const point = assignment?.serviceRequest?.operationPoint;
+  const workerIsTest = assignment?.worker?.isTestProfile === true;
+  const clientIsTest = point?.client?.isTestClient === true;
+  if (!point?.id || !workerIsTest || !clientIsTest) return assignment;
+
+  const enabled = await isDispatchTestGeofenceBypassEnabled(prisma, {
+    operationPointId: point.id,
+    clientIsTest,
+    workerIsTest
+  });
+  if (!enabled) return assignment;
+
+  return {
+    ...assignment,
+    serviceRequest: {
+      ...assignment.serviceRequest,
+      operationPoint: {
+        ...point,
+        geofenceRadiusMeters: DISPATCH_TEST_GEOFENCE_BYPASS_RADIUS_SENTINEL_METERS,
+        maxLocationAccuracyMeters: 100_000,
+        testGeofenceBypassEnabled: true
+      }
+    }
+  };
+}
