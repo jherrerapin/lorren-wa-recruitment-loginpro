@@ -12,7 +12,12 @@ const SCENARIOS = [
   { key: 'question_with_data', caseId: 'answer-question-before-data', coverage: 'text' },
   { key: 'data_confirmation', caseId: 'no-infinite-confirmation', coverage: 'text' },
   { key: 'cv_request', caseId: 'fragmented-data-consolidation', coverage: 'text' },
-  { key: 'cv_received', coverage: 'pending_webhook', reason: 'La recepción real de CV ocurre en la rama document del webhook.' },
+  {
+    key: 'cv_received',
+    coverage: 'webhook_document',
+    engineBoundary: 'router_document_branch',
+    contractTests: ['test/cvDocumentParity.test.js']
+  },
   { key: 'question_during_ask_cv', caseId: 'ask-cv-out-of-scope-question-pauses-for-dev-review', coverage: 'text' },
   { key: 'interview_offer', caseId: 'future-birthday-keeps-current-age-and-does-not-repeat-transport', coverage: 'text' },
   { key: 'schedule_confirmation', caseId: 'parity-schedule-confirmation', coverage: 'text' },
@@ -66,13 +71,18 @@ function domainDifferences(left, right) {
   return keys.filter((key) => JSON.stringify(left[key]) !== JSON.stringify(right[key]));
 }
 
-test('el manifiesto conserva los 23 escenarios exactos del plan', () => {
+test('el manifiesto conserva los 23 escenarios exactos del plan sin pendientes', () => {
   assert.equal(SCENARIOS.length, 23);
   assert.equal(new Set(SCENARIOS.map((item) => item.key)).size, 23);
-  const pending = SCENARIOS.filter((item) => item.coverage === 'pending_webhook');
-  assert.equal(pending.length, 1);
-  assert.equal(pending[0].key, 'cv_received');
-  assert.ok(pending[0].reason);
+  assert.deepEqual(SCENARIOS.filter((item) => item.coverage === 'pending_webhook'), []);
+});
+
+test('CV recibido se cubre mediante el router documental real', () => {
+  const scenario = SCENARIOS.find((item) => item.key === 'cv_received');
+  assert.equal(scenario.coverage, 'webhook_document');
+  assert.equal(scenario.engineBoundary, 'router_document_branch');
+  assert.deepEqual(scenario.contractTests, ['test/cvDocumentParity.test.js']);
+  assert.equal(Object.hasOwn(scenario, 'caseId'), false);
 });
 
 test('duplicados y concurrencia se cubren antes del engine mediante contratos de webhook', () => {
