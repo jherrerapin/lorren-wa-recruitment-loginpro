@@ -4,10 +4,13 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('Nómina queda montada dentro del módulo protegido de Asistencia', async () => {
-  const source = await read('src/routes/dispatchAttendanceAdmin.js');
-  assert.match(source, /import \{ dispatchPayrollRouter \} from '\.\/dispatchPayroll\.js';/);
-  assert.match(source, /router\.use\('\/nomina', dispatchPayrollRouter\(prisma\)\);/);
+test('Nómina conserva su ruta pero atraviesa las guardas con permiso propio', async () => {
+  const bridge = await read('src/routes/dispatchBridge.js');
+  const attendance = await read('src/routes/dispatchAttendanceAdmin.js');
+  assert.match(attendance, /router\.use\('\/nomina', dispatchPayrollRouter\(prisma\)\);/);
+  assert.match(bridge, /isPayrollRequest/);
+  assert.match(bridge, /req\.canAccessPayrollFeature/);
+  assert.match(bridge, /resolvePayrollFeatureAccess/);
 });
 
 test('el portal valida su propio permiso antes de mostrar información', async () => {
@@ -24,13 +27,14 @@ test('la configuración de usuarios solo recibe el control cuando el perfil actu
   assert.match(middleware, /path !== '\/admin\/users' \|\| role !== 'dev'/);
   assert.match(middleware, /PAYROLL_USERS_SCRIPT/);
   assert.doesNotMatch(client, /:has\(/);
-  assert.match(client, /Nómina y tiempo trabajado/);
+  assert.match(client, /No activa Operaciones ni Asistencia/);
 });
 
-test('conceder Nómina exige DEV y activa los módulos padre', async () => {
+test('conceder Nómina exige DEV y no cambia los módulos padre', async () => {
   const source = await read('src/services/payrollFeatureAccess.js');
   assert.match(source, /actorRole !== 'dev'/);
-  assert.match(source, /canAccessDispatch: true, canAccessAttendance: true/);
+  assert.doesNotMatch(source, /canAccessDispatch: true, canAccessAttendance: true/);
+  assert.match(source, /parentPermissionsChanged: false/);
   assert.match(source, /PAYROLL_ACCESS_ENABLED/);
   assert.match(source, /PAYROLL_ACCESS_DISABLED/);
 });
