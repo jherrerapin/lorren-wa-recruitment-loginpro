@@ -32,6 +32,22 @@ function actor(req) {
   };
 }
 
+function roleFromRequest(req) {
+  return req.session?.userRole || req.userRole;
+}
+
+function allowTestData(req) {
+  return roleFromRequest(req) === 'dev';
+}
+
+function sanitizedPayrollInput(req, source = {}) {
+  const input = { ...(source || {}) };
+  if (!allowTestData(req)) delete input.includeTest;
+  else if (String(input.includeTest || '').toLowerCase() === 'true') input.includeTest = 'true';
+  else delete input.includeTest;
+  return input;
+}
+
 function noStore(res) {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('Pragma', 'no-cache');
@@ -40,7 +56,7 @@ function noStore(res) {
 
 function safeQuery(source = {}) {
   const params = new URLSearchParams();
-  ['periodType', 'from', 'to', 'anchor', 'clientId', 'operationPointId', 'workerId', 'search'].forEach((key) => {
+  ['periodType', 'from', 'to', 'anchor', 'clientId', 'operationPointId', 'workerId', 'search', 'includeTest'].forEach((key) => {
     const value = normalizeString(source[key], 180);
     if (value) params.set(key, value);
   });
@@ -72,7 +88,7 @@ function publicError(error) {
 
 async function loadAccess(prisma, req) {
   const access = await resolvePayrollFeatureAccess(prisma, {
-    userRole: req.session?.userRole || req.userRole,
+    userRole: roleFromRequest(req),
     userId: req.session?.userId || req.userId,
     username: req.session?.username || req.username
   });
@@ -82,7 +98,7 @@ async function loadAccess(prisma, req) {
 }
 
 function requireDev(req, res, next) {
-  if ((req.session?.userRole || req.userRole) !== 'dev') return res.status(403).json({ ok: false, error: 'dev_required' });
+  if (roleFromRequest(req) !== 'dev') return res.status(403).json({ ok: false, error: 'dev_required' });
   return next();
 }
 
@@ -93,6 +109,12 @@ function csvEscape(value) {
 
 function reportFilename(report, extension) {
   return `nomina-${report.period.from}-${report.period.to}.${extension}`;
+}
+
+async function reportForRequest(prisma, req, source) {
+  return loadPayrollReport(prisma, sanitizedPayrollInput(req, source), {
+    allowTestData: allowTestData(req)
+  });
 }
 
 export function dispatchPayrollRouter(prisma) {
@@ -160,13 +182,13 @@ export function dispatchPayrollRouter(prisma) {
 
   router.get('/', async (req, res) => {
     try {
-      const report = await loadPayrollReport(prisma, req.query || {});
+      const report = await reportForRequest(prisma, req, req.query || {});
       const selectedClientId = report.filters.clientId || report.clients[0]?.id || '';
       const selectedPolicies = await loadPayrollPolicies(prisma, selectedClientId ? [selectedClientId] : []);
       const selectedPolicy = selectedPolicies.get(selectedClientId) || DEFAULT_PAYROLL_POLICY;
       return res.render('operacionesNomina', {
         pageTitle: 'Nómina y tiempo trabajado',
-        role: req.session?.userRole || req.userRole,
+        role: roleFromRequest(req),
         report,
         selectedPolicy,
         conceptCodes: PAYROLL_CONCEPT_CODES,
@@ -178,10 +200,10 @@ export function dispatchPayrollRouter(prisma) {
       console.error('[PAYROLL_REPORT_FAILED]', error);
       return res.status(500).render('operacionesNomina', {
         pageTitle: 'Nómina y tiempo trabajado',
-        role: req.session?.userRole || req.userRole,
+        role: roleFromRequest(req),
         report: {
           period: { periodType: 'WEEKLY', from: '', to: '', anchor: '' },
-          filters: { clientId: '', operationPointId: '', workerId: '', search: '' },
+          filters: { clientId: '', operationPointId: '', workerId: '', search: '', includeTest: false },
           clients: [], workers: [], rows: [], conceptCodes: PAYROLL_CONCEPT_CODES,
           totals: { workers: 0, totalMinutes: 0, ordinaryMinutes: 0, overtimeMinutes: 0, exportableWorkers: 0, workersWithNovelties: 0, conceptMinutes: {}, conceptHours: {} }
         },
@@ -195,29 +217,29 @@ export function dispatchPayrollRouter(prisma) {
   });
 
   router.post('/policy', formParser, async (req, res) => {
-    if ((req.session?.userRole || req.userRole) !== 'dev') {
-      return redirectToPayroll(res, req.body, { error: 'Solo DEV puede modificar la política de jornada.' });
+    if (roleFromRequest(req) !== 'dev') {
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { error: 'Solo DEV puede modificar la política de jornada.' });
     }
     try {
       await savePayrollPolicy(prisma, { ...req.body, recognizeEarlyArrival: req.body.recognizeEarlyArrival === 'true', ...actor(req) });
-      return redirectToPayroll(res, req.body, { success: 'Política de jornada guardada con auditoría.' });
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { success: 'Política de jornada guardada con auditoría.' });
     } catch (error) {
-      return redirectToPayroll(res, req.body, { error: publicError(error) });
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { error: publicError(error) });
     }
   });
 
   router.post('/compensation', formParser, async (req, res) => {
     try {
       await savePayrollCompensation(prisma, { ...req.body, ...actor(req) });
-      return redirectToPayroll(res, req.body, { success: 'Estado del compensatorio actualizado.' });
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { success: 'Estado del compensatorio actualizado.' });
     } catch (error) {
-      return redirectToPayroll(res, req.body, { error: publicError(error) });
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { error: publicError(error) });
     }
   });
 
   router.get('/export.csv', async (req, res) => {
     try {
-      const report = await loadPayrollReport(prisma, req.query || {});
+      const report = await reportForRequest(prisma, req, req.query || {});
       const rows = buildPayrollExportRows(report);
       const headers = rows.length ? Object.keys(rows[0]) : ['Documento', 'Nombre', 'FechaInicial', 'FechaFinal', ...PAYROLL_CONCEPT_CODES];
       const lines = [headers.join(';'), ...rows.map((row) => headers.map((header) => csvEscape(row[header])).join(';'))];
@@ -225,13 +247,13 @@ export function dispatchPayrollRouter(prisma) {
       res.set('Content-Disposition', `attachment; filename="${reportFilename(report, 'csv')}"`);
       return res.send(`\uFEFF${lines.join('\r\n')}`);
     } catch (error) {
-      return redirectToPayroll(res, req.query, { error: publicError(error) });
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.query), { error: publicError(error) });
     }
   });
 
   router.get('/export.xlsx', async (req, res) => {
     try {
-      const report = await loadPayrollReport(prisma, req.query || {});
+      const report = await reportForRequest(prisma, req, req.query || {});
       const rows = buildPayrollExportRows(report);
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'Lórren · LoginPro';
@@ -253,7 +275,7 @@ export function dispatchPayrollRouter(prisma) {
       res.set('Content-Disposition', `attachment; filename="${reportFilename(report, 'xlsx')}"`);
       return res.send(Buffer.from(buffer));
     } catch (error) {
-      return redirectToPayroll(res, req.query, { error: publicError(error) });
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.query), { error: publicError(error) });
     }
   });
 
