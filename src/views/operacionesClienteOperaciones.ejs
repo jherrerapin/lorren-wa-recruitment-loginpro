@@ -139,15 +139,14 @@
                         <div class="attendance-map-status" role="status" aria-live="polite"><%= op.attendanceLatitude != null && op.attendanceLongitude != null ? 'Ubicación guardada. Puedes ajustarla en el mapa.' : 'Busca la dirección, usa tu ubicación o toca el mapa para seleccionar el punto.' %></div>
                       </div>
                       <div class="field full">
-                        <div class="attendance-standards">
+                        <div class="attendance-standards" data-attendance-open-entry-policy="true">
                           <span class="attendance-standard">Radio permitido: 100 m</span>
                           <span class="attendance-standard">Precisión GPS: 50 m o mejor</span>
-                          <span class="muted">Valores protegidos y definidos por Lórren.</span>
+                          <span class="attendance-standard">Entrada sin ventana configurable</span>
+                          <span class="attendance-standard">Las llegadas tarde se registran y no se bloquean</span>
+                          <span class="muted">La hora real siempre queda guardada. Si el auxiliar llega antes, el conteo inicia a la hora programada salvo reconocimiento auditado del coordinador.</span>
                         </div>
                       </div>
-                      <div class="field"><label>Ventana anticipada (min)</label><input type="number" name="earlyArrivalWindowMinutes" min="0" max="240" step="1" required value="<%= op.earlyArrivalWindowMinutes %>" /></div>
-                      <div class="field"><label>Tolerancia de tardanza (min)</label><input type="number" name="lateToleranceMinutes" min="0" max="240" step="1" required value="<%= op.lateToleranceMinutes %>" /></div>
-                      <div class="field"><label>Declarar ausencia después de (min)</label><input type="number" name="absenceGraceMinutes" min="0" max="240" step="1" required value="<%= op.absenceGraceMinutes %>" /></div>
                       <div class="field"><label>Zona horaria</label><select name="attendanceTimezone" required><option value="America/Bogota" selected>America/Bogota</option></select></div>
                       <div class="field"><label>Política de fotografía</label><select name="attendancePhotoPolicy" required><option value="NEVER" <%= op.attendancePhotoPolicy === 'NEVER' ? 'selected' : '' %>>Nunca</option><option value="RISK_ONLY" <%= op.attendancePhotoPolicy === 'RISK_ONLY' ? 'selected' : '' %>>Solo ante riesgo</option><option value="ALWAYS" <%= op.attendancePhotoPolicy === 'ALWAYS' ? 'selected' : '' %>>Siempre</option></select></div>
                       <div class="field"><label><input type="checkbox" name="manualAttendanceAllowed" value="true" <%= op.manualAttendanceAllowed ? 'checked' : '' %> /> Permitir corrección o registro manual auditado</label></div>
