@@ -9,14 +9,23 @@
     biometric_verification_required: 'Completa correctamente la validación facial para marcar.',
     online_biometric_required: 'Necesitas conexión para validar el rostro.',
     biometric_challenge_failed: 'No fue posible iniciar la validación facial.',
+    biometric_request_invalid: 'No fue posible preparar la validación facial.',
+    portal_session_required: 'Tu sesión del portal venció. Abre nuevamente el enlace del auxiliar.',
+    assignment_not_available: 'La asignación ya no está disponible para validar el rostro.',
+    biometric_temporarily_unavailable: 'La validación facial está temporalmente no disponible.',
     attendance_biometric_consent_required: 'Debes autorizar el registro facial para continuar.',
     attendance_biometric_antispoof_low: 'No se confirmó un rostro real. Intenta nuevamente.',
     attendance_biometric_liveness_low: 'No se confirmó el movimiento solicitado. Intenta nuevamente.',
     biometric_verification_rejected: 'El rostro no fue verificado. Repite la captura.'
   });
+  const LEGACY_BIOMETRIC_ROUTES = Object.freeze({
+    '/admin/operaciones/portal-activaciones/biometria/desafio': '/operaciones/portal/biometria/desafio',
+    '/admin/operaciones/portal-activaciones/biometria/verificar': '/operaciones/portal/biometria/verificar'
+  });
 
   let currentMarkType = null;
   let biometricVerified = false;
+  let lastBiometricStartError = null;
   const previousFetch = window.fetch.bind(window);
 
   function markResult(message, className = 'danger') {
@@ -27,8 +36,19 @@
     result.textContent = message;
   }
 
+  function rewriteBiometricInput(input) {
+    const originalUrl = typeof input === 'string' ? input : String(input?.url || '');
+    const matchedPath = Object.keys(LEGACY_BIOMETRIC_ROUTES)
+      .find((path) => originalUrl.includes(path));
+    if (!matchedPath) return { input, url: originalUrl };
+    const rewrittenUrl = originalUrl.replace(matchedPath, LEGACY_BIOMETRIC_ROUTES[matchedPath]);
+    if (typeof input === 'string') return { input: rewrittenUrl, url: rewrittenUrl };
+    return { input: new Request(rewrittenUrl, input), url: rewrittenUrl };
+  }
+
   window.fetch = async (input, init = {}) => {
-    const url = typeof input === 'string' ? input : String(input?.url || '');
+    const rewritten = rewriteBiometricInput(input);
+    const url = rewritten.url;
     let nextInit = init;
 
     if (url.includes('/biometria/verificar') && typeof init.body === 'string') {
@@ -41,7 +61,18 @@
       }
     }
 
-    const response = await previousFetch(input, nextInit);
+    const response = await previousFetch(rewritten.input, nextInit);
+
+    if (url.includes('/biometria/desafio')) {
+      try {
+        const payload = await response.clone().json();
+        lastBiometricStartError = response.ok
+          ? null
+          : (STRICT_ERRORS[payload?.error] || payload?.message || 'No fue posible iniciar la validación facial.');
+      } catch {
+        lastBiometricStartError = response.ok ? null : 'No fue posible iniciar la validación facial.';
+      }
+    }
 
     if (url.includes('/biometria/verificar')) {
       try {
@@ -69,13 +100,28 @@
     return response;
   };
 
+  function installBiometricStartMessageObserver() {
+    const result = document.getElementById('mark-result');
+    if (!result) return;
+    const clarify = () => {
+      const text = String(result.textContent || '');
+      if (!/No fue posible iniciar la cámara y la validación facial/i.test(text)) return;
+      result.textContent = lastBiometricStartError
+        || 'No fue posible abrir la cámara frontal. Cierra otras aplicaciones que puedan estar usándola e intenta nuevamente.';
+    };
+    new MutationObserver(clarify).observe(result, { childList: true, characterData: true, subtree: true });
+  }
+
   function initializeWorkerPortal() {
     if (window.location.pathname !== '/operaciones/portal') return;
+
+    installBiometricStartMessageObserver();
 
     document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
       button.addEventListener('click', (event) => {
         currentMarkType = button.dataset.markType || null;
         biometricVerified = false;
+        lastBiometricStartError = null;
         if (!navigator.onLine) {
           event.preventDefault();
           event.stopImmediatePropagation();

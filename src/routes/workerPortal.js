@@ -14,8 +14,10 @@ import {
   ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
   WORKER_BIOMETRIC_ACTION,
   WORKER_BIOMETRIC_ENTITY_TYPE,
+  assessWorkerBiometric,
   enrollWorkerBiometric,
-  getWorkerBiometricEnrollment
+  getWorkerBiometricEnrollment,
+  issueWorkerBiometricChallenge
 } from '../services/workerBiometricService.js';
 
 export * from './workerPortalCore.js';
@@ -48,6 +50,12 @@ function normalizedString(value, maxLength = 160) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
   return text ? text.slice(0, maxLength) : null;
+}
+
+function normalizeBiometricMarkType(value) {
+  const markType = normalizedString(value, 40)?.toUpperCase();
+  if (!BIOMETRIC_MARK_TYPES.has(markType)) throw new Error('attendance_biometric_mark_type_invalid');
+  return markType;
 }
 
 function strictError(res, status, error, message) {
@@ -123,6 +131,19 @@ export function workerPortalRouter(prisma, options = {}) {
     || ((workerId) => getWorkerBiometricEnrollment(prisma, workerId, { env: options.env || process.env }));
   const enrollBiometricFn = options.enrollBiometricFn
     || ((input, enrollmentOptions) => enrollWorkerBiometric(prisma, input, enrollmentOptions));
+  const assessBiometricFn = options.assessBiometricFn
+    || ((input, assessmentOptions) => assessWorkerBiometric(prisma, input, assessmentOptions));
+  const issueChallengeFn = options.issueChallengeFn || issueWorkerBiometricChallenge;
+  const loadBiometricAssignmentFn = options.loadBiometricAssignmentFn || (async (workerId, assignmentId) => (
+    prisma.dispatchAssignment.findFirst({
+      where: {
+        id: assignmentId,
+        workerId,
+        status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
+      },
+      include: { serviceRequest: { include: { operationPoint: true } } }
+    })
+  ));
   let repository = options.repository || null;
 
   const markUpload = options.strictMarkUpload || options.markUpload || options.arrivalUpload || multer({
@@ -150,6 +171,28 @@ export function workerPortalRouter(prisma, options = {}) {
       return false;
     }
     return true;
+  }
+
+  async function requireBiometricAssignment(req, res, portalSession, now) {
+    const assignmentId = normalizedString(req.body?.assignmentId, 120);
+    const idempotencyKey = normalizedString(req.body?.idempotencyKey, 120);
+    let markType;
+    try {
+      markType = normalizeBiometricMarkType(req.body?.markType);
+    } catch {
+      strictError(res, 400, 'biometric_request_invalid', 'Solicitud biométrica inválida.');
+      return null;
+    }
+    if (!assignmentId || !idempotencyKey) {
+      strictError(res, 400, 'biometric_request_invalid', 'Solicitud biométrica inválida.');
+      return null;
+    }
+    const assignment = await loadBiometricAssignmentFn(portalSession.workerId, assignmentId, now);
+    if (!assignment || assignment.serviceRequest?.operationPoint?.attendanceEnabled !== true) {
+      strictError(res, 404, 'assignment_not_available', 'La operación no está disponible para validar el rostro.');
+      return null;
+    }
+    return { assignment, assignmentId: assignment.id, idempotencyKey, markType };
   }
 
   async function markLatestEnrollmentAsWorkerPortal(workerId) {
@@ -319,6 +362,80 @@ export function workerPortalRouter(prisma, options = {}) {
     } catch (error) {
       const [status, code] = biometricPublicError(error);
       return strictError(res, status, code, 'No fue posible completar el registro facial.');
+    }
+  });
+
+  router.post('/biometria/desafio', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const context = await requireBiometricAssignment(req, res, portalSession, now);
+      if (!context) return;
+      const enrollment = await getEnrollmentFn(portalSession.workerId);
+      if (!enrollment?.enrolled || !enrollment?.descriptor) {
+        return strictError(res, 409, 'biometric_enrollment_required', 'Primero completa el registro facial inicial.');
+      }
+      const challenge = issueChallengeFn({
+        workerId: portalSession.workerId,
+        assignmentId: context.assignmentId,
+        idempotencyKey: context.idempotencyKey,
+        markType: context.markType
+      }, { now, env: options.env || process.env });
+      return res.status(200).json({ ok: true, challenge });
+    } catch (error) {
+      const [status, code] = biometricPublicError(error);
+      console.warn('[WORKER_PORTAL_BIOMETRIC_CHALLENGE_FAILED]', { code });
+      return strictError(res, status, code, 'No fue posible iniciar la validación facial.');
+    }
+  });
+
+  router.post('/biometria/verificar', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const context = await requireBiometricAssignment(req, res, portalSession, now);
+      if (!context) return;
+      const enrollment = await getEnrollmentFn(portalSession.workerId);
+      if (!enrollment?.enrolled || !enrollment?.descriptor) {
+        return strictError(res, 409, 'biometric_enrollment_required', 'Primero completa el registro facial inicial.');
+      }
+      const assessment = await assessBiometricFn({
+        workerId: portalSession.workerId,
+        assignmentId: context.assignmentId,
+        idempotencyKey: context.idempotencyKey,
+        markType: context.markType,
+        challengeToken: req.body?.challengeToken,
+        challengeAction: normalizedString(req.body?.challengeAction, 40),
+        challengeCompleted: req.body?.challengeCompleted === true,
+        descriptor: req.body?.descriptor,
+        realScore: req.body?.realScore,
+        liveScore: req.body?.liveScore,
+        modelVersion: normalizedString(req.body?.modelVersion, 100),
+        ipAddress: normalizedString(req.ip, 120),
+        userAgent: normalizedString(req.get?.('user-agent'), 500)
+      }, { now, env: options.env || process.env });
+      if (!assessment?.verified) {
+        return res.status(422).json({
+          ok: false,
+          error: 'biometric_verification_rejected',
+          verified: false,
+          requiresReview: false
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        decision: assessment.decision,
+        verified: true,
+        requiresReview: false
+      });
+    } catch (error) {
+      const [status, code] = biometricPublicError(error);
+      console.warn('[WORKER_PORTAL_BIOMETRIC_VERIFICATION_FAILED]', { code });
+      return strictError(res, status, code, 'No fue posible completar la validación facial.');
     }
   });
 
