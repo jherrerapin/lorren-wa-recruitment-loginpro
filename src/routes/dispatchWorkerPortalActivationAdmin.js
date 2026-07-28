@@ -14,7 +14,9 @@ import {
   assessWorkerBiometric,
   enrollWorkerBiometric,
   getWorkerBiometricEnrollment,
-  issueWorkerBiometricChallenge
+  issueWorkerBiometricChallenge,
+  WORKER_BIOMETRIC_ACTION,
+  WORKER_BIOMETRIC_ENTITY_TYPE
 } from '../services/workerBiometricService.js';
 
 export * from './dispatchWorkerPortalActivationAdminCore.js';
@@ -98,6 +100,23 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     return loader(prisma, { workerId, assignmentId, now });
   }
 
+  async function markEnrollmentAsWorkerPortal(workerId) {
+    const event = await prisma.devAuditEvent.findFirst({
+      where: {
+        entityType: WORKER_BIOMETRIC_ENTITY_TYPE,
+        entityId: workerId,
+        action: WORKER_BIOMETRIC_ACTION.ENROLLED
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true }
+    });
+    if (!event) return;
+    await prisma.devAuditEvent.update({
+      where: { id: event.id },
+      data: { actorSource: 'worker-portal', actorRole: 'worker' }
+    });
+  }
+
   router.use(cookieParser());
 
   router.post('/biometria/desafio', requireWorkerPortalJson, biometricJson, async (req, res) => {
@@ -166,6 +185,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
           ipAddress: requestIp(req),
           userAgent: requestUserAgent(req)
         }, { now, env: options.env || process.env });
+        await markEnrollmentAsWorkerPortal(portalSession.workerId);
         enrollment = await getEnrollmentFn(portalSession.workerId);
         enrolledNow = Boolean(enrollment.enrolled && enrollment.descriptor);
       }
