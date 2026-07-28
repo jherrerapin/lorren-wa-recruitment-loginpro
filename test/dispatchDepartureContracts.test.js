@@ -19,14 +19,16 @@ test('la salida usa una ruta protegida paralela a la llegada', () => {
   assert.match(route, /X-Requested-With|x-requested-with/);
 });
 
-test('el portal ofrece almuerzo opcional y salida después de la llegada', () => {
+test('el portal ofrece almuerzo opcional, salida y desglose de jornada', () => {
   assert.match(view, /BREAK_START/);
   assert.match(view, /BREAK_END/);
   assert.match(view, /Iniciar almuerzo/);
   assert.match(view, /Registrar salida/);
   assert.match(view, /departure_arrival_required/);
   assert.match(view, /Tiempo trabajado/);
-  assert.match(view, /almuerzo solo se descuenta/i);
+  assert.match(view, /jornada ordinaria es de 7 horas/i);
+  assert.match(view, /Horas extra/);
+  assert.match(view, /1 hora y 30 minutos/);
 });
 
 test('la evidencia separa llegada y salida', () => {
@@ -45,19 +47,24 @@ test('el almuerzo se registra como dos marcaciones auditables', () => {
   assert.match(breakRegistration, /serverReceivedAt/);
 });
 
-test('la salida calcula tramos reales y bloquea un almuerzo abierto', () => {
-  assert.match(departure, /attendance_departure_break_end_required/);
+test('la salida calcula tramos reales y penaliza un almuerzo abierto sin bloquear', () => {
+  assert.doesNotMatch(departure, /attendance_departure_break_end_required/);
   assert.match(departure, /breakStartAt/);
   assert.match(departure, /breakEndAt/);
-  assert.match(workPolicy, /unpaidBreakMinutesDeducted/);
+  assert.match(workPolicy, /INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES\s*=\s*90/);
+  assert.match(workPolicy, /STANDARD_DISPATCH_WORKDAY_MINUTES\s*=\s*7\s*\*\s*60/);
+  assert.match(workPolicy, /shortBreakMinutesCredited/);
+  assert.match(workPolicy, /overtimeMinutes/);
   assert.match(workPolicy, /recognizeEarlyArrival/);
 });
 
-test('el panel muestra registro, almuerzo, tiempo anticipado y neto', () => {
+test('el panel muestra almuerzo, horas ordinarias, extras y total trabajado', () => {
   assert.doesNotMatch(adminRoute, /upsertDispatchAttendanceBreakPolicy/);
-  assert.match(adminView, /Desde entrada hasta salida/);
-  assert.match(adminView, /Tiempo anticipado excluido/);
+  assert.match(adminView, /Entrada a salida/);
+  assert.match(adminView, /Anticipado excluido/);
   assert.match(adminView, /Almuerzo descontado/);
-  assert.match(adminView, /Tiempo neto trabajado/);
+  assert.match(adminView, /Horas ordinarias/);
+  assert.match(adminView, /Horas extra/);
+  assert.match(adminView, /Total trabajado/);
   assert.match(adminView, /Reconocer tiempo anterior al turno/);
 });
