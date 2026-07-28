@@ -97,10 +97,16 @@ function prependRouteHandlers(router, path, handlers) {
   target.route.stack.unshift(...temporary.stack[0].route.stack);
 }
 
+function usesInjectedAttendanceCore(options = {}) {
+  return [options.registerArrivalFn, options.registerDepartureFn, options.registerBreakFn]
+    .some((candidate) => typeof candidate === 'function');
+}
+
 export function workerPortalRouter(prisma, options = {}) {
   const repositoryFactory = options.repositoryFactory || (() => createPrismaWorkerPortalSessionRepository(prisma));
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
   const nowFn = options.nowFn || (() => new Date());
+  const injectedCore = usesInjectedAttendanceCore(options);
   let repository = options.repository || null;
 
   const markUpload = options.strictMarkUpload || options.markUpload || options.arrivalUpload || multer({
@@ -204,7 +210,10 @@ export function workerPortalRouter(prisma, options = {}) {
     }
   }
 
-  const router = coreWorkerPortalRouter(prisma, {
+  const router = coreWorkerPortalRouter(prisma, injectedCore ? {
+    ...options,
+    repository: getRepository()
+  } : {
     ...options,
     repository: getRepository(),
     markUpload: (_req, _res, next) => next(),
@@ -214,6 +223,8 @@ export function workerPortalRouter(prisma, options = {}) {
   const cspRouter = express.Router();
   cspRouter.use(installBiometricCspBridge);
   router.stack.unshift(...cspRouter.stack);
-  STRICT_MARK_PATHS.forEach((path) => prependRouteHandlers(router, path, [markUpload, strictMarkGuard]));
+  if (!injectedCore) {
+    STRICT_MARK_PATHS.forEach((path) => prependRouteHandlers(router, path, [markUpload, strictMarkGuard]));
+  }
   return router;
 }
