@@ -157,14 +157,14 @@ test('D: schedulingGuard bloquea offer_interview sin HV', () => {
 });
 
 
-test('HV .doc o storage sin MIME/nombre PDF/DOCX no cuenta como CV válido', () => {
-  assert.equal(hasValidCv(candidate({ cvMimeType: 'application/msword', cvOriginalName: 'hoja-vida.doc' })), false);
+test('HV .doc auténtico cuenta como válido y metadatos incompletos no', () => {
+  assert.equal(hasValidCv(candidate({ cvMimeType: 'application/msword', cvOriginalName: 'hoja-vida.doc' })), true);
   assert.equal(hasValidCv(candidate({ cvStorageKey: 'cv/cand-1', cvMimeType: null, cvOriginalName: null })), false);
   assert.equal(hasValidCv(candidate({ cvStorageKey: null, cvData: null, cvMimeType: 'application/pdf', cvOriginalName: 'hoja-vida.pdf' })), false);
   assert.equal(hasValidCv(candidate({ cvStorageKey: 'cv/cand-1.bin', cvMimeType: 'application/octet-stream', cvOriginalName: 'hoja-vida.docx' })), true);
 });
 
-test('E: HV imagen no cuenta como CV válido y seguridad pide PDF/DOCX', async () => {
+test('E: HV imagen no cuenta como CV válido y seguridad pide PDF, DOC o DOCX', async () => {
   const analysis = await analyzeAttachment({ buffer: Buffer.from('fake'), mimeType: 'image/jpeg', filename: 'hv.jpg' });
   const readiness = getCandidateReadiness(candidate({ cvStorageKey: 'cv/hv.jpg', cvMimeType: 'image/jpeg' }), activeBogota());
   const safe = sanitizeOutboundReply({ reply: 'Puedes enviarme la hoja de vida en foto clara.' });
@@ -172,7 +172,7 @@ test('E: HV imagen no cuenta como CV válido y seguridad pide PDF/DOCX', async (
   assert.equal(analysis.classification, 'CV_IMAGE_ONLY');
   assert.equal(readiness.hasValidCv, false);
   assert.equal(safe.blocked, true);
-  assert.match(safe.reply, /PDF o Word\/DOCX/i);
+  assert.match(safe.reply, /PDF, DOC o DOCX/i);
 });
 
 test('G: cortesía “Sii señora claro” no marca género femenino ni agenda', () => {
