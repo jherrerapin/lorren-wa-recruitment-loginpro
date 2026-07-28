@@ -44,7 +44,6 @@
     .work-chip strong { display: block; margin-top: 3px; color: #263645; font-size: 13px; }
     .work-chip.overtime { background: #fff6df; color: #76520b; }
     .work-chip.overtime strong { color: #76520b; }
-    .policy-note { margin: 12px 0; padding: 11px 12px; border-radius: 11px; background: #eef7ff; color: #315b78; font-size: 12px; line-height: 1.45; }
     .action-grid { display: grid; gap: 9px; }
     .mark-button, .primary-button, .secondary-button { width: 100%; border: 0; border-radius: 12px; padding: 14px 16px; font-weight: 800; cursor: pointer; }
     .mark-button, .primary-button { background: #176c36; color: #fff; }
@@ -124,9 +123,7 @@
                 <div class="detail-row"><span class="detail-label">Operación</span><span class="detail-value"><%= assignment.operationPointName %></span></div>
                 <div class="detail-row"><span class="detail-label">Ciudad</span><span class="detail-value"><%= assignment.cityName %></span></div>
                 <div class="detail-row"><span class="detail-label">Dirección</span><span class="detail-value"><%= assignment.address %></span></div>
-                <div class="detail-row"><span class="detail-label">Almuerzo</span><span class="detail-value"><%= assignment.breakLabel %></span></div>
               </div>
-              <div class="policy-note">La jornada ordinaria es de 7 horas trabajadas. Si no tomas la hora de almuerzo, o tomas menos de una hora, ese tiempo se suma a lo laborado y puede convertirse en hora extra. Si inicias el almuerzo y registras la salida sin marcar el regreso, Lórren descontará 1 hora y 30 minutos.</div>
               <% if (assignment.arrivalReported || assignment.departureReported) { %>
                 <div class="work-summary">
                   <div class="work-chip">Llegada<strong><%= assignment.arrivalReportedLabel || 'Registrada' %></strong></div>
@@ -134,9 +131,7 @@
                   <% if (assignment.breakStarted) { %><div class="work-chip">Inicio almuerzo<strong><%= assignment.breakStartLabel %></strong></div><% } %>
                   <% if (assignment.breakEnded) { %><div class="work-chip">Fin almuerzo<strong><%= assignment.breakEndLabel %></strong></div><% } %>
                   <% if (assignment.workedLabel) { %><div class="work-chip">Tiempo trabajado<strong><%= assignment.workedLabel %></strong></div><% } %>
-                  <% if (assignment.ordinaryWorkedLabel) { %><div class="work-chip">Horas ordinarias<strong><%= assignment.ordinaryWorkedLabel %></strong></div><% } %>
                   <% if (assignment.overtimeMinutes > 0) { %><div class="work-chip overtime">Horas extra<strong><%= assignment.overtimeLabel %></strong></div><% } %>
-                  <% if (assignment.shortBreakMinutesCredited > 0 && assignment.departureReported) { %><div class="work-chip">Almuerzo no tomado<strong><%= assignment.shortBreakMinutesCredited %> min sumados</strong></div><% } %>
                   <% if (assignment.arrivalStatusLabel) { %><div class="work-chip">Estado<strong><%= assignment.arrivalStatusLabel %></strong></div><% } %>
                 </div>
               <% } %>
