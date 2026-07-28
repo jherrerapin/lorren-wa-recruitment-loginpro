@@ -19,21 +19,22 @@ if (!globalForPrisma[MIDDLEWARE_FLAG] && typeof prismaClient.$use === 'function'
       return result;
     }
 
-    const [worker, client] = await Promise.all([
-      prismaClient.dispatchWorker.findUnique({
-        where: { id: result.workerId },
-        select: { isTestProfile: true }
-      }),
-      prismaClient.dispatchClient.findUnique({
-        where: { id: operationPoint.clientId },
-        select: { isTestClient: true }
-      })
-    ]);
+    const client = await prismaClient.dispatchClient.findUnique({
+      where: { id: operationPoint.clientId },
+      select: { isTestClient: true }
+    });
+    if (client?.isTestClient !== true) return result;
+
+    const worker = await prismaClient.dispatchWorker.findUnique({
+      where: { id: result.workerId },
+      select: { isTestProfile: true }
+    });
+    if (worker?.isTestProfile !== true) return result;
 
     const enabled = await isDispatchTestGeofenceBypassEnabled(prismaClient, {
       operationPointId: operationPoint.id,
-      clientIsTest: client?.isTestClient === true,
-      workerIsTest: worker?.isTestProfile === true
+      clientIsTest: true,
+      workerIsTest: true
     });
     if (!enabled) return result;
 
