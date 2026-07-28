@@ -4,9 +4,11 @@ import fs from 'node:fs';
 
 const serviceWorker = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 
-test('la nueva interfaz invalida el caché anterior del portal', () => {
-  assert.match(serviceWorker, /CACHE_NAME\s*=\s*'lorren-worker-portal-shell-v4'/);
+
+test('las reglas estrictas invalidan el caché anterior del portal', () => {
+  assert.match(serviceWorker, /CACHE_NAME\s*=\s*'lorren-worker-portal-shell-v5'/);
   assert.match(serviceWorker, /'\/operaciones\/portal\/offline\.js'/);
   assert.match(serviceWorker, /cache\.addAll\(STATIC_ASSETS\)/);
-  assert.match(serviceWorker, /name !== CACHE_NAME/);
+  assert.match(serviceWorker, /key !== CACHE_NAME/);
+  assert.match(serviceWorker, /La asistencia requiere conexión/);
 });

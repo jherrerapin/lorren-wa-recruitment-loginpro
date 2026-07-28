@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const route = fs.readFileSync(new URL('../src/routes/workerPortal.js', import.meta.url), 'utf8');
+const route = fs.readFileSync(new URL('../src/routes/workerPortalCore.js', import.meta.url), 'utf8');
 const view = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 const departure = fs.readFileSync(new URL('../src/modules/dispatch-attendance/application/registerDeparture.js', import.meta.url), 'utf8');
 const breakRegistration = fs.readFileSync(new URL('../src/modules/dispatch-attendance/application/registerBreak.js', import.meta.url), 'utf8');
@@ -10,6 +10,7 @@ const workPolicy = fs.readFileSync(new URL('../src/modules/dispatch-attendance/d
 const adminRoute = fs.readFileSync(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8');
 const adminView = fs.readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
 const evidence = fs.readFileSync(new URL('../src/services/attendanceEvidenceStorage.js', import.meta.url), 'utf8');
+
 
 test('la salida usa una ruta protegida paralela a la llegada', () => {
   assert.match(route, /\/asignaciones\/:assignmentId\/salida/);
@@ -19,7 +20,8 @@ test('la salida usa una ruta protegida paralela a la llegada', () => {
   assert.match(route, /X-Requested-With|x-requested-with/);
 });
 
-test('el portal ofrece almuerzo opcional, salida y desglose de jornada', () => {
+
+test('el núcleo conserva almuerzo opcional, salida y cálculo de jornada', () => {
   assert.match(view, /BREAK_START/);
   assert.match(view, /BREAK_END/);
   assert.match(view, /Iniciar almuerzo/);
@@ -31,12 +33,14 @@ test('el portal ofrece almuerzo opcional, salida y desglose de jornada', () => {
   assert.match(view, /1 hora y 30 minutos/);
 });
 
+
 test('la evidencia separa llegada y salida', () => {
   assert.match(evidence, /MARK_PATHS/);
   assert.match(evidence, /ARRIVAL: 'arrival'/);
   assert.match(evidence, /DEPARTURE: 'departure'/);
   assert.match(evidence, /storeAttendanceDepartureEvidence/);
 });
+
 
 test('el almuerzo se registra como dos marcaciones auditables', () => {
   assert.match(route, /inicio-almuerzo/);
@@ -46,6 +50,7 @@ test('el almuerzo se registra como dos marcaciones auditables', () => {
   assert.match(breakRegistration, /idempotencyKey/);
   assert.match(breakRegistration, /serverReceivedAt/);
 });
+
 
 test('la salida calcula tramos reales y penaliza un almuerzo abierto sin bloquear', () => {
   assert.doesNotMatch(departure, /attendance_departure_break_end_required/);
@@ -58,7 +63,8 @@ test('la salida calcula tramos reales y penaliza un almuerzo abierto sin bloquea
   assert.match(workPolicy, /recognizeEarlyArrival/);
 });
 
-test('el panel muestra almuerzo, horas ordinarias, extras y total trabajado', () => {
+
+test('el cálculo administrativo se conserva aunque la capa compacta lo oculte', () => {
   assert.doesNotMatch(adminRoute, /upsertDispatchAttendanceBreakPolicy/);
   assert.match(adminView, /Entrada a salida/);
   assert.match(adminView, /Anticipado excluido/);

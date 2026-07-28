@@ -301,32 +301,37 @@ test('un origen público faltante falla cerrado sin filtrar el token', async () 
   }
 });
 
-test('la pantalla informa el alcance del permiso y mantiene copia solo mediante clic', () => {
+test('la pantalla conserva la emisión del enlace y mueve el rostro al portal', () => {
   const view = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
+  const hardening = fs.readFileSync('src/public/worker-portal-hardening.js', 'utf8');
   const copyListenerIndex = view.indexOf("copyButton?.addEventListener('click'");
   const clipboardIndex = view.indexOf('navigator.clipboard.writeText');
   assert.ok(copyListenerIndex >= 0);
   assert.ok(clipboardIndex > copyListenerIndex);
   assert.match(view, /Gestión de asistencia/);
-  assert.match(view, /Registrar rostro/);
-  assert.match(view, /autorizó la plantilla facial/);
+  assert.match(hardening, /getElementById\('enroll-button'\)\?\.remove/);
+  assert.match(hardening, /getElementById\('biometric-dialog'\)\?\.remove/);
+  assert.match(hardening, /Registro facial desde el portal/);
   assert.match(view, /No abras este enlace en tu computador/);
   assert.doesNotMatch(view, /window\.open\(|location\.href\s*=\s*activationUrl/);
 });
 
-test('las rutas administrativas exigen permiso y las biométricas públicas exigen sesión del portal', () => {
+test('las rutas administrativas conservan permisos y la biometría usa sesión del portal', () => {
   const bridgeSource = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
   const activationSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
+  const activationCoreSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdminCore.js', 'utf8');
 
   assert.match(bridgeSource, /'\/portal-activaciones',[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/);
-  assert.match(activationSource, /router\.get\('\/', requireAttendancePermission/);
-  assert.match(activationSource, /router\.post\('\/emitir', requireAttendancePermission, requireAdminJson/);
-  assert.match(activationSource, /router\.post\('\/biometria\/registrar', requireAttendancePermission, requireAdminJson/);
-  assert.match(activationSource, /router\.post\('\/biometria\/desafio', requireWorkerPortalJson/);
+  assert.match(activationCoreSource, /router\.get\('\/', requireAttendancePermission/);
+  assert.match(activationCoreSource, /router\.post\('\/emitir', requireAttendancePermission, requireAdminJson/);
+  assert.match(activationCoreSource, /router\.post\('\/biometria\/revocar', requireAttendancePermission, requireAdminJson/);
+  assert.match(activationSource, /replacementRouter\.post\('\/biometria\/desafio', parsePortalCookie, requireWorkerPortalJson/);
+  assert.match(activationSource, /replacementRouter\.post\('\/biometria\/verificar', parsePortalCookie, requireWorkerPortalJson/);
+  assert.match(activationSource, /biometric_enrollment_moved_to_worker_portal/);
   assert.match(activationSource, /resolvePortalRequestSession/);
   assert.match(activationSource, /loadBiometricAssignment/);
   assert.match(bridgeSource, /filterOperationsPersonalAttendanceHtml/);
-  assert.match(activationSource, /currentRole\(req\) === 'dev' \|\| req\.canAccessAttendanceFeature === true/);
+  assert.match(activationCoreSource, /currentRole\(req\) === 'dev' \|\| req\.canAccessAttendanceFeature === true/);
   assert.match(personalView, /<% if \(role === 'dev'\) \{ %>[\s\S]*Sincronizar contratados/);
 });

@@ -1,391 +1,115 @@
 import express from 'express';
-import cookieParser from 'cookie-parser';
 import multer from 'multer';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import {
-  hashInstallationId,
-  normalizeActivationToken,
-  normalizeInstallationId
-} from '../modules/dispatch-attendance/domain/deviceActivationPolicy.js';
-import {
-  WORKER_PORTAL_SESSION_COOKIE_NAME,
-  WORKER_PORTAL_SESSION_COOKIE_PATH
-} from '../modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
-import {
-  activateWorkerPortalSession,
-  resolveWorkerPortalSession
-} from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
-import { registerDispatchArrival } from '../modules/dispatch-attendance/application/registerArrival.js';
-import { registerDispatchDeparture } from '../modules/dispatch-attendance/application/registerDeparture.js';
-import { registerDispatchBreak } from '../modules/dispatch-attendance/application/registerBreak.js';
-import {
-  loadWorkerPortalAssignmentForArrival,
-  loadWorkerPortalAssignmentForMark,
-  loadWorkerPortalAssignments
-} from '../modules/dispatch-attendance/application/workerPortalAssignments.js';
+import { workerPortalRouter as coreWorkerPortalRouter, applyWorkerPortalSecurityHeaders } from './workerPortalCore.js';
+import { resolveWorkerPortalSession } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { createPrismaWorkerPortalSessionRepository } from '../modules/dispatch-attendance/infrastructure/prismaWorkerPortalSessionRepository.js';
-import { createWorkerPortalActivationAbuseGuard } from '../services/workerPortalActivationAbuseGuard.js';
+import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
 import {
-  MAX_ATTENDANCE_EVIDENCE_BYTES,
-  discardAttendanceArrivalEvidence,
-  discardAttendanceDepartureEvidence,
-  storeAttendanceArrivalEvidence,
-  storeAttendanceDepartureEvidence
-} from '../services/attendanceEvidenceStorage.js';
+  calculateAttendanceDistanceMeters,
+  isAttendanceInsideGeofence
+} from '../modules/dispatch-attendance/domain/attendanceDistance.js';
+import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../modules/dispatch-attendance/application/registerArrival.js';
+import { MAX_ATTENDANCE_EVIDENCE_BYTES } from '../services/attendanceEvidenceStorage.js';
+import {
+  ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
+  WORKER_BIOMETRIC_ACTION
+} from '../services/workerBiometricService.js';
 
-export const WORKER_PORTAL_HOME_PATH = '/operaciones/portal';
-export const WORKER_PORTAL_ACTIVATION_PATH = '/operaciones/portal/activar';
-export const WORKER_PORTAL_INSTALLATION_COOKIE_NAME = '__Secure-lorren-installation';
-export const WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+export * from './workerPortalCore.js';
 
-const WORKER_PORTAL_SERVICE_WORKER_FILE = fileURLToPath(new URL('../public/worker-portal-sw.js', import.meta.url));
-const WORKER_PORTAL_OFFLINE_RUNTIME_FILE = fileURLToPath(new URL('../public/worker-portal-offline.js', import.meta.url));
-const WORKER_PORTAL_MANIFEST_FILE = fileURLToPath(new URL('../public/worker-portal.webmanifest', import.meta.url));
-const WORKER_PORTAL_ICON_FILE = fileURLToPath(new URL('../public/worker-portal-icon.svg', import.meta.url));
-const GENERIC_ACTIVATION_ERROR = 'activation_invalid_or_expired';
-const ACTIVATION_RATE_LIMIT_ERROR = 'activation_temporarily_limited';
-const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
-const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
-const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
-const BREAK_MARK_TYPES = new Set(['BREAK_START', 'BREAK_END']);
-const CONFIGURATION_ERROR_CODES = new Set([
-  'installation_pepper_required',
-  'installation_pepper_too_short',
-  'worker_portal_session_ttl_invalid',
-  'attendance_evidence_storage_unavailable'
-]);
-const EXPECTED_ACTIVATION_REJECTION_CODES = new Set([
-  'activation_token_required',
-  'activation_token_invalid',
-  'worker_portal_activation_request_invalid',
-  'worker_portal_session_repository_result_invalid',
-  'worker_portal_session_repository_expiry_invalid',
-  'worker_portal_session_repository_expired'
-]);
-const INVALID_SESSION_COOKIE_CODES = new Set(['worker_portal_session_token_invalid']);
-const EXPECTED_MARK_INPUT_CODES = new Set([
-  'attendance_assignment_not_found',
-  'attendance_evidence_file_invalid',
-  'attendance_evidence_file_too_large',
-  'attendance_evidence_mime_not_allowed',
-  'attendance_evidence_worker_id_invalid',
-  'attendance_evidence_assignment_id_invalid',
-  'attendance_evidence_idempotency_key_invalid',
-  'attendance_evidence_mark_type_invalid'
-]);
+const HUMAN_CDN_ORIGIN = 'https://cdn.jsdelivr.net';
+const STRICT_MARK_PATHS = [
+  '/asignaciones/:assignmentId/llegada',
+  '/asignaciones/:assignmentId/inicio-almuerzo',
+  '/asignaciones/:assignmentId/fin-almuerzo',
+  '/asignaciones/:assignmentId/salida'
+];
+const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'DEPARTURE']);
 
-function validDate(value) {
-  return value instanceof Date && !Number.isNaN(value.getTime());
+function markTypeFromPath(pathname = '') {
+  if (pathname.endsWith('/llegada')) return 'ARRIVAL';
+  if (pathname.endsWith('/salida')) return 'DEPARTURE';
+  if (pathname.endsWith('/inicio-almuerzo')) return 'BREAK_START';
+  if (pathname.endsWith('/fin-almuerzo')) return 'BREAK_END';
+  return null;
 }
 
-function createNonce(randomBytesFn = randomBytes) {
-  const value = randomBytesFn(18);
-  if (!Buffer.isBuffer(value) || value.length !== 18) throw new Error('worker_portal_nonce_source_invalid');
-  return value.toString('base64');
-}
-
-function optionalInteger(value) {
-  if (value === undefined || value === null || value === '') return undefined;
-  return Number(value);
-}
-
-function normalizeOptionalHeader(value, maxLength) {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim();
-  return normalized ? normalized.slice(0, maxLength) : null;
-}
-
-function requestIp(req) {
-  return normalizeOptionalHeader(req.ip, 120) || 'unknown';
-}
-
-function requestPlatform(req) {
-  return normalizeOptionalHeader(req.get?.('sec-ch-ua-platform'), 120);
-}
-
-function requestUserAgent(req) {
-  return normalizeOptionalHeader(req.get?.('user-agent'), 500);
-}
-
-function errorCode(error) {
-  const candidate = typeof error?.code === 'string'
-    ? error.code
-    : (typeof error?.message === 'string' ? error.message : 'unknown');
-  return /^[A-Za-z0-9_]{1,100}$/.test(candidate) ? candidate : 'worker_portal_error';
-}
-
-function isConfigurationError(error) {
-  const code = errorCode(error);
-  return CONFIGURATION_ERROR_CODES.has(code)
-    || code.startsWith('worker_portal_session_prisma_')
-    || code.startsWith('worker_portal_assignment_')
-    || code.endsWith('_contract_invalid')
-    || code.endsWith('_transaction_required')
-    || code === 'worker_portal_repository_unavailable'
-    || code === 'R2_storage_is_not_configured';
-}
-
-function isActivationBodyParserError(error) {
-  return error?.type === 'entity.parse.failed'
-    || error?.type === 'entity.too.large'
-    || (error instanceof SyntaxError && Number(error?.status) === 400);
-}
-
-function requiredBodyNumber(value, label, { min, max }) {
-  if (value === undefined || value === null || value === '') throw new Error(`${label}_required`);
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${label}_invalid`);
-  return number;
-}
-
-function optionalBodyDate(value, label) {
+function finiteNumber(value, { min = -Infinity, max = Infinity } = {}) {
   if (value === undefined || value === null || value === '') return null;
-  const date = new Date(value);
-  if (!validDate(date)) throw new Error(`${label}_invalid`);
-  return date;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : null;
 }
 
-function normalizeIdempotencyKey(value) {
-  if (typeof value !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(value.trim())) {
-    throw new Error('attendance_idempotency_key_invalid');
-  }
-  return value.trim();
+function normalizedString(value, maxLength = 160) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text.slice(0, maxLength) : null;
 }
 
-function normalizeCaptureMode(value) {
-  if (value === undefined || value === null || value === '') return ONLINE_WEB_CAPTURE_MODE;
-  if (typeof value !== 'string') throw new Error('attendance_capture_mode_invalid');
-  const normalized = value.trim().toUpperCase();
-  if (![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(normalized)) {
-    throw new Error('attendance_capture_mode_invalid');
-  }
-  return normalized;
+function strictError(res, status, error, message) {
+  applyWorkerPortalSecurityHeaders(res);
+  return res.status(status).json({ ok: false, error, message });
 }
 
-function arrivalPublicError(result) {
-  const firstFlag = result?.validation?.riskFlags?.[0];
-  return ({
-    ARRIVAL_WINDOW_NOT_OPEN: 'arrival_window_not_open',
-    DUPLICATE_ARRIVAL: 'arrival_already_registered',
-    ATTENDANCE_NOT_ENABLED: 'attendance_not_enabled',
-    ASSIGNMENT_NOT_ACTIVE: 'assignment_not_available'
-  })[firstFlag] || 'arrival_not_recorded';
+function verifiedBiometricMetadata(metadata, expected) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+  return metadata.decision === 'VERIFIED'
+    && metadata.verified === true
+    && String(metadata.workerId || '') === String(expected.workerId)
+    && String(metadata.assignmentId || '') === String(expected.assignmentId)
+    && String(metadata.markType || '') === String(expected.markType);
 }
 
-function arrivalPublicResult(result) {
-  if (!result?.recorded) {
-    return { status: 409, payload: { ok: false, error: arrivalPublicError(result) } };
-  }
-  const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
-  const punctualityStatus = result.validation?.reportedPunctuality || null;
-  const riskFlags = Array.isArray(result.validation?.riskFlags) ? result.validation.riskFlags : [];
-  let message = 'Llegada registrada y enviada para revisión.';
-  if (riskFlags.includes('OFFLINE_WEB_CAPTURE')) {
-    message = 'Llegada guardada sin conexión y sincronizada. Quedó pendiente de revisión.';
-  } else if (validationStatus === 'AUTO_VALIDATED') {
-    message = punctualityStatus === 'LATE'
-      ? 'Llegada registrada y validada. Se registró como llegada tarde.'
-      : 'Llegada registrada y validada a tiempo.';
-  }
-  return {
-    status: 200,
-    payload: {
-      ok: true,
-      markType: 'ARRIVAL',
-      recorded: true,
-      replayed: Boolean(result.replayed),
-      validationStatus,
-      attendanceStatus: result.validation?.attendanceStatus || null,
-      punctualityStatus,
-      requiresReview: validationStatus === 'REVIEW_REQUIRED',
-      message
+function expandBiometricCsp(value) {
+  if (typeof value !== 'string') return value;
+  return value
+    .replace("script-src ", `script-src ${HUMAN_CDN_ORIGIN} `)
+    .replace("connect-src 'self'", `connect-src 'self' ${HUMAN_CDN_ORIGIN}`);
+}
+
+function installBiometricCspBridge(_req, res, next) {
+  const originalSet = res.set.bind(res);
+  res.set = (field, value) => {
+    if (typeof field === 'string' && field.toLowerCase() === 'content-security-policy') {
+      return originalSet(field, expandBiometricCsp(value));
     }
-  };
-}
-
-function departurePublicResult(result) {
-  const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
-  const riskFlags = Array.isArray(result.validation?.riskFlags) ? result.validation.riskFlags : [];
-  const workedMinutes = Number(result.validation?.workedMinutes);
-  const hours = Number.isFinite(workedMinutes) ? Math.floor(workedMinutes / 60) : null;
-  const minutes = Number.isFinite(workedMinutes) ? workedMinutes % 60 : null;
-  const workedLabel = hours === null ? null : `${hours} h${minutes ? ` ${minutes} min` : ''}`;
-  let message = workedLabel
-    ? `Salida registrada. Tiempo trabajado neto: ${workedLabel}.`
-    : 'Salida registrada correctamente.';
-  if (riskFlags.includes('OFFLINE_WEB_CAPTURE')) {
-    message = `${message} La marcación sin conexión quedó pendiente de revisión.`;
-  } else if (validationStatus === 'REVIEW_REQUIRED') {
-    message = `${message} Quedó pendiente de revisión.`;
-  }
-  return {
-    status: 200,
-    payload: {
-      ok: true,
-      markType: 'DEPARTURE',
-      recorded: true,
-      replayed: Boolean(result.replayed),
-      validationStatus,
-      attendanceStatus: result.attendanceSession?.attendanceStatus || null,
-      workedMinutes: Number.isFinite(workedMinutes) ? workedMinutes : null,
-      grossWorkedMinutes: result.validation?.grossWorkedMinutes ?? null,
-      unpaidBreakMinutesDeducted: result.validation?.unpaidBreakMinutesDeducted ?? null,
-      earlyMinutesExcluded: result.validation?.earlyMinutesExcluded ?? null,
-      requiresReview: validationStatus === 'REVIEW_REQUIRED',
-      message
+    if (field && typeof field === 'object' && !Array.isArray(field)) {
+      const headers = { ...field };
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === 'content-security-policy') headers[key] = expandBiometricCsp(headers[key]);
+      }
+      return originalSet(headers);
     }
+    return originalSet(field, value);
   };
-}
-
-function breakPublicResult(result, markType) {
-  const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
-  const starting = markType === 'BREAK_START';
-  return {
-    status: 200,
-    payload: {
-      ok: true,
-      markType,
-      recorded: true,
-      replayed: Boolean(result.replayed),
-      validationStatus,
-      attendanceStatus: result.attendanceSession?.attendanceStatus || null,
-      requiresReview: validationStatus === 'REVIEW_REQUIRED',
-      message: starting
-        ? 'Inicio de almuerzo registrado. El tiempo dejará de contabilizarse hasta que marques el regreso.'
-        : 'Fin de almuerzo registrado. El tiempo trabajado vuelve a contabilizarse.'
-    }
-  };
-}
-
-export function workerPortalCookieOptions(maxAge) {
-  if (!Number.isFinite(maxAge) || maxAge <= 0) throw new Error('worker_portal_cookie_max_age_invalid');
-  return { httpOnly: true, secure: true, sameSite: 'strict', path: WORKER_PORTAL_SESSION_COOKIE_PATH, maxAge };
-}
-
-export function applyWorkerPortalSecurityHeaders(res, nonce = null) {
-  const scriptSource = nonce ? `'nonce-${nonce}'` : "'none'";
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.set('Pragma', 'no-cache');
-  res.set('Expires', '0');
-  res.set('Referrer-Policy', 'no-referrer');
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'DENY');
-  res.set('Content-Security-Policy', `default-src 'none'; script-src ${scriptSource} 'self'; worker-src 'self'; manifest-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
-}
-
-export function redactWorkerPortalActivationUrlForLogging(req, _res, next) {
-  if (req.method === 'GET' && typeof req.originalUrl === 'string') {
-    req.originalUrl = req.originalUrl.replace(/([?&]token=)[^&#]*/i, '$1[REDACTED]');
-  }
   return next();
 }
 
-export function resolveWorkerPortalInstallationId(req, randomUUIDFn = randomUUID) {
-  const current = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
-  if (current) {
-    try {
-      return { installationId: normalizeInstallationId(current), shouldSetCookie: false };
-    } catch {
-      // Reemplaza valores heredados inválidos después de una activación exitosa.
-    }
-  }
-  return { installationId: normalizeInstallationId(randomUUIDFn()), shouldSetCookie: true };
+function routeLayer(router, path, method = 'post') {
+  return router.stack.find((layer) => layer.route?.path === path && layer.route.methods?.[method]);
 }
 
-export function setWorkerPortalInstallationCookie(res, installationId) {
-  res.cookie(
-    WORKER_PORTAL_INSTALLATION_COOKIE_NAME,
-    normalizeInstallationId(installationId),
-    workerPortalCookieOptions(WORKER_PORTAL_INSTALLATION_COOKIE_MAX_AGE_MS)
-  );
+function prependRouteHandlers(router, path, handlers) {
+  const target = routeLayer(router, path);
+  if (!target) throw new Error(`worker_portal_strict_route_missing:${path}`);
+  const temporary = express.Router();
+  temporary.post(path, ...handlers);
+  target.route.stack.unshift(...temporary.stack[0].route.stack);
 }
 
-export function buildWorkerPortalActivationUrl(origin, rawActivationToken) {
-  const token = normalizeActivationToken(rawActivationToken);
-  const url = new URL(WORKER_PORTAL_ACTIVATION_PATH, origin);
-  if (url.protocol !== 'https:') throw new Error('worker_portal_activation_origin_https_required');
-  url.searchParams.set('token', token);
-  return url.toString();
-}
-
-function clearWorkerPortalSessionCookie(res) {
-  res.clearCookie(WORKER_PORTAL_SESSION_COOKIE_NAME, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'strict',
-    path: WORKER_PORTAL_SESSION_COOKIE_PATH
-  });
-}
-
-function renderPortal(res, mode, nonce, options = {}) {
-  res.set('X-Lorren-Worker-Portal-Mode', mode);
-  return res.render('workerPortal', {
-    mode,
-    nonce,
-    expiresAt: validDate(options.expiresAt) ? options.expiresAt.toISOString() : null,
-    assignments: Array.isArray(options.assignments) ? options.assignments : []
-  });
-}
-
-export function createWorkerPortalActivationAttemptMiddleware(attemptGuard) {
-  if (!attemptGuard || typeof attemptGuard.consume !== 'function') {
-    throw new Error('worker_portal_activation_attempt_guard_required');
-  }
-  return function workerPortalActivationAttemptMiddleware(req, res, next) {
-    const decision = attemptGuard.consume(requestIp(req));
-    if (decision.allowed) return next();
-    applyWorkerPortalSecurityHeaders(res);
-    res.set('Retry-After', String(decision.retryAfterSeconds));
-    return res.status(429).json({ ok: false, error: ACTIVATION_RATE_LIMIT_ERROR });
-  };
-}
-
-export function workerPortalActivationJsonErrorHandler(error, _req, res, next) {
-  if (!isActivationBodyParserError(error)) return next(error);
-  applyWorkerPortalSecurityHeaders(res);
-  return res.status(error?.type === 'entity.too.large' ? 413 : 400).json({
-    ok: false,
-    error: GENERIC_ACTIVATION_ERROR
-  });
-}
-
-export function workerPortalArrivalUploadErrorHandler(error, _req, res, next) {
-  if (!(error instanceof multer.MulterError)) return next(error);
-  applyWorkerPortalSecurityHeaders(res);
-  return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
-    ok: false,
-    error: 'arrival_evidence_invalid'
-  });
+function usesInjectedAttendanceCore(options = {}) {
+  return [options.registerArrivalFn, options.registerDepartureFn, options.registerBreakFn]
+    .some((candidate) => typeof candidate === 'function');
 }
 
 export function workerPortalRouter(prisma, options = {}) {
-  const router = express.Router();
   const repositoryFactory = options.repositoryFactory || (() => createPrismaWorkerPortalSessionRepository(prisma));
-  let repository = options.repository || null;
-  const activateSessionFn = options.activateSessionFn || activateWorkerPortalSession;
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
-  const loadAssignmentsFn = options.loadAssignmentsFn || loadWorkerPortalAssignments;
-  const loadAssignmentForArrivalFn = options.loadAssignmentForArrivalFn || loadWorkerPortalAssignmentForArrival;
-  const loadAssignmentForDepartureFn = options.loadAssignmentForDepartureFn || loadWorkerPortalAssignmentForMark;
-  const loadAssignmentForBreakFn = options.loadAssignmentForBreakFn || loadWorkerPortalAssignmentForMark;
-  const registerArrivalFn = options.registerArrivalFn || registerDispatchArrival;
-  const registerDepartureFn = options.registerDepartureFn || registerDispatchDeparture;
-  const registerBreakFn = options.registerBreakFn || registerDispatchBreak;
-  const storeArrivalEvidenceFn = options.storeArrivalEvidenceFn || storeAttendanceArrivalEvidence;
-  const discardArrivalEvidenceFn = options.discardArrivalEvidenceFn || discardAttendanceArrivalEvidence;
-  const storeDepartureEvidenceFn = options.storeDepartureEvidenceFn || storeAttendanceDepartureEvidence;
-  const discardDepartureEvidenceFn = options.discardDepartureEvidenceFn || discardAttendanceDepartureEvidence;
-  const installationPepper = options.installationPepper ?? process.env.ATTENDANCE_INSTALLATION_PEPPER;
-  const sessionTtlMinutes = optionalInteger(options.sessionTtlMinutes ?? process.env.ATTENDANCE_PORTAL_SESSION_TTL_MINUTES);
-  const randomUUIDFn = options.randomUUIDFn || randomUUID;
-  const randomSessionBytesFn = options.randomSessionBytesFn;
-  const nonceBytesFn = options.nonceBytesFn || randomBytes;
   const nowFn = options.nowFn || (() => new Date());
-  const activationAttemptGuard = options.activationAttemptGuard || createWorkerPortalActivationAbuseGuard();
-  const activationAttemptMiddleware = createWorkerPortalActivationAttemptMiddleware(activationAttemptGuard);
-  const activationJsonParser = express.json({ limit: '4kb', strict: true, type: 'application/json' });
-  const markUpload = options.markUpload || options.arrivalUpload || multer({
+  const injectedCore = usesInjectedAttendanceCore(options);
+  let repository = options.repository || null;
+
+  const markUpload = options.strictMarkUpload || options.markUpload || options.arrivalUpload || multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_ATTENDANCE_EVIDENCE_BYTES, files: 1, fields: 12, fieldSize: 4 * 1024 }
   }).single('selfie');
@@ -396,260 +120,111 @@ export function workerPortalRouter(prisma, options = {}) {
     return repository;
   }
 
-  async function resolveRequestSession(req, now) {
-    const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
-    if (!rawSessionToken) return null;
-    return resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
-  }
-
-  async function handleMark(req, res, markType) {
-    let evidence = null;
-    const isArrival = markType === 'ARRIVAL';
-    const isDeparture = markType === 'DEPARTURE';
-    const isBreak = BREAK_MARK_TYPES.has(markType);
-    const loadAssignment = isArrival
-      ? loadAssignmentForArrivalFn
-      : (isDeparture ? loadAssignmentForDepartureFn : loadAssignmentForBreakFn);
-    const register = isArrival
-      ? registerArrivalFn
-      : (isDeparture ? registerDepartureFn : registerBreakFn);
-    const storeEvidence = isArrival ? storeArrivalEvidenceFn : storeDepartureEvidenceFn;
-    const discardEvidence = isArrival ? discardArrivalEvidenceFn : discardDepartureEvidenceFn;
-
+  async function strictMarkGuard(req, res, next) {
     try {
+      applyWorkerPortalSecurityHeaders(res);
+      if (req.get?.('x-requested-with') !== 'worker-portal') {
+        return strictError(res, 400, 'mark_request_invalid', 'Solicitud de marcación inválida.');
+      }
+
       const now = nowFn();
-      if (!validDate(now)) throw new Error('worker_portal_mark_now_invalid');
-      const portalSession = await resolveRequestSession(req, now);
-      if (!portalSession) {
-        clearWorkerPortalSessionCookie(res);
-        return res.status(401).json({ ok: false, error: 'portal_session_required' });
+      if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
+        throw new Error('worker_portal_strict_now_invalid');
       }
 
-      const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotencyKey);
-      const captureMode = normalizeCaptureMode(req.body?.captureMode);
-      const clientCapturedAt = optionalBodyDate(req.body?.clientCapturedAt, 'attendance_client_captured_at');
-      if (captureMode === OFFLINE_WEB_CAPTURE_MODE && !clientCapturedAt) {
-        throw new Error('attendance_client_captured_at_required');
+      const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
+      if (!rawSessionToken) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const portalSession = await resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+
+      const markType = markTypeFromPath(req.path);
+      const idempotencyKey = normalizedString(req.body?.idempotencyKey, 120);
+      const latitude = finiteNumber(req.body?.latitude, { min: -90, max: 90 });
+      const longitude = finiteNumber(req.body?.longitude, { min: -180, max: 180 });
+      const accuracyMeters = finiteNumber(req.body?.accuracyMeters, { min: 0, max: 100_000 });
+      if (!markType || !idempotencyKey || latitude === null || longitude === null || accuracyMeters === null) {
+        return strictError(res, 400, 'mark_request_invalid', 'No fue posible validar la ubicación.');
       }
 
-      const assignment = await loadAssignment(prisma, {
-        workerId: portalSession.workerId,
-        assignmentId: req.params.assignmentId,
-        now
+      const assignment = await prisma.dispatchAssignment.findFirst({
+        where: {
+          id: req.params.assignmentId,
+          workerId: portalSession.workerId,
+          status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
+        },
+        include: { serviceRequest: { include: { operationPoint: true } } }
       });
-      if (!assignment) return res.status(404).json({ ok: false, error: 'assignment_not_available' });
-      if (!assignment.attendanceEnabled) return res.status(409).json({ ok: false, error: 'attendance_not_enabled' });
-
-      if (isDeparture) {
-        if (!assignment.arrivalReported) return res.status(409).json({ ok: false, error: 'departure_arrival_required' });
-        if (assignment.departureReported) return res.status(409).json({ ok: false, error: 'departure_already_registered' });
-        if (assignment.breakOpen) return res.status(409).json({ ok: false, error: 'departure_break_end_required' });
-      }
-      if (markType === 'BREAK_START') {
-        if (!assignment.arrivalReported) return res.status(409).json({ ok: false, error: 'break_arrival_required' });
-        if (assignment.departureReported) return res.status(409).json({ ok: false, error: 'break_after_departure' });
-        if (assignment.breakStarted) return res.status(409).json({ ok: false, error: 'break_already_started' });
-      }
-      if (markType === 'BREAK_END') {
-        if (!assignment.breakStarted) return res.status(409).json({ ok: false, error: 'break_start_required' });
-        if (assignment.breakEnded) return res.status(409).json({ ok: false, error: 'break_already_completed' });
+      if (!assignment || assignment.serviceRequest?.operationPoint?.attendanceEnabled !== true) {
+        return strictError(res, 409, 'assignment_not_available', 'La operación no está disponible para marcar asistencia.');
       }
 
-      const latitude = requiredBodyNumber(req.body?.latitude, 'attendance_latitude', { min: -90, max: 90 });
-      const longitude = requiredBodyNumber(req.body?.longitude, 'attendance_longitude', { min: -180, max: 180 });
-      const accuracyMeters = requiredBodyNumber(req.body?.accuracyMeters, 'attendance_accuracy', { min: 0, max: 100_000 });
-      if (!isBreak && assignment.photoRequired && !req.file) {
-        return res.status(400).json({ ok: false, error: 'selfie_required' });
-      }
-      if (req.file && req.body?.photoConsent !== 'true') {
-        return res.status(400).json({ ok: false, error: 'photo_consent_required' });
+      const point = assignment.serviceRequest.operationPoint;
+      const pointLatitude = finiteNumber(point.attendanceLatitude, { min: -90, max: 90 });
+      const pointLongitude = finiteNumber(point.attendanceLongitude, { min: -180, max: 180 });
+      const radiusMeters = finiteNumber(point.geofenceRadiusMeters, { min: 1, max: 100_000 });
+      if (pointLatitude === null || pointLongitude === null || radiusMeters === null) {
+        return strictError(res, 409, 'operation_geofence_required', 'La operación no tiene una geocerca válida configurada.');
       }
 
-      const rawInstallationId = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
-      if (!rawInstallationId) return res.status(401).json({ ok: false, error: 'device_activation_required' });
-      const installationIdHash = hashInstallationId(normalizeInstallationId(rawInstallationId), installationPepper);
+      const maxAccuracyMeters = finiteNumber(point.maxLocationAccuracyMeters, { min: 1, max: 100_000 }) ?? 100;
+      if (accuracyMeters > maxAccuracyMeters) {
+        return strictError(res, 409, 'location_accuracy_insufficient', 'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.');
+      }
 
-      if (!isBreak) {
-        evidence = await storeEvidence({
+      const distanceMeters = calculateAttendanceDistanceMeters(
+        { latitude: pointLatitude, longitude: pointLongitude },
+        { latitude, longitude }
+      );
+      if (isAttendanceInsideGeofence(distanceMeters, radiusMeters) !== true) {
+        return strictError(res, 409, 'outside_operation_range', 'Debes estar dentro del rango de la operación para marcar asistencia.');
+      }
+
+      if (BIOMETRIC_MARK_TYPES.has(markType)) {
+        if (String(req.body?.captureMode || '').toUpperCase() === 'OFFLINE_WEB') {
+          return strictError(res, 409, 'online_biometric_required', 'La entrada y la salida requieren conexión para validar el rostro.');
+        }
+        const event = await prisma.devAuditEvent.findFirst({
+          where: {
+            entityType: ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
+            entityId: idempotencyKey,
+            action: WORKER_BIOMETRIC_ACTION.ASSESSED
+          },
+          orderBy: { createdAt: 'desc' }
+        });
+        if (!verifiedBiometricMetadata(event?.metadata, {
           workerId: portalSession.workerId,
           assignmentId: assignment.id,
-          idempotencyKey,
-          file: req.file || null
-        });
+          markType
+        })) {
+          return strictError(res, 409, 'biometric_verification_required', 'Debes completar correctamente la validación facial para marcar.');
+        }
       }
 
-      const result = await register(prisma, {
-        assignmentId: assignment.id,
-        expectedWorkerId: portalSession.workerId,
-        idempotencyKey,
-        markType: isBreak ? markType : undefined,
-        now,
-        captureMode,
-        clientCapturedAt,
-        latitude,
-        longitude,
-        accuracyMeters,
-        installationIdHash,
-        persistentStorageAvailable: captureMode === OFFLINE_WEB_CAPTURE_MODE
-          ? req.body?.persistentStorageAvailable === 'true'
-          : true,
-        hasFreshPhoto: Boolean(evidence?.storageKey),
-        evidenceStorageKey: evidence?.storageKey || null,
-        evidenceMimeType: evidence?.mimeType || null,
-        ipAddress: requestIp(req),
-        userAgent: requestUserAgent(req)
-      });
-
-      if (!result.recorded && evidence?.created) await discardEvidence(evidence).catch(() => {});
-      const publicResult = isArrival
-        ? arrivalPublicResult(result)
-        : (isDeparture ? departurePublicResult(result) : breakPublicResult(result, markType));
-      return res.status(publicResult.status).json(publicResult.payload);
+      req.lorrenStrictAttendance = { workerId: portalSession.workerId, markType, distanceMeters, insideGeofence: true };
+      return next();
     } catch (error) {
-      const code = errorCode(error);
-      if (INVALID_SESSION_COOKIE_CODES.has(code)) {
-        clearWorkerPortalSessionCookie(res);
-        return res.status(401).json({ ok: false, error: 'portal_session_required' });
-      }
-      if (isConfigurationError(error)) {
-        console.error('[WORKER_PORTAL_MARK_CONFIGURATION_ERROR]', { markType, code });
-        return res.status(503).json({ ok: false, error: 'mark_temporarily_unavailable' });
-      }
-      const publicCodes = {
-        attendance_assignment_not_found: [404, 'assignment_not_available'],
-        attendance_assignment_inactive: [409, 'assignment_not_available'],
-        attendance_not_enabled: [409, 'attendance_not_enabled'],
-        attendance_departure_arrival_required: [409, 'departure_arrival_required'],
-        attendance_departure_already_registered: [409, 'departure_already_registered'],
-        attendance_departure_before_arrival: [409, 'departure_before_arrival'],
-        attendance_departure_break_end_required: [409, 'departure_break_end_required'],
-        attendance_break_arrival_required: [409, 'break_arrival_required'],
-        attendance_break_after_departure: [409, 'break_after_departure'],
-        attendance_break_before_arrival: [409, 'break_before_arrival'],
-        attendance_break_already_started: [409, 'break_already_started'],
-        attendance_break_start_required: [409, 'break_start_required'],
-        attendance_break_already_completed: [409, 'break_already_completed'],
-        attendance_break_end_before_start: [409, 'break_end_before_start'],
-        attendance_offline_capture_expired: [409, 'offline_capture_expired'],
-        attendance_offline_capture_future_invalid: [400, 'offline_capture_time_invalid']
-      };
-      if (publicCodes[code]) {
-        return res.status(publicCodes[code][0]).json({ ok: false, error: publicCodes[code][1] });
-      }
-      if (EXPECTED_MARK_INPUT_CODES.has(code) || code.endsWith('_invalid') || code.endsWith('_required')) {
-        return res.status(400).json({ ok: false, error: 'mark_request_invalid' });
-      }
-      console.error('[WORKER_PORTAL_MARK_ERROR]', { markType, code });
-      return res.status(500).json({ ok: false, error: 'mark_failed' });
+      console.error('[WORKER_PORTAL_STRICT_MARK_GUARD_FAILED]', {
+        code: typeof error?.message === 'string' ? error.message : 'unknown'
+      });
+      return strictError(res, 503, 'mark_temporarily_unavailable', 'No fue posible validar la marcación en este momento.');
     }
   }
 
-  router.use(cookieParser());
-  router.use(redactWorkerPortalActivationUrlForLogging);
-  router.get('/service-worker.js', (_req, res) => {
-    res.set('Content-Type', 'application/javascript; charset=utf-8');
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('Service-Worker-Allowed', WORKER_PORTAL_HOME_PATH);
-    res.set('X-Content-Type-Options', 'nosniff');
-    return res.sendFile(WORKER_PORTAL_SERVICE_WORKER_FILE);
-  });
-  router.get('/offline.js', (_req, res) => {
-    res.set('Content-Type', 'application/javascript; charset=utf-8');
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('X-Content-Type-Options', 'nosniff');
-    return res.sendFile(WORKER_PORTAL_OFFLINE_RUNTIME_FILE);
-  });
-  router.get('/manifest.webmanifest', (_req, res) => {
-    res.set('Content-Type', 'application/manifest+json; charset=utf-8');
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('X-Content-Type-Options', 'nosniff');
-    return res.sendFile(WORKER_PORTAL_MANIFEST_FILE);
-  });
-  router.get('/icon.svg', (_req, res) => {
-    res.set('Content-Type', 'image/svg+xml; charset=utf-8');
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.set('X-Content-Type-Options', 'nosniff');
-    return res.sendFile(WORKER_PORTAL_ICON_FILE);
+  const router = coreWorkerPortalRouter(prisma, injectedCore ? {
+    ...options,
+    repository: getRepository()
+  } : {
+    ...options,
+    repository: getRepository(),
+    markUpload: (_req, _res, next) => next(),
+    arrivalUpload: undefined
   });
 
-  router.get('/activar', (_req, res) => {
-    const nonce = createNonce(nonceBytesFn);
-    applyWorkerPortalSecurityHeaders(res, nonce);
-    return renderPortal(res, 'activation', nonce);
-  });
-  router.post('/activar', activationAttemptMiddleware, activationJsonParser, async (req, res) => {
-    applyWorkerPortalSecurityHeaders(res);
-    try {
-      if (req.get?.('x-requested-with') !== 'worker-portal') {
-        throw new Error('worker_portal_activation_request_invalid');
-      }
-      const now = nowFn();
-      if (!validDate(now)) throw new Error('worker_portal_activation_now_invalid');
-      const installation = resolveWorkerPortalInstallationId(req, randomUUIDFn);
-      const result = await activateSessionFn({
-        repository: getRepository(),
-        rawActivationToken: req.body?.activationToken,
-        installationId: installation.installationId,
-        installationPepper,
-        now,
-        sessionTtlMinutes,
-        randomBytesFn: randomSessionBytesFn,
-        userAgent: requestUserAgent(req),
-        platform: requestPlatform(req),
-        ipAddress: requestIp(req)
-      });
-      if (installation.shouldSetCookie) setWorkerPortalInstallationCookie(res, installation.installationId);
-      res.cookie(result.cookie.name, result.rawSessionToken, result.cookie.options);
-      return res.status(200).json({ ok: true, redirectTo: WORKER_PORTAL_HOME_PATH });
-    } catch (error) {
-      const code = errorCode(error);
-      if (isConfigurationError(error)) {
-        console.error('[WORKER_PORTAL_CONFIGURATION_ERROR]', { code });
-        return res.status(503).json({ ok: false, error: 'portal_temporarily_unavailable' });
-      }
-      if (!EXPECTED_ACTIVATION_REJECTION_CODES.has(code)) {
-        console.error('[WORKER_PORTAL_ACTIVATION_ERROR]', { code });
-      }
-      return res.status(400).json({ ok: false, error: GENERIC_ACTIVATION_ERROR });
-    }
-  });
-  router.use('/activar', workerPortalActivationJsonErrorHandler);
-
-  const markRequestGuard = (req, res, next) => {
-    applyWorkerPortalSecurityHeaders(res);
-    if (req.get?.('x-requested-with') !== 'worker-portal') {
-      return res.status(400).json({ ok: false, error: 'mark_request_invalid' });
-    }
-    return next();
-  };
-  router.post('/asignaciones/:assignmentId/llegada', markRequestGuard, markUpload, (req, res) => handleMark(req, res, 'ARRIVAL'));
-  router.post('/asignaciones/:assignmentId/inicio-almuerzo', markRequestGuard, markUpload, (req, res) => handleMark(req, res, 'BREAK_START'));
-  router.post('/asignaciones/:assignmentId/fin-almuerzo', markRequestGuard, markUpload, (req, res) => handleMark(req, res, 'BREAK_END'));
-  router.post('/asignaciones/:assignmentId/salida', markRequestGuard, markUpload, (req, res) => handleMark(req, res, 'DEPARTURE'));
-  router.use('/asignaciones', workerPortalArrivalUploadErrorHandler);
-
-  router.get('/', async (req, res) => {
-    const nonce = createNonce(nonceBytesFn);
-    applyWorkerPortalSecurityHeaders(res, nonce);
-    try {
-      const now = nowFn();
-      if (!validDate(now)) throw new Error('worker_portal_resolution_now_invalid');
-      const portalSession = await resolveRequestSession(req, now);
-      if (!portalSession) {
-        if (req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME]) clearWorkerPortalSessionCookie(res);
-        return renderPortal(res, 'inactive', nonce);
-      }
-      const assignments = await loadAssignmentsFn(prisma, { workerId: portalSession.workerId, now });
-      return renderPortal(res, 'active', nonce, { expiresAt: portalSession.expiresAt, assignments });
-    } catch (error) {
-      if (INVALID_SESSION_COOKIE_CODES.has(errorCode(error))) {
-        clearWorkerPortalSessionCookie(res);
-        return renderPortal(res, 'inactive', nonce);
-      }
-      console.error('[WORKER_PORTAL_AVAILABILITY_ERROR]', { code: errorCode(error) });
-      return renderPortal(res, 'unavailable', nonce);
-    }
-  });
-
+  const cspRouter = express.Router();
+  cspRouter.use(installBiometricCspBridge);
+  router.stack.unshift(...cspRouter.stack);
+  if (!injectedCore) {
+    STRICT_MARK_PATHS.forEach((path) => prependRouteHandlers(router, path, [markUpload, strictMarkGuard]));
+  }
   return router;
 }

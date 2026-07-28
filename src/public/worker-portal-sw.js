@@ -2,7 +2,7 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v4';
+const CACHE_NAME = 'lorren-worker-portal-shell-v5';
 const STATIC_ASSETS = [
   '/operaciones/portal/offline.js',
   '/operaciones/portal/manifest.webmanifest',
@@ -98,7 +98,7 @@ async function notifyClients(message) {
 }
 
 function offlineFallbackResponse() {
-  return new Response(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Portal del Auxiliar · Lórren</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f4f6f8;color:#17212b;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(100%,480px);background:#fff;border:1px solid #dfe4ea;border-radius:20px;padding:26px}h1{margin:0 0 10px}p{color:#4d5b69;line-height:1.55}.status{margin-top:18px;padding:14px;border-radius:12px;background:#fff6df;color:#76520b;font-weight:700}</style></head><body><main class="card"><h1>Sin conexión</h1><p>Abre el portal una vez con internet para guardar tu programación. Las llegadas y salidas pendientes se sincronizarán cuando vuelva la conexión.</p><div class="status">No hay una copia offline disponible todavía.</div></main></body></html>`, {
+  return new Response(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Portal del Auxiliar · Lórren</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#f4f6f8;color:#17212b;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(100%,480px);background:#fff;border:1px solid #dfe4ea;border-radius:20px;padding:26px}h1{margin:0 0 10px}.status{margin-top:18px;padding:14px;border-radius:12px;background:#fff6df;color:#76520b;font-weight:700}</style></head><body><main class="card"><h1>Sin conexión</h1><div class="status">La asistencia requiere conexión.</div></main></body></html>`, {
     status: 503,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
@@ -169,7 +169,12 @@ function terminalRejection(status, error) {
     'departure_before_arrival',
     'offline_capture_expired',
     'assignment_not_available',
-    'attendance_not_enabled'
+    'attendance_not_enabled',
+    'outside_operation_range',
+    'operation_geofence_required',
+    'location_accuracy_insufficient',
+    'online_biometric_required',
+    'biometric_verification_required'
   ].includes(error);
 }
 
