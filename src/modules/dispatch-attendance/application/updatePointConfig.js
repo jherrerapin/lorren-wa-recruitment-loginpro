@@ -14,12 +14,6 @@ export const DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS = 50;
 const PHOTO_POLICIES = new Set(Object.values(ATTENDANCE_PHOTO_POLICY));
 const TIMEZONES = new Set(SUPPORTED_ATTENDANCE_TIMEZONES);
 
-const LIMITS = Object.freeze({
-  earlyArrivalWindowMinutes: { min: 0, max: 240 },
-  lateToleranceMinutes: { min: 0, max: 240 },
-  absenceGraceMinutes: { min: 0, max: 240 }
-});
-
 function requireInputObject(input, label) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error(`${label}_invalid`);
@@ -28,9 +22,7 @@ function requireInputObject(input, label) {
 }
 
 function requireNonEmptyString(value, label) {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${label}_required`);
-  }
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}_required`);
   return value.trim();
 }
 
@@ -38,30 +30,18 @@ function parseExplicitBoolean(value, label, fallback) {
   if (value === undefined) return fallback;
   if (value === true || value === false) return value;
   if (typeof value !== 'string') throw new Error(`${label}_invalid`);
-
   const normalized = value.trim().toLowerCase();
   if (normalized === 'true' || normalized === '1' || normalized === 'on') return true;
   if (normalized === 'false' || normalized === '0' || normalized === 'off') return false;
   throw new Error(`${label}_invalid`);
 }
 
-function parseOptionalFiniteNumber(value, label, fallback, { min, max, integer = false }) {
+function parseOptionalFiniteNumber(value, label, fallback, { min, max }) {
   if (value === undefined) return fallback;
   if (value === null || value === '') return null;
-  if (typeof value !== 'number' && typeof value !== 'string') {
-    throw new Error(`${label}_invalid`);
-  }
-
+  if (typeof value !== 'number' && typeof value !== 'string') throw new Error(`${label}_invalid`);
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max || (integer && !Number.isInteger(parsed))) {
-    throw new Error(`${label}_invalid`);
-  }
-  return parsed;
-}
-
-function parseRequiredInteger(value, label, fallback, limits) {
-  const parsed = parseOptionalFiniteNumber(value, label, fallback, { ...limits, integer: true });
-  if (parsed === null) throw new Error(`${label}_required`);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) throw new Error(`${label}_invalid`);
   return parsed;
 }
 
@@ -91,7 +71,6 @@ function normalizedConfig(existing, input) {
     'manual_attendance_allowed',
     existing.manualAttendanceAllowed
   );
-
   const attendanceLatitude = parseOptionalFiniteNumber(
     input.attendanceLatitude,
     'attendance_latitude',
@@ -103,30 +82,6 @@ function normalizedConfig(existing, input) {
     'attendance_longitude',
     existing.attendanceLongitude === null ? null : Number(existing.attendanceLongitude),
     { min: -180, max: 180 }
-  );
-  const geofenceRadiusMeters = attendanceEnabled
-    ? DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS
-    : existing.geofenceRadiusMeters;
-  const maxLocationAccuracyMeters = attendanceEnabled
-    ? DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS
-    : existing.maxLocationAccuracyMeters;
-  const earlyArrivalWindowMinutes = parseRequiredInteger(
-    input.earlyArrivalWindowMinutes,
-    'early_arrival_window_minutes',
-    existing.earlyArrivalWindowMinutes,
-    LIMITS.earlyArrivalWindowMinutes
-  );
-  const lateToleranceMinutes = parseRequiredInteger(
-    input.lateToleranceMinutes,
-    'late_tolerance_minutes',
-    existing.lateToleranceMinutes,
-    LIMITS.lateToleranceMinutes
-  );
-  const absenceGraceMinutes = parseRequiredInteger(
-    input.absenceGraceMinutes,
-    'absence_grace_minutes',
-    existing.absenceGraceMinutes,
-    LIMITS.absenceGraceMinutes
   );
   const attendanceTimezone = parseAllowedString(
     input.attendanceTimezone,
@@ -141,10 +96,6 @@ function normalizedConfig(existing, input) {
     PHOTO_POLICIES
   );
 
-  if (absenceGraceMinutes < lateToleranceMinutes) {
-    throw new Error('absence_grace_before_late_tolerance');
-  }
-
   if (attendanceEnabled) {
     if (existing.isActive !== true) throw new Error('attendance_point_inactive');
     if (attendanceLatitude === null || attendanceLongitude === null) {
@@ -156,11 +107,12 @@ function normalizedConfig(existing, input) {
     attendanceEnabled,
     attendanceLatitude,
     attendanceLongitude,
-    geofenceRadiusMeters,
-    maxLocationAccuracyMeters,
-    earlyArrivalWindowMinutes,
-    lateToleranceMinutes,
-    absenceGraceMinutes,
+    geofenceRadiusMeters: attendanceEnabled
+      ? DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS
+      : existing.geofenceRadiusMeters,
+    maxLocationAccuracyMeters: attendanceEnabled
+      ? DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS
+      : existing.maxLocationAccuracyMeters,
     attendanceTimezone,
     attendancePhotoPolicy,
     manualAttendanceAllowed
@@ -184,21 +136,16 @@ export async function updateDispatchAttendancePointConfig(prisma, input = {}) {
       attendanceLongitude: true,
       geofenceRadiusMeters: true,
       maxLocationAccuracyMeters: true,
-      earlyArrivalWindowMinutes: true,
-      lateToleranceMinutes: true,
-      absenceGraceMinutes: true,
       attendanceTimezone: true,
       attendancePhotoPolicy: true,
       manualAttendanceAllowed: true
     }
   });
-
   if (!existing) throw new Error('attendance_operation_point_not_found');
 
-  const data = normalizedConfig(existing, configInput);
   return prisma.dispatchOperationPoint.update({
     where: { id: existing.id },
-    data,
+    data: normalizedConfig(existing, configInput),
     select: {
       id: true,
       clientId: true,
@@ -208,9 +155,6 @@ export async function updateDispatchAttendancePointConfig(prisma, input = {}) {
       attendanceLongitude: true,
       geofenceRadiusMeters: true,
       maxLocationAccuracyMeters: true,
-      earlyArrivalWindowMinutes: true,
-      lateToleranceMinutes: true,
-      absenceGraceMinutes: true,
       attendanceTimezone: true,
       attendancePhotoPolicy: true,
       manualAttendanceAllowed: true,

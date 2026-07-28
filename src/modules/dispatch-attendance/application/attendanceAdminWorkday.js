@@ -1,7 +1,9 @@
 import {
-  getDispatchAttendanceBreakPolicies
-} from '../infrastructure/dispatchAttendanceBreakPolicyRepository.js';
-import { formatDispatchMinutes } from '../domain/attendanceWorkdayPolicy.js';
+  DISPATCH_BREAK_STATUS,
+  STANDARD_DISPATCH_WORKDAY_MINUTES,
+  calculateDispatchWorkedTime,
+  formatDispatchMinutes
+} from '../domain/attendanceWorkdayPolicy.js';
 import { reviewAttendanceSession } from './adminAttendance.js';
 
 const BOGOTA_TIME_ZONE = 'America/Bogota';
@@ -37,10 +39,17 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function markMoment(mark) {
+  const raw = mark?.clientCapturedAt || mark?.serverReceivedAt;
+  if (!raw) return null;
+  const date = raw instanceof Date ? raw : new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function latestMark(marks, markType) {
   return (Array.isArray(marks) ? marks : [])
     .filter((mark) => mark.markType === markType)
-    .sort((left, right) => new Date(right.serverReceivedAt || 0) - new Date(left.serverReceivedAt || 0))[0] || null;
+    .sort((left, right) => (markMoment(right)?.getTime() || 0) - (markMoment(left)?.getTime() || 0))[0] || null;
 }
 
 function numericCoordinate(value, min, max) {
@@ -58,6 +67,28 @@ function reportedLateMinutes(arrivalAt, expectedStartAt) {
   return Math.max(0, Math.floor((arrivalAt.getTime() - expectedStartAt.getTime()) / 60_000));
 }
 
+function safeWorkCalculation(input) {
+  try {
+    return calculateDispatchWorkedTime(input);
+  } catch {
+    return null;
+  }
+}
+
+function breakRuleLabel(work) {
+  if (!work) return 'Pendiente de salida';
+  if (work.breakStatus === DISPATCH_BREAK_STATUS.INCOMPLETE) {
+    return 'Se tomó 1 h 30 min de almuerzo por no marcar la terminación.';
+  }
+  if (work.breakStatus === DISPATCH_BREAK_STATUS.NONE) {
+    return 'No tomó almuerzo; ese tiempo cuenta como trabajado.';
+  }
+  if (work.shortBreakMinutesCredited > 0) {
+    return `Tomó ${formatDispatchMinutes(work.actualBreakMinutes)} de almuerzo; ${formatDispatchMinutes(work.shortBreakMinutesCredited)} se sumaron al tiempo trabajado.`;
+  }
+  return `Almuerzo descontado según las marcaciones reales: ${formatDispatchMinutes(work.actualBreakMinutes)}.`;
+}
+
 export async function enrichAttendanceBoardWithWorkday(prisma, board) {
   const rows = Array.isArray(board?.rows) ? board.rows : [];
   if (!rows.length) return board;
@@ -73,29 +104,62 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
     }
   });
   const assignmentMap = new Map(assignments.map((assignment) => [assignment.id, assignment]));
-  const policies = await getDispatchAttendanceBreakPolicies(
-    prisma,
-    assignments.map((assignment) => assignment.serviceRequestId)
-  );
 
   return {
     ...board,
     rows: rows.map((row) => {
       const assignment = assignmentMap.get(row.assignmentId);
       const session = assignment?.attendanceSession || null;
-      const arrivalMark = latestMark(session?.marks, 'ARRIVAL');
-      const departureMark = latestMark(session?.marks, 'DEPARTURE');
+      const marks = session?.marks || [];
+      const arrivalMark = latestMark(marks, 'ARRIVAL');
+      const departureMark = latestMark(marks, 'DEPARTURE');
+      const breakStartMark = latestMark(marks, 'BREAK_START');
+      const breakEndMark = latestMark(marks, 'BREAK_END');
       const arrivalAt = session?.arrivalReportedAt ? new Date(session.arrivalReportedAt) : null;
       const departureAt = session?.departureReportedAt ? new Date(session.departureReportedAt) : null;
-      const expectedStartAt = row.expectedStartAt ? new Date(row.expectedStartAt) : null;
-      const grossWorkedMinutes = arrivalAt && departureAt
-        ? Math.max(0, Math.floor((departureAt.getTime() - arrivalAt.getTime()) / 60_000))
+      const expectedStartAt = session?.expectedStartAt
+        ? new Date(session.expectedStartAt)
+        : (row.expectedStartAt ? new Date(row.expectedStartAt) : null);
+      const expectedEndAt = session?.expectedEndAt ? new Date(session.expectedEndAt) : null;
+      const breakStartAt = markMoment(breakStartMark);
+      const breakEndAt = markMoment(breakEndMark);
+      const defaultWork = arrivalAt && departureAt
+        ? safeWorkCalculation({
+            arrivalAt,
+            departureAt,
+            expectedStartAt,
+            expectedEndAt,
+            breakStartAt,
+            breakEndAt,
+            recognizeEarlyArrival: false
+          })
         : null;
-      const workedMinutes = Number.isInteger(session?.workedMinutes) ? session.workedMinutes : null;
-      const deducted = grossWorkedMinutes !== null && workedMinutes !== null
-        ? Math.max(0, grossWorkedMinutes - workedMinutes)
+      const recognizedWork = arrivalAt && departureAt
+        ? safeWorkCalculation({
+            arrivalAt,
+            departureAt,
+            expectedStartAt,
+            expectedEndAt,
+            breakStartAt,
+            breakEndAt,
+            recognizeEarlyArrival: true
+          })
         : null;
-      const policy = policies.get(assignment?.serviceRequestId) || { policy: 'NONE', unpaidBreakMinutes: 0 };
+      const workedMinutes = Number.isInteger(session?.workedMinutes)
+        ? session.workedMinutes
+        : defaultWork?.workedMinutes ?? null;
+      const earlyTimeRecognized = Boolean(
+        defaultWork
+        && recognizedWork
+        && defaultWork.earlyMinutesExcluded > 0
+        && workedMinutes === recognizedWork.workedMinutes
+      );
+      const ordinaryWorkedMinutes = workedMinutes === null
+        ? null
+        : Math.min(workedMinutes, STANDARD_DISPATCH_WORKDAY_MINUTES);
+      const overtimeMinutes = workedMinutes === null
+        ? null
+        : Math.max(0, workedMinutes - STANDARD_DISPATCH_WORKDAY_MINUTES);
 
       return {
         ...row,
@@ -111,23 +175,47 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
         lateMinutes: reportedLateMinutes(arrivalAt, expectedStartAt),
         departureReportedAt: session?.departureReportedAt?.toISOString?.() || null,
         departureReportedLabel: formatDateTime(session?.departureReportedAt),
-        grossWorkedMinutes,
-        grossWorkedLabel: grossWorkedMinutes === null ? 'Pendiente de salida' : formatDispatchMinutes(grossWorkedMinutes),
-        unpaidBreakMinutesDeducted: deducted,
-        unpaidBreakLabel: deducted === null ? 'Pendiente' : formatDispatchMinutes(deducted),
+        effectiveWorkStartAt: defaultWork?.effectiveWorkStartAt?.toISOString?.() || null,
+        effectiveWorkStartLabel: defaultWork ? formatDateTime(defaultWork.effectiveWorkStartAt) : 'Pendiente',
+        recordedSpanMinutes: defaultWork?.recordedSpanMinutes ?? null,
+        recordedSpanLabel: defaultWork ? formatDispatchMinutes(defaultWork.recordedSpanMinutes) : 'Pendiente de salida',
+        grossWorkedMinutes: defaultWork?.grossWorkedMinutes ?? null,
+        grossWorkedLabel: defaultWork ? formatDispatchMinutes(defaultWork.grossWorkedMinutes) : 'Pendiente de salida',
+        earlyMinutesExcluded: earlyTimeRecognized ? 0 : (defaultWork?.earlyMinutesExcluded ?? 0),
+        earlyMinutesExcludedLabel: formatDispatchMinutes(earlyTimeRecognized ? 0 : (defaultWork?.earlyMinutesExcluded ?? 0)),
+        earlyTimeRecognized,
+        canRecognizeEarlyArrival: Boolean(defaultWork?.earlyMinutesExcluded > 0),
+        breakStarted: Boolean(breakStartAt),
+        breakEnded: Boolean(breakEndAt),
+        breakOpen: Boolean(breakStartAt && !breakEndAt),
+        breakStartAt: breakStartAt?.toISOString() || null,
+        breakEndAt: breakEndAt?.toISOString() || null,
+        breakStartLabel: formatDateTime(breakStartAt),
+        breakEndLabel: formatDateTime(breakEndAt),
+        breakStatus: defaultWork?.breakStatus || null,
+        breakPenaltyApplied: defaultWork?.breakStatus === DISPATCH_BREAK_STATUS.INCOMPLETE,
+        actualBreakMinutes: defaultWork?.actualBreakMinutes ?? null,
+        shortBreakMinutesCredited: defaultWork?.shortBreakMinutesCredited ?? 0,
+        shortBreakMinutesCreditedLabel: formatDispatchMinutes(defaultWork?.shortBreakMinutesCredited ?? 0),
+        unpaidBreakMinutesDeducted: defaultWork?.unpaidBreakMinutesDeducted ?? 0,
+        unpaidBreakLabel: formatDispatchMinutes(defaultWork?.unpaidBreakMinutesDeducted ?? 0),
         workedMinutes,
         workedLabel: workedMinutes === null ? 'Pendiente de salida' : formatDispatchMinutes(workedMinutes),
-        breakPolicy: policy.policy,
-        configuredUnpaidBreakMinutes: policy.unpaidBreakMinutes,
-        configuredBreakLabel: policy.unpaidBreakMinutes > 0
-          ? `${policy.unpaidBreakMinutes} min no remunerados`
-          : 'Sin descanso no remunerado'
+        ordinaryWorkedMinutes,
+        ordinaryWorkedLabel: ordinaryWorkedMinutes === null ? 'Pendiente de salida' : formatDispatchMinutes(ordinaryWorkedMinutes),
+        overtimeMinutes,
+        overtimeLabel: overtimeMinutes === null ? 'Pendiente de salida' : formatDispatchMinutes(overtimeMinutes),
+        standardWorkdayMinutes: STANDARD_DISPATCH_WORKDAY_MINUTES,
+        standardWorkdayLabel: formatDispatchMinutes(STANDARD_DISPATCH_WORKDAY_MINUTES),
+        breakPolicy: 'ACTUAL_MARKS_WITH_INCOMPLETE_PENALTY',
+        configuredUnpaidBreakMinutes: 0,
+        configuredBreakLabel: breakRuleLabel(defaultWork)
       };
     })
   };
 }
 
-function workdayTransition(session, action, now, requestedAttendanceStatus) {
+function workdayTransition(session, action, now, requestedAttendanceStatus, workedMinutes) {
   if (action === 'VALIDATE') {
     const punctualityStatus = requireString(
       requestedAttendanceStatus,
@@ -142,7 +230,8 @@ function workdayTransition(session, action, now, requestedAttendanceStatus) {
       validationStatus: 'MANUAL_VALIDATED',
       punctualityStatus,
       arrivalValidatedAt: session.arrivalValidatedAt || now,
-      departureValidatedAt: now
+      departureValidatedAt: now,
+      workedMinutes
     };
   }
   if (action === 'REJECT') {
@@ -163,10 +252,6 @@ function workdayTransition(session, action, now, requestedAttendanceStatus) {
   throw new Error('attendance_review_action_invalid');
 }
 
-/**
- * Conserva la semántica de jornada cerrada cuando ya existe una salida.
- * Las asistencias que solo tienen llegada siguen usando la autoridad histórica.
- */
 export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
   const sessionId = requireString(input.sessionId, 'attendance_review_session_id', { maxLength: 120 });
   if (!prisma?.dispatchAttendanceSession || typeof prisma.dispatchAttendanceSession.findUnique !== 'function') {
@@ -185,6 +270,7 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
   const notes = normalizeString(input.notes)?.slice(0, 1000) || null;
   const actorUsername = requireString(input.actorUsername, 'attendance_review_actor', { maxLength: 120 });
   const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
+  const recognizeEarlyArrival = input.recognizeEarlyArrival === true;
   const now = input.now instanceof Date ? input.now : new Date();
   if (Number.isNaN(now.getTime())) throw new Error('attendance_review_now_invalid');
   if (typeof prisma.$transaction !== 'function') throw new Error('attendance_workday_transaction_required');
@@ -193,6 +279,7 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
     const session = await tx.dispatchAttendanceSession.findUnique({
       where: { id: sessionId },
       include: {
+        marks: { orderBy: { serverReceivedAt: 'asc' } },
         assignment: {
           include: { worker: true, serviceRequest: true }
         }
@@ -201,15 +288,23 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
     if (!session) throw new Error('attendance_review_session_not_found');
     if (!session.departureReportedAt) throw new Error('attendance_review_departure_required');
 
-    const transition = workdayTransition(session, action, now, input.attendanceStatus);
+    const breakStartAt = markMoment(latestMark(session.marks, 'BREAK_START'));
+    const breakEndAt = markMoment(latestMark(session.marks, 'BREAK_END'));
+    const work = calculateDispatchWorkedTime({
+      arrivalAt: session.arrivalReportedAt,
+      departureAt: session.departureReportedAt,
+      expectedStartAt: session.expectedStartAt,
+      expectedEndAt: session.expectedEndAt,
+      breakStartAt,
+      breakEndAt,
+      recognizeEarlyArrival
+    });
+    const transition = workdayTransition(session, action, now, input.attendanceStatus, work.workedMinutes);
     const updated = await tx.dispatchAttendanceSession.update({
       where: { id: session.id },
       data: transition
     });
-    const departureMark = await tx.dispatchAttendanceMark.findFirst({
-      where: { attendanceSessionId: session.id, markType: 'DEPARTURE' },
-      orderBy: { serverReceivedAt: 'desc' }
-    });
+    const departureMark = latestMark(session.marks, 'DEPARTURE');
     if (departureMark) {
       await tx.dispatchAttendanceMark.update({
         where: { id: departureMark.id },
@@ -234,7 +329,19 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
           serviceRequestId: session.assignment.serviceRequestId,
           assignmentId: session.assignmentId,
           departureReportedAt: session.departureReportedAt.toISOString(),
-          workedMinutes: session.workedMinutes,
+          workedMinutes: action === 'VALIDATE' ? work.workedMinutes : session.workedMinutes,
+          ordinaryWorkedMinutes: work.ordinaryWorkedMinutes,
+          overtimeMinutes: work.overtimeMinutes,
+          recordedSpanMinutes: work.recordedSpanMinutes,
+          unpaidBreakMinutesDeducted: work.unpaidBreakMinutesDeducted,
+          actualBreakMinutes: work.actualBreakMinutes,
+          shortBreakMinutesCredited: work.shortBreakMinutesCredited,
+          breakStatus: work.breakStatus,
+          breakPenaltyMinutes: work.breakPenaltyMinutes,
+          earlyMinutesExcluded: work.earlyMinutesExcluded,
+          recognizeEarlyArrival,
+          breakStartAt: breakStartAt?.toISOString() || null,
+          breakEndAt: breakEndAt?.toISOString() || null,
           punctualityStatus: transition.punctualityStatus || session.punctualityStatus || null
         }
       }

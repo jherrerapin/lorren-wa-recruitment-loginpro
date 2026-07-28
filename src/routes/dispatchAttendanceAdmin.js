@@ -7,7 +7,6 @@ import {
   enrichAttendanceBoardWithWorkday,
   reviewAttendanceWorkdaySession
 } from '../modules/dispatch-attendance/application/attendanceAdminWorkday.js';
-import { upsertDispatchAttendanceBreakPolicy } from '../modules/dispatch-attendance/infrastructure/dispatchAttendanceBreakPolicyRepository.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 
 const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
@@ -69,6 +68,7 @@ function publicErrorMessage(error) {
     attendance_review_session_not_found: 'La marcación ya no existe o fue eliminada.',
     attendance_review_arrival_required: 'No existe una llegada reportada para revisar.',
     attendance_review_departure_required: 'No existe una salida reportada para revisar.',
+    attendance_review_break_end_required: 'El almuerzo quedó abierto. Debe registrarse su final antes de validar la jornada.',
     attendance_review_action_invalid: 'La acción seleccionada no es válida.',
     attendance_review_status_invalid: 'Selecciona si la llegada fue a tiempo o tarde.',
     attendance_review_reason_required: 'Escribe el motivo de la decisión.',
@@ -80,9 +80,8 @@ function publicErrorMessage(error) {
     attendance_manual_status_invalid: 'Selecciona si la llegada fue a tiempo o tarde.',
     attendance_manual_reason_required: 'Escribe el motivo de la marcación manual.',
     attendance_manual_reason_too_short: 'El motivo debe tener al menos 5 caracteres.',
-    attendance_break_policy_invalid: 'Selecciona una política de descanso válida.',
-    attendance_break_minutes_invalid: 'El descanso flexible debe estar entre 1 y 240 minutos.',
-    attendance_break_service_request_id_invalid: 'La solicitud de servicio no es válida.',
+    attendance_work_break_end_before_start: 'El fin del almuerzo no puede ser anterior a su inicio.',
+    attendance_work_departure_before_arrival: 'La salida no puede ser anterior a la entrada.',
     service_start_time_required: 'La solicitud no tiene una hora de inicio válida.',
     service_start_time_invalid: 'La hora de inicio de la solicitud no es válida.'
   };
@@ -187,26 +186,6 @@ export function dispatchAttendanceAdminRouter(prisma) {
     }
   });
 
-  router.post('/service-requests/:serviceRequestId/break-policy', formParser, async (req, res) => {
-    try {
-      const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
-        where: { id: req.params.serviceRequestId },
-        select: { id: true }
-      });
-      if (!serviceRequest) throw new Error('attendance_break_service_request_id_invalid');
-      await upsertDispatchAttendanceBreakPolicy(prisma, {
-        serviceRequestId: serviceRequest.id,
-        policy: req.body.policy,
-        unpaidBreakMinutes: req.body.unpaidBreakMinutes,
-        actorUsername: actorFromRequest(req).actorUsername
-      });
-      return redirectToBoard(res, req.body, { success: 'La política de descanso no remunerado quedó guardada.' });
-    } catch (error) {
-      console.warn('[ATTENDANCE_BREAK_POLICY_UPDATE_FAILED]', { code: error?.message, serviceRequestId: req.params.serviceRequestId });
-      return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
-    }
-  });
-
   router.post('/sessions/:sessionId/review', formParser, async (req, res) => {
     try {
       const reason = await resolveAttendanceReviewReason(prisma, {
@@ -219,11 +198,12 @@ export function dispatchAttendanceAdminRouter(prisma) {
         sessionId: req.params.sessionId,
         action: req.body.action,
         attendanceStatus: req.body.attendanceStatus,
+        recognizeEarlyArrival: req.body.recognizeEarlyArrival === 'true',
         reason,
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, { success: 'La decisión quedó guardada con auditoría.' });
+      return redirectToBoard(res, req.body, { success: 'La decisión y el tiempo trabajado quedaron guardados con auditoría.' });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', { code: error?.message, sessionId: req.params.sessionId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });

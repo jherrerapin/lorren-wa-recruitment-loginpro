@@ -7,7 +7,7 @@ import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBrid
 import { resolveAttendanceFeatureAccess } from '../services/attendanceFeatureAccess.js';
 import { geocodeAttendanceAddress } from '../services/attendanceGeocoding.js';
 
-export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-23-r7';
+export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-27-workday-r1';
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -17,6 +17,11 @@ const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
 const WORKER_PORTAL_ACTIVATION_ADMIN_PATH = '/admin/operaciones/portal-activaciones';
+const LEGACY_TIMING_FIELD_NAMES = Object.freeze([
+  'earlyArrivalWindowMinutes',
+  'lateToleranceMinutes',
+  'absenceGraceMinutes'
+]);
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -115,7 +120,6 @@ function injectAttendanceMapReliability(html) {
     );
   }
   if (output.includes(ATTENDANCE_MAP_RELIABILITY_SCRIPT)) return output;
-
   const escapedUrl = LEAFLET_1_9_4_SCRIPT_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const leafletScriptPattern = new RegExp(
     `(<script\\s+[^>]*src=["']${escapedUrl}["'][^>]*>\\s*<\\/script>)`,
@@ -149,12 +153,32 @@ function defaultAttendanceEnablement(html) {
   );
 }
 
+function stripLegacyAttendanceTimingControls(html) {
+  let output = html;
+  LEGACY_TIMING_FIELD_NAMES.forEach((fieldName) => {
+    const pattern = new RegExp(
+      `<div\\s+class=["']field["'][^>]*>\\s*<label[^>]*>[\\s\\S]*?<\\/label>\\s*<input\\b(?=[^>]*\\bname=["']${fieldName}["'])[^>]*>\\s*<\\/div>`,
+      'gi'
+    );
+    output = output.replace(pattern, '');
+  });
+
+  if (!output.includes('data-attendance-open-entry-policy')) {
+    output = output.replace(
+      /(<div\s+class=["']attendance-standards["'][^>]*>[\s\S]*?<\/div>)/i,
+      `$1\n                        <div class="attendance-standards" data-attendance-open-entry-policy="true"><span class="attendance-standard">Entrada sin ventana configurable</span><span class="attendance-standard">Las llegadas tarde se registran y no se bloquean</span><span class="muted">Una llegada anticipada se guarda con su hora real, pero el conteo inicia a la hora programada salvo reconocimiento auditado del coordinador.</span></div>`
+    );
+  }
+  return output;
+}
+
 export function filterAttendanceFeatureHtml(html, { allowed = false } = {}) {
   if (typeof html !== 'string') return html;
   let output = normalizeLeafletScriptIntegrity(html);
   output = injectAttendanceMapReliability(output);
   output = normalizeAttendanceGeocodingEndpoint(output);
   output = defaultAttendanceEnablement(output);
+  output = stripLegacyAttendanceTimingControls(output);
 
   if (!allowed) {
     output = output.replace(
@@ -162,7 +186,6 @@ export function filterAttendanceFeatureHtml(html, { allowed = false } = {}) {
       ''
     );
   }
-
   return output;
 }
 
@@ -176,10 +199,8 @@ export function filterOperationsPersonalAttendanceHtml(html, { allowed = false }
   if (typeof html !== 'string' || !allowed || html.includes(`href="${WORKER_PORTAL_ACTIVATION_ADMIN_PATH}"`)) {
     return html;
   }
-
   const returnAction = '<a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>';
   if (!html.includes(returnAction)) return html;
-
   const activationAction = `<a class="btn btn-success" href="${WORKER_PORTAL_ACTIVATION_ADMIN_PATH}">Activar Portal del Auxiliar</a>`;
   return html.replace(returnAction, `${activationAction}\n        ${returnAction}`);
 }
@@ -189,7 +210,6 @@ function installAttendanceRenderGate(req, res, next) {
   res.render = (view, locals, callback) => {
     let renderLocals = locals || {};
     let renderCallback = callback;
-
     if (typeof locals === 'function') {
       renderCallback = locals;
       renderLocals = {};
@@ -207,7 +227,6 @@ function installAttendanceRenderGate(req, res, next) {
         if (typeof renderCallback === 'function') return renderCallback(error);
         return next(error);
       }
-
       let output;
       if (isPointConfigView) {
         output = filterAttendanceFeatureHtml(html, {
@@ -220,7 +239,6 @@ function installAttendanceRenderGate(req, res, next) {
           allowed: Boolean(req.canAccessAttendanceFeature)
         });
       }
-
       if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
     });
@@ -319,7 +337,6 @@ export function dispatchBridgeRouter() {
       try {
         const name = normalizeString(req.body.name);
         if (!name) return res.status(400).send('Nombre requerido');
-
         const operation = await prisma.dispatchOperationPoint.findFirst({
           where: {
             id: req.params.operationId,
@@ -342,7 +359,6 @@ export function dispatchBridgeRouter() {
         const hadAttendanceLocation = operation.attendanceEnabled === true
           || operation.attendanceLatitude !== null
           || operation.attendanceLongitude !== null;
-
         if (locationChanged && hadAttendanceLocation && !req.canAccessAttendanceFeature) {
           return res.status(403).send(
             'Cambiar la ciudad o dirección de un punto con asistencia requiere acceso autorizado a Asistencia.'
@@ -358,18 +374,12 @@ export function dispatchBridgeRouter() {
           notes: normalizeString(req.body.notes),
           isActive: normalizeString(req.body.isActive) !== 'false'
         };
-
         if (locationChanged && hadAttendanceLocation) {
           data.attendanceEnabled = false;
           data.attendanceLatitude = null;
           data.attendanceLongitude = null;
         }
-
-        await prisma.dispatchOperationPoint.update({
-          where: { id: operation.id },
-          data
-        });
-
+        await prisma.dispatchOperationPoint.update({ where: { id: operation.id }, data });
         const message = locationChanged && hadAttendanceLocation
           ? 'Operación actualizada. La dirección cambió: vuelve a confirmar el punto exacto antes de habilitar asistencia.'
           : 'Operación actualizada.';

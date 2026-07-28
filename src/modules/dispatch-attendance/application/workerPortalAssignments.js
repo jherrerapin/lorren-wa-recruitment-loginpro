@@ -1,17 +1,15 @@
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
-  buildDispatchAttendanceExpectedWindow,
-  getDispatchArrivalWindowState
+  buildDispatchAttendanceExpectedWindow
 } from './registerArrival.js';
 import {
-  getDispatchAttendanceBreakPolicies,
-  getDispatchAttendanceBreakPolicy
-} from '../infrastructure/dispatchAttendanceBreakPolicyRepository.js';
-import { formatDispatchMinutes } from '../domain/attendanceWorkdayPolicy.js';
+  INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES,
+  STANDARD_DISPATCH_BREAK_MINUTES,
+  STANDARD_DISPATCH_WORKDAY_MINUTES,
+  formatDispatchMinutes
+} from '../domain/attendanceWorkdayPolicy.js';
 
-const PORTAL_PAST_WINDOW_MS = 24 * 60 * 60 * 1000;
-const PORTAL_FUTURE_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
-const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
+const PORTAL_COMPLETED_WINDOW_MS = 24 * 60 * 60 * 1000;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 
 function requireNonEmptyString(value, label) {
@@ -25,13 +23,10 @@ function requireDate(value, label) {
   return date;
 }
 
-function finiteNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function nonNegativeMinutes(value, fallback) {
-  return Math.max(0, finiteNumber(value, fallback));
+function optionalIsoDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function requireAssignmentReader(prisma, methodName) {
@@ -68,7 +63,7 @@ function formatDateTime(value) {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true
-  }).format(value);
+  }).format(requireDate(value, 'worker_portal_datetime'));
 }
 
 function arrivalLabel(session) {
@@ -87,74 +82,129 @@ function normalizePhotoPolicy(value) {
   return ['NEVER', 'RISK_ONLY', 'ALWAYS'].includes(value) ? value : 'RISK_ONLY';
 }
 
-function boundedArrivalWindow({ now, expectedStartAt, point }) {
-  const baseWindow = getDispatchArrivalWindowState({
-    now,
-    expectedStartAt,
-    earlyArrivalWindowMinutes: nonNegativeMinutes(point?.earlyArrivalWindowMinutes, 0)
-  });
-  const absenceGraceMinutes = nonNegativeMinutes(
-    point?.absenceGraceMinutes,
-    DEFAULT_ABSENCE_GRACE_MINUTES
-  );
-  const closesAt = new Date(expectedStartAt.getTime() + absenceGraceMinutes * 60_000);
-  const expired = now.getTime() > closesAt.getTime();
+function markMoment(mark) {
+  const raw = mark?.clientCapturedAt || mark?.serverReceivedAt;
+  if (!raw) return null;
+  const date = raw instanceof Date ? raw : new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function latestMark(marks, markType) {
+  return (Array.isArray(marks) ? marks : [])
+    .filter((mark) => mark.markType === markType)
+    .sort((left, right) => (markMoment(right)?.getTime() || 0) - (markMoment(left)?.getTime() || 0))[0] || null;
+}
+
+function minutesBetween(startAt, endAt) {
+  if (!startAt || !endAt) return null;
+  return Math.max(0, Math.floor((endAt.getTime() - startAt.getTime()) / 60_000));
+}
+
+function buildBreakSummary({ breakStartAt, breakEndAt, departureReported }) {
+  if (!breakStartAt) {
+    return {
+      breakMinutesDeducted: 0,
+      breakPenaltyApplied: false,
+      shortBreakMinutesCredited: departureReported ? STANDARD_DISPATCH_BREAK_MINUTES : 0,
+      breakLabel: departureReported
+        ? 'No tomó almuerzo · el tiempo cuenta como trabajado'
+        : 'No registrado · si no toma almuerzo, ese tiempo cuenta como trabajado'
+    };
+  }
+
+  if (!breakEndAt) {
+    return {
+      breakMinutesDeducted: departureReported ? INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES : 0,
+      breakPenaltyApplied: departureReported,
+      shortBreakMinutesCredited: 0,
+      breakLabel: departureReported
+        ? 'Se tomó 1 h 30 min de almuerzo · penalización por no marcar regreso'
+        : `Inició ${formatDateTime(breakStartAt)} · si registra salida sin finalizar se descontarán 1 h 30 min`
+    };
+  }
+
+  const actualBreakMinutes = minutesBetween(breakStartAt, breakEndAt) || 0;
+  const shortBreakMinutesCredited = Math.max(0, STANDARD_DISPATCH_BREAK_MINUTES - actualBreakMinutes);
   return {
-    open: baseWindow.open && !expired,
-    opensAt: baseWindow.opensAt,
-    closesAt,
-    expired
+    breakMinutesDeducted: actualBreakMinutes,
+    breakPenaltyApplied: false,
+    shortBreakMinutesCredited,
+    breakLabel: `${formatDateTime(breakStartAt)} – ${formatDateTime(breakEndAt)} · ${formatDispatchMinutes(actualBreakMinutes)}`
   };
 }
 
-function breakLabel(policy) {
-  return policy.unpaidBreakMinutes > 0
-    ? `${policy.unpaidBreakMinutes} min no remunerados`
-    : 'Sin descanso no remunerado';
-}
-
-function buildPortalAssignment(assignment, now, breakPolicy) {
+function buildPortalAssignment(assignment) {
   const request = assignment?.serviceRequest;
   if (!request) throw new Error('worker_portal_assignment_service_request_required');
 
   const point = request.operationPoint ?? null;
   const session = assignment.attendanceSession ?? null;
+  const marks = session?.marks || [];
+  const breakStartAt = markMoment(latestMark(marks, 'BREAK_START'));
+  const breakEndAt = markMoment(latestMark(marks, 'BREAK_END'));
+  const breakStarted = Boolean(breakStartAt);
+  const breakEnded = Boolean(breakEndAt);
+  const breakPending = breakStarted && !breakEnded;
+
   let expectedStartAt = null;
   let expectedEndAt = null;
-  let windowState = { open: false, opensAt: null, closesAt: null, expired: false };
-
   if (request.startTime) {
     const expected = buildDispatchAttendanceExpectedWindow(request);
     expectedStartAt = expected.expectedStartAt;
     expectedEndAt = expected.expectedEndAt;
-    windowState = boundedArrivalWindow({ now, expectedStartAt, point });
   }
 
   const arrivalReported = Boolean(session?.arrivalReportedAt);
   const departureReported = Boolean(session?.departureReportedAt);
   const attendanceEnabled = point?.attendanceEnabled === true;
-  const canRegisterArrival = attendanceEnabled
-    && Boolean(expectedStartAt)
-    && windowState.open
-    && !arrivalReported;
+  const sessionRejected = session?.validationStatus === 'REJECTED';
+  const canRegisterArrival = attendanceEnabled && Boolean(expectedStartAt) && !arrivalReported;
+  const canStartBreak = attendanceEnabled
+    && arrivalReported
+    && !departureReported
+    && !breakStarted
+    && !sessionRejected;
+  const canEndBreak = attendanceEnabled
+    && arrivalReported
+    && !departureReported
+    && breakPending
+    && !sessionRejected;
   const canRegisterDeparture = attendanceEnabled
     && arrivalReported
     && !departureReported
-    && session?.validationStatus !== 'REJECTED';
+    && !sessionRejected;
   const photoPolicy = normalizePhotoPolicy(point?.attendancePhotoPolicy);
+  const breakSummary = buildBreakSummary({ breakStartAt, breakEndAt, departureReported });
+  const workedMinutes = Number.isInteger(session?.workedMinutes) ? session.workedMinutes : null;
+  const ordinaryWorkedMinutes = workedMinutes === null
+    ? null
+    : Math.min(workedMinutes, STANDARD_DISPATCH_WORKDAY_MINUTES);
+  const overtimeMinutes = workedMinutes === null
+    ? null
+    : Math.max(0, workedMinutes - STANDARD_DISPATCH_WORKDAY_MINUTES);
 
   let actionType = 'ARRIVAL';
   let actionLabel = 'Registrar llegada';
   if (departureReported) {
     actionType = 'DONE';
-    actionLabel = `Jornada finalizada · ${formatDispatchMinutes(session?.workedMinutes)}`;
+    actionLabel = `Jornada finalizada · ${formatDispatchMinutes(workedMinutes)}`;
   } else if (arrivalReported) {
     actionType = 'DEPARTURE';
-    actionLabel = 'Registrar salida';
+    actionLabel = breakPending
+      ? 'Registrar salida · se descontarán 1 h 30 min de almuerzo'
+      : 'Registrar salida';
   } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
-  else if (windowState.expired) actionLabel = 'Jornada vencida';
   else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
-  else if (!windowState.open) actionLabel = `Disponible desde ${formatTime(windowState.opensAt)}`;
+
+  let breakActionType = null;
+  let breakActionLabel = null;
+  if (canStartBreak) {
+    breakActionType = 'BREAK_START';
+    breakActionLabel = 'Iniciar almuerzo';
+  } else if (canEndBreak) {
+    breakActionType = 'BREAK_END';
+    breakActionLabel = 'Finalizar almuerzo';
+  }
 
   return {
     id: assignment.id,
@@ -168,45 +218,68 @@ function buildPortalAssignment(assignment, now, breakPolicy) {
       : 'Horario por confirmar',
     expectedStartAt: expectedStartAt?.toISOString() || null,
     expectedEndAt: expectedEndAt?.toISOString() || null,
-    arrivalWindowOpen: windowState.open,
-    arrivalWindowOpensAt: windowState.opensAt?.toISOString() || null,
-    arrivalWindowClosesAt: windowState.closesAt?.toISOString() || null,
-    arrivalWindowExpired: windowState.expired,
+    arrivalWindowOpen: Boolean(expectedStartAt),
+    arrivalWindowOpensAt: null,
+    arrivalWindowClosesAt: null,
+    arrivalWindowExpired: false,
     attendanceEnabled,
     arrivalReported,
+    arrivalReportedAt: optionalIsoDate(session?.arrivalReportedAt),
     arrivalReportedLabel: formatDateTime(session?.arrivalReportedAt),
     departureReported,
+    departureReportedAt: optionalIsoDate(session?.departureReportedAt),
     departureReportedLabel: formatDateTime(session?.departureReportedAt),
-    workedMinutes: session?.workedMinutes ?? null,
-    workedLabel: session?.workedMinutes === null || session?.workedMinutes === undefined
-      ? null
-      : formatDispatchMinutes(session.workedMinutes),
-    breakPolicy: breakPolicy.policy,
-    unpaidBreakMinutes: breakPolicy.unpaidBreakMinutes,
-    breakLabel: breakLabel(breakPolicy),
+    breakStarted,
+    breakEnded,
+    breakOpen: false,
+    breakPending,
+    breakStartLabel: formatDateTime(breakStartAt),
+    breakEndLabel: formatDateTime(breakEndAt),
+    ...breakSummary,
+    workedMinutes,
+    workedLabel: workedMinutes === null ? null : formatDispatchMinutes(workedMinutes),
+    ordinaryWorkedMinutes,
+    ordinaryWorkedLabel: ordinaryWorkedMinutes === null ? null : formatDispatchMinutes(ordinaryWorkedMinutes),
+    overtimeMinutes,
+    overtimeLabel: overtimeMinutes === null ? null : formatDispatchMinutes(overtimeMinutes),
     attendanceStatus: session?.attendanceStatus || 'PENDING',
     validationStatus: session?.validationStatus || 'PENDING',
     punctualityStatus: session?.punctualityStatus || null,
     arrivalStatusLabel: arrivalLabel(session),
     actionType,
     actionLabel,
+    breakActionType,
+    breakActionLabel,
     canRegisterArrival,
+    canStartBreak,
+    canEndBreak,
     canRegisterDeparture,
     photoPolicy,
-    photoRequired: photoPolicy !== 'NEVER'
+    photoRequired: photoPolicy === 'ALWAYS'
   };
 }
 
 function isPortalRelevant(assignment, now) {
-  if (assignment.arrivalReported && !assignment.departureReported) return true;
-  if (assignment.departureReported) {
-    const departure = assignment.departureReportedLabel ? new Date(assignment.expectedStartAt || 0).getTime() : 0;
-    return !departure || departure >= now.getTime() - PORTAL_PAST_WINDOW_MS;
-  }
-  if (!assignment.expectedStartAt) return true;
-  const start = new Date(assignment.expectedStartAt).getTime();
-  return start >= now.getTime() - PORTAL_PAST_WINDOW_MS
-    && start <= now.getTime() + PORTAL_FUTURE_WINDOW_MS;
+  if (!assignment.departureReported) return true;
+  const departureAt = assignment.departureReportedAt
+    ? new Date(assignment.departureReportedAt).getTime()
+    : Number.NaN;
+  return Number.isFinite(departureAt)
+    && departureAt >= now.getTime() - PORTAL_COMPLETED_WINDOW_MS;
+}
+
+function assignmentInclude() {
+  return {
+    attendanceSession: {
+      include: {
+        marks: {
+          where: { markType: { in: ['BREAK_START', 'BREAK_END'] } },
+          orderBy: { serverReceivedAt: 'asc' }
+        }
+      }
+    },
+    serviceRequest: { include: { operationPoint: true } }
+  };
 }
 
 export async function loadWorkerPortalAssignments(prisma, input = {}) {
@@ -218,22 +291,11 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
       workerId,
       status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
     },
-    include: {
-      attendanceSession: true,
-      serviceRequest: { include: { operationPoint: true } }
-    }
+    include: assignmentInclude()
   });
-  const policies = await getDispatchAttendanceBreakPolicies(
-    prisma,
-    records.map((record) => record.serviceRequestId)
-  );
 
   return records
-    .map((record) => buildPortalAssignment(
-      record,
-      now,
-      policies.get(record.serviceRequestId) || { policy: 'NONE', unpaidBreakMinutes: 0 }
-    ))
+    .map((record) => buildPortalAssignment(record))
     .filter((record) => isPortalRelevant(record, now))
     .sort((left, right) => {
       const leftTime = left.expectedStartAt ? new Date(left.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
@@ -246,21 +308,15 @@ export async function loadWorkerPortalAssignmentForMark(prisma, input = {}) {
   requireAssignmentReader(prisma, 'findFirst');
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
   const assignmentId = requireNonEmptyString(input.assignmentId, 'worker_portal_assignment_id');
-  const now = input.now === undefined ? new Date() : requireDate(input.now, 'worker_portal_now');
   const assignment = await prisma.dispatchAssignment.findFirst({
     where: {
       id: assignmentId,
       workerId,
       status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
     },
-    include: {
-      attendanceSession: true,
-      serviceRequest: { include: { operationPoint: true } }
-    }
+    include: assignmentInclude()
   });
-  if (!assignment) return null;
-  const policy = await getDispatchAttendanceBreakPolicy(prisma, assignment.serviceRequestId);
-  return buildPortalAssignment(assignment, now, policy);
+  return assignment ? buildPortalAssignment(assignment) : null;
 }
 
 export const loadWorkerPortalAssignmentForArrival = loadWorkerPortalAssignmentForMark;
