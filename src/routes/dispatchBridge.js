@@ -4,7 +4,9 @@ import { dispatchAttendanceAdminRouter } from './dispatchAttendanceAdmin.js';
 import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';
 import { dispatchWorkerPortalActivationAdminRouter } from './dispatchWorkerPortalActivationAdmin.js';
 import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBridgeCore.js';
+import { dispatchDevPayrollTestRouter } from './dispatchDevPayrollTest.js';
 import { resolveAttendanceFeatureAccess } from '../services/attendanceFeatureAccess.js';
+import { resolvePayrollFeatureAccess } from '../services/payrollFeatureAccess.js';
 import { geocodeAttendanceAddress } from '../services/attendanceGeocoding.js';
 
 export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-27-workday-r1';
@@ -17,6 +19,7 @@ const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
 const WORKER_PORTAL_ACTIVATION_ADMIN_PATH = '/admin/operaciones/portal-activaciones';
+const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const LEGACY_TIMING_FIELD_NAMES = Object.freeze([
   'earlyArrivalWindowMinutes',
   'lateToleranceMinutes',
@@ -52,6 +55,10 @@ function isOpsUser(req) {
   return Boolean(username?.startsWith('operaciones-despacho'));
 }
 
+function isPayrollRequest(req) {
+  return String(req.originalUrl || '').split('?')[0].startsWith(PAYROLL_PATH);
+}
+
 function canUseOps(req) {
   const role = req.session?.userRole || req.userRole;
   const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch);
@@ -61,6 +68,7 @@ function canUseOps(req) {
 function requireOps(req, res, next) {
   const role = req.session?.userRole || req.userRole;
   if (!role) return res.redirect('/login');
+  if (isPayrollRequest(req) && req.canAccessPayrollFeature) return next();
   if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
   return next();
 }
@@ -72,6 +80,7 @@ function requireDev(req, res, next) {
 }
 
 function requireAttendanceAccess(req, res, next) {
+  if (isPayrollRequest(req) && req.canAccessPayrollFeature) return next();
   if (!req.canAccessAttendanceFeature) {
     return res.status(403).send('No tienes permiso para acceder a Asistencia operativa.');
   }
@@ -86,18 +95,32 @@ function requestOrigin(req) {
   return `${protocol}://${host}`;
 }
 
-async function loadAttendanceFeatureAccess(req, res, next) {
+async function loadFeatureAccess(req, res, next) {
+  const source = {
+    userRole: req.session?.userRole || req.userRole,
+    userId: req.session?.userId || req.userId,
+    username: req.session?.username || req.username
+  };
   try {
-    const access = await resolveAttendanceFeatureAccess(prisma, {
-      userRole: req.session?.userRole || req.userRole,
-      username: req.session?.username || req.username
-    });
-    req.canAccessAttendanceFeature = access.allowed;
-    res.locals.canAccessAttendanceFeature = access.allowed;
+    const attendance = await resolveAttendanceFeatureAccess(prisma, source);
+    req.canAccessAttendanceFeature = attendance.allowed;
+    res.locals.canAccessAttendanceFeature = attendance.allowed;
   } catch (error) {
     console.error('[ATTENDANCE_FEATURE_ACCESS_LOAD_FAILED]', error);
     req.canAccessAttendanceFeature = false;
     res.locals.canAccessAttendanceFeature = false;
+  }
+  try {
+    const payroll = await resolvePayrollFeatureAccess(prisma, source);
+    req.canAccessPayrollFeature = payroll.allowed;
+    req.canAccessPayroll = payroll.allowed;
+    res.locals.canAccessPayroll = payroll.allowed;
+    if (req.session) req.session.canAccessPayroll = payroll.allowed;
+  } catch (error) {
+    console.error('[PAYROLL_FEATURE_ACCESS_LOAD_FAILED]', error);
+    req.canAccessPayrollFeature = source.userRole === 'dev';
+    req.canAccessPayroll = req.canAccessPayrollFeature;
+    res.locals.canAccessPayroll = req.canAccessPayrollFeature;
   }
   return next();
 }
@@ -281,8 +304,9 @@ export function dispatchBridgeRouter() {
     });
   });
 
-  router.use(loadAttendanceFeatureAccess);
+  router.use(loadFeatureAccess);
   router.use(installAttendanceRenderGate);
+  router.use('/pruebas', dispatchDevPayrollTestRouter(prisma));
 
   router.get(
     '/asistencia/geocodificar',
