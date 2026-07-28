@@ -146,14 +146,10 @@ export async function loadPayrollCompensationMap(prisma, workerIds = [], range =
   const events = await prisma.devAuditEvent.findMany({
     where: {
       entityType: PAYROLL_COMPENSATION_ENTITY_TYPE,
-      action: PAYROLL_COMPENSATION_ACTION,
-      metadata: { path: ['workerId'], array_contains: undefined }
+      action: PAYROLL_COMPENSATION_ACTION
     },
     orderBy: { createdAt: 'desc' }
-  }).catch(() => prisma.devAuditEvent.findMany({
-    where: { entityType: PAYROLL_COMPENSATION_ENTITY_TYPE, action: PAYROLL_COMPENSATION_ACTION },
-    orderBy: { createdAt: 'desc' }
-  }));
+  });
 
   const workerSet = new Set(uniqueIds);
   for (const event of events) {
