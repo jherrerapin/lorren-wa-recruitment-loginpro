@@ -1,0 +1,98 @@
+name: Issue 801 CV contracts
+
+on:
+  pull_request:
+    branches:
+      - automation/801-cv-contracts
+
+permissions:
+  contents: write
+
+jobs:
+  validate-cv-contracts:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+      BASELINE_SHA: 3295ababdcadfe8262952b0d1fb4bf0835b64ac4
+
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Capture baseline failure names
+        shell: bash
+        run: |
+          git worktree add /tmp/issue-801-base "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/issue-801-base/node_modules
+          set +e
+          (cd /tmp/issue-801-base && npm test) > /tmp/baseline.log 2>&1
+          set -e
+          grep '^not ok [0-9][0-9]* - ' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
+
+      - name: Apply exact test patch
+        run: node .github/scripts/apply-issue-801.mjs
+
+      - name: Validate focal CV contracts
+        run: |
+          node --check test/aiFirstRecruitmentGuards.test.js
+          node --check test/hardeningP0Delta.test.js
+          node --test test/aiFirstRecruitmentGuards.test.js test/hardeningP0Delta.test.js test/cvFlow.test.js test/attachmentAnalyzerDoc.test.js
+
+      - name: Compare full suite
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.log 2>&1
+          set -e
+          grep '^not ok [0-9][0-9]* - ' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
+          comm -13 /tmp/baseline.failures /tmp/head.failures > /tmp/new.failures
+          comm -23 /tmp/baseline.failures /tmp/head.failures > /tmp/resolved.failures
+          if [ -s /tmp/new.failures ]; then
+            echo 'Nuevos fallos:'
+            cat /tmp/new.failures
+            exit 1
+          fi
+          for expected in \
+            'HV .doc o storage sin MIME/nombre PDF/DOCX no cuenta como CV válido' \
+            'E: HV imagen no cuenta como CV válido y seguridad pide PDF/DOCX' \
+            'documento no CV se clasifica OTHER y no CV_VALID'
+          do
+            grep -Fxq "$expected" /tmp/resolved.failures || {
+              echo "No se resolvió el fallo esperado: $expected"
+              echo 'Fallos resueltos observados:'
+              cat /tmp/resolved.failures
+              exit 1
+            }
+          done
+          cat /tmp/resolved.failures
+
+      - name: Validate diff
+        run: git diff --check
+
+      - name: Commit test files
+        shell: bash
+        run: |
+          git add test/aiFirstRecruitmentGuards.test.js test/hardeningP0Delta.test.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: alinear contratos vigentes de HV #801'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
