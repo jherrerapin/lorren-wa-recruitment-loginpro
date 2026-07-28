@@ -2,7 +2,12 @@ import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
   buildDispatchAttendanceExpectedWindow
 } from './registerArrival.js';
-import { formatDispatchMinutes } from '../domain/attendanceWorkdayPolicy.js';
+import {
+  INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES,
+  STANDARD_DISPATCH_BREAK_MINUTES,
+  STANDARD_DISPATCH_WORKDAY_MINUTES,
+  formatDispatchMinutes
+} from '../domain/attendanceWorkdayPolicy.js';
 
 const PORTAL_COMPLETED_WINDOW_MS = 24 * 60 * 60 * 1000;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
@@ -90,6 +95,44 @@ function latestMark(marks, markType) {
     .sort((left, right) => (markMoment(right)?.getTime() || 0) - (markMoment(left)?.getTime() || 0))[0] || null;
 }
 
+function minutesBetween(startAt, endAt) {
+  if (!startAt || !endAt) return null;
+  return Math.max(0, Math.floor((endAt.getTime() - startAt.getTime()) / 60_000));
+}
+
+function buildBreakSummary({ breakStartAt, breakEndAt, departureReported }) {
+  if (!breakStartAt) {
+    return {
+      breakMinutesDeducted: 0,
+      breakPenaltyApplied: false,
+      shortBreakMinutesCredited: departureReported ? STANDARD_DISPATCH_BREAK_MINUTES : 0,
+      breakLabel: departureReported
+        ? 'No tomó almuerzo · el tiempo cuenta como trabajado'
+        : 'No registrado · si no toma almuerzo, ese tiempo cuenta como trabajado'
+    };
+  }
+
+  if (!breakEndAt) {
+    return {
+      breakMinutesDeducted: departureReported ? INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES : 0,
+      breakPenaltyApplied: departureReported,
+      shortBreakMinutesCredited: 0,
+      breakLabel: departureReported
+        ? 'Se tomó 1 h 30 min de almuerzo · penalización por no marcar regreso'
+        : `Inició ${formatDateTime(breakStartAt)} · si registra salida sin finalizar se descontarán 1 h 30 min`
+    };
+  }
+
+  const actualBreakMinutes = minutesBetween(breakStartAt, breakEndAt) || 0;
+  const shortBreakMinutesCredited = Math.max(0, STANDARD_DISPATCH_BREAK_MINUTES - actualBreakMinutes);
+  return {
+    breakMinutesDeducted: actualBreakMinutes,
+    breakPenaltyApplied: false,
+    shortBreakMinutesCredited,
+    breakLabel: `${formatDateTime(breakStartAt)} – ${formatDateTime(breakEndAt)} · ${formatDispatchMinutes(actualBreakMinutes)}`
+  };
+}
+
 function buildPortalAssignment(assignment) {
   const request = assignment?.serviceRequest;
   if (!request) throw new Error('worker_portal_assignment_service_request_required');
@@ -129,18 +172,27 @@ function buildPortalAssignment(assignment) {
   const canRegisterDeparture = attendanceEnabled
     && arrivalReported
     && !departureReported
-    && !breakOpen
     && !sessionRejected;
   const photoPolicy = normalizePhotoPolicy(point?.attendancePhotoPolicy);
+  const breakSummary = buildBreakSummary({ breakStartAt, breakEndAt, departureReported });
+  const workedMinutes = Number.isInteger(session?.workedMinutes) ? session.workedMinutes : null;
+  const ordinaryWorkedMinutes = workedMinutes === null
+    ? null
+    : Math.min(workedMinutes, STANDARD_DISPATCH_WORKDAY_MINUTES);
+  const overtimeMinutes = workedMinutes === null
+    ? null
+    : Math.max(0, workedMinutes - STANDARD_DISPATCH_WORKDAY_MINUTES);
 
   let actionType = 'ARRIVAL';
   let actionLabel = 'Registrar llegada';
   if (departureReported) {
     actionType = 'DONE';
-    actionLabel = `Jornada finalizada · ${formatDispatchMinutes(session?.workedMinutes)}`;
+    actionLabel = `Jornada finalizada · ${formatDispatchMinutes(workedMinutes)}`;
   } else if (arrivalReported) {
     actionType = 'DEPARTURE';
-    actionLabel = breakOpen ? 'Finaliza el almuerzo antes de salir' : 'Registrar salida';
+    actionLabel = breakOpen
+      ? 'Registrar salida · se descontarán 1 h 30 min de almuerzo'
+      : 'Registrar salida';
   } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
   else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
 
@@ -182,15 +234,13 @@ function buildPortalAssignment(assignment) {
     breakOpen,
     breakStartLabel: formatDateTime(breakStartAt),
     breakEndLabel: formatDateTime(breakEndAt),
-    breakLabel: breakStarted
-      ? (breakEnded
-          ? `${formatDateTime(breakStartAt)} – ${formatDateTime(breakEndAt)}`
-          : `Inició ${formatDateTime(breakStartAt)} · pendiente de finalizar`)
-      : 'No registrado · el tiempo seguirá contando como trabajado',
-    workedMinutes: session?.workedMinutes ?? null,
-    workedLabel: session?.workedMinutes === null || session?.workedMinutes === undefined
-      ? null
-      : formatDispatchMinutes(session.workedMinutes),
+    ...breakSummary,
+    workedMinutes,
+    workedLabel: workedMinutes === null ? null : formatDispatchMinutes(workedMinutes),
+    ordinaryWorkedMinutes,
+    ordinaryWorkedLabel: ordinaryWorkedMinutes === null ? null : formatDispatchMinutes(ordinaryWorkedMinutes),
+    overtimeMinutes,
+    overtimeLabel: overtimeMinutes === null ? null : formatDispatchMinutes(overtimeMinutes),
     attendanceStatus: session?.attendanceStatus || 'PENDING',
     validationStatus: session?.validationStatus || 'PENDING',
     punctualityStatus: session?.punctualityStatus || null,
