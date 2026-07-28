@@ -290,7 +290,10 @@ export async function saveDevTestAttendance(prisma, input = {}, actor = {}) {
 
   const dateKey = serviceDateKey(assignment.serviceRequest.serviceDate);
   const expectedStartAt = bogotaDateTime(dateKey, assignment.serviceRequest.startTime) || arrivalAt;
-  const expectedEndAt = bogotaDateTime(dateKey, assignment.serviceRequest.endTime);
+  let expectedEndAt = bogotaDateTime(dateKey, assignment.serviceRequest.endTime);
+  if (expectedEndAt && expectedEndAt <= expectedStartAt) {
+    expectedEndAt = new Date(expectedEndAt.getTime() + (24 * 60 * 60 * 1000));
+  }
   const now = new Date();
   const punctualityStatus = arrivalAt <= expectedStartAt ? 'ON_TIME' : 'LATE';
 
@@ -375,7 +378,8 @@ export function formatBogotaDateTimeLocal(value) {
 export function defaultDevTestTimes(request) {
   const dateKey = serviceDateKey(request.serviceDate);
   const arrival = bogotaDateTime(dateKey, request.startTime || '08:00') || new Date(request.serviceDate);
-  const departure = bogotaDateTime(dateKey, request.endTime || '16:00') || new Date(arrival.getTime() + (8 * 60 * 60 * 1000));
+  let departure = bogotaDateTime(dateKey, request.endTime || '16:00') || new Date(arrival.getTime() + (8 * 60 * 60 * 1000));
+  if (departure <= arrival) departure = new Date(departure.getTime() + (24 * 60 * 60 * 1000));
   const durationMs = departure.getTime() - arrival.getTime();
   const supportsBreak = durationMs >= 3 * 60 * 60 * 1000;
   const breakStart = supportsBreak
