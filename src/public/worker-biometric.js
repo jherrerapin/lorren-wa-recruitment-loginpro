@@ -8,6 +8,7 @@
   const MIN_LIVE_SCORE = 0.55;
   const DETECTION_INTERVAL_MS = 160;
   const CAPTURE_TIMEOUT_MS = 20_000;
+  const reviewRequiredKeys = new Set();
   let humanPromise = null;
   let scriptPromise = null;
 
@@ -36,54 +37,66 @@
     return scriptPromise;
   }
 
+  function humanConfig(backend) {
+    return {
+      backend,
+      modelBasePath: HUMAN_MODEL_PATH,
+      cacheModels: true,
+      debug: false,
+      async: true,
+      warmup: 'face',
+      filter: { enabled: true, autoBrightness: true, flip: false },
+      gesture: { enabled: false },
+      face: {
+        enabled: true,
+        detector: {
+          enabled: true,
+          modelPath: 'blazeface.json',
+          rotation: true,
+          maxDetected: 2,
+          minConfidence: 0.55,
+          minSize: 120,
+          skipFrames: 0,
+          skipTime: 0
+        },
+        mesh: { enabled: true, modelPath: 'facemesh.json' },
+        iris: { enabled: true, modelPath: 'iris.json' },
+        description: {
+          enabled: true,
+          modelPath: 'faceres.json',
+          minConfidence: 0.45,
+          skipFrames: 0,
+          skipTime: 0
+        },
+        antispoof: { enabled: true, modelPath: 'antispoof.json', skipFrames: 0, skipTime: 0 },
+        liveness: { enabled: true, modelPath: 'liveness.json', skipFrames: 0, skipTime: 0 },
+        emotion: { enabled: false },
+        attention: { enabled: false },
+        gear: { enabled: false }
+      },
+      body: { enabled: false },
+      hand: { enabled: false },
+      object: { enabled: false },
+      segmentation: { enabled: false }
+    };
+  }
+
+  async function createHuman(backend) {
+    const human = new window.Human.Human(humanConfig(backend));
+    await human.load();
+    return human;
+  }
+
   async function humanInstance() {
     if (humanPromise) return humanPromise;
     humanPromise = (async () => {
       await loadHumanScript();
       if (!window.Human?.Human) throw new Error('biometric_runtime_unavailable');
-      const human = new window.Human.Human({
-        backend: 'webgl',
-        modelBasePath: HUMAN_MODEL_PATH,
-        cacheModels: true,
-        debug: false,
-        async: true,
-        warmup: 'face',
-        filter: { enabled: true, autoBrightness: true, flip: false },
-        gesture: { enabled: false },
-        face: {
-          enabled: true,
-          detector: {
-            enabled: true,
-            modelPath: 'blazeface.json',
-            rotation: true,
-            maxDetected: 2,
-            minConfidence: 0.55,
-            minSize: 120,
-            skipFrames: 0,
-            skipTime: 0
-          },
-          mesh: { enabled: true, modelPath: 'facemesh.json' },
-          iris: { enabled: true, modelPath: 'iris.json' },
-          description: {
-            enabled: true,
-            modelPath: 'faceres.json',
-            minConfidence: 0.45,
-            skipFrames: 0,
-            skipTime: 0
-          },
-          antispoof: { enabled: true, modelPath: 'antispoof.json', skipFrames: 0, skipTime: 0 },
-          liveness: { enabled: true, modelPath: 'liveness.json', skipFrames: 0, skipTime: 0 },
-          emotion: { enabled: false },
-          attention: { enabled: false },
-          gear: { enabled: false }
-        },
-        body: { enabled: false },
-        hand: { enabled: false },
-        object: { enabled: false },
-        segmentation: { enabled: false }
-      });
-      await human.load();
-      return human;
+      try {
+        return await createHuman('webgl');
+      } catch {
+        return createHuman('cpu');
+      }
     })().catch((error) => {
       humanPromise = null;
       throw error;
@@ -100,7 +113,7 @@
     const verticalOffset = Math.abs(centerY - video.videoHeight / 2) / video.videoHeight;
     const faceRatio = Math.min(width / video.videoWidth, height / video.videoHeight);
     if (faceRatio < 0.22) return { valid: false, message: 'Acerca un poco el rostro.' };
-    if (faceRatio > 0.78) return { valid: false, message: 'Aleja un poco el rostro.' };
+    if (faceRatio > 0.82) return { valid: false, message: 'Aleja un poco el rostro.' };
     if (horizontalOffset > 0.2 || verticalOffset > 0.22) return { valid: false, message: 'Centra el rostro dentro del marco.' };
     if (Number(face.score || face.faceScore || 0) < 0.55) return { valid: false, message: 'Busca mejor iluminación.' };
     return { valid: true, faceRatio };
@@ -231,6 +244,7 @@
     const timeoutAt = Date.now() + (options.timeoutMs || CAPTURE_TIMEOUT_MS);
     const baseline = await waitForStableFront(human, video, statusCallback, timeoutAt, 2);
     const baselineRatio = baseline.quality.faceRatio;
+    const closerTarget = Math.min(0.72, baselineRatio + 0.08);
     let completed = false;
     if (challenge.action === 'TURN_SIDE') statusCallback?.('Gira el rostro hacia un lado.');
     else statusCallback?.('Acerca el rostro a la cámara.');
@@ -240,7 +254,7 @@
       if (detected) {
         completed = challenge.action === 'TURN_SIDE'
           ? turnedSide(detected.face)
-          : detected.quality.faceRatio >= baselineRatio * 1.25;
+          : detected.quality.faceRatio >= closerTarget;
       }
       if (!completed) await sleep(DETECTION_INTERVAL_MS);
     }
@@ -271,6 +285,51 @@
     await video.play();
     return stream;
   }
+
+  function installPortalResponseGuard() {
+    if (!window.location.pathname.startsWith('/operaciones/portal') || window.__lorrenBiometricFetchGuard) return;
+    window.__lorrenBiometricFetchGuard = true;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      const url = typeof input === 'string' ? input : String(input?.url || '');
+      const response = await originalFetch(input, init);
+
+      if (url.includes('/biometria/verificar') && typeof init.body === 'string') {
+        try {
+          const requestPayload = JSON.parse(init.body);
+          const responsePayload = await response.clone().json();
+          if (responsePayload?.requiresReview && requestPayload?.idempotencyKey) {
+            reviewRequiredKeys.add(String(requestPayload.idempotencyKey));
+          }
+        } catch {
+          // La ruta original conserva el manejo de error.
+        }
+        return response;
+      }
+
+      if (/\/operaciones\/portal\/asignaciones\/[^/]+\/(llegada|salida)$/.test(url) && init.body instanceof FormData) {
+        const key = String(init.body.get('idempotencyKey') || '');
+        if (key && reviewRequiredKeys.has(key) && response.ok) {
+          try {
+            const payload = await response.clone().json();
+            reviewRequiredKeys.delete(key);
+            const headers = new Headers(response.headers);
+            headers.set('Content-Type', 'application/json; charset=utf-8');
+            return new Response(JSON.stringify({
+              ...payload,
+              requiresReview: true,
+              message: 'Marcación registrada y enviada para revisión.'
+            }), { status: response.status, statusText: response.statusText, headers });
+          } catch {
+            return response;
+          }
+        }
+      }
+      return response;
+    };
+  }
+
+  installPortalResponseGuard();
 
   window.LorrenWorkerBiometric = Object.freeze({
     MODEL_VERSION,
