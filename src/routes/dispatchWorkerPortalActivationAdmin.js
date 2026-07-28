@@ -66,8 +66,19 @@ function requireWorkerPortalJson(req, res, next) {
   return next();
 }
 
+function routeLayer(router, path, method = 'post') {
+  return router.stack.find((layer) => layer.route?.path === path && layer.route.methods?.[method]);
+}
+
+function replaceRouteHandlers(targetRouter, sourceRouter, path) {
+  const target = routeLayer(targetRouter, path);
+  const source = routeLayer(sourceRouter, path);
+  if (!target || !source) throw new Error(`worker_biometric_route_missing:${path}`);
+  target.route.stack = source.route.stack;
+}
+
 export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) {
-  const router = express.Router();
+  const replacementRouter = express.Router();
   const biometricJson = express.json({ limit: BIOMETRIC_BODY_LIMIT, strict: true, type: 'application/json' });
   const sessionRepositoryFactory = options.sessionRepositoryFactory
     || (() => createPrismaWorkerPortalSessionRepository(prisma));
@@ -116,9 +127,9 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     });
   }
 
-  router.use(cookieParser());
+  replacementRouter.use(cookieParser());
 
-  router.post('/biometria/desafio', requireWorkerPortalJson, biometricJson, async (req, res) => {
+  replacementRouter.post('/biometria/desafio', requireWorkerPortalJson, biometricJson, async (req, res) => {
     try {
       const now = nowFn();
       const portalSession = await resolvePortalRequestSession(req, now);
@@ -126,9 +137,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
       const assignmentId = normalizeString(req.body?.assignmentId, 120);
       const idempotencyKey = normalizeString(req.body?.idempotencyKey, 120);
       const markType = normalizeMarkType(req.body?.markType);
-      if (!assignmentId || !idempotencyKey) {
-        return res.status(400).json({ ok: false, error: 'biometric_request_invalid' });
-      }
+      if (!assignmentId || !idempotencyKey) return res.status(400).json({ ok: false, error: 'biometric_request_invalid' });
       const assignment = await loadBiometricAssignment(portalSession.workerId, assignmentId, markType, now);
       if (!assignment || !assignment.attendanceEnabled) {
         return res.status(404).json({ ok: false, error: 'assignment_not_available' });
@@ -153,7 +162,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     }
   });
 
-  router.post('/biometria/verificar', requireWorkerPortalJson, biometricJson, async (req, res) => {
+  replacementRouter.post('/biometria/verificar', requireWorkerPortalJson, biometricJson, async (req, res) => {
     try {
       const now = nowFn();
       const portalSession = await resolvePortalRequestSession(req, now);
@@ -161,9 +170,7 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
       const assignmentId = normalizeString(req.body?.assignmentId, 120);
       const idempotencyKey = normalizeString(req.body?.idempotencyKey, 120);
       const markType = normalizeMarkType(req.body?.markType);
-      if (!assignmentId || !idempotencyKey) {
-        return res.status(400).json({ ok: false, error: 'biometric_request_invalid' });
-      }
+      if (!assignmentId || !idempotencyKey) return res.status(400).json({ ok: false, error: 'biometric_request_invalid' });
       const assignment = await loadBiometricAssignment(portalSession.workerId, assignmentId, markType, now);
       if (!assignment || !assignment.attendanceEnabled) {
         return res.status(404).json({ ok: false, error: 'assignment_not_available' });
@@ -240,17 +247,16 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     }
   });
 
-  router.post('/biometria/registrar', biometricJson, (_req, res) => {
+  replacementRouter.post('/biometria/registrar', biometricJson, (_req, res) => {
     setNoStore(res);
-    return res.status(410).json({
-      ok: false,
-      error: 'biometric_enrollment_moved_to_worker_portal'
-    });
+    return res.status(410).json({ ok: false, error: 'biometric_enrollment_moved_to_worker_portal' });
   });
 
-  router.use(coreDispatchWorkerPortalActivationAdminRouter(prisma, {
+  const router = coreDispatchWorkerPortalActivationAdminRouter(prisma, {
     ...options,
     sessionRepository: getSessionRepository()
-  }));
+  });
+  ['/biometria/desafio', '/biometria/verificar', '/biometria/registrar']
+    .forEach((path) => replaceRouteHandlers(router, replacementRouter, path));
   return router;
 }
