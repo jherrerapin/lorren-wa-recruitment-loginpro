@@ -38,7 +38,10 @@ function requestDouble({
   username = 'dev',
   canAccessAttendanceFeature = false,
   body = {},
-  headers = {}
+  headers = {},
+  cookies = {},
+  params = {},
+  ip = '127.0.0.1'
 } = {}) {
   const normalizedHeaders = Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])
@@ -46,6 +49,9 @@ function requestDouble({
   return {
     method,
     body,
+    cookies,
+    params,
+    ip,
     canAccessAttendanceFeature,
     session: role ? { userRole: role, username } : {},
     get(name) { return normalizedHeaders[String(name).toLowerCase()] ?? undefined; },
@@ -84,11 +90,16 @@ function workerFixture(overrides = {}) {
 function buildRouter(options = {}) {
   return dispatchWorkerPortalActivationAdminRouter({}, {
     repository: {},
-    env: { RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app' },
+    sessionRepository: {},
+    env: {
+      RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app',
+      ATTENDANCE_BIOMETRIC_SECRET: 'b'.repeat(64)
+    },
     ttlMinutes: 30,
     nowFn: () => NOW,
     loadWorkersFn: async () => [workerFixture()],
     findWorkerFn: async () => workerFixture(),
+    loadBiometricStatusMapFn: async () => new Map([[WORKER_ID, { enrolled: false }]]),
     issueActivationFn: async () => ({
       activationId: 'activation-1',
       workerId: WORKER_ID,
@@ -157,6 +168,7 @@ test('GET permite a DEV y mantiene respuesta sin almacenamiento', async () => {
   assert.equal(state.render.view, 'operacionesPortalActivaciones');
   assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · Directo');
   assert.equal(state.render.locals.workers[0].documentNumber, undefined);
+  assert.equal(state.render.locals.workers[0].biometric.enrolled, false);
   assert.match(state.headers['Cache-Control'], /no-store/);
 });
 
@@ -185,9 +197,14 @@ test('la consulta predeterminada replica Personal operativo: solo CONTRATADO de 
   };
   const router = dispatchWorkerPortalActivationAdminRouter(prisma, {
     repository: {},
-    env: { RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app' },
+    sessionRepository: {},
+    env: {
+      RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app',
+      ATTENDANCE_BIOMETRIC_SECRET: 'b'.repeat(64)
+    },
     ttlMinutes: 30,
-    nowFn: () => NOW
+    nowFn: () => NOW,
+    loadBiometricStatusMapFn: async () => new Map()
   });
   const { res, state } = responseDouble();
 
@@ -291,23 +308,25 @@ test('la pantalla informa el alcance del permiso y mantiene copia solo mediante 
   assert.ok(copyListenerIndex >= 0);
   assert.ok(clipboardIndex > copyListenerIndex);
   assert.match(view, /Gestión de asistencia/);
-  assert.match(view, /usuarios con permiso de Asistencia/);
-  assert.doesNotMatch(view, /Control exclusivo DEV/);
+  assert.match(view, /Registrar rostro/);
+  assert.match(view, /autorizó la plantilla facial/);
   assert.match(view, /No abras este enlace en tu computador/);
   assert.doesNotMatch(view, /window\.open\(|location\.href\s*=\s*activationUrl/);
 });
 
-test('la ruta y el acceso visual usan el permiso de Asistencia sin ampliar otras funciones DEV', () => {
+test('las rutas administrativas exigen permiso y las biométricas públicas exigen sesión del portal', () => {
   const bridgeSource = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
   const activationSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
 
-  assert.match(
-    bridgeSource,
-    /'\/portal-activaciones',[\s\S]*requireOps,[\s\S]*requireAttendanceAccess,[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/
-  );
+  assert.match(bridgeSource, /'\/portal-activaciones',[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/);
+  assert.match(activationSource, /router\.get\('\/', requireAttendancePermission/);
+  assert.match(activationSource, /router\.post\('\/emitir', requireAttendancePermission, requireAdminJson/);
+  assert.match(activationSource, /router\.post\('\/biometria\/registrar', requireAttendancePermission, requireAdminJson/);
+  assert.match(activationSource, /router\.post\('\/biometria\/desafio', requireWorkerPortalJson/);
+  assert.match(activationSource, /resolvePortalRequestSession/);
+  assert.match(activationSource, /loadBiometricAssignment/);
   assert.match(bridgeSource, /filterOperationsPersonalAttendanceHtml/);
-  assert.match(bridgeSource, /WORKER_PORTAL_ACTIVATION_ADMIN_PATH/);
   assert.match(activationSource, /currentRole\(req\) === 'dev' \|\| req\.canAccessAttendanceFeature === true/);
   assert.match(personalView, /<% if \(role === 'dev'\) \{ %>[\s\S]*Sincronizar contratados/);
 });
