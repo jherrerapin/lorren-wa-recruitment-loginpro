@@ -60,15 +60,17 @@
     .step { margin-top: 16px; padding: 15px; border-radius: 14px; background: #f5f7f9; }
     .step-title { margin-bottom: 6px; font-weight: 800; color: #263645; }
     .step-copy { font-size: 14px; }
-    video, .photo-preview { display: block; width: 100%; margin-top: 12px; border-radius: 14px; background: #101820; aspect-ratio: 3 / 4; object-fit: cover; }
-    .photo-preview[hidden], video[hidden] { display: none; }
+    .face-stage { position: relative; overflow: hidden; margin-top: 12px; border-radius: 14px; background: #101820; aspect-ratio: 3 / 4; }
+    .face-stage video, .face-stage .photo-preview { display: block; width: 100%; height: 100%; margin: 0; object-fit: cover; }
+    .face-stage video { transform: scaleX(-1); }
+    .face-stage .photo-preview[hidden], .face-stage video[hidden] { display: none; }
+    .face-frame { position: absolute; left: 50%; top: 48%; width: 58%; height: 65%; transform: translate(-50%, -50%); border: 3px solid rgba(255,255,255,.92); border-radius: 48% 48% 44% 44%; box-shadow: 0 0 0 999px rgba(0,0,0,.25); pointer-events: none; }
     .camera-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
     .camera-actions button { padding: 12px; border: 0; border-radius: 10px; font-weight: 750; cursor: pointer; }
-    .file-fallback { margin-top: 12px; font-size: 14px; }
+    .file-fallback { display: block; margin-top: 12px; font-size: 13px; }
     .consent { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; font-size: 13px; color: #4d5b69; }
     .consent input { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; }
     .dialog-actions { display: grid; gap: 10px; margin-top: 16px; }
-    .fine-print { margin-top: 14px; font-size: 12px; color: #72808e; }
     @media (max-width: 420px) { body { padding-left: 12px; padding-right: 12px; } .detail-row { grid-template-columns: 86px 1fr; } .work-summary { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -151,12 +153,29 @@
       <% } else { %><section class="empty-state"><h2>No tienes asignaciones activas</h2><p class="meta">Cuando Operaciones te programe un servicio, aparecerá aquí automáticamente.</p></section><% } %>
       <% if (expiresAt) { %><p class="meta">Tu sesión permanece en este dispositivo y puede revocarse desde Lórren.</p><% } %>
 
-      <dialog id="mark-dialog" aria-labelledby="mark-title"><div class="dialog-body"><div class="dialog-head"><div><p class="brand">Registro seguro</p><h2 id="mark-title">Confirmar marcación</h2></div><button type="button" class="icon-button" id="close-mark" aria-label="Cerrar">×</button></div>
-        <div class="step"><p class="step-title">1. Ubicación actual</p><p id="location-status" class="step-copy" role="status">Preparando el GPS…</p></div>
-        <div class="step" id="camera-step" hidden><p class="step-title">2. Selfie de evidencia</p><p class="step-copy">Toma una foto en este momento. No realizamos reconocimiento facial automático.</p><video id="camera-video" playsinline muted hidden></video><img id="photo-preview" class="photo-preview" alt="Vista previa de la selfie" hidden><canvas id="camera-canvas" hidden></canvas><div class="camera-actions"><button type="button" id="capture-photo" disabled>Tomar foto</button><button type="button" id="retry-photo" disabled>Repetir</button></div><label class="file-fallback" id="file-fallback" hidden>Cámara no disponible. Selecciona una foto tomada ahora:<input type="file" id="fallback-photo" accept="image/jpeg,image/png,image/webp" capture="user"></label></div>
-        <label class="consent" id="photo-consent-wrap" hidden><input type="checkbox" id="photo-consent"><span>Autorizo el uso de esta fotografía únicamente como evidencia de la marcación y para revisión de asistencia.</span></label>
-        <div id="mark-result" class="status" role="status" aria-live="polite" hidden></div><div class="dialog-actions"><button type="button" class="primary-button" id="submit-mark" disabled>Registrar</button><button type="button" class="secondary-button" id="cancel-mark">Cancelar</button></div><p class="fine-print">Lórren conserva la hora real de cada marcación. La salida puede registrarse antes o después del horario programado.</p></div></dialog>
+      <dialog id="mark-dialog" aria-labelledby="mark-title">
+        <div class="dialog-body">
+          <div class="dialog-head"><div><p class="brand">Registro seguro</p><h2 id="mark-title">Confirmar marcación</h2></div><button type="button" class="icon-button" id="close-mark" aria-label="Cerrar">×</button></div>
+          <div class="step"><p class="step-title">1. Ubicación</p><p id="location-status" class="step-copy" role="status">Preparando GPS…</p></div>
+          <div class="step" id="camera-step" hidden>
+            <p class="step-title">2. Verificación</p>
+            <p id="biometric-instruction" class="step-copy">Ubica tu rostro en el marco.</p>
+            <div class="face-stage">
+              <video id="camera-video" playsinline muted hidden></video>
+              <img id="photo-preview" class="photo-preview" alt="Vista previa" hidden>
+              <div class="face-frame" aria-hidden="true"></div>
+            </div>
+            <canvas id="camera-canvas" hidden></canvas>
+            <div class="camera-actions"><button type="button" id="capture-photo" disabled>Continuar</button><button type="button" id="retry-photo" disabled>Repetir</button></div>
+            <label class="file-fallback" id="file-fallback" hidden>Cámara no disponible:<input type="file" id="fallback-photo" accept="image/jpeg,image/png,image/webp" capture="user"></label>
+          </div>
+          <label class="consent" id="photo-consent-wrap" hidden><input type="checkbox" id="photo-consent"><span>Autorizo esta captura para validar mi identidad y asistencia.</span></label>
+          <div id="mark-result" class="status" role="status" aria-live="polite" hidden></div>
+          <div class="dialog-actions"><button type="button" class="primary-button" id="submit-mark" disabled>Registrar</button><button type="button" class="secondary-button" id="cancel-mark">Cancelar</button></div>
+        </div>
+      </dialog>
 
+      <script src="/public/worker-biometric.js"></script>
       <script src="/operaciones/portal/offline.js"></script>
       <script nonce="<%= nonce %>">
         (() => {
@@ -164,6 +183,7 @@
           const title = document.getElementById('mark-title');
           const locationStatus = document.getElementById('location-status');
           const cameraStep = document.getElementById('camera-step');
+          const biometricInstruction = document.getElementById('biometric-instruction');
           const cameraVideo = document.getElementById('camera-video');
           const cameraCanvas = document.getElementById('camera-canvas');
           const photoPreview = document.getElementById('photo-preview');
@@ -179,32 +199,345 @@
           const connectivityTitle = document.getElementById('connectivity-title');
           const connectivityCopy = document.getElementById('connectivity-copy');
           const offlineApi = window.LorrenWorkerPortalOffline || null;
-          let assignmentId = null; let markType = 'ARRIVAL'; let photoRequired = false; let locationEvidence = null; let photoBlob = null; let photoUrl = null; let cameraStream = null; let idempotencyKey = null; let offlineState = { queue: [], receipts: [], online: navigator.onLine };
+          const biometricApi = window.LorrenWorkerBiometric || null;
+          let assignmentId = null;
+          let markType = 'ARRIVAL';
+          let photoRequired = false;
+          let locationEvidence = null;
+          let photoBlob = null;
+          let photoUrl = null;
+          let cameraStream = null;
+          let idempotencyKey = null;
+          let biometricChallenge = null;
+          let biometricEnabled = false;
+          let offlineState = { queue: [], receipts: [], online: navigator.onLine };
+
           const labelFor = (type) => ({ ARRIVAL: 'llegada', BREAK_START: 'inicio de almuerzo', BREAK_END: 'fin de almuerzo', DEPARTURE: 'salida' })[type] || 'marcación';
           const endpointFor = (type) => ({ ARRIVAL: 'llegada', BREAK_START: 'inicio-almuerzo', BREAK_END: 'fin-almuerzo', DEPARTURE: 'salida' })[type];
           const supportsOffline = () => markType === 'ARRIVAL' || markType === 'DEPARTURE';
-          function newIdempotencyKey() { if (window.crypto?.randomUUID) return window.crypto.randomUUID(); return `${markType.toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`; }
-          function stopCamera() { if (cameraStream) cameraStream.getTracks().forEach((track) => track.stop()); cameraStream = null; cameraVideo.srcObject = null; }
-          function clearPhotoUrl() { if (photoUrl) URL.revokeObjectURL(photoUrl); photoUrl = null; }
-          function updateSubmitState() { submitButton.disabled = !locationEvidence || (photoRequired && !photoBlob) || (photoBlob && !photoConsent.checked) || (!navigator.onLine && !supportsOffline()); }
-          function showResult(message, className) { resultBox.hidden = false; resultBox.className = `status ${className || ''}`.trim(); resultBox.textContent = message; }
-          function resetDialog() { stopCamera(); clearPhotoUrl(); locationEvidence = null; photoBlob = null; photoConsent.checked = false; resultBox.hidden = true; locationStatus.textContent = 'Solicitando permiso de ubicación…'; cameraStep.hidden = !photoRequired; photoConsentWrap.hidden = !photoRequired; cameraVideo.hidden = true; photoPreview.hidden = true; capturePhotoButton.disabled = true; retryPhotoButton.disabled = true; fileFallback.hidden = true; fallbackPhoto.value = ''; submitButton.disabled = true; title.textContent = `Confirmar ${labelFor(markType)}`; submitButton.textContent = `Registrar ${labelFor(markType)}`; if (!navigator.onLine && !supportsOffline()) showResult('El almuerzo requiere conexión para mantener el orden correcto de las marcaciones.', 'warning'); }
-          function requestLocation() { if (!navigator.geolocation) { showResult('Este navegador no permite obtener la ubicación.', 'warning'); return; } navigator.geolocation.getCurrentPosition((position) => { locationEvidence = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracyMeters: position.coords.accuracy, clientCapturedAt: new Date(position.timestamp || Date.now()).toISOString() }; locationStatus.textContent = `Ubicación obtenida con precisión aproximada de ${Math.round(position.coords.accuracy)} metros.`; updateSubmitState(); }, (error) => { locationStatus.textContent = error?.code === 1 ? 'Permiso de ubicación rechazado.' : 'No fue posible obtener una ubicación confiable.'; showResult('Activa la ubicación y concede el permiso para continuar.', 'warning'); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }); }
-          async function startCamera() { if (!photoRequired) return; if (!navigator.mediaDevices?.getUserMedia) { fileFallback.hidden = false; return; } try { cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }, audio: false }); cameraVideo.srcObject = cameraStream; cameraVideo.hidden = false; await cameraVideo.play(); capturePhotoButton.disabled = false; } catch { fileFallback.hidden = false; showResult('No se pudo abrir la cámara. Usa la opción de foto disponible.', 'warning'); } }
-          function setPhoto(blob) { clearPhotoUrl(); photoBlob = blob; photoUrl = URL.createObjectURL(blob); photoPreview.src = photoUrl; photoPreview.hidden = false; cameraVideo.hidden = true; capturePhotoButton.disabled = true; retryPhotoButton.disabled = false; stopCamera(); updateSubmitState(); }
-          capturePhotoButton.addEventListener('click', () => { const scale = Math.min(1, 720 / (cameraVideo.videoWidth || 720)); cameraCanvas.width = Math.round((cameraVideo.videoWidth || 720) * scale); cameraCanvas.height = Math.round((cameraVideo.videoHeight || 960) * scale); cameraCanvas.getContext('2d').drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height); cameraCanvas.toBlob((blob) => blob ? setPhoto(blob) : showResult('No fue posible tomar la fotografía.', 'warning'), 'image/jpeg', .82); });
-          retryPhotoButton.addEventListener('click', async () => { clearPhotoUrl(); photoBlob = null; photoPreview.hidden = true; retryPhotoButton.disabled = true; updateSubmitState(); await startCamera(); });
-          fallbackPhoto.addEventListener('change', () => { const file = fallbackPhoto.files?.[0]; if (!file) return; if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024) { fallbackPhoto.value = ''; showResult('La fotografía debe ser JPG, PNG o WEBP y pesar máximo 3 MB.', 'warning'); return; } setPhoto(file); });
+          const supportsBiometric = () => markType === 'ARRIVAL' || markType === 'DEPARTURE';
+
+          function newIdempotencyKey() {
+            if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+            return `${markType.toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+          }
+
+          function stopCamera() {
+            cameraStream?.getTracks?.().forEach((track) => track.stop());
+            cameraStream = null;
+            cameraVideo.srcObject = null;
+          }
+
+          function clearPhotoUrl() {
+            if (photoUrl) URL.revokeObjectURL(photoUrl);
+            photoUrl = null;
+          }
+
+          function updateSubmitState() {
+            submitButton.disabled = !locationEvidence
+              || (photoRequired && !photoBlob)
+              || (photoBlob && !photoConsent.checked)
+              || (!navigator.onLine && !supportsOffline());
+          }
+
+          function showResult(message, className) {
+            resultBox.hidden = false;
+            resultBox.className = `status ${className || ''}`.trim();
+            resultBox.textContent = message;
+          }
+
+          function showCameraStep(visible) {
+            cameraStep.hidden = !visible;
+            photoConsentWrap.hidden = !visible;
+          }
+
+          function resetDialog() {
+            stopCamera();
+            clearPhotoUrl();
+            locationEvidence = null;
+            photoBlob = null;
+            biometricChallenge = null;
+            biometricEnabled = false;
+            photoConsent.checked = false;
+            resultBox.hidden = true;
+            locationStatus.textContent = 'Solicitando ubicación…';
+            biometricInstruction.textContent = 'Ubica tu rostro en el marco.';
+            showCameraStep(photoRequired);
+            cameraVideo.hidden = true;
+            photoPreview.hidden = true;
+            capturePhotoButton.disabled = true;
+            capturePhotoButton.textContent = 'Continuar';
+            retryPhotoButton.disabled = true;
+            fileFallback.hidden = true;
+            fallbackPhoto.value = '';
+            submitButton.disabled = true;
+            title.textContent = `Confirmar ${labelFor(markType)}`;
+            submitButton.textContent = `Registrar ${labelFor(markType)}`;
+            if (!navigator.onLine && !supportsOffline()) showResult('El almuerzo requiere conexión.', 'warning');
+          }
+
+          function requestLocation() {
+            if (!navigator.geolocation) {
+              showResult('Este navegador no permite obtener la ubicación.', 'warning');
+              return;
+            }
+            navigator.geolocation.getCurrentPosition((position) => {
+              locationEvidence = {
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracyMeters: position.coords.accuracy,
+                clientCapturedAt: new Date(position.timestamp || Date.now()).toISOString()
+              };
+              locationStatus.textContent = `Ubicación lista · precisión ${Math.round(position.coords.accuracy)} m`;
+              updateSubmitState();
+            }, (error) => {
+              locationStatus.textContent = error?.code === 1 ? 'Permiso de ubicación rechazado.' : 'No fue posible obtener la ubicación.';
+              showResult('Activa la ubicación para continuar.', 'warning');
+            }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+          }
+
+          async function startCamera() {
+            if (!photoRequired) return;
+            try {
+              if (biometricApi) cameraStream = await biometricApi.startCamera(cameraVideo);
+              else {
+                if (!navigator.mediaDevices?.getUserMedia) throw new Error('camera_unavailable');
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
+                cameraVideo.srcObject = cameraStream;
+                cameraVideo.hidden = false;
+                await cameraVideo.play();
+              }
+              capturePhotoButton.disabled = false;
+            } catch {
+              fileFallback.hidden = false;
+              showResult('No se pudo abrir la cámara. La marcación quedará para revisión.', 'warning');
+            }
+          }
+
+          async function requestBiometricChallenge() {
+            if (!supportsBiometric() || !navigator.onLine) return null;
+            try {
+              const response = await fetch('/admin/operaciones/portal-activaciones/biometria/desafio', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'worker-portal' },
+                body: JSON.stringify({ assignmentId, markType, idempotencyKey })
+              });
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok || !payload.ok || !payload.enabled) return null;
+              return payload.challenge;
+            } catch {
+              return null;
+            }
+          }
+
+          async function prepareCameraFlow() {
+            if (!supportsBiometric()) {
+              if (photoRequired) await startCamera();
+              return;
+            }
+            biometricChallenge = await requestBiometricChallenge();
+            biometricEnabled = Boolean(biometricChallenge);
+            if (biometricEnabled) photoRequired = true;
+            showCameraStep(photoRequired);
+            if (photoRequired) {
+              biometricInstruction.textContent = biometricEnabled ? 'Mira de frente para comenzar.' : 'Ubica tu rostro en el marco.';
+              await startCamera();
+            }
+          }
+
+          function capturePlainPhoto() {
+            const scale = Math.min(1, 720 / (cameraVideo.videoWidth || 720));
+            cameraCanvas.width = Math.round((cameraVideo.videoWidth || 720) * scale);
+            cameraCanvas.height = Math.round((cameraVideo.videoHeight || 960) * scale);
+            cameraCanvas.getContext('2d').drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            return new Promise((resolve, reject) => cameraCanvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('photo_failed')), 'image/jpeg', .82));
+          }
+
+          function setPhoto(blob) {
+            clearPhotoUrl();
+            photoBlob = blob;
+            photoUrl = URL.createObjectURL(blob);
+            photoPreview.src = photoUrl;
+            photoPreview.hidden = false;
+            cameraVideo.hidden = true;
+            capturePhotoButton.disabled = true;
+            retryPhotoButton.disabled = false;
+            stopCamera();
+            updateSubmitState();
+          }
+
+          async function verifyBiometric(capture) {
+            const response = await fetch('/admin/operaciones/portal-activaciones/biometria/verificar', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'worker-portal' },
+              body: JSON.stringify({
+                assignmentId,
+                markType,
+                idempotencyKey,
+                challengeToken: biometricChallenge.token,
+                challengeAction: capture.challengeAction,
+                challengeCompleted: capture.challengeCompleted,
+                descriptor: capture.descriptor,
+                realScore: capture.realScore,
+                liveScore: capture.liveScore,
+                modelVersion: capture.modelVersion
+              })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.ok) throw new Error('biometric_verification_failed');
+            return payload;
+          }
+
+          capturePhotoButton.addEventListener('click', async () => {
+            capturePhotoButton.disabled = true;
+            try {
+              if (biometricEnabled && biometricApi) {
+                const capture = await biometricApi.captureVerification({
+                  video: cameraVideo,
+                  challenge: biometricChallenge,
+                  onStatus: (message) => { biometricInstruction.textContent = message; }
+                });
+                const assessment = await verifyBiometric(capture);
+                setPhoto(capture.photoBlob);
+                biometricInstruction.textContent = assessment.verified ? 'Identidad verificada.' : 'Captura lista · revisión requerida.';
+                if (assessment.requiresReview) showResult('La marcación quedará para revisión.', 'warning');
+                return;
+              }
+              setPhoto(await capturePlainPhoto());
+            } catch {
+              try {
+                setPhoto(await capturePlainPhoto());
+                biometricInstruction.textContent = 'Captura lista · revisión requerida.';
+                showResult('No se completó la validación automática. La marcación quedará para revisión.', 'warning');
+              } catch {
+                capturePhotoButton.disabled = false;
+                showResult('No fue posible tomar la fotografía.', 'warning');
+              }
+            }
+          });
+
+          retryPhotoButton.addEventListener('click', async () => {
+            clearPhotoUrl();
+            photoBlob = null;
+            photoPreview.hidden = true;
+            retryPhotoButton.disabled = true;
+            updateSubmitState();
+            await startCamera();
+          });
+
+          fallbackPhoto.addEventListener('change', () => {
+            const file = fallbackPhoto.files?.[0];
+            if (!file) return;
+            if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024) {
+              fallbackPhoto.value = '';
+              showResult('Usa una foto JPG, PNG o WEBP de máximo 3 MB.', 'warning');
+              return;
+            }
+            setPhoto(file);
+            showResult('La captura quedará para revisión.', 'warning');
+          });
+
           photoConsent.addEventListener('change', updateSubmitState);
-          function renderConnectivity() { offlineState.online = navigator.onLine; connectivityBar.classList.toggle('offline', !navigator.onLine); connectivityTitle.textContent = navigator.onLine ? 'Con conexión' : 'Sin conexión'; connectivityCopy.textContent = navigator.onLine ? 'Las marcaciones se enviarán inmediatamente.' : 'Llegada y salida pueden guardarse. El almuerzo requiere conexión.'; }
-          async function queueCurrentMark() { if (!offlineApi || !supportsOffline()) throw new Error('Esta marcación requiere conexión.'); await offlineApi.queueMark({ markType, assignmentId, idempotencyKey, latitude: locationEvidence.latitude, longitude: locationEvidence.longitude, accuracyMeters: locationEvidence.accuracyMeters, clientCapturedAt: locationEvidence.clientCapturedAt, photoConsent: Boolean(photoBlob && photoConsent.checked), selfie: photoBlob || null }); showResult(`${labelFor(markType)} guardada en este celular. Se sincronizará automáticamente.`, 'warning'); submitButton.disabled = true; }
-          document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => button.addEventListener('click', () => { if (button.disabled) return; assignmentId = button.dataset.assignmentId; markType = button.dataset.markType; photoRequired = button.dataset.photoRequired === 'true'; idempotencyKey = newIdempotencyKey(); resetDialog(); if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', ''); requestLocation(); startCamera(); }));
-          async function submitMark() { if (!assignmentId || !locationEvidence || (photoRequired && !photoBlob)) return; submitButton.disabled = true; submitButton.textContent = navigator.onLine ? 'Registrando…' : 'Guardando…'; resultBox.hidden = true; if (!navigator.onLine) { try { await queueCurrentMark(); } catch (error) { showResult(error?.message || 'No fue posible guardar sin conexión.', 'danger'); submitButton.disabled = false; } return; } const form = new FormData(); form.set('idempotencyKey', idempotencyKey); form.set('latitude', String(locationEvidence.latitude)); form.set('longitude', String(locationEvidence.longitude)); form.set('accuracyMeters', String(locationEvidence.accuracyMeters)); form.set('clientCapturedAt', locationEvidence.clientCapturedAt); form.set('captureMode', 'ONLINE_WEB'); form.set('photoConsent', photoBlob && photoConsent.checked ? 'true' : 'false'); if (photoBlob) form.set('selfie', photoBlob, `selfie-${labelFor(markType).replaceAll(' ', '-')}.jpg`); try { const response = await fetch(`/operaciones/portal/asignaciones/${encodeURIComponent(assignmentId)}/${endpointFor(markType)}`, { method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'worker-portal' }, body: form }); const payload = await response.json().catch(() => ({})); if (!response.ok || !payload.ok) { const messages = { arrival_already_registered: 'La llegada ya había sido registrada.', departure_arrival_required: 'Debes registrar la llegada antes de la salida.', departure_already_registered: 'La salida ya había sido registrada.', break_arrival_required: 'Debes registrar la llegada antes del almuerzo.', break_already_started: 'El almuerzo ya fue iniciado.', break_start_required: 'Primero debes iniciar el almuerzo.', break_already_completed: 'El almuerzo ya fue finalizado.', attendance_not_enabled: 'La marcación no está habilitada para esta operación.', selfie_required: 'Debes tomar la selfie de evidencia.', photo_consent_required: 'Debes aceptar el uso de la fotografía.', portal_session_required: 'Tu sesión venció. Solicita una nueva activación.' }; throw new Error(messages[payload.error] || 'No fue posible registrar la marcación.'); } showResult(payload.message || 'Marcación registrada correctamente.', payload.requiresReview ? 'warning' : 'ok'); stopCamera(); setTimeout(() => window.location.reload(), 1200); } catch (error) { showResult(error?.message || 'No fue posible registrar.', 'danger'); submitButton.disabled = false; submitButton.textContent = `Registrar ${labelFor(markType)}`; } }
+
+          function renderConnectivity() {
+            offlineState.online = navigator.onLine;
+            connectivityBar.classList.toggle('offline', !navigator.onLine);
+            connectivityTitle.textContent = navigator.onLine ? 'Con conexión' : 'Sin conexión';
+            connectivityCopy.textContent = navigator.onLine ? 'Marcaciones inmediatas.' : 'Llegada y salida se guardan en el celular.';
+          }
+
+          async function queueCurrentMark() {
+            if (!offlineApi || !supportsOffline()) throw new Error('Esta marcación requiere conexión.');
+            await offlineApi.queueMark({
+              markType, assignmentId, idempotencyKey,
+              latitude: locationEvidence.latitude,
+              longitude: locationEvidence.longitude,
+              accuracyMeters: locationEvidence.accuracyMeters,
+              clientCapturedAt: locationEvidence.clientCapturedAt,
+              photoConsent: Boolean(photoBlob && photoConsent.checked),
+              selfie: photoBlob || null
+            });
+            showResult(`${labelFor(markType)} guardada. Se sincronizará automáticamente.`, 'warning');
+            submitButton.disabled = true;
+          }
+
+          document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => button.addEventListener('click', async () => {
+            if (button.disabled) return;
+            assignmentId = button.dataset.assignmentId;
+            markType = button.dataset.markType;
+            photoRequired = button.dataset.photoRequired === 'true';
+            idempotencyKey = newIdempotencyKey();
+            resetDialog();
+            if (typeof dialog.showModal === 'function') dialog.showModal();
+            else dialog.setAttribute('open', '');
+            requestLocation();
+            await prepareCameraFlow();
+          }));
+
+          async function submitMark() {
+            if (!assignmentId || !locationEvidence || (photoRequired && !photoBlob)) return;
+            submitButton.disabled = true;
+            submitButton.textContent = navigator.onLine ? 'Registrando…' : 'Guardando…';
+            resultBox.hidden = true;
+            if (!navigator.onLine) {
+              try { await queueCurrentMark(); }
+              catch (error) { showResult(error?.message || 'No fue posible guardar sin conexión.', 'danger'); submitButton.disabled = false; }
+              return;
+            }
+            const form = new FormData();
+            form.set('idempotencyKey', idempotencyKey);
+            form.set('latitude', String(locationEvidence.latitude));
+            form.set('longitude', String(locationEvidence.longitude));
+            form.set('accuracyMeters', String(locationEvidence.accuracyMeters));
+            form.set('clientCapturedAt', locationEvidence.clientCapturedAt);
+            form.set('captureMode', 'ONLINE_WEB');
+            form.set('photoConsent', photoBlob && photoConsent.checked ? 'true' : 'false');
+            if (photoBlob) form.set('selfie', photoBlob, `selfie-${labelFor(markType).replaceAll(' ', '-')}.jpg`);
+            try {
+              const response = await fetch(`/operaciones/portal/asignaciones/${encodeURIComponent(assignmentId)}/${endpointFor(markType)}`, {
+                method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'worker-portal' }, body: form
+              });
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok || !payload.ok) {
+                const messages = {
+                  arrival_already_registered: 'La llegada ya había sido registrada.',
+                  departure_arrival_required: 'Debes registrar la llegada antes de la salida.',
+                  departure_already_registered: 'La salida ya había sido registrada.',
+                  break_arrival_required: 'Debes registrar la llegada antes del almuerzo.',
+                  break_already_started: 'El almuerzo ya fue iniciado.',
+                  break_start_required: 'Primero debes iniciar el almuerzo.',
+                  break_already_completed: 'El almuerzo ya fue finalizado.',
+                  attendance_not_enabled: 'La marcación no está habilitada.',
+                  selfie_required: 'Debes tomar la fotografía.',
+                  photo_consent_required: 'Debes aceptar el uso de la captura.',
+                  portal_session_required: 'Tu sesión venció.'
+                };
+                throw new Error(messages[payload.error] || 'No fue posible registrar la marcación.');
+              }
+              showResult(payload.message || 'Marcación registrada.', payload.requiresReview ? 'warning' : 'ok');
+              stopCamera();
+              setTimeout(() => window.location.reload(), 1200);
+            } catch (error) {
+              showResult(error?.message || 'No fue posible registrar.', 'danger');
+              submitButton.disabled = false;
+              submitButton.textContent = `Registrar ${labelFor(markType)}`;
+            }
+          }
+
           submitButton.addEventListener('click', submitMark);
-          function closeDialog() { stopCamera(); clearPhotoUrl(); if (typeof dialog.close === 'function') dialog.close(); else dialog.removeAttribute('open'); }
-          document.getElementById('close-mark').addEventListener('click', closeDialog); document.getElementById('cancel-mark').addEventListener('click', closeDialog); dialog.addEventListener('cancel', (event) => { event.preventDefault(); closeDialog(); });
-          window.addEventListener('online', () => { renderConnectivity(); updateSubmitState(); }); window.addEventListener('offline', () => { renderConnectivity(); updateSubmitState(); });
-          offlineApi?.init({ onStateChange: (state) => { offlineState = state || offlineState; renderConnectivity(); } }).catch(() => {}); renderConnectivity();
+          function closeDialog() {
+            stopCamera();
+            clearPhotoUrl();
+            if (typeof dialog.close === 'function') dialog.close();
+            else dialog.removeAttribute('open');
+          }
+          document.getElementById('close-mark').addEventListener('click', closeDialog);
+          document.getElementById('cancel-mark').addEventListener('click', closeDialog);
+          dialog.addEventListener('cancel', (event) => { event.preventDefault(); closeDialog(); });
+          window.addEventListener('online', () => { renderConnectivity(); updateSubmitState(); });
+          window.addEventListener('offline', () => { renderConnectivity(); updateSubmitState(); });
+          offlineApi?.init({ onStateChange: (state) => { offlineState = state || offlineState; renderConnectivity(); } }).catch(() => {});
+          renderConnectivity();
         })();
       </script>
     <% } else if (mode === 'unavailable') { %><section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Portal temporalmente no disponible</h1><p>No pudimos validar la sesión en este momento. Tu dispositivo no fue desactivado.</p><div class="status warning">Intenta nuevamente en unos minutos</div></section>
