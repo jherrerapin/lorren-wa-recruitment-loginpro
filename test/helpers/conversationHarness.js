@@ -155,6 +155,7 @@ export function buildParitySnapshot({ caseId, mode, result }) {
       slotId: booking.slotId || null,
       scheduled: Boolean(booking.scheduledAt),
       reminderSent: Boolean(booking.reminderSentAt),
+      reminderResponded: Boolean(booking.reminderResponse),
       reminderWindowClosed: Boolean(booking.reminderWindowClosed)
     })),
     outbound: {
