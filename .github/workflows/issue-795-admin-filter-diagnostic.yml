@@ -1,0 +1,82 @@
+name: Issue 795 admin filter diagnostic
+
+on:
+  pull_request:
+    branches:
+      - automation/795-admin-filter-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-admin-filter:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+
+    steps:
+      - name: Checkout diagnostic head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Instrument Express error response
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = 'test/adminStatusFilter.test.js';
+          let source = fs.readFileSync(path, 'utf8');
+          const before = "  app.use('/admin', adminRouter(prisma));\n\n  const server";
+          const after = `  app.use('/admin', adminRouter(prisma));
+  app.use((error, _req, res, _next) => {
+    console.error('[ISSUE_795_ADMIN_ERROR]', error?.stack || error);
+    res.status(500).type('text/plain').send(error?.stack || String(error));
+  });
+
+  const server`;
+          if (!source.includes(before)) throw new Error('instrumentation_anchor_not_found');
+          source = source.replace(before, after);
+          source = source.replaceAll('assert.equal(response.status, 200);', `if (response.status !== 200) console.error('[ISSUE_795_RESPONSE_BODY]', html);\n    assert.equal(response.status, 200);`);
+          fs.writeFileSync(path, source);
+          NODE
+
+      - name: Run failing admin filter test
+        id: focal
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          node --test test/adminStatusFilter.test.js > /tmp/issue-795.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-795.log
+          exit "$status"
+
+      - name: Upload diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-795-admin-filter-diagnostic
+          path: /tmp/issue-795.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Preserve expected diagnostic failure
+        if: steps.focal.outcome == 'failure'
+        run: echo 'Diagnostic captured the existing failure.'
