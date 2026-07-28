@@ -12,6 +12,12 @@
     attendance_biometric_antispoof_low: 'No fue posible confirmar que el rostro sea real. Intenta nuevamente.',
     attendance_biometric_liveness_low: 'No fue posible confirmar el movimiento solicitado. Intenta nuevamente.'
   });
+  const ACTION_LABELS = Object.freeze({
+    ARRIVAL: 'Registrar llegada',
+    DEPARTURE: 'Registrar salida',
+    BREAK_START: 'Iniciar almuerzo',
+    BREAK_END: 'Finalizar almuerzo'
+  });
 
   let currentMarkType = null;
   let biometricVerified = false;
@@ -72,6 +78,28 @@
     root.querySelectorAll(selector).forEach((element) => element.remove());
   }
 
+  function simplifyActionLabels() {
+    document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
+      const label = ACTION_LABELS[button.dataset.markType];
+      if (label) button.textContent = label;
+    });
+    document.querySelectorAll('.mark-button:disabled:not([data-mark-type])').forEach((button) => {
+      if (button.textContent.includes('Jornada finalizada')) button.textContent = 'Jornada finalizada';
+    });
+  }
+
+  function installCompactResultObserver() {
+    const result = document.getElementById('mark-result');
+    if (!result) return;
+    const compact = () => {
+      const text = String(result.textContent || '');
+      if (/quedar[aá].*revisi[oó]n|revisi[oó]n requerida/i.test(text)) {
+        result.textContent = 'Validación facial requerida.';
+      }
+    };
+    new MutationObserver(compact).observe(result, { childList: true, characterData: true, subtree: true });
+  }
+
   function compactWorkerPortal() {
     document.querySelectorAll('.portal-header p:not(.brand)').forEach((element) => element.remove());
     removeElement('.work-summary');
@@ -86,6 +114,8 @@
     document.getElementById('connectivity-copy')?.remove();
     const fallback = document.getElementById('file-fallback');
     if (fallback) fallback.hidden = true;
+    simplifyActionLabels();
+    installCompactResultObserver();
 
     document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
       button.addEventListener('click', (event) => {
