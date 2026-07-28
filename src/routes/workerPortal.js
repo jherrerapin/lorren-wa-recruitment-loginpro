@@ -18,6 +18,7 @@ import {
 
 export * from './workerPortalCore.js';
 
+const HUMAN_CDN_ORIGIN = 'https://cdn.jsdelivr.net';
 const STRICT_MARK_PATHS = [
   '/asignaciones/:assignmentId/llegada',
   '/asignaciones/:assignmentId/inicio-almuerzo',
@@ -60,6 +61,31 @@ function verifiedBiometricMetadata(metadata, expected) {
     && String(metadata.markType || '') === String(expected.markType);
 }
 
+function expandBiometricCsp(value) {
+  if (typeof value !== 'string') return value;
+  return value
+    .replace("script-src ", `script-src ${HUMAN_CDN_ORIGIN} `)
+    .replace("connect-src 'self'", `connect-src 'self' ${HUMAN_CDN_ORIGIN}`);
+}
+
+function installBiometricCspBridge(_req, res, next) {
+  const originalSet = res.set.bind(res);
+  res.set = (field, value) => {
+    if (typeof field === 'string' && field.toLowerCase() === 'content-security-policy') {
+      return originalSet(field, expandBiometricCsp(value));
+    }
+    if (field && typeof field === 'object' && !Array.isArray(field)) {
+      const headers = { ...field };
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === 'content-security-policy') headers[key] = expandBiometricCsp(headers[key]);
+      }
+      return originalSet(headers);
+    }
+    return originalSet(field, value);
+  };
+  return next();
+}
+
 export function workerPortalRouter(prisma, options = {}) {
   const router = express.Router();
   const repositoryFactory = options.repositoryFactory || (() => createPrismaWorkerPortalSessionRepository(prisma));
@@ -94,11 +120,7 @@ export function workerPortalRouter(prisma, options = {}) {
       if (!rawSessionToken) {
         return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       }
-      const portalSession = await resolveSessionFn({
-        repository: getRepository(),
-        rawSessionToken,
-        now
-      });
+      const portalSession = await resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
       if (!portalSession) {
         return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       }
@@ -181,6 +203,7 @@ export function workerPortalRouter(prisma, options = {}) {
     }
   }
 
+  router.use(installBiometricCspBridge);
   router.use(cookieParser());
   router.post(STRICT_MARK_PATHS, markUpload, strictMarkGuard);
   router.use(coreWorkerPortalRouter(prisma, {
