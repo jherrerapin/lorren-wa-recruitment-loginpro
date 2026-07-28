@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "nodemon src/server.js",
+    "install:deployment": "npm install --ignore-scripts --no-audit --no-fund",
     "prepare:human": "node scripts/copyHumanAssets.js",
     "build": "prisma generate && npm run prepare:human",
     "start": "npm run prepare:human && prisma migrate deploy && node src/server.js",
