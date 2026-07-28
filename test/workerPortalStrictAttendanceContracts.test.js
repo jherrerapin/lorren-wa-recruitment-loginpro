@@ -16,9 +16,11 @@ test('la geocerca se valida antes de delegar la persistencia al núcleo', () => 
   assert.match(portalRoute, /operation_geofence_required/);
   assert.match(portalRoute, /location_accuracy_insufficient/);
   assert.match(portalRoute, /outside_operation_range/);
-  const guardPosition = portalRoute.indexOf('router.post(STRICT_MARK_PATHS, markUpload, strictMarkGuard)');
-  const corePosition = portalRoute.indexOf('router.use(coreWorkerPortalRouter');
-  assert.ok(guardPosition >= 0 && corePosition > guardPosition);
+  assert.match(portalRoute, /prependRouteHandlers\(router, path, \[markUpload, strictMarkGuard\]\)/);
+  assert.match(portalRoute, /target\.route\.stack\.unshift/);
+  const corePosition = portalRoute.indexOf('coreWorkerPortalRouter(prisma');
+  const guardInjectionPosition = portalRoute.lastIndexOf('prependRouteHandlers(router, path');
+  assert.ok(corePosition >= 0 && guardInjectionPosition > corePosition);
 });
 
 
@@ -39,6 +41,7 @@ test('la inscripción inicial ocurre en el portal del auxiliar', () => {
   assert.match(biometricRoute, /consentAccepted: req\.body\?\.consentAccepted === true/);
   assert.match(biometricRoute, /await assessBiometricFn\(/);
   assert.match(biometricRoute, /actorSource: 'worker-portal'/);
+  assert.match(biometricRoute, /INITIAL_VERIFICATION_FAILED/);
   assert.match(biometricRoute, /biometric_enrollment_moved_to_worker_portal/);
   assert.match(hardening, /getElementById\('enroll-button'\)\?\.remove/);
   assert.match(hardening, /payload\.consentAccepted/);
