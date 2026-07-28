@@ -84,6 +84,22 @@ test('los escenarios de agenda usan fixtures focales independientes', () => {
   assert.equal(new Set(caseIds).size, agendaKeys.length);
 });
 
+test('agenda sin horarios conserva la autoridad determinística en ambos modos', () => {
+  const [withoutEngine] = runMode('false', ['parity-no-available-slots']);
+  const [withEngine] = runMode('true', ['parity-no-available-slots']);
+
+  assert.deepEqual(domainDifferences(withoutEngine, withEngine), []);
+  for (const snapshot of [withoutEngine, withEngine]) {
+    assert.equal(snapshot.candidate.currentStep, 'SCHEDULING');
+    assert.equal(snapshot.candidate.botPaused, true);
+    assert.match(String(snapshot.candidate.botPauseReason || ''), /missing_valid_slot/);
+    assert.equal(snapshot.candidate.reminderState, 'CANCELLED');
+    assert.deepEqual(snapshot.bookings, []);
+    assert.deepEqual(snapshot.outbound.sources, ['bot_flow']);
+  }
+  assert.equal(withEngine.openAi.byType.conversation_engine || 0, 0);
+});
+
 test('la matriz ejecuta ambos modos en procesos aislados y reporta divergencias de dominio', () => {
   const supported = SCENARIOS.filter((item) => item.coverage === 'text');
   const caseIds = [...new Set(supported.map((item) => item.caseId))];
