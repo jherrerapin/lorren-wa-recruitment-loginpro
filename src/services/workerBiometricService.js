@@ -96,6 +96,28 @@ function decryptDescriptor(envelope, env) {
   return normalizeWorkerBiometricDescriptor(JSON.parse(decrypted));
 }
 
+async function redactHistoricalEnrollmentTemplates(prisma, workerId, now) {
+  const events = await prisma.devAuditEvent.findMany({
+    where: {
+      entityType: WORKER_BIOMETRIC_ENTITY_TYPE,
+      entityId: workerId,
+      action: WORKER_BIOMETRIC_ACTION.ENROLLED
+    },
+    select: { id: true, metadata: true }
+  });
+  await Promise.all(events.map((event) => prisma.devAuditEvent.update({
+    where: { id: event.id },
+    data: {
+      metadata: {
+        ...(event.metadata && typeof event.metadata === 'object' ? event.metadata : {}),
+        template: null,
+        descriptorHash: null,
+        redactedAt: now.toISOString()
+      }
+    }
+  })));
+}
+
 async function findLatestEnrollmentEvent(prisma, workerId) {
   return prisma.devAuditEvent.findFirst({
     where: {
@@ -145,6 +167,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
   if (!Number.isFinite(liveScore) || liveScore < LIVE_THRESHOLD) throw new Error('attendance_biometric_liveness_low');
   const now = options.now || new Date();
   if (!validDate(now)) throw new Error('attendance_biometric_enrollment_now_invalid');
+  await redactHistoricalEnrollmentTemplates(prisma, workerId, now);
   const encrypted = encryptDescriptor(descriptor, options.env || process.env);
   const event = await prisma.devAuditEvent.create({
     data: {
@@ -178,6 +201,7 @@ export async function revokeWorkerBiometric(prisma, input = {}, options = {}) {
   const actorUsername = normalizeString(input.actorUsername, 160);
   if (!workerId || !actorUsername) throw new Error('attendance_biometric_revocation_identity_required');
   const now = options.now || new Date();
+  await redactHistoricalEnrollmentTemplates(prisma, workerId, now);
   const event = await prisma.devAuditEvent.create({
     data: {
       entityType: WORKER_BIOMETRIC_ENTITY_TYPE,
