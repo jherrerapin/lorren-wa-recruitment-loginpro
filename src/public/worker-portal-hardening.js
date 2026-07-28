@@ -98,6 +98,12 @@
       event.stopImmediatePropagation();
       markResult('Primero completa correctamente la validación facial.', 'danger');
     }, true);
+
+    window.addEventListener('online', () => {
+      const enrollmentDialog = document.getElementById('enrollment-dialog');
+      const enrollmentButton = document.getElementById('start-enrollment');
+      if (enrollmentDialog?.open && enrollmentButton?.disabled) window.location.reload();
+    });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeWorkerPortal, { once: true });
