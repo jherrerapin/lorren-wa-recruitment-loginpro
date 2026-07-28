@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= pageTitle %> — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg:#f4f5f7; --surface:#fff; --border:#e1e4e8; --soft:#f8fafc; --text:#18212b; --muted:#64748b; --navy:#1e2d3d; --teal:#0d7a6b; --teal2:#e6f4f1; --red:#b91c1c; --red2:#fee2e2; --amber:#92400e; --amber2:#fef3c7; --green:#166534; --green2:#dcfce7; --blue:#1d4ed8; --blue2:#dbeafe; --radius:10px; --shadow:0 1px 3px rgba(0,0,0,.08); }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); font-size:14px; }
+    .navbar { height:52px; padding:0 24px; display:flex; align-items:center; gap:18px; background:var(--navy); overflow-x:auto; }
+    .navbar a { color:#cbd5e0; text-decoration:none; white-space:nowrap; font-size:13px; font-weight:600; }
+    .navbar a:hover,.navbar .active { color:#fff; }
+    .navbar .brand img { height:28px; display:block; }
+    .navbar .spacer { flex:1; }
+    .page { max-width:1600px; margin:0 auto; padding:26px 18px 60px; display:grid; gap:16px; }
+    .header { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+    h1 { color:var(--navy); font-size:23px; }
+    .sub { color:var(--muted); margin-top:4px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn { display:inline-flex; justify-content:center; align-items:center; min-height:36px; border:1px solid var(--border); border-radius:8px; padding:8px 13px; background:#fff; color:var(--navy); font-weight:750; text-decoration:none; cursor:pointer; }
+    .btn-primary { background:var(--teal); border-color:var(--teal); color:#fff; }
+    .btn-blue { background:var(--blue); border-color:var(--blue); color:#fff; }
+    .panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; }
+    .alert { padding:11px 13px; border-radius:8px; font-weight:650; }
+    .alert-success { color:var(--green); background:var(--green2); border:1px solid #86efac; }
+    .alert-error { color:var(--red); background:var(--red2); border:1px solid #fca5a5; }
+    .filters { display:grid; grid-template-columns:repeat(6,minmax(140px,1fr)); gap:12px; align-items:end; }
+    .field { display:flex; flex-direction:column; gap:5px; }
+    .field label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
+    input,select { width:100%; border:1px solid var(--border); border-radius:8px; padding:9px 10px; background:#fff; font-size:13px; }
+    .metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
+    .metric { padding:15px; border:1px solid var(--border); border-radius:10px; background:#fff; }
+    .metric small { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
+    .metric strong { display:block; color:var(--navy); font-size:24px; margin-top:6px; }
+    .metric.warn { border-color:#fcd34d; background:#fffbeb; }
+    .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:10px; }
+    table { width:max-content; min-width:100%; border-collapse:collapse; background:#fff; }
+    th,td { padding:10px 9px; border-bottom:1px solid #edf0f2; text-align:right; white-space:nowrap; }
+    th { position:sticky; top:0; z-index:2; background:#f8fafc; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
+    th:first-child,td:first-child,th:nth-child(2),td:nth-child(2) { text-align:left; }
+    th:first-child,td:first-child { position:sticky; left:0; z-index:1; background:#fff; }
+    th:first-child { z-index:3; background:#f8fafc; }
+    td strong { display:block; }
+    td small { display:block; color:var(--muted); margin-top:2px; }
+    .badge { display:inline-flex; padding:3px 8px; border-radius:999px; font-size:10px; font-weight:850; }
+    .badge-ok { color:var(--green); background:var(--green2); }
+    .badge-warn { color:var(--amber); background:var(--amber2); }
+    details { margin-top:8px; }
+    summary { cursor:pointer; color:var(--blue); font-weight:750; }
+    .daily { margin-top:8px; display:grid; gap:7px; min-width:720px; }
+    .daily-row { display:grid; grid-template-columns:100px minmax(180px,1fr) 110px 120px minmax(220px,1fr); gap:10px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
+    .daily-row form { display:flex; gap:5px; align-items:center; }
+    .daily-row select { min-width:150px; }
+    .novelty { color:var(--red); font-size:11px; white-space:normal; }
+    .policy-grid { display:grid; grid-template-columns:repeat(5,minmax(130px,1fr)); gap:10px; }
+    .policy-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:12px; align-items:center; }
+    .codes { display:grid; grid-template-columns:repeat(5,minmax(150px,1fr)); gap:7px; }
+    .code { padding:8px 9px; background:var(--soft); border:1px solid var(--border); border-radius:8px; }
+    .code strong { color:var(--navy); }
+    .code small { display:block; color:var(--muted); margin-top:2px; }
+    .empty { padding:30px; text-align:center; color:var(--muted); }
+    @media(max-width:1050px){.filters{grid-template-columns:repeat(3,minmax(150px,1fr))}.metrics{grid-template-columns:repeat(2,1fr)}.policy-grid{grid-template-columns:repeat(2,1fr)}.codes{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:620px){.navbar{height:auto;padding:10px 14px}.page{padding:18px 10px 42px}.filters,.metrics,.policy-grid,.codes{grid-template-columns:1fr}.actions{width:100%}.actions .btn{flex:1}.panel{padding:12px}}
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/admin" class="brand"><img src="/public/loginpro.png" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/operaciones">Operaciones / Despacho</a>
+    <a href="/admin/operaciones/asistencia">Asistencia</a>
+    <a href="/admin/operaciones/asistencia/nomina" class="active">Nómina</a>
+    <span class="spacer"></span>
+    <a href="/logout">Cerrar sesión</a>
+  </nav>
+
+  <main class="page">
+    <header class="header">
+      <div><h1><%= pageTitle %></h1><p class="sub">Corte <%= report.period.from || '—' %> a <%= report.period.to || '—' %></p></div>
+      <div class="actions">
+        <a class="btn" href="/admin/operaciones/asistencia">Asistencia</a>
+        <a class="btn btn-blue" href="/admin/operaciones/asistencia/nomina/export.csv?<%= new URLSearchParams({...report.filters, periodType: report.period.periodType, from: report.period.from, to: report.period.to, anchor: report.period.anchor}).toString() %>">CSV</a>
+        <a class="btn btn-primary" href="/admin/operaciones/asistencia/nomina/export.xlsx?<%= new URLSearchParams({...report.filters, periodType: report.period.periodType, from: report.period.from, to: report.period.to, anchor: report.period.anchor}).toString() %>">Excel</a>
+      </div>
+    </header>
+
+    <% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <section class="panel">
+      <form method="get" action="/admin/operaciones/asistencia/nomina" class="filters" id="payroll-filters">
+        <div class="field"><label for="periodType">Tipo de corte</label><select id="periodType" name="periodType"><option value="WEEKLY" <%= report.period.periodType === 'WEEKLY' ? 'selected' : '' %>>Semanal</option><option value="BIWEEKLY" <%= report.period.periodType === 'BIWEEKLY' ? 'selected' : '' %>>Quincenal</option><option value="CUSTOM" <%= report.period.periodType === 'CUSTOM' ? 'selected' : '' %>>Personalizado</option></select></div>
+        <div class="field"><label for="anchor">Fecha de referencia</label><input id="anchor" name="anchor" type="date" value="<%= report.period.anchor || report.period.from %>" /></div>
+        <div class="field custom-date"><label for="from">Desde</label><input id="from" name="from" type="date" value="<%= report.period.from %>" /></div>
+        <div class="field custom-date"><label for="to">Hasta</label><input id="to" name="to" type="date" value="<%= report.period.to %>" /></div>
+        <div class="field"><label for="clientId">Cliente</label><select id="clientId" name="clientId"><option value="">Todos</option><% for (const client of report.clients) { %><option value="<%= client.id %>" <%= report.filters.clientId === client.id ? 'selected' : '' %>><%= client.name %></option><% } %></select></div>
+        <div class="field"><label for="operationPointId">Operación</label><select id="operationPointId" name="operationPointId"><option value="">Todas</option><% for (const client of report.clients) { for (const point of client.operationPoints || []) { %><option data-client="<%= client.id %>" value="<%= point.id %>" <%= report.filters.operationPointId === point.id ? 'selected' : '' %>><%= client.name %> · <%= point.name %></option><% }} %></select></div>
+        <div class="field"><label for="workerId">Auxiliar</label><select id="workerId" name="workerId"><option value="">Todos</option><% for (const worker of report.workers) { %><option value="<%= worker.id %>" <%= report.filters.workerId === worker.id ? 'selected' : '' %>><%= worker.fullName %><%= worker.documentNumber ? ` · ${worker.documentNumber}` : '' %></option><% } %></select></div>
+        <div class="field"><label for="search">Buscar</label><input id="search" name="search" value="<%= report.filters.search %>" placeholder="Nombre, documento o teléfono" /></div>
+        <div class="field"><button class="btn btn-primary" type="submit">Calcular periodo</button></div>
+      </form>
+    </section>
+
+    <section class="metrics">
+      <article class="metric"><small>Auxiliares</small><strong><%= report.totals.workers %></strong></article>
+      <article class="metric"><small>Total trabajado</small><strong><%= formatPayrollMinutes(report.totals.totalMinutes) %></strong></article>
+      <article class="metric"><small>Horas ordinarias</small><strong><%= report.totals.ordinaryHours || 0 %></strong></article>
+      <article class="metric"><small>Horas extra</small><strong><%= report.totals.overtimeHours || 0 %></strong></article>
+      <article class="metric <%= report.totals.workersWithNovelties ? 'warn' : '' %>"><small>Con novedades</small><strong><%= report.totals.workersWithNovelties %></strong></article>
+    </section>
+
+    <% if (role === 'dev') { %>
+      <section class="panel">
+        <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada.</p></div></div>
+        <form method="post" action="/admin/operaciones/asistencia/nomina/policy">
+          <input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" />
+          <div class="policy-grid">
+            <div class="field"><label>Cliente</label><select name="clientId" required><option value="">Selecciona</option><% for (const client of report.clients) { %><option value="<%= client.id %>" <%= report.filters.clientId === client.id ? 'selected' : '' %>><%= client.name %></option><% } %></select></div>
+            <div class="field"><label>Horas ordinarias semanales</label><input name="weeklyOrdinaryHours" type="number" min="1" max="168" step="0.25" value="<%= selectedPolicy.weeklyOrdinaryMinutes / 60 %>" required /></div>
+            <div class="field"><label>Horas ordinarias diarias</label><input name="dailyOrdinaryHours" type="number" min="1" max="24" step="0.25" value="<%= selectedPolicy.dailyOrdinaryMinutes / 60 %>" required /></div>
+            <div class="field"><label>Máximo extra diario</label><input name="maxDailyOvertimeHours" type="number" min="0" max="12" step="0.25" value="<%= selectedPolicy.maxDailyOvertimeMinutes / 60 %>" required /></div>
+            <div class="field"><label>Máximo extra semanal</label><input name="maxWeeklyOvertimeHours" type="number" min="0" max="168" step="0.25" value="<%= selectedPolicy.maxWeeklyOvertimeMinutes / 60 %>" required /></div>
+            <div class="field"><label>Inicio nocturno</label><input name="nightStartHour" type="number" min="0" max="23" step="1" value="<%= selectedPolicy.nightStartMinute / 60 %>" required /></div>
+            <div class="field"><label>Fin nocturno</label><input name="nightEndHour" type="number" min="0" max="23" step="1" value="<%= selectedPolicy.nightEndMinute / 60 %>" required /></div>
+            <div class="field"><label>Día inicial de semana</label><select name="weekStartsOn"><option value="1" <%= selectedPolicy.weekStartsOn === 1 ? 'selected' : '' %>>Lunes</option><option value="0" <%= selectedPolicy.weekStartsOn === 0 ? 'selected' : '' %>>Domingo</option></select></div>
+            <div class="field"><label>Día de descanso</label><select name="restDay"><option value="0" <%= selectedPolicy.restDay === 0 ? 'selected' : '' %>>Domingo</option><option value="1" <%= selectedPolicy.restDay === 1 ? 'selected' : '' %>>Lunes</option><option value="2" <%= selectedPolicy.restDay === 2 ? 'selected' : '' %>>Martes</option><option value="3" <%= selectedPolicy.restDay === 3 ? 'selected' : '' %>>Miércoles</option><option value="4" <%= selectedPolicy.restDay === 4 ? 'selected' : '' %>>Jueves</option><option value="5" <%= selectedPolicy.restDay === 5 ? 'selected' : '' %>>Viernes</option><option value="6" <%= selectedPolicy.restDay === 6 ? 'selected' : '' %>>Sábado</option></select></div>
+            <div class="field"><label>Descuento almuerzo abierto</label><input name="incompleteBreakPenaltyMinutes" type="number" min="0" max="480" step="1" value="<%= selectedPolicy.incompleteBreakPenaltyMinutes %>" required /></div>
+            <div class="field"><label>Domingo que también es festivo</label><select name="holidaySundayPriority"><option value="HOLIDAY" <%= selectedPolicy.holidaySundayPriority === 'HOLIDAY' ? 'selected' : '' %>>Reportar como festivo</option><option value="REST" <%= selectedPolicy.holidaySundayPriority === 'REST' ? 'selected' : '' %>>Reportar como descanso</option></select></div>
+            <div class="field"><label>Reconocer llegada anticipada</label><select name="recognizeEarlyArrival"><option value="false" <%= !selectedPolicy.recognizeEarlyArrival ? 'selected' : '' %>>No</option><option value="true" <%= selectedPolicy.recognizeEarlyArrival ? 'selected' : '' %>>Sí</option></select></div>
+            <div class="field"><button type="submit" class="btn btn-primary">Guardar política</button></div>
+          </div>
+        </form>
+      </section>
+    <% } %>
+
+    <section class="panel">
+      <div class="table-wrap">
+        <% if (!report.rows.length) { %><div class="empty">No hay jornadas con entrada y salida para el periodo seleccionado.</div><% } else { %>
+          <table>
+            <thead><tr><th>Auxiliar</th><th>Estado</th><th>Total</th><th>Ordinarias</th><th>Extra</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
+            <tbody>
+              <% for (const row of report.rows) { %>
+                <tr>
+                  <td><strong><%= row.fullName %></strong><small><%= row.documentType %> <%= row.documentNumber || 'Sin documento' %></small></td>
+                  <td><span class="badge <%= row.exportable ? 'badge-ok' : 'badge-warn' %>"><%= row.status %></span></td>
+                  <td><%= row.totalHours %></td><td><%= row.ordinaryHours %></td><td><%= row.overtimeHours %></td>
+                  <% for (const code of conceptCodes) { %><td><%= row.conceptHours[code] || 0 %></td><% } %>
+                  <td>
+                    <details><summary>Ver días</summary><div class="daily">
+                      <% for (const day of row.daily) { %>
+                        <div class="daily-row">
+                          <strong><%= day.dateKey %></strong>
+                          <div><%= day.clientNames.join(', ') %><small><%= day.operationNames.join(', ') %></small></div>
+                          <div><%= day.totalHours %> h</div>
+                          <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small></div>
+                          <div>
+                            <% if (day.compensationStatus) { %>
+                              <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
+                                <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
+                                <select name="status"><option value="PENDING" <%= day.compensationStatus === 'PENDING' ? 'selected' : '' %>>Compensatorio pendiente</option><option value="NOT_COMPENSATED" <%= day.compensationStatus === 'NOT_COMPENSATED' ? 'selected' : '' %>>No compensado</option><option value="COMPENSATED" <%= day.compensationStatus === 'COMPENSATED' ? 'selected' : '' %>>Compensado</option></select><button class="btn" type="submit">Guardar</button>
+                              </form>
+                            <% } %>
+                            <% const dayNovelty = row.novelties.filter((item) => item.dateKey === day.dateKey); %>
+                            <% if (dayNovelty.length) { %><div class="novelty"><%= dayNovelty.map((item) => item.code).join(' · ') %></div><% } %>
+                          </div>
+                        </div>
+                      <% } %>
+                    </div></details>
+                  </td>
+                </tr>
+              <% } %>
+            </tbody>
+          </table>
+        <% } %>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 style="margin-bottom:10px;">Conceptos generados</h2>
+      <% const labels = { HEDO:'Extra diurna ordinaria', HENO:'Extra nocturna ordinaria', HEDD:'Extra diurna dominical', HEND:'Extra nocturna dominical', HEDF:'Extra diurna festiva', HENF:'Extra nocturna festiva', RNO:'Recargo nocturno ordinario', RDD:'Recargo diurno dominical no compensado', RND:'Recargo nocturno dominical no compensado', RDF:'Recargo diurno festivo no compensado', RNF:'Recargo nocturno festivo no compensado', RDDC:'Recargo diurno dominical compensado', RNDC:'Recargo nocturno dominical compensado', RDFC:'Recargo diurno festivo compensado', RNFC:'Recargo nocturno festivo compensado' }; %>
+      <div class="codes"><% for (const code of conceptCodes) { %><div class="code"><strong><%= code %></strong><small><%= labels[code] %></small></div><% } %></div>
+    </section>
+  </main>
+
+  <script>
+    const periodType = document.getElementById('periodType');
+    const customDates = document.querySelectorAll('.custom-date');
+    function syncPeriodFields() { const custom = periodType.value === 'CUSTOM'; customDates.forEach((field) => { field.style.display = custom ? 'flex' : 'none'; }); }
+    periodType.addEventListener('change', syncPeriodFields); syncPeriodFields();
+
+    const clientSelect = document.getElementById('clientId');
+    const operationSelect = document.getElementById('operationPointId');
+    function syncOperations() {
+      const clientId = clientSelect.value;
+      [...operationSelect.options].forEach((option, index) => { if (!index) return; option.hidden = Boolean(clientId && option.dataset.client !== clientId); });
+      if (operationSelect.selectedOptions[0]?.hidden) operationSelect.value = '';
+    }
+    clientSelect.addEventListener('change', syncOperations); syncOperations();
+  </script>
+</body>
+</html>

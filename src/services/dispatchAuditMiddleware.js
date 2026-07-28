@@ -1,3 +1,8 @@
+import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
+
+const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
+const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -18,6 +23,7 @@ function safeJson(value) {
 
 function inferAction(req) {
   const path = req.path || '';
+  if (path.includes('/nomina')) return 'DISPATCH_PAYROLL_CHANGE';
   if (path.includes('/whatsapp/enviar')) return 'DISPATCH_WHATSAPP_SEND';
   if (path.includes('/asignaciones/assign')) return 'DISPATCH_ASSIGNMENT_CREATE';
   if (path.includes('/asignaciones/confirmar')) return 'DISPATCH_ASSIGNMENT_CONFIRM';
@@ -55,6 +61,39 @@ function targetFor(req) {
     || 'dispatch';
 }
 
+function clearSessionPermissions(req) {
+  req.session.userRole = null;
+  req.session.userId = null;
+  req.session.canAccessDispatch = false;
+  req.session.canAccessAttendance = false;
+  req.session.canAccessPayroll = false;
+  req.session.canAccessStatistics = false;
+  req.session.canAccessMetaAds = false;
+  req.session.canAccessCvAnalysis = false;
+  req.userRole = null;
+  req.userId = null;
+  req.canAccessDispatch = false;
+  req.canAccessAttendance = false;
+  req.canAccessPayroll = false;
+  req.canAccessStatistics = false;
+  req.canAccessMetaAds = false;
+  req.canAccessCvAnalysis = false;
+}
+
+async function safePayrollAccess(prisma, req, user) {
+  try {
+    const access = await resolvePayrollFeatureAccess(prisma, {
+      userRole: req.session?.userRole || req.userRole,
+      userId: user?.id || req.session?.userId || req.userId,
+      username: user?.username || req.session?.username || req.username
+    });
+    return access.allowed === true;
+  } catch (error) {
+    console.warn('No fue posible refrescar el permiso de Nómina.', error?.message || error);
+    return false;
+  }
+}
+
 async function refreshDatabaseUserPermissions(prisma, req) {
   const source = req.session?.userSource;
   const isDatabaseUser = source === 'db' && Boolean(req.session?.userId);
@@ -62,7 +101,12 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     && req.session?.userRole === 'admin'
     && Boolean(req.session?.username)
     && req.session.username === normalizeString(process.env.ADMIN_USER);
-  if (!isDatabaseUser && !isEnvironmentAdmin) return;
+  if (!isDatabaseUser && !isEnvironmentAdmin) {
+    const isDev = req.session?.userRole === 'dev' || req.userRole === 'dev';
+    req.session.canAccessPayroll = isDev;
+    req.canAccessPayroll = isDev;
+    return;
+  }
 
   const user = await prisma.appUser.findUnique({
     where: isEnvironmentAdmin
@@ -70,6 +114,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
       : { id: req.session.userId },
     select: {
       id: true,
+      username: true,
       isActive: true,
       accessScope: true,
       scopeCity: true,
@@ -82,23 +127,14 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     }
   });
 
-  if (!user && isEnvironmentAdmin) return;
+  if (!user && isEnvironmentAdmin) {
+    req.session.canAccessPayroll = false;
+    req.canAccessPayroll = false;
+    return;
+  }
 
   if (!user || !user.isActive) {
-    req.session.userRole = null;
-    req.session.userId = null;
-    req.session.canAccessDispatch = false;
-    req.session.canAccessAttendance = false;
-    req.session.canAccessStatistics = false;
-    req.session.canAccessMetaAds = false;
-    req.session.canAccessCvAnalysis = false;
-    req.userRole = null;
-    req.userId = null;
-    req.canAccessDispatch = false;
-    req.canAccessAttendance = false;
-    req.canAccessStatistics = false;
-    req.canAccessMetaAds = false;
-    req.canAccessCvAnalysis = false;
+    clearSessionPermissions(req);
     return;
   }
 
@@ -107,18 +143,17 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const accessVacancyId = user.scopeVacancyId || null;
   const canAccessAttendance = Boolean(user.canAccessAttendance);
   const canAccessDispatch = Boolean(user.canAccessDispatch) || canAccessAttendance;
-  // La migración convierte el permiso general anterior en ambos permisos.
-  // No se usa canAccessStatistics como fallback: si solo uno queda activo,
-  // el permiso general derivado sigue en true y reabriría el otro módulo.
   const canAccessMetaAds = Boolean(user.canAccessMetaAds);
   const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis);
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
+  const canAccessPayroll = await safePayrollAccess(prisma, req, user);
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
   req.session.userAccessVacancyId = accessVacancyId;
   req.session.canAccessDispatch = canAccessDispatch;
   req.session.canAccessAttendance = canAccessAttendance;
+  req.session.canAccessPayroll = canAccessPayroll;
   req.session.canAccessStatistics = canAccessStatistics;
   req.session.canAccessMetaAds = canAccessMetaAds;
   req.session.canAccessCvAnalysis = canAccessCvAnalysis;
@@ -130,9 +165,46 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.userAccessVacancyId = accessVacancyId;
   req.canAccessDispatch = canAccessDispatch;
   req.canAccessAttendance = canAccessAttendance;
+  req.canAccessPayroll = canAccessPayroll;
   req.canAccessStatistics = canAccessStatistics;
   req.canAccessMetaAds = canAccessMetaAds;
   req.canAccessCvAnalysis = canAccessCvAnalysis;
+}
+
+function isHtmlResponse(body, res) {
+  if (typeof body !== 'string') return false;
+  const contentType = typeof res?.getHeader === 'function'
+    ? String(res.getHeader('Content-Type') || '').toLowerCase()
+    : '';
+  return contentType.includes('text/html') || body.trimStart().startsWith('<!DOCTYPE html') || body.trimStart().startsWith('<html');
+}
+
+function injectPayrollNavigation(html, req) {
+  const allowed = req.canAccessPayroll === true || req.session?.canAccessPayroll === true;
+  if (!allowed || !String(req.originalUrl || '').startsWith('/admin/operaciones')) return html;
+  if (html.includes(`href="${PAYROLL_PATH}"`)) return html;
+  const link = `<a href="${PAYROLL_PATH}">Nómina</a>`;
+  if (html.includes('<span class="spacer"></span>')) {
+    return html.replace('<span class="spacer"></span>', `${link}\n    <span class="spacer"></span>`);
+  }
+  return html.replace(/<\/nav>/i, `  ${link}\n  </nav>`);
+}
+
+function injectPayrollUsersScript(html, req) {
+  const path = String(req.originalUrl || '').split('?')[0];
+  const role = req.session?.userRole || req.userRole;
+  if (path !== '/admin/users' || role !== 'dev' || html.includes(PAYROLL_USERS_SCRIPT)) return html;
+  return html.replace(/<\/body>/i, `  <script src="${PAYROLL_USERS_SCRIPT}"></script>\n</body>`);
+}
+
+function installPayrollHtmlBridge(req, res) {
+  if (!res || typeof res.send !== 'function') return;
+  const originalSend = res.send.bind(res);
+  res.send = (body) => {
+    if (!isHtmlResponse(body, res)) return originalSend(body);
+    const withNavigation = injectPayrollNavigation(body, req);
+    return originalSend(injectPayrollUsersScript(withNavigation, req));
+  };
 }
 
 export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
@@ -161,12 +233,14 @@ export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
 export function dispatchAuditMiddleware(prisma) {
   return async (req, res, next) => {
     try {
-      // Mantiene sincronizados tanto los usuarios de base de datos como el
-      // perfil editable de la cuenta administradora configurada en Railway.
       await refreshDatabaseUserPermissions(prisma, req);
     } catch (error) {
       console.warn('No fue posible refrescar los permisos del usuario.', error);
+      req.session.canAccessPayroll = req.session?.userRole === 'dev';
+      req.canAccessPayroll = req.session?.userRole === 'dev';
     }
+
+    installPayrollHtmlBridge(req, res);
 
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
     const startedAt = Date.now();

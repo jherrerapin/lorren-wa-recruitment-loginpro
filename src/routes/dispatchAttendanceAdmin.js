@@ -8,6 +8,7 @@ import {
   reviewAttendanceWorkdaySession
 } from '../modules/dispatch-attendance/application/attendanceAdminWorkday.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
+import { dispatchPayrollRouter } from './dispatchPayroll.js';
 
 const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
 
@@ -155,6 +156,8 @@ export async function resolveAttendanceReviewReason(prisma, input = {}) {
 export function dispatchAttendanceAdminRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: false, limit: '16kb' });
+
+  router.use('/nomina', dispatchPayrollRouter(prisma));
 
   router.get('/', async (req, res) => {
     applyNoStore(res);
