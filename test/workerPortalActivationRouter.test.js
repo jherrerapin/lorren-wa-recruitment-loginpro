@@ -103,12 +103,13 @@ test('el enlace de activación usa query y no fragmento', () => {
   assert.equal(parsed.hash, '');
 });
 
-test('las cookies del portal permanecen seguras y limitadas a su ruta', () => {
+test('las cookies permanecen seguras, host-only y disponibles para la verificación biométrica', () => {
   const options = workerPortalCookieOptions(60_000);
   assert.equal(options.httpOnly, true);
   assert.equal(options.secure, true);
   assert.equal(options.sameSite, 'strict');
-  assert.equal(options.path, '/operaciones/portal');
+  assert.equal(options.path, '/');
+  assert.equal(Object.hasOwn(options, 'domain'), false);
 
   const missing = resolveWorkerPortalInstallationId(requestDouble(), () => INSTALLATION_ID);
   assert.equal(missing.installationId, INSTALLATION_ID);
@@ -247,7 +248,7 @@ test('sesión ausente o revocada muestra acceso inactivo y limpia una cookie exi
   assert.equal(state.clearedCookies[0].name, WORKER_PORTAL_SESSION_COOKIE_NAME);
 });
 
-test('la vista usa GPS, cámara y multipart sin cargar terceros ni almacenamiento web', () => {
+test('la vista usa GPS, cámara, biometría local y multipart sin cargar terceros', () => {
   const view = fs.readFileSync('src/views/workerPortal.ejs', 'utf8');
   const replaceIndex = view.indexOf('window.history.replaceState');
   const activationFetchIndex = view.indexOf("fetch('/operaciones/portal/activar'");
@@ -257,6 +258,8 @@ test('la vista usa GPS, cámara y multipart sin cargar terceros ni almacenamient
   assert.match(view, /navigator\.geolocation\.getCurrentPosition/);
   assert.match(view, /getUserMedia/);
   assert.match(view, /new FormData\(\)/);
+  assert.match(view, /LorrenWorkerBiometric/);
+  assert.match(view, /biometria\/desafio/);
   assert.match(view, /photoConsent/);
   assert.doesNotMatch(view, /https?:\/\//i);
   assert.doesNotMatch(view, /localStorage|sessionStorage/);

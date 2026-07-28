@@ -6,7 +6,7 @@ export const WORKER_PORTAL_SESSION_DEFAULT_TTL_MINUTES = 7 * 24 * 60;
 export const WORKER_PORTAL_SESSION_MIN_TTL_MINUTES = 15;
 export const WORKER_PORTAL_SESSION_MAX_TTL_MINUTES = 30 * 24 * 60;
 export const WORKER_PORTAL_SESSION_COOKIE_NAME = '__Secure-lorren-attendance';
-export const WORKER_PORTAL_SESSION_COOKIE_PATH = '/operaciones/portal';
+export const WORKER_PORTAL_SESSION_COOKIE_PATH = '/';
 
 function validDate(value, label) {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {

@@ -30,16 +30,32 @@
     .btn { display:inline-flex; align-items:center; justify-content:center; min-height:38px; border:1px solid var(--border); border-radius:9px; padding:8px 14px; background:#fff; color:var(--navy); text-decoration:none; font-size:13px; font-weight:800; cursor:pointer; }
     .btn-primary { background:var(--teal); color:#fff; border-color:var(--teal); }
     .btn-primary:hover { background:var(--teal-hover); }
+    .btn-danger { background:#fff; color:var(--red); border-color:#fecaca; }
     .btn:disabled { opacity:.55; cursor:not-allowed; }
     .alert { border-radius:10px; padding:12px 14px; margin-top:16px; font-size:13px; font-weight:700; }
     .alert-error { background:var(--red-light); color:var(--red); }
     .alert-success { background:var(--green-light); color:var(--green); }
     .alert-warning { background:var(--amber-light); color:var(--amber); }
-    .hidden { display:none; }
+    .hidden { display:none !important; }
     .result { margin-top:18px; border-top:1px solid var(--border); padding-top:18px; }
     .meta { font-size:13px; margin-top:8px; }
     .warning-box { margin-top:16px; padding:14px; border-radius:10px; background:var(--amber-light); color:var(--amber); font-size:13px; line-height:1.55; }
     .test-note { font-size:12px; color:var(--amber); margin-left:6px; font-weight:800; }
+    .worker-state { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+    .pill { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:5px 10px; font-size:12px; font-weight:850; }
+    .pill-on { background:var(--green-light); color:var(--green); }
+    .pill-off { background:#edf1f4; color:#596675; }
+    dialog { width:min(calc(100% - 24px),480px); border:0; border-radius:18px; padding:0; box-shadow:0 26px 80px rgba(15,23,42,.32); }
+    dialog::backdrop { background:rgba(15,23,42,.66); }
+    .dialog-body { padding:20px; }
+    .dialog-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .icon-button { width:36px; height:36px; border:0; border-radius:999px; background:#edf1f4; font-size:21px; cursor:pointer; }
+    .face-stage { position:relative; overflow:hidden; margin-top:16px; border-radius:18px; background:#111827; aspect-ratio:3/4; }
+    .face-stage video { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+    .face-frame { position:absolute; left:50%; top:48%; width:58%; height:65%; transform:translate(-50%,-50%); border:3px solid rgba(255,255,255,.9); border-radius:48% 48% 44% 44%; box-shadow:0 0 0 999px rgba(0,0,0,.28); pointer-events:none; }
+    .biometric-status { min-height:44px; margin-top:12px; padding:11px 12px; border-radius:10px; background:#f1f5f4; color:#34534b; font-size:13px; font-weight:750; }
+    .consent { display:flex; gap:9px; align-items:flex-start; margin-top:14px; color:var(--muted); font-size:12px; line-height:1.45; }
+    .consent input { width:18px; height:18px; flex:0 0 auto; margin-top:1px; }
     @media (max-width:640px) { .page { padding:18px 14px 42px; } .actions, .btn { width:100%; } }
   </style>
 </head>
@@ -56,16 +72,15 @@
     <section class="hero">
       <div>
         <div class="eyebrow">Gestión de asistencia</div>
-        <h1>Activar Portal del Auxiliar</h1>
-        <p>Los usuarios con permiso de Asistencia pueden generar un enlace de un solo uso para registrar el celular principal de un auxiliar.</p>
+        <h1>Portal del Auxiliar</h1>
+        <p>Activa el celular y registra el rostro del auxiliar.</p>
       </div>
       <a class="btn" href="/admin/operaciones/personal">Volver a Personal operativo</a>
     </section>
 
     <section class="card">
       <h2>Seleccionar auxiliar</h2>
-      <p>Se muestran únicamente los auxiliares con estado <strong>Contratado</strong> que aparecen en Personal operativo. Al lado del nombre se indica si el contrato es <strong>Directo</strong> o <strong>Contratista</strong>.</p>
-      <p class="meta">El enlace vence en aproximadamente <strong><%= defaultTtlMinutes %> minutos</strong> y reemplaza cualquier activación pendiente anterior del mismo auxiliar.</p>
+      <p class="meta">Solo aparecen auxiliares contratados.</p>
 
       <% if (typeof loadError !== 'undefined' && loadError) { %>
         <div class="alert alert-error"><%= loadError %></div>
@@ -73,16 +88,25 @@
 
       <form id="activation-form">
         <div class="field">
-          <label for="workerId">Auxiliar activo de Despacho</label>
+          <label for="workerId">Auxiliar</label>
           <select id="workerId" name="workerId" required <%= workers.length ? '' : 'disabled' %>>
             <option value="">Selecciona un auxiliar</option>
             <% workers.forEach((worker) => { %>
-              <option value="<%= worker.id %>"><%= worker.label %><%= worker.isTestProfile ? ' · PERFIL DE PRUEBA' : '' %></option>
+              <option
+                value="<%= worker.id %>"
+                data-worker-name="<%= worker.fullName %>"
+                data-biometric-enrolled="<%= worker.biometric?.enrolled ? 'true' : 'false' %>"
+              ><%= worker.label %><%= worker.isTestProfile ? ' · PERFIL DE PRUEBA' : '' %></option>
             <% }) %>
           </select>
         </div>
+        <div id="worker-state" class="worker-state hidden">
+          <span id="biometric-pill" class="pill pill-off">Rostro sin registrar</span>
+        </div>
         <div class="actions">
-          <button class="btn btn-primary" id="generate-button" type="submit" <%= workers.length ? '' : 'disabled' %>>Generar enlace seguro</button>
+          <button class="btn btn-primary" id="generate-button" type="submit" <%= workers.length ? '' : 'disabled' %>>Generar enlace</button>
+          <button class="btn" id="enroll-button" type="button" disabled>Registrar rostro</button>
+          <button class="btn btn-danger hidden" id="revoke-button" type="button">Eliminar rostro</button>
         </div>
       </form>
 
@@ -99,28 +123,81 @@
         <div class="actions">
           <button class="btn btn-primary" id="copy-button" type="button">Copiar enlace</button>
         </div>
-        <div class="warning-box">
-          No abras este enlace en tu computador: el dispositivo que lo abra quedará asociado al auxiliar. Cópialo y envíalo únicamente al celular correcto.
-        </div>
+        <div class="warning-box">No abras este enlace en tu computador: envíalo al celular correcto.</div>
       </div>
     </section>
   </main>
 
+  <dialog id="biometric-dialog" aria-labelledby="biometric-title">
+    <div class="dialog-body">
+      <div class="dialog-head">
+        <div><div class="eyebrow">Registro supervisado</div><h2 id="biometric-title">Registrar rostro</h2></div>
+        <button class="icon-button" id="close-biometric" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="face-stage">
+        <video id="biometric-video" playsinline muted hidden></video>
+        <div class="face-frame" aria-hidden="true"></div>
+      </div>
+      <div id="biometric-status" class="biometric-status" role="status">Abre la cámara para comenzar.</div>
+      <label class="consent"><input id="biometric-consent" type="checkbox"><span>Confirmo que el auxiliar fue informado y autorizó la plantilla facial para validar su asistencia.</span></label>
+      <div class="actions">
+        <button class="btn btn-primary" id="capture-biometric" type="button">Iniciar registro</button>
+        <button class="btn" id="cancel-biometric" type="button">Cancelar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/public/worker-biometric.js"></script>
   <script>
     (() => {
       const form = document.getElementById('activation-form');
       const workerSelect = document.getElementById('workerId');
       const generateButton = document.getElementById('generate-button');
+      const enrollButton = document.getElementById('enroll-button');
+      const revokeButton = document.getElementById('revoke-button');
+      const workerState = document.getElementById('worker-state');
+      const biometricPill = document.getElementById('biometric-pill');
       const status = document.getElementById('status');
       const result = document.getElementById('result');
       const workerName = document.getElementById('worker-name');
       const activationUrl = document.getElementById('activation-url');
       const expiresAt = document.getElementById('expires-at');
       const copyButton = document.getElementById('copy-button');
+      const biometricDialog = document.getElementById('biometric-dialog');
+      const biometricTitle = document.getElementById('biometric-title');
+      const biometricVideo = document.getElementById('biometric-video');
+      const biometricStatus = document.getElementById('biometric-status');
+      const biometricConsent = document.getElementById('biometric-consent');
+      const captureBiometric = document.getElementById('capture-biometric');
+      let biometricStream = null;
 
       function showStatus(message, type) {
         status.textContent = message;
         status.className = `alert ${type === 'success' ? 'alert-success' : type === 'warning' ? 'alert-warning' : 'alert-error'}`;
+      }
+
+      function selectedOption() {
+        return workerSelect.options[workerSelect.selectedIndex] || null;
+      }
+
+      function selectedWorkerId() {
+        return workerSelect.value || '';
+      }
+
+      function biometricEnrolled() {
+        return selectedOption()?.dataset.biometricEnrolled === 'true';
+      }
+
+      function renderWorkerState() {
+        const selected = Boolean(selectedWorkerId());
+        workerState.classList.toggle('hidden', !selected);
+        enrollButton.disabled = !selected;
+        if (!selected) return;
+        const enrolled = biometricEnrolled();
+        biometricPill.textContent = enrolled ? 'Rostro registrado' : 'Rostro sin registrar';
+        biometricPill.className = `pill ${enrolled ? 'pill-on' : 'pill-off'}`;
+        enrollButton.textContent = enrolled ? 'Actualizar rostro' : 'Registrar rostro';
+        revokeButton.classList.toggle('hidden', !enrolled);
       }
 
       function mobileSafeActivationUrl(rawUrl) {
@@ -134,43 +211,121 @@
         return url.toString();
       }
 
+      function stopBiometricCamera() {
+        biometricStream?.getTracks?.().forEach((track) => track.stop());
+        biometricStream = null;
+        biometricVideo.srcObject = null;
+        biometricVideo.hidden = true;
+      }
+
+      function closeBiometricDialog() {
+        stopBiometricCamera();
+        if (typeof biometricDialog.close === 'function') biometricDialog.close();
+        else biometricDialog.removeAttribute('open');
+      }
+
+      workerSelect.addEventListener('change', renderWorkerState);
+
       form?.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const workerId = workerSelect.value;
-        if (!workerId) {
-          showStatus('Selecciona un auxiliar.', 'error');
-          return;
-        }
-
-        if (!window.confirm('Se revocará cualquier enlace pendiente anterior de este auxiliar. ¿Continuar?')) return;
-
+        const workerId = selectedWorkerId();
+        if (!workerId) return showStatus('Selecciona un auxiliar.', 'error');
+        if (!window.confirm('Se revocará cualquier enlace pendiente anterior. ¿Continuar?')) return;
         generateButton.disabled = true;
         result.classList.add('hidden');
-        showStatus('Generando enlace seguro…', 'warning');
-
+        showStatus('Generando enlace…', 'warning');
         try {
           const response = await fetch('/admin/operaciones/portal-activaciones/emitir', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Requested-With': 'attendance-admin'
-            },
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'attendance-admin' },
             body: JSON.stringify({ workerId })
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload.ok || !payload.activationUrl) throw new Error(payload.error || 'activation_failed');
-
           activationUrl.value = mobileSafeActivationUrl(payload.activationUrl);
-          workerName.textContent = `Auxiliar: ${payload.worker.fullName} · ${payload.worker.contractType}${payload.worker.isTestProfile ? ' (perfil de prueba)' : ''}`;
+          workerName.textContent = `Auxiliar: ${payload.worker.fullName} · ${payload.worker.contractType}${payload.worker.isTestProfile ? ' (prueba)' : ''}`;
           const expiry = new Date(payload.expiresAt);
           expiresAt.textContent = Number.isNaN(expiry.getTime()) ? 'Vencimiento automático configurado.' : `Vence: ${expiry.toLocaleString('es-CO')}`;
           result.classList.remove('hidden');
-          showStatus('Enlace generado. Cópialo y envíalo al celular correcto.', 'success');
+          showStatus('Enlace generado.', 'success');
         } catch {
-          showStatus('No fue posible generar el enlace. Revisa la configuración del portal o intenta nuevamente.', 'error');
+          showStatus('No fue posible generar el enlace.', 'error');
         } finally {
           generateButton.disabled = false;
+        }
+      });
+
+      enrollButton.addEventListener('click', () => {
+        if (!selectedWorkerId()) return;
+        biometricTitle.textContent = biometricEnrolled() ? 'Actualizar rostro' : 'Registrar rostro';
+        biometricStatus.textContent = 'Abre la cámara para comenzar.';
+        biometricConsent.checked = false;
+        captureBiometric.disabled = false;
+        captureBiometric.textContent = 'Iniciar registro';
+        if (typeof biometricDialog.showModal === 'function') biometricDialog.showModal();
+        else biometricDialog.setAttribute('open', '');
+      });
+
+      captureBiometric.addEventListener('click', async () => {
+        if (!biometricConsent.checked) {
+          biometricStatus.textContent = 'Confirma la autorización del auxiliar.';
+          return;
+        }
+        captureBiometric.disabled = true;
+        captureBiometric.textContent = 'Procesando…';
+        try {
+          if (!window.LorrenWorkerBiometric) throw new Error('biometric_runtime_unavailable');
+          biometricStream = await window.LorrenWorkerBiometric.startCamera(biometricVideo);
+          const capture = await window.LorrenWorkerBiometric.captureEnrollment({
+            video: biometricVideo,
+            onStatus: (message) => { biometricStatus.textContent = message; }
+          });
+          const response = await fetch('/admin/operaciones/portal-activaciones/biometria/registrar', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'attendance-admin' },
+            body: JSON.stringify({
+              workerId: selectedWorkerId(),
+              descriptor: capture.descriptor,
+              realScore: capture.realScore,
+              liveScore: capture.liveScore,
+              modelVersion: capture.modelVersion,
+              consentAccepted: true
+            })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'biometric_enrollment_failed');
+          selectedOption().dataset.biometricEnrolled = 'true';
+          renderWorkerState();
+          showStatus('Rostro registrado.', 'success');
+          closeBiometricDialog();
+        } catch (error) {
+          biometricStatus.textContent = error?.message === 'biometric_capture_timeout'
+            ? 'No fue posible completar la captura. Intenta de nuevo con mejor luz.'
+            : 'No fue posible registrar el rostro.';
+          captureBiometric.disabled = false;
+          captureBiometric.textContent = 'Reintentar';
+          stopBiometricCamera();
+        }
+      });
+
+      revokeButton.addEventListener('click', async () => {
+        if (!selectedWorkerId() || !window.confirm('¿Eliminar la plantilla facial de este auxiliar?')) return;
+        revokeButton.disabled = true;
+        try {
+          const response = await fetch('/admin/operaciones/portal-activaciones/biometria/revocar', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'attendance-admin' },
+            body: JSON.stringify({ workerId: selectedWorkerId() })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload.ok) throw new Error('biometric_revocation_failed');
+          selectedOption().dataset.biometricEnrolled = 'false';
+          renderWorkerState();
+          showStatus('Rostro eliminado.', 'success');
+        } catch {
+          showStatus('No fue posible eliminar el rostro.', 'error');
+        } finally {
+          revokeButton.disabled = false;
         }
       });
 
@@ -178,13 +333,18 @@
         if (!activationUrl.value) return;
         try {
           await navigator.clipboard.writeText(activationUrl.value);
-          showStatus('Enlace copiado al portapapeles.', 'success');
+          showStatus('Enlace copiado.', 'success');
         } catch {
           activationUrl.focus();
           activationUrl.select();
-          showStatus('El navegador no permitió copiar automáticamente. El enlace quedó seleccionado para copiarlo manualmente.', 'warning');
+          showStatus('El enlace quedó seleccionado para copiarlo.', 'warning');
         }
       });
+
+      document.getElementById('close-biometric').addEventListener('click', closeBiometricDialog);
+      document.getElementById('cancel-biometric').addEventListener('click', closeBiometricDialog);
+      biometricDialog.addEventListener('cancel', (event) => { event.preventDefault(); closeBiometricDialog(); });
+      renderWorkerState();
     })();
   </script>
 </body>
