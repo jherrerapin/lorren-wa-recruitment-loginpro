@@ -1,0 +1,75 @@
+name: Issue 807 reminder diagnosis
+
+on:
+  pull_request:
+    branches:
+      - automation/807-reminder-diagnosis
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-reminders:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run full suite and extract reminder debt
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/full-suite.log 2>&1
+          set -e
+          grep '^not ok [0-9][0-9]* - ' /tmp/full-suite.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/all-failures.txt || true
+          grep -Ei 'reminder|recordatorio|keepalive|queue|cola|chatEngine|interview' /tmp/all-failures.txt > /tmp/reminder-failures.txt || true
+          echo '=== reminder-related failures ==='
+          cat /tmp/reminder-failures.txt
+
+      - name: Run focal reminder contracts
+        shell: bash
+        run: |
+          set +e
+          node --test \
+            test/reminder.test.js \
+            test/hardeningP0Delta.test.js \
+            test/interviewReminderIdempotency.test.js \
+            test/conversationEngineStepAuthority.test.js \
+            test/webhookInterviewBookingAuthority.test.js \
+            > /tmp/reminder-focused.log 2>&1
+          focal_exit=$?
+          set -e
+          echo "$focal_exit" > /tmp/reminder-focused-exit.txt
+          cat /tmp/reminder-focused.log
+
+      - name: Upload diagnosis
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-807-reminder-diagnosis
+          path: |
+            /tmp/all-failures.txt
+            /tmp/reminder-failures.txt
+            /tmp/reminder-focused.log
+            /tmp/reminder-focused-exit.txt
+          if-no-files-found: error
+          retention-days: 1
