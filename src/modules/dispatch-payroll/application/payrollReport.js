@@ -13,6 +13,7 @@ export const PAYROLL_POLICY_ENTITY_TYPE = 'DISPATCH_PAYROLL_POLICY';
 export const PAYROLL_POLICY_ACTION = 'PAYROLL_POLICY_UPDATED';
 export const PAYROLL_COMPENSATION_ENTITY_TYPE = 'DISPATCH_PAYROLL_COMPENSATION';
 export const PAYROLL_COMPENSATION_ACTION = 'PAYROLL_COMPENSATION_UPDATED';
+export const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 
 function normalizeString(value, maxLength = 200) {
   if (typeof value !== 'string') return null;
@@ -144,10 +145,7 @@ export async function loadPayrollCompensationMap(prisma, workerIds = [], range =
   const map = new Map();
   if (!uniqueIds.length) return map;
   const events = await prisma.devAuditEvent.findMany({
-    where: {
-      entityType: PAYROLL_COMPENSATION_ENTITY_TYPE,
-      action: PAYROLL_COMPENSATION_ACTION
-    },
+    where: { entityType: PAYROLL_COMPENSATION_ENTITY_TYPE, action: PAYROLL_COMPENSATION_ACTION },
     orderBy: { createdAt: 'desc' }
   });
 
@@ -191,19 +189,27 @@ export async function savePayrollCompensation(prisma, input = {}) {
   return { workerId: worker.id, dateKey, status };
 }
 
-function normalizedFilters(query = {}) {
+function normalizedFilters(query = {}, options = {}) {
   return {
     clientId: normalizeString(query.clientId, 120) || '',
     operationPointId: normalizeString(query.operationPointId, 120) || '',
     workerId: normalizeString(query.workerId, 120) || '',
-    search: normalizeString(query.search, 160) || ''
+    search: normalizeString(query.search, 160) || '',
+    includeTest: options.allowTestData === true && String(query.includeTest || '').toLowerCase() === 'true'
   };
+}
+
+function sessionIsTest(session) {
+  return session?.assignment?.serviceRequest?.source === DEV_TEST_REQUEST_SOURCE
+    || session?.assignment?.worker?.isTestProfile === true
+    || session?.source === 'DEV_TEST_MANUAL';
 }
 
 function sessionMatchesFilters(session, filters) {
   const assignment = session?.assignment;
   const worker = assignment?.worker || {};
   const point = assignment?.serviceRequest?.operationPoint || {};
+  if (!filters.includeTest && sessionIsTest(session)) return false;
   if (filters.clientId && point.clientId !== filters.clientId) return false;
   if (filters.operationPointId && point.id !== filters.operationPointId) return false;
   if (filters.workerId && worker.id !== filters.workerId) return false;
@@ -216,7 +222,7 @@ function sessionMatchesFilters(session, filters) {
 
 export async function loadPayrollReport(prisma, query = {}, options = {}) {
   const period = resolvePayrollPeriod(query, options.now || new Date());
-  const filters = normalizedFilters(query);
+  const filters = normalizedFilters(query, options);
   const expandedFrom = addDateKeyDays(period.from, -6);
   const start = bogotaDayStart(expandedFrom);
   const end = bogotaDayStart(addDateKeyDays(period.to, 1));
@@ -243,12 +249,15 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
       orderBy: { arrivalReportedAt: 'asc' }
     }),
     prisma.dispatchClient.findMany({
-      where: { isActive: true },
+      where: { isActive: true, ...(filters.includeTest ? {} : { isTestClient: false }) },
       include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } } },
       orderBy: { name: 'asc' }
     }),
     prisma.dispatchWorker.findMany({
-      where: { operationalStatus: { not: 'ELIMINADO' } },
+      where: {
+        operationalStatus: { not: 'ELIMINADO' },
+        ...(filters.includeTest ? {} : { isTestProfile: false })
+      },
       select: { id: true, fullName: true, documentNumber: true },
       orderBy: { fullName: 'asc' }
     })
