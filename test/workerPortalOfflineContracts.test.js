@@ -79,6 +79,11 @@ test('el marcador publica las nuevas capacidades de jornada', () => {
   assert.ok(release.features.includes('break-start'));
   assert.ok(release.features.includes('break-end'));
   assert.ok(release.features.includes('actual-break-deduction'));
+  assert.ok(release.features.includes('incomplete-break-90-minute-penalty'));
+  assert.ok(release.features.includes('seven-hour-standard-workday'));
+  assert.ok(release.features.includes('overtime-after-seven-hours'));
+  assert.ok(release.features.includes('short-break-time-credit'));
+  assert.ok(release.features.includes('no-break-time-credit'));
   assert.ok(release.features.includes('flexible-departure'));
   assert.ok(release.features.includes('open-arrival-marking'));
   assert.ok(release.features.includes('audited-early-time-recognition'));
