@@ -827,7 +827,7 @@ function shouldUseEngineFieldPreview(candidate, cleanText, localParsedData = {},
   }
 
   if (candidate.currentStep === ConversationStep.GREETING_SENT && !candidate.vacancyId) {
-    return Boolean(Object.keys(localParsedData || {}).length || Object.keys(aiFields || {}).length);
+    return hasParsedCandidateData;
   }
   return Object.keys(aiFields || {}).length === 0 || Object.keys(localParsedData || {}).length <= 1;
 }
