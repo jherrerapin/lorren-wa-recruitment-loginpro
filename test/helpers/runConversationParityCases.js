@@ -1,4 +1,5 @@
 import { conversationCases } from '../fixtures/conversationCases.js';
+import { conversationParityCases } from '../fixtures/conversationParityCases.js';
 import { buildParitySnapshot, runConversationCase } from './conversationHarness.js';
 
 const mode = String(process.argv[2] || 'false');
@@ -15,7 +16,9 @@ if (Array.isArray(caseIds) && caseIds.length) {
 
   const { processText } = await import('../../src/routes/webhook.js');
   const { createDebugTrace } = await import('../../src/services/debugTrace.js');
-  const byId = new Map(conversationCases.map((item) => [item.id, item]));
+  const byId = new Map(
+    [...conversationCases, ...conversationParityCases].map((item) => [item.id, item])
+  );
   const snapshots = [];
 
   for (const caseId of caseIds) {
