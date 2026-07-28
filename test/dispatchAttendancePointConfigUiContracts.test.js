@@ -68,7 +68,8 @@ test('el formulario conserva booleanos explícitos y elimina las ventanas tempor
   assert.match(renderedView, /data-attendance-open-entry-policy="true"/);
   assert.match(renderedView, /Entrada sin ventana configurable/);
   assert.match(renderedView, /Las llegadas tarde se registran y no se bloquean/);
-  assert.match(renderedView, /conteo inicia a la hora programada/);
+  assert.doesNotMatch(sourceView, /La hora real siempre queda guardada/);
+  assert.doesNotMatch(renderedView, /conteo inicia a la hora programada/);
 });
 
 test('el render autorizado conserva completa la configuración de asistencia por operación', () => {
