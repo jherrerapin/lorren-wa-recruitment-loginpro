@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const root = path.dirname(require.resolve('@vladmandic/human/package.json'));
+const packageEntry = require.resolve('@vladmandic/human');
+const root = path.resolve(path.dirname(packageEntry), '..');
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const destination = path.join(projectRoot, 'src', 'public', 'vendor', 'human');
 const modelNames = ['blazeface.json', 'facemesh.json', 'iris.json', 'faceres.json', 'antispoof.json', 'liveness.json'];
