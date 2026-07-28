@@ -77,6 +77,12 @@
     removeElement('.work-summary');
     removeElement('main > .meta');
     removeElement('.empty-state .meta');
+    removeElement('.portal-summary-panel');
+    removeElement('.portal-status-pill');
+    removeElement('.portal-next-summary small');
+    removeElement('.portal-filter-head p');
+    removeElement('.portal-filter-result');
+    removeElement('.portal-status-filter');
     document.getElementById('connectivity-copy')?.remove();
     const fallback = document.getElementById('file-fallback');
     if (fallback) fallback.hidden = true;
