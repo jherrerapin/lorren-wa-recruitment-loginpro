@@ -23,7 +23,7 @@ test('convierte los bloques DEV sin perder fecha, horas ni cantidad', () => {
   assert.equal(blocks[1].startTime, '19:00');
 });
 
-test('crea solicitudes aisladas con source DEV_TEST y sin autoasignación', async () => {
+test('crea solicitudes aisladas con source y estado DEV_TEST', async () => {
   const createdData = [];
   const prisma = {
     dispatchClient: {
@@ -50,7 +50,8 @@ test('crea solicitudes aisladas con source DEV_TEST y sin autoasignación', asyn
 
   assert.equal(result.created.length, 1);
   assert.equal(createdData[0].source, DEV_TEST_REQUEST_SOURCE);
-  assert.equal(createdData[0].status, 'PENDING_ASSIGNMENT');
+  assert.equal(createdData[0].status, 'DEV_TEST_PENDING');
+  assert.notEqual(createdData[0].status, 'PENDING_ASSIGNMENT');
 });
 
 test('rechaza asignar un auxiliar real a una solicitud de prueba', async () => {
@@ -61,6 +62,27 @@ test('rechaza asignar un auxiliar real a una solicitud de prueba', async () => {
   await assert.rejects(() => assignDevTestWorker(prisma, {
     serviceRequestId: 'request-1', workerId: 'worker-real'
   }), /dev_test_worker_required/);
+});
+
+test('asigna sujetos de prueba con estado separado del flujo real', async () => {
+  const saved = { assignment: null, requestStatus: null };
+  const prisma = {
+    dispatchServiceRequest: {
+      findUnique: async () => ({ id: 'request-1', source: DEV_TEST_REQUEST_SOURCE, requiredWorkers: 1 }),
+      update: async ({ data }) => { saved.requestStatus = data.status; }
+    },
+    dispatchWorker: { findUnique: async () => ({ id: 'worker-test', isTestProfile: true }) },
+    dispatchAssignment: {
+      upsert: async (input) => { saved.assignment = input; return { id: 'assignment-1', ...input.create }; },
+      count: async () => 1
+    }
+  };
+  const result = await assignDevTestWorker(prisma, {
+    serviceRequestId: 'request-1', workerId: 'worker-test'
+  }, { actorUsername: 'devloginpro' });
+  assert.equal(result.status, 'DEV_TEST_ASSIGNED');
+  assert.equal(saved.assignment.create.status, 'DEV_TEST_ASSIGNED');
+  assert.equal(saved.requestStatus, 'DEV_TEST_COMPLETE');
 });
 
 test('la jornada manual exige una cronología válida', async () => {
