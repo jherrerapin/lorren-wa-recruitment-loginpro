@@ -52,32 +52,9 @@ jobs:
         run: node .github/scripts/apply-issue-799.mjs
 
       - name: Validate focal detail contracts
-        id: focal
-        continue-on-error: true
-        shell: bash
         run: |
-          set +e
-          {
-            node --check src/routes/admin.js
-            node --test test/adminManualCv.test.js test/adminDevOnlyContracts.test.js
-          } > /tmp/issue-799-focused.log 2>&1
-          status=$?
-          set -e
-          cat /tmp/issue-799-focused.log
-          exit "$status"
-
-      - name: Upload focal log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-799-admin-detail-log
-          path: /tmp/issue-799-focused.log
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Stop after focal failure
-        if: steps.focal.outcome == 'failure'
-        run: exit 1
+          node --check src/routes/admin.js
+          node --test test/adminManualCv.test.js
 
       - name: Compare full suite
         shell: bash
