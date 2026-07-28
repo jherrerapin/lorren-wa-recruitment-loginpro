@@ -26,7 +26,16 @@ const SCENARIOS = [
   { key: 'manual_review', caseId: 'document-exception-pauses-for-manual-review', coverage: 'text' },
   { key: 'recent_human_intervention', caseId: 'human-intervention-pauses-bot', coverage: 'text' },
   { key: 'finished_or_rejected_candidate', caseId: 'done-step-followup-about-previous-application-gets-status-ack', coverage: 'text' },
-  { key: 'duplicate_or_concurrent_messages', coverage: 'pending_webhook', reason: 'Requiere persistencia de waMessageId y adquisición multiline concurrente.' }
+  {
+    key: 'duplicate_or_concurrent_messages',
+    coverage: 'webhook_contract',
+    engineBoundary: 'before_process_text',
+    contractTests: [
+      'test/webhookIdempotency.test.js',
+      'test/webhookInboundMessageAuthority.test.js',
+      'test/candidateMultilineStateService.test.js'
+    ]
+  }
 ];
 
 const runnerPath = fileURLToPath(new URL('./helpers/runConversationParityCases.js', import.meta.url));
@@ -60,9 +69,22 @@ function domainDifferences(left, right) {
 test('el manifiesto conserva los 23 escenarios exactos del plan', () => {
   assert.equal(SCENARIOS.length, 23);
   assert.equal(new Set(SCENARIOS.map((item) => item.key)).size, 23);
-  const pending = SCENARIOS.filter((item) => item.coverage !== 'text');
-  assert.equal(pending.length, 2);
-  for (const item of pending) assert.ok(item.reason, `${item.key} debe explicar su cobertura pendiente`);
+  const pending = SCENARIOS.filter((item) => item.coverage === 'pending_webhook');
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].key, 'cv_received');
+  assert.ok(pending[0].reason);
+});
+
+test('duplicados y concurrencia se cubren antes del engine mediante contratos de webhook', () => {
+  const scenario = SCENARIOS.find((item) => item.key === 'duplicate_or_concurrent_messages');
+  assert.equal(scenario.coverage, 'webhook_contract');
+  assert.equal(scenario.engineBoundary, 'before_process_text');
+  assert.deepEqual(scenario.contractTests, [
+    'test/webhookIdempotency.test.js',
+    'test/webhookInboundMessageAuthority.test.js',
+    'test/candidateMultilineStateService.test.js'
+  ]);
+  assert.equal(Object.hasOwn(scenario, 'caseId'), false);
 });
 
 test('los escenarios de agenda usan fixtures focales independientes', () => {
