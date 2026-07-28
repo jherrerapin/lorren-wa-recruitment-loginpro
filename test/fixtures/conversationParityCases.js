@@ -6,6 +6,12 @@ const OP_BOG = {
   city: { id: 'city-bogota-parity', name: 'Bogota' }
 };
 
+const OP_IBAGUE = {
+  id: 'op-ibague-parity',
+  name: 'Operacion Ibague Parity',
+  city: { id: 'city-ibague-parity', name: 'Ibague' }
+};
+
 const VACANCY = {
   id: 'vac-sched-parity',
   title: 'Mensajero Bogota Parity',
@@ -23,6 +29,17 @@ const VACANCY = {
   isActive: true,
   schedulingEnabled: true,
   updatedAt: new Date('2026-07-27T12:00:00.000Z')
+};
+
+const IBAGUE_VACANCY = {
+  ...VACANCY,
+  id: 'vac-ibague-only-parity',
+  title: 'Auxiliar de Cargue Ibague Parity',
+  role: 'Auxiliar de cargue y descargue',
+  city: 'Ibague',
+  operationId: OP_IBAGUE.id,
+  operation: OP_IBAGUE,
+  schedulingEnabled: false
 };
 
 function completeCandidate(overrides = {}) {
@@ -47,6 +64,41 @@ function completeCandidate(overrides = {}) {
     cvOriginalName: 'hv.pdf',
     cvMimeType: 'application/pdf',
     reminderState: 'SKIPPED',
+    reminderScheduledFor: null,
+    botPaused: false,
+    botPausedAt: null,
+    botPausedBy: null,
+    botPauseReason: null,
+    botResumeMode: null,
+    lastInboundAt: new Date(),
+    lastOutboundAt: null,
+    createdAt: new Date('2026-07-27T10:00:00.000Z'),
+    ...overrides
+  };
+}
+
+function initialCandidate(overrides = {}) {
+  return {
+    id: overrides.id || 'candidate-parity-city',
+    phone: overrides.phone || '573001118888',
+    status: 'NUEVO',
+    currentStep: 'GREETING_SENT',
+    vacancyId: null,
+    fullName: null,
+    documentType: null,
+    documentNumber: null,
+    age: null,
+    gender: 'UNKNOWN',
+    neighborhood: null,
+    locality: null,
+    medicalRestrictions: null,
+    transportMode: null,
+    experienceInfo: null,
+    experienceTime: null,
+    cvData: null,
+    cvOriginalName: null,
+    cvMimeType: null,
+    reminderState: 'NONE',
     reminderScheduledFor: null,
     botPaused: false,
     botPausedAt: null,
@@ -196,6 +248,15 @@ export const conversationParityCases = [
     }),
     vacancies: [VACANCY],
     operations: [OP_BOG],
+    interviewSlots: [],
+    interviewBookings: []
+  },
+  {
+    id: 'parity-city-without-active-vacancies',
+    steps: ['Desde Bogotá para trabajo de bodega'],
+    candidate: initialCandidate(),
+    vacancies: [IBAGUE_VACANCY],
+    operations: [OP_IBAGUE],
     interviewSlots: [],
     interviewBookings: []
   }
