@@ -1,0 +1,97 @@
+name: Issue 795 admin render contract
+
+on:
+  pull_request:
+    branches:
+      - automation/795-admin-render-contract
+
+permissions:
+  contents: write
+
+jobs:
+  validate-admin-render:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+      BASELINE_SHA: 073adcf1d9e1ac82f55d4b3e8628cea6ed42fc43
+
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Capture baseline failure names
+        shell: bash
+        run: |
+          git worktree add /tmp/issue-795-base "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/issue-795-base/node_modules
+          set +e
+          (cd /tmp/issue-795-base && npm test) > /tmp/baseline.log 2>&1
+          set -e
+          grep '^not ok [0-9][0-9]* - ' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
+
+      - name: Apply exact functional patch
+        run: node .github/scripts/apply-issue-795.mjs
+
+      - name: Validate focal admin filters
+        run: |
+          node --check src/routes/admin.js
+          node --test test/adminStatusFilter.test.js
+
+      - name: Compare full suite
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.log 2>&1
+          set -e
+          grep '^not ok [0-9][0-9]* - ' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
+          comm -13 /tmp/baseline.failures /tmp/head.failures > /tmp/new.failures
+          comm -23 /tmp/baseline.failures /tmp/head.failures > /tmp/resolved.failures
+          if [ -s /tmp/new.failures ]; then
+            echo 'Nuevos fallos:'
+            cat /tmp/new.failures
+            exit 1
+          fi
+          for expected in \
+            'GET /admin?status=registered muestra operativos y conserva APROBADO visible' \
+            'GET /admin?status=contacted muestra solo candidatos contactados' \
+            'recruiter no ve pestaña de nuevos ni candidatos incompletos en status=all' \
+            'GET /admin muestra hojas de vida de vacante pausada en revisión'
+          do
+            grep -Fxq "$expected" /tmp/resolved.failures || {
+              echo "No se resolvió el fallo esperado: $expected"
+              exit 1
+            }
+          done
+          echo 'Fallos resueltos:'
+          cat /tmp/resolved.failures
+
+      - name: Validate diff
+        run: git diff --check
+
+      - name: Commit functional file
+        shell: bash
+        run: |
+          git add src/routes/admin.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: completar locales del dashboard administrativo #795'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
