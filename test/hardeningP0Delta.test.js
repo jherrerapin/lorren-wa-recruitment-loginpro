@@ -119,7 +119,7 @@ test('campo crítico ambiguo activa protección de autodescarte', () => {
   assert.deepEqual(result.protectedDiscardFields, ['age']);
 });
 
-test('scheduleReminderForCandidate encola reminder a una hora', async () => {
+test('scheduleReminderForCandidate encola seguimiento del proceso a dos horas', async () => {
   process.env.FF_POSTGRES_JOB_QUEUE = 'true';
   const now = new Date('2026-04-23T10:00:00.000Z');
   const candidate = {
@@ -145,8 +145,9 @@ test('scheduleReminderForCandidate encola reminder a una hora', async () => {
 
   await scheduleReminderForCandidate(prisma, candidate.id, now);
   assert.equal(jobs.length, 1);
-  assert.equal(jobs[0].type, 'interview_reminder');
-  assert.equal(new Date(jobs[0].runAt).toISOString(), '2026-04-23T11:00:00.000Z');
+  assert.equal(jobs[0].type, 'candidate_process_reminder');
+  assert.equal(new Date(jobs[0].runAt).toISOString(), '2026-04-23T12:00:00.000Z');
+  assert.equal(jobs[0].dedupeKey, 'candidate:cand-queue-1:process-reminder:2026-04-23T12:00:00.000Z');
   assert.equal(updates[0].reminderState, 'SCHEDULED');
   delete process.env.FF_POSTGRES_JOB_QUEUE;
 });
