@@ -80,6 +80,20 @@ function clearSessionPermissions(req) {
   req.canAccessCvAnalysis = false;
 }
 
+async function safePayrollAccess(prisma, req, user) {
+  try {
+    const access = await resolvePayrollFeatureAccess(prisma, {
+      userRole: req.session?.userRole || req.userRole,
+      userId: user?.id || req.session?.userId || req.userId,
+      username: user?.username || req.session?.username || req.username
+    });
+    return access.allowed === true;
+  } catch (error) {
+    console.warn('No fue posible refrescar el permiso de Nómina.', error?.message || error);
+    return false;
+  }
+}
+
 async function refreshDatabaseUserPermissions(prisma, req) {
   const source = req.session?.userSource;
   const isDatabaseUser = source === 'db' && Boolean(req.session?.userId);
@@ -132,12 +146,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const canAccessMetaAds = Boolean(user.canAccessMetaAds);
   const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis);
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
-  const payrollAccess = await resolvePayrollFeatureAccess(prisma, {
-    userRole: req.session?.userRole || req.userRole,
-    userId: user.id,
-    username: user.username
-  });
-  const canAccessPayroll = payrollAccess.allowed === true;
+  const canAccessPayroll = await safePayrollAccess(prisma, req, user);
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
@@ -164,7 +173,9 @@ async function refreshDatabaseUserPermissions(prisma, req) {
 
 function isHtmlResponse(body, res) {
   if (typeof body !== 'string') return false;
-  const contentType = String(res.getHeader('Content-Type') || '').toLowerCase();
+  const contentType = typeof res?.getHeader === 'function'
+    ? String(res.getHeader('Content-Type') || '').toLowerCase()
+    : '';
   return contentType.includes('text/html') || body.trimStart().startsWith('<!DOCTYPE html') || body.trimStart().startsWith('<html');
 }
 
@@ -187,6 +198,7 @@ function injectPayrollUsersScript(html, req) {
 }
 
 function installPayrollHtmlBridge(req, res) {
+  if (!res || typeof res.send !== 'function') return;
   const originalSend = res.send.bind(res);
   res.send = (body) => {
     if (!isHtmlResponse(body, res)) return originalSend(body);
