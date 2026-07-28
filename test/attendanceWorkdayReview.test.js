@@ -2,10 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reviewAttendanceWorkdaySession } from '../src/modules/dispatch-attendance/application/attendanceAdminWorkday.js';
 
-function fixture({ earlyArrival = false } = {}) {
+function fixture({ earlyArrival = false, incompleteBreak = false, noBreak = false } = {}) {
   const arrivalReportedAt = new Date(earlyArrival
     ? '2026-07-25T12:30:00.000Z'
     : '2026-07-25T13:00:00.000Z');
+  const breakMarks = noBreak
+    ? []
+    : [
+        { id: 'break-start-1', markType: 'BREAK_START', serverReceivedAt: new Date('2026-07-25T17:00:00.000Z') },
+        ...(incompleteBreak ? [] : [{ id: 'break-end-1', markType: 'BREAK_END', serverReceivedAt: new Date('2026-07-25T18:00:00.000Z') }])
+      ];
   const session = {
     id: 'session-1',
     assignmentId: 'assignment-1',
@@ -21,8 +27,7 @@ function fixture({ earlyArrival = false } = {}) {
     workedMinutes: 480,
     marks: [
       { id: 'arrival-mark-1', markType: 'ARRIVAL', serverReceivedAt: arrivalReportedAt },
-      { id: 'break-start-1', markType: 'BREAK_START', serverReceivedAt: new Date('2026-07-25T17:00:00.000Z') },
-      { id: 'break-end-1', markType: 'BREAK_END', serverReceivedAt: new Date('2026-07-25T18:00:00.000Z') },
+      ...breakMarks,
       { id: 'departure-mark-1', markType: 'DEPARTURE', serverReceivedAt: new Date('2026-07-25T22:00:00.000Z') }
     ],
     assignment: {
@@ -63,7 +68,7 @@ function fixture({ earlyArrival = false } = {}) {
   return { prisma, session, state };
 }
 
-test('valida una jornada y descuenta el almuerzo realmente marcado', async () => {
+test('valida una jornada y audita horas ordinarias y extras', async () => {
   const { prisma, session, state } = fixture();
   const now = new Date('2026-07-25T22:10:00.000Z');
   const result = await reviewAttendanceWorkdaySession(prisma, {
@@ -84,7 +89,38 @@ test('valida una jornada y descuenta el almuerzo realmente marcado', async () =>
   assert.equal(state.review.action, 'WORKDAY_VALIDATE');
   assert.equal(state.review.metadata.unpaidBreakMinutesDeducted, 60);
   assert.equal(state.review.metadata.workedMinutes, 480);
+  assert.equal(state.review.metadata.ordinaryWorkedMinutes, 420);
+  assert.equal(state.review.metadata.overtimeMinutes, 60);
   assert.equal(session.punctualityStatus, 'LATE');
+});
+
+test('valida un almuerzo iniciado sin fin aplicando la penalización de noventa minutos', async () => {
+  const { prisma, state } = fixture({ incompleteBreak: true });
+  await reviewAttendanceWorkdaySession(prisma, {
+    sessionId: 'session-1',
+    action: 'VALIDATE',
+    attendanceStatus: 'ON_TIME',
+    reason: 'Validación con penalización automática de almuerzo.',
+    actorUsername: 'coordinador'
+  });
+  assert.equal(state.update.workedMinutes, 450);
+  assert.equal(state.review.metadata.breakStatus, 'INCOMPLETE');
+  assert.equal(state.review.metadata.breakPenaltyMinutes, 90);
+  assert.equal(state.review.metadata.overtimeMinutes, 30);
+});
+
+test('sin almuerzo conserva todo el tiempo y registra dos horas extra en esta jornada', async () => {
+  const { prisma, state } = fixture({ noBreak: true });
+  await reviewAttendanceWorkdaySession(prisma, {
+    sessionId: 'session-1',
+    action: 'VALIDATE',
+    attendanceStatus: 'ON_TIME',
+    reason: 'El auxiliar no tomó almuerzo.',
+    actorUsername: 'coordinador'
+  });
+  assert.equal(state.update.workedMinutes, 540);
+  assert.equal(state.review.metadata.shortBreakMinutesCredited, 60);
+  assert.equal(state.review.metadata.overtimeMinutes, 120);
 });
 
 test('la validación normal excluye la llegada anticipada', async () => {
@@ -114,6 +150,7 @@ test('el coordinador puede reconocer la llegada anticipada con auditoría', asyn
   assert.equal(state.update.workedMinutes, 510);
   assert.equal(state.review.metadata.earlyMinutesExcluded, 0);
   assert.equal(state.review.metadata.recognizeEarlyArrival, true);
+  assert.equal(state.review.metadata.overtimeMinutes, 90);
 });
 
 test('rechaza una puntualidad inválida al validar una jornada cerrada', async () => {
