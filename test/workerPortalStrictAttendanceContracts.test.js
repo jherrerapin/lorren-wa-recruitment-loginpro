@@ -4,6 +4,8 @@ import fs from 'node:fs';
 
 const portalRoute = fs.readFileSync('src/routes/workerPortal.js', 'utf8');
 const biometricRoute = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
+const portalView = fs.readFileSync('src/views/workerPortal.ejs', 'utf8');
+const activationView = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
 const hardening = fs.readFileSync('src/public/worker-portal-hardening.js', 'utf8');
 const compactAdmin = fs.readFileSync('src/public/attendance-admin-compact.js', 'utf8');
 const biometricLoader = fs.readFileSync('src/public/worker-biometric.js', 'utf8');
@@ -29,36 +31,46 @@ test('cada entrada y salida necesita una evaluación facial verificada', () => {
   assert.match(portalRoute, /metadata\.decision === 'VERIFIED'/);
   assert.match(portalRoute, /metadata\.verified === true/);
   assert.match(portalRoute, /biometric_verification_required/);
-  assert.match(portalRoute, /online_biometric_required/);
+  assert.match(portalRoute, /ONLINE_WEB/);
   assert.match(hardening, /biometricVerified = Boolean/);
   assert.match(hardening, /Primero completa correctamente la validación facial/);
+  assert.match(portalView, /captureVerification/);
+  assert.match(portalView, /biometricVerified = true/);
 });
 
 
-test('la inscripción inicial ocurre en el portal del auxiliar', () => {
-  assert.match(biometricRoute, /enrollmentRequired:/);
-  assert.match(biometricRoute, /await enrollBiometricFn\(/);
-  assert.match(biometricRoute, /consentAccepted: req\.body\?\.consentAccepted === true/);
-  assert.match(biometricRoute, /await assessBiometricFn\(/);
-  assert.match(biometricRoute, /actorSource: 'worker-portal'/);
-  assert.match(biometricRoute, /INITIAL_VERIFICATION_FAILED/);
-  assert.match(biometricRoute, /biometric_enrollment_moved_to_worker_portal/);
-  assert.match(hardening, /getElementById\('enroll-button'\)\?\.remove/);
-  assert.match(hardening, /payload\.consentAccepted/);
+test('la inscripción inicial ocurre antes de marcar y usa la sesión del auxiliar', () => {
+  assert.match(portalRoute, /router\.post\('\/biometria\/estado'/);
+  assert.match(portalRoute, /router\.post\('\/biometria\/registrar'/);
+  assert.match(portalRoute, /await enrollBiometricFn\(/);
+  assert.match(portalRoute, /portalSession\.workerId/);
+  assert.match(portalRoute, /consentAccepted: req\.body\?\.consentAccepted === true/);
+  assert.match(portalRoute, /actorSource: 'worker-portal'/);
+  assert.match(portalView, /Registro facial inicial/);
+  assert.match(portalView, /captureEnrollment/);
+  assert.match(portalView, /loadBiometricStatus/);
+  assert.match(biometricRoute, /biometric_enrollment_required/);
+  assert.doesNotMatch(biometricRoute, /await enrollBiometricFn\(/);
 });
 
 
-test('las capas visuales eliminan explicaciones y estados redundantes', () => {
+test('no existe carga de archivos ni registro facial administrativo', () => {
+  assert.doesNotMatch(portalView, /type="file"/i);
+  assert.doesNotMatch(portalView, /fallback-photo|file-fallback|capturePlainPhoto/);
+  assert.doesNotMatch(activationView, /enroll-button|biometric-dialog/);
+  assert.doesNotMatch(activationView, /Registrar rostro|Actualizar rostro/);
+  assert.doesNotMatch(hardening, /enroll-button|biometric-dialog/);
+});
+
+
+test('las vistas ya no dependen de JavaScript para retirar textos redundantes del portal', () => {
   assert.match(compactAdmin, /removeAll\('\.calculation-note'\)/);
   assert.match(compactAdmin, /removeAll\('\.work-grid'\)/);
   assert.match(compactAdmin, /removeAll\('\.attendance-risk-explanation'\)/);
-  assert.match(compactAdmin, /label\.includes\('almuerzo'\)/);
-  assert.match(compactAdmin, /value\.includes\(text\)/);
-  assert.match(hardening, /removeElement\('\.work-summary'\)/);
-  assert.match(hardening, /removeElement\('\.portal-summary-panel'\)/);
-  assert.match(hardening, /removeElement\('\.portal-status-pill'\)/);
-  assert.match(hardening, /Jornada finalizada/);
-  assert.match(hardening, /Registrar salida/);
+  assert.doesNotMatch(portalView, /class="work-summary"/);
+  assert.doesNotMatch(portalView, /Pendiente de salida|Horas extra|Tiempo trabajado/);
+  assert.match(portalView, /Jornada finalizada/);
+  assert.match(portalView, /Registrar salida/);
 });
 
 

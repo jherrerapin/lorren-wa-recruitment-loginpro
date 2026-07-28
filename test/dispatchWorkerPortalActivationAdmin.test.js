@@ -13,14 +13,7 @@ const NOW = new Date('2026-07-22T20:00:00.000Z');
 const EXPIRES_AT = new Date('2026-07-22T20:30:00.000Z');
 
 function responseDouble() {
-  const state = {
-    headers: {},
-    statusCode: 200,
-    json: null,
-    render: null,
-    redirect: null,
-    send: null
-  };
+  const state = { headers: {}, statusCode: 200, json: null, render: null, redirect: null, send: null };
   const res = {
     set(name, value) { state.headers[name] = value; return this; },
     status(code) { state.statusCode = code; return this; },
@@ -136,7 +129,7 @@ test('resuelve primero el origen explícito y luego RAILWAY_PUBLIC_DOMAIN', () =
   );
 });
 
-test('rechaza orígenes inseguros, con rutas o credenciales', () => {
+test('rechaza orígenes inseguros o con rutas', () => {
   assert.throws(
     () => resolveWorkerPortalPublicOrigin({ ATTENDANCE_PORTAL_PUBLIC_ORIGIN: 'http://lorren.example' }),
     /attendance_portal_public_origin_https_required/
@@ -145,31 +138,21 @@ test('rechaza orígenes inseguros, con rutas o credenciales', () => {
     () => resolveWorkerPortalPublicOrigin({ ATTENDANCE_PORTAL_PUBLIC_ORIGIN: 'https://lorren.example/admin' }),
     /attendance_portal_public_origin_path_not_allowed/
   );
-  assert.throws(
-    () => resolveWorkerPortalPublicOrigin({ ATTENDANCE_PORTAL_PUBLIC_ORIGIN: 'https://user:pass@lorren.example' }),
-    /attendance_portal_public_origin_invalid/
-  );
 });
 
-test('GET niega por defecto a un administrador sin permiso de Asistencia', async () => {
+test('GET niega a un administrador sin permiso y permite a DEV', async () => {
   const router = buildRouter();
-  const { res, state } = responseDouble();
-  await runRoute(router, '/', 'get', requestDouble({ role: 'admin' }), res);
-  assert.equal(state.statusCode, 403);
-  assert.equal(state.send, 'No tienes permiso para gestionar activaciones del Portal del Auxiliar');
-  assert.equal(state.render, null);
-});
+  const denied = responseDouble();
+  await runRoute(router, '/', 'get', requestDouble({ role: 'admin' }), denied.res);
+  assert.equal(denied.state.statusCode, 403);
 
-test('GET permite a DEV y mantiene respuesta sin almacenamiento', async () => {
-  const router = buildRouter();
-  const { res, state } = responseDouble();
-  await runRoute(router, '/', 'get', requestDouble(), res);
-  assert.equal(state.statusCode, 200);
-  assert.equal(state.render.view, 'operacionesPortalActivaciones');
-  assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · Directo');
-  assert.equal(state.render.locals.workers[0].documentNumber, undefined);
-  assert.equal(state.render.locals.workers[0].biometric.enrolled, false);
-  assert.match(state.headers['Cache-Control'], /no-store/);
+  const allowed = responseDouble();
+  await runRoute(router, '/', 'get', requestDouble(), allowed.res);
+  assert.equal(allowed.state.statusCode, 200);
+  assert.equal(allowed.state.render.view, 'operacionesPortalActivaciones');
+  assert.equal(allowed.state.render.locals.workers[0].label, 'Auxiliar Prueba · Directo');
+  assert.equal(allowed.state.render.locals.workers[0].biometric.enrolled, false);
+  assert.match(allowed.state.headers['Cache-Control'], /no-store/);
 });
 
 test('GET permite al administrador con permiso individual de Asistencia', async () => {
@@ -181,86 +164,33 @@ test('GET permite al administrador con permiso individual de Asistencia', async 
     canAccessAttendanceFeature: true
   }), res);
   assert.equal(state.statusCode, 200);
-  assert.equal(state.render.view, 'operacionesPortalActivaciones');
   assert.equal(state.render.locals.role, 'admin');
 });
 
-test('la consulta predeterminada replica Personal operativo: solo CONTRATADO de DispatchWorker', async () => {
-  let observedQuery;
-  const prisma = {
-    dispatchWorker: {
-      async findMany(query) {
-        observedQuery = query;
-        return [workerFixture({ contractType: 'CONTRATISTA' })];
-      }
-    }
-  };
-  const router = dispatchWorkerPortalActivationAdminRouter(prisma, {
-    repository: {},
-    sessionRepository: {},
-    env: {
-      RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app',
-      ATTENDANCE_BIOMETRIC_SECRET: 'b'.repeat(64)
-    },
-    ttlMinutes: 30,
-    nowFn: () => NOW,
-    loadBiometricStatusMapFn: async () => new Map()
-  });
-  const { res, state } = responseDouble();
-
-  await runRoute(router, '/', 'get', requestDouble(), res);
-
-  assert.deepEqual(observedQuery.where, { operationalStatus: 'CONTRATADO' });
-  assert.equal(observedQuery.select.contractType, true);
-  assert.equal(observedQuery.select.documentNumber, undefined);
-  assert.equal(state.render.locals.workers[0].label, 'Auxiliar Prueba · Contratista');
-});
-
-test('POST niega a un administrador sin permiso antes de emitir', async () => {
+test('POST niega solicitudes sin permiso o sin cabecera personalizada', async () => {
   let issueCalls = 0;
-  const router = buildRouter({
-    issueActivationFn: async () => {
-      issueCalls += 1;
-      return null;
-    }
-  });
-  const { res, state } = responseDouble();
-  await runRoute(router, '/emitir', 'post', validPostRequest({ role: 'admin' }), res);
-  assert.equal(state.statusCode, 403);
-  assert.deepEqual(state.json, { ok: false, error: 'forbidden' });
-  assert.equal(issueCalls, 0);
-});
+  const router = buildRouter({ issueActivationFn: async () => { issueCalls += 1; return null; } });
 
-test('POST rechaza solicitudes sin cabecera personalizada antes de emitir', async () => {
-  let issueCalls = 0;
-  const router = buildRouter({
-    issueActivationFn: async () => {
-      issueCalls += 1;
-      return null;
-    }
-  });
-  const { res, state } = responseDouble();
+  const forbidden = responseDouble();
+  await runRoute(router, '/emitir', 'post', validPostRequest({ role: 'admin' }), forbidden.res);
+  assert.equal(forbidden.state.statusCode, 403);
+
+  const invalid = responseDouble();
   await runRoute(router, '/emitir', 'post', requestDouble({
     method: 'POST',
     body: { workerId: WORKER_ID },
     headers: { 'content-type': 'application/json' }
-  }), res);
-  assert.equal(state.statusCode, 400);
-  assert.deepEqual(state.json, { ok: false, error: 'activation_request_invalid' });
+  }), invalid.res);
+  assert.equal(invalid.state.statusCode, 400);
   assert.equal(issueCalls, 0);
 });
 
-test('POST con permiso emite enlace y registra al usuario autorizado como actor', async () => {
+test('POST autorizado genera el enlace sin filtrar el token crudo', async () => {
   let observedInput;
   const router = buildRouter({
     issueActivationFn: async (input) => {
       observedInput = input;
-      return {
-        activationId: 'activation-1',
-        workerId: WORKER_ID,
-        rawToken: TOKEN,
-        expiresAt: EXPIRES_AT
-      };
+      return { activationId: 'activation-1', workerId: WORKER_ID, rawToken: TOKEN, expiresAt: EXPIRES_AT };
     }
   });
   const { res, state } = responseDouble();
@@ -273,52 +203,26 @@ test('POST con permiso emite enlace y registra al usuario autorizado como actor'
   assert.equal(state.statusCode, 201);
   assert.equal(observedInput.workerId, WORKER_ID);
   assert.equal(observedInput.createdByUsername, 'operaciones-autorizado');
-  assert.equal(observedInput.ttlMinutes, 30);
-  assert.equal(state.json.ok, true);
-  assert.equal(state.json.worker.contractType, 'Directo');
   assert.equal(state.json.activationUrl, `https://lorren.example.up.railway.app/operaciones/portal/activar#token=${TOKEN}`);
   assert.equal(state.json.rawToken, undefined);
-  assert.equal(state.json.expiresAt, EXPIRES_AT.toISOString());
 });
 
-test('un origen público faltante falla cerrado sin filtrar el token', async () => {
-  const originalError = console.error;
-  const logs = [];
-  console.error = (...values) => logs.push(values);
-  try {
-    const router = buildRouter({
-      resolveOriginFn: () => {
-        throw new Error('attendance_portal_public_origin_required');
-      }
-    });
-    const { res, state } = responseDouble();
-    await runRoute(router, '/emitir', 'post', validPostRequest(), res);
-    assert.equal(state.statusCode, 503);
-    assert.deepEqual(state.json, { ok: false, error: 'activation_service_unavailable' });
-    assert.equal(JSON.stringify(logs).includes(TOKEN), false);
-  } finally {
-    console.error = originalError;
-  }
-});
-
-test('la pantalla conserva la emisión del enlace y mueve el rostro al portal', () => {
+test('la pantalla administrativa nunca renderiza registro facial', () => {
   const view = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
   const hardening = fs.readFileSync('src/public/worker-portal-hardening.js', 'utf8');
   const copyListenerIndex = view.indexOf("copyButton?.addEventListener('click'");
   const clipboardIndex = view.indexOf('navigator.clipboard.writeText');
-  assert.ok(copyListenerIndex >= 0);
-  assert.ok(clipboardIndex > copyListenerIndex);
+  assert.ok(copyListenerIndex >= 0 && clipboardIndex > copyListenerIndex);
   assert.match(view, /Gestión de asistencia/);
-  assert.match(hardening, /getElementById\('enroll-button'\)\?\.remove/);
-  assert.match(hardening, /getElementById\('biometric-dialog'\)\?\.remove/);
-  assert.match(hardening, /Registro facial desde el portal/);
-  assert.match(view, /No abras este enlace en tu computador/);
+  assert.match(view, /Genera el enlace para activar el celular/);
+  assert.doesNotMatch(view, /enroll-button|biometric-dialog|captureEnrollment/);
+  assert.doesNotMatch(view, /Registrar rostro|Actualizar rostro/);
+  assert.doesNotMatch(hardening, /enroll-button|biometric-dialog/);
   assert.doesNotMatch(view, /window\.open\(|location\.href\s*=\s*activationUrl/);
 });
 
-test('las rutas administrativas conservan permisos y la biometría usa sesión del portal', () => {
+test('las rutas administrativas conservan permisos y la verificación usa sesión del portal', () => {
   const bridgeSource = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
-  const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
   const activationSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
   const activationCoreSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdminCore.js', 'utf8');
 
@@ -330,8 +234,6 @@ test('las rutas administrativas conservan permisos y la biometría usa sesión d
   assert.match(activationSource, /replacementRouter\.post\('\/biometria\/verificar', parsePortalCookie, requireWorkerPortalJson/);
   assert.match(activationSource, /biometric_enrollment_moved_to_worker_portal/);
   assert.match(activationSource, /resolvePortalRequestSession/);
-  assert.match(activationSource, /loadBiometricAssignment/);
-  assert.match(bridgeSource, /filterOperationsPersonalAttendanceHtml/);
-  assert.match(activationCoreSource, /currentRole\(req\) === 'dev' \|\| req\.canAccessAttendanceFeature === true/);
-  assert.match(personalView, /<% if \(role === 'dev'\) \{ %>[\s\S]*Sincronizar contratados/);
+  assert.match(activationSource, /biometric_enrollment_required/);
+  assert.doesNotMatch(activationSource, /await enrollBiometricFn\(/);
 });

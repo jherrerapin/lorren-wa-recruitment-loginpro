@@ -5,18 +5,14 @@
     outside_operation_range: 'Debes estar dentro del rango de la operación para marcar.',
     operation_geofence_required: 'La operación no tiene una geocerca válida.',
     location_accuracy_insufficient: 'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.',
+    biometric_enrollment_required: 'Primero completa el registro facial inicial.',
     biometric_verification_required: 'Completa correctamente la validación facial para marcar.',
     online_biometric_required: 'Necesitas conexión para validar el rostro.',
     biometric_challenge_failed: 'No fue posible iniciar la validación facial.',
     attendance_biometric_consent_required: 'Debes autorizar el registro facial para continuar.',
-    attendance_biometric_antispoof_low: 'No fue posible confirmar que el rostro sea real. Intenta nuevamente.',
-    attendance_biometric_liveness_low: 'No fue posible confirmar el movimiento solicitado. Intenta nuevamente.'
-  });
-  const ACTION_LABELS = Object.freeze({
-    ARRIVAL: 'Registrar llegada',
-    DEPARTURE: 'Registrar salida',
-    BREAK_START: 'Iniciar almuerzo',
-    BREAK_END: 'Finalizar almuerzo'
+    attendance_biometric_antispoof_low: 'No se confirmó un rostro real. Intenta nuevamente.',
+    attendance_biometric_liveness_low: 'No se confirmó el movimiento solicitado. Intenta nuevamente.',
+    biometric_verification_rejected: 'El rostro no fue verificado. Repite la captura.'
   });
 
   let currentMarkType = null;
@@ -41,7 +37,7 @@
         payload.consentAccepted = document.getElementById('photo-consent')?.checked === true;
         nextInit = { ...init, body: JSON.stringify(payload) };
       } catch {
-        // La ruta original manejará una solicitud inválida.
+        // La ruta del servidor rechazará una solicitud inválida.
       }
     }
 
@@ -52,8 +48,7 @@
         const payload = await response.clone().json();
         biometricVerified = Boolean(response.ok && payload?.ok && payload?.verified === true);
         if (!biometricVerified) {
-          const message = STRICT_ERRORS[payload?.error]
-            || 'La validación facial no fue aprobada. Repite la captura.';
+          const message = STRICT_ERRORS[payload?.error] || 'La validación facial no fue aprobada.';
           window.setTimeout(() => markResult(message, 'danger'), 0);
         }
       } catch {
@@ -67,61 +62,21 @@
         const message = STRICT_ERRORS[payload?.error] || payload?.message;
         if (message) window.setTimeout(() => markResult(message, 'danger'), 0);
       } catch {
-        // La interfaz original conserva su mensaje genérico.
+        // La interfaz principal conserva el mensaje de error.
       }
     }
 
     return response;
   };
 
-  function removeElement(selector, root = document) {
-    root.querySelectorAll(selector).forEach((element) => element.remove());
-  }
-
-  function simplifyActionLabels() {
-    document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
-      const label = ACTION_LABELS[button.dataset.markType];
-      if (label) button.textContent = label;
-    });
-    document.querySelectorAll('.mark-button:disabled:not([data-mark-type])').forEach((button) => {
-      if (button.textContent.includes('Jornada finalizada')) button.textContent = 'Jornada finalizada';
-    });
-  }
-
-  function installCompactResultObserver() {
-    const result = document.getElementById('mark-result');
-    if (!result) return;
-    const compact = () => {
-      const text = String(result.textContent || '');
-      if (/quedar[aá].*revisi[oó]n|revisi[oó]n requerida/i.test(text)) {
-        result.textContent = 'Validación facial requerida.';
-      }
-    };
-    new MutationObserver(compact).observe(result, { childList: true, characterData: true, subtree: true });
-  }
-
-  function compactWorkerPortal() {
-    document.querySelectorAll('.portal-header p:not(.brand)').forEach((element) => element.remove());
-    removeElement('.work-summary');
-    removeElement('main > .meta');
-    removeElement('.empty-state .meta');
-    removeElement('.portal-summary-panel');
-    removeElement('.portal-status-pill');
-    removeElement('.portal-next-summary small');
-    removeElement('.portal-filter-head p');
-    removeElement('.portal-filter-result');
-    removeElement('.portal-status-filter');
-    document.getElementById('connectivity-copy')?.remove();
-    const fallback = document.getElementById('file-fallback');
-    if (fallback) fallback.hidden = true;
-    simplifyActionLabels();
-    installCompactResultObserver();
+  function initializeWorkerPortal() {
+    if (window.location.pathname !== '/operaciones/portal') return;
 
     document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
       button.addEventListener('click', (event) => {
         currentMarkType = button.dataset.markType || null;
         biometricVerified = false;
-        if (!navigator.onLine && ['ARRIVAL', 'DEPARTURE'].includes(currentMarkType)) {
+        if (!navigator.onLine) {
           event.preventDefault();
           event.stopImmediatePropagation();
           markResult('Necesitas conexión para validar el rostro y la ubicación.', 'danger');
@@ -134,7 +89,7 @@
       if (document.getElementById('photo-consent')?.checked === true) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      markResult('Autoriza el registro facial para continuar.', 'warning');
+      markResult('Autoriza la captura para continuar.', 'warning');
     }, true);
 
     document.getElementById('submit-mark')?.addEventListener('click', (event) => {
@@ -143,22 +98,14 @@
       event.stopImmediatePropagation();
       markResult('Primero completa correctamente la validación facial.', 'danger');
     }, true);
+
+    window.addEventListener('online', () => {
+      const enrollmentDialog = document.getElementById('enrollment-dialog');
+      const enrollmentButton = document.getElementById('start-enrollment');
+      if (enrollmentDialog?.open && enrollmentButton?.disabled) window.location.reload();
+    });
   }
 
-  function compactActivationAdmin() {
-    document.getElementById('enroll-button')?.remove();
-    document.getElementById('biometric-dialog')?.remove();
-    const heroCopy = document.querySelector('.hero p');
-    if (heroCopy) heroCopy.textContent = 'Genera el enlace del portal para el auxiliar.';
-    const pill = document.getElementById('biometric-pill');
-    if (pill && pill.textContent.includes('sin registrar')) pill.textContent = 'Registro facial desde el portal';
-  }
-
-  function initialize() {
-    if (window.location.pathname === '/operaciones/portal') compactWorkerPortal();
-    if (window.location.pathname.startsWith('/admin/operaciones/portal-activaciones')) compactActivationAdmin();
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
-  else initialize();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeWorkerPortal, { once: true });
+  else initializeWorkerPortal();
 })();

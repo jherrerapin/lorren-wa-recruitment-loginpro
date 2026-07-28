@@ -9,8 +9,9 @@ const browser = fs.readFileSync('src/public/worker-biometric-core.js', 'utf8');
 const hardening = fs.readFileSync('src/public/worker-portal-hardening.js', 'utf8');
 const bridge = fs.readFileSync('src/public/vendor/human/human.js', 'utf8');
 const portal = fs.readFileSync('src/views/workerPortal.ejs', 'utf8');
-const route = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
-const strictPortalRoute = fs.readFileSync('src/routes/workerPortal.js', 'utf8');
+const activationView = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
+const verificationRoute = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
+const portalRoute = fs.readFileSync('src/routes/workerPortal.js', 'utf8');
 const service = fs.readFileSync('src/services/workerBiometricService.js', 'utf8');
 const migration = fs.readFileSync('prisma/migrations/20260728033000_enforce_worker_biometric_review/migration.sql', 'utf8');
 
@@ -27,7 +28,7 @@ test('Human queda fuera del servidor y fijado en el puente CDN del navegador', (
   assert.match(bridge, /HUMAN_VERSION = '3\.3\.6'/);
   assert.match(bridge, /cdn\.jsdelivr\.net\/npm\/@vladmandic\/human@\$\{HUMAN_VERSION\}\/dist\/human\.js/);
   assert.match(bridge, /modelBasePath: HUMAN_CDN_MODELS/);
-  assert.match(strictPortalRoute, /https:\/\/cdn\.jsdelivr\.net/);
+  assert.match(portalRoute, /https:\/\/cdn\.jsdelivr\.net/);
 });
 
 
@@ -55,29 +56,47 @@ test('el servidor cifra la plantilla y firma desafíos ligados a cada marcación
 });
 
 
-test('la primera marcación inscribe desde el portal y las siguientes comparan el rostro', () => {
-  assert.match(route, /enrollmentRequired:/);
-  assert.match(route, /await enrollBiometricFn\(/);
-  assert.match(route, /consentAccepted: req\.body\?\.consentAccepted === true/);
-  assert.match(route, /await assessBiometricFn\(/);
-  assert.match(route, /actorSource: 'worker-portal'/);
-  assert.match(route, /INITIAL_VERIFICATION_FAILED/);
-  assert.match(route, /biometric_enrollment_moved_to_worker_portal/);
-  assert.match(hardening, /payload\.consentAccepted/);
-  assert.match(hardening, /getElementById\('enroll-button'\)\?\.remove/);
-  assert.match(service, /redactHistoricalEnrollmentTemplates/);
+test('el primer acceso registra el rostro explícitamente desde la sesión del auxiliar', () => {
+  assert.match(portal, /id="enrollment-dialog"/);
+  assert.match(portal, /Registro facial inicial/);
+  assert.match(portal, /captureEnrollment/);
+  assert.match(portal, /portalBiometricRequest\('estado'\)/);
+  assert.match(portal, /portalBiometricRequest\('registrar'/);
+  assert.match(portalRoute, /router\.post\('\/biometria\/estado'/);
+  assert.match(portalRoute, /router\.post\('\/biometria\/registrar'/);
+  assert.match(portalRoute, /portalSession\.workerId/);
+  assert.match(portalRoute, /await enrollBiometricFn\(/);
+  assert.match(portalRoute, /actorSource: 'worker-portal'/);
+  assert.match(verificationRoute, /biometric_enrollment_required/);
+  assert.doesNotMatch(verificationRoute, /await enrollBiometricFn\(/);
 });
 
 
-test('entrada y salida exigen biometría verificada y geocerca antes de persistir', () => {
+test('la captura biométrica solo acepta cámara en vivo', () => {
+  assert.match(portal, /Solo cámara en vivo/);
+  assert.doesNotMatch(portal, /type="file"/i);
+  assert.doesNotMatch(portal, /fallback-photo|file-fallback|capturePlainPhoto/);
+  assert.doesNotMatch(portal, /setPhoto\(file\)|files\?\.\[0\]/);
+  assert.doesNotMatch(portal, /quedará para revisión/i);
+  assert.doesNotMatch(activationView, /id="enroll-button"/);
+  assert.doesNotMatch(activationView, /id="biometric-dialog"/);
+  assert.doesNotMatch(activationView, /Registrar rostro|Actualizar rostro/);
+  assert.doesNotMatch(hardening, /enroll-button|biometric-dialog/);
+});
+
+
+test('entrada y salida exigen una captura nueva, biometría verificada y geocerca', () => {
   assert.match(portal, /navigator\.geolocation\.getCurrentPosition/);
   assert.match(portal, /biometria\/desafio/);
   assert.match(portal, /biometria\/verificar/);
-  assert.match(strictPortalRoute, /outside_operation_range/);
-  assert.match(strictPortalRoute, /location_accuracy_insufficient/);
-  assert.match(strictPortalRoute, /metadata\.decision === 'VERIFIED'/);
-  assert.match(strictPortalRoute, /biometric_verification_required/);
-  assert.match(strictPortalRoute, /prependRouteHandlers\(router, path, \[markUpload, strictMarkGuard\]\)/);
+  assert.match(portal, /captureVerification/);
+  assert.match(portal, /biometricVerified = true/);
+  assert.match(portal, /if \(isBiometricMark\(\)\) form\.set\('selfie'/);
+  assert.match(portalRoute, /outside_operation_range/);
+  assert.match(portalRoute, /location_accuracy_insufficient/);
+  assert.match(portalRoute, /metadata\.decision === 'VERIFIED'/);
+  assert.match(portalRoute, /biometric_verification_required/);
+  assert.match(portalRoute, /prependRouteHandlers\(router, path, \[markUpload, strictMarkGuard\]\)/);
   assert.match(hardening, /Primero completa correctamente la validación facial/);
 });
 

@@ -23,7 +23,6 @@
     .ok { background: #eaf8ef; color: #176c36; }
     .warning { background: #fff6df; color: #76520b; }
     .danger { background: #fdecec; color: #8f2525; }
-    .meta { margin-top: 16px; font-size: 13px; color: #72808e; }
     .portal-header { display: flex; gap: 14px; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
     .session-chip { flex: 0 0 auto; padding: 8px 10px; border-radius: 999px; background: #eaf8ef; color: #176c36; font-size: 12px; font-weight: 800; }
     .connectivity-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid #dfe4ea; border-radius: 14px; background: #fff; font-size: 13px; }
@@ -39,11 +38,6 @@
     .detail-row { display: grid; grid-template-columns: 105px 1fr; gap: 10px; }
     .detail-label { color: #72808e; }
     .detail-value { color: #263645; font-weight: 600; overflow-wrap: anywhere; }
-    .work-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
-    .work-chip { padding: 10px; border-radius: 11px; background: #f3f6f8; color: #4d5b69; font-size: 12px; }
-    .work-chip strong { display: block; margin-top: 3px; color: #263645; font-size: 13px; }
-    .work-chip.overtime { background: #fff6df; color: #76520b; }
-    .work-chip.overtime strong { color: #76520b; }
     .action-grid { display: grid; gap: 9px; }
     .mark-button, .primary-button, .secondary-button { width: 100%; border: 0; border-radius: 12px; padding: 14px 16px; font-weight: 800; cursor: pointer; }
     .mark-button, .primary-button { background: #176c36; color: #fff; }
@@ -53,7 +47,7 @@
     button:disabled { cursor: not-allowed; opacity: .55; }
     .empty-state { padding: 24px; border: 1px dashed #cfd7df; border-radius: 16px; text-align: center; background: #fff; }
     dialog { width: min(calc(100% - 24px), 520px); max-height: calc(100vh - 28px); border: 0; border-radius: 20px; padding: 0; box-shadow: 0 24px 70px rgba(23, 33, 43, .28); }
-    dialog::backdrop { background: rgba(12, 21, 29, .62); }
+    dialog::backdrop { background: rgba(12, 21, 29, .72); }
     .dialog-body { padding: 22px; overflow-y: auto; max-height: calc(100vh - 28px); }
     .dialog-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
     .icon-button { width: 38px; height: 38px; border: 0; border-radius: 999px; background: #edf1f4; color: #263645; font-size: 22px; cursor: pointer; }
@@ -67,11 +61,11 @@
     .face-frame { position: absolute; left: 50%; top: 48%; width: 58%; height: 65%; transform: translate(-50%, -50%); border: 3px solid rgba(255,255,255,.92); border-radius: 48% 48% 44% 44%; box-shadow: 0 0 0 999px rgba(0,0,0,.25); pointer-events: none; }
     .camera-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
     .camera-actions button { padding: 12px; border: 0; border-radius: 10px; font-weight: 750; cursor: pointer; }
-    .file-fallback { display: block; margin-top: 12px; font-size: 13px; }
     .consent { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; font-size: 13px; color: #4d5b69; }
     .consent input { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; }
     .dialog-actions { display: grid; gap: 10px; margin-top: 16px; }
-    @media (max-width: 420px) { body { padding-left: 12px; padding-right: 12px; } .detail-row { grid-template-columns: 86px 1fr; } .work-summary { grid-template-columns: 1fr; } }
+    .camera-only { margin-top: 10px; font-size: 12px; font-weight: 750; color: #176c36; }
+    @media (max-width: 420px) { body { padding-left: 12px; padding-right: 12px; } .detail-row { grid-template-columns: 86px 1fr; } }
   </style>
 </head>
 <body>
@@ -80,7 +74,6 @@
       <section class="shell">
         <p class="brand">Lórren · Operaciones</p>
         <h1>Activando este dispositivo</h1>
-        <p>Estamos validando el enlace seguro. No cierres esta pantalla.</p>
         <div id="activation-status" class="status" role="status" aria-live="polite">Validando acceso…</div>
         <script nonce="<%= nonce %>">
           (() => {
@@ -91,7 +84,7 @@
             const activationToken = queryParams.get('token') || fragmentParams.get('token') || (fragment.includes('=') ? '' : fragment);
             window.history.replaceState(null, document.title, window.location.pathname);
             if (!/^[A-Za-z0-9_-]{43}$/.test(activationToken || '')) {
-              status.textContent = 'El enlace no es válido o está incompleto. Solicita uno nuevo.';
+              status.textContent = 'El enlace no es válido o está incompleto.';
               status.classList.add('warning');
               return;
             }
@@ -102,11 +95,11 @@
             }).then(async (response) => {
               const payload = await response.json().catch(() => ({}));
               if (!response.ok || !payload.ok) throw new Error('activation_rejected');
-              status.textContent = 'Dispositivo activado. Abriendo tu portal…';
+              status.textContent = 'Dispositivo activado.';
               status.classList.add('ok');
               window.location.replace(payload.redirectTo || '/operaciones/portal');
             }).catch(() => {
-              status.textContent = 'No fue posible activar este dispositivo. El enlace puede haber vencido o ya fue utilizado.';
+              status.textContent = 'El enlace venció o ya fue utilizado.';
               status.classList.add('warning');
             });
           })();
@@ -114,71 +107,106 @@
       </section>
     <% } else if (mode === 'active') { %>
       <% const portalAssignments = Array.isArray(assignments) ? assignments : []; %>
-      <header class="portal-header"><div><p class="brand">Lórren · Portal del Auxiliar</p><h1>Mi jornada</h1><p>Registra entrada, almuerzo y salida desde este celular.</p></div><span class="session-chip">Dispositivo verificado</span></header>
-      <section id="portal-connectivity" class="connectivity-bar" aria-live="polite"><span class="connectivity-dot" aria-hidden="true"></span><div><strong id="connectivity-title">Con conexión</strong><div id="connectivity-copy">Las marcaciones se enviarán inmediatamente.</div></div></section>
+      <header class="portal-header">
+        <div><p class="brand">Lórren · Portal del Auxiliar</p><h1>Mi jornada</h1></div>
+        <span class="session-chip">Dispositivo verificado</span>
+      </header>
+      <section id="portal-connectivity" class="connectivity-bar" aria-live="polite">
+        <span class="connectivity-dot" aria-hidden="true"></span>
+        <strong id="connectivity-title">Con conexión</strong>
+      </section>
+
       <% if (portalAssignments.length) { %>
         <section class="assignment-list" aria-label="Asignaciones activas">
           <% portalAssignments.forEach((assignment) => { %>
             <article class="assignment-card <%= assignment.departureReported ? 'completed' : '' %>" data-assignment-card="<%= assignment.id %>">
-              <p class="assignment-date"><%= assignment.dateLabel %></p><h2><%= assignment.clientName %></h2><p class="assignment-time"><%= assignment.timeLabel %></p>
+              <p class="assignment-date"><%= assignment.dateLabel %></p>
+              <h2><%= assignment.clientName %></h2>
+              <p class="assignment-time"><%= assignment.timeLabel %></p>
               <div class="assignment-details">
                 <div class="detail-row"><span class="detail-label">Operación</span><span class="detail-value"><%= assignment.operationPointName %></span></div>
                 <div class="detail-row"><span class="detail-label">Ciudad</span><span class="detail-value"><%= assignment.cityName %></span></div>
                 <div class="detail-row"><span class="detail-label">Dirección</span><span class="detail-value"><%= assignment.address %></span></div>
               </div>
-              <% if (assignment.arrivalReported || assignment.departureReported) { %>
-                <div class="work-summary">
-                  <div class="work-chip">Llegada<strong><%= assignment.arrivalReportedLabel || 'Registrada' %></strong></div>
-                  <div class="work-chip">Salida<strong><%= assignment.departureReportedLabel || 'Pendiente' %></strong></div>
-                  <% if (assignment.breakStarted) { %><div class="work-chip">Inicio almuerzo<strong><%= assignment.breakStartLabel %></strong></div><% } %>
-                  <% if (assignment.breakEnded) { %><div class="work-chip">Fin almuerzo<strong><%= assignment.breakEndLabel %></strong></div><% } %>
-                  <% if (assignment.workedLabel) { %><div class="work-chip">Tiempo trabajado<strong><%= assignment.workedLabel %></strong></div><% } %>
-                  <% if (assignment.overtimeMinutes > 0) { %><div class="work-chip overtime">Horas extra<strong><%= assignment.overtimeLabel %></strong></div><% } %>
-                  <% if (assignment.arrivalStatusLabel) { %><div class="work-chip">Estado<strong><%= assignment.arrivalStatusLabel %></strong></div><% } %>
-                </div>
-              <% } %>
               <div class="action-grid">
                 <% if (!assignment.arrivalReported && !assignment.departureReported) { %>
-                  <button type="button" class="mark-button" data-assignment-id="<%= assignment.id %>" data-mark-type="ARRIVAL" data-photo-required="<%= assignment.photoRequired ? 'true' : 'false' %>" <%= assignment.canRegisterArrival ? '' : 'disabled' %>><%= assignment.actionLabel %></button>
+                  <button type="button" class="mark-button" data-assignment-id="<%= assignment.id %>" data-mark-type="ARRIVAL" <%= assignment.canRegisterArrival ? '' : 'disabled' %>>Registrar llegada</button>
                 <% } else if (!assignment.departureReported) { %>
-                  <% if (assignment.breakActionType) { %><button type="button" class="mark-button break" data-assignment-id="<%= assignment.id %>" data-mark-type="<%= assignment.breakActionType %>" data-photo-required="false"><%= assignment.breakActionLabel %></button><% } %>
-                  <button type="button" class="mark-button departure" data-assignment-id="<%= assignment.id %>" data-mark-type="DEPARTURE" data-photo-required="<%= assignment.photoRequired ? 'true' : 'false' %>" <%= assignment.canRegisterDeparture ? '' : 'disabled' %>><%= assignment.actionLabel %></button>
+                  <% if (assignment.breakActionType) { %>
+                    <button type="button" class="mark-button break" data-assignment-id="<%= assignment.id %>" data-mark-type="<%= assignment.breakActionType %>"><%= assignment.breakActionType === 'BREAK_START' ? 'Iniciar almuerzo' : 'Finalizar almuerzo' %></button>
+                  <% } %>
+                  <button type="button" class="mark-button departure" data-assignment-id="<%= assignment.id %>" data-mark-type="DEPARTURE" <%= assignment.canRegisterDeparture ? '' : 'disabled' %>>Registrar salida</button>
                 <% } else { %>
-                  <button type="button" class="mark-button" disabled><%= assignment.actionLabel %></button>
+                  <button type="button" class="mark-button" disabled>Jornada finalizada</button>
                 <% } %>
               </div>
             </article>
           <% }); %>
         </section>
-      <% } else { %><section class="empty-state"><h2>No tienes asignaciones activas</h2><p class="meta">Cuando Operaciones te programe un servicio, aparecerá aquí automáticamente.</p></section><% } %>
-      <% if (expiresAt) { %><p class="meta">Tu sesión permanece en este dispositivo y puede revocarse desde Lórren.</p><% } %>
+      <% } else { %>
+        <section class="empty-state"><h2>No tienes asignaciones activas</h2></section>
+      <% } %>
+
+      <dialog id="enrollment-dialog" aria-labelledby="enrollment-title">
+        <div class="dialog-body">
+          <div class="dialog-head"><div><p class="brand">Primer acceso</p><h2 id="enrollment-title">Registro facial inicial</h2></div></div>
+          <p>Registra tu rostro desde la cámara de este celular.</p>
+          <p class="camera-only">Solo cámara en vivo. No se aceptan archivos ni fotos guardadas.</p>
+          <div class="face-stage">
+            <video id="enrollment-video" playsinline muted hidden></video>
+            <div class="face-frame" aria-hidden="true"></div>
+          </div>
+          <p id="enrollment-status" class="status" role="status" aria-live="polite">Autoriza el uso del rostro para comenzar.</p>
+          <label class="consent"><input type="checkbox" id="enrollment-consent"><span>Autorizo el registro facial para validar mi identidad en las marcaciones.</span></label>
+          <div class="dialog-actions"><button type="button" class="primary-button" id="start-enrollment">Registrar mi rostro</button></div>
+        </div>
+      </dialog>
 
       <dialog id="mark-dialog" aria-labelledby="mark-title">
         <div class="dialog-body">
-          <div class="dialog-head"><div><p class="brand">Registro seguro</p><h2 id="mark-title">Confirmar marcación</h2></div><button type="button" class="icon-button" id="close-mark" aria-label="Cerrar">×</button></div>
-          <div class="step"><p class="step-title">1. Ubicación</p><p id="location-status" class="step-copy" role="status">Preparando GPS…</p></div>
+          <div class="dialog-head">
+            <div><p class="brand">Registro seguro</p><h2 id="mark-title">Confirmar marcación</h2></div>
+            <button type="button" class="icon-button" id="close-mark" aria-label="Cerrar">×</button>
+          </div>
+          <div class="step"><p class="step-title">Ubicación</p><p id="location-status" class="step-copy" role="status">Preparando GPS…</p></div>
           <div class="step" id="camera-step" hidden>
-            <p class="step-title">2. Verificación</p>
-            <p id="biometric-instruction" class="step-copy">Ubica tu rostro en el marco.</p>
+            <p class="step-title">Verificación facial</p>
+            <p id="biometric-instruction" class="step-copy">Mira de frente.</p>
+            <p class="camera-only">Solo cámara en vivo.</p>
             <div class="face-stage">
               <video id="camera-video" playsinline muted hidden></video>
-              <img id="photo-preview" class="photo-preview" alt="Vista previa" hidden>
+              <img id="photo-preview" class="photo-preview" alt="Captura verificada" hidden>
               <div class="face-frame" aria-hidden="true"></div>
             </div>
             <canvas id="camera-canvas" hidden></canvas>
-            <div class="camera-actions"><button type="button" id="capture-photo" disabled>Continuar</button><button type="button" id="retry-photo" disabled>Repetir</button></div>
-            <label class="file-fallback" id="file-fallback" hidden>Cámara no disponible:<input type="file" id="fallback-photo" accept="image/jpeg,image/png,image/webp" capture="user"></label>
+            <div class="camera-actions">
+              <button type="button" id="capture-photo" disabled>Validar rostro</button>
+              <button type="button" id="retry-photo" disabled>Repetir</button>
+            </div>
           </div>
           <label class="consent" id="photo-consent-wrap" hidden><input type="checkbox" id="photo-consent"><span>Autorizo esta captura para validar mi identidad y asistencia.</span></label>
           <div id="mark-result" class="status" role="status" aria-live="polite" hidden></div>
-          <div class="dialog-actions"><button type="button" class="primary-button" id="submit-mark" disabled>Registrar</button><button type="button" class="secondary-button" id="cancel-mark">Cancelar</button></div>
+          <div class="dialog-actions">
+            <button type="button" class="primary-button" id="submit-mark" disabled>Registrar</button>
+            <button type="button" class="secondary-button" id="cancel-mark">Cancelar</button>
+          </div>
         </div>
       </dialog>
 
       <script src="/public/worker-biometric.js"></script>
-      <script src="/operaciones/portal/offline.js"></script>
       <script nonce="<%= nonce %>">
         (() => {
+          const biometricApi = window.LorrenWorkerBiometric || null;
+          const markButtons = [...document.querySelectorAll('.mark-button[data-mark-type]')];
+          const connectivityBar = document.getElementById('portal-connectivity');
+          const connectivityTitle = document.getElementById('connectivity-title');
+
+          const enrollmentDialog = document.getElementById('enrollment-dialog');
+          const enrollmentVideo = document.getElementById('enrollment-video');
+          const enrollmentStatus = document.getElementById('enrollment-status');
+          const enrollmentConsent = document.getElementById('enrollment-consent');
+          const startEnrollmentButton = document.getElementById('start-enrollment');
+
           const dialog = document.getElementById('mark-dialog');
           const title = document.getElementById('mark-title');
           const locationStatus = document.getElementById('location-status');
@@ -189,41 +217,137 @@
           const photoPreview = document.getElementById('photo-preview');
           const capturePhotoButton = document.getElementById('capture-photo');
           const retryPhotoButton = document.getElementById('retry-photo');
-          const fileFallback = document.getElementById('file-fallback');
-          const fallbackPhoto = document.getElementById('fallback-photo');
           const photoConsentWrap = document.getElementById('photo-consent-wrap');
           const photoConsent = document.getElementById('photo-consent');
           const submitButton = document.getElementById('submit-mark');
           const resultBox = document.getElementById('mark-result');
-          const connectivityBar = document.getElementById('portal-connectivity');
-          const connectivityTitle = document.getElementById('connectivity-title');
-          const connectivityCopy = document.getElementById('connectivity-copy');
-          const offlineApi = window.LorrenWorkerPortalOffline || null;
-          const biometricApi = window.LorrenWorkerBiometric || null;
+
+          let biometricReady = false;
+          let enrollmentStream = null;
+          let cameraStream = null;
           let assignmentId = null;
-          let markType = 'ARRIVAL';
-          let photoRequired = false;
+          let markType = null;
           let locationEvidence = null;
           let photoBlob = null;
           let photoUrl = null;
-          let cameraStream = null;
           let idempotencyKey = null;
           let biometricChallenge = null;
-          let biometricEnabled = false;
-          let offlineState = { queue: [], receipts: [], online: navigator.onLine };
+          let biometricVerified = false;
 
-          const labelFor = (type) => ({ ARRIVAL: 'llegada', BREAK_START: 'inicio de almuerzo', BREAK_END: 'fin de almuerzo', DEPARTURE: 'salida' })[type] || 'marcación';
+          const isBiometricMark = () => markType === 'ARRIVAL' || markType === 'DEPARTURE';
           const endpointFor = (type) => ({ ARRIVAL: 'llegada', BREAK_START: 'inicio-almuerzo', BREAK_END: 'fin-almuerzo', DEPARTURE: 'salida' })[type];
-          const supportsOffline = () => markType === 'ARRIVAL' || markType === 'DEPARTURE';
-          const supportsBiometric = () => markType === 'ARRIVAL' || markType === 'DEPARTURE';
+          const labelFor = (type) => ({ ARRIVAL: 'llegada', BREAK_START: 'inicio de almuerzo', BREAK_END: 'fin de almuerzo', DEPARTURE: 'salida' })[type] || 'marcación';
 
           function newIdempotencyKey() {
             if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-            return `${markType.toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+            return `${String(markType || 'mark').toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
           }
 
+          function showModal(target) {
+            if (typeof target.showModal === 'function') target.showModal();
+            else target.setAttribute('open', '');
+          }
+
+          function closeModal(target) {
+            if (typeof target.close === 'function') target.close();
+            else target.removeAttribute('open');
+          }
+
+          function stopStream(stream) { stream?.getTracks?.().forEach((track) => track.stop()); }
+
+          function setButtonsReady(ready) {
+            biometricReady = ready;
+            markButtons.forEach((button) => {
+              const originallyDisabled = button.hasAttribute('data-server-disabled');
+              if (!originallyDisabled) button.disabled = !ready;
+            });
+          }
+
+          markButtons.forEach((button) => {
+            if (button.disabled) button.setAttribute('data-server-disabled', 'true');
+            button.disabled = true;
+          });
+
+          async function portalBiometricRequest(path, body = {}) {
+            const response = await fetch(`/operaciones/portal/biometria/${path}`, {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'worker-portal' },
+              body: JSON.stringify(body)
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.ok) {
+              const error = new Error(payload.error || 'biometric_request_failed');
+              error.payload = payload;
+              throw error;
+            }
+            return payload;
+          }
+
+          async function loadBiometricStatus() {
+            try {
+              const status = await portalBiometricRequest('estado');
+              if (status.enrolled) {
+                setButtonsReady(true);
+                return;
+              }
+              setButtonsReady(false);
+              showModal(enrollmentDialog);
+            } catch {
+              setButtonsReady(false);
+              enrollmentStatus.textContent = 'No fue posible validar el registro facial. Recarga la página.';
+              enrollmentStatus.className = 'status danger';
+              showModal(enrollmentDialog);
+              startEnrollmentButton.disabled = true;
+            }
+          }
+
+          startEnrollmentButton.addEventListener('click', async () => {
+            if (!enrollmentConsent.checked) {
+              enrollmentStatus.textContent = 'Debes autorizar el registro facial.';
+              enrollmentStatus.className = 'status warning';
+              return;
+            }
+            startEnrollmentButton.disabled = true;
+            enrollmentStatus.textContent = 'Abriendo cámara…';
+            enrollmentStatus.className = 'status';
+            try {
+              if (!navigator.onLine || !biometricApi) throw new Error('camera_unavailable');
+              enrollmentStream = await biometricApi.startCamera(enrollmentVideo);
+              const capture = await biometricApi.captureEnrollment({
+                video: enrollmentVideo,
+                onStatus: (message) => { enrollmentStatus.textContent = message; }
+              });
+              await portalBiometricRequest('registrar', {
+                descriptor: capture.descriptor,
+                realScore: capture.realScore,
+                liveScore: capture.liveScore,
+                modelVersion: capture.modelVersion,
+                consentAccepted: true
+              });
+              enrollmentStatus.textContent = 'Rostro registrado.';
+              enrollmentStatus.className = 'status ok';
+              stopStream(enrollmentStream);
+              enrollmentStream = null;
+              enrollmentVideo.srcObject = null;
+              setButtonsReady(true);
+              window.setTimeout(() => closeModal(enrollmentDialog), 500);
+            } catch (error) {
+              stopStream(enrollmentStream);
+              enrollmentStream = null;
+              enrollmentVideo.srcObject = null;
+              enrollmentVideo.hidden = true;
+              enrollmentStatus.textContent = error?.message === 'attendance_biometric_antispoof_low'
+                ? 'No se confirmó un rostro real. Intenta nuevamente.'
+                : 'No fue posible completar el registro. Usa la cámara frontal con buena luz.';
+              enrollmentStatus.className = 'status danger';
+              startEnrollmentButton.disabled = false;
+            }
+          });
+
+          enrollmentDialog.addEventListener('cancel', (event) => event.preventDefault());
+
           function stopCamera() {
-            cameraStream?.getTracks?.().forEach((track) => track.stop());
+            stopStream(cameraStream);
             cameraStream = null;
             cameraVideo.srcObject = null;
           }
@@ -233,52 +357,43 @@
             photoUrl = null;
           }
 
-          function updateSubmitState() {
-            submitButton.disabled = !locationEvidence
-              || (photoRequired && !photoBlob)
-              || (photoBlob && !photoConsent.checked)
-              || (!navigator.onLine && !supportsOffline());
-          }
-
-          function showResult(message, className) {
+          function showResult(message, className = 'danger') {
             resultBox.hidden = false;
-            resultBox.className = `status ${className || ''}`.trim();
+            resultBox.className = `status ${className}`;
             resultBox.textContent = message;
           }
 
-          function showCameraStep(visible) {
-            cameraStep.hidden = !visible;
-            photoConsentWrap.hidden = !visible;
+          function updateSubmitState() {
+            submitButton.disabled = !navigator.onLine
+              || !locationEvidence
+              || (isBiometricMark() && (!biometricVerified || !photoBlob || !photoConsent.checked));
           }
 
-          function resetDialog() {
+          function resetMarkDialog() {
             stopCamera();
             clearPhotoUrl();
             locationEvidence = null;
             photoBlob = null;
             biometricChallenge = null;
-            biometricEnabled = false;
+            biometricVerified = false;
             photoConsent.checked = false;
             resultBox.hidden = true;
             locationStatus.textContent = 'Solicitando ubicación…';
-            biometricInstruction.textContent = 'Ubica tu rostro en el marco.';
-            showCameraStep(photoRequired);
+            biometricInstruction.textContent = 'Mira de frente.';
+            cameraStep.hidden = !isBiometricMark();
+            photoConsentWrap.hidden = !isBiometricMark();
             cameraVideo.hidden = true;
             photoPreview.hidden = true;
             capturePhotoButton.disabled = true;
-            capturePhotoButton.textContent = 'Continuar';
             retryPhotoButton.disabled = true;
-            fileFallback.hidden = true;
-            fallbackPhoto.value = '';
             submitButton.disabled = true;
             title.textContent = `Confirmar ${labelFor(markType)}`;
             submitButton.textContent = `Registrar ${labelFor(markType)}`;
-            if (!navigator.onLine && !supportsOffline()) showResult('El almuerzo requiere conexión.', 'warning');
           }
 
           function requestLocation() {
             if (!navigator.geolocation) {
-              showResult('Este navegador no permite obtener la ubicación.', 'warning');
+              showResult('Este navegador no permite obtener la ubicación.');
               return;
             }
             navigator.geolocation.getCurrentPosition((position) => {
@@ -296,64 +411,48 @@
             }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
           }
 
-          async function startCamera() {
-            if (!photoRequired) return;
-            try {
-              if (biometricApi) cameraStream = await biometricApi.startCamera(cameraVideo);
-              else {
-                if (!navigator.mediaDevices?.getUserMedia) throw new Error('camera_unavailable');
-                cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
-                cameraVideo.srcObject = cameraStream;
-                cameraVideo.hidden = false;
-                await cameraVideo.play();
-              }
-              capturePhotoButton.disabled = false;
-            } catch {
-              fileFallback.hidden = false;
-              showResult('No se pudo abrir la cámara. La marcación quedará para revisión.', 'warning');
-            }
-          }
-
           async function requestBiometricChallenge() {
-            if (!supportsBiometric() || !navigator.onLine) return null;
-            try {
-              const response = await fetch('/admin/operaciones/portal-activaciones/biometria/desafio', {
-                method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'worker-portal' },
-                body: JSON.stringify({ assignmentId, markType, idempotencyKey })
-              });
-              const payload = await response.json().catch(() => ({}));
-              if (!response.ok || !payload.ok || !payload.enabled) return null;
-              return payload.challenge;
-            } catch {
-              return null;
+            const response = await fetch('/admin/operaciones/portal-activaciones/biometria/desafio', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'worker-portal' },
+              body: JSON.stringify({ assignmentId, markType, idempotencyKey })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.ok || !payload.challenge) {
+              if (payload.error === 'biometric_enrollment_required') {
+                setButtonsReady(false);
+                showModal(enrollmentDialog);
+              }
+              throw new Error(payload.error || 'biometric_challenge_failed');
             }
+            return payload.challenge;
           }
 
-          async function prepareCameraFlow() {
-            if (!supportsBiometric()) {
-              if (photoRequired) await startCamera();
+          async function startVerificationCamera() {
+            if (!biometricApi || !navigator.onLine) throw new Error('camera_unavailable');
+            cameraStream = await biometricApi.startCamera(cameraVideo);
+            capturePhotoButton.disabled = false;
+          }
+
+          async function prepareMark() {
+            if (!navigator.onLine) {
+              showResult('Necesitas conexión para validar la ubicación y el rostro.');
               return;
             }
-            biometricChallenge = await requestBiometricChallenge();
-            biometricEnabled = Boolean(biometricChallenge);
-            if (biometricEnabled) photoRequired = true;
-            showCameraStep(photoRequired);
-            if (photoRequired) {
-              biometricInstruction.textContent = biometricEnabled ? 'Mira de frente para comenzar.' : 'Ubica tu rostro en el marco.';
-              await startCamera();
+            if (!isBiometricMark()) {
+              updateSubmitState();
+              return;
+            }
+            try {
+              biometricChallenge = await requestBiometricChallenge();
+              biometricInstruction.textContent = 'Mira de frente para comenzar.';
+              await startVerificationCamera();
+            } catch {
+              showResult('No fue posible iniciar la cámara y la validación facial.');
             }
           }
 
-          function capturePlainPhoto() {
-            const scale = Math.min(1, 720 / (cameraVideo.videoWidth || 720));
-            cameraCanvas.width = Math.round((cameraVideo.videoWidth || 720) * scale);
-            cameraCanvas.height = Math.round((cameraVideo.videoHeight || 960) * scale);
-            cameraCanvas.getContext('2d').drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
-            return new Promise((resolve, reject) => cameraCanvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('photo_failed')), 'image/jpeg', .82));
-          }
-
-          function setPhoto(blob) {
+          function setVerifiedPhoto(blob) {
             clearPhotoUrl();
             photoBlob = blob;
             photoUrl = URL.createObjectURL(blob);
@@ -384,106 +483,71 @@
               })
             });
             const payload = await response.json().catch(() => ({}));
-            if (!response.ok || !payload.ok) throw new Error('biometric_verification_failed');
+            if (!response.ok || !payload.ok || payload.verified !== true) throw new Error(payload.error || 'biometric_verification_failed');
             return payload;
           }
 
           capturePhotoButton.addEventListener('click', async () => {
+            if (!photoConsent.checked) {
+              showResult('Autoriza la captura para continuar.', 'warning');
+              return;
+            }
             capturePhotoButton.disabled = true;
+            biometricVerified = false;
             try {
-              if (biometricEnabled && biometricApi) {
-                const capture = await biometricApi.captureVerification({
-                  video: cameraVideo,
-                  challenge: biometricChallenge,
-                  onStatus: (message) => { biometricInstruction.textContent = message; }
-                });
-                const assessment = await verifyBiometric(capture);
-                setPhoto(capture.photoBlob);
-                biometricInstruction.textContent = assessment.verified ? 'Identidad verificada.' : 'Captura lista · revisión requerida.';
-                if (assessment.requiresReview) showResult('La marcación quedará para revisión.', 'warning');
-                return;
-              }
-              setPhoto(await capturePlainPhoto());
+              const capture = await biometricApi.captureVerification({
+                video: cameraVideo,
+                challenge: biometricChallenge,
+                onStatus: (message) => { biometricInstruction.textContent = message; }
+              });
+              await verifyBiometric(capture);
+              biometricVerified = true;
+              biometricInstruction.textContent = 'Identidad verificada.';
+              setVerifiedPhoto(capture.photoBlob);
+              showResult('Rostro verificado.', 'ok');
             } catch {
-              try {
-                setPhoto(await capturePlainPhoto());
-                biometricInstruction.textContent = 'Captura lista · revisión requerida.';
-                showResult('No se completó la validación automática. La marcación quedará para revisión.', 'warning');
-              } catch {
-                capturePhotoButton.disabled = false;
-                showResult('No fue posible tomar la fotografía.', 'warning');
-              }
+              biometricVerified = false;
+              photoBlob = null;
+              showResult('La validación facial falló. Repite la captura.', 'danger');
+              capturePhotoButton.disabled = false;
+              updateSubmitState();
             }
           });
 
           retryPhotoButton.addEventListener('click', async () => {
             clearPhotoUrl();
             photoBlob = null;
+            biometricVerified = false;
             photoPreview.hidden = true;
             retryPhotoButton.disabled = true;
             updateSubmitState();
-            await startCamera();
-          });
-
-          fallbackPhoto.addEventListener('change', () => {
-            const file = fallbackPhoto.files?.[0];
-            if (!file) return;
-            if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024) {
-              fallbackPhoto.value = '';
-              showResult('Usa una foto JPG, PNG o WEBP de máximo 3 MB.', 'warning');
-              return;
+            try {
+              biometricChallenge = await requestBiometricChallenge();
+              await startVerificationCamera();
+            } catch {
+              showResult('No fue posible reiniciar la cámara.');
             }
-            setPhoto(file);
-            showResult('La captura quedará para revisión.', 'warning');
           });
 
           photoConsent.addEventListener('change', updateSubmitState);
 
-          function renderConnectivity() {
-            offlineState.online = navigator.onLine;
-            connectivityBar.classList.toggle('offline', !navigator.onLine);
-            connectivityTitle.textContent = navigator.onLine ? 'Con conexión' : 'Sin conexión';
-            connectivityCopy.textContent = navigator.onLine ? 'Marcaciones inmediatas.' : 'Llegada y salida se guardan en el celular.';
-          }
-
-          async function queueCurrentMark() {
-            if (!offlineApi || !supportsOffline()) throw new Error('Esta marcación requiere conexión.');
-            await offlineApi.queueMark({
-              markType, assignmentId, idempotencyKey,
-              latitude: locationEvidence.latitude,
-              longitude: locationEvidence.longitude,
-              accuracyMeters: locationEvidence.accuracyMeters,
-              clientCapturedAt: locationEvidence.clientCapturedAt,
-              photoConsent: Boolean(photoBlob && photoConsent.checked),
-              selfie: photoBlob || null
-            });
-            showResult(`${labelFor(markType)} guardada. Se sincronizará automáticamente.`, 'warning');
-            submitButton.disabled = true;
-          }
-
-          document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => button.addEventListener('click', async () => {
-            if (button.disabled) return;
+          markButtons.forEach((button) => button.addEventListener('click', async () => {
+            if (button.disabled || !biometricReady) return;
             assignmentId = button.dataset.assignmentId;
             markType = button.dataset.markType;
-            photoRequired = button.dataset.photoRequired === 'true';
             idempotencyKey = newIdempotencyKey();
-            resetDialog();
-            if (typeof dialog.showModal === 'function') dialog.showModal();
-            else dialog.setAttribute('open', '');
+            resetMarkDialog();
+            showModal(dialog);
             requestLocation();
-            await prepareCameraFlow();
+            await prepareMark();
           }));
 
           async function submitMark() {
-            if (!assignmentId || !locationEvidence || (photoRequired && !photoBlob)) return;
+            if (!assignmentId || !locationEvidence || !navigator.onLine) return;
+            if (isBiometricMark() && (!biometricVerified || !photoBlob || !photoConsent.checked)) return;
             submitButton.disabled = true;
-            submitButton.textContent = navigator.onLine ? 'Registrando…' : 'Guardando…';
+            submitButton.textContent = 'Registrando…';
             resultBox.hidden = true;
-            if (!navigator.onLine) {
-              try { await queueCurrentMark(); }
-              catch (error) { showResult(error?.message || 'No fue posible guardar sin conexión.', 'danger'); submitButton.disabled = false; }
-              return;
-            }
             const form = new FormData();
             form.set('idempotencyKey', idempotencyKey);
             form.set('latitude', String(locationEvidence.latitude));
@@ -491,8 +555,8 @@
             form.set('accuracyMeters', String(locationEvidence.accuracyMeters));
             form.set('clientCapturedAt', locationEvidence.clientCapturedAt);
             form.set('captureMode', 'ONLINE_WEB');
-            form.set('photoConsent', photoBlob && photoConsent.checked ? 'true' : 'false');
-            if (photoBlob) form.set('selfie', photoBlob, `selfie-${labelFor(markType).replaceAll(' ', '-')}.jpg`);
+            form.set('photoConsent', isBiometricMark() ? 'true' : 'false');
+            if (isBiometricMark()) form.set('selfie', photoBlob, `selfie-${labelFor(markType).replaceAll(' ', '-')}.jpg`);
             try {
               const response = await fetch(`/operaciones/portal/asignaciones/${encodeURIComponent(assignmentId)}/${endpointFor(markType)}`, {
                 method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'worker-portal' }, body: form
@@ -500,23 +564,20 @@
               const payload = await response.json().catch(() => ({}));
               if (!response.ok || !payload.ok) {
                 const messages = {
-                  arrival_already_registered: 'La llegada ya había sido registrada.',
-                  departure_arrival_required: 'Debes registrar la llegada antes de la salida.',
-                  departure_already_registered: 'La salida ya había sido registrada.',
-                  break_arrival_required: 'Debes registrar la llegada antes del almuerzo.',
-                  break_already_started: 'El almuerzo ya fue iniciado.',
-                  break_start_required: 'Primero debes iniciar el almuerzo.',
-                  break_already_completed: 'El almuerzo ya fue finalizado.',
-                  attendance_not_enabled: 'La marcación no está habilitada.',
-                  selfie_required: 'Debes tomar la fotografía.',
-                  photo_consent_required: 'Debes aceptar el uso de la captura.',
-                  portal_session_required: 'Tu sesión venció.'
+                  outside_operation_range: 'Debes estar dentro del rango de la operación.',
+                  operation_geofence_required: 'La operación no tiene geocerca configurada.',
+                  location_accuracy_insufficient: 'La precisión del GPS no es suficiente.',
+                  biometric_verification_required: 'Completa nuevamente la validación facial.',
+                  online_biometric_required: 'Necesitas conexión para marcar.',
+                  portal_session_required: 'Tu sesión venció.',
+                  departure_arrival_required: 'Primero registra la llegada.',
+                  departure_break_end_required: 'Finaliza el almuerzo antes de registrar la salida.'
                 };
                 throw new Error(messages[payload.error] || 'No fue posible registrar la marcación.');
               }
-              showResult(payload.message || 'Marcación registrada.', payload.requiresReview ? 'warning' : 'ok');
+              showResult(payload.message || 'Marcación registrada.', 'ok');
               stopCamera();
-              setTimeout(() => window.location.reload(), 1200);
+              window.setTimeout(() => window.location.reload(), 900);
             } catch (error) {
               showResult(error?.message || 'No fue posible registrar.', 'danger');
               submitButton.disabled = false;
@@ -525,23 +586,34 @@
           }
 
           submitButton.addEventListener('click', submitMark);
-          function closeDialog() {
+
+          function closeMarkDialog() {
             stopCamera();
             clearPhotoUrl();
-            if (typeof dialog.close === 'function') dialog.close();
-            else dialog.removeAttribute('open');
+            closeModal(dialog);
           }
-          document.getElementById('close-mark').addEventListener('click', closeDialog);
-          document.getElementById('cancel-mark').addEventListener('click', closeDialog);
-          dialog.addEventListener('cancel', (event) => { event.preventDefault(); closeDialog(); });
-          window.addEventListener('online', () => { renderConnectivity(); updateSubmitState(); });
-          window.addEventListener('offline', () => { renderConnectivity(); updateSubmitState(); });
-          offlineApi?.init({ onStateChange: (state) => { offlineState = state || offlineState; renderConnectivity(); } }).catch(() => {});
+          document.getElementById('close-mark').addEventListener('click', closeMarkDialog);
+          document.getElementById('cancel-mark').addEventListener('click', closeMarkDialog);
+          dialog.addEventListener('cancel', (event) => { event.preventDefault(); closeMarkDialog(); });
+
+          function renderConnectivity() {
+            const online = navigator.onLine;
+            connectivityBar.classList.toggle('offline', !online);
+            connectivityTitle.textContent = online ? 'Con conexión' : 'Sin conexión';
+            if (!online) setButtonsReady(false);
+            else if (biometricReady) setButtonsReady(true);
+          }
+          window.addEventListener('online', () => { renderConnectivity(); loadBiometricStatus(); });
+          window.addEventListener('offline', renderConnectivity);
           renderConnectivity();
+          loadBiometricStatus();
         })();
       </script>
-    <% } else if (mode === 'unavailable') { %><section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Portal temporalmente no disponible</h1><p>No pudimos validar la sesión en este momento. Tu dispositivo no fue desactivado.</p><div class="status warning">Intenta nuevamente en unos minutos</div></section>
-    <% } else { %><section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Acceso no activo</h1><p>Este dispositivo no tiene una sesión vigente. Abre el enlace seguro enviado por Lórren o solicita uno nuevo.</p><div class="status warning">Se requiere activación</div></section><% } %>
+    <% } else if (mode === 'unavailable') { %>
+      <section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Portal temporalmente no disponible</h1><div class="status warning">Intenta nuevamente en unos minutos</div></section>
+    <% } else { %>
+      <section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Acceso no activo</h1><div class="status warning">Se requiere activación</div></section>
+    <% } %>
   </main>
 </body>
 </html>
