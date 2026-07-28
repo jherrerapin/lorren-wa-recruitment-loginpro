@@ -1,0 +1,149 @@
+name: Issue 423 corpus and debt
+
+on:
+  pull_request:
+    branches:
+      - automation/423-corpus-debt-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate-corpus-and-debt:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+      LORREN_SEND_DELAY_MS: 0
+      BASELINE_SHA: 974fe4b69aff22d0c229a941696c98a7fbe6960b
+
+    steps:
+      - name: Checkout validation head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Validate Prisma and generate client
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Capture exact main baseline
+        shell: bash
+        run: |
+          git worktree add /tmp/issue-423-base "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/issue-423-base/node_modules
+          set +e
+          (cd /tmp/issue-423-base && npm test) > /tmp/baseline.log 2>&1
+          baseline_exit=$?
+          set -e
+          grep '^not ok [0-9][0-9]* - ' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
+          echo "BASELINE_EXIT=$baseline_exit" >> "$GITHUB_ENV"
+
+      - name: Validate corpus and linked authorities
+        shell: bash
+        run: |
+          node --check test/conversationReplayProductionEdges.test.js
+          node --test \
+            test/conversationReplayProductionEdges.test.js \
+            test/conversationReplayFixtures.test.js \
+            test/conversationReplayInterpretation.test.js \
+            test/conversationReplayPlanning.test.js \
+            test/conversationReplayIntegral.test.js \
+            test/conversationReplayRecovery.test.js \
+            test/assignedVacancyChange.test.js \
+            test/vacancyFirstGate.test.js \
+            test/replyComposition.test.js \
+            test/conversationMessageRepository.test.js
+
+      - name: Measure current branch suite
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.log 2>&1
+          head_exit=$?
+          set -e
+          grep '^not ok [0-9][0-9]* - ' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
+
+          parse_metric() {
+            local file="$1"
+            local metric="$2"
+            awk -v metric="$metric" '$1 == "#" && $2 == metric && $3 ~ /^[0-9]+$/ { value = $3 } END { print value + 0 }' "$file"
+          }
+
+          baseline_tests=$(parse_metric /tmp/baseline.log tests)
+          baseline_pass=$(parse_metric /tmp/baseline.log pass)
+          baseline_fail=$(parse_metric /tmp/baseline.log fail)
+          head_tests=$(parse_metric /tmp/head.log tests)
+          head_pass=$(parse_metric /tmp/head.log pass)
+          head_fail=$(parse_metric /tmp/head.log fail)
+
+          {
+            echo '# Suite debt measurement'
+            echo
+            echo "Baseline commit: \`$BASELINE_SHA\`"
+            echo
+            echo '| Metric | Main baseline | Corpus branch |'
+            echo '| --- | ---: | ---: |'
+            echo "| Tests | $baseline_tests | $head_tests |"
+            echo "| Passed | $baseline_pass | $head_pass |"
+            echo "| Failed | $baseline_fail | $head_fail |"
+            echo "| Exit code | $BASELINE_EXIT | $head_exit |"
+            echo
+            echo '## Baseline failing top-level tests'
+            echo '```text'
+            cat /tmp/baseline.failures
+            echo '```'
+            echo
+            echo '## Branch failing top-level tests'
+            echo '```text'
+            cat /tmp/head.failures
+            echo '```'
+          } > /tmp/debt-report.md
+
+          printf '{"baselineSha":"%s","baseline":{"tests":%s,"passed":%s,"failed":%s,"exitCode":%s},"branch":{"tests":%s,"passed":%s,"failed":%s,"exitCode":%s}}\n' \
+            "$BASELINE_SHA" "$baseline_tests" "$baseline_pass" "$baseline_fail" "$BASELINE_EXIT" \
+            "$head_tests" "$head_pass" "$head_fail" "$head_exit" > /tmp/debt-summary.json
+
+          cat /tmp/debt-report.md
+
+          if ! diff -u /tmp/baseline.failures /tmp/head.failures > /tmp/failure-diff.txt; then
+            cat /tmp/failure-diff.txt
+            echo 'La rama cambió la lista de fallos históricos.'
+            exit 1
+          fi
+
+          if [ "$BASELINE_EXIT" = "0" ] && [ "$head_exit" != "0" ]; then
+            exit 1
+          fi
+
+      - name: Upload corpus and debt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-423-corpus-debt-evidence
+          path: |
+            /tmp/debt-report.md
+            /tmp/debt-summary.json
+            /tmp/baseline.failures
+            /tmp/head.failures
+            /tmp/failure-diff.txt
+            /tmp/baseline.log
+            /tmp/head.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Validate clean diff
+        run: git diff --check "$BASELINE_SHA"...HEAD
