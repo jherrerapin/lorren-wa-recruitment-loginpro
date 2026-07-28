@@ -1,0 +1,118 @@
+name: Issue 771 no slot guard
+
+on:
+  pull_request:
+    branches:
+      - automation/771-no-slot-guard
+
+permissions:
+  contents: write
+
+jobs:
+  validate-no-slot-guard:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_test
+      LORREN_SEND_DELAY_MS: 0
+      BASELINE_SHA: de9b035c996133740b2e231175fe1fdc74b4f00e
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Capture exact baseline suite
+        shell: bash
+        run: |
+          git worktree add /tmp/issue-771-base "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/issue-771-base/node_modules
+          set +e
+          (cd /tmp/issue-771-base && npm test) > /tmp/baseline.log 2>&1
+          baseline_exit=$?
+          set -e
+          grep '^not ok' /tmp/baseline.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/baseline.failures || true
+          echo "BASELINE_EXIT=$baseline_exit" >> "$GITHUB_ENV"
+          echo "Baseline failures: $(wc -l < /tmp/baseline.failures)"
+
+      - name: Apply exact functional patch
+        run: node .github/scripts/apply-issue-771.mjs
+
+      - name: Validate focused correction
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check src/routes/webhook.js
+            node --check test/conversationEngineParity.test.js
+            node --test test/conversationEngineParity.test.js test/conversationEngineStepAuthority.test.js test/webhookInterviewBookingAuthority.test.js
+          } > /tmp/issue-771-focused.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/issue-771-focused.log
+          exit "$status"
+
+      - name: Upload focused result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-771-no-slot-guard-log
+          path: /tmp/issue-771-focused.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Stop after focused failure
+        if: steps.focused.outcome == 'failure'
+        run: exit 1
+
+      - name: Compare full suite with exact baseline
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/head.log 2>&1
+          head_exit=$?
+          set -e
+          grep '^not ok' /tmp/head.log | sed -E 's/^not ok [0-9]+ - //' | sort > /tmp/head.failures || true
+          if ! diff -u /tmp/baseline.failures /tmp/head.failures; then
+            echo 'La corrección cambió la lista de fallos de la rama base.'
+            exit 1
+          fi
+          if [ "$BASELINE_EXIT" = "0" ] && [ "$head_exit" != "0" ]; then
+            exit 1
+          fi
+
+      - name: Validate clean diff
+        run: git diff --check
+
+      - name: Commit functional files only
+        shell: bash
+        run: |
+          git add src/routes/webhook.js test/conversationEngineParity.test.js
+          if git diff --cached --quiet; then
+            echo 'No functional changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: priorizar guard cuando no hay horarios #771'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
