@@ -1650,6 +1650,7 @@ export function adminRouter(prisma) {
       candidates.sort(compareCandidatesByRecentInbound);
       return res.render('list', {
         mode: 'legacy', candidates, formatDateTimeCO, role: req.userRole,
+        canAccessDispatch: Boolean(req.canAccessDispatch),
         canManageUsers: canManageRecruiterUsers(req),
         activeStatusScope: requestedStatus,
         summaryLabel: STATUS_SCOPE_SUMMARY_LABELS[requestedStatus] || STATUS_SCOPE_SUMMARY_LABELS.all,
@@ -1681,6 +1682,7 @@ export function adminRouter(prisma) {
     return res.render('list', {
       mode: 'vacancies', cities, legacyCandidates, manualReviewCandidates, activeCity, selectedDate,
       todayStr: todayCO(), formatDateTimeCO, formatTimeCO, role: req.userRole,
+      canAccessDispatch: Boolean(req.canAccessDispatch),
       canManageUsers: canManageRecruiterUsers(req),
       normalizeCandidateStatusForUI, candidates: [], activeStatusScope: null, summaryLabel: '',
       successMsg: normalizeString(req.query.success),
