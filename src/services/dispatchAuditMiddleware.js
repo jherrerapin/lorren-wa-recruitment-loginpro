@@ -24,6 +24,7 @@ function safeJson(value) {
 function inferAction(req) {
   const path = req.path || '';
   if (path.includes('/nomina')) return 'DISPATCH_PAYROLL_CHANGE';
+  if (path.includes('/pruebas')) return 'DISPATCH_DEV_TEST_CHANGE';
   if (path.includes('/whatsapp/enviar')) return 'DISPATCH_WHATSAPP_SEND';
   if (path.includes('/asignaciones/assign')) return 'DISPATCH_ASSIGNMENT_CREATE';
   if (path.includes('/asignaciones/confirmar')) return 'DISPATCH_ASSIGNMENT_CONFIRM';
@@ -80,20 +81,6 @@ function clearSessionPermissions(req) {
   req.canAccessCvAnalysis = false;
 }
 
-async function safePayrollAccess(prisma, req, user) {
-  try {
-    const access = await resolvePayrollFeatureAccess(prisma, {
-      userRole: req.session?.userRole || req.userRole,
-      userId: user?.id || req.session?.userId || req.userId,
-      username: user?.username || req.session?.username || req.username
-    });
-    return access.allowed === true;
-  } catch (error) {
-    console.warn('No fue posible refrescar el permiso de Nómina.', error?.message || error);
-    return false;
-  }
-}
-
 async function refreshDatabaseUserPermissions(prisma, req) {
   const source = req.session?.userSource;
   const isDatabaseUser = source === 'db' && Boolean(req.session?.userId);
@@ -146,7 +133,17 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const canAccessMetaAds = Boolean(user.canAccessMetaAds);
   const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis);
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
-  const canAccessPayroll = await safePayrollAccess(prisma, req, user);
+  let canAccessPayroll = false;
+  try {
+    const payrollAccess = await resolvePayrollFeatureAccess(prisma, {
+      userRole: req.session?.userRole || req.userRole,
+      userId: user.id,
+      username: user.username
+    });
+    canAccessPayroll = payrollAccess.allowed === true;
+  } catch (error) {
+    console.warn('No fue posible refrescar el permiso de Nómina.', error);
+  }
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
@@ -173,15 +170,14 @@ async function refreshDatabaseUserPermissions(prisma, req) {
 
 function isHtmlResponse(body, res) {
   if (typeof body !== 'string') return false;
-  const contentType = typeof res?.getHeader === 'function'
-    ? String(res.getHeader('Content-Type') || '').toLowerCase()
-    : '';
+  const contentType = String(res.getHeader('Content-Type') || '').toLowerCase();
   return contentType.includes('text/html') || body.trimStart().startsWith('<!DOCTYPE html') || body.trimStart().startsWith('<html');
 }
 
 function injectPayrollNavigation(html, req) {
   const allowed = req.canAccessPayroll === true || req.session?.canAccessPayroll === true;
-  if (!allowed || !String(req.originalUrl || '').startsWith('/admin/operaciones')) return html;
+  const path = String(req.originalUrl || '').split('?')[0];
+  if (!allowed || !path.startsWith('/admin') || path.startsWith('/admin/operaciones/asistencia/nomina/api/')) return html;
   if (html.includes(`href="${PAYROLL_PATH}"`)) return html;
   const link = `<a href="${PAYROLL_PATH}">Nómina</a>`;
   if (html.includes('<span class="spacer"></span>')) {
@@ -198,7 +194,6 @@ function injectPayrollUsersScript(html, req) {
 }
 
 function installPayrollHtmlBridge(req, res) {
-  if (!res || typeof res.send !== 'function') return;
   const originalSend = res.send.bind(res);
   res.send = (body) => {
     if (!isHtmlResponse(body, res)) return originalSend(body);
