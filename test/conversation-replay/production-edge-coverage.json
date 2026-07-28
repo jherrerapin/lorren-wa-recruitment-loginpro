@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "explicit-labeled-accented-name",
+      "title": "Nombre completo etiquetado con tildes y eñe",
+      "coverage": "fixture_replay",
+      "fixtureId": "data-explicit-labeled-accented-name-v1",
+      "authorities": ["conversationUnderstanding", "applyFieldPolicy", "replayFixtureIntegral"],
+      "observability": {
+        "source_by_field": "structured_output",
+        "rejected_fields": [],
+        "vacancy_resolution": null,
+        "replyKind": "candidate_data_acknowledgement",
+        "reason": "explicit_labeled_name",
+        "engine_loop_guard": "not_applicable",
+        "respondedAt": "outbound_delivery_committed"
+      }
+    },
+    {
+      "id": "name-after-explicit-request",
+      "title": "Nombre enviado después de la solicitud explícita",
+      "coverage": "fixture_replay",
+      "fixtureId": "data-name-after-explicit-request-v1",
+      "authorities": ["conversationUnderstanding", "applyFieldPolicy", "replayFixtureIntegral"],
+      "observability": {
+        "source_by_field": "structured_output",
+        "rejected_fields": [],
+        "vacancy_resolution": null,
+        "replyKind": "candidate_data_acknowledgement",
+        "reason": "pending_full_name_resolved",
+        "engine_loop_guard": "not_applicable",
+        "respondedAt": "outbound_delivery_committed"
+      }
+    },
+    {
+      "id": "city-role-correction",
+      "title": "Corrección de ciudad y cargo en el turno actual",
+      "coverage": "authority_contract",
+      "contractTests": ["test/assignedVacancyChange.test.js"],
+      "authorities": ["buildVacancyResolutionText", "resolveVacancyFirstGate"],
+      "observability": {
+        "source_by_field": "current_turn_correction",
+        "rejected_fields": ["previous_city", "previous_role_hint"],
+        "vacancy_resolution": "ASSIGNED_VACANCY_CHANGE_OFFERED",
+        "replyKind": "VACANCY_CHANGE_OFFER",
+        "reason": "ASSIGNED_VACANCY_CHANGE_OFFERED",
+        "engine_loop_guard": "vacancy_first_gate_before_engine",
+        "respondedAt": "after_outbound_delivery"
+      }
+    },
+    {
+      "id": "assigned-candidate-requests-another-vacancy",
+      "title": "Candidato con vacante asociada solicita otra vacante",
+      "coverage": "authority_contract",
+      "contractTests": ["test/assignedVacancyChange.test.js"],
+      "authorities": ["resolveVacancyFirstGate", "VACANCY_CHANGE_OFFER_MODE"],
+      "observability": {
+        "source_by_field": "candidate_message",
+        "rejected_fields": ["trusted_current_vacancy_as_new_target"],
+        "vacancy_resolution": "ASSIGNED_VACANCY_CHANGE_NEEDS_TARGET",
+        "replyKind": "VACANCY_CHANGE_TARGET_PROMPT",
+        "reason": "ASSIGNED_VACANCY_CHANGE_NEEDS_TARGET",
+        "engine_loop_guard": "vacancy_first_gate_before_engine",
+        "respondedAt": "after_outbound_delivery"
+      }
+    },
+    {
+      "id": "trusted-metadata-contradicts-ambiguous-text",
+      "title": "Metadata confiable contradice texto ambiguo",
+      "coverage": "authority_contract",
+      "contractTests": ["test/vacancyFirstGate.test.js"],
+      "authorities": ["resolveVacancyFirstGate", "resolveVacancyFromText"],
+      "observability": {
+        "source_by_field": "metadata_config",
+        "rejected_fields": ["ambiguous_text_vacancy"],
+        "vacancy_resolution": "matched_trusted_active_vacancy",
+        "replyKind": "ACTIVE_VACANCY_DATA_PROMPT",
+        "reason": "TRUSTED_ACTIVE_VACANCY_RESOLVED",
+        "engine_loop_guard": "vacancy_first_gate_before_engine",
+        "respondedAt": "after_outbound_delivery"
+      }
+    },
+    {
+      "id": "generated-reply-already-has-follow-up",
+      "title": "La respuesta generada ya contiene el seguimiento",
+      "coverage": "authority_contract",
+      "contractTests": ["test/replyComposition.test.js"],
+      "authorities": ["appendUniqueReplySegment", "detectReplyFollowUpTargets"],
+      "observability": {
+        "source_by_field": null,
+        "rejected_fields": [],
+        "vacancy_resolution": null,
+        "replyKind": "composed_unique_reply",
+        "reason": "segment_already_present",
+        "engine_loop_guard": "single_follow_up_target",
+        "respondedAt": "after_outbound_delivery"
+      }
+    },
+    {
+      "id": "delivery-before-responded-state-recovery",
+      "title": "Fallo entre entrega y marca de respuesta no duplica efectos",
+      "coverage": "recovery_contract",
+      "contractTests": [
+        "test/conversationReplayRecovery.test.js",
+        "test/conversationMessageRepository.test.js"
+      ],
+      "authorities": ["persistOutbound", "deliverOutbound", "markConversationMessagesResponded"],
+      "observability": {
+        "source_by_field": null,
+        "rejected_fields": [],
+        "vacancy_resolution": null,
+        "replyKind": "outbox_recovery",
+        "reason": "persist_before_delivery_and_idempotent_recovery",
+        "engine_loop_guard": "do_not_reinterpret_when_outbox_exists",
+        "respondedAt": "explicit_repository_update"
+      }
+    },
+    {
+      "id": "paused-vacancy-ambiguous-repeat-window",
+      "title": "Oferta de vacante pausada con mensajes ambiguos dentro y fuera de diez minutos",
+      "coverage": "authority_contract",
+      "contractTests": ["test/vacancyFirstGate.test.js"],
+      "authorities": ["hasRecentSameBotDecision", "resolveVacancyFirstGate"],
+      "observability": {
+        "source_by_field": null,
+        "rejected_fields": ["passive_ack_as_confirmation"],
+        "vacancy_resolution": "paused_vacancy",
+        "replyKind": "INACTIVE_VACANCY_FUTURE_PROFILE_OFFER",
+        "reason": "REPEAT_PREVENTED",
+        "engine_loop_guard": "ten_minute_same_decision_window",
+        "respondedAt": "after_outbound_delivery"
+      }
+    }
+  ]
+}
