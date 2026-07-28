@@ -56,9 +56,12 @@ test('Leaflet, búsqueda serializada y geolocalización respetan el contrato', (
   assert.match(renderedView, /maximumAge:\s*0/);
 });
 
-test('el formulario conserva booleanos explícitos y elimina las ventanas temporales', () => {
+test('el formulario conserva booleanos explícitos y elimina las ventanas temporales desde la plantilla', () => {
   assert.match(renderedView, /attendanceEnabledFallback/);
   assert.match(renderedView, /manualAttendanceAllowedFallback/);
+  assert.doesNotMatch(sourceView, /name="earlyArrivalWindowMinutes"/);
+  assert.doesNotMatch(sourceView, /name="lateToleranceMinutes"/);
+  assert.doesNotMatch(sourceView, /name="absenceGraceMinutes"/);
   assert.doesNotMatch(renderedView, /name="earlyArrivalWindowMinutes"/);
   assert.doesNotMatch(renderedView, /name="lateToleranceMinutes"/);
   assert.doesNotMatch(renderedView, /name="absenceGraceMinutes"/);
@@ -66,6 +69,16 @@ test('el formulario conserva booleanos explícitos y elimina las ventanas tempor
   assert.match(renderedView, /Entrada sin ventana configurable/);
   assert.match(renderedView, /Las llegadas tarde se registran y no se bloquean/);
   assert.match(renderedView, /conteo inicia a la hora programada/);
+});
+
+test('el render autorizado conserva completa la configuración de asistencia por operación', () => {
+  assert.match(renderedView, /<summary>Configurar asistencia<\/summary>/);
+  assert.match(renderedView, /class="form-grid compact-form attendance-map-form"/);
+  assert.match(renderedView, /name="attendanceEnabled"/);
+  assert.match(renderedView, /name="attendancePhotoPolicy"/);
+  assert.match(renderedView, /name="manualAttendanceAllowed"/);
+  assert.match(renderedView, /class="attendance-map"/);
+  assert.match(renderedView, /Guardar asistencia|Guardar y habilitar asistencia/);
 });
 
 test('el backend ignora las antiguas ventanas aunque un cliente las envíe', () => {
