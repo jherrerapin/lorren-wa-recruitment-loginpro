@@ -2,7 +2,7 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v3';
+const CACHE_NAME = 'lorren-worker-portal-shell-v4';
 const STATIC_ASSETS = [
   '/operaciones/portal/offline.js',
   '/operaciones/portal/manifest.webmanifest',
