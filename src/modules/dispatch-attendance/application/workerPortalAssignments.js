@@ -144,7 +144,7 @@ function buildPortalAssignment(assignment) {
   const breakEndAt = markMoment(latestMark(marks, 'BREAK_END'));
   const breakStarted = Boolean(breakStartAt);
   const breakEnded = Boolean(breakEndAt);
-  const breakOpen = breakStarted && !breakEnded;
+  const breakPending = breakStarted && !breakEnded;
 
   let expectedStartAt = null;
   let expectedEndAt = null;
@@ -167,7 +167,7 @@ function buildPortalAssignment(assignment) {
   const canEndBreak = attendanceEnabled
     && arrivalReported
     && !departureReported
-    && breakOpen
+    && breakPending
     && !sessionRejected;
   const canRegisterDeparture = attendanceEnabled
     && arrivalReported
@@ -190,7 +190,7 @@ function buildPortalAssignment(assignment) {
     actionLabel = `Jornada finalizada · ${formatDispatchMinutes(workedMinutes)}`;
   } else if (arrivalReported) {
     actionType = 'DEPARTURE';
-    actionLabel = breakOpen
+    actionLabel = breakPending
       ? 'Registrar salida · se descontarán 1 h 30 min de almuerzo'
       : 'Registrar salida';
   } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
@@ -231,7 +231,8 @@ function buildPortalAssignment(assignment) {
     departureReportedLabel: formatDateTime(session?.departureReportedAt),
     breakStarted,
     breakEnded,
-    breakOpen,
+    breakOpen: false,
+    breakPending,
     breakStartLabel: formatDateTime(breakStartAt),
     breakEndLabel: formatDateTime(breakEndAt),
     ...breakSummary,
