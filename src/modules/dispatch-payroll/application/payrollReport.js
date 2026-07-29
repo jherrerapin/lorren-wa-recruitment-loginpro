@@ -14,6 +14,8 @@ export const PAYROLL_POLICY_ACTION = 'PAYROLL_POLICY_UPDATED';
 export const PAYROLL_COMPENSATION_ENTITY_TYPE = 'DISPATCH_PAYROLL_COMPENSATION';
 export const PAYROLL_COMPENSATION_ACTION = 'PAYROLL_COMPENSATION_UPDATED';
 export const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
+export const MAX_WEEKLY_ORDINARY_MINUTES = DEFAULT_PAYROLL_POLICY.weeklyOrdinaryMinutes;
+export const MAX_DAILY_ORDINARY_MINUTES = DEFAULT_PAYROLL_POLICY.dailyOrdinaryMinutes;
 
 function normalizeString(value, maxLength = 200) {
   if (typeof value !== 'string') return null;
@@ -74,9 +76,18 @@ export function resolvePayrollPeriod(query = {}, now = new Date()) {
   return { periodType, from, to, anchor: validDateKey(query.anchor) || from, spanDays };
 }
 
+export function enforceDispatchOrdinaryLimits(source = {}) {
+  const policy = normalizePayrollPolicy(source);
+  return {
+    ...policy,
+    weeklyOrdinaryMinutes: Math.min(policy.weeklyOrdinaryMinutes, MAX_WEEKLY_ORDINARY_MINUTES),
+    dailyOrdinaryMinutes: Math.min(policy.dailyOrdinaryMinutes, MAX_DAILY_ORDINARY_MINUTES)
+  };
+}
+
 function policyFromEvent(event) {
   const raw = event?.metadata?.policy;
-  return normalizePayrollPolicy(raw && typeof raw === 'object' ? raw : {});
+  return enforceDispatchOrdinaryLimits(raw && typeof raw === 'object' ? raw : {});
 }
 
 export async function loadPayrollPolicies(prisma, clientIds = []) {
@@ -95,7 +106,7 @@ export async function loadPayrollPolicies(prisma, clientIds = []) {
     if (!event.entityId || map.has(event.entityId)) continue;
     map.set(event.entityId, policyFromEvent(event));
   }
-  uniqueIds.forEach((id) => { if (!map.has(id)) map.set(id, normalizePayrollPolicy(DEFAULT_PAYROLL_POLICY)); });
+  uniqueIds.forEach((id) => { if (!map.has(id)) map.set(id, enforceDispatchOrdinaryLimits(DEFAULT_PAYROLL_POLICY)); });
   return map;
 }
 
@@ -107,7 +118,7 @@ export async function savePayrollPolicy(prisma, input = {}) {
   const client = await prisma.dispatchClient.findUnique({ where: { id: clientId }, select: { id: true, name: true } });
   if (!client) throw new Error('payroll_policy_client_not_found');
 
-  const policy = normalizePayrollPolicy({
+  const policy = enforceDispatchOrdinaryLimits({
     weeklyOrdinaryMinutes: Number(input.weeklyOrdinaryHours) * 60,
     dailyOrdinaryMinutes: Number(input.dailyOrdinaryHours) * 60,
     maxDailyOvertimeMinutes: Number(input.maxDailyOvertimeHours) * 60,
