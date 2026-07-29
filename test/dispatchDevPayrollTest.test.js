@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ejs from 'ejs';
 import {
   DEV_TEST_ATTENDANCE_SOURCE,
   DEV_TEST_REQUEST_SOURCE,
@@ -103,6 +105,66 @@ test('los turnos nocturnos terminan al día siguiente por defecto', () => {
   });
   assert.equal(defaults.arrivalAt, '2026-07-28T19:00');
   assert.equal(defaults.departureAt, '2026-07-29T05:00');
+});
+
+test('la vista DEV usa el mensaje productivo vigente y deja el almuerzo vacío por defecto', async () => {
+  const [template, productionTemplate] = await Promise.all([
+    readFile('src/views/operacionesPruebasNomina.ejs', 'utf8'),
+    readFile('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8')
+  ]);
+  const currentMessage = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
+  const assignment = {
+    id: 'assignment-test',
+    workerId: 'worker-test',
+    status: 'DEV_TEST_ASSIGNED',
+    attendanceSession: null,
+    worker: {
+      id: 'worker-test',
+      fullName: 'Jhon Herrera',
+      documentNumber: '1000000000',
+      phone: '3000000000'
+    }
+  };
+  const request = {
+    id: 'request-test',
+    clientName: 'Cliente prueba',
+    operationPointName: 'Operación prueba',
+    cityName: 'Bogotá',
+    address: 'Calle prueba',
+    serviceName: 'Cargue y descargue',
+    serviceDate: new Date('2026-07-28T05:00:00.000Z'),
+    startTime: '08:00',
+    endTime: '16:00',
+    requiredWorkers: 1,
+    operationPoint: { clientId: 'client-test', address: 'Calle prueba', cityName: 'Bogotá' },
+    assignments: [assignment]
+  };
+
+  const html = ejs.render(template, {
+    pageTitle: 'Pruebas DEV',
+    role: 'dev',
+    workspace: { requests: [request], selectedRequest: request, availableWorkers: [] },
+    message: null,
+    error: null,
+    formatBogotaDateTimeLocal: () => '',
+    defaultDevTestTimes: () => ({
+      arrivalAt: '2026-07-28T08:00',
+      breakStartAt: '2026-07-28T12:00',
+      breakEndAt: '2026-07-28T13:00',
+      departureAt: '2026-07-28T16:00'
+    }),
+    testRequestSource: DEV_TEST_REQUEST_SOURCE
+  });
+
+  assert.match(html, /name="breakStartAt" value=""/);
+  assert.match(html, /name="breakEndAt" value=""/);
+  assert.match(html, /Inicio de almuerzo \(opcional\)/);
+  assert.match(html, /Regreso de almuerzo \(opcional\)/);
+  assert.ok(productionTemplate.includes(currentMessage), 'La vista productiva debe conservar el mensaje operativo verificado.');
+  assert.ok(template.includes(currentMessage), 'La vista DEV debe usar exactamente el mensaje de producción.');
+  assert.doesNotMatch(template, /Te confirmamos la asignación de prueba/);
+  assert.doesNotMatch(html, /Responde CONFIRMADO para validar la recepción/);
+  assert.doesNotMatch(template, /api\/asignacion-template/);
 });
 
 test('las constantes aíslan solicitud y marcaciones manuales', () => {
