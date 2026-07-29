@@ -320,7 +320,7 @@ function ensureDaily(summary, dateKey) {
   return summary.daily.get(dateKey);
 }
 
-export function minutesToDecimalHours(minutes, decimals = 4) {
+export function minutesToDecimalHours(minutes, decimals = 2) {
   const value = Number(minutes);
   if (!Number.isFinite(value)) return 0;
   return Number((value / 60).toFixed(decimals));

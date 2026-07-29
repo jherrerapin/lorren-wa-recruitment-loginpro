@@ -73,7 +73,7 @@ test('conserva minutos y convierte 7 h 30 min en 7.5 horas', () => {
   assert.equal(result.rows[0].overtimeMinutes, 30);
   assert.equal(result.rows[0].conceptMinutes.HEDO, 30);
   assert.equal(result.rows[0].totalHours, 7.5);
-  assert.equal(minutesToDecimalHours(455), 7.5833);
+  assert.equal(minutesToDecimalHours(455), 7.58);
 });
 
 test('separa recargo nocturno ordinario desde las 7 p. m.', () => {
