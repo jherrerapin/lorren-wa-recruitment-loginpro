@@ -37,22 +37,24 @@ function requireDev(req, res, next) {
   return next();
 }
 
-async function requireTestWorkspaceAccess(req, res, next) {
-  if (!roleFromRequest(req)) return res.redirect('/login');
-  try {
-    const access = await resolveTestWorkspaceFeatureAccess(req.app.locals.prisma || null, {
-      userRole: roleFromRequest(req),
-      userId: req.session?.userId || req.userId,
-      username: req.session?.username || req.username
-    });
-    if (!access.allowed) return res.status(403).send('No tienes permiso para acceder al entorno de pruebas.');
-    req.canAccessTestWorkspace = true;
-    if (req.session) req.session.canAccessTestWorkspace = true;
-    return next();
-  } catch (error) {
-    console.error('[TEST_WORKSPACE_ACCESS_FAILED]', error);
-    return res.status(503).send('No fue posible comprobar el permiso del entorno de pruebas.');
-  }
+function requireTestWorkspaceAccess(prisma) {
+  return async (req, res, next) => {
+    if (!roleFromRequest(req)) return res.redirect('/login');
+    try {
+      const access = await resolveTestWorkspaceFeatureAccess(prisma, {
+        userRole: roleFromRequest(req),
+        userId: req.session?.userId || req.userId,
+        username: req.session?.username || req.username
+      });
+      if (!access.allowed) return res.status(403).send('No tienes permiso para acceder al entorno de pruebas.');
+      req.canAccessTestWorkspace = true;
+      if (req.session) req.session.canAccessTestWorkspace = true;
+      return next();
+    } catch (error) {
+      console.error('[TEST_WORKSPACE_ACCESS_FAILED]', error);
+      return res.status(503).send('No fue posible comprobar el permiso del entorno de pruebas.');
+    }
+  };
 }
 
 function actor(req) {
@@ -156,11 +158,6 @@ export function dispatchDevPayrollTestRouter(prisma) {
   const formParser = express.urlencoded({ extended: true, limit: '32kb' });
   const jsonParser = express.json({ limit: '16kb', strict: true });
 
-  router.use((req, _res, next) => {
-    req.app.locals.prisma = prisma;
-    next();
-  });
-
   router.get('/api/users/:userId/access', requireDev, async (req, res) => {
     noStore(res);
     try {
@@ -204,22 +201,27 @@ export function dispatchDevPayrollTestRouter(prisma) {
     }
   });
 
-  router.use(requireTestWorkspaceAccess);
+  router.use(requireTestWorkspaceAccess(prisma));
 
   router.get('/', async (req, res) => {
-    const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
-    const role = roleFromRequest(req);
-    return res.render('operacionesPruebasNomina', {
-      pageTitle: 'Entorno de pruebas de asistencia y nómina',
-      role,
-      canUseTestWhatsapp: role === 'dev',
-      workspace,
-      message: normalizeString(req.query.message),
-      error: normalizeString(req.query.error),
-      formatBogotaDateTimeLocal,
-      defaultDevTestTimes,
-      testRequestSource: DEV_TEST_REQUEST_SOURCE
-    });
+    try {
+      const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
+      const role = roleFromRequest(req);
+      return res.render('operacionesPruebasNominaV2', {
+        pageTitle: 'Entorno de pruebas de asistencia y nómina',
+        role,
+        canUseTestWhatsapp: role === 'dev',
+        workspace,
+        message: normalizeString(req.query.message),
+        error: normalizeString(req.query.error),
+        formatBogotaDateTimeLocal,
+        defaultDevTestTimes,
+        testRequestSource: DEV_TEST_REQUEST_SOURCE
+      });
+    } catch (error) {
+      console.error('[TEST_WORKSPACE_LOAD_FAILED]', error);
+      return res.status(500).send('No fue posible cargar el entorno de pruebas.');
+    }
   });
 
   router.get('/whatsapp', requireDev, async (req, res) => {
