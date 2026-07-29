@@ -1,9 +1,20 @@
+<% const waTitle = typeof whatsappTitle === 'string' && whatsappTitle ? whatsappTitle : 'WhatsApp de despacho';
+   const waEyebrow = typeof whatsappEyebrow === 'string' && whatsappEyebrow ? whatsappEyebrow : 'Operaciones / Despacho';
+   const waDescription = typeof whatsappDescription === 'string' && whatsappDescription ? whatsappDescription : 'Gestiona la conexión visual de la línea usada para enviar notificaciones de despacho.';
+   const waStatusEndpoint = typeof statusEndpoint === 'string' && statusEndpoint ? statusEndpoint : '/admin/operaciones/whatsapp/estado';
+   const waCloseEndpoint = typeof closeSessionEndpoint === 'string' && closeSessionEndpoint ? closeSessionEndpoint : '/admin/operaciones/whatsapp/cerrar-sesion';
+   const waBackUrl = typeof backUrl === 'string' && backUrl ? backUrl : '/admin/operaciones';
+   const waBackLabel = typeof backLabel === 'string' && backLabel ? backLabel : 'Volver a Operaciones';
+   const waAssignmentUrl = typeof assignmentUrl === 'string' && assignmentUrl ? assignmentUrl : '/admin/operaciones/asignaciones';
+   const waAssignmentLabel = typeof assignmentLabel === 'string' && assignmentLabel ? assignmentLabel : 'Asignaciones';
+   const technicalErrorValue = typeof technicalLastError === 'string' ? technicalLastError : null;
+%>
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WhatsApp de despacho — LoginPro</title>
+  <title><%= waTitle %> — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
@@ -37,15 +48,15 @@
   <main class="page">
     <section class="hero">
       <div>
-        <div class="eyebrow">Operaciones / Despacho</div>
-        <h1>WhatsApp de despacho</h1>
-        <p>Gestiona la conexión visual de la línea usada para enviar notificaciones de despacho.</p>
+        <div class="eyebrow"><%= waEyebrow %></div>
+        <h1><%= waTitle %></h1>
+        <p><%= waDescription %></p>
       </div>
       <div class="actions">
-        <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
-        <a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a>
+        <a class="btn" href="<%= waBackUrl %>"><%= waBackLabel %></a>
+        <a class="btn" href="<%= waAssignmentUrl %>"><%= waAssignmentLabel %></a>
         <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
-        <form class="inline-action-form" method="post" action="/admin/operaciones/whatsapp/cerrar-sesion" onsubmit="return confirm('¿Cerrar la sesión de WhatsApp despacho? Tendrás que escanear un nuevo QR para reconectar.');">
+        <form class="inline-action-form" method="post" action="<%= waCloseEndpoint %>" onsubmit="return confirm('¿Cerrar esta sesión de WhatsApp? Tendrás que escanear un nuevo QR para reconectar.');">
           <button class="btn" type="submit">Cerrar sesión de WhatsApp</button>
         </form>
       </div>
@@ -56,33 +67,34 @@
     <section class="status-layout">
       <article class="status-card <%= ready ? 'connected' : '' %>" id="statusCard">
         <span class="status-label <%= ready ? 'connected' : lastError ? 'error' : '' %>" id="statusLabel"><%= ready ? 'Conectado' : lastError ? 'Requiere revisión' : 'No conectado' %></span>
-        <h2 id="statusTitle"><%= ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión' %></h2>
+        <h2 id="statusTitle"><%= ready ? `${waTitle} conectado` : 'Sesión pendiente de conexión' %></h2>
         <p class="muted-strong" id="readyAt" <%= lastReadyAt ? '' : 'hidden' %>>Conectado desde: <span data-raw-ready-at="<%= lastReadyAt || '' %>"><%= lastReadyAt || '' %></span></p>
-        <p>Esta pantalla permite vincular y revisar la conexión de WhatsApp de despacho para enviar mensajes desde el panel.</p>
+        <p><%= waDescription %></p>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
         <% if (role === 'dev') { %>
-          <details class="technical-box" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>>
+          <details class="technical-box" id="technicalDetails" <%= technicalErrorValue ? '' : 'hidden' %>>
             <summary>Detalle técnico para dev</summary>
-            <div id="technicalError"><%= technicalLastError || '' %></div>
+            <div id="technicalError"><%= technicalErrorValue || '' %></div>
+            <% if (typeof authDataPath === 'string' && authDataPath) { %><div style="margin-top:8px">Sesión: <%= authDataPath %> · <%= authStorageMode || 'Sin definir' %></div><% } %>
           </details>
         <% } %>
       </article>
 
       <article class="status-card qr-panel" id="qrPanel">
         <div id="connectedMessage" <%= ready ? '' : 'hidden' %>>
-          <h2>WhatsApp de despacho conectado</h2>
-          <p class="muted-strong">Ya puedes volver a asignaciones y enviar mensajes.</p>
+          <h2><%= waTitle %> conectado</h2>
+          <p class="muted-strong">Ya puedes volver al entorno correspondiente y enviar mensajes.</p>
         </div>
         <div id="qrContainer" <%= !ready && qrImage ? '' : 'hidden' %>>
-          <img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de WhatsApp despacho" />
-          <p class="muted-strong">Escanea este QR desde el celular de despacho para vincular la sesión.</p>
+          <img class="qr-image" id="qrImage" src="<%= qrImage || '' %>" alt="QR de vinculación de <%= waTitle %>" />
+          <p class="muted-strong">Escanea este QR desde el celular que utilizarás para esta sesión.</p>
         </div>
         <div id="waitingQr" <%= !ready && !qrImage && !lastError ? '' : 'hidden' %>>
           <h2>Preparando conexión...</h2>
           <p class="muted-strong">La pantalla se actualiza automáticamente cada 3 segundos.</p>
         </div>
         <div class="info-box" id="unavailableBox" <%= !ready && !qrImage && lastError ? '' : 'hidden' %>>
-          La conexión aún no está disponible. Actualiza el estado en unos segundos. Si continúa igual, avisa al responsable técnico.
+          La conexión aún no está disponible. Actualiza el estado en unos segundos y revisa el detalle técnico si continúa igual.
         </div>
       </article>
     </section>
@@ -90,7 +102,9 @@
 
   <script>
     const isDev = <%= role === 'dev' ? 'true' : 'false' %>;
-    const fallbackOperationalError = 'La conexión de WhatsApp de despacho no está disponible en este momento. Actualiza el estado o contacta al responsable técnico.';
+    const statusEndpoint = <%- JSON.stringify(waStatusEndpoint) %>;
+    const connectedTitle = <%- JSON.stringify(`${waTitle} conectado`) %>;
+    const fallbackOperationalError = <%- JSON.stringify(`La conexión de ${waTitle} no está disponible en este momento.`) %>;
     const statusLabel = document.getElementById('statusLabel');
     const statusTitle = document.getElementById('statusTitle');
     const statusCard = document.getElementById('statusCard');
@@ -132,11 +146,10 @@
     function setHidden(element, hidden) { if (element) element.hidden = hidden; }
     function renderStatus(data) {
       const hasError = Boolean(data.lastError || data.technicalLastError);
-      const isPreparingConnection = Boolean(data.initializing || data.reconnecting);
       statusLabel.textContent = data.ready ? 'Conectado' : hasError ? 'Requiere revisión' : 'No conectado';
       statusLabel.className = 'status-label ' + (data.ready ? 'connected' : hasError ? 'error' : '');
       statusCard.classList.toggle('connected', Boolean(data.ready));
-      statusTitle.textContent = data.ready ? 'WhatsApp de despacho conectado' : 'Sesión pendiente de conexión';
+      statusTitle.textContent = data.ready ? connectedTitle : 'Sesión pendiente de conexión';
       renderReadyAt(data.lastReadyAt);
       setHidden(errorBox, !hasError);
       if (errorBox) errorBox.textContent = hasError ? (data.lastError || fallbackOperationalError) : '';
@@ -148,20 +161,10 @@
       setHidden(unavailableBox, data.ready || Boolean(data.qrImage) || !hasError);
       if (data.qrImage && qrImage && qrImage.src !== data.qrImage) qrImage.src = data.qrImage;
     }
-    function renderStatusError() {
-      renderStatus({
-        ready: false,
-        initializing: false,
-        reconnecting: false,
-        qrImage: null,
-        lastError: fallbackOperationalError,
-        technicalLastError: null,
-        lastReadyAt: null
-      });
-    }
+
     async function refreshStatus() {
       try {
-        const response = await fetch('/admin/operaciones/whatsapp/estado', {
+        const response = await fetch(statusEndpoint, {
           cache: 'no-store',
           credentials: 'same-origin',
           headers: { Accept: 'application/json' }
@@ -169,10 +172,11 @@
         if (!response.ok) throw new Error(`Estado HTTP ${response.status}`);
         renderStatus(await response.json());
       } catch (error) {
-        console.error('No fue posible consultar el estado de WhatsApp despacho.', error);
-        renderStatusError();
+        console.error('No fue posible consultar el estado de WhatsApp.', error);
+        renderStatus({ ready: false, qrImage: null, lastError: fallbackOperationalError, technicalLastError: null, lastReadyAt: null });
       }
     }
+
     document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);
     renderReadyAt(readyAtText?.dataset.rawReadyAt || readyAtText?.textContent || '');
     refreshStatus();
