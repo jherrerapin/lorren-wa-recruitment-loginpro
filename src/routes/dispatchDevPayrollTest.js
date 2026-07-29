@@ -15,6 +15,8 @@ import {
   sendDispatchTestWhatsappMessage
 } from '../services/dispatchWhatsappWebTestService.js';
 
+const ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES = ['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED'];
+
 function normalizeString(value, maxLength = 300) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
@@ -101,9 +103,22 @@ function publicError(error) {
   return messages[error?.message] || 'No fue posible completar la prueba de nómina.';
 }
 
+function normalizeWorkspaceAvailability(workspace) {
+  const assignedWorkerIds = new Set((workspace.selectedRequest?.assignments || [])
+    .filter((assignment) => ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES.includes(assignment.status))
+    .map((assignment) => assignment.workerId));
+  return {
+    ...workspace,
+    availableWorkers: (workspace.testWorkers || []).filter((worker) => !assignedWorkerIds.has(worker.id))
+  };
+}
+
 async function recalculateTestRequestStatus(prisma, request) {
   const assignedCount = await prisma.dispatchAssignment.count({
-    where: { serviceRequestId: request.id, status: 'DEV_TEST_ASSIGNED' }
+    where: {
+      serviceRequestId: request.id,
+      status: { in: ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES }
+    }
   });
   const status = assignedCount === 0
     ? 'DEV_TEST_PENDING'
@@ -122,7 +137,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
   router.use(requireDev);
 
   router.get('/', async (req, res) => {
-    const workspace = await loadDevTestWorkspace(prisma, req.query || {});
+    const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
     return res.render('operacionesPruebasNomina', {
       pageTitle: 'Pruebas DEV de asistencia y nómina',
       role: 'dev',
@@ -206,6 +221,10 @@ export function dispatchDevPayrollTestRouter(prisma) {
         serviceRequestId: req.params.serviceRequestId,
         workerId: req.body.workerId
       }, actor(req));
+      const request = await prisma.dispatchServiceRequest.findUnique({
+        where: { id: req.params.serviceRequestId }
+      });
+      if (request?.source === DEV_TEST_REQUEST_SOURCE) await recalculateTestRequestStatus(prisma, request);
       return redirectWorkspace(res, req.params.serviceRequestId, {
         message: 'Sujeto de prueba asignado y confirmado.'
       });
