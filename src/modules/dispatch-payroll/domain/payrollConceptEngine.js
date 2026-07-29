@@ -9,6 +9,8 @@ export const PAYROLL_COMPENSATION_STATUS = Object.freeze({
   NOT_COMPENSATED: 'NOT_COMPENSATED'
 });
 
+export const MIN_OVERTIME_RECOGNITION_MINUTES = 30;
+
 export const DEFAULT_PAYROLL_POLICY = Object.freeze({
   weeklyOrdinaryMinutes: 42 * 60,
   dailyOrdinaryMinutes: 7 * 60,
@@ -291,6 +293,7 @@ function ensureWorkerSummary(map, identity) {
       totalMinutes: 0,
       ordinaryMinutes: 0,
       overtimeMinutes: 0,
+      unrecognizedOvertimeMinutes: 0,
       conceptMinutes: emptyConceptMinutes(),
       daily: new Map(),
       novelties: []
@@ -306,6 +309,7 @@ function ensureDaily(summary, dateKey) {
       totalMinutes: 0,
       ordinaryMinutes: 0,
       overtimeMinutes: 0,
+      unrecognizedOvertimeMinutes: 0,
       conceptMinutes: emptyConceptMinutes(),
       clientNames: new Set(),
       operationNames: new Set(),
@@ -365,8 +369,8 @@ export function calculatePayrollConceptReport(input = {}) {
     const seenMinutes = new Set();
     const dailyOrdinary = new Map();
     const weeklyOrdinary = new Map();
-    const dailyOvertime = new Map();
-    const weeklyOvertime = new Map();
+    const rawDailyOvertime = new Map();
+    const classifiedRecords = [];
     const workerNovelties = reportNoveltyMap.get(workerId) || [];
     const identity = rawRecords[0]?.worker || { workerId, fullName: 'Auxiliar sin nombre', documentType: '', documentNumber: '', phone: '' };
     const summary = ensureWorkerSummary(summaries, identity);
@@ -390,14 +394,42 @@ export function calculatePayrollConceptReport(input = {}) {
       const weekKey = payrollWeekStartKey(parts.dateKey, record.policy.weekStartsOn);
       const dayOrdinary = dailyOrdinary.get(workdayKey) || 0;
       const weekOrdinary = weeklyOrdinary.get(weekKey) || 0;
-      const overtime = dayOrdinary >= record.policy.dailyOrdinaryMinutes
+      const rawOvertime = dayOrdinary >= record.policy.dailyOrdinaryMinutes
         || weekOrdinary >= record.policy.weeklyOrdinaryMinutes;
-      if (overtime) {
-        dailyOvertime.set(workdayKey, (dailyOvertime.get(workdayKey) || 0) + 1);
-        weeklyOvertime.set(weekKey, (weeklyOvertime.get(weekKey) || 0) + 1);
+      if (rawOvertime) {
+        rawDailyOvertime.set(workdayKey, (rawDailyOvertime.get(workdayKey) || 0) + 1);
       } else {
         dailyOrdinary.set(workdayKey, dayOrdinary + 1);
         weeklyOrdinary.set(weekKey, weekOrdinary + 1);
+      }
+      classifiedRecords.push({ ...record, parts, workdayKey, weekKey, rawOvertime });
+    }
+
+    const recognizedOvertimeWorkdays = new Set(
+      [...rawDailyOvertime.entries()]
+        .filter(([, minutes]) => minutes >= MIN_OVERTIME_RECOGNITION_MINUTES)
+        .map(([workdayKey]) => workdayKey)
+    );
+    const recognizedDailyOvertime = new Map();
+    const recognizedWeeklyOvertime = new Map();
+
+    for (const [workdayKey, minutes] of rawDailyOvertime) {
+      if (minutes >= MIN_OVERTIME_RECOGNITION_MINUTES) continue;
+      pushNovelty(summary.novelties, 'OVERTIME_BELOW_MINIMUM', `El exceso de ${minutes} minuto(s) no alcanzó el mínimo de ${MIN_OVERTIME_RECOGNITION_MINUTES} minutos para reconocerse como hora extra.`, {
+        dateKey: workdayKey,
+        blocking: false,
+        overtimeMinutes: minutes,
+        minimumMinutes: MIN_OVERTIME_RECOGNITION_MINUTES
+      });
+    }
+
+    for (const record of classifiedRecords) {
+      const { parts, workdayKey, weekKey, rawOvertime } = record;
+      const overtime = rawOvertime && recognizedOvertimeWorkdays.has(workdayKey);
+      const unrecognizedOvertime = rawOvertime && !overtime;
+      if (overtime) {
+        recognizedDailyOvertime.set(workdayKey, (recognizedDailyOvertime.get(workdayKey) || 0) + 1);
+        recognizedWeeklyOvertime.set(weekKey, (recognizedWeeklyOvertime.get(weekKey) || 0) + 1);
       }
 
       if (!inRange(parts.dateKey, range)) continue;
@@ -411,16 +443,20 @@ export function calculatePayrollConceptReport(input = {}) {
       const compensationStatus = compensationStatusFor(compensationByWorkerDate, workerId, parts.dateKey);
       const compensated = compensationStatus === PAYROLL_COMPENSATION_STATUS.COMPENSATED;
       const night = isNightMinute(parts.hour * 60 + parts.minute, record.policy);
-      const concept = conceptForMinute({ overtime, night, holiday, rest, compensated });
+      const concept = unrecognizedOvertime
+        ? null
+        : conceptForMinute({ overtime, night, holiday, rest, compensated });
 
       summary.totalMinutes += 1;
       if (overtime) summary.overtimeMinutes += 1;
+      else if (unrecognizedOvertime) summary.unrecognizedOvertimeMinutes += 1;
       else summary.ordinaryMinutes += 1;
       if (concept) summary.conceptMinutes[concept] += 1;
 
       const daily = ensureDaily(summary, parts.dateKey);
       daily.totalMinutes += 1;
       if (overtime) daily.overtimeMinutes += 1;
+      else if (unrecognizedOvertime) daily.unrecognizedOvertimeMinutes += 1;
       else daily.ordinaryMinutes += 1;
       if (concept) daily.conceptMinutes[concept] += 1;
       daily.clientNames.add(record.client.clientName);
@@ -437,7 +473,7 @@ export function calculatePayrollConceptReport(input = {}) {
       }
     }
 
-    for (const [dateKey, minutes] of dailyOvertime) {
+    for (const [dateKey, minutes] of recognizedDailyOvertime) {
       const policy = rawRecords.find((record) => record.workdayKey === dateKey)?.policy || DEFAULT_PAYROLL_POLICY;
       if (minutes > policy.maxDailyOvertimeMinutes) {
         pushNovelty(summary.novelties, 'DAILY_OVERTIME_LIMIT_EXCEEDED', 'Las horas extra del día superan el límite configurado.', {
@@ -447,7 +483,7 @@ export function calculatePayrollConceptReport(input = {}) {
         });
       }
     }
-    for (const [weekKey, minutes] of weeklyOvertime) {
+    for (const [weekKey, minutes] of recognizedWeeklyOvertime) {
       const policy = rawRecords.find((record) => payrollWeekStartKey(bogotaDateKey(record.timestamp), record.policy.weekStartsOn) === weekKey)?.policy || DEFAULT_PAYROLL_POLICY;
       if (minutes > policy.maxWeeklyOvertimeMinutes) {
         pushNovelty(summary.novelties, 'WEEKLY_OVERTIME_LIMIT_EXCEEDED', 'Las horas extra de la semana superan el límite configurado.', {
@@ -466,6 +502,7 @@ export function calculatePayrollConceptReport(input = {}) {
       totalHours: minutesToDecimalHours(summary.totalMinutes),
       ordinaryHours: minutesToDecimalHours(summary.ordinaryMinutes),
       overtimeHours: minutesToDecimalHours(summary.overtimeMinutes),
+      unrecognizedOvertimeHours: minutesToDecimalHours(summary.unrecognizedOvertimeMinutes),
       daily: [...summary.daily.values()]
         .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
         .map((daily) => ({
@@ -475,7 +512,8 @@ export function calculatePayrollConceptReport(input = {}) {
           conceptHours: Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(daily.conceptMinutes[code])])),
           totalHours: minutesToDecimalHours(daily.totalMinutes),
           ordinaryHours: minutesToDecimalHours(daily.ordinaryMinutes),
-          overtimeHours: minutesToDecimalHours(daily.overtimeMinutes)
+          overtimeHours: minutesToDecimalHours(daily.overtimeMinutes),
+          unrecognizedOvertimeHours: minutesToDecimalHours(daily.unrecognizedOvertimeMinutes)
         })),
       status: summary.novelties.some((item) => item.blocking) ? 'CON_NOVEDADES' : 'CALCULADO',
       exportable: !summary.novelties.some((item) => item.blocking)
@@ -487,6 +525,7 @@ export function calculatePayrollConceptReport(input = {}) {
     totalMinutes: rows.reduce((sum, row) => sum + row.totalMinutes, 0),
     ordinaryMinutes: rows.reduce((sum, row) => sum + row.ordinaryMinutes, 0),
     overtimeMinutes: rows.reduce((sum, row) => sum + row.overtimeMinutes, 0),
+    unrecognizedOvertimeMinutes: rows.reduce((sum, row) => sum + row.unrecognizedOvertimeMinutes, 0),
     exportableWorkers: rows.filter((row) => row.exportable).length,
     workersWithNovelties: rows.filter((row) => !row.exportable).length,
     conceptMinutes: emptyConceptMinutes()
@@ -497,6 +536,7 @@ export function calculatePayrollConceptReport(input = {}) {
   totals.totalHours = minutesToDecimalHours(totals.totalMinutes);
   totals.ordinaryHours = minutesToDecimalHours(totals.ordinaryMinutes);
   totals.overtimeHours = minutesToDecimalHours(totals.overtimeMinutes);
+  totals.unrecognizedOvertimeHours = minutesToDecimalHours(totals.unrecognizedOvertimeMinutes);
   totals.conceptHours = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(totals.conceptMinutes[code])]));
 
   return { range, rows, totals, conceptCodes: PAYROLL_CONCEPT_CODES };
