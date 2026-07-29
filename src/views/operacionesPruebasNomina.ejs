@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    .test-page{max-width:1500px}.test-layout{display:grid;grid-template-columns:minmax(300px,.65fr) minmax(0,1.35fr);gap:16px;align-items:start}.test-badge{display:inline-flex;padding:4px 9px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:900}.request-list{display:grid;gap:8px;max-height:70vh;overflow:auto}.request-card{display:block;text-decoration:none;color:inherit;border:1px solid var(--border);border-radius:12px;padding:11px;background:#fff}.request-card.active{border-color:#7c3aed;background:#f5f3ff}.request-card strong{display:block;color:var(--navy);margin-bottom:4px}.request-card small{display:block;color:var(--muted);line-height:1.45}.assignment-grid{display:grid;gap:14px}.assignment-card{border:1px solid var(--border);border-radius:14px;padding:14px;background:#fff}.assignment-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}.manual-grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin-top:12px}.manual-grid .full{grid-column:1/-1}.field small{color:var(--muted);font-size:11px;line-height:1.4}.test-note{border:1px solid #c4b5fd;background:#f5f3ff;color:#5b21b6;border-radius:10px;padding:11px 13px;line-height:1.5}.empty-test{padding:24px;text-align:center;color:var(--muted)}.assign-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end}.danger-btn{border-color:#fecaca!important;color:#b91c1c!important;background:#fff5f5!important}.payroll-link{background:#1d4ed8!important;border-color:#1d4ed8!important;color:#fff!important}@media(max-width:900px){.test-layout{grid-template-columns:1fr}.request-list{max-height:none}.manual-grid,.assign-row{grid-template-columns:1fr}.manual-grid .full{grid-column:1}}
+    .test-page{max-width:1500px}.test-layout{display:grid;grid-template-columns:minmax(300px,.65fr) minmax(0,1.35fr);gap:16px;align-items:start}.test-badge{display:inline-flex;padding:4px 9px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:900}.request-list{display:grid;gap:8px;max-height:70vh;overflow:auto}.request-card{display:block;text-decoration:none;color:inherit;border:1px solid var(--border);border-radius:12px;padding:11px;background:#fff}.request-card.active{border-color:#7c3aed;background:#f5f3ff}.request-card strong{display:block;color:var(--navy);margin-bottom:4px}.request-card small{display:block;color:var(--muted);line-height:1.45}.assignment-grid{display:grid;gap:14px}.assignment-card{border:1px solid var(--border);border-radius:14px;padding:14px;background:#fff}.assignment-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}.manual-grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin-top:12px}.manual-grid .full{grid-column:1/-1}.field small{color:var(--muted);font-size:11px;line-height:1.4}.test-note{border:1px solid #c4b5fd;background:#f5f3ff;color:#5b21b6;border-radius:10px;padding:11px 13px;line-height:1.5}.empty-test{padding:24px;text-align:center;color:var(--muted)}.assign-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end}.danger-btn{border-color:#fecaca!important;color:#b91c1c!important;background:#fff5f5!important}.payroll-link{background:#1d4ed8!important;border-color:#1d4ed8!important;color:#fff!important}.wa-link{background:#15803d!important;border-color:#15803d!important;color:#fff!important}.wa-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.wa-dot{width:10px;height:10px;border-radius:50%;background:#dc2626}.wa-dot.ready{background:#16a34a}.wa-form{margin-top:12px;border-top:1px solid var(--border);padding-top:12px;display:grid;gap:8px}.wa-form textarea{width:100%;min-height:82px;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;resize:vertical}.preview-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-top:12px}.preview-metric{border:1px solid var(--border);border-radius:10px;padding:10px;background:#f8fafc}.preview-metric small{display:block;color:var(--muted);font-size:10px;font-weight:900;text-transform:uppercase}.preview-metric strong{display:block;color:var(--navy);font-size:19px;margin-top:4px}.preview-table{overflow:auto;margin-top:12px;border:1px solid var(--border);border-radius:10px}.preview-table table{border-collapse:collapse;width:max-content;min-width:100%}.preview-table th,.preview-table td{padding:8px;border-bottom:1px solid #edf2f7;text-align:right;white-space:nowrap;font-size:12px}.preview-table th:first-child,.preview-table td:first-child{text-align:left}.preview-table th{background:#f8fafc;color:var(--muted);font-size:10px}.preview-warning{border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:10px;padding:11px;margin-top:12px}.concept-list{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.concept-pill{border-radius:999px;padding:3px 7px;background:#dbeafe;color:#1d4ed8;font-size:10px;font-weight:900}@media(max-width:900px){.test-layout{grid-template-columns:1fr}.request-list{max-height:none}.manual-grid,.assign-row{grid-template-columns:1fr}.manual-grid .full{grid-column:1}.preview-metrics{grid-template-columns:repeat(2,1fr)}}
   </style>
 </head>
 <body>
@@ -24,18 +24,28 @@
     <section class="hero">
       <div>
         <div class="eyebrow">Exclusivo DEV</div>
-        <h1>Pruebas de asistencia y nómina</h1>
-        <p>Crea solicitudes aisladas, asigna únicamente sujetos de prueba y registra horarios manuales para validar los conceptos.</p>
+        <h1>Pruebas de asistencia, nómina y WhatsApp</h1>
+        <p>Crea solicitudes aisladas, registra horarios manuales y prueba mensajes y confirmaciones con una segunda cuenta.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/solicitudes">Crear otra solicitud</a>
         <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?includeTest=true">Abrir Nómina con pruebas</a>
+        <a class="btn wa-link" href="/admin/operaciones/pruebas/whatsapp">Vincular WhatsApp de prueba</a>
       </div>
     </section>
 
     <% if (message) { %><div class="section-note"><%= message %></div><% } %>
     <% if (error) { %><div class="section-note" style="border-color:#fecaca;background:#fff5f5;color:#b91c1c"><%= error %></div><% } %>
-    <div class="test-note"><strong>Aislamiento aplicado:</strong> estas solicitudes usan <code><%= testRequestSource %></code>, no autoasignan personal real, no envían notificaciones y no aparecen en Nómina normal. DEV debe abrir el reporte con datos de prueba.</div>
+    <div class="test-note"><strong>Aislamiento aplicado:</strong> estas solicitudes usan <code><%= testRequestSource %></code>. El cálculo usa el motor real de Nómina, pero los datos y la segunda sesión de WhatsApp no se mezclan con la operación.</div>
+
+    <section class="card">
+      <div class="card-body wa-status">
+        <span class="wa-dot <%= testWhatsappStatus?.ready ? 'ready' : '' %>"></span>
+        <strong>WhatsApp de prueba: <%= testWhatsappStatus?.ready ? 'conectado' : testWhatsappStatus?.initializing ? 'iniciando' : 'no conectado' %></strong>
+        <span class="muted">Cuenta y almacenamiento separados de WhatsApp de despacho.</span>
+        <a class="btn" href="/admin/operaciones/pruebas/whatsapp"><%= testWhatsappStatus?.ready ? 'Ver conexión' : 'Escanear QR' %></a>
+      </div>
+    </section>
 
     <section class="test-layout">
       <aside class="card">
@@ -63,17 +73,19 @@
           <div class="card"><div class="empty-test">Crea una solicitud con el check de prueba o selecciona una existente.</div></div>
         <% } else {
           const selectedDate = selected.serviceDate ? new Date(selected.serviceDate).toISOString().slice(0,10) : '';
+          const previewFrom = payrollPreview?.period?.from || selectedDate;
+          const previewTo = payrollPreview?.period?.to || selectedDate;
         %>
           <section class="card">
             <div class="card-body">
               <div class="assignment-head">
                 <div><span class="test-badge">SOLICITUD AISLADA</span><h2 style="margin-top:8px"><%= selected.clientName %> · <%= selected.operationPointName || 'Sin operación' %></h2><p class="muted"><%= selectedDate %> · <%= selected.startTime || '—' %><%= selected.endTime ? ` - ${selected.endTime}` : '' %> · <%= selected.requiredWorkers %> auxiliar(es)</p></div>
-                <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?periodType=CUSTOM&from=<%= selectedDate %>&to=<%= selectedDate %>&clientId=<%= selected.operationPoint?.clientId || '' %>&includeTest=true">Calcular esta fecha</a>
+                <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?periodType=CUSTOM&from=<%= previewFrom %>&to=<%= previewTo %>&operationPointId=<%= selected.operationPointId %>&includeTest=true">Abrir detalle en Nómina</a>
               </div>
 
               <form class="assign-row" method="post" action="/admin/operaciones/pruebas/solicitudes/<%= selected.id %>/asignar" style="margin-top:14px">
                 <div class="field"><label>Sujeto de prueba</label><select name="workerId" required><option value="">Selecciona</option><% for (const worker of workspace.availableWorkers) { %><option value="<%= worker.id %>"><%= worker.fullName %><%= worker.documentNumber ? ` · ${worker.documentNumber}` : '' %></option><% } %></select><small>Solo aparecen auxiliares con <code>isTestProfile=true</code>.</small></div>
-                <button class="btn btn-primary" type="submit" <%= workspace.availableWorkers.length ? '' : 'disabled' %>>Asignar y confirmar</button>
+                <button class="btn btn-primary" type="submit" <%= workspace.availableWorkers.length ? '' : 'disabled' %>>Asignar</button>
               </form>
             </div>
           </section>
@@ -87,12 +99,13 @@
             const breakStartValue = formatBogotaDateTimeLocal(mark('BREAK_START')?.clientCapturedAt || mark('BREAK_START')?.serverReceivedAt) || defaults.breakStartAt;
             const breakEndValue = formatBogotaDateTimeLocal(mark('BREAK_END')?.clientCapturedAt || mark('BREAK_END')?.serverReceivedAt) || defaults.breakEndAt;
             const departureValue = formatBogotaDateTimeLocal(session?.departureReportedAt) || defaults.departureAt;
+            const whatsappMessage = `Hola ${assignment.worker.fullName}, te confirmamos una asignación de prueba para ${selectedDate} en ${selected.operationPointName || 'la operación'}. Hora: ${selected.startTime || 'por definir'}. Por favor confirma recibido.`;
           %>
             <article class="assignment-card">
               <div class="assignment-head">
                 <div><h2><%= assignment.worker.fullName %></h2><p class="muted"><%= assignment.worker.documentNumber || 'Sin documento' %> · Estado <%= assignment.status %></p></div>
                 <div class="actions">
-                  <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?periodType=CUSTOM&from=<%= selectedDate %>&to=<%= selectedDate %>&clientId=<%= selected.operationPoint?.clientId || '' %>&workerId=<%= assignment.worker.id %>&includeTest=true">Ver resultado</a>
+                  <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?periodType=CUSTOM&from=<%= previewFrom %>&to=<%= previewTo %>&operationPointId=<%= selected.operationPointId %>&workerId=<%= assignment.worker.id %>&includeTest=true">Ver resultado completo</a>
                   <form method="post" action="/admin/operaciones/pruebas/asignaciones/<%= assignment.id %>/quitar"><input type="hidden" name="serviceRequestId" value="<%= selected.id %>" /><button class="btn danger-btn" type="submit">Quitar</button></form>
                 </div>
               </div>
@@ -106,10 +119,47 @@
                   <div class="field"><label>Salida de turno</label><input type="datetime-local" name="departureAt" value="<%= departureValue %>" required /></div>
                   <div class="field full"><label>Nota de la prueba</label><input name="notes" placeholder="Ejemplo: validar HENO y recargo dominical" /></div>
                 </div>
-                <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar jornada y recalcular</button></div>
+                <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar jornada y calcular</button></div>
+              </form>
+
+              <form class="wa-form" method="post" action="/admin/operaciones/pruebas/whatsapp/enviar">
+                <input type="hidden" name="serviceRequestId" value="<%= selected.id %>" />
+                <input type="hidden" name="assignmentId" value="<%= assignment.id %>" />
+                <input type="hidden" name="workerId" value="<%= assignment.worker.id %>" />
+                <input type="hidden" name="phone" value="<%= assignment.worker.phone || '' %>" />
+                <div class="field"><label>Mensaje desde WhatsApp de prueba</label><textarea name="message" required><%= whatsappMessage %></textarea><small>La respuesta “sí”, “confirmado”, “listo” u otra confirmación reconocida se procesa con la misma regla utilizada por Despacho.</small></div>
+                <div class="form-actions">
+                  <% if (!assignment.worker.phone) { %><span class="muted">El sujeto no tiene teléfono.</span><% } %>
+                  <% if (!testWhatsappStatus?.ready) { %><a class="btn" href="/admin/operaciones/pruebas/whatsapp">Vincular cuenta de prueba</a><% } %>
+                  <button class="btn wa-link" type="submit" <%= testWhatsappStatus?.ready && assignment.worker.phone ? '' : 'disabled' %>>Enviar prueba por WhatsApp</button>
+                </div>
               </form>
             </article>
           <% } %>
+
+          <section class="card">
+            <div class="card-body">
+              <div class="assignment-head">
+                <div><span class="test-badge">CÁLCULO REAL</span><h2 style="margin-top:8px">Resultado de Nómina de esta solicitud</h2><p class="muted">Periodo <%= previewFrom %> a <%= previewTo %>. Se actualiza al guardar cada jornada.</p></div>
+              </div>
+              <% if (!payrollPreview || !payrollPreview.rows.length) { %>
+                <div class="preview-warning"><strong>Sin resultado calculado.</strong> Jornadas completas detectadas: <%= payrollPreview?.recordedSessions || 0 %>. Guarda una entrada y salida válidas; si ya existen, esta advertencia indica un fallo real del flujo y no un filtro oculto.</div>
+              <% } else { %>
+                <div class="preview-metrics">
+                  <div class="preview-metric"><small>Auxiliares</small><strong><%= payrollPreview.totals.workers %></strong></div>
+                  <div class="preview-metric"><small>Total trabajado</small><strong><%= formatPayrollMinutes(payrollPreview.totals.totalMinutes) %></strong></div>
+                  <div class="preview-metric"><small>Ordinario</small><strong><%= formatPayrollMinutes(payrollPreview.totals.ordinaryMinutes) %></strong></div>
+                  <div class="preview-metric"><small>Extra</small><strong><%= formatPayrollMinutes(payrollPreview.totals.overtimeMinutes) %></strong></div>
+                  <div class="preview-metric"><small>Con novedades</small><strong><%= payrollPreview.totals.workersWithNovelties %></strong></div>
+                </div>
+                <div class="preview-table"><table><thead><tr><th>Auxiliar</th><th>Total</th><th>Ordinarias</th><th>Extra</th><th>Conceptos calculados</th><th>Estado</th></tr></thead><tbody>
+                  <% for (const row of payrollPreview.rows) { const activeConcepts = conceptCodes.filter((code) => Number(row.conceptMinutes?.[code]) > 0); %>
+                    <tr><td><strong><%= row.fullName %></strong><br><small><%= row.documentNumber || 'Sin documento' %></small></td><td><%= formatPayrollMinutes(row.totalMinutes) %></td><td><%= formatPayrollMinutes(row.ordinaryMinutes) %></td><td><%= formatPayrollMinutes(row.overtimeMinutes) %></td><td><div class="concept-list"><% if (!activeConcepts.length) { %><span class="muted">Sin recargos</span><% } %><% for (const code of activeConcepts) { %><span class="concept-pill"><%= code %>: <%= formatPayrollMinutes(row.conceptMinutes[code]) %></span><% } %></div></td><td><%= row.status %></td></tr>
+                  <% } %>
+                </tbody></table></div>
+              <% } %>
+            </div>
+          </section>
         <% } %>
       </section>
     </section>
