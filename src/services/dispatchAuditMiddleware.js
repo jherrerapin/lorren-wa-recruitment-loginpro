@@ -1,6 +1,8 @@
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
+import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
 
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
+const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 const DEV_TEST_ASSIGNMENT_STATUSES = new Set(['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED']);
@@ -76,11 +78,7 @@ async function existingAssignmentContext(prisma, params) {
   const where = params.args?.where || {};
   const compound = where.serviceRequestId_workerId || {};
   if (compound.serviceRequestId && compound.workerId) {
-    return {
-      serviceRequestId: compound.serviceRequestId,
-      workerId: compound.workerId,
-      status: null
-    };
+    return { serviceRequestId: compound.serviceRequestId, workerId: compound.workerId, status: null };
   }
   if (!where.id || !prisma?.dispatchAssignment?.findUnique) return null;
   return prisma.dispatchAssignment.findUnique({
@@ -104,15 +102,14 @@ async function validateDevTestAssignmentMutation(prisma, params) {
 
   const workerId = payloads.map((item) => item.workerId).find(Boolean) || existing?.workerId || null;
   const worker = workerId
-    ? await prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { isTestProfile: true } })
+    ? await prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true, operationalStatus: true } })
     : null;
   const explicitStatuses = payloads.map((item) => item.status).filter(Boolean);
   const statuses = explicitStatuses.length ? explicitStatuses : [existing?.status].filter(Boolean);
   const statusAllowed = statuses.length > 0 && statuses.every((status) => DEV_TEST_ASSIGNMENT_STATUSES.has(status));
+  const workerAllowed = Boolean(worker?.id) && worker.operationalStatus !== 'ELIMINADO';
 
-  if (worker?.isTestProfile !== true || !statusAllowed) {
-    throw new Error('dev_test_assignment_isolated');
-  }
+  if (!workerAllowed || !statusAllowed) throw new Error('dev_test_assignment_isolated');
 }
 
 function installDevTestAssignmentGuard(prisma) {
@@ -130,6 +127,7 @@ function clearSessionPermissions(req) {
   req.session.canAccessDispatch = false;
   req.session.canAccessAttendance = false;
   req.session.canAccessPayroll = false;
+  req.session.canAccessTestWorkspace = false;
   req.session.canAccessStatistics = false;
   req.session.canAccessMetaAds = false;
   req.session.canAccessCvAnalysis = false;
@@ -138,6 +136,7 @@ function clearSessionPermissions(req) {
   req.canAccessDispatch = false;
   req.canAccessAttendance = false;
   req.canAccessPayroll = false;
+  req.canAccessTestWorkspace = false;
   req.canAccessStatistics = false;
   req.canAccessMetaAds = false;
   req.canAccessCvAnalysis = false;
@@ -153,14 +152,14 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   if (!isDatabaseUser && !isEnvironmentAdmin) {
     const isDev = req.session?.userRole === 'dev' || req.userRole === 'dev';
     req.session.canAccessPayroll = isDev;
+    req.session.canAccessTestWorkspace = isDev;
     req.canAccessPayroll = isDev;
+    req.canAccessTestWorkspace = isDev;
     return;
   }
 
   const user = await prisma.appUser.findUnique({
-    where: isEnvironmentAdmin
-      ? { username: req.session.username }
-      : { id: req.session.userId },
+    where: isEnvironmentAdmin ? { username: req.session.username } : { id: req.session.userId },
     select: {
       id: true,
       username: true,
@@ -178,10 +177,11 @@ async function refreshDatabaseUserPermissions(prisma, req) {
 
   if (!user && isEnvironmentAdmin) {
     req.session.canAccessPayroll = false;
+    req.session.canAccessTestWorkspace = false;
     req.canAccessPayroll = false;
+    req.canAccessTestWorkspace = false;
     return;
   }
-
   if (!user || !user.isActive) {
     clearSessionPermissions(req);
     return;
@@ -196,6 +196,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis);
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
   let canAccessPayroll = false;
+  let canAccessTestWorkspace = false;
   try {
     const payrollAccess = await resolvePayrollFeatureAccess(prisma, {
       userRole: req.session?.userRole || req.userRole,
@@ -206,6 +207,16 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   } catch (error) {
     console.warn('No fue posible refrescar el permiso de Nómina.', error);
   }
+  try {
+    const testAccess = await resolveTestWorkspaceFeatureAccess(prisma, {
+      userRole: req.session?.userRole || req.userRole,
+      userId: user.id,
+      username: user.username
+    });
+    canAccessTestWorkspace = testAccess.allowed === true;
+  } catch (error) {
+    console.warn('No fue posible refrescar el permiso del entorno de pruebas.', error);
+  }
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
@@ -213,6 +224,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.session.canAccessDispatch = canAccessDispatch;
   req.session.canAccessAttendance = canAccessAttendance;
   req.session.canAccessPayroll = canAccessPayroll;
+  req.session.canAccessTestWorkspace = canAccessTestWorkspace;
   req.session.canAccessStatistics = canAccessStatistics;
   req.session.canAccessMetaAds = canAccessMetaAds;
   req.session.canAccessCvAnalysis = canAccessCvAnalysis;
@@ -225,6 +237,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.canAccessDispatch = canAccessDispatch;
   req.canAccessAttendance = canAccessAttendance;
   req.canAccessPayroll = canAccessPayroll;
+  req.canAccessTestWorkspace = canAccessTestWorkspace;
   req.canAccessStatistics = canAccessStatistics;
   req.canAccessMetaAds = canAccessMetaAds;
   req.canAccessCvAnalysis = canAccessCvAnalysis;
@@ -236,16 +249,24 @@ function isHtmlResponse(body, res) {
   return contentType.includes('text/html') || body.trimStart().startsWith('<!DOCTYPE html') || body.trimStart().startsWith('<html');
 }
 
-function injectPayrollNavigation(html, req) {
-  const allowed = req.canAccessPayroll === true || req.session?.canAccessPayroll === true;
+function injectFeatureNavigation(html, req) {
   const path = String(req.originalUrl || '').split('?')[0];
-  if (!allowed || !path.startsWith('/admin') || path.startsWith('/admin/operaciones/asistencia/nomina/api/')) return html;
-  if (html.includes(`href="${PAYROLL_PATH}"`)) return html;
-  const link = `<a href="${PAYROLL_PATH}">Nómina</a>`;
-  if (html.includes('<span class="spacer"></span>')) {
-    return html.replace('<span class="spacer"></span>', `${link}\n    <span class="spacer"></span>`);
+  if (!path.startsWith('/admin')) return html;
+  let output = html;
+  const payrollAllowed = req.canAccessPayroll === true || req.session?.canAccessPayroll === true;
+  const testAllowed = req.canAccessTestWorkspace === true || req.session?.canAccessTestWorkspace === true;
+  const links = [];
+  if (payrollAllowed && !path.startsWith('/admin/operaciones/asistencia/nomina/api/') && !output.includes(`href="${PAYROLL_PATH}"`)) {
+    links.push(`<a href="${PAYROLL_PATH}">Nómina</a>`);
   }
-  return html.replace(/<\/nav>/i, `  ${link}\n  </nav>`);
+  if (testAllowed && !path.startsWith('/admin/operaciones/pruebas/api/') && !output.includes(`href="${TEST_WORKSPACE_PATH}"`)) {
+    links.push(`<a href="${TEST_WORKSPACE_PATH}">Entorno de pruebas</a>`);
+  }
+  if (!links.length) return output;
+  if (output.includes('<span class="spacer"></span>')) {
+    return output.replace('<span class="spacer"></span>', `${links.join('\n    ')}\n    <span class="spacer"></span>`);
+  }
+  return output.replace(/<\/nav>/i, `  ${links.join('\n  ')}\n  </nav>`);
 }
 
 function injectPayrollUsersScript(html, req) {
@@ -259,7 +280,7 @@ function installPayrollHtmlBridge(req, res) {
   const originalSend = res.send.bind(res);
   res.send = (body) => {
     if (!isHtmlResponse(body, res)) return originalSend(body);
-    const withNavigation = injectPayrollNavigation(body, req);
+    const withNavigation = injectFeatureNavigation(body, req);
     return originalSend(injectPayrollUsersScript(withNavigation, req));
   };
 }
@@ -294,12 +315,14 @@ export function dispatchAuditMiddleware(prisma) {
       await refreshDatabaseUserPermissions(prisma, req);
     } catch (error) {
       console.warn('No fue posible refrescar los permisos del usuario.', error);
-      req.session.canAccessPayroll = req.session?.userRole === 'dev';
-      req.canAccessPayroll = req.session?.userRole === 'dev';
+      const isDev = req.session?.userRole === 'dev';
+      req.session.canAccessPayroll = isDev;
+      req.session.canAccessTestWorkspace = isDev;
+      req.canAccessPayroll = isDev;
+      req.canAccessTestWorkspace = isDev;
     }
 
     installPayrollHtmlBridge(req, res);
-
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
     const startedAt = Date.now();
     res.on('finish', () => {
