@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   MAX_DAILY_ORDINARY_MINUTES,
   MAX_WEEKLY_ORDINARY_MINUTES,
-  loadPayrollPolicies
+  loadPayrollPolicies,
+  savePayrollPolicy
 } from '../src/modules/dispatch-payroll/application/payrollReport.js';
 import { calculatePayrollConceptReport } from '../src/modules/dispatch-payroll/domain/payrollConceptEngine.js';
 
@@ -84,4 +85,41 @@ test('una política histórica de ocho horas no convierte todo el turno 9 a 5 en
   assert.equal(report.rows[0].conceptMinutes.HEDO, 60);
   assert.equal(report.rows[0].daily[0].ordinaryMinutes, 420);
   assert.equal(report.rows[0].daily[0].overtimeMinutes, 60);
+});
+
+test('guardar una política de ocho horas persiste el máximo de siete horas', async () => {
+  let createdEvent = null;
+  const prisma = {
+    dispatchClient: {
+      findUnique: async () => ({ id: 'client-test', name: 'Cliente prueba' })
+    },
+    devAuditEvent: {
+      create: async ({ data }) => {
+        createdEvent = data;
+        return data;
+      }
+    }
+  };
+
+  const policy = await savePayrollPolicy(prisma, {
+    clientId: 'client-test',
+    actorRole: 'dev',
+    actorUsername: 'devloginpro',
+    weeklyOrdinaryHours: 48,
+    dailyOrdinaryHours: 8,
+    maxDailyOvertimeHours: 2,
+    maxWeeklyOvertimeHours: 12,
+    nightStartHour: 19,
+    nightEndHour: 6,
+    weekStartsOn: 1,
+    restDay: 0,
+    recognizeEarlyArrival: false,
+    incompleteBreakPenaltyMinutes: 90,
+    holidaySundayPriority: 'HOLIDAY'
+  });
+
+  assert.equal(policy.dailyOrdinaryMinutes, MAX_DAILY_ORDINARY_MINUTES);
+  assert.equal(policy.weeklyOrdinaryMinutes, MAX_WEEKLY_ORDINARY_MINUTES);
+  assert.equal(createdEvent.metadata.policy.dailyOrdinaryMinutes, MAX_DAILY_ORDINARY_MINUTES);
+  assert.equal(createdEvent.metadata.policy.weeklyOrdinaryMinutes, MAX_WEEKLY_ORDINARY_MINUTES);
 });
