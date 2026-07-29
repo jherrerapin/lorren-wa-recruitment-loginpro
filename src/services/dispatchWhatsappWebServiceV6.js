@@ -4,9 +4,16 @@ import QRCode from 'qrcode';
 import { prisma } from '../lib/prisma.js';
 import { recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 
+const IS_DEV_TEST_RUNTIME = new URL(import.meta.url).searchParams.get('scope') === 'dev-test';
+const RUNTIME_SCOPE = IS_DEV_TEST_RUNTIME ? 'dev-test' : 'operational';
+const RUNTIME_CLIENT_ID = IS_DEV_TEST_RUNTIME ? 'dispatch-dev-test' : 'dispatch';
+const RUNTIME_AUTH_DIRECTORY = IS_DEV_TEST_RUNTIME ? 'dispatch-wweb-auth-test' : 'dispatch-wweb-auth';
+const RUNTIME_AUTH_PATH_ENV = IS_DEV_TEST_RUNTIME ? 'DISPATCH_TEST_WWEB_AUTH_PATH' : 'DISPATCH_WWEB_AUTH_PATH';
+const RUNTIME_AUTH_PERSISTENT_ENV = IS_DEV_TEST_RUNTIME ? 'DISPATCH_TEST_WWEB_AUTH_PERSISTENT' : 'DISPATCH_WWEB_AUTH_PERSISTENT';
+const RUNTIME_LABEL = IS_DEV_TEST_RUNTIME ? 'WhatsApp de pruebas de despacho' : 'WhatsApp de despacho';
 const MAX_MESSAGE_LENGTH = 3500;
-const NOT_CONNECTED_MESSAGE = 'WhatsApp de despacho no está conectado. Escanea el QR e intenta nuevamente.';
-const LOGGED_OUT_MESSAGE = 'Sesión de WhatsApp despacho cerrada. Escanea un nuevo QR para volver a conectar.';
+const NOT_CONNECTED_MESSAGE = `${RUNTIME_LABEL} no está conectado. Escanea el QR e intenta nuevamente.`;
+const LOGGED_OUT_MESSAGE = `Sesión de ${RUNTIME_LABEL} cerrada. Escanea un nuevo QR para volver a conectar.`;
 const DUPLICATE_SEND_WINDOW_MS = Number(process.env.DISPATCH_DUPLICATE_SEND_WINDOW_MS || 120000);
 const RECONNECT_DELAY_MS = Number(process.env.DISPATCH_WWEB_RECONNECT_DELAY_MS || 5000);
 const CONFIRMATION_MEMORY_TTL_MS = Number(process.env.DISPATCH_WA_CONFIRMATION_MEMORY_TTL_MS || 36 * 60 * 60 * 1000);
@@ -16,10 +23,13 @@ const PENDING_RECONCILIATION_INTERVAL_MS = Math.max(15000, Number(process.env.DI
 const PENDING_RECONCILIATION_LIMIT = Math.max(1, Number(process.env.DISPATCH_WA_RECONCILE_LIMIT || 200));
 const PENDING_RECONCILIATION_MESSAGES_PER_CHAT = Math.max(1, Number(process.env.DISPATCH_WA_RECONCILE_MESSAGES_PER_CHAT || 20));
 const CHROMIUM_LOCK_FILES = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket']);
-const PENDING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
+const PENDING_ASSIGNMENT_STATUSES = IS_DEV_TEST_RUNTIME
+  ? ['DEV_TEST_ASSIGNED']
+  : ['ASSIGNED', 'CONFIRMATION_PENDING'];
 const RECOVERABLE_CONFIRMATION_LINK_STATUSES = ['PENDING', 'DELIVERY_UNKNOWN'];
 const CONFIRMED_REPLY_PENDING_STATUS = 'CONFIRMED_REPLY_PENDING';
-const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
+const CONFIRMED_ASSIGNMENT_STATUS = IS_DEV_TEST_RUNTIME ? 'DEV_TEST_CONFIRMED' : 'CONFIRMED';
+const SCOPED_ASSIGNMENT_STATUSES = [...new Set([...PENDING_ASSIGNMENT_STATUSES, CONFIRMED_ASSIGNMENT_STATUS])];
 const AUTOMATIC_CONFIRMATION_REPLY = 'Gracias.';
 const CONNECTED_CLIENT_STATE = 'CONNECTED';
 
@@ -431,15 +441,16 @@ async function printTerminalQr(qr) {
     const terminalQr = module.default || module;
     terminalQr.generate(qr, { small: true });
   } catch (error) {
-    console.warn('No fue posible imprimir el QR de WhatsApp despacho en consola.', error);
+    console.warn(`No fue posible imprimir el QR de ${RUNTIME_LABEL} en consola.`, error);
   }
 }
 
 function resolveAuthDataPath() {
-  if (process.env.DISPATCH_WWEB_AUTH_PATH) return process.env.DISPATCH_WWEB_AUTH_PATH;
-  if (process.env.RAILWAY_VOLUME_MOUNT_PATH) return `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/dispatch-wweb-auth`;
-  if (existsSync('/data')) return '/data/dispatch-wweb-auth';
-  return './storage/dispatch-wweb-auth';
+  const explicitPath = process.env[RUNTIME_AUTH_PATH_ENV];
+  if (explicitPath) return explicitPath;
+  if (process.env.RAILWAY_VOLUME_MOUNT_PATH) return `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/${RUNTIME_AUTH_DIRECTORY}`;
+  if (existsSync('/data')) return `/data/${RUNTIME_AUTH_DIRECTORY}`;
+  return `./storage/${RUNTIME_AUTH_DIRECTORY}`;
 }
 
 export function isPathWithinRoot(rootPath, targetPath) {
@@ -452,7 +463,7 @@ export function isPathWithinRoot(rootPath, targetPath) {
 
 function authStorageInfo() {
   const authDataPath = path.resolve(resolveAuthDataPath());
-  const explicitPersistentPath = process.env.DISPATCH_WWEB_AUTH_PERSISTENT === 'true';
+  const explicitPersistentPath = process.env[RUNTIME_AUTH_PERSISTENT_ENV] === 'true';
   const railwayVolumeMountPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '';
   const authPathInsideRailwayVolume = isPathWithinRoot(railwayVolumeMountPath, authDataPath);
   const authStoragePersistent = explicitPersistentPath || authPathInsideRailwayVolume;
@@ -462,14 +473,14 @@ function authStorageInfo() {
     authStorageMode: authStoragePersistent ? 'PERSISTENT' : 'EPHEMERAL',
     authStorageWarning: authStoragePersistent
       ? null
-      : 'La sesión de WhatsApp está en almacenamiento efímero. Monta un volumen Railway, ubica LocalAuth dentro del volumen y desactiva Serverless para operación continua.'
+      : `La sesión de ${RUNTIME_LABEL} está en almacenamiento efímero. Monta un volumen Railway, ubica LocalAuth dentro del volumen y desactiva Serverless para operación continua.`
   };
 }
 
 function ensureAuthDataPath() {
   const dataPath = resolveAuthDataPath();
   try { mkdirSync(dataPath, { recursive: true }); }
-  catch (error) { console.warn('No fue posible crear/verificar carpeta de sesión de WhatsApp despacho.', error); }
+  catch (error) { console.warn(`No fue posible crear/verificar carpeta de sesión de ${RUNTIME_LABEL}.`, error); }
   return dataPath;
 }
 
@@ -477,7 +488,7 @@ function cleanupChromiumProfileLocks(rootPath, depth = 0) {
   if (!rootPath || depth > 5 || !existsSync(rootPath)) return;
   let entries = [];
   try { entries = readdirSync(rootPath, { withFileTypes: true }); }
-  catch (error) { console.warn(`No fue posible leer carpeta de sesión WhatsApp despacho: ${rootPath}`, error); return; }
+  catch (error) { console.warn(`No fue posible leer carpeta de sesión ${RUNTIME_LABEL}: ${rootPath}`, error); return; }
   for (const entry of entries) {
     const entryPath = path.join(rootPath, entry.name);
     if (entry.isDirectory()) { cleanupChromiumProfileLocks(entryPath, depth + 1); continue; }
@@ -504,7 +515,7 @@ function resolveChromeExecutablePath() {
 function buildPuppeteerOptions() {
   const executablePath = resolveChromeExecutablePath();
   if (!executablePath) {
-    lastError = 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho.';
+    lastError = `No se encontró Chrome/Chromium en el servidor para iniciar la sesión de ${RUNTIME_LABEL}.`;
     console.warn(lastError);
   }
   return {
@@ -526,12 +537,12 @@ function buildPuppeteerOptions() {
 }
 
 function formatBrowserLaunchError(error) {
-  const rawMessage = error?.message || 'No fue posible inicializar WhatsApp de despacho.';
+  const rawMessage = error?.message || `No fue posible inicializar ${RUNTIME_LABEL}.`;
   if (rawMessage.includes('The profile appears to be in use') || rawMessage.includes('process_singleton_posix')) {
-    return 'El perfil de WhatsApp despacho estaba bloqueado por Chromium. El sistema limpió el lock y reintentará la conexión.';
+    return `El perfil de ${RUNTIME_LABEL} estaba bloqueado por Chromium. El sistema limpió el lock y reintentará la conexión.`;
   }
   if (rawMessage.includes('ENOENT') || rawMessage.includes('Could not find Chrome') || rawMessage.includes('Failed to launch the browser process')) {
-    return 'No se encontró Chrome/Chromium en el servidor para iniciar la sesión de WhatsApp despacho.';
+    return `No se encontró Chrome/Chromium en el servidor para iniciar la sesión de ${RUNTIME_LABEL}.`;
   }
   return rawMessage;
 }
@@ -547,7 +558,7 @@ function scheduleReconnect(reason) {
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     if (manualLogoutRequested) return;
-    console.log(`Reintentando conexión de WhatsApp despacho${reason ? ` (${reason})` : ''}.`);
+    console.log(`Reintentando conexión de ${RUNTIME_LABEL}${reason ? ` (${reason})` : ''}.`);
     initDispatchWhatsappClient();
   }, RECONNECT_DELAY_MS);
 }
@@ -593,7 +604,7 @@ export async function restartDispatchWhatsappClient(reason = 'recuperación auto
   await destroyClientWithoutLogout(oldClient);
   const dataPath = ensureAuthDataPath();
   cleanupChromiumProfileLocks(dataPath);
-  console.warn(`[dispatch-wa] Reiniciando cliente sin cerrar la sesión persistida. reason=${reason}`);
+  console.warn(`[dispatch-wa] Reiniciando cliente ${RUNTIME_SCOPE} sin cerrar la sesión persistida. reason=${reason}`);
   initDispatchWhatsappClient();
   return getDispatchWhatsappStatus();
 }
@@ -614,6 +625,7 @@ async function getRecipientId(activeClient, phone) {
 }
 
 async function recalculateServiceRequestStatus(serviceRequestId) {
+  if (IS_DEV_TEST_RUNTIME) return null;
   return recalculateDispatchServiceRequestStatus(prisma, serviceRequestId);
 }
 
@@ -649,7 +661,11 @@ async function findPendingAssignmentFromChatId(chatId, message = {}) {
 
 async function latestPendingConfirmationLink(where) {
   return prisma.dispatchWhatsappConfirmation.findFirst({
-    where: { status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES }, ...where },
+    where: {
+      status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES },
+      assignment: { status: { in: SCOPED_ASSIGNMENT_STATUSES } },
+      ...where
+    },
     orderBy: { createdAt: 'desc' }
   });
 }
@@ -669,7 +685,7 @@ async function findPersistedPendingAssignmentByLink({ phone = '', chatId = '', m
     where: {
       id: link.assignmentId,
       serviceRequestId: link.serviceRequestId,
-      status: { in: [...PENDING_ASSIGNMENT_STATUSES, CONFIRMED_ASSIGNMENT_STATUS] }
+      status: { in: SCOPED_ASSIGNMENT_STATUSES }
     },
     include: { worker: true }
   });
@@ -787,7 +803,7 @@ async function applyAssignmentConfirmation({ activeClient, assignment, phone = '
     await setPersistedConfirmationLinksStatus({ assignmentId: assignment.id, status: 'CONFIRMED' });
   }
   lastConfirmationAt = new Date().toISOString();
-  console.log(`[dispatch-wa] Confirmación automática registrada para assignment=${assignment.id} event=${eventName} thanks=${automaticReplySent ? 'sent' : 'pending'} repaired=${claim.repaired ? 'yes' : 'no'}.`);
+  console.log(`[dispatch-wa] Confirmación automática registrada. scope=${RUNTIME_SCOPE} assignment=${assignment.id} event=${eventName} thanks=${automaticReplySent ? 'sent' : 'pending'} repaired=${claim.repaired ? 'yes' : 'no'}.`);
   return true;
 }
 
@@ -820,7 +836,7 @@ async function confirmAssignmentFromInboundMessage(activeClient, message, eventN
   ];
   const assignment = await resolveAssignmentForInboundConfirmation({ phone, senders, message });
   if (!assignment) {
-    console.warn(`[dispatch-wa] Se recibió una confirmación sin contexto pendiente. senderType=${sender.split('@')[1] || 'unknown'} event=${eventName} phoneResolved=${phone ? 'yes' : 'no'}.`);
+    console.warn(`[dispatch-wa] Se recibió una confirmación sin contexto pendiente. scope=${RUNTIME_SCOPE} senderType=${sender.split('@')[1] || 'unknown'} event=${eventName} phoneResolved=${phone ? 'yes' : 'no'}.`);
     return false;
   }
   if (!reserveInbound(message)) return false;
@@ -839,7 +855,6 @@ function bindInboundMessageListeners(activeClient) {
   activeClient.on('message', handler('message'));
   activeClient.on('message_create', handler('message_create'));
 }
-
 
 export function selectLatestPendingConfirmationTargets(links = []) {
   const byAssignment = new Map();
@@ -883,7 +898,7 @@ async function processPersistedConfirmationTarget(activeClient, link) {
         if (await confirmAssignmentFromInboundMessage(activeClient, message, 'persisted_reconciliation')) return 1;
       }
     } catch (error) {
-      console.warn(`[dispatch-wa] No fue posible reconciliar un chat pendiente. chatType=${chatId.split('@')[1] || 'unknown'}.`, error?.message || error);
+      console.warn(`[dispatch-wa] No fue posible reconciliar un chat pendiente. scope=${RUNTIME_SCOPE} chatType=${chatId.split('@')[1] || 'unknown'}.`, error?.message || error);
     }
   }
   return 0;
@@ -930,7 +945,10 @@ async function processPersistedPendingConfirmations(activeClient, reason = 'inte
   let repliesRetried = 0;
   try {
     const links = await prisma.dispatchWhatsappConfirmation.findMany({
-      where: { status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES } },
+      where: {
+        status: { in: RECOVERABLE_CONFIRMATION_LINK_STATUSES },
+        assignment: { status: { in: SCOPED_ASSIGNMENT_STATUSES } }
+      },
       select: {
         id: true,
         assignmentId: true,
@@ -947,10 +965,10 @@ async function processPersistedPendingConfirmations(activeClient, reason = 'inte
     repliesRetried = await retryPendingAutomaticReplies(activeClient);
     lastPendingReconciliationAt = new Date().toISOString();
     lastPendingReconciliationProcessed = processed + repliesRetried;
-    console.log(`[dispatch-wa] Reconciliación persistente finalizada. reason=${reason} pendientes=${targets.length} confirmaciones=${processed} graciasReintentados=${repliesRetried}.`);
+    console.log(`[dispatch-wa] Reconciliación persistente finalizada. scope=${RUNTIME_SCOPE} reason=${reason} pendientes=${targets.length} confirmaciones=${processed} graciasReintentados=${repliesRetried}.`);
     return processed + repliesRetried;
   } catch (error) {
-    console.warn('[dispatch-wa] No fue posible reconciliar confirmaciones persistidas.', error?.message || error);
+    console.warn(`[dispatch-wa] No fue posible reconciliar confirmaciones persistidas. scope=${RUNTIME_SCOPE}`, error?.message || error);
     return processed;
   } finally {
     pendingReconciliationRunning = false;
@@ -1031,19 +1049,19 @@ export function initDispatchWhatsappClient() {
     .then(({ Client: WhatsappClient, LocalAuth: WhatsappLocalAuth }) => {
       if (client) return client;
       client = new WhatsappClient({
-        authStrategy: new WhatsappLocalAuth({ clientId: 'dispatch', dataPath }),
+        authStrategy: new WhatsappLocalAuth({ clientId: RUNTIME_CLIENT_ID, dataPath }),
         takeoverOnConflict: true,
         takeoverTimeoutMs: 0,
         puppeteer: buildPuppeteerOptions()
       });
-      client.on('qr', (qr) => { lastQr = qr; ready = false; lastError = null; console.log('QR de WhatsApp despacho pendiente. Escanéalo para vincular la sesión:'); printTerminalQr(qr); });
-      client.on('authenticated', () => { lastAuthenticatedAt = new Date().toISOString(); lastError = null; console.log('WhatsApp de despacho autenticado.'); });
-      client.on('ready', () => { ready = true; lastQr = null; lastError = null; lastReadyAt = new Date().toISOString(); console.log('WhatsApp de despacho conectado.'); startPendingConfirmationReconciliation(client); });
+      client.on('qr', (qr) => { lastQr = qr; ready = false; lastError = null; console.log(`QR de ${RUNTIME_LABEL} pendiente. Escanéalo para vincular la sesión:`); printTerminalQr(qr); });
+      client.on('authenticated', () => { lastAuthenticatedAt = new Date().toISOString(); lastError = null; console.log(`${RUNTIME_LABEL} autenticado.`); });
+      client.on('ready', () => { ready = true; lastQr = null; lastError = null; lastReadyAt = new Date().toISOString(); console.log(`${RUNTIME_LABEL} conectado.`); startPendingConfirmationReconciliation(client); });
       bindInboundMessageListeners(client);
       client.on('disconnected', (reason) => {
         ready = false;
         lastQr = null;
-        lastError = reason ? `WhatsApp de despacho desconectado: ${reason}` : 'WhatsApp de despacho desconectado.';
+        lastError = reason ? `${RUNTIME_LABEL} desconectado: ${reason}` : `${RUNTIME_LABEL} desconectado.`;
         console.warn(lastError);
         resetClientReference()
           .catch((error) => console.warn('[dispatch-wa] No fue posible liberar el cliente desconectado.', error?.message || error))
@@ -1052,7 +1070,7 @@ export function initDispatchWhatsappClient() {
       client.on('auth_failure', (message) => {
         ready = false;
         lastQr = null;
-        lastError = message ? `Fallo de autenticación de WhatsApp despacho: ${message}` : 'Fallo de autenticación de WhatsApp despacho.';
+        lastError = message ? `Fallo de autenticación de ${RUNTIME_LABEL}: ${message}` : `Fallo de autenticación de ${RUNTIME_LABEL}.`;
         console.warn(lastError);
         resetClientReference()
           .catch((error) => console.warn('[dispatch-wa] No fue posible liberar el cliente con fallo de autenticación.', error?.message || error))
@@ -1064,18 +1082,38 @@ export function initDispatchWhatsappClient() {
           lastQr = null;
           lastError = formatBrowserLaunchError(error);
           await resetClientReference();
-          console.error('Error inicializando WhatsApp de despacho.', error);
+          console.error(`Error inicializando ${RUNTIME_LABEL}.`, error);
           scheduleReconnect('error de inicio');
         })
         .finally(() => { initializing = false; });
       return client;
     })
-    .catch((error) => { ready = false; lastQr = null; lastError = error?.message || 'No fue posible preparar WhatsApp de despacho.'; initializing = false; console.error('Error preparando WhatsApp de despacho.', error); });
+    .catch((error) => { ready = false; lastQr = null; lastError = error?.message || `No fue posible preparar ${RUNTIME_LABEL}.`; initializing = false; console.error(`Error preparando ${RUNTIME_LABEL}.`, error); });
   return client;
 }
 
 export function getDispatchWhatsappStatus() {
-  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };
+  return {
+    runtimeScope: RUNTIME_SCOPE,
+    clientId: RUNTIME_CLIENT_ID,
+    ready,
+    initializing,
+    reconnecting: Boolean(reconnectTimer),
+    manualLogoutRequested,
+    lastQr,
+    lastError,
+    lastReadyAt,
+    lastAuthenticatedAt,
+    lastInboundAt,
+    lastConfirmationAt,
+    lastHealthCheckAt,
+    lastHealthState,
+    lastHealthError,
+    pendingReconciliationRunning,
+    lastPendingReconciliationAt,
+    lastPendingReconciliationProcessed,
+    ...authStorageInfo()
+  };
 }
 
 export async function getDispatchWhatsappStatusView(options = {}) {
@@ -1084,9 +1122,9 @@ export async function getDispatchWhatsappStatusView(options = {}) {
   let qrImage = null;
   if (lastQr) {
     try { qrImage = await QRCode.toDataURL(lastQr); }
-    catch (error) { console.error('No fue posible generar imagen QR de WhatsApp despacho.', error); }
+    catch (error) { console.error(`No fue posible generar imagen QR de ${RUNTIME_LABEL}.`, error); }
   }
-  return { ready, initializing, reconnecting: Boolean(reconnectTimer), manualLogoutRequested, lastQr, qrImage, lastError, lastReadyAt, lastAuthenticatedAt, lastInboundAt, lastConfirmationAt, lastHealthCheckAt, lastHealthState, lastHealthError, pendingReconciliationRunning, lastPendingReconciliationAt, lastPendingReconciliationProcessed, ...authStorageInfo() };
+  return { ...getDispatchWhatsappStatus(), qrImage };
 }
 
 export async function closeDispatchWhatsappSession() {
@@ -1104,9 +1142,9 @@ export async function closeDispatchWhatsappSession() {
   lastError = LOGGED_OUT_MESSAGE;
   if (oldClient) {
     try { await oldClient.logout(); }
-    catch (error) { console.warn('No fue posible cerrar sesión limpiamente en WhatsApp despacho.', error); }
+    catch (error) { console.warn(`No fue posible cerrar sesión limpiamente en ${RUNTIME_LABEL}.`, error); }
     try { await oldClient.destroy(); }
-    catch (error) { console.warn('No fue posible destruir completamente el cliente de WhatsApp despacho.', error); }
+    catch (error) { console.warn(`No fue posible destruir completamente el cliente de ${RUNTIME_LABEL}.`, error); }
   }
   return getDispatchWhatsappStatus();
 }
