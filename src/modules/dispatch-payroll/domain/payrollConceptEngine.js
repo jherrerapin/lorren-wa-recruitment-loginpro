@@ -220,7 +220,8 @@ function sessionMinuteRecords(session, policy, novelties) {
     });
   }
 
-  return minutes.map((timestamp) => ({ timestamp, session }));
+  const workdayKey = bogotaDateKey(arrivalAt);
+  return minutes.map((timestamp) => ({ timestamp, session, workdayKey }));
 }
 
 function isNightMinute(minuteOfDay, policy) {
@@ -385,16 +386,17 @@ export function calculatePayrollConceptReport(input = {}) {
       }
       seenMinutes.add(minuteKey);
 
+      const workdayKey = record.workdayKey || parts.dateKey;
       const weekKey = payrollWeekStartKey(parts.dateKey, record.policy.weekStartsOn);
-      const dayOrdinary = dailyOrdinary.get(parts.dateKey) || 0;
+      const dayOrdinary = dailyOrdinary.get(workdayKey) || 0;
       const weekOrdinary = weeklyOrdinary.get(weekKey) || 0;
       const overtime = dayOrdinary >= record.policy.dailyOrdinaryMinutes
         || weekOrdinary >= record.policy.weeklyOrdinaryMinutes;
       if (overtime) {
-        dailyOvertime.set(parts.dateKey, (dailyOvertime.get(parts.dateKey) || 0) + 1);
+        dailyOvertime.set(workdayKey, (dailyOvertime.get(workdayKey) || 0) + 1);
         weeklyOvertime.set(weekKey, (weeklyOvertime.get(weekKey) || 0) + 1);
       } else {
-        dailyOrdinary.set(parts.dateKey, dayOrdinary + 1);
+        dailyOrdinary.set(workdayKey, dayOrdinary + 1);
         weeklyOrdinary.set(weekKey, weekOrdinary + 1);
       }
 
@@ -436,7 +438,7 @@ export function calculatePayrollConceptReport(input = {}) {
     }
 
     for (const [dateKey, minutes] of dailyOvertime) {
-      const policy = rawRecords.find((record) => bogotaDateKey(record.timestamp) === dateKey)?.policy || DEFAULT_PAYROLL_POLICY;
+      const policy = rawRecords.find((record) => record.workdayKey === dateKey)?.policy || DEFAULT_PAYROLL_POLICY;
       if (minutes > policy.maxDailyOvertimeMinutes) {
         pushNovelty(summary.novelties, 'DAILY_OVERTIME_LIMIT_EXCEEDED', 'Las horas extra del día superan el límite configurado.', {
           dateKey,
