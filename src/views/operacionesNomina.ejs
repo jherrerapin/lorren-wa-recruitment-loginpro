@@ -31,11 +31,12 @@
     .field { display:flex; flex-direction:column; gap:5px; }
     .field label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
     input,select { width:100%; border:1px solid var(--border); border-radius:8px; padding:9px 10px; background:#fff; font-size:13px; }
-    .metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
+    .metrics { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; }
     .metric { padding:15px; border:1px solid var(--border); border-radius:10px; background:#fff; }
     .metric small { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
     .metric strong { display:block; color:var(--navy); font-size:24px; margin-top:6px; }
     .metric.warn { border-color:#fcd34d; background:#fffbeb; }
+    .metric.threshold { border-color:#bfdbfe; background:#eff6ff; }
     .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:10px; }
     table { width:max-content; min-width:100%; border-collapse:collapse; background:#fff; }
     th,td { padding:10px 9px; border-bottom:1px solid #edf0f2; text-align:right; white-space:nowrap; }
@@ -51,10 +52,11 @@
     details { margin-top:8px; }
     summary { cursor:pointer; color:var(--blue); font-weight:750; }
     .daily { margin-top:8px; display:grid; gap:7px; min-width:720px; }
-    .daily-row { display:grid; grid-template-columns:100px minmax(180px,1fr) 110px 120px minmax(220px,1fr); gap:10px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
+    .daily-row { display:grid; grid-template-columns:100px minmax(180px,1fr) 110px 150px minmax(220px,1fr); gap:10px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
     .daily-row form { display:flex; gap:5px; align-items:center; }
     .daily-row select { min-width:150px; }
     .novelty { color:var(--red); font-size:11px; white-space:normal; }
+    .novelty.info { color:var(--blue); }
     .policy-grid { display:grid; grid-template-columns:repeat(5,minmax(130px,1fr)); gap:10px; }
     .policy-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:12px; align-items:center; }
     .codes { display:grid; grid-template-columns:repeat(5,minmax(150px,1fr)); gap:7px; }
@@ -113,12 +115,13 @@
       <article class="metric"><small>Total trabajado</small><strong><%= formatPayrollMinutes(report.totals.totalMinutes) %></strong></article>
       <article class="metric"><small>Horas ordinarias</small><strong><%= report.totals.ordinaryHours || 0 %></strong></article>
       <article class="metric"><small>Horas extra</small><strong><%= report.totals.overtimeHours || 0 %></strong></article>
+      <article class="metric threshold"><small>Extra bajo umbral</small><strong><%= formatPayrollMinutes(report.totals.unrecognizedOvertimeMinutes || 0) %></strong></article>
       <article class="metric <%= report.totals.workersWithNovelties ? 'warn' : '' %>"><small>Con novedades</small><strong><%= report.totals.workersWithNovelties %></strong></article>
     </section>
 
     <% if (role === 'dev') { %>
       <section class="panel">
-        <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada. El máximo ordinario es 42 horas semanales y 7 horas diarias.</p></div></div>
+        <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada. El máximo ordinario es 42 horas semanales y 7 horas diarias. El exceso se reconoce como extra desde 30 minutos.</p></div></div>
         <form method="post" action="/admin/operaciones/asistencia/nomina/policy">
           <input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" />
           <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
@@ -145,13 +148,13 @@
       <div class="table-wrap">
         <% if (!report.rows.length) { %><div class="empty">No hay jornadas con entrada y salida para el periodo seleccionado.</div><% } else { %>
           <table>
-            <thead><tr><th>Auxiliar</th><th>Estado</th><th>Total</th><th>Ordinarias</th><th>Extra</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
+            <thead><tr><th>Auxiliar</th><th>Estado</th><th>Total</th><th>Ordinarias</th><th>Extra</th><th>Bajo umbral</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
             <tbody>
               <% for (const row of report.rows) { %>
                 <tr>
                   <td><strong><%= row.fullName %></strong><small><%= row.documentType %> <%= row.documentNumber || 'Sin documento' %></small></td>
                   <td><span class="badge <%= row.exportable ? 'badge-ok' : 'badge-warn' %>"><%= row.status %></span></td>
-                  <td><%= row.totalHours %></td><td><%= row.ordinaryHours %></td><td><%= row.overtimeHours %></td>
+                  <td><%= row.totalHours %></td><td><%= row.ordinaryHours %></td><td><%= row.overtimeHours %></td><td><%= row.unrecognizedOvertimeHours || 0 %></td>
                   <% for (const code of conceptCodes) { %><td><%= row.conceptHours[code] || 0 %></td><% } %>
                   <td>
                     <details><summary>Ver días</summary><div class="daily">
@@ -160,7 +163,7 @@
                           <strong><%= day.dateKey %></strong>
                           <div><%= day.clientNames.join(', ') %><small><%= day.operationNames.join(', ') %></small></div>
                           <div><%= day.totalHours %> h</div>
-                          <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small></div>
+                          <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small><small>Bajo umbral <%= day.unrecognizedOvertimeHours || 0 %></small></div>
                           <div>
                             <% if (day.compensationStatus) { %>
                               <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
@@ -170,7 +173,7 @@
                               </form>
                             <% } %>
                             <% const dayNovelty = row.novelties.filter((item) => item.dateKey === day.dateKey); %>
-                            <% if (dayNovelty.length) { %><div class="novelty"><%= dayNovelty.map((item) => item.code).join(' · ') %></div><% } %>
+                            <% if (dayNovelty.length) { %><div class="novelty <%= dayNovelty.every((item) => item.blocking === false) ? 'info' : '' %>"><%= dayNovelty.map((item) => item.code === 'OVERTIME_BELOW_MINIMUM' ? item.message : item.code).join(' · ') %></div><% } %>
                           </div>
                         </div>
                       <% } %>
