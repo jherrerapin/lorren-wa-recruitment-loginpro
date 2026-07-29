@@ -10,6 +10,8 @@ import {
 
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 const DEV_TEST_ASSIGNMENT_STATUS = 'DEV_TEST_ASSIGNED';
+const DEV_TEST_CONFIRMED_STATUS = 'DEV_TEST_CONFIRMED';
+const RESTARTABLE_TEST_STATUSES = [DEV_TEST_ASSIGNMENT_STATUS, DEV_TEST_CONFIRMED_STATUS];
 
 function buildOperationalError(message, statusCode = 400) {
   const error = new Error(message);
@@ -50,10 +52,11 @@ async function validateTestAssignmentContext(context = {}, phone = '') {
       id: assignmentId,
       serviceRequestId,
       workerId,
-      status: DEV_TEST_ASSIGNMENT_STATUS
+      status: { in: RESTARTABLE_TEST_STATUSES }
     },
     select: {
       id: true,
+      status: true,
       workerId: true,
       worker: { select: { phone: true, isTestProfile: true } },
       serviceRequest: { select: { id: true, source: true, serviceDate: true } }
@@ -78,7 +81,26 @@ async function validateTestAssignmentContext(context = {}, phone = '') {
     throw buildOperationalError('Para probar confirmaciones por WhatsApp usa una solicitud de hoy o de una fecha futura.', 409);
   }
 
-  return { ...context, assignmentId, serviceRequestId, workerId };
+  return {
+    assignment,
+    context: { ...context, assignmentId, serviceRequestId, workerId }
+  };
+}
+
+async function prepareAssignmentForNewTest(assignment) {
+  await prisma.$transaction([
+    prisma.dispatchWhatsappConfirmation.updateMany({
+      where: {
+        assignmentId: assignment.id,
+        status: { in: ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'] }
+      },
+      data: { status: 'EXPIRED' }
+    }),
+    prisma.dispatchAssignment.update({
+      where: { id: assignment.id },
+      data: { status: DEV_TEST_ASSIGNMENT_STATUS }
+    })
+  ]);
 }
 
 export function initDispatchTestWhatsappClient() {
@@ -98,10 +120,11 @@ export async function closeDispatchTestWhatsappSession() {
 }
 
 export async function sendDispatchTestWhatsappMessage(args = {}) {
-  const context = await validateTestAssignmentContext(args.context, args.phone);
+  const validated = await validateTestAssignmentContext(args.context, args.phone);
+  await prepareAssignmentForNewTest(validated.assignment);
   return sendTestRuntimeTextMessage({
     ...args,
-    context,
+    context: validated.context,
     message: labelHours(args.message)
   });
 }
