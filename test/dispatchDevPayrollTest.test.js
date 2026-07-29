@@ -107,8 +107,12 @@ test('los turnos nocturnos terminan al día siguiente por defecto', () => {
   assert.equal(defaults.departureAt, '2026-07-29T05:00');
 });
 
-test('la vista DEV usa la plantilla productiva y deja el almuerzo vacío por defecto', async () => {
-  const template = await readFile('src/views/operacionesPruebasNomina.ejs', 'utf8');
+test('la vista DEV usa el mensaje productivo vigente y deja el almuerzo vacío por defecto', async () => {
+  const [template, productionTemplate] = await Promise.all([
+    readFile('src/views/operacionesPruebasNomina.ejs', 'utf8'),
+    readFile('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8')
+  ]);
+  const currentMessage = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
   const assignment = {
     id: 'assignment-test',
     workerId: 'worker-test',
@@ -156,10 +160,11 @@ test('la vista DEV usa la plantilla productiva y deja el almuerzo vacío por def
   assert.match(html, /name="breakEndAt" value=""/);
   assert.match(html, /Inicio de almuerzo \(opcional\)/);
   assert.match(html, /Regreso de almuerzo \(opcional\)/);
-  assert.match(template, /fetch\('\/admin\/operaciones\/api\/asignacion-template'/);
-  assert.match(template, /fallbackAssignmentTemplate = 'Hola \{\{nombre\}\}, te confirmamos asignación/);
+  assert.ok(productionTemplate.includes(currentMessage), 'La vista productiva debe conservar el mensaje operativo verificado.');
+  assert.ok(template.includes(currentMessage), 'La vista DEV debe usar exactamente el mensaje de producción.');
   assert.doesNotMatch(template, /Te confirmamos la asignación de prueba/);
   assert.doesNotMatch(html, /Responde CONFIRMADO para validar la recepción/);
+  assert.doesNotMatch(template, /api\/asignacion-template/);
 });
 
 test('las constantes aíslan solicitud y marcaciones manuales', () => {
