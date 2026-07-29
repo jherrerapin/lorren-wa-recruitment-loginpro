@@ -21,3 +21,22 @@ test('el formulario de solicitudes ofrece check de prueba solamente a DEV', asyn
   assert.match(view, /\/admin\/operaciones\/pruebas\/solicitudes/);
   assert.match(bridge, /router\.use\('\/pruebas', dispatchDevPayrollTestRouter\(prisma\)\)/);
 });
+
+test('los estados DEV no se confunden con solicitudes o asignaciones operativas', async () => {
+  const service = await read('src/services/dispatchDevPayrollTest.js');
+  const attendance = await read('src/modules/dispatch-attendance/application/adminAttendance.js');
+  assert.match(service, /status: 'DEV_TEST_PENDING'/);
+  assert.match(service, /status: 'DEV_TEST_ASSIGNED'/);
+  assert.match(service, /DEV_TEST_PARTIAL/);
+  assert.match(service, /DEV_TEST_COMPLETE/);
+  assert.doesNotMatch(service, /status: 'CONFIRMED'/);
+  assert.match(attendance, /'ASSIGNED',[\s\S]*'CONFIRMATION_PENDING',[\s\S]*'CONFIRMED'/);
+  assert.doesNotMatch(attendance, /DEV_TEST_ASSIGNED/);
+});
+
+test('el dashboard y sus exportaciones no cargan solicitudes DEV_TEST', async () => {
+  const dashboard = await read('src/routes/dispatchDashboardMetrics.js');
+  assert.match(dashboard, /DEV_TEST_REQUEST_SOURCE = 'DEV_TEST'/);
+  assert.match(dashboard, /source: \{ not: DEV_TEST_REQUEST_SOURCE \}/);
+  assert.match(dashboard, /request\.source === DEV_TEST_REQUEST_SOURCE/);
+});
