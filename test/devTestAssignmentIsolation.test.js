@@ -14,7 +14,11 @@ function guardedPrisma({ workerIsTest = false } = {}) {
       findUnique: async () => ({ isTestProfile: workerIsTest })
     },
     dispatchAssignment: {
-      findUnique: async () => null
+      findUnique: async () => ({
+        serviceRequestId: 'request-test',
+        workerId: workerIsTest ? 'worker-test' : 'worker-real',
+        status: 'DEV_TEST_ASSIGNED'
+      })
     },
     devAuditEvent: {
       create: async () => ({}),
@@ -60,4 +64,33 @@ test('permite únicamente sujeto y estado propios del entorno DEV', async () => 
   });
   assert.equal(nextCalled, true);
   assert.equal(result.id, 'assignment-test');
+});
+
+test('permite que la cuenta secundaria confirme mediante updateMany sin salir de DEV_TEST', async () => {
+  const { guard } = guardedPrisma({ workerIsTest: true });
+  let nextCalled = false;
+  await guard({
+    model: 'DispatchAssignment',
+    action: 'updateMany',
+    args: {
+      where: { id: 'assignment-test', status: { in: ['DEV_TEST_ASSIGNED'] } },
+      data: { status: 'DEV_TEST_CONFIRMED' }
+    }
+  }, async () => {
+    nextCalled = true;
+    return { count: 1 };
+  });
+  assert.equal(nextCalled, true);
+});
+
+test('bloquea que una actualización masiva convierta una prueba en estado operativo', async () => {
+  const { guard } = guardedPrisma({ workerIsTest: true });
+  await assert.rejects(() => guard({
+    model: 'DispatchAssignment',
+    action: 'updateMany',
+    args: {
+      where: { id: 'assignment-test' },
+      data: { status: 'CONFIRMED' }
+    }
+  }, async () => ({ count: 1 })), /dev_test_assignment_isolated/);
 });
