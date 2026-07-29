@@ -12,7 +12,7 @@
 </head>
 <body>
   <nav class="navbar">
-    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/favicon-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
     <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
     <a href="/admin/operaciones/asistencia/nomina">Nómina</a>
@@ -129,7 +129,16 @@
   </main>
 
   <script>
-    const currentProductionAssignmentTemplate = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
+    const currentProductionAssignmentTemplate = [
+      'Hola *{{nombre}}*,',
+      '',
+      'Mañana: *{{fecha}}*',
+      'Llegar a: *{{operacion}}  - {{direccion}}*',
+      'Hora : *{{horaInicio}} por favor.*',
+      '',
+      '',
+      '*Confirmado?*'
+    ].join('\n');
     const testWhatsappPanels = Array.from(document.querySelectorAll('[data-wa-test]'));
 
     function renderAssignmentMessage(template, panel) {
@@ -151,7 +160,7 @@
       const messageInput = panel.querySelector('[data-wa-message]');
       const result = panel.querySelector('[data-wa-result]');
       if (messageInput) messageInput.value = renderAssignmentMessage(currentProductionAssignmentTemplate, panel);
-      if (result) result.textContent = 'Mensaje vigente del tablero operativo cargado.';
+      if (result) result.textContent = 'Mensaje real de confirmación operativa cargado.';
 
       button?.addEventListener('click', async () => {
         const message = messageInput?.value?.trim() || '';
