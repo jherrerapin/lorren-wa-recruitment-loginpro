@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= pageTitle %> — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .test-page{max-width:1500px}.test-layout{display:grid;grid-template-columns:minmax(320px,.7fr) minmax(0,1.3fr);gap:16px;align-items:start}.stack{display:grid;gap:14px}.test-badge{display:inline-flex;padding:4px 9px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:900}.real-badge{display:inline-flex;padding:3px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:10px;font-weight:900}.profile-badge{display:inline-flex;padding:3px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:10px;font-weight:900}.request-list{display:grid;gap:8px;max-height:54vh;overflow:auto}.request-card{display:block;text-decoration:none;color:inherit;border:1px solid var(--border);border-radius:12px;padding:11px;background:#fff}.request-card.active{border-color:#7c3aed;background:#f5f3ff}.request-card strong{display:block;color:var(--navy);margin:4px 0}.request-card small{display:block;color:var(--muted);line-height:1.45}.assignment-grid{display:grid;gap:14px}.assignment-card{border:1px solid var(--border);border-radius:14px;padding:14px;background:#fff}.assignment-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}.manual-grid,.request-grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin-top:12px}.manual-grid .full,.request-grid .full{grid-column:1/-1}.field small{color:var(--muted);font-size:11px;line-height:1.4}.test-note{border:1px solid #c4b5fd;background:#f5f3ff;color:#5b21b6;border-radius:10px;padding:11px 13px;line-height:1.5}.safety-note{border:1px solid #93c5fd;background:#eff6ff;color:#1e3a8a;border-radius:10px;padding:11px 13px;line-height:1.5}.empty-test{padding:24px;text-align:center;color:var(--muted)}.assign-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end}.danger-btn{border-color:#fecaca!important;color:#b91c1c!important;background:#fff5f5!important}.payroll-link{background:#1d4ed8!important;border-color:#1d4ed8!important;color:#fff!important}.wa-link{background:#15803d!important;border-color:#15803d!important;color:#fff!important}.wa-test{display:grid;gap:10px;margin-top:14px;padding:13px;border:1px solid #bbf7d0;border-radius:12px;background:#f0fdf4}.wa-test-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}.wa-test textarea{width:100%;min-height:96px;resize:vertical;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;background:#fff}.wa-result{min-height:18px;font-size:12px;font-weight:800;color:#166534}.wa-result.error{color:#b91c1c}.status-confirmed{color:#166534;font-weight:900}.section-title{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.compact-help{font-size:12px;color:var(--muted);line-height:1.5}@media(max-width:900px){.test-layout{grid-template-columns:1fr}.request-list{max-height:none}.manual-grid,.request-grid,.assign-row{grid-template-columns:1fr}.manual-grid .full,.request-grid .full{grid-column:1}}
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a>
+    <a href="/admin/operaciones/pruebas" class="nav-active">Entorno de pruebas</a>
+    <a href="/admin/operaciones/asistencia/nomina?includeTest=true">Nómina de pruebas</a>
+    <span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page test-page">
+    <section class="hero">
+      <div>
+        <div class="eyebrow"><%= role === 'dev' ? 'DEV · ACCESO TOTAL' : 'PERMISO DE PRUEBAS' %></div>
+        <h1>Entorno aislado de asistencia y nómina</h1>
+        <p>Usa auxiliares, clientes y operaciones existentes como referencia, sin alterar sus registros operativos.</p>
+      </div>
+      <div class="actions">
+        <% if (canUseTestWhatsapp) { %><a class="btn wa-link" href="/admin/operaciones/pruebas/whatsapp">WhatsApp de pruebas</a><% } %>
+        <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?includeTest=true">Abrir Nómina de pruebas</a>
+      </div>
+    </section>
+
+    <% if (message) { %><div class="section-note"><%= message %></div><% } %>
+    <% if (error) { %><div class="section-note" style="border-color:#fecaca;background:#fff5f5;color:#b91c1c"><%= error %></div><% } %>
+    <div class="test-note"><strong>Aislamiento obligatorio:</strong> las solicitudes usan <code><%= testRequestSource %></code>, las asignaciones conservan estados <code>DEV_TEST_*</code> y las jornadas usan <code>DEV_TEST_MANUAL</code>. El auxiliar, cliente y operación seleccionados no cambian de estado ni reciben marcaciones operativas.</div>
+    <div class="safety-note"><strong>Entidades reales, registros de prueba:</strong> puedes seleccionar cualquier auxiliar no eliminado y cualquier cliente u operación activos. Lo real se utiliza únicamente como referencia para reproducir escenarios.</div>
+
+    <section class="test-layout">
+      <aside class="stack">
+        <section class="card">
+          <div class="card-body">
+            <div class="section-title"><div><h2>Nueva solicitud de prueba</h2><p class="compact-help">Se crea directamente aquí; no necesitas acceso al módulo operativo.</p></div><span class="test-badge">AISLADA</span></div>
+            <form method="post" action="/admin/operaciones/pruebas/solicitudes">
+              <div class="request-grid">
+                <div class="field full"><label>Cliente existente</label><select id="test-client" name="clientId" required><option value="">Selecciona</option><% for (const client of workspace.clients || []) { %><option value="<%= client.id %>"><%= client.name %><%= client.isTestClient ? ' · perfil de prueba' : '' %></option><% } %></select></div>
+                <div class="field full"><label>Operación existente</label><select id="test-operation" name="operationPointId" required><option value="">Selecciona primero un cliente</option><% for (const client of workspace.clients || []) { for (const point of client.operationPoints || []) { %><option value="<%= point.id %>" data-client="<%= client.id %>" hidden><%= point.name %><%= point.cityName ? ` · ${point.cityName}` : '' %></option><% }} %></select></div>
+                <div class="field full"><label>Servicio</label><select id="test-service" name="serviceId"><option value="">Sin servicio específico</option><% for (const client of workspace.clients || []) { for (const service of client.services || []) { %><option value="<%= service.id %>" data-client="<%= client.id %>" hidden><%= service.name %></option><% }} %></select></div>
+                <div class="field"><label>Fecha</label><input id="test-date" name="serviceDateBlock" type="date" required /></div>
+                <div class="field"><label>Auxiliares requeridos</label><input name="requiredWorkers" type="number" min="1" max="100" value="1" required /></div>
+                <div class="field"><label>Inicio</label><input name="startTime" type="time" value="08:00" required /></div>
+                <div class="field"><label>Fin programado</label><input name="endTime" type="time" value="16:00" /></div>
+                <div class="field full"><label>Nota</label><input name="notes" maxlength="500" placeholder="Ejemplo: validar turno nocturno sin almuerzo" /></div>
+              </div>
+              <div class="form-actions"><button class="btn btn-primary" type="submit">Crear solicitud aislada</button></div>
+            </form>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-body">
+            <div class="section-head"><div><h2>Solicitudes de prueba</h2><p>Últimas 100 solicitudes aisladas.</p></div></div>
+            <div class="request-list">
+              <% if (!(workspace.requests || []).length) { %><div class="empty-test">Todavía no hay solicitudes de prueba.</div><% } %>
+              <% for (const request of workspace.requests || []) {
+                const dateKey = request.serviceDate ? new Date(request.serviceDate).toISOString().slice(0,10) : '';
+              %>
+                <a class="request-card <%= workspace.selectedRequest?.id === request.id ? 'active' : '' %>" href="/admin/operaciones/pruebas?serviceRequestId=<%= request.id %>">
+                  <span class="test-badge">PRUEBA</span>
+                  <strong><%= request.clientName %> · <%= request.operationPointName || 'Sin operación' %></strong>
+                  <small><%= dateKey %> · <%= request.startTime || '—' %><%= request.endTime ? ` - ${request.endTime}` : '' %></small>
+                  <small><%= request.assignments.length %> asignación(es) · <%= request.requiredWorkers %> requeridos</small>
+                </a>
+              <% } %>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="assignment-grid">
+        <% const selected = workspace.selectedRequest; %>
+        <% if (!selected) { %>
+          <div class="card"><div class="empty-test">Crea o selecciona una solicitud para asignar auxiliares y registrar una jornada.</div></div>
+        <% } else {
+          const selectedDate = selected.serviceDate ? new Date(selected.serviceDate).toISOString().slice(0,10) : '';
+        %>
+          <section class="card">
+            <div class="card-body">
+              <div class="assignment-head">
+                <div><span class="test-badge">SOLICITUD AISLADA</span><h2 style="margin-top:8px"><%= selected.clientName %> · <%= selected.operationPointName || 'Sin operación' %></h2><p class="muted"><%= selectedDate %> · <%= selected.startTime || '—' %><%= selected.endTime ? ` - ${selected.endTime}` : '' %> · <%= selected.requiredWorkers %> auxiliar(es)</p></div>
+                <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?periodType=CUSTOM&from=<%= selectedDate %>&to=<%= selectedDate %>&clientId=<%= selected.operationPoint?.clientId || '' %>&includeTest=true">Calcular esta fecha</a>
+              </div>
+
+              <form class="assign-row" method="post" action="/admin/operaciones/pruebas/solicitudes/<%= selected.id %>/asignar" style="margin-top:14px">
+                <div class="field"><label>Auxiliar existente</label><select name="workerId" required><option value="">Selecciona</option><% for (const worker of workspace.availableWorkers || []) { %><option value="<%= worker.id %>"><%= worker.fullName %><%= worker.documentNumber ? ` · ${worker.documentNumber}` : '' %><%= worker.isTestProfile ? ' · perfil de prueba' : ' · auxiliar operativo' %></option><% } %></select><small>Aparecen auxiliares operativos y perfiles de prueba. La asignación creada siempre será <code>DEV_TEST</code>.</small></div>
+                <button class="btn btn-primary" type="submit" <%= (workspace.availableWorkers || []).length ? '' : 'disabled' %>>Asignar en prueba</button>
+              </form>
+            </div>
+          </section>
+
+          <% if (!selected.assignments.length) { %><div class="card"><div class="empty-test">Asigna un auxiliar para registrar entrada, almuerzo y salida manuales.</div></div><% } %>
+          <% for (const assignment of selected.assignments) {
+            const session = assignment.attendanceSession;
+            const mark = (type) => (session?.marks || []).filter((item) => item.markType === type).slice(-1)[0] || null;
+            const defaults = defaultDevTestTimes(selected);
+            const arrivalValue = formatBogotaDateTimeLocal(session?.arrivalReportedAt) || defaults.arrivalAt;
+            const breakStartValue = formatBogotaDateTimeLocal(mark('BREAK_START')?.clientCapturedAt || mark('BREAK_START')?.serverReceivedAt);
+            const breakEndValue = formatBogotaDateTimeLocal(mark('BREAK_END')?.clientCapturedAt || mark('BREAK_END')?.serverReceivedAt);
+            const departureValue = formatBogotaDateTimeLocal(session?.departureReportedAt) || defaults.departureAt;
+          %>
+            <article class="assignment-card">
+              <div class="assignment-head">
+                <div>
+                  <h2><%= assignment.worker.fullName %></h2>
+                  <p class="muted"><%= assignment.worker.documentNumber || 'Sin documento' %> · Estado <span class="<%= assignment.status === 'DEV_TEST_CONFIRMED' ? 'status-confirmed' : '' %>"><%= assignment.status %></span></p>
+                  <span class="<%= assignment.worker.isTestProfile ? 'profile-badge' : 'real-badge' %>"><%= assignment.worker.isTestProfile ? 'PERFIL DE PRUEBA' : 'AUXILIAR REAL USADO COMO REFERENCIA' %></span>
+                </div>
+                <div class="actions">
+                  <a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?periodType=CUSTOM&from=<%= selectedDate %>&to=<%= selectedDate %>&clientId=<%= selected.operationPoint?.clientId || '' %>&workerId=<%= assignment.worker.id %>&includeTest=true">Ver resultado</a>
+                  <form method="post" action="/admin/operaciones/pruebas/asignaciones/<%= assignment.id %>/quitar"><input type="hidden" name="serviceRequestId" value="<%= selected.id %>" /><button class="btn danger-btn" type="submit">Quitar prueba</button></form>
+                </div>
+              </div>
+
+              <% if (canUseTestWhatsapp) { %>
+                <section class="wa-test" data-wa-test data-phone="<%= assignment.worker.phone || '' %>" data-assignment-id="<%= assignment.id %>" data-service-request-id="<%= selected.id %>" data-worker-id="<%= assignment.worker.id %>" data-recipient-name="<%= assignment.worker.fullName %>" data-operation="<%= selected.operationPointName || '' %>" data-address="<%= selected.address || selected.operationPoint?.address || '' %>" data-date="<%= selectedDate %>" data-start="<%= selected.startTime || '' %>">
+                  <div class="wa-test-head"><div><strong>Prueba de WhatsApp — solo DEV</strong><p class="muted"><%= assignment.worker.phone ? `Destino: ${assignment.worker.phone}` : 'Este auxiliar no tiene teléfono registrado.' %></p></div><a class="btn" href="/admin/operaciones/pruebas/whatsapp">Cuenta secundaria</a></div>
+                  <textarea data-wa-message <%= assignment.worker.phone ? '' : 'disabled' %>></textarea>
+                  <div class="actions"><button class="btn wa-link" type="button" data-wa-send <%= assignment.worker.phone ? '' : 'disabled' %>>Enviar desde WhatsApp de pruebas</button></div>
+                  <div class="wa-result" data-wa-result role="status" aria-live="polite"></div>
+                </section>
+              <% } %>
+
+              <form method="post" action="/admin/operaciones/pruebas/asignaciones/<%= assignment.id %>/jornada">
+                <input type="hidden" name="serviceRequestId" value="<%= selected.id %>" />
+                <div class="manual-grid">
+                  <div class="field"><label>Entrada</label><input type="datetime-local" name="arrivalAt" value="<%= arrivalValue %>" required /></div>
+                  <div class="field"><label>Inicio de almuerzo (opcional)</label><input type="datetime-local" name="breakStartAt" value="<%= breakStartValue %>" /><small>Vacío significa que no se tomó o no se registró almuerzo; no se descuenta tiempo.</small></div>
+                  <div class="field"><label>Regreso de almuerzo (opcional)</label><input type="datetime-local" name="breakEndAt" value="<%= breakEndValue %>" /><small>Solo úsalo junto con el inicio. Se descuenta el intervalo real.</small></div>
+                  <div class="field"><label>Salida de turno</label><input type="datetime-local" name="departureAt" value="<%= departureValue %>" required /></div>
+                  <div class="field full"><label>Nota de la prueba</label><input name="notes" placeholder="Ejemplo: validar HENO y recargo dominical" /></div>
+                </div>
+                <div class="form-actions"><button class="btn btn-primary" type="submit">Guardar jornada aislada y calcular</button></div>
+              </form>
+            </article>
+          <% } %>
+        <% } %>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const clientSelect = document.getElementById('test-client');
+    const operationSelect = document.getElementById('test-operation');
+    const serviceSelect = document.getElementById('test-service');
+    const dateInput = document.getElementById('test-date');
+
+    function syncEntityOptions() {
+      const clientId = clientSelect?.value || '';
+      [operationSelect, serviceSelect].forEach((select) => {
+        if (!select) return;
+        [...select.options].forEach((option, index) => {
+          if (index === 0) return;
+          option.hidden = !clientId || option.dataset.client !== clientId;
+        });
+        if (select.selectedOptions[0]?.hidden) select.value = '';
+      });
+      if (operationSelect?.options[0]) operationSelect.options[0].textContent = clientId ? 'Selecciona una operación' : 'Selecciona primero un cliente';
+    }
+    clientSelect?.addEventListener('change', syncEntityOptions);
+    syncEntityOptions();
+    if (dateInput && !dateInput.value) {
+      try { dateInput.value = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date()); } catch { dateInput.value = new Date().toISOString().slice(0,10); }
+    }
+
+    const currentProductionAssignmentTemplate = [
+      'Hola *{{nombre}}*,', '', 'Mañana: *{{fecha}}*',
+      'Llegar a: *{{operacion}}  - {{direccion}}*',
+      'Hora : *{{horaInicio}} por favor.*', '', '', '*Confirmado?*'
+    ].join('\n');
+
+    function renderAssignmentMessage(template, panel) {
+      const values = {
+        nombre: panel.dataset.recipientName || '', operacion: panel.dataset.operation || '',
+        direccion: panel.dataset.address || '', fecha: panel.dataset.date || '', horaInicio: panel.dataset.start || ''
+      };
+      return String(template || '').replace(/\{\{\s*(nombre|operacion|direccion|fecha|horaInicio)\s*\}\}/g, (_match, key) => values[key] || '');
+    }
+
+    document.querySelectorAll('[data-wa-test]').forEach((panel) => {
+      const button = panel.querySelector('[data-wa-send]');
+      const messageInput = panel.querySelector('[data-wa-message]');
+      const result = panel.querySelector('[data-wa-result]');
+      if (messageInput) messageInput.value = renderAssignmentMessage(currentProductionAssignmentTemplate, panel);
+      if (result) result.textContent = 'Mensaje operativo real cargado en la cuenta secundaria.';
+      button?.addEventListener('click', async () => {
+        const message = messageInput?.value?.trim() || '';
+        result.classList.remove('error');
+        if (!message) { result.textContent = 'Escribe el mensaje que deseas probar.'; result.classList.add('error'); return; }
+        button.disabled = true;
+        result.textContent = 'Enviando desde la cuenta secundaria...';
+        try {
+          const response = await fetch('/admin/operaciones/pruebas/whatsapp/enviar', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({
+              phone: panel.dataset.phone, message,
+              context: { assignmentId: panel.dataset.assignmentId, serviceRequestId: panel.dataset.serviceRequestId, workerId: panel.dataset.workerId, recipientName: panel.dataset.recipientName }
+            })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.ok) throw new Error(data.message || `No fue posible enviar el mensaje (${response.status}).`);
+          result.textContent = `Mensaje enviado a ${data.phone}.`;
+        } catch (error) {
+          result.textContent = error.message || 'No fue posible enviar el WhatsApp de prueba.';
+          result.classList.add('error');
+        } finally {
+          button.disabled = !panel.dataset.phone;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
