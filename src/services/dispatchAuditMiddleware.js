@@ -3,7 +3,7 @@ import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
-const DEV_TEST_ASSIGNMENT_STATUS = 'DEV_TEST_ASSIGNED';
+const DEV_TEST_ASSIGNMENT_STATUSES = new Set(['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED']);
 const GUARDED_PRISMA_CLIENTS = new WeakSet();
 
 function normalizeString(value) {
@@ -67,7 +67,7 @@ function targetFor(req) {
 
 function assignmentMutationPayloads(params) {
   if (params.action === 'create') return [params.args?.data || {}];
-  if (params.action === 'update') return [params.args?.data || {}];
+  if (params.action === 'update' || params.action === 'updateMany') return [params.args?.data || {}];
   if (params.action === 'upsert') return [params.args?.create || {}, params.args?.update || {}];
   return [];
 }
@@ -82,6 +82,13 @@ async function existingAssignmentContext(prisma, params) {
       status: null
     };
   }
+  if (where.serviceRequestId && where.workerId) {
+    return {
+      serviceRequestId: where.serviceRequestId,
+      workerId: where.workerId,
+      status: null
+    };
+  }
   if (!where.id || !prisma?.dispatchAssignment?.findUnique) return null;
   return prisma.dispatchAssignment.findUnique({
     where: { id: where.id },
@@ -90,7 +97,7 @@ async function existingAssignmentContext(prisma, params) {
 }
 
 async function validateDevTestAssignmentMutation(prisma, params) {
-  if (params.model !== 'DispatchAssignment' || !['create', 'update', 'upsert'].includes(params.action)) return;
+  if (params.model !== 'DispatchAssignment' || !['create', 'update', 'updateMany', 'upsert'].includes(params.action)) return;
   const payloads = assignmentMutationPayloads(params);
   const existing = await existingAssignmentContext(prisma, params);
   const serviceRequestId = payloads.map((item) => item.serviceRequestId).find(Boolean) || existing?.serviceRequestId || null;
@@ -108,7 +115,7 @@ async function validateDevTestAssignmentMutation(prisma, params) {
     : null;
   const explicitStatuses = payloads.map((item) => item.status).filter(Boolean);
   const statuses = explicitStatuses.length ? explicitStatuses : [existing?.status].filter(Boolean);
-  const statusAllowed = statuses.length > 0 && statuses.every((status) => status === DEV_TEST_ASSIGNMENT_STATUS);
+  const statusAllowed = statuses.length > 0 && statuses.every((status) => DEV_TEST_ASSIGNMENT_STATUSES.has(status));
 
   if (worker?.isTestProfile !== true || !statusAllowed) {
     throw new Error('dev_test_assignment_isolated');
