@@ -2,6 +2,9 @@ import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
+const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
+const DEV_TEST_ASSIGNMENT_STATUS = 'DEV_TEST_ASSIGNED';
+const GUARDED_PRISMA_CLIENTS = new WeakSet();
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -60,6 +63,65 @@ function targetFor(req) {
     || normalizeString(req.body?.workerId)
     || req.path
     || 'dispatch';
+}
+
+function assignmentMutationPayloads(params) {
+  if (params.action === 'create') return [params.args?.data || {}];
+  if (params.action === 'update') return [params.args?.data || {}];
+  if (params.action === 'upsert') return [params.args?.create || {}, params.args?.update || {}];
+  return [];
+}
+
+async function existingAssignmentContext(prisma, params) {
+  const where = params.args?.where || {};
+  const compound = where.serviceRequestId_workerId || {};
+  if (compound.serviceRequestId && compound.workerId) {
+    return {
+      serviceRequestId: compound.serviceRequestId,
+      workerId: compound.workerId,
+      status: null
+    };
+  }
+  if (!where.id || !prisma?.dispatchAssignment?.findUnique) return null;
+  return prisma.dispatchAssignment.findUnique({
+    where: { id: where.id },
+    select: { serviceRequestId: true, workerId: true, status: true }
+  });
+}
+
+async function validateDevTestAssignmentMutation(prisma, params) {
+  if (params.model !== 'DispatchAssignment' || !['create', 'update', 'upsert'].includes(params.action)) return;
+  const payloads = assignmentMutationPayloads(params);
+  const existing = await existingAssignmentContext(prisma, params);
+  const serviceRequestId = payloads.map((item) => item.serviceRequestId).find(Boolean) || existing?.serviceRequestId || null;
+  if (!serviceRequestId) return;
+
+  const request = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: serviceRequestId },
+    select: { source: true }
+  });
+  if (request?.source !== DEV_TEST_REQUEST_SOURCE) return;
+
+  const workerId = payloads.map((item) => item.workerId).find(Boolean) || existing?.workerId || null;
+  const worker = workerId
+    ? await prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { isTestProfile: true } })
+    : null;
+  const explicitStatuses = payloads.map((item) => item.status).filter(Boolean);
+  const statuses = explicitStatuses.length ? explicitStatuses : [existing?.status].filter(Boolean);
+  const statusAllowed = statuses.length > 0 && statuses.every((status) => status === DEV_TEST_ASSIGNMENT_STATUS);
+
+  if (worker?.isTestProfile !== true || !statusAllowed) {
+    throw new Error('dev_test_assignment_isolated');
+  }
+}
+
+function installDevTestAssignmentGuard(prisma) {
+  if (!prisma || GUARDED_PRISMA_CLIENTS.has(prisma) || typeof prisma.$use !== 'function') return;
+  prisma.$use(async (params, next) => {
+    await validateDevTestAssignmentMutation(prisma, params);
+    return next(params);
+  });
+  GUARDED_PRISMA_CLIENTS.add(prisma);
 }
 
 function clearSessionPermissions(req) {
@@ -226,6 +288,7 @@ export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
 }
 
 export function dispatchAuditMiddleware(prisma) {
+  installDevTestAssignmentGuard(prisma);
   return async (req, res, next) => {
     try {
       await refreshDatabaseUserPermissions(prisma, req);
