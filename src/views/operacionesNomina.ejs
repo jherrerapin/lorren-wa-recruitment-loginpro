@@ -26,10 +26,13 @@
     .alert { padding:11px 13px; border-radius:8px; font-weight:650; }
     .alert-success { color:var(--green); background:var(--green2); border:1px solid #86efac; }
     .alert-error { color:var(--red); background:var(--red2); border:1px solid #fca5a5; }
+    .alert-test { color:#5b21b6; background:#f5f3ff; border:1px solid #c4b5fd; }
     .filters { display:grid; grid-template-columns:repeat(6,minmax(140px,1fr)); gap:12px; align-items:end; }
     .field { display:flex; flex-direction:column; gap:5px; }
     .field label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
     input,select { width:100%; border:1px solid var(--border); border-radius:8px; padding:9px 10px; background:#fff; font-size:13px; }
+    .test-toggle { min-height:38px; display:flex!important; flex-direction:row!important; align-items:center; gap:8px; border:1px solid #c4b5fd; background:#f5f3ff; color:#5b21b6!important; border-radius:8px; padding:8px 10px; text-transform:none!important; letter-spacing:0!important; }
+    .test-toggle input { width:auto; accent-color:#7c3aed; }
     .metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
     .metric { padding:15px; border:1px solid var(--border); border-radius:10px; background:#fff; }
     .metric small { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
@@ -81,6 +84,7 @@
       <div><h1><%= pageTitle %></h1><p class="sub">Corte <%= report.period.from || '—' %> a <%= report.period.to || '—' %></p></div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/asistencia">Asistencia</a>
+        <% if (role === 'dev') { %><a class="btn" href="/admin/operaciones/pruebas">Entorno de pruebas</a><% } %>
         <a class="btn btn-blue" href="/admin/operaciones/asistencia/nomina/export.csv?<%= new URLSearchParams({...report.filters, periodType: report.period.periodType, from: report.period.from, to: report.period.to, anchor: report.period.anchor}).toString() %>">CSV</a>
         <a class="btn btn-primary" href="/admin/operaciones/asistencia/nomina/export.xlsx?<%= new URLSearchParams({...report.filters, periodType: report.period.periodType, from: report.period.from, to: report.period.to, anchor: report.period.anchor}).toString() %>">Excel</a>
       </div>
@@ -88,6 +92,7 @@
 
     <% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
     <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+    <% if (role === 'dev' && report.filters.includeTest) { %><div class="alert alert-test"><strong>Modo de prueba activo:</strong> este cálculo incluye solicitudes, sujetos y jornadas DEV_TEST. Las exportaciones conservan este mismo filtro.</div><% } %>
 
     <section class="panel">
       <form method="get" action="/admin/operaciones/asistencia/nomina" class="filters" id="payroll-filters">
@@ -99,6 +104,7 @@
         <div class="field"><label for="operationPointId">Operación</label><select id="operationPointId" name="operationPointId"><option value="">Todas</option><% for (const client of report.clients) { for (const point of client.operationPoints || []) { %><option data-client="<%= client.id %>" value="<%= point.id %>" <%= report.filters.operationPointId === point.id ? 'selected' : '' %>><%= client.name %> · <%= point.name %></option><% }} %></select></div>
         <div class="field"><label for="workerId">Auxiliar</label><select id="workerId" name="workerId"><option value="">Todos</option><% for (const worker of report.workers) { %><option value="<%= worker.id %>" <%= report.filters.workerId === worker.id ? 'selected' : '' %>><%= worker.fullName %><%= worker.documentNumber ? ` · ${worker.documentNumber}` : '' %></option><% } %></select></div>
         <div class="field"><label for="search">Buscar</label><input id="search" name="search" value="<%= report.filters.search %>" placeholder="Nombre, documento o teléfono" /></div>
+        <% if (role === 'dev') { %><div class="field"><label class="test-toggle"><input type="checkbox" name="includeTest" value="true" <%= report.filters.includeTest ? 'checked' : '' %> /> Incluir datos de prueba</label></div><% } %>
         <div class="field"><button class="btn btn-primary" type="submit">Calcular periodo</button></div>
       </form>
     </section>
@@ -115,7 +121,7 @@
       <section class="panel">
         <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada.</p></div></div>
         <form method="post" action="/admin/operaciones/asistencia/nomina/policy">
-          <input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" />
+          <input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
           <div class="policy-grid">
             <div class="field"><label>Cliente</label><select name="clientId" required><option value="">Selecciona</option><% for (const client of report.clients) { %><option value="<%= client.id %>" <%= report.filters.clientId === client.id ? 'selected' : '' %>><%= client.name %></option><% } %></select></div>
             <div class="field"><label>Horas ordinarias semanales</label><input name="weeklyOrdinaryHours" type="number" min="1" max="168" step="0.25" value="<%= selectedPolicy.weeklyOrdinaryMinutes / 60 %>" required /></div>
@@ -137,7 +143,7 @@
 
     <section class="panel">
       <div class="table-wrap">
-        <% if (!report.rows.length) { %><div class="empty">No hay jornadas con entrada y salida para el periodo seleccionado.</div><% } else { %>
+        <% if (!report.rows.length) { %><div class="empty">No hay jornadas con entrada y salida para el periodo seleccionado.<% if (role === 'dev' && !report.filters.includeTest) { %> Activa “Incluir datos de prueba” para ver sujetos DEV_TEST.<% } %></div><% } else { %>
           <table>
             <thead><tr><th>Auxiliar</th><th>Estado</th><th>Total</th><th>Ordinarias</th><th>Extra</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
             <tbody>
@@ -158,7 +164,7 @@
                           <div>
                             <% if (day.compensationStatus) { %>
                               <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
-                                <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
+                                <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" /><% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
                                 <select name="status"><option value="PENDING" <%= day.compensationStatus === 'PENDING' ? 'selected' : '' %>>Compensatorio pendiente</option><option value="NOT_COMPENSATED" <%= day.compensationStatus === 'NOT_COMPENSATED' ? 'selected' : '' %>>No compensado</option><option value="COMPENSATED" <%= day.compensationStatus === 'COMPENSATED' ? 'selected' : '' %>>Compensado</option></select><button class="btn" type="submit">Guardar</button>
                               </form>
                             <% } %>
