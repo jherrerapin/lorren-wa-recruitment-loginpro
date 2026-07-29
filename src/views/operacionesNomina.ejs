@@ -26,6 +26,7 @@
     .alert { padding:11px 13px; border-radius:8px; font-weight:650; }
     .alert-success { color:var(--green); background:var(--green2); border:1px solid #86efac; }
     .alert-error { color:var(--red); background:var(--red2); border:1px solid #fca5a5; }
+    .test-mode { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; padding:12px 14px; border:1px solid #c4b5fd; border-radius:10px; background:#f5f3ff; color:#5b21b6; font-weight:750; }
     .filters { display:grid; grid-template-columns:repeat(6,minmax(140px,1fr)); gap:12px; align-items:end; }
     .field { display:flex; flex-direction:column; gap:5px; }
     .field label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
@@ -88,9 +89,13 @@
 
     <% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
     <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+    <% if (role === 'dev' && report.filters.includeTest) { %>
+      <div class="test-mode"><span>Modo DEV activo: este cálculo incluye jornadas y sujetos de prueba.</span><div class="actions"><a class="btn" href="/admin/operaciones/pruebas">Volver al entorno de pruebas</a><a class="btn" href="/admin/operaciones/asistencia/nomina">Salir del modo de pruebas</a></div></div>
+    <% } %>
 
     <section class="panel">
       <form method="get" action="/admin/operaciones/asistencia/nomina" class="filters" id="payroll-filters">
+        <% if (role === 'dev' && report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
         <div class="field"><label for="periodType">Tipo de corte</label><select id="periodType" name="periodType"><option value="WEEKLY" <%= report.period.periodType === 'WEEKLY' ? 'selected' : '' %>>Semanal</option><option value="BIWEEKLY" <%= report.period.periodType === 'BIWEEKLY' ? 'selected' : '' %>>Quincenal</option><option value="CUSTOM" <%= report.period.periodType === 'CUSTOM' ? 'selected' : '' %>>Personalizado</option></select></div>
         <div class="field"><label for="anchor">Fecha de referencia</label><input id="anchor" name="anchor" type="date" value="<%= report.period.anchor || report.period.from %>" /></div>
         <div class="field custom-date"><label for="from">Desde</label><input id="from" name="from" type="date" value="<%= report.period.from %>" /></div>
@@ -116,6 +121,7 @@
         <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada.</p></div></div>
         <form method="post" action="/admin/operaciones/asistencia/nomina/policy">
           <input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" />
+          <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
           <div class="policy-grid">
             <div class="field"><label>Cliente</label><select name="clientId" required><option value="">Selecciona</option><% for (const client of report.clients) { %><option value="<%= client.id %>" <%= report.filters.clientId === client.id ? 'selected' : '' %>><%= client.name %></option><% } %></select></div>
             <div class="field"><label>Horas ordinarias semanales</label><input name="weeklyOrdinaryHours" type="number" min="1" max="168" step="0.25" value="<%= selectedPolicy.weeklyOrdinaryMinutes / 60 %>" required /></div>
@@ -159,6 +165,7 @@
                             <% if (day.compensationStatus) { %>
                               <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
                                 <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
+                                <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
                                 <select name="status"><option value="PENDING" <%= day.compensationStatus === 'PENDING' ? 'selected' : '' %>>Compensatorio pendiente</option><option value="NOT_COMPENSATED" <%= day.compensationStatus === 'NOT_COMPENSATED' ? 'selected' : '' %>>No compensado</option><option value="COMPENSATED" <%= day.compensationStatus === 'COMPENSATED' ? 'selected' : '' %>>Compensado</option></select><button class="btn" type="submit">Guardar</button>
                               </form>
                             <% } %>

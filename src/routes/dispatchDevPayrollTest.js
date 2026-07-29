@@ -8,6 +8,14 @@ import {
   loadDevTestWorkspace,
   saveDevTestAttendance
 } from '../services/dispatchDevPayrollTest.js';
+import {
+  closeDispatchTestWhatsappSession,
+  getDispatchTestWhatsappStatusView,
+  initDispatchTestWhatsappClient,
+  sendDispatchTestWhatsappMessage
+} from '../services/dispatchWhatsappWebTestService.js';
+
+const ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES = ['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED'];
 
 function normalizeString(value, maxLength = 300) {
   if (typeof value !== 'string') return null;
@@ -29,12 +37,45 @@ function actor(req) {
   };
 }
 
+function noStore(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+}
+
 function redirectWorkspace(res, serviceRequestId, { message = null, error = null } = {}) {
   const params = new URLSearchParams();
   if (serviceRequestId) params.set('serviceRequestId', serviceRequestId);
   if (message) params.set('message', message);
   if (error) params.set('error', error);
   return res.redirect(`/admin/operaciones/pruebas?${params.toString()}`);
+}
+
+function payrollResultUrl(result) {
+  const params = new URLSearchParams();
+  const from = formatBogotaDateTimeLocal(result.arrivalAt).slice(0, 10);
+  const to = formatBogotaDateTimeLocal(result.departureAt).slice(0, 10);
+  const clientId = result.assignment?.serviceRequest?.operationPoint?.clientId || '';
+  const workerId = result.assignment?.worker?.id || result.assignment?.workerId || '';
+  params.set('periodType', 'CUSTOM');
+  params.set('from', from);
+  params.set('to', to || from);
+  if (clientId) params.set('clientId', clientId);
+  if (workerId) params.set('workerId', workerId);
+  params.set('includeTest', 'true');
+  params.set('success', 'Jornada manual guardada y calculada con datos de prueba.');
+  return `/admin/operaciones/asistencia/nomina?${params.toString()}`;
+}
+
+function normalizeWhatsappContext(context) {
+  if (!context || typeof context !== 'object') return undefined;
+  return {
+    serviceRequestId: normalizeString(context.serviceRequestId, 120),
+    assignmentId: normalizeString(context.assignmentId, 120),
+    workerId: normalizeString(context.workerId, 120),
+    recipientName: normalizeString(context.recipientName, 180),
+    messageType: 'DISPATCH_DEV_TEST_CONFIRMATION_REQUEST'
+  };
 }
 
 function publicError(error) {
@@ -62,9 +103,22 @@ function publicError(error) {
   return messages[error?.message] || 'No fue posible completar la prueba de nómina.';
 }
 
+function normalizeWorkspaceAvailability(workspace) {
+  const assignedWorkerIds = new Set((workspace.selectedRequest?.assignments || [])
+    .filter((assignment) => ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES.includes(assignment.status))
+    .map((assignment) => assignment.workerId));
+  return {
+    ...workspace,
+    availableWorkers: (workspace.testWorkers || []).filter((worker) => !assignedWorkerIds.has(worker.id))
+  };
+}
+
 async function recalculateTestRequestStatus(prisma, request) {
   const assignedCount = await prisma.dispatchAssignment.count({
-    where: { serviceRequestId: request.id, status: 'DEV_TEST_ASSIGNED' }
+    where: {
+      serviceRequestId: request.id,
+      status: { in: ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES }
+    }
   });
   const status = assignedCount === 0
     ? 'DEV_TEST_PENDING'
@@ -78,11 +132,12 @@ async function recalculateTestRequestStatus(prisma, request) {
 export function dispatchDevPayrollTestRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: true, limit: '32kb' });
+  const jsonParser = express.json({ limit: '16kb', strict: true });
 
   router.use(requireDev);
 
   router.get('/', async (req, res) => {
-    const workspace = await loadDevTestWorkspace(prisma, req.query || {});
+    const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
     return res.render('operacionesPruebasNomina', {
       pageTitle: 'Pruebas DEV de asistencia y nómina',
       role: 'dev',
@@ -93,6 +148,59 @@ export function dispatchDevPayrollTestRouter(prisma) {
       defaultDevTestTimes,
       testRequestSource: DEV_TEST_REQUEST_SOURCE
     });
+  });
+
+  router.get('/whatsapp', async (req, res) => {
+    noStore(res);
+    initDispatchTestWhatsappClient();
+    const status = await getDispatchTestWhatsappStatusView({ autoStart: false });
+    return res.render('operacionesWhatsappEstado', {
+      pageTitle: 'WhatsApp de pruebas de despacho',
+      role: 'dev',
+      message: normalizeString(req.query?.message),
+      isDev: true,
+      technicalLastError: status.lastError || null,
+      ...status,
+      whatsappTitle: 'WhatsApp de pruebas de despacho',
+      whatsappEyebrow: 'Entorno aislado DEV',
+      whatsappDescription: 'Vincula una cuenta distinta a la línea operativa para probar envíos y confirmaciones de sujetos de prueba.',
+      whatsappBasePath: '/admin/operaciones/pruebas/whatsapp',
+      whatsappReturnHref: '/admin/operaciones/pruebas',
+      whatsappReturnLabel: 'Volver a Pruebas DEV',
+      whatsappAssignmentsHref: '/admin/operaciones/pruebas',
+      whatsappAssignmentsLabel: 'Sujetos de prueba',
+      whatsappCloseConfirm: '¿Cerrar únicamente la sesión de WhatsApp de pruebas? La cuenta operativa no se modificará.',
+      whatsappQrInstruction: 'Escanea este QR desde la cuenta secundaria que usarás exclusivamente para las pruebas.'
+    });
+  });
+
+  router.get('/whatsapp/estado', async (req, res) => {
+    noStore(res);
+    const shouldStart = !['0', 'false'].includes(String(req.query?.start || '').toLowerCase());
+    const status = await getDispatchTestWhatsappStatusView({ autoStart: shouldStart });
+    return res.json({ ok: true, isDev: true, technicalLastError: status.lastError || null, ...status });
+  });
+
+  router.post('/whatsapp/cerrar-sesion', async (_req, res) => {
+    noStore(res);
+    await closeDispatchTestWhatsappSession();
+    const message = encodeURIComponent('Sesión de WhatsApp de pruebas cerrada. La cuenta operativa continúa sin cambios.');
+    return res.redirect(`/admin/operaciones/pruebas/whatsapp?message=${message}`);
+  });
+
+  router.post('/whatsapp/enviar', jsonParser, async (req, res) => {
+    noStore(res);
+    try {
+      const result = await sendDispatchTestWhatsappMessage({
+        phone: req.body?.phone,
+        message: req.body?.message,
+        context: normalizeWhatsappContext(req.body?.context)
+      });
+      return res.json({ ok: true, providerMessageId: result.providerMessageId, phone: result.phone });
+    } catch (error) {
+      const statusCode = error?.statusCode === 503 ? 503 : 400;
+      return res.status(statusCode).json({ ok: false, message: error?.message || 'No se pudo enviar el WhatsApp de prueba.' });
+    }
   });
 
   router.post('/solicitudes', formParser, async (req, res) => {
@@ -113,6 +221,10 @@ export function dispatchDevPayrollTestRouter(prisma) {
         serviceRequestId: req.params.serviceRequestId,
         workerId: req.body.workerId
       }, actor(req));
+      const request = await prisma.dispatchServiceRequest.findUnique({
+        where: { id: req.params.serviceRequestId }
+      });
+      if (request?.source === DEV_TEST_REQUEST_SOURCE) await recalculateTestRequestStatus(prisma, request);
       return redirectWorkspace(res, req.params.serviceRequestId, {
         message: 'Sujeto de prueba asignado y confirmado.'
       });
@@ -124,7 +236,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
   router.post('/asignaciones/:assignmentId/jornada', formParser, async (req, res) => {
     const serviceRequestId = normalizeString(req.body.serviceRequestId, 120);
     try {
-      await saveDevTestAttendance(prisma, {
+      const result = await saveDevTestAttendance(prisma, {
         assignmentId: req.params.assignmentId,
         arrivalAt: req.body.arrivalAt,
         breakStartAt: req.body.breakStartAt,
@@ -132,9 +244,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
         departureAt: req.body.departureAt,
         notes: req.body.notes
       }, actor(req));
-      return redirectWorkspace(res, serviceRequestId, {
-        message: 'Jornada manual guardada. Ya puedes abrir Nómina con datos de prueba.'
-      });
+      return res.redirect(payrollResultUrl(result));
     } catch (error) {
       return redirectWorkspace(res, serviceRequestId, { error: publicError(error) });
     }
@@ -158,6 +268,10 @@ export function dispatchDevPayrollTestRouter(prisma) {
           prisma.dispatchAttendanceSession.delete({ where: { id: session.id } })
         ]);
       }
+      await prisma.dispatchWhatsappConfirmation.updateMany({
+        where: { assignmentId: assignment.id, status: { in: ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'] } },
+        data: { status: 'EXPIRED' }
+      });
       await prisma.dispatchAssignment.delete({ where: { id: assignment.id } });
       await recalculateTestRequestStatus(prisma, assignment.serviceRequest);
       return redirectWorkspace(res, serviceRequestId, { message: 'Asignación de prueba eliminada.' });
