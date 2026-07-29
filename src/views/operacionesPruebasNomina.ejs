@@ -98,14 +98,14 @@
                 </div>
               </div>
 
-              <section class="wa-test" data-wa-test data-phone="<%= assignment.worker.phone || '' %>" data-assignment-id="<%= assignment.id %>" data-service-request-id="<%= selected.id %>" data-worker-id="<%= assignment.worker.id %>" data-recipient-name="<%= assignment.worker.fullName %>" data-client="<%= selected.clientName || '' %>" data-operation="<%= selected.operationPointName || '' %>" data-address="<%= selected.address || selected.operationPoint?.address || '' %>" data-city="<%= selected.cityName || selected.operationPoint?.cityName || '' %>" data-service="<%= selected.serviceName || selected.service?.name || '' %>" data-date="<%= selectedDate %>" data-start="<%= selected.startTime || '' %>" data-end="<%= selected.endTime || '' %>">
+              <section class="wa-test" data-wa-test data-phone="<%= assignment.worker.phone || '' %>" data-assignment-id="<%= assignment.id %>" data-service-request-id="<%= selected.id %>" data-worker-id="<%= assignment.worker.id %>" data-recipient-name="<%= assignment.worker.fullName %>" data-client="<%= selected.clientName || '' %>" data-operation="<%= selected.operationPointName || '' %>" data-address="<%= selected.address || selected.operationPoint?.address || '' %>" data-city="<%= selected.cityName || selected.operationPoint?.cityName || '' %>" data-service="<%= selected.serviceName || selected.service?.name || '' %>" data-date="<%= selectedDate %>" data-start="<%= selected.startTime || '' %>">
                 <div class="wa-test-head">
                   <div><strong>Prueba de mensaje y confirmación</strong><p class="muted"><%= assignment.worker.phone ? `Destino: ${assignment.worker.phone}` : 'Este sujeto no tiene teléfono registrado.' %></p></div>
                   <a class="btn" href="/admin/operaciones/pruebas/whatsapp">Estado de la cuenta secundaria</a>
                 </div>
-                <textarea data-wa-message <%= assignment.worker.phone ? '' : 'disabled' %>>Cargando plantilla vigente de producción...</textarea>
+                <textarea data-wa-message <%= assignment.worker.phone ? '' : 'disabled' %>></textarea>
                 <div class="actions">
-                  <button class="btn wa-link" type="button" data-wa-send disabled>Enviar desde WhatsApp de pruebas</button>
+                  <button class="btn wa-link" type="button" data-wa-send <%= assignment.worker.phone ? '' : 'disabled' %>>Enviar desde WhatsApp de pruebas</button>
                 </div>
                 <div class="wa-result" data-wa-result role="status" aria-live="polite"></div>
               </section>
@@ -129,16 +129,8 @@
   </main>
 
   <script>
-    const fallbackAssignmentTemplate = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
+    const currentProductionAssignmentTemplate = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
     const testWhatsappPanels = Array.from(document.querySelectorAll('[data-wa-test]'));
-
-    function sanitizeAssignmentTemplate(template) {
-      return String(template || '')
-        .replace(/\s*-\s*\{\{\s*horaFin\s*\}\}/gi, '')
-        .replace(/\s*a\s*\{\{\s*horaFin\s*\}\}/gi, '')
-        .replace(/\{\{\s*horaFin\s*\}\}/gi, '')
-        .replace(/Horario:\s*\{\{\s*horaInicio\s*\}\}/gi, 'Hora de inicio: {{horaInicio}}');
-    }
 
     function renderAssignmentMessage(template, panel) {
       const values = {
@@ -151,41 +143,16 @@
         fecha: panel.dataset.date || '',
         horaInicio: panel.dataset.start || ''
       };
-      return sanitizeAssignmentTemplate(template).replace(/\{\{\s*(nombre|cliente|operacion|direccion|ciudad|servicio|fecha|horaInicio)\s*\}\}/g, (_match, key) => values[key] || '');
+      return String(template || '').replace(/\{\{\s*(nombre|cliente|operacion|direccion|ciudad|servicio|fecha|horaInicio)\s*\}\}/g, (_match, key) => values[key] || '');
     }
-
-    async function loadProductionAssignmentTemplate() {
-      try {
-        const response = await fetch('/admin/operaciones/api/asignacion-template', {
-          credentials: 'same-origin',
-          headers: { Accept: 'application/json' },
-          cache: 'no-store'
-        });
-        if (!response.ok) throw new Error('production_template_unavailable');
-        const data = await response.json();
-        return { template: data.content || fallbackAssignmentTemplate, source: 'production' };
-      } catch (_error) {
-        return { template: fallbackAssignmentTemplate, source: 'fallback' };
-      }
-    }
-
-    loadProductionAssignmentTemplate().then(({ template, source }) => {
-      testWhatsappPanels.forEach((panel) => {
-        const button = panel.querySelector('[data-wa-send]');
-        const messageInput = panel.querySelector('[data-wa-message]');
-        const result = panel.querySelector('[data-wa-result]');
-        if (messageInput) messageInput.value = renderAssignmentMessage(template, panel);
-        if (button) button.disabled = !panel.dataset.phone;
-        if (result) result.textContent = source === 'production'
-          ? 'Plantilla vigente de producción cargada.'
-          : 'No se pudo leer la plantilla guardada; se cargó el mensaje operativo predeterminado.';
-      });
-    });
 
     testWhatsappPanels.forEach((panel) => {
       const button = panel.querySelector('[data-wa-send]');
       const messageInput = panel.querySelector('[data-wa-message]');
       const result = panel.querySelector('[data-wa-result]');
+      if (messageInput) messageInput.value = renderAssignmentMessage(currentProductionAssignmentTemplate, panel);
+      if (result) result.textContent = 'Mensaje vigente del tablero operativo cargado.';
+
       button?.addEventListener('click', async () => {
         const message = messageInput?.value?.trim() || '';
         result.classList.remove('error');
