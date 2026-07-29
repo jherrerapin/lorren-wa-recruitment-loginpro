@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   MIN_OVERTIME_RECOGNITION_MINUTES,
   calculatePayrollConceptReport
@@ -89,4 +90,14 @@ test('el umbral se aplica a una sola jornada aunque cruce medianoche', () => {
   assert.equal(row.unrecognizedOvertimeMinutes, 0);
   assert.equal(row.conceptMinutes.RNO, 420);
   assert.equal(row.conceptMinutes.HENO, 60);
+});
+
+test('la pantalla muestra el tiempo extra que quedó bajo el umbral', async () => {
+  const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
+  assert.match(template, /Extra bajo umbral/);
+  assert.match(template, /report\.totals\.unrecognizedOvertimeMinutes/);
+  assert.match(template, /row\.unrecognizedOvertimeHours/);
+  assert.match(template, /day\.unrecognizedOvertimeHours/);
+  assert.match(template, /El exceso se reconoce como extra desde 30 minutos/);
+  assert.match(template, /OVERTIME_BELOW_MINIMUM/);
 });
