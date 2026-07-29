@@ -85,10 +85,9 @@
             const mark = (type) => (session?.marks || []).filter((item) => item.markType === type).slice(-1)[0] || null;
             const defaults = defaultDevTestTimes(selected);
             const arrivalValue = formatBogotaDateTimeLocal(session?.arrivalReportedAt) || defaults.arrivalAt;
-            const breakStartValue = formatBogotaDateTimeLocal(mark('BREAK_START')?.clientCapturedAt || mark('BREAK_START')?.serverReceivedAt) || defaults.breakStartAt;
-            const breakEndValue = formatBogotaDateTimeLocal(mark('BREAK_END')?.clientCapturedAt || mark('BREAK_END')?.serverReceivedAt) || defaults.breakEndAt;
+            const breakStartValue = formatBogotaDateTimeLocal(mark('BREAK_START')?.clientCapturedAt || mark('BREAK_START')?.serverReceivedAt);
+            const breakEndValue = formatBogotaDateTimeLocal(mark('BREAK_END')?.clientCapturedAt || mark('BREAK_END')?.serverReceivedAt);
             const departureValue = formatBogotaDateTimeLocal(session?.departureReportedAt) || defaults.departureAt;
-            const defaultWhatsappMessage = `Hola ${assignment.worker.fullName}. Te confirmamos la asignación de prueba para ${selected.operationPointName || 'la operación'} el ${selectedDate} de ${selected.startTime || 'hora pendiente'}${selected.endTime ? ` a ${selected.endTime}` : ''}. Responde CONFIRMADO para validar la recepción.`;
           %>
             <article class="assignment-card">
               <div class="assignment-head">
@@ -99,14 +98,14 @@
                 </div>
               </div>
 
-              <section class="wa-test" data-wa-test data-phone="<%= assignment.worker.phone || '' %>" data-assignment-id="<%= assignment.id %>" data-service-request-id="<%= selected.id %>" data-worker-id="<%= assignment.worker.id %>" data-recipient-name="<%= assignment.worker.fullName %>">
+              <section class="wa-test" data-wa-test data-phone="<%= assignment.worker.phone || '' %>" data-assignment-id="<%= assignment.id %>" data-service-request-id="<%= selected.id %>" data-worker-id="<%= assignment.worker.id %>" data-recipient-name="<%= assignment.worker.fullName %>" data-client="<%= selected.clientName || '' %>" data-operation="<%= selected.operationPointName || '' %>" data-address="<%= selected.address || selected.operationPoint?.address || '' %>" data-city="<%= selected.cityName || selected.operationPoint?.cityName || '' %>" data-service="<%= selected.serviceName || selected.service?.name || '' %>" data-date="<%= selectedDate %>" data-start="<%= selected.startTime || '' %>" data-end="<%= selected.endTime || '' %>">
                 <div class="wa-test-head">
                   <div><strong>Prueba de mensaje y confirmación</strong><p class="muted"><%= assignment.worker.phone ? `Destino: ${assignment.worker.phone}` : 'Este sujeto no tiene teléfono registrado.' %></p></div>
                   <a class="btn" href="/admin/operaciones/pruebas/whatsapp">Estado de la cuenta secundaria</a>
                 </div>
-                <textarea data-wa-message <%= assignment.worker.phone ? '' : 'disabled' %>><%= defaultWhatsappMessage %></textarea>
+                <textarea data-wa-message <%= assignment.worker.phone ? '' : 'disabled' %>>Cargando plantilla vigente de producción...</textarea>
                 <div class="actions">
-                  <button class="btn wa-link" type="button" data-wa-send <%= assignment.worker.phone ? '' : 'disabled' %>>Enviar desde WhatsApp de pruebas</button>
+                  <button class="btn wa-link" type="button" data-wa-send disabled>Enviar desde WhatsApp de pruebas</button>
                 </div>
                 <div class="wa-result" data-wa-result role="status" aria-live="polite"></div>
               </section>
@@ -115,8 +114,8 @@
                 <input type="hidden" name="serviceRequestId" value="<%= selected.id %>" />
                 <div class="manual-grid">
                   <div class="field"><label>Entrada</label><input type="datetime-local" name="arrivalAt" value="<%= arrivalValue %>" required /></div>
-                  <div class="field"><label>Inicio de almuerzo</label><input type="datetime-local" name="breakStartAt" value="<%= breakStartValue %>" /><small>Déjalo vacío para probar una jornada sin almuerzo.</small></div>
-                  <div class="field"><label>Regreso de almuerzo</label><input type="datetime-local" name="breakEndAt" value="<%= breakEndValue %>" /><small>Bórralo y conserva el inicio para probar almuerzo abierto.</small></div>
+                  <div class="field"><label>Inicio de almuerzo (opcional)</label><input type="datetime-local" name="breakStartAt" value="<%= breakStartValue %>" /><small>Déjalo vacío si el auxiliar no tomó almuerzo; no se descontará tiempo.</small></div>
+                  <div class="field"><label>Regreso de almuerzo (opcional)</label><input type="datetime-local" name="breakEndAt" value="<%= breakEndValue %>" /><small>Solo diligéncialo si registraste el inicio; se descontará únicamente el tiempo realmente tomado.</small></div>
                   <div class="field"><label>Salida de turno</label><input type="datetime-local" name="departureAt" value="<%= departureValue %>" required /></div>
                   <div class="field full"><label>Nota de la prueba</label><input name="notes" placeholder="Ejemplo: validar HENO y recargo dominical" /></div>
                 </div>
@@ -130,7 +129,60 @@
   </main>
 
   <script>
-    document.querySelectorAll('[data-wa-test]').forEach((panel) => {
+    const fallbackAssignmentTemplate = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
+    const testWhatsappPanels = Array.from(document.querySelectorAll('[data-wa-test]'));
+
+    function sanitizeAssignmentTemplate(template) {
+      return String(template || '')
+        .replace(/\s*-\s*\{\{\s*horaFin\s*\}\}/gi, '')
+        .replace(/\s*a\s*\{\{\s*horaFin\s*\}\}/gi, '')
+        .replace(/\{\{\s*horaFin\s*\}\}/gi, '')
+        .replace(/Horario:\s*\{\{\s*horaInicio\s*\}\}/gi, 'Hora de inicio: {{horaInicio}}');
+    }
+
+    function renderAssignmentMessage(template, panel) {
+      const values = {
+        nombre: panel.dataset.recipientName || '',
+        cliente: panel.dataset.client || '',
+        operacion: panel.dataset.operation || '',
+        direccion: panel.dataset.address || '',
+        ciudad: panel.dataset.city || '',
+        servicio: panel.dataset.service || '',
+        fecha: panel.dataset.date || '',
+        horaInicio: panel.dataset.start || ''
+      };
+      return sanitizeAssignmentTemplate(template).replace(/\{\{\s*(nombre|cliente|operacion|direccion|ciudad|servicio|fecha|horaInicio)\s*\}\}/g, (_match, key) => values[key] || '');
+    }
+
+    async function loadProductionAssignmentTemplate() {
+      try {
+        const response = await fetch('/admin/operaciones/api/asignacion-template', {
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store'
+        });
+        if (!response.ok) throw new Error('production_template_unavailable');
+        const data = await response.json();
+        return { template: data.content || fallbackAssignmentTemplate, source: 'production' };
+      } catch (_error) {
+        return { template: fallbackAssignmentTemplate, source: 'fallback' };
+      }
+    }
+
+    loadProductionAssignmentTemplate().then(({ template, source }) => {
+      testWhatsappPanels.forEach((panel) => {
+        const button = panel.querySelector('[data-wa-send]');
+        const messageInput = panel.querySelector('[data-wa-message]');
+        const result = panel.querySelector('[data-wa-result]');
+        if (messageInput) messageInput.value = renderAssignmentMessage(template, panel);
+        if (button) button.disabled = !panel.dataset.phone;
+        if (result) result.textContent = source === 'production'
+          ? 'Plantilla vigente de producción cargada.'
+          : 'No se pudo leer la plantilla guardada; se cargó el mensaje operativo predeterminado.';
+      });
+    });
+
+    testWhatsappPanels.forEach((panel) => {
       const button = panel.querySelector('[data-wa-send]');
       const messageInput = panel.querySelector('[data-wa-message]');
       const result = panel.querySelector('[data-wa-result]');
@@ -167,7 +219,7 @@
           result.textContent = error.message || 'No fue posible enviar el WhatsApp de prueba.';
           result.classList.add('error');
         } finally {
-          button.disabled = false;
+          button.disabled = !panel.dataset.phone;
         }
       });
     });
