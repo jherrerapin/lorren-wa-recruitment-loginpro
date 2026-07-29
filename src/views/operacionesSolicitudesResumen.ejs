@@ -58,7 +58,7 @@
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
-  <% const metricUrl = (nextType) => `/admin/operaciones/solicitudes/resumen?fecha=${encodeURIComponent(selectedDate)}&tipo=${encodeURIComponent(nextType)}`; %>
+  <% const metricUrl = (nextType) => `/admin/operaciones/resumen?fecha=${encodeURIComponent(selectedDate)}&type=${encodeURIComponent(nextType)}`; %>
   <% const statusClass = (status) => status === 'ASSIGNMENT_COMPLETE' ? 'pill-green' : status === 'PENDING_CONFIRMATION' ? 'pill-blue' : status === 'CANCELLED' ? 'pill-red' : 'pill-amber'; %>
   <% const formatDate = (value) => value ? new Date(value).toISOString().slice(0,10) : '-'; %>
   <% const activeCount = (request) => activeAssignments(request).length; %>
