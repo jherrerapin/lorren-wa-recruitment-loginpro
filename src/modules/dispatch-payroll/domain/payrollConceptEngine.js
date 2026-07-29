@@ -36,8 +36,8 @@ function finiteInteger(value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER
 
 export function normalizePayrollPolicy(source = {}) {
   return {
-    weeklyOrdinaryMinutes: finiteInteger(source.weeklyOrdinaryMinutes, DEFAULT_PAYROLL_POLICY.weeklyOrdinaryMinutes, { min: 60, max: 7 * 24 * 60 }),
-    dailyOrdinaryMinutes: finiteInteger(source.dailyOrdinaryMinutes, DEFAULT_PAYROLL_POLICY.dailyOrdinaryMinutes, { min: 60, max: 24 * 60 }),
+    weeklyOrdinaryMinutes: finiteInteger(source.weeklyOrdinaryMinutes, DEFAULT_PAYROLL_POLICY.weeklyOrdinaryMinutes, { min: 60, max: DEFAULT_PAYROLL_POLICY.weeklyOrdinaryMinutes }),
+    dailyOrdinaryMinutes: finiteInteger(source.dailyOrdinaryMinutes, DEFAULT_PAYROLL_POLICY.dailyOrdinaryMinutes, { min: 60, max: DEFAULT_PAYROLL_POLICY.dailyOrdinaryMinutes }),
     maxDailyOvertimeMinutes: finiteInteger(source.maxDailyOvertimeMinutes, DEFAULT_PAYROLL_POLICY.maxDailyOvertimeMinutes, { min: 0, max: 12 * 60 }),
     maxWeeklyOvertimeMinutes: finiteInteger(source.maxWeeklyOvertimeMinutes, DEFAULT_PAYROLL_POLICY.maxWeeklyOvertimeMinutes, { min: 0, max: 7 * 24 * 60 }),
     nightStartMinute: finiteInteger(source.nightStartMinute, DEFAULT_PAYROLL_POLICY.nightStartMinute, { min: 0, max: 1439 }),
