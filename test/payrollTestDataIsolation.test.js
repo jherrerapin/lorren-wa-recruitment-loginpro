@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+
+test('Nómina excluye pruebas por defecto y solo DEV puede solicitar su inclusión', async () => {
+  const report = await read('src/modules/dispatch-payroll/application/payrollReport.js');
+  const route = await read('src/routes/dispatchPayroll.js');
+  assert.match(report, /DEV_TEST_REQUEST_SOURCE/);
+  assert.match(report, /!filters\.includeTest && sessionIsTest/);
+  assert.match(report, /isTestProfile: false/);
+  assert.match(route, /roleFromRequest\(req\) === 'dev'/);
+  assert.match(route, /delete input\.includeTest/);
+});
+
+test('el formulario de solicitudes ofrece check de prueba solamente a DEV', async () => {
+  const view = await read('src/views/operacionesSolicitudes.ejs');
+  const bridge = await read('src/routes/dispatchBridge.js');
+  assert.match(view, /role === 'dev'[\s\S]*Solicitud de prueba/);
+  assert.match(view, /\/admin\/operaciones\/pruebas\/solicitudes/);
+  assert.match(bridge, /router\.use\('\/pruebas', dispatchDevPayrollTestRouter\(prisma\)\)/);
+});
+
+test('los estados DEV no se confunden con solicitudes o asignaciones operativas', async () => {
+  const service = await read('src/services/dispatchDevPayrollTest.js');
+  const attendance = await read('src/modules/dispatch-attendance/application/adminAttendance.js');
+  assert.match(service, /status: 'DEV_TEST_PENDING'/);
+  assert.match(service, /status: 'DEV_TEST_ASSIGNED'/);
+  assert.match(service, /DEV_TEST_PARTIAL/);
+  assert.match(service, /DEV_TEST_COMPLETE/);
+  assert.doesNotMatch(service, /status: 'CONFIRMED'/);
+  assert.match(attendance, /'ASSIGNED',[\s\S]*'CONFIRMATION_PENDING',[\s\S]*'CONFIRMED'/);
+  assert.doesNotMatch(attendance, /DEV_TEST_ASSIGNED/);
+});
+
+test('el dashboard y sus exportaciones no cargan solicitudes DEV_TEST', async () => {
+  const dashboard = await read('src/routes/dispatchDashboardMetrics.js');
+  assert.match(dashboard, /DEV_TEST_REQUEST_SOURCE = 'DEV_TEST'/);
+  assert.match(dashboard, /source: \{ not: DEV_TEST_REQUEST_SOURCE \}/);
+  assert.match(dashboard, /request\.source === DEV_TEST_REQUEST_SOURCE/);
+});

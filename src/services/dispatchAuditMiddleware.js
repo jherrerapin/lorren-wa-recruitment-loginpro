@@ -2,6 +2,9 @@ import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
+const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
+const DEV_TEST_ASSIGNMENT_STATUS = 'DEV_TEST_ASSIGNED';
+const GUARDED_PRISMA_CLIENTS = new WeakSet();
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -24,6 +27,7 @@ function safeJson(value) {
 function inferAction(req) {
   const path = req.path || '';
   if (path.includes('/nomina')) return 'DISPATCH_PAYROLL_CHANGE';
+  if (path.includes('/pruebas')) return 'DISPATCH_DEV_TEST_CHANGE';
   if (path.includes('/whatsapp/enviar')) return 'DISPATCH_WHATSAPP_SEND';
   if (path.includes('/asignaciones/assign')) return 'DISPATCH_ASSIGNMENT_CREATE';
   if (path.includes('/asignaciones/confirmar')) return 'DISPATCH_ASSIGNMENT_CONFIRM';
@@ -61,6 +65,65 @@ function targetFor(req) {
     || 'dispatch';
 }
 
+function assignmentMutationPayloads(params) {
+  if (params.action === 'create') return [params.args?.data || {}];
+  if (params.action === 'update') return [params.args?.data || {}];
+  if (params.action === 'upsert') return [params.args?.create || {}, params.args?.update || {}];
+  return [];
+}
+
+async function existingAssignmentContext(prisma, params) {
+  const where = params.args?.where || {};
+  const compound = where.serviceRequestId_workerId || {};
+  if (compound.serviceRequestId && compound.workerId) {
+    return {
+      serviceRequestId: compound.serviceRequestId,
+      workerId: compound.workerId,
+      status: null
+    };
+  }
+  if (!where.id || !prisma?.dispatchAssignment?.findUnique) return null;
+  return prisma.dispatchAssignment.findUnique({
+    where: { id: where.id },
+    select: { serviceRequestId: true, workerId: true, status: true }
+  });
+}
+
+async function validateDevTestAssignmentMutation(prisma, params) {
+  if (params.model !== 'DispatchAssignment' || !['create', 'update', 'upsert'].includes(params.action)) return;
+  const payloads = assignmentMutationPayloads(params);
+  const existing = await existingAssignmentContext(prisma, params);
+  const serviceRequestId = payloads.map((item) => item.serviceRequestId).find(Boolean) || existing?.serviceRequestId || null;
+  if (!serviceRequestId) return;
+
+  const request = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: serviceRequestId },
+    select: { source: true }
+  });
+  if (request?.source !== DEV_TEST_REQUEST_SOURCE) return;
+
+  const workerId = payloads.map((item) => item.workerId).find(Boolean) || existing?.workerId || null;
+  const worker = workerId
+    ? await prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { isTestProfile: true } })
+    : null;
+  const explicitStatuses = payloads.map((item) => item.status).filter(Boolean);
+  const statuses = explicitStatuses.length ? explicitStatuses : [existing?.status].filter(Boolean);
+  const statusAllowed = statuses.length > 0 && statuses.every((status) => status === DEV_TEST_ASSIGNMENT_STATUS);
+
+  if (worker?.isTestProfile !== true || !statusAllowed) {
+    throw new Error('dev_test_assignment_isolated');
+  }
+}
+
+function installDevTestAssignmentGuard(prisma) {
+  if (!prisma || GUARDED_PRISMA_CLIENTS.has(prisma) || typeof prisma.$use !== 'function') return;
+  prisma.$use(async (params, next) => {
+    await validateDevTestAssignmentMutation(prisma, params);
+    return next(params);
+  });
+  GUARDED_PRISMA_CLIENTS.add(prisma);
+}
+
 function clearSessionPermissions(req) {
   req.session.userRole = null;
   req.session.userId = null;
@@ -78,20 +141,6 @@ function clearSessionPermissions(req) {
   req.canAccessStatistics = false;
   req.canAccessMetaAds = false;
   req.canAccessCvAnalysis = false;
-}
-
-async function safePayrollAccess(prisma, req, user) {
-  try {
-    const access = await resolvePayrollFeatureAccess(prisma, {
-      userRole: req.session?.userRole || req.userRole,
-      userId: user?.id || req.session?.userId || req.userId,
-      username: user?.username || req.session?.username || req.username
-    });
-    return access.allowed === true;
-  } catch (error) {
-    console.warn('No fue posible refrescar el permiso de Nómina.', error?.message || error);
-    return false;
-  }
 }
 
 async function refreshDatabaseUserPermissions(prisma, req) {
@@ -146,7 +195,17 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const canAccessMetaAds = Boolean(user.canAccessMetaAds);
   const canAccessCvAnalysis = Boolean(user.canAccessCvAnalysis);
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
-  const canAccessPayroll = await safePayrollAccess(prisma, req, user);
+  let canAccessPayroll = false;
+  try {
+    const payrollAccess = await resolvePayrollFeatureAccess(prisma, {
+      userRole: req.session?.userRole || req.userRole,
+      userId: user.id,
+      username: user.username
+    });
+    canAccessPayroll = payrollAccess.allowed === true;
+  } catch (error) {
+    console.warn('No fue posible refrescar el permiso de Nómina.', error);
+  }
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
@@ -173,15 +232,14 @@ async function refreshDatabaseUserPermissions(prisma, req) {
 
 function isHtmlResponse(body, res) {
   if (typeof body !== 'string') return false;
-  const contentType = typeof res?.getHeader === 'function'
-    ? String(res.getHeader('Content-Type') || '').toLowerCase()
-    : '';
+  const contentType = String(res.getHeader('Content-Type') || '').toLowerCase();
   return contentType.includes('text/html') || body.trimStart().startsWith('<!DOCTYPE html') || body.trimStart().startsWith('<html');
 }
 
 function injectPayrollNavigation(html, req) {
   const allowed = req.canAccessPayroll === true || req.session?.canAccessPayroll === true;
-  if (!allowed || !String(req.originalUrl || '').startsWith('/admin/operaciones')) return html;
+  const path = String(req.originalUrl || '').split('?')[0];
+  if (!allowed || !path.startsWith('/admin') || path.startsWith('/admin/operaciones/asistencia/nomina/api/')) return html;
   if (html.includes(`href="${PAYROLL_PATH}"`)) return html;
   const link = `<a href="${PAYROLL_PATH}">Nómina</a>`;
   if (html.includes('<span class="spacer"></span>')) {
@@ -198,7 +256,6 @@ function injectPayrollUsersScript(html, req) {
 }
 
 function installPayrollHtmlBridge(req, res) {
-  if (!res || typeof res.send !== 'function') return;
   const originalSend = res.send.bind(res);
   res.send = (body) => {
     if (!isHtmlResponse(body, res)) return originalSend(body);
@@ -231,6 +288,7 @@ export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
 }
 
 export function dispatchAuditMiddleware(prisma) {
+  installDevTestAssignmentGuard(prisma);
   return async (req, res, next) => {
     try {
       await refreshDatabaseUserPermissions(prisma, req);

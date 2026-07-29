@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    .readonly-field{background:#f8fafc;color:var(--muted);cursor:not-allowed}.select-hint,.shift-summary{color:var(--muted);font-size:12px;margin-top:4px}.shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.section-note strong{color:var(--teal)}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
+    .readonly-field{background:#f8fafc;color:var(--muted);cursor:not-allowed}.select-hint,.shift-summary{color:var(--muted);font-size:12px;margin-top:4px}.shift-list{display:grid;gap:10px}.shift-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2)}.shift-remove{border:1px solid var(--border);background:#fff;border-radius:999px;padding:9px 12px;font-weight:900;cursor:pointer}.section-note strong{color:var(--teal)}.test-request-option{display:flex;align-items:flex-start;gap:10px;border:1px solid #c4b5fd;background:#f5f3ff;border-radius:12px;padding:13px;color:#5b21b6;cursor:pointer}.test-request-option input{width:18px;height:18px;margin-top:2px;accent-color:#7c3aed}.test-request-option strong,.test-request-option small{display:block}.test-request-option small{margin-top:3px;line-height:1.4;color:#6d28d9}@media(max-width:720px){.shift-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -20,13 +20,13 @@
   <main class="page">
     <section class="hero">
       <div><div class="eyebrow">Solicitudes operativas</div><h1>Crear solicitud de servicio</h1><p>Esta pantalla queda enfocada solo en crear solicitudes nuevas.</p></div>
-      <div class="actions"><a class="btn" href="/admin/operaciones">Volver a Operaciones</a><a class="btn btn-primary" href="/admin/operaciones/asignaciones">Ir a asignación</a><a class="btn" href="/admin/operaciones/clientes">Clientes</a></div>
+      <div class="actions"><a class="btn" href="/admin/operaciones">Volver a Operaciones</a><a class="btn btn-primary" href="/admin/operaciones/asignaciones">Ir a asignación</a><a class="btn" href="/admin/operaciones/clientes">Clientes</a><% if (role === 'dev') { %><a class="btn" href="/admin/operaciones/pruebas">Entorno de pruebas</a><% } %></div>
     </section>
     <% if (message) { %><div class="section-note"><%= message %></div><% } %>
     <div class="section-note"><strong>Consulta y edición:</strong> el listado con acciones aparece desde las tarjetas del panel operativo: Solicitudes del día, Pendientes, Asignación completa o Novedades abiertas.</div>
     <section class="card">
       <div class="card-body">
-        <form method="post" action="/admin/operaciones/solicitudes">
+        <form method="post" action="/admin/operaciones/solicitudes" id="serviceRequestForm">
           <div class="form-grid">
             <div class="field"><label for="clientId">Cliente</label><select id="clientId" name="clientId" required><option value="">Selecciona un cliente</option><% clients.forEach((client)=>{ %><option value="<%= client.id %>"><%= client.name %></option><% }) %></select><p class="select-hint">Solo aparecen clientes activos registrados en Operaciones.</p></div>
             <div class="field"><label for="operationPointId">Operación / punto</label><select id="operationPointId" name="operationPointId" required disabled><option value="">Selecciona primero un cliente</option></select></div>
@@ -35,6 +35,7 @@
             <div class="field"><label for="addressDisplay">Dirección de la operación</label><input id="addressDisplay" class="readonly-field" readonly placeholder="Se carga desde la operación" /></div>
             <input type="hidden" id="address" name="address" />
             <div class="field full"><label>Días, horarios y auxiliares requeridos</label><div class="shift-list" id="shiftList"><div class="shift-row"><div class="field"><label>Fecha servicio</label><input type="date" name="serviceDateBlock" value="<%= today %>" required /></div><div class="field"><label>Auxiliares</label><input type="number" name="requiredWorkers" min="1" value="1" required /></div><div class="field"><label>Hora inicio</label><input type="time" name="startTime" required /></div><div class="field"><label>Hora fin</label><input type="time" name="endTime" /></div><button class="shift-remove" type="button" hidden>Quitar</button></div></div><p class="shift-summary">Para varios días, agrega un bloque por cada fecha y horario.</p><button class="btn" type="button" id="addShiftBtn">Agregar otro día / horario</button></div>
+            <% if (role === 'dev') { %><label class="field full test-request-option"><input id="isDevTestRequest" type="checkbox" checked /><span><strong>Solicitud de prueba</strong><small>No ejecuta autoasignación ni notificaciones. Solo permitirá asignar auxiliares marcados como sujetos de prueba y después registrar la jornada manual.</small></span></label><% } %>
             <div class="field full"><label>Notas</label><textarea name="notes" placeholder="Observaciones de la solicitud"></textarea></div>
           </div>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Crear solicitud</button></div>
@@ -51,6 +52,7 @@
     operationSelect?.addEventListener('change',()=>{const option=operationSelect.selectedOptions[0];cityDisplay.value=option?.dataset.city||'';addressDisplay.value=option?.dataset.address||'';addressInput.value=option?.dataset.address||'';});
     const shiftList=document.getElementById('shiftList'),addShiftBtn=document.getElementById('addShiftBtn');function refreshRemoveButtons(){const rows=Array.from(shiftList?.querySelectorAll('.shift-row')||[]);rows.forEach((row)=>{const button=row.querySelector('.shift-remove');if(button)button.hidden=rows.length===1;});}
     addShiftBtn?.addEventListener('click',()=>{const first=shiftList.querySelector('.shift-row');const clone=first.cloneNode(true);clone.querySelectorAll('input').forEach((input)=>{input.value=input.type==='number'?'1':'';});clone.querySelector('.shift-remove')?.addEventListener('click',()=>{clone.remove();refreshRemoveButtons();});shiftList.appendChild(clone);refreshRemoveButtons();});shiftList?.querySelector('.shift-remove')?.addEventListener('click',(event)=>{event.currentTarget.closest('.shift-row')?.remove();refreshRemoveButtons();});refreshRemoveButtons();
+    const requestForm=document.getElementById('serviceRequestForm'),testRequest=document.getElementById('isDevTestRequest');function syncRequestAction(){if(!requestForm||!testRequest)return;requestForm.action=testRequest.checked?'/admin/operaciones/pruebas/solicitudes':'/admin/operaciones/solicitudes';}testRequest?.addEventListener('change',syncRequestAction);syncRequestAction();
   </script>
 </body>
 </html>

@@ -1,0 +1,63 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { dispatchAuditMiddleware } from '../src/services/dispatchAuditMiddleware.js';
+
+function guardedPrisma({ workerIsTest = false } = {}) {
+  let guard = null;
+  const prisma = {
+    $use(handler) { guard = handler; },
+    appUser: { findUnique: async () => null },
+    dispatchServiceRequest: {
+      findUnique: async () => ({ source: 'DEV_TEST' })
+    },
+    dispatchWorker: {
+      findUnique: async () => ({ isTestProfile: workerIsTest })
+    },
+    dispatchAssignment: {
+      findUnique: async () => null
+    },
+    devAuditEvent: {
+      create: async () => ({}),
+      findFirst: async () => null
+    }
+  };
+  dispatchAuditMiddleware(prisma);
+  return { prisma, guard };
+}
+
+test('bloquea que una ruta heredada asigne personal real a DEV_TEST', async () => {
+  const { guard } = guardedPrisma({ workerIsTest: false });
+  assert.equal(typeof guard, 'function');
+  await assert.rejects(() => guard({
+    model: 'DispatchAssignment',
+    action: 'create',
+    args: {
+      data: {
+        serviceRequestId: 'request-test',
+        workerId: 'worker-real',
+        status: 'CONFIRMATION_PENDING'
+      }
+    }
+  }, async () => ({ id: 'should-not-run' })), /dev_test_assignment_isolated/);
+});
+
+test('permite únicamente sujeto y estado propios del entorno DEV', async () => {
+  const { guard } = guardedPrisma({ workerIsTest: true });
+  let nextCalled = false;
+  const result = await guard({
+    model: 'DispatchAssignment',
+    action: 'create',
+    args: {
+      data: {
+        serviceRequestId: 'request-test',
+        workerId: 'worker-test',
+        status: 'DEV_TEST_ASSIGNED'
+      }
+    }
+  }, async () => {
+    nextCalled = true;
+    return { id: 'assignment-test' };
+  });
+  assert.equal(nextCalled, true);
+  assert.equal(result.id, 'assignment-test');
+});

@@ -17,6 +17,7 @@ const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRM
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const PENDING_REQUEST_STATUSES = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
 const OPEN_INCIDENT_STATUSES = ['OPEN', 'IN_PROGRESS'];
+const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -76,7 +77,7 @@ function assignmentStatusLabel(value) {
 
 function cleanSheetName(value, fallback) {
   const base = normalizeString(value) || fallback;
-  return base.replace(/[\\/*?:[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || fallback;
+  return base.replace(/[\/*?:[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || fallback;
 }
 
 function groupByClient(requests) {
@@ -165,10 +166,16 @@ function buildOperationsDashboardMetrics(requests = []) {
   };
 }
 
+function excludeDevTestRequests(where = {}) {
+  return {
+    AND: [where, { source: { not: DEV_TEST_REQUEST_SOURCE } }]
+  };
+}
+
 async function loadServiceRequestsForDate(prisma, selectedDate) {
   const broadWhere = buildDispatchServiceDateWhere(selectedDate);
   const requests = await prisma.dispatchServiceRequest.findMany({
-    where: broadWhere,
+    where: excludeDevTestRequests(broadWhere),
     include: {
       service: true,
       ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
@@ -313,135 +320,124 @@ async function exportRequestsToExcel(res, selectedDate, serviceRequests) {
     { header: 'Requeridos', key: 'required', width: 13 },
     { header: 'Asignados', key: 'assigned', width: 13 },
     { header: 'Confirmados', key: 'confirmed', width: 13 },
-    { header: 'Estado', key: 'status', width: 26 },
-    { header: 'Novedades', key: 'incidents', width: 12 }
+    { header: 'Estado', key: 'status', width: 22 },
+    { header: 'Auxiliares asignados', key: 'workers', width: 48 }
   ];
-  applyTitle(summarySheet, 'Reporte de Operaciones', `Fecha: ${selectedDate}`, summaryColumns.length);
   summarySheet.columns = summaryColumns;
-  const summaryHeaderRow = summarySheet.getRow(3);
-  summaryHeaderRow.values = summaryColumns.map((column) => column.header);
-  styleHeader(summaryHeaderRow);
+  applyTitle(summarySheet, 'Solicitudes de Operaciones', `Fecha de servicio: ${selectedDate}`, summaryColumns.length);
+  const headerRow = summarySheet.addRow(summaryColumns.map((column) => column.header));
+  styleHeader(headerRow);
 
   serviceRequests.forEach((request, index) => {
-    const active = activeAssignments(request);
-    const confirmed = confirmedAssignments(request);
     const row = summarySheet.addRow({
-      client: request.clientName || '-',
-      operation: request.operationPointName || '-',
-      service: request.serviceName || request.service?.name || '-',
+      client: request.clientName || 'Sin cliente',
+      operation: request.operationPointName || request.operationPoint?.name || 'Sin operación',
+      service: request.serviceName || request.service?.name || 'Sin servicio',
       horario: buildHorario(request),
       required: request.requiredWorkers || 0,
-      assigned: active.length,
-      confirmed: confirmed.length,
+      assigned: activeAssignments(request).length,
+      confirmed: confirmedAssignments(request).length,
       status: statusLabel(request.status),
-      incidents: (request.incidents || []).length
+      workers: buildAssignedWorkersCell(request)
     });
     styleDataRow(row, index);
     styleStatusCell(row.getCell('status'), request.status);
-    row.height = 22;
   });
 
-  const groupedByClient = groupByClient(serviceRequests);
-  for (const [clientName, clientRequests] of groupedByClient) {
-    const sheetName = cleanSheetName(clientName, 'Cliente');
-    const clientSheet = workbook.addWorksheet(sheetName);
-    const clientColumns = [
-      { header: 'Operación', key: 'operation', width: 28 },
-      { header: 'Servicio', key: 'service', width: 24 },
-      { header: 'Horario', key: 'horario', width: 18 },
-      { header: 'Auxiliares asignados', key: 'workers', width: 52 },
-      { header: 'Cobertura', key: 'coverage', width: 28 },
-      { header: 'Estado', key: 'status', width: 26 }
-    ];
-    applyTitle(clientSheet, clientName, `Fecha: ${selectedDate}`, clientColumns.length);
-    clientSheet.columns = clientColumns;
-    const headerRow = clientSheet.getRow(3);
-    headerRow.values = clientColumns.map((column) => column.header);
-    styleHeader(headerRow);
+  summarySheet.views = [{ state: 'frozen', ySplit: 3 }];
+  summarySheet.autoFilter = { from: 'A3', to: 'I3' };
+  summarySheet.getColumn('workers').alignment = { wrapText: true, vertical: 'top' };
 
-    clientRequests.forEach((request, index) => {
-      const row = clientSheet.addRow({
-        operation: request.operationPointName || '-',
-        service: request.serviceName || request.service?.name || '-',
+  for (const [clientName, requests] of groupByClient(serviceRequests)) {
+    const sheet = workbook.addWorksheet(cleanSheetName(clientName, 'Cliente'));
+    sheet.columns = summaryColumns;
+    applyTitle(sheet, clientName, `Fecha de servicio: ${selectedDate}`, summaryColumns.length);
+    const clientHeader = sheet.addRow(summaryColumns.map((column) => column.header));
+    styleHeader(clientHeader);
+    requests.forEach((request, index) => {
+      const row = sheet.addRow({
+        client: request.clientName || clientName,
+        operation: request.operationPointName || request.operationPoint?.name || 'Sin operación',
+        service: request.serviceName || request.service?.name || 'Sin servicio',
         horario: buildHorario(request),
-        workers: buildAssignedWorkersCell(request),
-        coverage: buildCoverageText(request),
-        status: statusLabel(request.status)
+        required: request.requiredWorkers || 0,
+        assigned: activeAssignments(request).length,
+        confirmed: confirmedAssignments(request).length,
+        status: statusLabel(request.status),
+        workers: buildAssignedWorkersCell(request)
       });
       styleDataRow(row, index);
       styleStatusCell(row.getCell('status'), request.status);
-      row.height = Math.min(260, Math.max(42, 30 + Math.max(1, activeAssignments(request).length) * 48));
     });
+    sheet.views = [{ state: 'frozen', ySplit: 3 }];
+    sheet.autoFilter = { from: 'A3', to: 'I3' };
+    sheet.getColumn('workers').alignment = { wrapText: true, vertical: 'top' };
   }
 
-  const safeDate = selectedDate.replace(/[^0-9-]/g, '');
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="programacion-operativa-${safeDate}.xlsx"`);
-  await workbook.xlsx.write(res);
-  res.end();
+  const buffer = await workbook.xlsx.writeBuffer();
+  const fileName = `solicitudes-operaciones-${selectedDate}.xlsx`;
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.set('Content-Disposition', `attachment; filename="${fileName}"`);
+  return res.send(Buffer.from(buffer));
 }
 
 export function dispatchDashboardMetricsRouter(prisma) {
   const router = express.Router();
 
-  router.use(requireOps);
-
-  router.get('/', async (req, res) => {
-    try {
-      const selectedDate = selectedDateFromQuery(req.query);
-      const [requests, attendanceAccess] = await Promise.all([
-        loadServiceRequestsForDate(prisma, selectedDate),
-        loadAttendanceAccessForDashboard(prisma, req)
-      ]);
-      return renderHome(res, req, selectedDate, requests, attendanceAccess);
-    } catch (err) {
-      console.error('[DispatchOps] Error cargando inicio:', err);
-      return res.status(500).send('Error cargando el panel de operaciones');
-    }
+  router.get('/', requireOps, async (req, res) => {
+    const selectedDate = selectedDateFromQuery(req.query);
+    const [requests, attendanceAccess] = await Promise.all([
+      loadServiceRequestsForDate(prisma, selectedDate),
+      loadAttendanceAccessForDashboard(prisma, req)
+    ]);
+    return renderHome(res, req, selectedDate, requests, attendanceAccess);
   });
 
-  router.get('/dispatch/operations', async (req, res) => {
-    try {
-      const selectedDate = selectedDateFromQuery(req.query);
-      const [requests, attendanceAccess] = await Promise.all([
-        loadServiceRequestsForDate(prisma, selectedDate),
-        loadAttendanceAccessForDashboard(prisma, req)
-      ]);
-      return renderHome(res, req, selectedDate, requests, attendanceAccess);
-    } catch (err) {
-      console.error('[DispatchOps] Error cargando dashboard:', err);
-      return res.status(500).send('Error cargando el dashboard de operaciones');
-    }
+  router.get('/resumen', requireOps, async (req, res) => {
+    const selectedDate = selectedDateFromQuery(req.query);
+    const requests = await loadServiceRequestsForDate(prisma, selectedDate);
+    return renderSummary(res, req, selectedDate, normalizeSummaryType(req.query.type), requests);
   });
 
-  async function handleSummary(req, res) {
-    try {
-      const selectedDate = selectedDateFromQuery(req.query);
-      const type = normalizeSummaryType(req.query.type || req.query.tipo);
-      const requests = await loadServiceRequestsForDate(prisma, selectedDate);
-      return renderSummary(res, req, selectedDate, type, requests);
-    } catch (err) {
-      console.error('[DispatchOps] Error cargando resumen:', err);
-      return res.status(500).send('Error cargando el resumen de operaciones');
-    }
-  }
+  router.get('/resumen/exportar', requireOps, async (req, res) => {
+    const selectedDate = selectedDateFromQuery(req.query);
+    const requests = await loadServiceRequestsForDate(prisma, selectedDate);
+    const type = normalizeSummaryType(req.query.type);
+    return exportRequestsToExcel(res, selectedDate, filterRequestsBySummaryType(requests, type));
+  });
 
-  router.get('/dispatch/operations/summary', handleSummary);
-  router.get('/solicitudes/resumen', handleSummary);
-
-  async function handleExport(req, res) {
-    try {
-      const selectedDate = selectedDateFromQuery(req.query);
-      const requests = await loadServiceRequestsForDate(prisma, selectedDate);
-      return exportRequestsToExcel(res, selectedDate, requests);
-    } catch (err) {
-      console.error('[DispatchOps] Error exportando:', err);
-      return res.status(500).send('Error generando el reporte de operaciones');
-    }
-  }
-
-  router.get('/dispatch/operations/export', handleExport);
-  router.get('/programacion.xlsx', handleExport);
+  router.get('/solicitudes/:serviceRequestId', requireOps, async (req, res) => {
+    const request = await prisma.dispatchServiceRequest.findUnique({
+      where: { id: req.params.serviceRequestId },
+      include: {
+        service: true,
+        ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
+        assignments: {
+          include: { worker: true },
+          orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
+        },
+        incidents: {
+          include: { worker: true, assignment: { include: { worker: true } } },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+    if (!request || request.source === DEV_TEST_REQUEST_SOURCE) return res.status(404).send('Solicitud no encontrada');
+    const derivedRequest = { ...request, status: deriveDispatchRequestOperationalState(request).status };
+    return res.render('operacionesSolicitudDetalle', {
+      role: req.session?.userRole || req.userRole,
+      request: derivedRequest,
+      selectedDate: dispatchServiceDateKey(request.serviceDate),
+      activeAssignments,
+      confirmedAssignments,
+      assignmentStatusLabel,
+      statusLabel,
+      buildHorario,
+      buildCoverageText,
+      resolveServiceRequestPolicy: resolveDispatchServiceRequestPolicy,
+      message: normalizeString(req.query.message)
+    });
+  });
 
   return router;
 }

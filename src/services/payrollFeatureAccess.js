@@ -11,7 +11,7 @@ function normalizeString(value, maxLength = 200) {
 }
 
 function requirePrisma(prisma) {
-  if (!prisma?.appUser?.findUnique || !prisma?.appUser?.update || !prisma?.devAuditEvent?.findFirst || !prisma?.devAuditEvent?.create) {
+  if (!prisma?.appUser?.findUnique || !prisma?.devAuditEvent?.findFirst || !prisma?.devAuditEvent?.create) {
     throw new Error('payroll_access_prisma_contract_invalid');
   }
   return prisma;
@@ -73,20 +73,13 @@ export async function setPayrollFeatureAccess(prisma, input = {}, options = {}) 
       id: true,
       username: true,
       role: true,
-      isActive: true,
-      canAccessDispatch: true,
-      canAccessAttendance: true
+      isActive: true
     }
   });
   if (!user || String(user.role || '').toUpperCase() !== 'ADMIN') throw new Error('payroll_access_user_not_found');
 
-  if (enabled && (!user.canAccessDispatch || !user.canAccessAttendance)) {
-    await prisma.appUser.update({
-      where: { id: user.id },
-      data: { canAccessDispatch: true, canAccessAttendance: true }
-    });
-  }
-
+  const previous = await latestAccessEvent(prisma, user.id);
+  const previousEnabled = previous?.action === PAYROLL_ACCESS_ACTION.ENABLED;
   await prisma.devAuditEvent.create({
     data: {
       entityType: PAYROLL_ACCESS_ENTITY_TYPE,
@@ -94,16 +87,16 @@ export async function setPayrollFeatureAccess(prisma, input = {}, options = {}) 
       entityLabel: user.username,
       action: enabled ? PAYROLL_ACCESS_ACTION.ENABLED : PAYROLL_ACCESS_ACTION.DISABLED,
       actorUsername: normalizeString(input.actorUsername, 160),
-      actorRole: actorRole,
+      actorRole,
       actorSource: 'users-admin',
       ipAddress: normalizeString(input.ipAddress, 120),
       userAgent: normalizeString(input.userAgent, 500),
-      fromValue: { enabled: !enabled },
+      fromValue: { enabled: previousEnabled },
       toValue: { enabled },
       metadata: {
         permission: 'PAYROLL',
-        parentPermissionsEnabled: enabled,
-        parentPermissions: enabled ? ['DISPATCH', 'ATTENDANCE'] : []
+        independentPermission: true,
+        parentPermissionsChanged: false
       },
       createdAt: now
     }
@@ -113,7 +106,8 @@ export async function setPayrollFeatureAccess(prisma, input = {}, options = {}) 
     userId: user.id,
     username: user.username,
     enabled,
-    parentPermissionsEnabled: enabled
+    independentPermission: true,
+    parentPermissionsChanged: false
   };
 }
 
