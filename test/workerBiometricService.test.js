@@ -14,6 +14,25 @@ const ENV = { ATTENDANCE_BIOMETRIC_SECRET: 'b'.repeat(64) };
 const NOW = new Date('2026-07-28T03:00:00.000Z');
 const descriptor = Array.from({ length: 128 }, (_, index) => Math.sin(index + 1) / 12);
 
+function unitVector(vector) {
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return vector.map((value) => value / norm);
+}
+
+function rotatedDescriptor(vector, angle) {
+  const base = unitVector(vector);
+  const seed = Array.from({ length: base.length }, (_, index) => Math.cos((index + 1) * 1.7));
+  const projection = seed.reduce((sum, value, index) => sum + value * base[index], 0);
+  const orthogonal = unitVector(seed.map((value, index) => value - projection * base[index]));
+  return base.map((value, index) => value * Math.cos(angle) + orthogonal[index] * Math.sin(angle));
+}
+
+function legacySimilarity(left, right) {
+  const distance = Math.sqrt(left.reduce((sum, value, index) => sum + ((value - right[index]) * 25) ** 2, 0));
+  const normalized = (1 - (distance / 100) - 0.2) / 0.6;
+  return Math.round(100 * Math.max(0, Math.min(1, normalized))) / 100;
+}
+
 function matchesWhere(event, where = {}) {
   if (where.entityType && event.entityType !== where.entityType) return false;
   if (where.entityId) {
@@ -72,6 +91,29 @@ async function enroll(prisma, vector = descriptor, now = NOW) {
   }, { now, env: ENV });
 }
 
+async function assess(prisma, vector, {
+  idempotencyKey,
+  markType = 'ARRIVAL',
+  randomIndex = 0,
+  elapsedMs = 10_000
+}) {
+  const challenge = issueWorkerBiometricChallenge({
+    workerId: 'worker-1', assignmentId: 'assignment-1', idempotencyKey, markType
+  }, { now: NOW, env: ENV, randomIndex });
+  return assessWorkerBiometric(prisma, {
+    workerId: 'worker-1',
+    assignmentId: 'assignment-1',
+    idempotencyKey,
+    markType,
+    challengeToken: challenge.token,
+    challengeAction: challenge.action,
+    challengeCompleted: true,
+    descriptor: vector,
+    realScore: 0.93,
+    liveScore: 0.9
+  }, { now: new Date(NOW.getTime() + elapsedMs), env: ENV });
+}
+
 test('cifra la plantilla y permite recuperarla únicamente con el secreto', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
@@ -86,46 +128,50 @@ test('cifra la plantilla y permite recuperarla únicamente con el secreto', asyn
 test('la misma identidad con desafío válido queda verificada', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
-  const challenge = issueWorkerBiometricChallenge({
-    workerId: 'worker-1', assignmentId: 'assignment-1', idempotencyKey: 'mark-key-12345678', markType: 'ARRIVAL'
-  }, { now: NOW, env: ENV, randomIndex: 0 });
-  const assessment = await assessWorkerBiometric(prisma, {
-    workerId: 'worker-1',
-    assignmentId: 'assignment-1',
-    idempotencyKey: 'mark-key-12345678',
-    markType: 'ARRIVAL',
-    challengeToken: challenge.token,
-    challengeAction: challenge.action,
-    challengeCompleted: true,
-    descriptor,
-    realScore: 0.93,
-    liveScore: 0.9
-  }, { now: new Date(NOW.getTime() + 10_000), env: ENV });
+  const assessment = await assess(prisma, descriptor, { idempotencyKey: 'mark-key-12345678' });
   assert.equal(assessment.decision, 'VERIFIED');
   assert.equal(assessment.verified, true);
   assert.equal(assessment.similarity, 1);
   assert.deepEqual(assessment.riskFlags, []);
 });
 
-test('un rostro distinto no bloquea la marcación pero exige revisión', async () => {
+test('una variación razonable del mismo rostro conserva la verificación', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
-  const challenge = issueWorkerBiometricChallenge({
-    workerId: 'worker-1', assignmentId: 'assignment-1', idempotencyKey: 'mark-key-87654321', markType: 'DEPARTURE'
-  }, { now: NOW, env: ENV, randomIndex: 1 });
+  const genuineVariation = rotatedDescriptor(descriptor, 0.25);
+  const assessment = await assess(prisma, genuineVariation, { idempotencyKey: 'mark-key-genuine-1234' });
+  assert.ok(assessment.similarity > 0.96);
+  assert.equal(assessment.decision, 'VERIFIED');
+  assert.equal(assessment.verified, true);
+});
+
+test('un impostor cercano queda rechazado aunque el cálculo anterior lo habría aceptado', async () => {
+  const prisma = fakePrisma();
+  await enroll(prisma);
+  const nearImpostor = rotatedDescriptor(descriptor, 0.65);
+  assert.ok(legacySimilarity(unitVector(descriptor), nearImpostor) >= 0.52);
+  const assessment = await assess(prisma, nearImpostor, {
+    idempotencyKey: 'mark-key-impostor-1234',
+    markType: 'DEPARTURE',
+    randomIndex: 1,
+    elapsedMs: 12_000
+  });
+  assert.ok(assessment.similarity > 0.75 && assessment.similarity < 0.9);
+  assert.equal(assessment.decision, 'REVIEW_REQUIRED');
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
+});
+
+test('un rostro claramente distinto queda rechazado', async () => {
+  const prisma = fakePrisma();
+  await enroll(prisma);
   const different = descriptor.map((value, index) => value + (index % 2 ? 1.8 : -1.8));
-  const assessment = await assessWorkerBiometric(prisma, {
-    workerId: 'worker-1',
-    assignmentId: 'assignment-1',
+  const assessment = await assess(prisma, different, {
     idempotencyKey: 'mark-key-87654321',
     markType: 'DEPARTURE',
-    challengeToken: challenge.token,
-    challengeAction: challenge.action,
-    challengeCompleted: true,
-    descriptor: different,
-    realScore: 0.94,
-    liveScore: 0.92
-  }, { now: new Date(NOW.getTime() + 12_000), env: ENV });
+    randomIndex: 1,
+    elapsedMs: 12_000
+  });
   assert.equal(assessment.decision, 'REVIEW_REQUIRED');
   assert.equal(assessment.verified, false);
   assert.ok(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
@@ -147,7 +193,12 @@ test('al actualizar o revocar se borra el material biométrico anterior', async 
   assert.equal(status.get('worker-1').enrolled, false);
 });
 
-test('la similitud conserva la métrica publicada por Human', () => {
+test('la similitud usa coseno normalizado y separa rostros cercanos', () => {
+  const genuineVariation = rotatedDescriptor(descriptor, 0.25);
+  const nearImpostor = rotatedDescriptor(descriptor, 0.65);
   assert.equal(humanFaceSimilarity(descriptor, descriptor), 1);
-  assert.equal(humanFaceSimilarity(descriptor, descriptor.map((value) => value + 4)), 0);
+  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) > 0.96);
+  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) > 0.75);
+  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) < 0.9);
+  assert.ok(humanFaceSimilarity(descriptor, descriptor.map((value) => value + 4)) < 0.1);
 });

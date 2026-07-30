@@ -23,7 +23,7 @@ const MIN_DESCRIPTOR_LENGTH = 64;
 const MAX_DESCRIPTOR_LENGTH = 2048;
 const REAL_THRESHOLD = 0.55;
 const LIVE_THRESHOLD = 0.55;
-const MATCH_THRESHOLD = 0.52;
+const MATCH_THRESHOLD = 0.90;
 
 function normalizeString(value, maxLength = 500) {
   if (typeof value !== 'string') return null;
@@ -289,20 +289,21 @@ function verifyChallenge(token, expected = {}, options = {}) {
   return value;
 }
 
-export function humanFaceSimilarity(descriptor1, descriptor2, options = {}) {
+export function humanFaceSimilarity(descriptor1, descriptor2) {
   const left = normalizeWorkerBiometricDescriptor(descriptor1);
   const right = normalizeWorkerBiometricDescriptor(descriptor2);
   if (left.length !== right.length) return 0;
-  const multiplier = Number(options.multiplier || 25);
-  let distance = 0;
+  let dotProduct = 0;
+  let leftNormSquared = 0;
+  let rightNormSquared = 0;
   for (let index = 0; index < left.length; index += 1) {
-    distance += Math.abs((left[index] - right[index]) * multiplier) ** 2;
+    dotProduct += left[index] * right[index];
+    leftNormSquared += left[index] ** 2;
+    rightNormSquared += right[index] ** 2;
   }
-  const root = Math.sqrt(distance);
-  const min = Number(options.min ?? 0.2);
-  const max = Number(options.max ?? 0.8);
-  const normalized = (1 - (root / 100) - min) / (max - min);
-  return Math.round(100 * Math.max(0, Math.min(1, normalized))) / 100;
+  if (leftNormSquared <= 0 || rightNormSquared <= 0) return 0;
+  const cosine = dotProduct / Math.sqrt(leftNormSquared * rightNormSquared);
+  return Math.round(10_000 * Math.max(0, Math.min(1, cosine))) / 10_000;
 }
 
 function addFlag(flags, flag, points, state) {
