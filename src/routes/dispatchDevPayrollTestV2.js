@@ -12,6 +12,7 @@ import {
   resolveTestWorkspaceFeatureAccess,
   setTestWorkspaceFeatureAccess
 } from '../services/testWorkspaceFeatureAccess.js';
+import { loadTestWorkspacePayrollReport } from '../services/testWorkspacePayrollReport.js';
 import {
   closeDispatchTestWhatsappSession,
   getDispatchTestWhatsappStatusView,
@@ -78,22 +79,6 @@ function redirectWorkspace(res, serviceRequestId, { message = null, error = null
   if (message) params.set('message', message);
   if (error) params.set('error', error);
   return res.redirect(`/admin/operaciones/pruebas?${params.toString()}`);
-}
-
-function payrollResultUrl(result) {
-  const params = new URLSearchParams();
-  const from = formatBogotaDateTimeLocal(result.arrivalAt).slice(0, 10);
-  const to = formatBogotaDateTimeLocal(result.departureAt).slice(0, 10);
-  const clientId = result.assignment?.serviceRequest?.operationPoint?.clientId || '';
-  const workerId = result.assignment?.worker?.id || result.assignment?.workerId || '';
-  params.set('periodType', 'CUSTOM');
-  params.set('from', from);
-  params.set('to', to || from);
-  if (clientId) params.set('clientId', clientId);
-  if (workerId) params.set('workerId', workerId);
-  params.set('includeTest', 'true');
-  params.set('success', 'Jornada manual guardada y calculada con datos de prueba.');
-  return `/admin/operaciones/asistencia/nomina?${params.toString()}`;
 }
 
 function normalizeWhatsappContext(context) {
@@ -206,11 +191,13 @@ export function dispatchDevPayrollTestRouter(prisma) {
   router.get('/', async (req, res) => {
     try {
       const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
+      workspace.testReport = await loadTestWorkspacePayrollReport(prisma, workspace.selectedRequest);
       const role = roleFromRequest(req);
       return res.render('operacionesPruebasNominaV2', {
         pageTitle: 'Entorno de pruebas de asistencia y nómina',
         role,
         canUseTestWhatsapp: role === 'dev',
+        canOpenOperationalPayroll: role === 'dev' || Boolean(req.session?.canAccessPayroll || req.canAccessPayroll),
         workspace,
         message: normalizeString(req.query.message),
         error: normalizeString(req.query.error),
@@ -293,7 +280,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
   router.post('/asignaciones/:assignmentId/jornada', formParser, async (req, res) => {
     const serviceRequestId = normalizeString(req.body.serviceRequestId, 120);
     try {
-      const result = await saveDevTestAttendance(prisma, {
+      await saveDevTestAttendance(prisma, {
         assignmentId: req.params.assignmentId,
         arrivalAt: req.body.arrivalAt,
         breakStartAt: req.body.breakStartAt,
@@ -301,7 +288,9 @@ export function dispatchDevPayrollTestRouter(prisma) {
         departureAt: req.body.departureAt,
         notes: req.body.notes
       }, actor(req));
-      return res.redirect(payrollResultUrl(result));
+      return redirectWorkspace(res, serviceRequestId, {
+        message: 'Jornada aislada guardada. El cálculo se actualizó dentro del entorno de pruebas.'
+      });
     } catch (error) {
       return redirectWorkspace(res, serviceRequestId, { error: publicError(error) });
     }
