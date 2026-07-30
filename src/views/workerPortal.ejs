@@ -55,11 +55,11 @@
     .step { margin-top: 12px; padding: 14px; border-radius: 14px; background: #f5f7f9; }
     .step-title { margin-bottom: 6px; font-weight: 800; color: #263645; }
     .step-copy { font-size: 14px; }
-    .face-stage { position: relative; overflow: hidden; margin-top: 10px; border-radius: 14px; background: #101820; aspect-ratio: 3 / 4; }
-    .face-stage video, .face-stage .photo-preview { display: block; width: 100%; height: 100%; margin: 0; object-fit: cover; }
+    .face-stage { position: relative; overflow: hidden; margin-top: 10px; border-radius: 14px; background: #05090c; aspect-ratio: 3 / 4; }
+    .face-stage video, .face-stage .photo-preview { display: block; width: 100%; height: 100%; margin: 0; object-fit: contain; background: #05090c; }
     .face-stage video { transform: scaleX(-1); }
     .face-stage .photo-preview[hidden], .face-stage video[hidden] { display: none; }
-    .face-frame { position: absolute; left: 50%; top: 48%; width: 58%; height: 65%; transform: translate(-50%, -50%); border: 3px solid rgba(255,255,255,.92); border-radius: 48% 48% 44% 44%; box-shadow: 0 0 0 999px rgba(0,0,0,.25); pointer-events: none; }
+    .face-frame { position: absolute; left: 50%; top: 50%; width: 84%; height: 88%; transform: translate(-50%, -50%); border: 3px solid rgba(255,255,255,.92); border-radius: 24px; box-shadow: 0 0 0 999px rgba(0,0,0,.14); pointer-events: none; }
     .camera-only { margin-top: 8px; font-size: 12px; font-weight: 750; color: #176c36; }
     .consent { display: flex; gap: 14px; align-items: center; margin: 0; padding: 15px; border: 2px solid #176c36; border-radius: 14px; background: #f1faf4; color: #17212b; font-size: 18px; line-height: 1.35; font-weight: 700; }
     .consent input { width: 32px; min-width: 32px; height: 32px; margin: 0; flex: 0 0 auto; accent-color: #176c36; }
@@ -90,19 +90,20 @@
         grid-row: 4;
         min-height: 0;
         margin: 0;
-        padding: 10px;
+        padding: 6px;
         display: grid;
         grid-template-rows: auto auto minmax(0, 1fr) auto;
         overflow: hidden;
       }
       #camera-step[hidden] { display: none; }
-      #camera-step .face-stage { width: min(100%, 380px); min-height: 0; height: 100%; margin: 8px auto 0; aspect-ratio: auto; }
+      #camera-step .face-stage { width: 100%; max-width: none; min-height: 0; height: 100%; margin: 8px auto 0; aspect-ratio: auto; }
       #location-step { grid-row: 5; margin: 0; padding: 9px 12px; }
       #location-step .step-title { display: inline; margin-right: 6px; }
       #location-step .step-copy { display: inline; }
       #mark-dialog .dialog-actions { grid-row: 6; margin: 0; padding-top: 8px; background: #fff; }
       #mark-dialog[data-flow-state="waiting-consent"] #camera-step { opacity: .55; }
       #enrollment-dialog .dialog-body { min-height: 100dvh; max-height: 100dvh; padding: max(12px, env(safe-area-inset-top)) 14px max(12px, env(safe-area-inset-bottom)); }
+      #enrollment-dialog .face-stage { width: 100%; max-width: none; }
     }
 
     @media (max-width: 420px) {
@@ -200,7 +201,7 @@
           <p id="enrollment-status" class="status" role="status" aria-live="assertive">Autoriza el uso del rostro para comenzar.</p>
           <p class="camera-only">Solo cámara en vivo. No se aceptan archivos ni fotos guardadas.</p>
           <div class="face-stage">
-            <video id="enrollment-video" playsinline muted hidden></video>
+            <video id="enrollment-video" playsinline autoplay muted hidden></video>
             <div class="face-frame" aria-hidden="true"></div>
           </div>
           <div class="dialog-actions"><button type="button" class="primary-button" id="start-enrollment">Registrar mi rostro</button></div>
@@ -225,7 +226,7 @@
             <p class="step-title">Verificación facial</p>
             <p id="biometric-instruction" class="step-copy" role="status" aria-live="assertive" aria-atomic="true">Mira de frente.</p>
             <div class="face-stage">
-              <video id="camera-video" playsinline muted hidden></video>
+              <video id="camera-video" playsinline autoplay muted hidden></video>
               <img id="photo-preview" class="photo-preview" alt="Captura verificada" hidden>
               <div class="face-frame" aria-hidden="true"></div>
             </div>
@@ -244,7 +245,7 @@
         </div>
       </dialog>
 
-      <script src="/public/worker-biometric.js"></script>
+      <script src="/public/worker-biometric.js?v=20260730-mobile-camera-v3"></script>
     <% } else if (mode === 'unavailable') { %>
       <section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Portal temporalmente no disponible</h1><div class="status warning">Intenta nuevamente en unos minutos</div></section>
     <% } else { %>
