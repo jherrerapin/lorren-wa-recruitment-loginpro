@@ -10,21 +10,20 @@ function dateKey(value) {
   return /^\d{4}-\d{2}-\d{2}/.test(formatted) ? formatted.slice(0, 10) : null;
 }
 
-function reportRange(request) {
-  const from = dateKey(request?.serviceDate);
-  if (!from) return null;
-  let to = from;
-  for (const assignment of request.assignments || []) {
-    const departure = dateKey(assignment.attendanceSession?.departureReportedAt);
-    if (departure && departure > to) to = departure;
+function reportRange(request, sessions = []) {
+  if (sessions.length) {
+    const dates = sessions.flatMap((session) => [
+      dateKey(session.arrivalReportedAt),
+      dateKey(session.departureReportedAt)
+    ]).filter(Boolean).sort();
+    if (dates.length) return { from: dates[0], to: dates[dates.length - 1] };
   }
-  return { from, to };
+  const serviceDate = dateKey(request?.serviceDate);
+  return serviceDate ? { from: serviceDate, to: serviceDate } : null;
 }
 
 export async function loadTestWorkspacePayrollReport(prisma, request) {
   if (!request) return null;
-  const range = reportRange(request);
-  if (!range) return null;
 
   const sessions = (request.assignments || [])
     .filter((assignment) => assignment.attendanceSession?.source === 'DEV_TEST_MANUAL')
@@ -36,6 +35,9 @@ export async function loadTestWorkspacePayrollReport(prisma, request) {
         serviceRequest: request
       }
     }));
+  const range = reportRange(request, sessions);
+  if (!range) return null;
+
   if (!sessions.length) {
     return {
       range,
