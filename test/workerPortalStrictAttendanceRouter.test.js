@@ -84,6 +84,20 @@ function requestHeaders() {
   };
 }
 
+async function assertBiometricRequired(path, options = {}) {
+  await withServer(options, async (origin) => {
+    const response = await fetch(`${origin}/operaciones/portal/asignaciones/assignment-1/${path}`, {
+      method: 'POST',
+      headers: requestHeaders(),
+      body: markForm({ latitude: 4.71115, longitude: -74.07205 })
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 409);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.error, 'biometric_verification_required');
+  });
+}
+
 test('rechaza una llegada ubicada fuera del radio de la operación', async () => {
   await withServer({}, async (origin, queryCount) => {
     const response = await fetch(`${origin}/operaciones/portal/asignaciones/assignment-1/llegada`, {
@@ -99,16 +113,28 @@ test('rechaza una llegada ubicada fuera del radio de la operación', async () =>
   });
 });
 
-test('rechaza una llegada dentro de la geocerca si no existe evaluación facial verificada', async () => {
-  await withServer({}, async (origin) => {
-    const response = await fetch(`${origin}/operaciones/portal/asignaciones/assignment-1/llegada`, {
-      method: 'POST',
-      headers: requestHeaders(),
-      body: markForm({ latitude: 4.71115, longitude: -74.07205 })
-    });
-    const payload = await response.json();
-    assert.equal(response.status, 409);
-    assert.equal(payload.ok, false);
-    assert.equal(payload.error, 'biometric_verification_required');
+test('rechaza una llegada dentro de la geocerca sin evaluación facial verificada', async () => {
+  await assertBiometricRequired('llegada');
+});
+
+test('rechaza el inicio de almuerzo sin evaluación facial verificada', async () => {
+  await assertBiometricRequired('inicio-almuerzo');
+});
+
+test('rechaza el fin de almuerzo sin evaluación facial verificada', async () => {
+  await assertBiometricRequired('fin-almuerzo');
+});
+
+test('una evaluación de llegada no autoriza el inicio de almuerzo', async () => {
+  await assertBiometricRequired('inicio-almuerzo', {
+    auditEvent: {
+      metadata: {
+        decision: 'VERIFIED',
+        verified: true,
+        workerId: 'worker-1',
+        assignmentId: 'assignment-1',
+        markType: 'ARRIVAL'
+      }
+    }
   });
 });
