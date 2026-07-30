@@ -13,13 +13,20 @@ test('Nómina conserva su ruta pero atraviesa las guardas con permiso propio', a
   assert.match(bridge, /resolvePayrollFeatureAccess/);
 });
 
-test('el portal valida Nómina y el permiso independiente de pruebas', async () => {
-  const source = await read('src/routes/dispatchPayrollV2.js');
+test('Nómina operativa conserva exclusivamente su permiso propio', async () => {
+  const source = await read('src/routes/dispatchPayroll.js');
   assert.match(source, /resolvePayrollFeatureAccess/);
-  assert.match(source, /resolveTestWorkspaceFeatureAccess/);
-  assert.match(source, /No tienes permiso para acceder a Nómina ni al entorno de pruebas/);
+  assert.doesNotMatch(source, /resolveTestWorkspaceFeatureAccess/);
+  assert.match(source, /No tienes permiso para acceder a Nómina y tiempo trabajado/);
   assert.match(source, /router\.get\('\/export\.csv'/);
   assert.match(source, /router\.get\('\/export\.xlsx'/);
+});
+
+test('el entorno de pruebas valida su permiso y calcula dentro de su propia ruta', async () => {
+  const route = await read('src/routes/dispatchDevPayrollTestV2.js');
+  assert.match(route, /resolveTestWorkspaceFeatureAccess/);
+  assert.match(route, /loadTestWorkspacePayrollReport/);
+  assert.match(route, /No tienes permiso para acceder al entorno de pruebas/);
 });
 
 test('la configuración de usuarios solo recibe los controles cuando el perfil actual es DEV', async () => {
