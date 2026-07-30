@@ -4,54 +4,80 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('el portal carga el ajuste móvil antes de la experiencia accesible', async () => {
+test('el portal carga un único controlador biométrico después del motor y del endurecimiento', async () => {
   const loader = await read('src/public/worker-biometric.js');
   const corePosition = loader.indexOf('/public/worker-biometric-core.js');
   const mobilePosition = loader.indexOf('/public/worker-biometric-mobile.js');
-  const accessibilityPosition = loader.indexOf('/public/worker-biometric-accessibility.js');
+  const hardeningPosition = loader.indexOf('/public/worker-portal-hardening.js');
+  const flowPosition = loader.indexOf('/public/worker-portal-biometric-flow.js');
 
   assert.ok(corePosition >= 0);
   assert.ok(mobilePosition > corePosition);
-  assert.ok(accessibilityPosition > mobilePosition);
-  assert.match(loader, /\/public\/worker-portal-hardening\.js/);
+  assert.ok(hardeningPosition > mobilePosition);
+  assert.ok(flowPosition > hardeningPosition);
+  assert.match(loader, /BIOMETRIC_ASSET_VERSION\s*=\s*'20260730-single-controller-v1'/);
+  assert.doesNotMatch(loader, /worker-biometric-accessibility\.js/);
   assert.match(loader, /\/operaciones\/portal\/offline\.js/);
 });
 
-test('la ventana móvil ocupa la pantalla y mantiene controles grandes', async () => {
-  const source = await read('src/public/worker-biometric-accessibility.js');
+test('la autorización aparece antes del estado, la cámara y la ubicación', async () => {
+  const view = await read('src/views/workerPortal.ejs');
+  const consentPosition = view.indexOf('id="photo-consent-wrap"');
+  const statusPosition = view.indexOf('id="mark-result"');
+  const cameraPosition = view.indexOf('id="camera-step"');
+  const locationPosition = view.indexOf('id="location-step"');
 
-  assert.match(source, /#mark-dialog[\s\S]*width:\s*100vw/);
-  assert.match(source, /height:\s*100dvh/);
-  assert.match(source, /#close-mark[\s\S]*52px/);
-  assert.match(source, /#photo-consent[\s\S]*30px/);
-  assert.match(source, /#capture-photo,[\s\S]*#submit-mark[\s\S]*min-height:\s*60px/);
-  assert.match(source, /#mark-dialog \.dialog-actions[\s\S]*position:\s*sticky/);
-  assert.match(source, /font-size:\s*clamp\(21px,\s*5\.8vw,\s*28px\)/);
-  assert.doesNotMatch(source, /Para que te reconozca correctamente/);
+  assert.ok(consentPosition >= 0);
+  assert.ok(statusPosition > consentPosition);
+  assert.ok(cameraPosition > statusPosition);
+  assert.ok(locationPosition > cameraPosition);
+  assert.doesNotMatch(view, /id="capture-photo"/);
+  assert.doesNotMatch(view, /id="retry-photo"/);
+  assert.match(view, /id="retry-biometric" hidden>Intentar nuevamente/);
+  assert.match(view, /aria-live="assertive"/);
 });
 
-test('un toque permite un reintento transitorio automático sin interceptar la red', async () => {
-  const source = await read('src/public/worker-biometric-accessibility.js');
+test('la ventana móvil mantiene autorización, estado, cámara y acciones sin desplazamiento', async () => {
+  const view = await read('src/views/workerPortal.ejs');
 
-  assert.match(source, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
-  assert.match(source, /timeoutMs:\s*12_000/);
-  assert.match(source, /Reintentando automáticamente/);
-  assert.match(source, /singlePressVerification:\s*true/);
-  assert.doesNotMatch(source, /window\.fetch\s*=/);
-  assert.doesNotMatch(source, /getUserMedia\s*=/);
+  assert.match(view, /#mark-dialog[\s\S]*width:\s*100vw/);
+  assert.match(view, /height:\s*100dvh/);
+  assert.match(view, /#mark-dialog \.dialog-body[\s\S]*grid-template-rows/);
+  assert.match(view, /overflow:\s*hidden/);
+  assert.match(view, /#photo-consent-wrap\s*\{\s*grid-row:\s*2/);
+  assert.match(view, /#mark-result\s*\{\s*grid-row:\s*3/);
+  assert.match(view, /#mark-dialog \.dialog-actions[\s\S]*grid-row:\s*6/);
+  assert.match(view, /\.icon-button[\s\S]*width:\s*52px/);
+  assert.match(view, /\.consent input[\s\S]*width:\s*32px/);
+  assert.match(view, /#submit-mark\s*\{\s*min-height:\s*60px/);
 });
 
-test('el motor móvil elimina conteos técnicos y reduce el recorrido facial', async () => {
-  const source = await read('src/public/worker-biometric-mobile.js');
+test('marcar la autorización inicia el flujo y los reintentos son automáticos', async () => {
+  const flow = await read('src/public/worker-portal-biometric-flow.js');
 
-  assert.match(source, /const CAPTURE_TIMEOUT_MS = 22_000/);
-  assert.match(source, /async function prepare\(\)/);
-  assert.match(source, /Gira el rostro hacia tu hombro derecho/);
-  assert.match(source, /Rostro detectado\. Mantén la posición/);
-  assert.doesNotMatch(source, /Rostro detectado · \$\{descriptors\.length\} de \$\{samplesRequired\}/);
-  assert.match(source, /collectStableFront\(human, video, onStatus, timeoutAt, 1\)/);
-  assert.match(source, /averageDescriptors\(\[\.\.\.baseline\.descriptors, \.\.\.final\.descriptors\]\)/);
-  assert.match(source, /faces\.length !== 1/);
-  assert.match(source, /MIN_REAL_SCORE = 0\.55/);
-  assert.match(source, /MIN_LIVE_SCORE = 0\.55/);
+  assert.match(flow, /photoConsent\?\.addEventListener\('change'/);
+  assert.match(flow, /runAutomaticVerification\(\)/);
+  assert.match(flow, /const MAX_AUTOMATIC_ATTEMPTS = 2/);
+  assert.match(flow, /for \(let attempt = 1; attempt <= MAX_AUTOMATIC_ATTEMPTS; attempt \+= 1\)/);
+  assert.match(flow, /state\.idempotencyKey = newIdempotencyKey\(\)/);
+  assert.match(flow, /portalBiometricRequest\('desafio'/);
+  assert.match(flow, /portalBiometricRequest\('verificar'/);
+  assert.doesNotMatch(flow, /activeMarkButton\.click\(\)/);
+  assert.doesNotMatch(flow, /MutationObserver/);
+  assert.doesNotMatch(flow, /capturePhotoButton/);
+});
+
+test('la marcación final continúa exigiendo GPS, autorización e identidad verificada', async () => {
+  const flow = await read('src/public/worker-portal-biometric-flow.js');
+  const mobile = await read('src/public/worker-biometric-mobile.js');
+
+  assert.match(flow, /!state\.locationEvidence/);
+  assert.match(flow, /!state\.biometricVerified/);
+  assert.match(flow, /!state\.photoBlob/);
+  assert.match(flow, /!photoConsent\?\.checked/);
+  assert.match(flow, /verification\.verified !== true/);
+  assert.match(flow, /captureMode', 'ONLINE_WEB'/);
+  assert.match(mobile, /faces\.length !== 1/);
+  assert.match(mobile, /challengeCompleted:\s*true/);
+  assert.match(mobile, /MIN_REAL_SCORE = 0\.55/);
 });
