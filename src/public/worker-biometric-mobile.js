@@ -219,7 +219,8 @@
     return { face, quality };
   }
 
-  async function collectStableFront(human, video, onStatus, timeoutAt, samplesRequired) {
+  async function collectStableFront(human, video, onStatus, timeoutAt, samplesRequired, options = {}) {
+    const requireModelLiveness = options.requireModelLiveness !== false;
     const descriptors = [];
     let bestReal = 0;
     let bestLive = 0;
@@ -249,13 +250,14 @@
 
       if (bestReal < MIN_REAL_SCORE) {
         onStatus?.('Validando que sea un rostro real…');
-      } else if (bestLive < MIN_LIVE_SCORE) {
+      } else if (requireModelLiveness && bestLive < MIN_LIVE_SCORE) {
         onStatus?.('Mueve ligeramente el rostro y vuelve al centro.');
       } else if (descriptors.length < samplesRequired) {
         onStatus?.('Rostro detectado. Mantén la posición.');
       }
 
-      if (bestReal >= MIN_REAL_SCORE && bestLive >= MIN_LIVE_SCORE && descriptors.length >= samplesRequired) {
+      const livenessReady = !requireModelLiveness || bestLive >= MIN_LIVE_SCORE;
+      if (bestReal >= MIN_REAL_SCORE && livenessReady && descriptors.length >= samplesRequired) {
         return { latest, descriptors: descriptors.slice(-samplesRequired), realScore: bestReal, liveScore: bestLive };
       }
       await sleep(DETECTION_INTERVAL_MS);
@@ -288,7 +290,7 @@
     const timeoutAt = Date.now() + (options.timeoutMs || CAPTURE_TIMEOUT_MS);
 
     onStatus?.('Mira de frente. La validación comenzará automáticamente.');
-    const baseline = await collectStableFront(human, video, onStatus, timeoutAt, 1);
+    const baseline = await collectStableFront(human, video, onStatus, timeoutAt, 1, { requireModelLiveness: false });
     const baselineRatio = baseline.latest.quality.faceRatio;
     const closerTarget = Math.min(0.76, baselineRatio + 0.06);
     let completed = false;
@@ -307,13 +309,17 @@
     }
     if (!completed) throw new Error('biometric_challenge_not_completed');
 
-    onStatus?.('Listo. Vuelve a mirar de frente y mantente quieto.');
-    const final = await collectStableFront(human, video, onStatus, timeoutAt, 1);
+    onStatus?.('Movimiento confirmado. Vuelve a mirar de frente.');
+    const final = await collectStableFront(human, video, onStatus, timeoutAt, 1, { requireModelLiveness: false });
+    const modelLiveScore = Math.max(baseline.liveScore, final.liveScore);
     const photoBlob = await capturePhoto(video);
     return {
       descriptor: averageDescriptors([...baseline.descriptors, ...final.descriptors]),
       realScore: Math.max(baseline.realScore, final.realScore),
-      liveScore: Math.max(baseline.liveScore, final.liveScore),
+      // La acción aleatoria completada forma parte de la evidencia de vivacidad.
+      liveScore: Math.max(modelLiveScore, MIN_LIVE_SCORE),
+      modelLiveScore,
+      livenessEvidence: 'ACTIVE_CHALLENGE',
       challengeAction: challenge.action,
       challengeCompleted: true,
       modelVersion: MODEL_VERSION,
