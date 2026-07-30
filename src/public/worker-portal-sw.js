@@ -50,8 +50,8 @@ function openDatabase() {
         receipts.createIndex('completedAt', 'completedAt', { unique: false });
       }
     });
-    request.addEventListener('success', () => resolve(request.result));
-    request.addEventListener('error', () => reject(request.error || new Error('indexeddb_open_failed')));
+    request.addEventListener('success', () => resolve(request.result), { once: true });
+    request.addEventListener('error', () => reject(request.error || new Error('indexeddb_open_failed')), { once: true });
   });
 }
 
