@@ -7,7 +7,8 @@
   const MIN_REAL_SCORE = 0.55;
   const MIN_LIVE_SCORE = 0.55;
   const DETECTION_INTERVAL_MS = 160;
-  const CAPTURE_TIMEOUT_MS = 20_000;
+  const CAPTURE_TIMEOUT_MS = 30_000;
+  const VERIFICATION_SAMPLES = 3;
   const reviewRequiredKeys = new Set();
   let humanPromise = null;
   let scriptPromise = null;
@@ -122,7 +123,7 @@
   function frontFacing(face) {
     const angle = face?.rotation?.angle;
     if (!angle) return true;
-    return Math.abs(Number(angle.yaw || 0)) < 0.16 && Math.abs(Number(angle.pitch || 0)) < 0.18;
+    return Math.abs(Number(angle.yaw || 0)) < 0.22 && Math.abs(Number(angle.pitch || 0)) < 0.24;
   }
 
   function turnedSide(face) {
@@ -259,14 +260,24 @@
       if (!completed) await sleep(DETECTION_INTERVAL_MS);
     }
     if (!completed) throw new Error('biometric_challenge_not_completed');
+
     statusCallback?.('Listo. Vuelve a mirar de frente.');
-    const final = await waitForStableFront(human, video, statusCallback, timeoutAt, 2);
-    const scores = biometricScores(final.face);
+    const descriptors = [];
+    const scores = [];
+    while (descriptors.length < VERIFICATION_SAMPLES && Date.now() < timeoutAt) {
+      const detected = await waitForStableFront(human, video, statusCallback, timeoutAt, 2);
+      descriptors.push(normalizeDescriptor(detected.face.embedding));
+      scores.push(biometricScores(detected.face));
+      statusCallback?.(`Verificando identidad · captura ${descriptors.length} de ${VERIFICATION_SAMPLES}.`);
+      if (descriptors.length < VERIFICATION_SAMPLES) await sleep(220);
+    }
+    if (descriptors.length < VERIFICATION_SAMPLES) throw new Error('biometric_capture_timeout');
+
     const photoBlob = await capturePhoto(video);
     return {
-      descriptor: normalizeDescriptor(final.face.embedding).map((value) => Math.round(value * 1_000_000) / 1_000_000),
-      realScore: scores.realScore,
-      liveScore: scores.liveScore,
+      descriptor: averageDescriptors(descriptors),
+      realScore: Math.min(...scores.map((item) => item.realScore)),
+      liveScore: Math.min(...scores.map((item) => item.liveScore)),
       challengeAction: challenge.action,
       challengeCompleted: true,
       modelVersion: MODEL_VERSION,

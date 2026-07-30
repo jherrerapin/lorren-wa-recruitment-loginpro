@@ -23,7 +23,7 @@ const MIN_DESCRIPTOR_LENGTH = 64;
 const MAX_DESCRIPTOR_LENGTH = 2048;
 const REAL_THRESHOLD = 0.55;
 const LIVE_THRESHOLD = 0.55;
-const MATCH_THRESHOLD = 0.90;
+const MATCH_THRESHOLD = 0.85;
 
 function normalizeString(value, maxLength = 500) {
   if (typeof value !== 'string') return null;
@@ -391,6 +391,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     riskScore: Math.min(100, state.score),
     riskFlags: flags,
     similarity,
+    matchThreshold: MATCH_THRESHOLD,
     realScore: Number.isFinite(realScore) ? realScore : null,
     liveScore: Number.isFinite(liveScore) ? liveScore : null,
     challengeAction: challenge?.action || normalizeString(input.challengeAction, 40),
