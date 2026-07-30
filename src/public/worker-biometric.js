@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_VERSION = '20260730-biometric-breaks-v2';
+const BIOMETRIC_ASSET_VERSION = '20260730-mobile-camera-v3';
 
 document.write(`<script src="/public/worker-biometric-core.js?v=${BIOMETRIC_ASSET_VERSION}"><\/script>`);
 document.write(`<script src="/public/worker-biometric-mobile.js?v=${BIOMETRIC_ASSET_VERSION}"><\/script>`);

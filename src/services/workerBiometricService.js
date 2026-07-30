@@ -24,6 +24,7 @@ const MAX_DESCRIPTOR_LENGTH = 2048;
 const REAL_THRESHOLD = 0.55;
 const LIVE_THRESHOLD = 0.55;
 const MATCH_THRESHOLD = 0.85;
+const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 
 function normalizeString(value, maxLength = 500) {
   if (typeof value !== 'string') return null;
@@ -246,7 +247,7 @@ export function issueWorkerBiometricChallenge(input = {}, options = {}) {
   const assignmentId = normalizeString(input.assignmentId, 120);
   const idempotencyKey = normalizeString(input.idempotencyKey, 120);
   const markType = normalizeString(input.markType, 40)?.toUpperCase();
-  if (!workerId || !assignmentId || !idempotencyKey || !['ARRIVAL', 'DEPARTURE'].includes(markType)) {
+  if (!workerId || !assignmentId || !idempotencyKey || !BIOMETRIC_MARK_TYPES.has(markType)) {
     throw new Error('attendance_biometric_challenge_input_invalid');
   }
   const now = options.now || new Date();
@@ -330,7 +331,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
   const idempotencyKey = normalizeString(input.idempotencyKey, 120);
   const markType = normalizeString(input.markType, 40)?.toUpperCase();
   const now = options.now || new Date();
-  if (!workerId || !assignmentId || !idempotencyKey || !['ARRIVAL', 'DEPARTURE'].includes(markType)) {
+  if (!workerId || !assignmentId || !idempotencyKey || !BIOMETRIC_MARK_TYPES.has(markType)) {
     throw new Error('attendance_biometric_assessment_input_invalid');
   }
 
