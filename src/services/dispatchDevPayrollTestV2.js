@@ -123,7 +123,7 @@ export async function createDevTestServiceRequests(prisma, body = {}, actor = {}
   const operationPoint = client.operationPoints.find((item) => item.id === operationPointId);
   if (!operationPoint) throw new Error('dev_test_operation_not_found');
   const service = serviceId ? client.services.find((item) => item.id === serviceId) || null : null;
-  if (client.services.length && !service) throw new Error('dev_test_service_not_found');
+  if (serviceId && !service) throw new Error('dev_test_service_not_found');
 
   const groupCode = requestGroupCode(blocks.length);
   const baseData = {
