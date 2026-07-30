@@ -11,6 +11,7 @@
   const MIN_LIVE_SCORE = 0.55;
   const DETECTION_INTERVAL_MS = 75;
   const CAPTURE_TIMEOUT_MS = 22_000;
+  const CAMERA_READY_TIMEOUT_MS = 9_000;
   let humanPromise = null;
   let scriptPromise = null;
 
@@ -143,9 +144,9 @@
     const horizontalOffset = Math.abs(centerX - video.videoWidth / 2) / video.videoWidth;
     const verticalOffset = Math.abs(centerY - video.videoHeight / 2) / video.videoHeight;
     const faceRatio = Math.min(width / video.videoWidth, height / video.videoHeight);
-    if (faceRatio < 0.18) return { valid: false, message: 'Acerca un poco el rostro.' };
-    if (faceRatio > 0.86) return { valid: false, message: 'Aleja un poco el rostro.' };
-    if (horizontalOffset > 0.24 || verticalOffset > 0.26) return { valid: false, message: 'Centra el rostro dentro del marco.' };
+    if (faceRatio < 0.13) return { valid: false, message: 'Acerca un poco el rostro.' };
+    if (faceRatio > 0.92) return { valid: false, message: 'Aleja un poco el rostro.' };
+    if (horizontalOffset > 0.3 || verticalOffset > 0.3) return { valid: false, message: 'Centra el rostro dentro del marco.' };
     if (faceConfidence(face) < 0.42) return { valid: false, message: 'Busca mejor iluminación.' };
     return { valid: true, faceRatio };
   }
@@ -292,7 +293,7 @@
     onStatus?.('Mira de frente. La validación comenzará automáticamente.');
     const baseline = await collectStableFront(human, video, onStatus, timeoutAt, 1, { requireModelLiveness: false });
     const baselineRatio = baseline.latest.quality.faceRatio;
-    const closerTarget = Math.min(0.76, baselineRatio + 0.06);
+    const closerTarget = Math.min(0.8, baselineRatio + 0.05);
     let completed = false;
 
     if (challenge.action === 'TURN_SIDE') onStatus?.('Gira el rostro hacia tu hombro derecho.');
@@ -327,57 +328,122 @@
     };
   }
 
-  async function waitForVideoReady(video, timeoutMs = 10_000) {
-    if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) return;
+  function stopStream(stream) {
+    stream?.getTracks?.().forEach((track) => track.stop());
+  }
+
+  function resetVideo(video) {
+    try { video.pause(); } catch { /* La reproducción puede no haber iniciado. */ }
+    video.srcObject = null;
+    video.removeAttribute('src');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('autoplay', '');
+    video.muted = true;
+    video.autoplay = true;
+    video.hidden = false;
+    try { video.load(); } catch { /* Algunos WebView no implementan load completamente. */ }
+  }
+
+  function renderedFrameCount(video) {
+    try {
+      return Number(video.getVideoPlaybackQuality?.().totalVideoFrames || 0);
+    } catch {
+      return 0;
+    }
+  }
+
+  async function waitForVideoReady(video, stream, timeoutMs = CAMERA_READY_TIMEOUT_MS) {
+    const track = stream.getVideoTracks?.()[0];
+    if (!track || track.readyState !== 'live') throw new Error('camera_stream_unavailable');
+
     await new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        cleanup();
-        reject(new Error('camera_stream_unavailable'));
-      }, timeoutMs);
-      const ready = () => {
-        if (video.videoWidth <= 0 || video.videoHeight <= 0) return;
-        cleanup();
-        resolve();
-      };
-      const failed = () => {
-        cleanup();
-        reject(new Error('camera_stream_unavailable'));
-      };
+      let settled = false;
+      let frameCallbackId = null;
+      const timeout = window.setTimeout(() => finish(new Error('camera_stream_unavailable')), timeoutMs);
+      const interval = window.setInterval(check, 120);
+
       function cleanup() {
         window.clearTimeout(timeout);
-        video.removeEventListener('loadedmetadata', ready);
-        video.removeEventListener('loadeddata', ready);
-        video.removeEventListener('error', failed);
+        window.clearInterval(interval);
+        video.removeEventListener('loadeddata', check);
+        video.removeEventListener('playing', check);
+        video.removeEventListener('error', fail);
+        track.removeEventListener('ended', fail);
+        if (frameCallbackId !== null && typeof video.cancelVideoFrameCallback === 'function') {
+          video.cancelVideoFrameCallback(frameCallbackId);
+        }
       }
-      video.addEventListener('loadedmetadata', ready);
-      video.addEventListener('loadeddata', ready);
-      video.addEventListener('error', failed);
+
+      function finish(error) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error) reject(error);
+        else resolve();
+      }
+
+      function fail() {
+        finish(new Error('camera_stream_unavailable'));
+      }
+
+      function check() {
+        if (track.readyState !== 'live') return fail();
+        const dimensionsReady = video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+        const frameReady = renderedFrameCount(video) > 0 || (!video.paused && video.currentTime > 0);
+        if (dimensionsReady && frameReady) finish();
+      }
+
+      video.addEventListener('loadeddata', check);
+      video.addEventListener('playing', check);
+      video.addEventListener('error', fail, { once: true });
+      track.addEventListener('ended', fail, { once: true });
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        frameCallbackId = video.requestVideoFrameCallback(() => finish());
+      }
+      check();
     });
   }
 
-  async function startCamera(video) {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('camera_unavailable');
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'user' },
-        resizeMode: 'none',
-        width: { ideal: 720 },
-        height: { ideal: 960 }
-      },
-      audio: false
-    });
+  async function openStream(video, constraints) {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
     try {
+      resetVideo(video);
       video.srcObject = stream;
-      video.hidden = false;
-      video.setAttribute('playsinline', '');
-      video.muted = true;
       await video.play();
-      await waitForVideoReady(video);
+      await waitForVideoReady(video, stream);
       return stream;
     } catch (error) {
-      stream.getTracks().forEach((track) => track.stop());
+      stopStream(stream);
+      resetVideo(video);
       throw error;
     }
+  }
+
+  async function startCamera(video) {
+    if (!video || !navigator.mediaDevices?.getUserMedia) throw new Error('camera_unavailable');
+    resetVideo(video);
+    const attempts = [
+      {
+        video: {
+          facingMode: { ideal: 'user' },
+          width: { ideal: 720 },
+          height: { ideal: 960 }
+        },
+        audio: false
+      },
+      { video: { facingMode: 'user' }, audio: false },
+      { video: true, audio: false }
+    ];
+
+    let lastError = null;
+    for (const constraints of attempts) {
+      try {
+        return await openStream(video, constraints);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('camera_stream_unavailable');
   }
 
   window.LorrenWorkerBiometric = Object.freeze({
