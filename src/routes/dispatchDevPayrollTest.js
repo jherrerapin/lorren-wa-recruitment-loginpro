@@ -197,7 +197,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
         pageTitle: 'Entorno de pruebas de asistencia y nómina',
         role,
         canUseTestWhatsapp: role === 'dev',
-        canOpenOperationalPayroll: role === 'dev' || Boolean(req.session?.canAccessPayroll || req.canAccessPayroll),
+        canOpenOperationalPayroll: role === 'dev',
         workspace,
         message: normalizeString(req.query.message),
         error: normalizeString(req.query.error),
@@ -302,7 +302,13 @@ export function dispatchDevPayrollTestRouter(prisma) {
       const assignment = await prisma.dispatchAssignment.findUnique({
         where: { id: req.params.assignmentId }, include: { serviceRequest: true, worker: true, attendanceSession: true }
       });
-      if (!assignment || assignment.serviceRequest?.source !== DEV_TEST_REQUEST_SOURCE) throw new Error('dev_test_assignment_not_found');
+      if (
+        !assignment
+        || assignment.serviceRequest?.source !== DEV_TEST_REQUEST_SOURCE
+        || !ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES.includes(assignment.status)
+      ) {
+        throw new Error('dev_test_assignment_not_found');
+      }
       if (assignment.attendanceSession) {
         const session = assignment.attendanceSession;
         await prisma.$transaction([
