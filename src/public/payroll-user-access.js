@@ -1,8 +1,24 @@
 'use strict';
 
 (() => {
-  const API_BASE = '/admin/operaciones/asistencia/nomina/api/users';
-  const PENDING_CREATE_KEY = 'lorren-payroll-access-after-create';
+  const PERMISSIONS = [
+    {
+      id: 'payroll',
+      apiBase: '/admin/operaciones/asistencia/nomina/api/users',
+      pendingKey: 'lorren-payroll-access-after-create',
+      title: 'Nómina y tiempo trabajado',
+      description: 'Permiso independiente para cortes, conceptos y exportaciones. No activa Operaciones ni Asistencia.',
+      summary: 'Nómina y tiempo trabajado'
+    },
+    {
+      id: 'test-workspace',
+      apiBase: '/admin/operaciones/pruebas/api/users',
+      pendingKey: 'lorren-test-workspace-access-after-create',
+      title: 'Entorno de pruebas de asistencia y nómina',
+      description: 'Permite usar auxiliares, clientes y operaciones existentes dentro de registros DEV_TEST aislados. No modifica la operación real.',
+      summary: 'Entorno de pruebas'
+    }
+  ];
 
   async function request(url, options = {}) {
     const response = await fetch(url, {
@@ -11,52 +27,56 @@
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'X-Requested-With': 'payroll-user-access',
+        'X-Requested-With': 'feature-user-access',
         ...(options.headers || {})
       }
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok !== true) throw new Error(payload.error || 'payroll_access_failed');
+    if (!response.ok || payload.ok !== true) throw new Error(payload.error || 'feature_access_failed');
     return payload;
   }
 
-  function updatePermissionSummary(form, enabled) {
+  function permissionHost(form) {
+    const attendanceInput = form.querySelector('input[name="canAccessAttendance"]');
+    return attendanceInput?.closest('.field.full')
+      || form.querySelector('.permission-stack')
+      || form.querySelector('.grid')
+      || form;
+  }
+
+  function updatePermissionSummary(form, config, enabled) {
     const row = form.closest('tr');
     const permissionCell = row?.querySelectorAll('td')?.[2];
     if (!permissionCell) return;
-    let label = permissionCell.querySelector('[data-payroll-permission-label]');
+    let label = permissionCell.querySelector(`[data-feature-permission-label="${config.id}"]`);
     if (enabled && !label) {
       label = document.createElement('small');
-      label.dataset.payrollPermissionLabel = 'true';
-      label.textContent = 'Nómina y tiempo trabajado';
+      label.dataset.featurePermissionLabel = config.id;
+      label.textContent = config.summary;
       permissionCell.appendChild(label);
     } else if (!enabled && label) {
       label.remove();
     }
   }
 
-  function permissionControl({ form, userId = null, initial = false, createMode = false }) {
-    const attendanceInput = form.querySelector('input[name="canAccessAttendance"]');
-    const host = attendanceInput?.closest('.field.full')
-      || form.querySelector('.permission-stack')
-      || form.querySelector('.grid')
-      || form;
-    if (host.querySelector('[data-payroll-permission]')) return;
+  function permissionControl({ form, userId = null, initial = false, createMode = false, config }) {
+    const host = permissionHost(form);
+    if (host.querySelector(`[data-feature-permission="${config.id}"]`)) return;
 
     const label = document.createElement('label');
     label.className = createMode ? 'permission-card' : 'dispatch-row';
-    label.dataset.payrollPermission = 'true';
+    label.dataset.featurePermission = config.id;
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = initial;
-    checkbox.setAttribute('aria-label', 'Permitir acceso a Nómina y tiempo trabajado');
+    checkbox.setAttribute('aria-label', `Permitir acceso a ${config.title}`);
 
     const text = document.createElement('span');
     const strong = document.createElement('strong');
-    strong.textContent = 'Nómina y tiempo trabajado';
+    strong.textContent = config.title;
     const small = document.createElement('small');
-    small.textContent = 'Permiso independiente para cortes, conceptos y exportaciones. No activa Operaciones ni Asistencia.';
+    small.textContent = config.description;
     text.append(strong, small);
     label.append(checkbox, text);
 
@@ -67,8 +87,8 @@
     if (createMode) {
       host.append(label);
       form.addEventListener('submit', () => {
-        if (checkbox.checked) sessionStorage.setItem(PENDING_CREATE_KEY, 'true');
-        else sessionStorage.removeItem(PENDING_CREATE_KEY);
+        if (checkbox.checked) sessionStorage.setItem(config.pendingKey, 'true');
+        else sessionStorage.removeItem(config.pendingKey);
       });
       return;
     }
@@ -78,20 +98,20 @@
     wrapper.style.gap = '4px';
     wrapper.append(label, status);
     host.append(wrapper);
-    updatePermissionSummary(form, initial);
+    updatePermissionSummary(form, config, initial);
 
     checkbox.addEventListener('change', async () => {
       const requested = checkbox.checked;
       checkbox.disabled = true;
       status.textContent = 'Guardando permiso…';
       try {
-        const payload = await request(`${API_BASE}/${encodeURIComponent(userId)}/access`, {
+        const payload = await request(`${config.apiBase}/${encodeURIComponent(userId)}/access`, {
           method: 'POST',
           body: JSON.stringify({ enabled: requested })
         });
         checkbox.checked = payload.enabled === true;
-        status.textContent = checkbox.checked ? 'Permiso de Nómina activo.' : 'Permiso de Nómina desactivado.';
-        updatePermissionSummary(form, checkbox.checked);
+        status.textContent = checkbox.checked ? 'Permiso activo.' : 'Permiso desactivado.';
+        updatePermissionSummary(form, config, checkbox.checked);
       } catch {
         checkbox.checked = !requested;
         status.textContent = 'No fue posible cambiar el permiso.';
@@ -105,43 +125,50 @@
     const match = form.action.match(/\/users\/([^/]+)\/access$/);
     if (!match) return;
     const userId = decodeURIComponent(match[1]);
-    try {
-      const payload = await request(`${API_BASE}/${encodeURIComponent(userId)}/access`, { method: 'GET' });
-      permissionControl({ form, userId, initial: payload.enabled === true });
-    } catch {
-      // Solo DEV recibe el control.
-    }
+    await Promise.all(PERMISSIONS.map(async (config) => {
+      try {
+        const payload = await request(`${config.apiBase}/${encodeURIComponent(userId)}/access`, { method: 'GET' });
+        permissionControl({ form, userId, initial: payload.enabled === true, config });
+      } catch {
+        // El control solo se renderiza cuando DEV puede consultar su estado.
+      }
+    }));
   }
 
-  async function applyPendingCreatePermission() {
-    if (sessionStorage.getItem(PENDING_CREATE_KEY) !== 'true') return;
+  function showNotice(text, success = true) {
+    const notice = document.createElement('div');
+    notice.className = success ? 'alert alert-success' : 'alert alert-error';
+    notice.textContent = text;
+    document.querySelector('.page')?.prepend(notice);
+  }
+
+  async function applyPendingCreatePermissions() {
     const username = new URLSearchParams(window.location.search).get('username');
     if (!username) return;
-    sessionStorage.removeItem(PENDING_CREATE_KEY);
-    try {
-      await request(`${API_BASE}/by-username/${encodeURIComponent(username)}/access`, {
-        method: 'POST',
-        body: JSON.stringify({ enabled: true })
-      });
-      const notice = document.createElement('div');
-      notice.className = 'alert alert-success';
-      notice.textContent = `Nómina habilitada para ${username}, sin modificar sus otros módulos.`;
-      document.querySelector('.page')?.prepend(notice);
-    } catch {
-      const notice = document.createElement('div');
-      notice.className = 'alert alert-error';
-      notice.textContent = `El usuario ${username} se creó, pero no fue posible activar Nómina.`;
-      document.querySelector('.page')?.prepend(notice);
+    for (const config of PERMISSIONS) {
+      if (sessionStorage.getItem(config.pendingKey) !== 'true') continue;
+      sessionStorage.removeItem(config.pendingKey);
+      try {
+        await request(`${config.apiBase}/by-username/${encodeURIComponent(username)}/access`, {
+          method: 'POST',
+          body: JSON.stringify({ enabled: true })
+        });
+        showNotice(`${config.title} habilitado para ${username}.`);
+      } catch {
+        showNotice(`El usuario ${username} se creó, pero no fue posible activar ${config.title}.`, false);
+      }
     }
   }
 
   function initialize() {
     const createForm = document.querySelector('form[action="/admin/users/create"]');
-    if (createForm) permissionControl({ form: createForm, createMode: true });
+    if (createForm) {
+      PERMISSIONS.forEach((config) => permissionControl({ form: createForm, createMode: true, config }));
+    }
     document.querySelectorAll('form[action^="/admin/locations/users/"][action$="/access"]').forEach((form) => {
       initializeEditForm(form).catch(() => {});
     });
-    applyPendingCreatePermission().catch(() => {});
+    applyPendingCreatePermissions().catch(() => {});
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });

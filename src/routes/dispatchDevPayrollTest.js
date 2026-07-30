@@ -9,6 +9,11 @@ import {
   saveDevTestAttendance
 } from '../services/dispatchDevPayrollTest.js';
 import {
+  resolveTestWorkspaceFeatureAccess,
+  setTestWorkspaceFeatureAccess
+} from '../services/testWorkspaceFeatureAccess.js';
+import { loadTestWorkspacePayrollReport } from '../services/testWorkspacePayrollReport.js';
+import {
   closeDispatchTestWhatsappSession,
   getDispatchTestWhatsappStatusView,
   initDispatchTestWhatsappClient,
@@ -23,17 +28,42 @@ function normalizeString(value, maxLength = 300) {
   return text ? text.slice(0, maxLength) : null;
 }
 
+function roleFromRequest(req) {
+  return normalizeString(req.session?.userRole || req.userRole, 80)?.toLowerCase();
+}
+
 function requireDev(req, res, next) {
-  const role = req.session?.userRole || req.userRole;
-  if (!role) return res.redirect('/login');
-  if (role !== 'dev') return res.status(403).send('Acceso restringido a DEV.');
+  if (!roleFromRequest(req)) return res.redirect('/login');
+  if (roleFromRequest(req) !== 'dev') return res.status(403).send('Acceso restringido a DEV.');
   return next();
+}
+
+function requireTestWorkspaceAccess(prisma) {
+  return async (req, res, next) => {
+    if (!roleFromRequest(req)) return res.redirect('/login');
+    try {
+      const access = await resolveTestWorkspaceFeatureAccess(prisma, {
+        userRole: roleFromRequest(req),
+        userId: req.session?.userId || req.userId,
+        username: req.session?.username || req.username
+      });
+      if (!access.allowed) return res.status(403).send('No tienes permiso para acceder al entorno de pruebas.');
+      req.canAccessTestWorkspace = true;
+      if (req.session) req.session.canAccessTestWorkspace = true;
+      return next();
+    } catch (error) {
+      console.error('[TEST_WORKSPACE_ACCESS_FAILED]', error);
+      return res.status(503).send('No fue posible comprobar el permiso del entorno de pruebas.');
+    }
+  };
 }
 
 function actor(req) {
   return {
-    actorUsername: normalizeString(req.session?.username || req.username, 160) || 'DEV',
-    actorRole: 'dev'
+    actorUsername: normalizeString(req.session?.username || req.username, 160) || 'TEST-WORKSPACE',
+    actorRole: roleFromRequest(req) || 'admin',
+    ipAddress: normalizeString(req.ip, 120),
+    userAgent: normalizeString(req.get?.('user-agent'), 500)
   };
 }
 
@@ -49,22 +79,6 @@ function redirectWorkspace(res, serviceRequestId, { message = null, error = null
   if (message) params.set('message', message);
   if (error) params.set('error', error);
   return res.redirect(`/admin/operaciones/pruebas?${params.toString()}`);
-}
-
-function payrollResultUrl(result) {
-  const params = new URLSearchParams();
-  const from = formatBogotaDateTimeLocal(result.arrivalAt).slice(0, 10);
-  const to = formatBogotaDateTimeLocal(result.departureAt).slice(0, 10);
-  const clientId = result.assignment?.serviceRequest?.operationPoint?.clientId || '';
-  const workerId = result.assignment?.worker?.id || result.assignment?.workerId || '';
-  params.set('periodType', 'CUSTOM');
-  params.set('from', from);
-  params.set('to', to || from);
-  if (clientId) params.set('clientId', clientId);
-  if (workerId) params.set('workerId', workerId);
-  params.set('includeTest', 'true');
-  params.set('success', 'Jornada manual guardada y calculada con datos de prueba.');
-  return `/admin/operaciones/asistencia/nomina?${params.toString()}`;
 }
 
 function normalizeWhatsappContext(context) {
@@ -88,9 +102,9 @@ function publicError(error) {
     dev_test_start_time_invalid: 'La hora de inicio no es válida.',
     dev_test_end_time_invalid: 'La hora de salida programada no es válida.',
     dev_test_required_workers_invalid: 'Ingresa una cantidad válida de auxiliares.',
-    dev_test_assignment_required: 'Selecciona una solicitud y un auxiliar de prueba.',
+    dev_test_assignment_required: 'Selecciona una solicitud y un auxiliar.',
     dev_test_request_not_found: 'La solicitud no existe o no está marcada como prueba.',
-    dev_test_worker_required: 'Solo se pueden asignar auxiliares marcados como sujetos de prueba.',
+    dev_test_worker_required: 'El auxiliar no existe o fue eliminado.',
     dev_test_assignment_not_found: 'La asignación no existe o no pertenece al entorno de prueba.',
     dev_test_arrival_invalid: 'La fecha y hora de entrada no son válidas.',
     dev_test_departure_invalid: 'La fecha y hora de salida no son válidas.',
@@ -109,22 +123,17 @@ function normalizeWorkspaceAvailability(workspace) {
     .map((assignment) => assignment.workerId));
   return {
     ...workspace,
-    availableWorkers: (workspace.testWorkers || []).filter((worker) => !assignedWorkerIds.has(worker.id))
+    availableWorkers: (workspace.workers || []).filter((worker) => !assignedWorkerIds.has(worker.id))
   };
 }
 
 async function recalculateTestRequestStatus(prisma, request) {
   const assignedCount = await prisma.dispatchAssignment.count({
-    where: {
-      serviceRequestId: request.id,
-      status: { in: ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES }
-    }
+    where: { serviceRequestId: request.id, status: { in: ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES } }
   });
   const status = assignedCount === 0
     ? 'DEV_TEST_PENDING'
-    : assignedCount >= request.requiredWorkers
-      ? 'DEV_TEST_COMPLETE'
-      : 'DEV_TEST_PARTIAL';
+    : assignedCount >= request.requiredWorkers ? 'DEV_TEST_COMPLETE' : 'DEV_TEST_PARTIAL';
   await prisma.dispatchServiceRequest.update({ where: { id: request.id }, data: { status } });
   return status;
 }
@@ -134,67 +143,110 @@ export function dispatchDevPayrollTestRouter(prisma) {
   const formParser = express.urlencoded({ extended: true, limit: '32kb' });
   const jsonParser = express.json({ limit: '16kb', strict: true });
 
-  router.use(requireDev);
-
-  router.get('/', async (req, res) => {
-    const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
-    return res.render('operacionesPruebasNomina', {
-      pageTitle: 'Pruebas DEV de asistencia y nómina',
-      role: 'dev',
-      workspace,
-      message: normalizeString(req.query.message),
-      error: normalizeString(req.query.error),
-      formatBogotaDateTimeLocal,
-      defaultDevTestTimes,
-      testRequestSource: DEV_TEST_REQUEST_SOURCE
-    });
+  router.get('/api/users/:userId/access', requireDev, async (req, res) => {
+    noStore(res);
+    try {
+      const access = await resolveTestWorkspaceFeatureAccess(prisma, {
+        userRole: 'admin', userId: req.params.userId, username: null
+      });
+      return res.json({ ok: true, enabled: access.allowed, userId: access.userId });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error?.message || 'test_workspace_access_failed' });
+    }
   });
 
-  router.get('/whatsapp', async (req, res) => {
+  router.post('/api/users/:userId/access', requireDev, jsonParser, async (req, res) => {
+    noStore(res);
+    try {
+      const result = await setTestWorkspaceFeatureAccess(prisma, {
+        targetUserId: req.params.userId,
+        enabled: req.body?.enabled === true,
+        ...actor(req)
+      });
+      return res.json({ ok: true, ...result });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error?.message || 'test_workspace_access_failed' });
+    }
+  });
+
+  router.post('/api/users/by-username/:username/access', requireDev, jsonParser, async (req, res) => {
+    noStore(res);
+    const username = normalizeString(req.params.username, 160);
+    const user = username ? await prisma.appUser.findUnique({ where: { username }, select: { id: true } }) : null;
+    if (!user) return res.status(404).json({ ok: false, error: 'test_workspace_access_user_not_found' });
+    try {
+      const result = await setTestWorkspaceFeatureAccess(prisma, {
+        targetUserId: user.id,
+        enabled: req.body?.enabled === true,
+        ...actor(req)
+      });
+      return res.json({ ok: true, ...result });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error?.message || 'test_workspace_access_failed' });
+    }
+  });
+
+  router.use(requireTestWorkspaceAccess(prisma));
+
+  router.get('/', async (req, res) => {
+    try {
+      const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
+      workspace.testReport = await loadTestWorkspacePayrollReport(prisma, workspace.selectedRequest);
+      const role = roleFromRequest(req);
+      return res.render('operacionesPruebasNomina', {
+        pageTitle: 'Entorno de pruebas de asistencia y nómina',
+        role,
+        canUseTestWhatsapp: role === 'dev',
+        canOpenOperationalPayroll: role === 'dev',
+        workspace,
+        message: normalizeString(req.query.message),
+        error: normalizeString(req.query.error),
+        formatBogotaDateTimeLocal,
+        defaultDevTestTimes,
+        testRequestSource: DEV_TEST_REQUEST_SOURCE
+      });
+    } catch (error) {
+      console.error('[TEST_WORKSPACE_LOAD_FAILED]', error);
+      return res.status(500).send('No fue posible cargar el entorno de pruebas.');
+    }
+  });
+
+  router.get('/whatsapp', requireDev, async (req, res) => {
     noStore(res);
     initDispatchTestWhatsappClient();
     const status = await getDispatchTestWhatsappStatusView({ autoStart: false });
     return res.render('operacionesWhatsappEstado', {
-      pageTitle: 'WhatsApp de pruebas de despacho',
-      role: 'dev',
-      message: normalizeString(req.query?.message),
-      isDev: true,
-      technicalLastError: status.lastError || null,
-      ...status,
-      whatsappTitle: 'WhatsApp de pruebas de despacho',
-      whatsappEyebrow: 'Entorno aislado DEV',
-      whatsappDescription: 'Vincula una cuenta distinta a la línea operativa para probar envíos y confirmaciones de sujetos de prueba.',
-      whatsappBasePath: '/admin/operaciones/pruebas/whatsapp',
-      whatsappReturnHref: '/admin/operaciones/pruebas',
-      whatsappReturnLabel: 'Volver a Pruebas DEV',
-      whatsappAssignmentsHref: '/admin/operaciones/pruebas',
-      whatsappAssignmentsLabel: 'Sujetos de prueba',
+      pageTitle: 'WhatsApp de pruebas de despacho', role: 'dev', message: normalizeString(req.query?.message),
+      isDev: true, technicalLastError: status.lastError || null, ...status,
+      whatsappTitle: 'WhatsApp de pruebas de despacho', whatsappEyebrow: 'Entorno aislado DEV',
+      whatsappDescription: 'Vincula una cuenta distinta a la línea operativa para probar envíos y confirmaciones.',
+      whatsappBasePath: '/admin/operaciones/pruebas/whatsapp', whatsappReturnHref: '/admin/operaciones/pruebas',
+      whatsappReturnLabel: 'Volver al entorno de pruebas', whatsappAssignmentsHref: '/admin/operaciones/pruebas',
+      whatsappAssignmentsLabel: 'Asignaciones de prueba',
       whatsappCloseConfirm: '¿Cerrar únicamente la sesión de WhatsApp de pruebas? La cuenta operativa no se modificará.',
       whatsappQrInstruction: 'Escanea este QR desde la cuenta secundaria que usarás exclusivamente para las pruebas.'
     });
   });
 
-  router.get('/whatsapp/estado', async (req, res) => {
+  router.get('/whatsapp/estado', requireDev, async (req, res) => {
     noStore(res);
     const shouldStart = !['0', 'false'].includes(String(req.query?.start || '').toLowerCase());
     const status = await getDispatchTestWhatsappStatusView({ autoStart: shouldStart });
     return res.json({ ok: true, isDev: true, technicalLastError: status.lastError || null, ...status });
   });
 
-  router.post('/whatsapp/cerrar-sesion', async (_req, res) => {
+  router.post('/whatsapp/cerrar-sesion', requireDev, async (_req, res) => {
     noStore(res);
     await closeDispatchTestWhatsappSession();
     const message = encodeURIComponent('Sesión de WhatsApp de pruebas cerrada. La cuenta operativa continúa sin cambios.');
     return res.redirect(`/admin/operaciones/pruebas/whatsapp?message=${message}`);
   });
 
-  router.post('/whatsapp/enviar', jsonParser, async (req, res) => {
+  router.post('/whatsapp/enviar', requireDev, jsonParser, async (req, res) => {
     noStore(res);
     try {
       const result = await sendDispatchTestWhatsappMessage({
-        phone: req.body?.phone,
-        message: req.body?.message,
-        context: normalizeWhatsappContext(req.body?.context)
+        phone: req.body?.phone, message: req.body?.message, context: normalizeWhatsappContext(req.body?.context)
       });
       return res.json({ ok: true, providerMessageId: result.providerMessageId, phone: result.phone });
     } catch (error) {
@@ -206,8 +258,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
   router.post('/solicitudes', formParser, async (req, res) => {
     try {
       const result = await createDevTestServiceRequests(prisma, req.body, actor(req));
-      const firstId = result.created[0]?.id || null;
-      return redirectWorkspace(res, firstId, {
+      return redirectWorkspace(res, result.created[0]?.id || null, {
         message: `${result.created.length} solicitud(es) de prueba creadas. No se ejecutó autoasignación ni notificaciones.`
       });
     } catch (error) {
@@ -217,17 +268,10 @@ export function dispatchDevPayrollTestRouter(prisma) {
 
   router.post('/solicitudes/:serviceRequestId/asignar', formParser, async (req, res) => {
     try {
-      await assignDevTestWorker(prisma, {
-        serviceRequestId: req.params.serviceRequestId,
-        workerId: req.body.workerId
-      }, actor(req));
-      const request = await prisma.dispatchServiceRequest.findUnique({
-        where: { id: req.params.serviceRequestId }
-      });
+      await assignDevTestWorker(prisma, { serviceRequestId: req.params.serviceRequestId, workerId: req.body.workerId }, actor(req));
+      const request = await prisma.dispatchServiceRequest.findUnique({ where: { id: req.params.serviceRequestId } });
       if (request?.source === DEV_TEST_REQUEST_SOURCE) await recalculateTestRequestStatus(prisma, request);
-      return redirectWorkspace(res, req.params.serviceRequestId, {
-        message: 'Sujeto de prueba asignado y confirmado.'
-      });
+      return redirectWorkspace(res, req.params.serviceRequestId, { message: 'Auxiliar asignado dentro del entorno aislado de pruebas.' });
     } catch (error) {
       return redirectWorkspace(res, req.params.serviceRequestId, { error: publicError(error) });
     }
@@ -236,7 +280,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
   router.post('/asignaciones/:assignmentId/jornada', formParser, async (req, res) => {
     const serviceRequestId = normalizeString(req.body.serviceRequestId, 120);
     try {
-      const result = await saveDevTestAttendance(prisma, {
+      await saveDevTestAttendance(prisma, {
         assignmentId: req.params.assignmentId,
         arrivalAt: req.body.arrivalAt,
         breakStartAt: req.body.breakStartAt,
@@ -244,7 +288,9 @@ export function dispatchDevPayrollTestRouter(prisma) {
         departureAt: req.body.departureAt,
         notes: req.body.notes
       }, actor(req));
-      return res.redirect(payrollResultUrl(result));
+      return redirectWorkspace(res, serviceRequestId, {
+        message: 'Jornada aislada guardada. El cálculo se actualizó dentro del entorno de pruebas.'
+      });
     } catch (error) {
       return redirectWorkspace(res, serviceRequestId, { error: publicError(error) });
     }
@@ -254,10 +300,13 @@ export function dispatchDevPayrollTestRouter(prisma) {
     const serviceRequestId = normalizeString(req.body.serviceRequestId, 120);
     try {
       const assignment = await prisma.dispatchAssignment.findUnique({
-        where: { id: req.params.assignmentId },
-        include: { serviceRequest: true, worker: true, attendanceSession: true }
+        where: { id: req.params.assignmentId }, include: { serviceRequest: true, worker: true, attendanceSession: true }
       });
-      if (!assignment || assignment.serviceRequest?.source !== DEV_TEST_REQUEST_SOURCE || assignment.worker?.isTestProfile !== true) {
+      if (
+        !assignment
+        || assignment.serviceRequest?.source !== DEV_TEST_REQUEST_SOURCE
+        || !ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES.includes(assignment.status)
+      ) {
         throw new Error('dev_test_assignment_not_found');
       }
       if (assignment.attendanceSession) {
@@ -274,7 +323,7 @@ export function dispatchDevPayrollTestRouter(prisma) {
       });
       await prisma.dispatchAssignment.delete({ where: { id: assignment.id } });
       await recalculateTestRequestStatus(prisma, assignment.serviceRequest);
-      return redirectWorkspace(res, serviceRequestId, { message: 'Asignación de prueba eliminada.' });
+      return redirectWorkspace(res, serviceRequestId, { message: 'Asignación de prueba eliminada. El auxiliar real no fue modificado.' });
     } catch (error) {
       return redirectWorkspace(res, serviceRequestId, { error: publicError(error) });
     }

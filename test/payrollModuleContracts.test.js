@@ -13,21 +13,31 @@ test('Nómina conserva su ruta pero atraviesa las guardas con permiso propio', a
   assert.match(bridge, /resolvePayrollFeatureAccess/);
 });
 
-test('el portal valida su propio permiso antes de mostrar información', async () => {
+test('Nómina operativa conserva exclusivamente su permiso propio', async () => {
   const source = await read('src/routes/dispatchPayroll.js');
   assert.match(source, /resolvePayrollFeatureAccess/);
+  assert.doesNotMatch(source, /resolveTestWorkspaceFeatureAccess/);
   assert.match(source, /No tienes permiso para acceder a Nómina y tiempo trabajado/);
   assert.match(source, /router\.get\('\/export\.csv'/);
   assert.match(source, /router\.get\('\/export\.xlsx'/);
 });
 
-test('la configuración de usuarios solo recibe el control cuando el perfil actual es DEV', async () => {
+test('el entorno de pruebas valida su permiso y calcula dentro de su propia ruta', async () => {
+  const route = await read('src/routes/dispatchDevPayrollTest.js');
+  assert.match(route, /resolveTestWorkspaceFeatureAccess/);
+  assert.match(route, /loadTestWorkspacePayrollReport/);
+  assert.match(route, /No tienes permiso para acceder al entorno de pruebas/);
+});
+
+test('la configuración de usuarios solo recibe los controles cuando el perfil actual es DEV', async () => {
   const middleware = await read('src/services/dispatchAuditMiddleware.js');
   const client = await read('src/public/payroll-user-access.js');
   assert.match(middleware, /path !== '\/admin\/users' \|\| role !== 'dev'/);
   assert.match(middleware, /PAYROLL_USERS_SCRIPT/);
   assert.doesNotMatch(client, /:has\(/);
   assert.match(client, /No activa Operaciones ni Asistencia/);
+  assert.match(client, /Entorno de pruebas de asistencia y nómina/);
+  assert.match(client, /registros DEV_TEST aislados/);
 });
 
 test('conceder Nómina exige DEV y no cambia los módulos padre', async () => {
