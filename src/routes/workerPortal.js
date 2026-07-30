@@ -30,7 +30,7 @@ const STRICT_MARK_PATHS = [
   '/asignaciones/:assignmentId/fin-almuerzo',
   '/asignaciones/:assignmentId/salida'
 ];
-const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'DEPARTURE']);
+const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 
 function markTypeFromPath(pathname = '') {
   if (pathname.endsWith('/llegada')) return 'ARRIVAL';
@@ -271,7 +271,7 @@ export function workerPortalRouter(prisma, options = {}) {
 
       if (BIOMETRIC_MARK_TYPES.has(markType)) {
         if (String(req.body?.captureMode || '').toUpperCase() !== 'ONLINE_WEB') {
-          return strictError(res, 409, 'online_biometric_required', 'La entrada y la salida requieren conexión para validar el rostro.');
+          return strictError(res, 409, 'online_biometric_required', 'Esta marcación requiere conexión para validar el rostro.');
         }
         const event = await prisma.devAuditEvent.findFirst({
           where: {
