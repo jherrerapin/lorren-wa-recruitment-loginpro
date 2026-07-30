@@ -2,42 +2,23 @@
 
 (() => {
   const STYLE_ID = 'lorren-biometric-accessibility-style';
-  const TRANSIENT_CAPTURE_ERRORS = new Set([
-    'biometric_capture_timeout',
-    'biometric_challenge_not_completed',
-    'biometric_descriptor_unavailable',
-    'biometric_descriptor_inconsistent'
-  ]);
+  const FLOW_VERSION = '2026-07-29-r4';
+  let activeMarkButton = null;
+  let automaticRetryUsed = false;
+  let automaticRetryPending = false;
+  let lastInstruction = '';
 
   function sleep(milliseconds) {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   }
 
-  function installSinglePressVerification() {
-    const api = window.LorrenWorkerBiometric;
-    if (!api?.captureVerification || api.singlePressVerification === true) return;
-    const originalCaptureVerification = api.captureVerification.bind(api);
-
-    async function captureVerification(options = {}) {
-      let lastError = null;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          return await originalCaptureVerification({ ...options, timeoutMs: 12_000 });
-        } catch (error) {
-          lastError = error;
-          if (attempt > 0 || !TRANSIENT_CAPTURE_ERRORS.has(String(error?.message || ''))) throw error;
-          options.onStatus?.('No te muevas. Reintentando automáticamente…');
-          await sleep(350);
-        }
-      }
-      throw lastError || new Error('biometric_capture_timeout');
+  async function waitFor(predicate, timeoutMs = 8_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await sleep(100);
     }
-
-    window.LorrenWorkerBiometric = Object.freeze({
-      ...api,
-      captureVerification,
-      singlePressVerification: true
-    });
+    throw new Error('biometric_ui_wait_timeout');
   }
 
   function installStyles() {
@@ -204,18 +185,76 @@
     window.LorrenWorkerBiometric?.prepare?.().catch(() => {});
   }
 
-  function enhanceControls() {
-    document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
-      button.addEventListener('pointerdown', prepareBiometricModels, { passive: true });
-      button.addEventListener('click', prepareBiometricModels);
-    });
+  function finalFailureMessage() {
+    const normalized = lastInstruction.toLowerCase();
+    if (normalized.includes('rostro real')) return 'No se confirmó un rostro real. Intenta con luz de frente y sin reflejos.';
+    if (normalized.includes('hombro') || normalized.includes('acerca')) return 'No se confirmó el movimiento solicitado.';
+    return 'No fue posible confirmar que el rostro coincide con el registrado.';
+  }
 
+  async function retryCompleteFlow() {
+    const dialog = document.getElementById('mark-dialog');
+    const closeButton = document.getElementById('close-mark');
+    const captureButton = document.getElementById('capture-photo');
     const consent = document.getElementById('photo-consent');
+    const instruction = document.getElementById('biometric-instruction');
+    const result = document.getElementById('mark-result');
+
+    if (automaticRetryUsed || automaticRetryPending || !activeMarkButton || !dialog?.open) return;
+    automaticRetryUsed = true;
+    automaticRetryPending = true;
+
+    if (instruction) instruction.textContent = 'Reintentando automáticamente. Mira de frente.';
+    if (result) {
+      result.hidden = false;
+      result.className = 'status warning';
+      result.textContent = 'La primera lectura no concluyó. Reintentando sin que pulses otra vez…';
+    }
+
+    try {
+      closeButton?.click();
+      await sleep(250);
+      activeMarkButton.click();
+      await waitFor(() => Boolean(dialog.open && captureButton && !captureButton.disabled));
+      if (consent) {
+        consent.checked = true;
+        consent.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (instruction) instruction.textContent = 'Mira de frente. Segundo intento automático.';
+      captureButton.click();
+    } catch {
+      if (result) {
+        result.hidden = false;
+        result.className = 'status danger';
+        result.textContent = 'No fue posible reiniciar automáticamente la validación facial.';
+      }
+    } finally {
+      automaticRetryPending = false;
+    }
+  }
+
+  function installFlowRecovery() {
+    const dialog = document.getElementById('mark-dialog');
     const captureButton = document.getElementById('capture-photo');
     const instruction = document.getElementById('biometric-instruction');
+    const result = document.getElementById('mark-result');
 
-    consent?.addEventListener('change', () => {
-      if (!consent.checked) return;
+    document.documentElement.dataset.lorrenBiometricFlow = FLOW_VERSION;
+
+    document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
+      button.addEventListener('pointerdown', prepareBiometricModels, { passive: true });
+      button.addEventListener('click', (event) => {
+        activeMarkButton = button;
+        if (event.isTrusted) {
+          automaticRetryUsed = false;
+          automaticRetryPending = false;
+        }
+        prepareBiometricModels();
+      }, true);
+    });
+
+    document.getElementById('photo-consent')?.addEventListener('change', (event) => {
+      if (!event.currentTarget.checked) return;
       prepareBiometricModels();
       captureButton?.focus({ preventScroll: true });
     });
@@ -227,19 +266,37 @@
 
     if (captureButton) {
       new MutationObserver(() => {
-        if (!captureButton.disabled) {
+        if (!captureButton.disabled && !/validado/i.test(captureButton.textContent || '')) {
           captureButton.textContent = 'Validar rostro';
           captureButton.removeAttribute('aria-busy');
         }
       }).observe(captureButton, { attributes: true, attributeFilter: ['disabled'] });
     }
 
-    if (instruction && captureButton) {
+    if (instruction) {
+      lastInstruction = String(instruction.textContent || '');
       new MutationObserver(() => {
-        if (!/identidad verificada/i.test(String(instruction.textContent || ''))) return;
-        captureButton.textContent = 'Rostro validado';
-        captureButton.removeAttribute('aria-busy');
+        lastInstruction = String(instruction.textContent || '');
+        if (!/identidad verificada/i.test(lastInstruction)) return;
+        if (captureButton) {
+          captureButton.textContent = 'Rostro validado';
+          captureButton.removeAttribute('aria-busy');
+        }
       }).observe(instruction, { childList: true, characterData: true, subtree: true });
+    }
+
+    if (result) {
+      new MutationObserver(() => {
+        const text = String(result.textContent || '');
+        const failed = /La validación facial falló|validación facial no fue aprobada|rostro no fue verificado/i.test(text);
+        if (!failed || !dialog?.open) return;
+        if (!automaticRetryUsed) {
+          window.setTimeout(() => retryCompleteFlow(), 180);
+          return;
+        }
+        result.className = 'status danger';
+        result.textContent = finalFailureMessage();
+      }).observe(result, { childList: true, characterData: true, subtree: true });
     }
   }
 
@@ -247,10 +304,9 @@
     if (window.location.pathname !== '/operaciones/portal') return;
     installStyles();
     makeInstructionAccessible();
-    enhanceControls();
+    installFlowRecovery();
   }
 
-  installSinglePressVerification();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initialize, { once: true });
   } else {
