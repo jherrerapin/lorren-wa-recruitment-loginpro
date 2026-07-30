@@ -51,7 +51,7 @@
     biometricVerified: false
   };
 
-  const isBiometricMark = () => state.markType === 'ARRIVAL' || state.markType === 'DEPARTURE';
+  const isBiometricMark = () => ['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'].includes(state.markType);
   const endpointFor = (type) => ({
     ARRIVAL: 'llegada',
     BREAK_START: 'inicio-almuerzo',
