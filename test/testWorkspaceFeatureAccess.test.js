@@ -125,7 +125,7 @@ test('la interfaz de usuarios incluye ambos permisos independientes', async () =
 test('el permiso de pruebas no reemplaza ni amplía la ruta de Nómina operativa', async () => {
   const [payrollRoute, workspaceRoute, isolatedReport] = await Promise.all([
     readFile('src/routes/dispatchPayroll.js', 'utf8'),
-    readFile('src/routes/dispatchDevPayrollTestV2.js', 'utf8'),
+    readFile('src/routes/dispatchDevPayrollTest.js', 'utf8'),
     readFile('src/services/testWorkspacePayrollReport.js', 'utf8')
   ]);
   assert.doesNotMatch(payrollRoute, /resolveTestWorkspaceFeatureAccess/);
