@@ -4,15 +4,15 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('Nómina excluye pruebas por defecto y la inclusión exige DEV o permiso de pruebas', async () => {
+test('Nómina global excluye pruebas por defecto y solo DEV puede solicitar su inclusión', async () => {
   const report = await read('src/modules/dispatch-payroll/application/payrollReport.js');
-  const route = await read('src/routes/dispatchPayrollV2.js');
+  const route = await read('src/routes/dispatchPayroll.js');
   assert.match(report, /DEV_TEST_REQUEST_SOURCE/);
   assert.match(report, /!filters\.includeTest && sessionIsTest/);
   assert.match(report, /isTestProfile: false/);
-  assert.match(route, /roleFromRequest\(req\) === 'dev' \|\| req\.canAccessTestWorkspace === true/);
+  assert.match(route, /roleFromRequest\(req\) === 'dev'/);
   assert.match(route, /delete input\.includeTest/);
-  assert.match(route, /resolveTestWorkspaceFeatureAccess/);
+  assert.doesNotMatch(route, /resolveTestWorkspaceFeatureAccess/);
 });
 
 test('el entorno autorizado crea solicitudes aisladas sin depender del módulo operativo', async () => {
