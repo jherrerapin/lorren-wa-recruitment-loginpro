@@ -23,7 +23,7 @@ test('Nómina operativa conserva exclusivamente su permiso propio', async () => 
 });
 
 test('el entorno de pruebas valida su permiso y calcula dentro de su propia ruta', async () => {
-  const route = await read('src/routes/dispatchDevPayrollTestV2.js');
+  const route = await read('src/routes/dispatchDevPayrollTest.js');
   assert.match(route, /resolveTestWorkspaceFeatureAccess/);
   assert.match(route, /loadTestWorkspacePayrollReport/);
   assert.match(route, /No tienes permiso para acceder al entorno de pruebas/);
