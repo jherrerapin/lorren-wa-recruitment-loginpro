@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('el portal carga la guía biométrica accesible después del motor facial', async () => {
+test('el portal conserva el refuerzo visual después del motor facial', async () => {
   const loader = await read('src/public/worker-biometric.js');
   const corePosition = loader.indexOf('/public/worker-biometric-core.js');
   const accessibilityPosition = loader.indexOf('/public/worker-biometric-accessibility.js');
@@ -16,17 +16,30 @@ test('el portal carga la guía biométrica accesible después del motor facial',
   assert.match(loader, /\/operaciones\/portal\/offline\.js/);
 });
 
-test('la instrucción facial es grande, de alto contraste y explica el uso de gafas', async () => {
+test('solo la instrucción dinámica queda grande y en alto contraste', async () => {
   const source = await read('src/public/worker-biometric-accessibility.js');
 
-  assert.match(source, /font-size:\s*clamp\(20px,\s*5\.5vw,\s*26px\)/);
+  assert.match(source, /#biometric-instruction/);
+  assert.match(source, /font-size:\s*clamp\(21px,\s*5\.8vw,\s*28px\)/);
   assert.match(source, /font-weight:\s*850/);
   assert.match(source, /border:\s*2px solid #176c36/);
   assert.match(source, /aria-live', 'assertive/);
-  assert.match(source, /centra todo tu rostro dentro del óvalo/);
-  assert.match(source, /gafas transparentes/);
-  assert.match(source, /reflejo fuerte/);
-  assert.match(source, /Solo tú debes aparecer frente a la cámara/);
+  assert.doesNotMatch(source, /Para que te reconozca correctamente/);
+  assert.doesNotMatch(source, /gafas transparentes/);
+  assert.doesNotMatch(source, /reflejo fuerte/);
+  assert.doesNotMatch(source, /lorren-biometric-visible-help/);
+});
+
+test('la verificación promedia tres capturas estables y conserva las barreras', async () => {
+  const source = await read('src/public/worker-biometric-core.js');
+
+  assert.match(source, /const CAPTURE_TIMEOUT_MS = 30_000/);
+  assert.match(source, /const VERIFICATION_SAMPLES = 3/);
+  assert.match(source, /descriptor:\s*averageDescriptors\(descriptors\)/);
+  assert.match(source, /Math\.min\(\.\.\.scores\.map/);
+  assert.match(source, /scores\.realScore >= MIN_REAL_SCORE/);
+  assert.match(source, /scores\.liveScore >= MIN_LIVE_SCORE/);
+  assert.match(source, /faces\.length !== 1/);
 });
 
 test('la mejora visual no reemplaza ni intercepta la API de reconocimiento', async () => {
