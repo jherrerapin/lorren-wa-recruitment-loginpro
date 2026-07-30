@@ -71,7 +71,7 @@ export async function setTestWorkspaceFeatureAccess(prisma, input = {}, options 
     where: { id: targetUserId },
     select: { id: true, username: true, role: true, isActive: true }
   });
-  if (!user || String(user.role || '').toUpperCase() !== 'ADMIN') {
+  if (!user || !user.isActive || String(user.role || '').toUpperCase() !== 'ADMIN') {
     throw new Error('test_workspace_access_user_not_found');
   }
 
