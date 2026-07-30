@@ -149,7 +149,7 @@ test('los turnos nocturnos terminan al día siguiente y el almuerzo inicia vací
 
 test('la vista permite crear solicitudes y distingue auxiliares reales de perfiles de prueba', async () => {
   const [template, publicTemplateSync, confirmationPatch] = await Promise.all([
-    readFile('src/views/operacionesPruebasNominaV2.ejs', 'utf8'),
+    readFile('src/views/operacionesPruebasNomina.ejs', 'utf8'),
     readFile('src/public/assignment-template-sync.js', 'utf8'),
     readFile('src/services/dispatchWhatsappConfirmationPatch.js', 'utf8')
   ]);
