@@ -9,8 +9,8 @@
   const MODEL_VERSION = previousApi.MODEL_VERSION || 'human-3.3.6-faceres';
   const MIN_REAL_SCORE = 0.55;
   const MIN_LIVE_SCORE = 0.55;
-  const DETECTION_INTERVAL_MS = 90;
-  const CAPTURE_TIMEOUT_MS = 45_000;
+  const DETECTION_INTERVAL_MS = 75;
+  const CAPTURE_TIMEOUT_MS = 22_000;
   let humanPromise = null;
   let scriptPromise = null;
 
@@ -117,6 +117,11 @@
       throw error;
     });
     return humanPromise;
+  }
+
+  async function prepare() {
+    await humanInstance();
+    return true;
   }
 
   function finiteScore(value) {
@@ -247,7 +252,7 @@
       } else if (bestLive < MIN_LIVE_SCORE) {
         onStatus?.('Mueve ligeramente el rostro y vuelve al centro.');
       } else if (descriptors.length < samplesRequired) {
-        onStatus?.(`Rostro detectado · ${descriptors.length} de ${samplesRequired}`);
+        onStatus?.('Rostro detectado. Mantén la posición.');
       }
 
       if (bestReal >= MIN_REAL_SCORE && bestLive >= MIN_LIVE_SCORE && descriptors.length >= samplesRequired) {
@@ -281,12 +286,14 @@
     const onStatus = options.onStatus;
     const human = await humanInstance();
     const timeoutAt = Date.now() + (options.timeoutMs || CAPTURE_TIMEOUT_MS);
-    const baseline = await collectStableFront(human, video, onStatus, timeoutAt, 2);
+
+    onStatus?.('Mira de frente. La validación comenzará automáticamente.');
+    const baseline = await collectStableFront(human, video, onStatus, timeoutAt, 1);
     const baselineRatio = baseline.latest.quality.faceRatio;
     const closerTarget = Math.min(0.76, baselineRatio + 0.06);
     let completed = false;
 
-    if (challenge.action === 'TURN_SIDE') onStatus?.('Gira el rostro suavemente hacia un lado.');
+    if (challenge.action === 'TURN_SIDE') onStatus?.('Gira el rostro hacia tu hombro derecho.');
     else onStatus?.('Acerca un poco el rostro a la cámara.');
 
     while (Date.now() < timeoutAt && !completed) {
@@ -300,11 +307,11 @@
     }
     if (!completed) throw new Error('biometric_challenge_not_completed');
 
-    onStatus?.('Listo. Vuelve a mirar de frente.');
-    const final = await collectStableFront(human, video, onStatus, timeoutAt, 2);
+    onStatus?.('Listo. Vuelve a mirar de frente y mantente quieto.');
+    const final = await collectStableFront(human, video, onStatus, timeoutAt, 1);
     const photoBlob = await capturePhoto(video);
     return {
-      descriptor: averageDescriptors(final.descriptors),
+      descriptor: averageDescriptors([...baseline.descriptors, ...final.descriptors]),
       realScore: Math.max(baseline.realScore, final.realScore),
       liveScore: Math.max(baseline.liveScore, final.liveScore),
       challengeAction: challenge.action,
@@ -370,6 +377,7 @@
   window.LorrenWorkerBiometric = Object.freeze({
     ...previousApi,
     MODEL_VERSION,
+    prepare,
     startCamera,
     captureEnrollment,
     captureVerification
