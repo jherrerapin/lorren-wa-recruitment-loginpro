@@ -16,9 +16,9 @@ test('Nómina global excluye pruebas por defecto y solo DEV puede solicitar su i
 });
 
 test('el entorno autorizado crea solicitudes aisladas sin depender del módulo operativo', async () => {
-  const view = await read('src/views/operacionesPruebasNominaV2.ejs');
+  const view = await read('src/views/operacionesPruebasNomina.ejs');
   const bridge = await read('src/routes/dispatchBridge.js');
-  const route = await read('src/routes/dispatchDevPayrollTestV2.js');
+  const route = await read('src/routes/dispatchDevPayrollTest.js');
   assert.match(view, /Nueva solicitud de prueba/);
   assert.match(view, /Cliente existente/);
   assert.match(view, /\/admin\/operaciones\/pruebas\/solicitudes/);
@@ -27,7 +27,7 @@ test('el entorno autorizado crea solicitudes aisladas sin depender del módulo o
 });
 
 test('los estados DEV no se confunden con solicitudes o asignaciones operativas', async () => {
-  const service = await read('src/services/dispatchDevPayrollTestV2.js');
+  const service = await read('src/services/dispatchDevPayrollTest.js');
   const attendance = await read('src/modules/dispatch-attendance/application/adminAttendance.js');
   assert.match(service, /status: 'DEV_TEST_PENDING'/);
   assert.match(service, /status: 'DEV_TEST_ASSIGNED'/);
