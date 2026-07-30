@@ -15,7 +15,7 @@ test('el portal carga un único controlador biométrico después del motor y del
   assert.ok(mobilePosition > corePosition);
   assert.ok(hardeningPosition > mobilePosition);
   assert.ok(flowPosition > hardeningPosition);
-  assert.match(loader, /BIOMETRIC_ASSET_VERSION\s*=\s*'20260730-single-controller-v1'/);
+  assert.match(loader, /BIOMETRIC_ASSET_VERSION\s*=\s*'20260730-biometric-breaks-v2'/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js/);
   assert.match(loader, /\/operaciones\/portal\/offline\.js/);
 });
@@ -65,6 +65,16 @@ test('marcar la autorización inicia el flujo y los reintentos son automáticos'
   assert.doesNotMatch(flow, /activeMarkButton\.click\(\)/);
   assert.doesNotMatch(flow, /MutationObserver/);
   assert.doesNotMatch(flow, /capturePhotoButton/);
+});
+
+test('llegada, almuerzo y salida usan el mismo flujo biométrico', async () => {
+  const flow = await read('src/public/worker-portal-biometric-flow.js');
+
+  assert.match(flow, /\['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'\]\.includes\(state\.markType\)/);
+  assert.match(flow, /BREAK_START:\s*'inicio-almuerzo'/);
+  assert.match(flow, /BREAK_END:\s*'fin-almuerzo'/);
+  assert.match(flow, /markType:\s*state\.markType/);
+  assert.match(flow, /form\.set\('selfie', state\.photoBlob/);
 });
 
 test('la marcación final continúa exigiendo GPS, autorización e identidad verificada', async () => {
