@@ -122,10 +122,14 @@ test('la interfaz de usuarios incluye ambos permisos independientes', async () =
   assert.match(script, /lorren-test-workspace-access-after-create/);
 });
 
-test('la ruta de nómina fuerza includeTest para usuarios exclusivos de pruebas y bloquea compensatorios', async () => {
-  const route = await readFile('src/routes/dispatchPayrollV2.js', 'utf8');
-  assert.match(route, /req\.canAccessTestWorkspace && !req\.canAccessPayroll/);
-  assert.match(route, /input\.includeTest = 'true'/);
-  assert.match(route, /Los compensatorios no se modifican desde el entorno de pruebas/);
-  assert.match(route, /allowTestData: allowTestData\(req\)/);
+test('el permiso de pruebas no reemplaza ni amplía la ruta de Nómina operativa', async () => {
+  const [payrollRoute, workspaceRoute, isolatedReport] = await Promise.all([
+    readFile('src/routes/dispatchPayroll.js', 'utf8'),
+    readFile('src/routes/dispatchDevPayrollTestV2.js', 'utf8'),
+    readFile('src/services/testWorkspacePayrollReport.js', 'utf8')
+  ]);
+  assert.doesNotMatch(payrollRoute, /resolveTestWorkspaceFeatureAccess/);
+  assert.match(payrollRoute, /No tienes permiso para acceder a Nómina y tiempo trabajado/);
+  assert.match(workspaceRoute, /loadTestWorkspacePayrollReport/);
+  assert.match(isolatedReport, /attendanceSession\?\.source === 'DEV_TEST_MANUAL'/);
 });
