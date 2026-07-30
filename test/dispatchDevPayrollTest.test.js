@@ -171,9 +171,9 @@ test('la vista permite crear solicitudes y distingue auxiliares reales de perfil
     operationPoint: { clientId: 'client-real', address: 'Calle real', cityName: 'Bogotá' }, assignments: [assignment]
   };
   const locals = {
-    pageTitle: 'Entorno de pruebas', role: 'dev', canUseTestWhatsapp: true,
+    pageTitle: 'Entorno de pruebas', role: 'dev', canUseTestWhatsapp: true, canOpenOperationalPayroll: true,
     workspace: {
-      requests: [request], selectedRequest: request, availableWorkers: [],
+      requests: [request], selectedRequest: request, availableWorkers: [], testReport: null,
       clients: [{ id: 'client-real', name: 'Cliente real', operationPoints: [{ id: 'point-real', name: 'Operación real' }], services: [] }]
     },
     message: null, error: null, formatBogotaDateTimeLocal: () => '',
@@ -186,6 +186,7 @@ test('la vista permite crear solicitudes y distingue auxiliares reales de perfil
   assert.match(html, /Cliente existente/);
   assert.match(html, /Auxiliar existente/);
   assert.match(html, /AUXILIAR REAL USADO COMO REFERENCIA/);
+  assert.match(html, /Resultado aislado de nómina/);
   assert.match(html, /name="breakStartAt" value=""/);
   assert.match(html, /name="breakEndAt" value=""/);
   for (const line of canonicalLines) {
@@ -194,9 +195,16 @@ test('la vista permite crear solicitudes y distingue auxiliares reales de perfil
     assert.ok(template.includes(line));
   }
 
-  const adminHtml = ejs.render(template, { ...locals, role: 'admin', canUseTestWhatsapp: false });
+  const adminHtml = ejs.render(template, {
+    ...locals,
+    role: 'admin',
+    canUseTestWhatsapp: false,
+    canOpenOperationalPayroll: false
+  });
   assert.doesNotMatch(adminHtml, /Enviar desde WhatsApp de pruebas/);
   assert.doesNotMatch(adminHtml, /href="\/admin\/operaciones\/pruebas\/whatsapp"/);
+  assert.doesNotMatch(adminHtml, /href="\/admin\/operaciones\/asistencia\/nomina\?includeTest=true"/);
+  assert.match(adminHtml, /Ver cálculo aislado/);
 });
 
 test('las constantes aíslan solicitud y marcaciones manuales', () => {
