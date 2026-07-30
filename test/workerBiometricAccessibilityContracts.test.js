@@ -4,18 +4,20 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('el portal carga un único controlador biométrico después del motor y del endurecimiento', async () => {
+test('el portal carga un único controlador biométrico después del motor y de la recuperación de cámara', async () => {
   const loader = await read('src/public/worker-biometric.js');
   const corePosition = loader.indexOf('/public/worker-biometric-core.js');
   const mobilePosition = loader.indexOf('/public/worker-biometric-mobile.js');
+  const recoveryPosition = loader.indexOf('/public/worker-biometric-camera-recovery.js');
   const hardeningPosition = loader.indexOf('/public/worker-portal-hardening.js');
   const flowPosition = loader.indexOf('/public/worker-portal-biometric-flow.js');
 
   assert.ok(corePosition >= 0);
   assert.ok(mobilePosition > corePosition);
-  assert.ok(hardeningPosition > mobilePosition);
+  assert.ok(recoveryPosition > mobilePosition);
+  assert.ok(hardeningPosition > recoveryPosition);
   assert.ok(flowPosition > hardeningPosition);
-  assert.match(loader, /BIOMETRIC_ASSET_VERSION\s*=\s*'20260730-biometric-breaks-v2'/);
+  assert.match(loader, /BIOMETRIC_ASSET_VERSION\s*=\s*'20260730-mobile-camera-v3'/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js/);
   assert.match(loader, /\/operaciones\/portal\/offline\.js/);
 });
@@ -75,6 +77,29 @@ test('llegada, almuerzo y salida usan el mismo flujo biométrico', async () => {
   assert.match(flow, /BREAK_END:\s*'fin-almuerzo'/);
   assert.match(flow, /markType:\s*state\.markType/);
   assert.match(flow, /form\.set\('selfie', state\.photoBlob/);
+});
+
+test('el encuadre móvil muestra el vídeo completo y una guía facial amplia', async () => {
+  const recovery = await read('src/public/worker-biometric-camera-recovery.js');
+
+  assert.match(recovery, /object-fit:\s*contain\s*!important/);
+  assert.match(recovery, /width:\s*84%\s*!important/);
+  assert.match(recovery, /height:\s*88%\s*!important/);
+  assert.match(recovery, /border-radius:\s*24px\s*!important/);
+  assert.match(recovery, /#camera-step \.face-stage[\s\S]*width:\s*100%\s*!important/);
+});
+
+test('cada apertura reinicia el vídeo y exige un fotograma renderizado', async () => {
+  const recovery = await read('src/public/worker-biometric-camera-recovery.js');
+
+  assert.match(recovery, /video\.pause\(\)/);
+  assert.match(recovery, /video\.srcObject = null/);
+  assert.match(recovery, /requestVideoFrameCallback/);
+  assert.match(recovery, /getVideoPlaybackQuality/);
+  assert.match(recovery, /track\.readyState !== 'live'/);
+  assert.match(recovery, /for \(const constraints of attempts\)/);
+  assert.match(recovery, /facingMode:\s*\{ ideal:\s*'user' \}/);
+  assert.match(recovery, /\{ video: true, audio: false \}/);
 });
 
 test('la marcación final continúa exigiendo GPS, autorización e identidad verificada', async () => {
