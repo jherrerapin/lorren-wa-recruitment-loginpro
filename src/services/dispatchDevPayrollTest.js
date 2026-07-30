@@ -271,7 +271,13 @@ export async function saveDevTestAttendance(prisma, input = {}, actor = {}) {
     where: { id: assignmentId },
     include: { worker: true, serviceRequest: { include: { operationPoint: { include: { client: true } } } } }
   });
-  if (!assignment || assignment.serviceRequest?.source !== DEV_TEST_REQUEST_SOURCE) throw new Error('dev_test_assignment_not_found');
+  if (
+    !assignment
+    || assignment.serviceRequest?.source !== DEV_TEST_REQUEST_SOURCE
+    || !ACTIVE_ASSIGNMENT_STATUSES.includes(assignment.status)
+  ) {
+    throw new Error('dev_test_assignment_not_found');
+  }
   if (!assignment.worker || assignment.worker.operationalStatus === 'ELIMINADO') throw new Error('dev_test_worker_required');
 
   const dateKey = serviceDateKey(assignment.serviceRequest.serviceDate);
