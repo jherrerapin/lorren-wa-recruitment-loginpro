@@ -27,12 +27,6 @@ function rotatedDescriptor(vector, angle) {
   return base.map((value, index) => value * Math.cos(angle) + orthogonal[index] * Math.sin(angle));
 }
 
-function legacySimilarity(left, right) {
-  const distance = Math.sqrt(left.reduce((sum, value, index) => sum + ((value - right[index]) * 25) ** 2, 0));
-  const normalized = (1 - (distance / 100) - 0.2) / 0.6;
-  return Math.round(100 * Math.max(0, Math.min(1, normalized))) / 100;
-}
-
 function matchesWhere(event, where = {}) {
   if (where.entityType && event.entityType !== where.entityType) return false;
   if (where.entityId) {
@@ -132,31 +126,32 @@ test('la misma identidad con desafío válido queda verificada', async () => {
   assert.equal(assessment.decision, 'VERIFIED');
   assert.equal(assessment.verified, true);
   assert.equal(assessment.similarity, 1);
+  assert.equal(assessment.matchThreshold, 0.85);
   assert.deepEqual(assessment.riskFlags, []);
 });
 
-test('una variación razonable del mismo rostro conserva la verificación', async () => {
+test('una variación legítima que fallaba con 0.90 queda verificada', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
-  const genuineVariation = rotatedDescriptor(descriptor, 0.25);
+  const genuineVariation = rotatedDescriptor(descriptor, 0.5);
   const assessment = await assess(prisma, genuineVariation, { idempotencyKey: 'mark-key-genuine-1234' });
-  assert.ok(assessment.similarity > 0.96);
+  assert.ok(assessment.similarity > 0.87 && assessment.similarity < 0.9);
   assert.equal(assessment.decision, 'VERIFIED');
   assert.equal(assessment.verified, true);
+  assert.deepEqual(assessment.riskFlags, []);
 });
 
-test('un impostor cercano queda rechazado aunque el cálculo anterior lo habría aceptado', async () => {
+test('un impostor cercano permanece rechazado con el umbral conservador', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const nearImpostor = rotatedDescriptor(descriptor, 0.65);
-  assert.ok(legacySimilarity(unitVector(descriptor), nearImpostor) >= 0.52);
   const assessment = await assess(prisma, nearImpostor, {
     idempotencyKey: 'mark-key-impostor-1234',
     markType: 'DEPARTURE',
     randomIndex: 1,
     elapsedMs: 12_000
   });
-  assert.ok(assessment.similarity > 0.75 && assessment.similarity < 0.9);
+  assert.ok(assessment.similarity > 0.75 && assessment.similarity < 0.85);
   assert.equal(assessment.decision, 'REVIEW_REQUIRED');
   assert.equal(assessment.verified, false);
   assert.ok(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
@@ -193,12 +188,13 @@ test('al actualizar o revocar se borra el material biométrico anterior', async 
   assert.equal(status.get('worker-1').enrolled, false);
 });
 
-test('la similitud usa coseno normalizado y separa rostros cercanos', () => {
-  const genuineVariation = rotatedDescriptor(descriptor, 0.25);
+test('la similitud normalizada separa variación legítima e impostor', () => {
+  const genuineVariation = rotatedDescriptor(descriptor, 0.5);
   const nearImpostor = rotatedDescriptor(descriptor, 0.65);
   assert.equal(humanFaceSimilarity(descriptor, descriptor), 1);
-  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) > 0.96);
+  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) > 0.87);
+  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) < 0.9);
   assert.ok(humanFaceSimilarity(descriptor, nearImpostor) > 0.75);
-  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) < 0.9);
+  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) < 0.85);
   assert.ok(humanFaceSimilarity(descriptor, descriptor.map((value) => value + 4)) < 0.1);
 });
