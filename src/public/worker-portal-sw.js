@@ -2,7 +2,7 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v5';
+const CACHE_NAME = 'lorren-worker-portal-shell-v6';
 const STATIC_ASSETS = [
   '/operaciones/portal/offline.js',
   '/operaciones/portal/manifest.webmanifest',
@@ -50,8 +50,8 @@ function openDatabase() {
         receipts.createIndex('completedAt', 'completedAt', { unique: false });
       }
     });
-    request.addEventListener('success', () => resolve(request.result), { once: true });
-    request.addEventListener('error', () => reject(request.error || new Error('indexeddb_open_failed')), { once: true });
+    request.addEventListener('success', () => resolve(request.result));
+    request.addEventListener('error', () => reject(request.error || new Error('indexeddb_open_failed')));
   });
 }
 
