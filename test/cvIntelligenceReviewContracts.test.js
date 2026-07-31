@@ -263,7 +263,7 @@ test('un fallo completo del lote usa un único reintento y no genera llamadas in
   );
 });
 
-test('el último lote unitario también consume el presupuesto global de tres reintentos', async () => {
+test('el fallo técnico del último lote unitario consume el presupuesto global de tres reintentos', async () => {
   const requests = [];
   const singleRequestCounts = new Map();
   const vacancy = {
@@ -298,7 +298,7 @@ test('el último lote unitario también consume el presupuesto global de tres re
     const requestCount = (singleRequestCounts.get(candidateId) || 0) + 1;
     singleRequestCounts.set(candidateId, requestCount);
     if (candidateId === 'unit-31' && requestCount === 1) {
-      return structuredResponse({ results: [] });
+      throw new Error('simulated unit batch timeout');
     }
     return structuredResponse({
       results: [{
