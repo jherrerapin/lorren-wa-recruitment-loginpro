@@ -92,6 +92,8 @@ function renderLayout({ title, body, req = {} }) {
     .alert { border-radius:10px; padding:11px 13px; margin-bottom:15px; background:var(--green-soft); color:var(--green); font-weight:750; }
     .alert.error { background:#fff1f0; color:var(--red); border:1px solid #fecdca; }
     .alert.warn { background:#fffaeb; color:#93370d; border:1px solid #fedf89; }
+    .technical { border:1px dashed #98a2b3; background:#f8fafc; }
+    .technical code { color:#344054; font-size:12px; overflow-wrap:anywhere; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:10px; }
     .kpi { border:1px solid var(--border); border-radius:11px; padding:14px; background:#f8fafc; }
     .kpi strong { display:block; font-size:27px; line-height:1; color:var(--navy); }
@@ -221,7 +223,6 @@ function renderCriteria(profile = {}) {
       <strong>${escapeHtml(criterion.label)}</strong>
       <p>${escapeHtml(criterion.description)}${criterion.minimumMonths ? ` · Mínimo ${Math.round(criterion.minimumMonths / 12 * 10) / 10} año(s)` : ''}</p>
     </div>`).join('')}</div>
-    ${profile.warnings?.length ? `<div class="alert warn" style="margin-top:12px">${profile.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
   </section>`;
 }
 
@@ -245,7 +246,16 @@ function renderRegisteredData(candidate = {}) {
   </div>`;
 }
 
-function renderResultCard(result, kind) {
+function operatorManualReason(reason = '') {
+  const value = normalizeString(reason);
+  if (!value) return '';
+  if (/(lote|reintent|modelo|openai|comparación automática|respuesta de comparación|código interno)/i.test(value)) {
+    return 'No fue posible completar la comparación de este perfil. Revísalo manualmente.';
+  }
+  return value;
+}
+
+function renderResultCard(result, kind, { isDev = false } = {}) {
   const candidate = result.candidate || {};
   const match = result.match;
   const labels = {
@@ -254,13 +264,16 @@ function renderResultCard(result, kind) {
     low: 'Poca evidencia',
     manual: 'Revisar manualmente'
   };
+  const manualReason = result.manualReason
+    ? (isDev ? result.manualReason : operatorManualReason(result.manualReason))
+    : '';
   return `<article class="result ${kind}">
     <div class="result-top">
       <div><h3>${escapeHtml(candidate.fullName || 'Candidato sin nombre')}</h3></div>
       ${match ? `<div class="score">${Math.round(match.score)}%</div>` : '<span class="badge error">Manual</span>'}
     </div>
     <span class="badge ${kind === 'strong' ? 'ok' : kind === 'manual' ? 'error' : 'warn'}" style="margin-top:10px">${labels[kind]}</span>
-    ${result.manualReason ? `<p>${escapeHtml(result.manualReason)}</p>` : ''}
+    ${manualReason ? `<p>${escapeHtml(manualReason)}</p>` : ''}
     ${renderRegisteredData(candidate)}
     ${renderStringList('Por qué puede servir', match?.reasons)}
     ${renderStringList('Evidencia encontrada (HV o registro)', match?.evidence)}
@@ -280,18 +293,28 @@ function renderExportForm(reviewToken, group, label, secondary = true) {
   </form>`;
 }
 
-function renderResultGroup(title, help, items, kind, reviewToken) {
+function renderResultGroup(title, help, items, kind, reviewToken, { isDev = false } = {}) {
   if (!items.length) return '';
   return `<section class="group">
     <div class="group-head">
       <div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(help)}</p></div>
       <div class="group-actions"><span class="badge">${items.length}</span>${renderExportForm(reviewToken, kind, 'Descargar esta sección')}</div>
     </div>
-    <div class="result-grid">${items.map((item) => renderResultCard(item, kind)).join('')}</div>
+    <div class="result-grid">${items.map((item) => renderResultCard(item, kind, { isDev })).join('')}</div>
   </section>`;
 }
 
-function renderReviewResults(review, reviewToken = '') {
+function renderTechnicalDiagnostics(review, { isDev = false } = {}) {
+  if (!isDev || !review?.ok) return '';
+  const warnings = Array.isArray(review.warnings) ? review.warnings : [];
+  return `<section class="card technical">
+    <h2>Diagnóstico técnico</h2>
+    <p><strong>Modelo:</strong> <code>${escapeHtml(review.modelUsed || 'No informado')}</code></p>
+    ${warnings.length ? `<div class="alert warn">${warnings.map(escapeHtml).join(' · ')}</div>` : '<p class="muted">Sin advertencias técnicas.</p>'}
+  </section>`;
+}
+
+function renderReviewResults(review, reviewToken = '', { isDev = false } = {}) {
   if (!review?.ok) return '';
   if (!review.stats.total) return '<section class="card"><div class="empty">No hay hojas de vida para revisar en esta vacante.</div></section>';
   const groups = review.groups;
@@ -308,25 +331,25 @@ function renderReviewResults(review, reviewToken = '') {
         <div class="kpi warn"><strong>${review.stats.low}</strong><span>Con poca evidencia relacionada</span></div>
         <div class="kpi warn"><strong>${review.stats.manual}</strong><span>Necesitan revisión manual</span></div>
       </div>
-      ${review.warnings?.length ? `<div class="alert warn" style="margin-top:12px">${review.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
-      <p class="muted" style="margin-top:12px">Modelo usado: ${escapeHtml(review.modelUsed || 'No informado')} · El Excel incluye columnas editables para responsable y observaciones.</p>
     </section>
-    ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida y/o el registro contienen evidencia clara de varios puntos importantes.', groups.strong, 'strong', reviewToken)}
-    ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas y conviene una revisión humana antes de decidir.', groups.possible, 'possible', reviewToken)}
-    ${renderResultGroup('Poca evidencia para el perfil', 'La hoja de vida y los datos registrados muestran poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low', reviewToken)}
-    ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual', reviewToken)}`;
+    ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida y/o el registro contienen evidencia clara de varios puntos importantes.', groups.strong, 'strong', reviewToken, { isDev })}
+    ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas y conviene una revisión humana antes de decidir.', groups.possible, 'possible', reviewToken, { isDev })}
+    ${renderResultGroup('Poca evidencia para el perfil', 'La hoja de vida y los datos registrados muestran poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low', reviewToken, { isDev })}
+    ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual', reviewToken, { isDev })}
+    ${renderTechnicalDiagnostics(review, { isDev })}`;
 }
 
-function errorMessage(reason = '') {
+function errorMessage(reason = '', { isDev = false } = {}) {
   const messages = {
     vacancy_required: 'Selecciona una vacante antes de iniciar la revisión.',
     vacancy_not_found: 'La vacante seleccionada ya no existe.',
     profile_too_short: 'Cuéntanos un poco más sobre la experiencia o conocimientos que buscas.',
-    ai_not_configured: 'OpenAI no está configurado para ejecutar este análisis.',
+    ai_not_configured: 'El análisis inteligente no está disponible en este momento.',
     profile_analysis_failed: 'No fue posible entender el perfil en este momento. Intenta nuevamente.',
-    match_analysis_failed: 'Las hojas de vida se procesaron, pero no fue posible compararlas en este momento.'
+    match_analysis_failed: 'Las hojas de vida se procesaron, pero no fue posible completar la comparación en este momento.'
   };
-  return messages[reason] || 'No fue posible completar la revisión.';
+  const message = messages[reason] || 'No fue posible completar la revisión.';
+  return isDev && reason ? `${message} [${reason}]` : message;
 }
 
 async function loadVacancies(prisma, accessContext = {}) {
@@ -363,6 +386,8 @@ async function loadCandidates(prisma, vacancyId, accessContext = {}) {
 }
 
 function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desiredProfile = '', review = null, reviewToken = '', message = '', error = '', showCandidates = true }) {
+  const accessContext = getAccessContext(req);
+  const isDev = Boolean(accessContext?.isDev);
   const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
     ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
     <section class="card hero">
@@ -371,9 +396,13 @@ function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desi
     </section>
     ${renderProfileForm(vacancies, { vacancyId, desiredProfile })}
     ${review
-      ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review, reviewToken)}`
+      ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review, reviewToken, { isDev })}`
       : showCandidates ? renderCandidateTable(candidates, vacancyId) : ''}`;
   return renderLayout({ title: 'Análisis de hojas de vida — Lórren', body, req });
+}
+
+export function renderCvAnalysisPageForTest(options = {}) {
+  return renderPage(options);
 }
 
 export function lorenV2CvAnalysisRouter(prisma) {
@@ -427,7 +456,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
           vacancies,
           vacancyId,
           desiredProfile,
-          error: errorMessage(review.reason),
+          error: errorMessage(review.reason, { isDev: Boolean(accessContext?.isDev) }),
           showCandidates: false
         }));
       }
@@ -487,13 +516,18 @@ export function lorenV2CvAnalysisRouter(prisma) {
   });
 
   router.post('/:candidateId/analyze', async (req, res) => {
+    const accessContext = getAccessContext(req);
     const candidate = await prisma.candidate.findFirst({
-      where: { id: req.params.candidateId, ...buildCandidateAccessWhere(getAccessContext(req)) },
+      where: { id: req.params.candidateId, ...buildCandidateAccessWhere(accessContext) },
       select: { id: true }
     });
     if (!candidate) return res.status(403).send('No tienes acceso a este candidato.');
     const result = await analyzeCandidateCv(prisma, req.params.candidateId);
-    const message = result.ok ? 'Hoja de vida analizada.' : `No fue posible analizar la hoja de vida: ${result.reason}`;
+    const message = result.ok
+      ? 'Hoja de vida analizada.'
+      : accessContext?.isDev
+        ? `No fue posible analizar la hoja de vida: ${result.reason}`
+        : 'No fue posible analizar la hoja de vida. Intenta nuevamente.';
     res.redirect(`/admin/estadisticas/cv-analysis?message=${encodeURIComponent(message)}`);
   });
 

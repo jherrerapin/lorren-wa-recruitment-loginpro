@@ -1,10 +1,16 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  clearCvIntelligenceCachesForTest,
   groupCandidateReviewResults,
   reviewVacancyCandidates
 } from '../src/services/cvIntelligence.js';
+import { renderCvAnalysisPageForTest } from '../src/routes/lorenV2CvAnalysis.js';
+
+beforeEach(() => {
+  clearCvIntelligenceCachesForTest();
+});
 
 function structuredResponse(parsed) {
   return {
@@ -54,7 +60,7 @@ function cachedCandidateForReview(id, vacancy) {
   };
 }
 
-function interpretedOperationProfile() {
+function interpretedOperationProfile(overrides = {}) {
   return {
     summary: 'Perfil de operación logística.',
     criteria: [{
@@ -65,7 +71,30 @@ function interpretedOperationProfile() {
       minimumMonths: null,
       keywords: ['logística', 'operación']
     }],
-    warnings: []
+    warnings: [],
+    ...overrides
+  };
+}
+
+function reviewPrisma(vacancy, candidates) {
+  return {
+    vacancy: {
+      findUnique: async ({ where } = {}) => !where || where.id === vacancy.id ? vacancy : null
+    },
+    candidate: {
+      findMany: async () => candidates
+    }
+  };
+}
+
+function matchResult(candidateId, { level = 'STRONG', score = 88 } = {}) {
+  return {
+    candidateId,
+    level,
+    score,
+    reasons: ['Cumple experiencia relacionada con la operación.'],
+    evidence: ['Experiencia en operación logística e inventarios.'],
+    gaps: []
   };
 }
 
@@ -79,21 +108,13 @@ test('el análisis combina requisitos de vacante, texto del coordinador, HV y re
     roleDescription: 'Coordina cargue, descargue e inventarios.'
   };
   const candidate = {
-    id: 'candidate-cv-review',
+    ...cachedCandidateForReview('candidate-cv-review', vacancy),
     fullName: 'Persona de Prueba',
     phone: '3001234567',
     documentType: 'CC',
     documentNumber: '123456789',
     age: 31,
     gender: 'FEMALE',
-    transportMode: 'Moto',
-    locality: 'La Estrella',
-    neighborhood: null,
-    zone: null,
-    cvStorageKey: 'candidates/candidate-cv-review/hv.pdf',
-    cvOriginalName: 'hoja-de-vida.pdf',
-    cvMimeType: 'application/pdf',
-    vacancy,
     attachmentAnalyses: [{
       id: 'analysis-cv-review',
       classification: 'CV_VALID',
@@ -119,15 +140,6 @@ test('el análisis combina requisitos de vacante, texto del coordinador, HV y re
         }
       }
     }]
-  };
-
-  const prisma = {
-    vacancy: {
-      findUnique: async ({ where }) => where.id === vacancy.id ? vacancy : null
-    },
-    candidate: {
-      findMany: async () => [candidate]
-    }
   };
 
   const desiredProfile = 'Busco experiencia coordinando cargue y descargue, manejo de Excel y conocimiento de SAP.';
@@ -170,7 +182,7 @@ test('el análisis combina requisitos de vacante, texto del coordinador, HV y re
   };
 
   const result = await reviewVacancyCandidates(
-    prisma,
+    reviewPrisma(vacancy, [candidate]),
     { vacancyId: vacancy.id, desiredProfile },
     { openAiPost, model: 'test-cv-model' }
   );
@@ -189,10 +201,7 @@ test('el análisis combina requisitos de vacante, texto del coordinador, HV y re
   assert.match(requests[0].input[0].content[0].text, /significado y el contexto/i);
 
   const matchPayload = JSON.parse(requests[1].input[1].content[0].text);
-  assert.equal(
-    matchPayload.comparisonProfile.interpretedProfile.criteria[0].label,
-    'Manejo de personal'
-  );
+  assert.equal(matchPayload.comparisonProfile.interpretedProfile.criteria[0].label, 'Manejo de personal');
   assert.equal(matchPayload.comparisonProfile.vacancy.requirements, vacancy.requirements);
   assert.equal(matchPayload.comparisonProfile.coordinatorRequest, desiredProfile);
   assert.equal(matchPayload.candidates[0].sources.cv.estimatedExperienceMonths, 24);
@@ -219,14 +228,6 @@ test('un fallo completo del lote usa un único reintento y no genera llamadas in
     { length: 8 },
     (_, index) => cachedCandidateForReview(`batch-${index + 1}`, vacancy)
   );
-  const prisma = {
-    vacancy: {
-      findUnique: async () => vacancy
-    },
-    candidate: {
-      findMany: async () => candidates
-    }
-  };
   const openAiPost = async (payload) => {
     requests.push(payload);
     if (payload.text.format.name === 'loren_desired_candidate_profile') {
@@ -236,7 +237,7 @@ test('un fallo completo del lote usa un único reintento y no genera llamadas in
   };
 
   const result = await reviewVacancyCandidates(
-    prisma,
+    reviewPrisma(vacancy, candidates),
     {
       vacancyId: vacancy.id,
       desiredProfile: 'Prioriza experiencia equivalente en cargue, descargue o inventarios.'
@@ -274,17 +275,9 @@ test('el fallo técnico del último lote unitario consume el presupuesto global 
     roleDescription: 'Apoya cargue, descargue e inventarios.'
   };
   const candidates = Array.from(
-    { length: 31 },
+    { length: 13 },
     (_, index) => cachedCandidateForReview(`unit-${index + 1}`, vacancy)
   );
-  const prisma = {
-    vacancy: {
-      findUnique: async () => vacancy
-    },
-    candidate: {
-      findMany: async () => candidates
-    }
-  };
   const openAiPost = async (payload) => {
     requests.push(payload);
     if (payload.text.format.name === 'loren_desired_candidate_profile') {
@@ -297,23 +290,14 @@ test('el fallo técnico del último lote unitario consume el presupuesto global 
     const candidateId = input.candidates[0].candidateId;
     const requestCount = (singleRequestCounts.get(candidateId) || 0) + 1;
     singleRequestCounts.set(candidateId, requestCount);
-    if (candidateId === 'unit-31' && requestCount === 1) {
+    if (candidateId === 'unit-13' && requestCount === 1) {
       throw new Error('simulated unit batch timeout');
     }
-    return structuredResponse({
-      results: [{
-        candidateId,
-        level: 'LOW',
-        score: 20,
-        reasons: ['La información disponible es limitada.'],
-        evidence: ['Experiencia operativa general.'],
-        gaps: ['Falta confirmar experiencia específica.']
-      }]
-    });
+    return structuredResponse({ results: [matchResult(candidateId, { level: 'LOW', score: 20 })] });
   };
 
   const result = await reviewVacancyCandidates(
-    prisma,
+    reviewPrisma(vacancy, candidates),
     {
       vacancyId: vacancy.id,
       desiredProfile: 'Prioriza experiencia equivalente en cargue, descargue o inventarios.'
@@ -330,9 +314,167 @@ test('el fallo técnico del último lote unitario consume el presupuesto global 
   });
   assert.equal(singleCandidateRequests.length, 4);
   assert.equal(result.stats.low, 3);
-  assert.equal(result.stats.manual, 28);
+  assert.equal(result.stats.manual, 10);
   assert.equal(result.warnings.length, 1);
-  assert.match(result.warnings[0], /respuestas válidas omitieron perfiles/i);
+});
+
+test('dos revisiones idénticas reutilizan una comparación completa y conservan el resultado', async () => {
+  const requests = [];
+  let matchCalls = 0;
+  const vacancy = {
+    id: 'vacancy-stable-cache',
+    title: 'Líder de operación',
+    city: 'Neiva',
+    requirements: 'Mínimo un año en operaciones logísticas y manejo de personal.',
+    roleDescription: 'Coordina personal y operación.'
+  };
+  const candidate = cachedCandidateForReview('stable-candidate', vacancy);
+  const openAiPost = async (payload) => {
+    requests.push(payload);
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      return structuredResponse(interpretedOperationProfile());
+    }
+    matchCalls += 1;
+    return structuredResponse({
+      results: [matchResult(candidate.id, matchCalls === 1
+        ? { level: 'STRONG', score: 93 }
+        : { level: 'LOW', score: 8 })]
+    });
+  };
+  const input = {
+    vacancyId: vacancy.id,
+    desiredProfile: 'Busco técnico o tecnólogo con un año en logística y manejo de personal.'
+  };
+  const options = { openAiPost, model: 'test-stable-model' };
+  const prisma = reviewPrisma(vacancy, [candidate]);
+
+  const first = await reviewVacancyCandidates(prisma, input, options);
+  const second = await reviewVacancyCandidates(prisma, input, options);
+
+  assert.equal(first.stats.strong, 1);
+  assert.equal(second.stats.strong, 1);
+  assert.equal(second.groups.strong[0].match.score, 93);
+  assert.equal(matchCalls, 1);
+  assert.equal(requests.length, 2);
+});
+
+test('una respuesta parcial no se almacena y obliga nuevas consultas', async () => {
+  let profileCalls = 0;
+  let matchCalls = 0;
+  const vacancy = {
+    id: 'vacancy-partial-cache',
+    title: 'Auxiliar de operación',
+    city: 'Neiva',
+    requirements: 'Experiencia logística.',
+    roleDescription: 'Apoya la operación.'
+  };
+  const candidate = cachedCandidateForReview('partial-candidate', vacancy);
+  const openAiPost = async (payload) => {
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      profileCalls += 1;
+      return structuredResponse(interpretedOperationProfile());
+    }
+    matchCalls += 1;
+    return structuredResponse({ results: [] });
+  };
+  const input = {
+    vacancyId: vacancy.id,
+    desiredProfile: 'Busco experiencia relacionada con operación logística.'
+  };
+  const options = { openAiPost, model: 'test-partial-model' };
+  const prisma = reviewPrisma(vacancy, [candidate]);
+
+  await reviewVacancyCandidates(prisma, input, options);
+  await reviewVacancyCandidates(prisma, input, options);
+
+  assert.equal(profileCalls, 1);
+  assert.equal(matchCalls, 4);
+});
+
+test('el schema exige exactamente un resultado por candidato y limita el tamaño de la respuesta', async () => {
+  const requests = [];
+  const vacancy = {
+    id: 'vacancy-schema-contract',
+    title: 'Auxiliar de operación',
+    city: 'Neiva',
+    requirements: 'Experiencia logística.',
+    roleDescription: 'Apoya operación e inventarios.'
+  };
+  const candidates = [
+    cachedCandidateForReview('schema-1', vacancy),
+    cachedCandidateForReview('schema-2', vacancy)
+  ];
+  const openAiPost = async (payload) => {
+    requests.push(payload);
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      return structuredResponse(interpretedOperationProfile());
+    }
+    return structuredResponse({ results: candidates.map((candidate) => matchResult(candidate.id)) });
+  };
+
+  await reviewVacancyCandidates(
+    reviewPrisma(vacancy, candidates),
+    {
+      vacancyId: vacancy.id,
+      desiredProfile: 'Busco experiencia relacionada con operación logística.'
+    },
+    { openAiPost, model: 'test-schema-model' }
+  );
+
+  const matchRequest = requests.find(
+    (payload) => payload.text.format.name === 'loren_candidate_profile_matches'
+  );
+  const resultsSchema = matchRequest.text.format.schema.properties.results;
+  assert.equal(resultsSchema.minItems, 2);
+  assert.equal(resultsSchema.maxItems, 2);
+  assert.equal(resultsSchema.items.properties.reasons.maxItems, 4);
+  assert.equal(resultsSchema.items.properties.evidence.maxItems, 5);
+  assert.equal(resultsSchema.items.properties.gaps.maxItems, 4);
+});
+
+test('los operadores no ven diagnósticos técnicos y dev sí los conserva', () => {
+  const warning = 'No fue posible ejecutar un lote después de un reintento controlado.';
+  const interpretedWarning = 'La vacante está ubicada en Neiva y conviene validar disponibilidad de traslado.';
+  const candidate = {
+    id: 'manual-candidate',
+    fullName: 'Persona Manual',
+    phone: '3000000000'
+  };
+  const manualResult = {
+    candidate,
+    analysis: null,
+    match: null,
+    manualReason: 'No fue posible ejecutar la comparación automática del lote después de un reintento.'
+  };
+  const review = {
+    ok: true,
+    interpretedProfile: interpretedOperationProfile({ warnings: [interpretedWarning] }),
+    modelUsed: 'gpt-5.6-terra',
+    warnings: [warning],
+    truncated: false,
+    stats: { total: 1, readable: 1, strong: 0, possible: 0, low: 0, manual: 1 },
+    groups: { strong: [], possible: [], low: [], manual: [manualResult] }
+  };
+
+  const operatorHtml = renderCvAnalysisPageForTest({
+    req: { userRole: 'reclutador' },
+    vacancies: [],
+    review
+  });
+  assert.doesNotMatch(operatorHtml, /Modelo usado|gpt-|OpenAI|reintent|lote/i);
+  assert.doesNotMatch(operatorHtml, /Neiva y conviene validar disponibilidad de traslado/i);
+  assert.doesNotMatch(operatorHtml, /columnas editables para responsable/i);
+  assert.match(operatorHtml, /Revísalo manualmente/i);
+
+  const devHtml = renderCvAnalysisPageForTest({
+    req: { userRole: 'dev' },
+    vacancies: [],
+    review
+  });
+  assert.match(devHtml, /Diagnóstico técnico/i);
+  assert.match(devHtml, /gpt-5\.6-terra/i);
+  assert.match(devHtml, /reintento controlado/i);
+  assert.doesNotMatch(devHtml, /Neiva y conviene validar disponibilidad de traslado/i);
 });
 
 test('la agrupación conserva el nivel y ordena cada sección de mayor a menor porcentaje', () => {
