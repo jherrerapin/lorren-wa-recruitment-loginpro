@@ -18,7 +18,13 @@ function createFixture(overrides = {}) {
     status: 'CONFIRMED',
     attendanceSession: session,
     serviceRequest: {
-      operationPoint: { attendanceEnabled: true }
+      operationPoint: {
+        attendanceEnabled: true,
+        attendanceLatitude: 4.711,
+        attendanceLongitude: -74.072,
+        geofenceRadiusMeters: 150,
+        maxLocationAccuracyMeters: 50
+      }
     },
     ...overrides.assignment
   };
@@ -61,7 +67,7 @@ function input(markType, at, overrides = {}) {
     markType,
     now: new Date(at),
     clientCapturedAt: new Date(at),
-    latitude: 4.711,
+    latitude: 4.7111,
     longitude: -74.072,
     accuracyMeters: 15,
     installationIdHash: 'installation-hash',
@@ -77,6 +83,8 @@ test('registra el inicio de almuerzo después de la llegada', async () => {
   );
   assert.equal(result.recorded, true);
   assert.equal(result.attendanceMark.markType, 'BREAK_START');
+  assert.equal(result.attendanceMark.insideGeofence, true);
+  assert.ok(result.attendanceMark.distanceToPointMeters < 150);
   assert.equal(marks.length, 1);
 });
 
@@ -96,6 +104,7 @@ test('registra el fin de almuerzo después de su inicio', async () => {
     input('BREAK_END', '2026-07-25T18:00:00.000Z')
   );
   assert.equal(result.attendanceMark.markType, 'BREAK_END');
+  assert.equal(result.attendanceMark.insideGeofence, true);
 });
 
 test('usa la hora capturada para validar el orden de un almuerzo sincronizado', async () => {
