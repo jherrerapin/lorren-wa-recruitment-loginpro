@@ -1,5 +1,4 @@
 const EARTH_RADIUS_METERS = 6_371_008.8;
-export const ATTENDANCE_TEST_GEOFENCE_BYPASS_RADIUS_SENTINEL_METERS = 99_999;
 
 function finiteNumber(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
@@ -66,6 +65,5 @@ export function isAttendanceInsideGeofence(distanceMeters, radiusMeters) {
   const distance = finiteNumber(distanceMeters);
   const radius = finiteNumber(radiusMeters);
   if (distance === null || radius === null || distance < 0 || radius <= 0) return null;
-  if (radius === ATTENDANCE_TEST_GEOFENCE_BYPASS_RADIUS_SENTINEL_METERS) return true;
   return distance <= radius;
 }
