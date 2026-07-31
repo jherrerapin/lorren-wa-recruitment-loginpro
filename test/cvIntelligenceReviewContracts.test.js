@@ -14,6 +14,46 @@ function structuredResponse(parsed) {
   };
 }
 
+function cachedCandidateForReview(id, vacancy) {
+  const storageKey = `candidates/${id}/hv.pdf`;
+  return {
+    id,
+    fullName: `Persona ${id}`,
+    phone: `300${id}`,
+    vacancyId: vacancy.id,
+    transportMode: 'Moto',
+    locality: 'La Estrella',
+    neighborhood: null,
+    zone: null,
+    cvStorageKey: storageKey,
+    cvData: null,
+    cvOriginalName: `${id}.pdf`,
+    cvMimeType: 'application/pdf',
+    updatedAt: new Date('2026-07-31T12:00:00.000Z'),
+    vacancy,
+    attachmentAnalyses: [{
+      id: `analysis-${id}`,
+      classification: 'CV_VALID',
+      confidence: 0.9,
+      summary: 'Hoja de vida legible.',
+      rawResponse: {
+        documentReference: `storage:${storageKey}`,
+        extracted: {
+          city: vacancy.city,
+          locality: 'La Estrella',
+          experienceSummary: 'Experiencia en operación logística y manejo de inventarios.',
+          lastRole: 'Auxiliar de operación',
+          educationSummary: 'Bachiller',
+          estimatedExperienceMonths: 18,
+          skills: ['Inventarios', 'Logística'],
+          certifications: [],
+          experience: []
+        }
+      }
+    }]
+  };
+}
+
 test('el análisis combina requisitos de vacante, texto del coordinador, HV y registro sin mezclar fuentes', async () => {
   const requests = [];
   const vacancy = {
@@ -130,18 +170,93 @@ test('el análisis combina requisitos de vacante, texto del coordinador, HV y re
   assert.equal(profilePayload.vacancy.roleDescription, vacancy.roleDescription);
   assert.equal(profilePayload.coordinatorRequest, desiredProfile);
   assert.match(requests[0].input[0].content[0].text, /No agregues requisitos/i);
-  assert.match(requests[0].input[0].content[0].text, /vacante o en la solicitud del coordinador/i);
+  assert.match(requests[0].input[0].content[0].text, /vacante ni en la solicitud del coordinador/i);
+  assert.match(requests[0].input[0].content[0].text, /significado y el contexto/i);
 
   const matchPayload = JSON.parse(requests[1].input[1].content[0].text);
-  assert.equal(matchPayload.interpretedProfile.criteria[0].label, 'Manejo de personal');
+  assert.equal(
+    matchPayload.comparisonProfile.interpretedProfile.criteria[0].label,
+    'Manejo de personal'
+  );
+  assert.equal(matchPayload.comparisonProfile.vacancy.requirements, vacancy.requirements);
+  assert.equal(matchPayload.comparisonProfile.coordinatorRequest, desiredProfile);
   assert.equal(matchPayload.candidates[0].sources.cv.estimatedExperienceMonths, 24);
   assert.deepEqual(matchPayload.candidates[0].sources.cv.skills, ['Inventarios', 'Excel', 'Manejo de personal']);
-  assert.equal(matchPayload.candidates[0].sources.registration.transportMode, 'MOTO');
+  assert.equal(matchPayload.candidates[0].sources.registration.transportMode, 'Moto');
   assert.equal(matchPayload.candidates[0].sources.registration.residence, 'La Estrella');
   assert.equal(Object.hasOwn(matchPayload.candidates[0], 'age'), false);
   assert.equal(Object.hasOwn(matchPayload.candidates[0], 'gender'), false);
   assert.match(requests[1].input[0].content[0].text, /usa la hoja de vida/i);
   assert.match(requests[1].input[0].content[0].text, /medio de transporte y residencia/i);
+  assert.match(requests[1].input[0].content[0].text, /significado y contexto/i);
+});
+
+test('un fallo completo del lote usa un único reintento y no genera llamadas individuales masivas', async () => {
+  const requests = [];
+  const vacancy = {
+    id: 'vacancy-batch-failure',
+    title: 'Auxiliar de operación',
+    city: 'Bogotá',
+    requirements: 'Experiencia relacionada con operación logística.',
+    roleDescription: 'Apoya cargue, descargue e inventarios.'
+  };
+  const candidates = Array.from(
+    { length: 8 },
+    (_, index) => cachedCandidateForReview(`batch-${index + 1}`, vacancy)
+  );
+  const prisma = {
+    vacancy: {
+      findUnique: async () => vacancy
+    },
+    candidate: {
+      findMany: async () => candidates
+    }
+  };
+  const openAiPost = async (payload) => {
+    requests.push(payload);
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      return structuredResponse({
+        summary: 'Perfil de operación logística.',
+        criteria: [{
+          id: 'operation',
+          label: 'Experiencia logística',
+          description: 'Experiencia relacionada con operación logística.',
+          priority: 'REQUIRED',
+          minimumMonths: null,
+          keywords: ['logística', 'operación']
+        }],
+        warnings: []
+      });
+    }
+    throw new Error('simulated comparison timeout');
+  };
+
+  const result = await reviewVacancyCandidates(
+    prisma,
+    {
+      vacancyId: vacancy.id,
+      desiredProfile: 'Prioriza experiencia equivalente en cargue, descargue o inventarios.'
+    },
+    { openAiPost, model: 'test-cv-model' }
+  );
+
+  const matchRequests = requests.filter(
+    (payload) => payload.text.format.name === 'loren_candidate_profile_matches'
+  );
+  assert.equal(requests.length, 3);
+  assert.equal(matchRequests.length, 2);
+  assert.equal(matchRequests.every((payload) => {
+    const input = JSON.parse(payload.input[1].content[0].text);
+    return input.candidates.length === candidates.length;
+  }), true);
+  assert.equal(result.stats.readable, candidates.length);
+  assert.equal(result.stats.manual, candidates.length);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /único reintento controlado/i);
+  assert.equal(
+    result.groups.manual.every((item) => /comparación automática del lote/i.test(item.manualReason)),
+    true
+  );
 });
 
 test('la agrupación conserva el nivel y ordena cada sección de mayor a menor porcentaje', () => {
