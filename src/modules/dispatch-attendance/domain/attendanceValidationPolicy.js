@@ -65,16 +65,32 @@ function rejectedResult(flag) {
   };
 }
 
+function requiredGeofenceRejection(input, accuracyMeters, maxAccuracyMeters) {
+  if (input.hasConfiguredGeofence !== true) {
+    return ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED;
+  }
+  if (input.withinGeofence !== true && input.withinGeofence !== false) {
+    return ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE;
+  }
+  if (input.withinGeofence === false) {
+    return ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE;
+  }
+  if (accuracyMeters === null) {
+    return ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE;
+  }
+  if (accuracyMeters > maxAccuracyMeters) {
+    return ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY;
+  }
+  return null;
+}
+
 /**
  * Evalúa una marcación de llegada sin persistir datos ni depender de Express o Prisma.
  *
- * La ruta normal es la validación automática. La revisión humana solo se exige cuando
- * faltan señales confiables o aparecen indicios de riesgo. Una fotografía reciente puede
- * aportar evidencia, pero nunca convierte por sí sola un dispositivo no autorizado en uno
- * confiable.
- *
- * Una captura web offline siempre requiere revisión: IndexedDB permite conservar la marca,
- * pero el reloj del navegador no equivale a una fuente horaria protegida por hardware.
+ * La geocerca es una condición obligatoria: una operación sin punto válido, una ubicación
+ * ausente, una precisión insuficiente o una posición fuera del radio rechazan la marca.
+ * La revisión humana se reserva para señales posteriores como dispositivo no autorizado,
+ * almacenamiento no persistente o una captura web offline que sí cumplió la geocerca.
  */
 export function evaluateArrivalValidation(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -101,31 +117,13 @@ export function evaluateArrivalValidation(input = {}) {
   const minutesLate = Math.max(0, finiteNumber(input.minutesLate, 0));
   const maxAccuracyMeters = Math.max(1, finiteNumber(input.maxAccuracyMeters, 100));
   const accuracyMeters = finiteNumber(input.accuracyMeters, null);
+  const geofenceRejection = requiredGeofenceRejection(input, accuracyMeters, maxAccuracyMeters);
+  if (geofenceRejection) return rejectedResult(geofenceRejection);
+
   const syncDelayMinutes = Math.max(0, finiteNumber(input.syncDelayMinutes, 0));
   const reportedPunctuality = punctualityFromMinutes(minutesLate, toleranceMinutes);
   const riskFlags = [];
   let riskScore = 0;
-
-  if (input.hasConfiguredGeofence !== true) {
-    riskFlags.push(ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED);
-    riskScore += 30;
-  } else if (input.withinGeofence !== true && input.withinGeofence !== false) {
-    riskFlags.push(ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE);
-    riskScore += 50;
-  } else if (input.withinGeofence === false) {
-    riskFlags.push(ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE);
-    riskScore += 50;
-  }
-
-  if (accuracyMeters === null) {
-    if (!riskFlags.includes(ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE)) {
-      riskFlags.push(ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE);
-      riskScore += 50;
-    }
-  } else if (accuracyMeters > maxAccuracyMeters) {
-    riskFlags.push(ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY);
-    riskScore += 25;
-  }
 
   if (input.authorizedDevice !== true) {
     riskFlags.push(ATTENDANCE_RISK_FLAG.UNAUTHORIZED_DEVICE);
