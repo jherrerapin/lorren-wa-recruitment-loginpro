@@ -7,6 +7,10 @@ const ZIP_SIGNATURES = [
   Buffer.from([0x50, 0x4b, 0x05, 0x06]),
   Buffer.from([0x50, 0x4b, 0x07, 0x08])
 ];
+const DOCX_CONTENT_TYPES_ENTRY = Buffer.from('[Content_Types].xml');
+const DOCX_DOCUMENT_ENTRY = Buffer.from('word/document.xml');
+const DOCX_WORD_DIRECTORY = Buffer.from('word/');
+const PDF_HEADER_SCAN_BYTES = 1024;
 
 export const CV_DOCUMENT_TYPES = Object.freeze({
   PDF: Object.freeze({ kind: 'pdf', mimeType: 'application/pdf', extension: '.pdf' }),
@@ -29,15 +33,23 @@ function startsWith(buffer, signature) {
     && buffer.subarray(0, signature.length).equals(signature);
 }
 
+function hasPdfSignature(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < PDF_SIGNATURE.length) return false;
+  const header = buffer.subarray(0, Math.min(buffer.length, PDF_HEADER_SCAN_BYTES));
+  return header.indexOf(PDF_SIGNATURE) >= 0;
+}
+
 function hasZipSignature(buffer) {
   return ZIP_SIGNATURES.some((signature) => startsWith(buffer, signature));
 }
 
 function looksLikeDocxArchive(buffer) {
   if (!hasZipSignature(buffer)) return false;
-  const sample = buffer.subarray(0, Math.min(buffer.length, 1024 * 1024)).toString('latin1');
-  return sample.includes('[Content_Types].xml')
-    && (sample.includes('word/document.xml') || sample.includes('word/'));
+  return buffer.indexOf(DOCX_CONTENT_TYPES_ENTRY) >= 0
+    && (
+      buffer.indexOf(DOCX_DOCUMENT_ENTRY) >= 0
+      || buffer.indexOf(DOCX_WORD_DIRECTORY) >= 0
+    );
 }
 
 function typeFromMime(mimeType = '') {
@@ -57,7 +69,7 @@ function typeFromExtension(fileName = '') {
 }
 
 function signatureType(buffer) {
-  if (startsWith(buffer, PDF_SIGNATURE)) return CV_DOCUMENT_TYPES.PDF;
+  if (hasPdfSignature(buffer)) return CV_DOCUMENT_TYPES.PDF;
   if (startsWith(buffer, OLE_SIGNATURE)) return CV_DOCUMENT_TYPES.DOC;
   if (looksLikeDocxArchive(buffer)) return CV_DOCUMENT_TYPES.DOCX;
   return CV_DOCUMENT_TYPES.UNKNOWN;
