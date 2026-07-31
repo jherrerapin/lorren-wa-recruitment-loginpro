@@ -1,4 +1,5 @@
 import {
+  ATTENDANCE_RISK_FLAG,
   ATTENDANCE_VALIDATION_STATUS,
   evaluateArrivalValidation
 } from '../domain/attendanceValidationPolicy.js';
@@ -157,6 +158,18 @@ function mergeFlags(...values) {
   return [...new Set(values.flatMap((value) => Array.isArray(value) ? value : []))];
 }
 
+function throwRequiredGeofenceRejection(validation) {
+  if (validation?.canRecordArrival !== false) return;
+  const flag = validation?.riskFlags?.[0];
+  const errorByFlag = {
+    [ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED]: 'attendance_operation_geofence_required',
+    [ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE]: 'attendance_location_required',
+    [ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE]: 'attendance_outside_operation_range',
+    [ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY]: 'attendance_location_accuracy_insufficient'
+  };
+  throw new Error(errorByFlag[flag] || 'attendance_departure_validation_rejected');
+}
+
 function markMoment(mark) {
   const value = mark?.clientCapturedAt || mark?.serverReceivedAt;
   if (!value) return null;
@@ -250,6 +263,7 @@ async function insideTransaction(client, input) {
     captureMode: input.captureMode,
     syncDelayMinutes
   });
+  throwRequiredGeofenceRejection(departureValidation);
 
   const expected = session.expectedStartAt
     ? { expectedStartAt: session.expectedStartAt, expectedEndAt: session.expectedEndAt }
