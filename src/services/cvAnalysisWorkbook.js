@@ -3,14 +3,11 @@ import ExcelJS from 'exceljs';
 const COLORS = Object.freeze({
   navy: '1E2D3D',
   teal: '0D7A6B',
-  tealSoft: 'E6F4F1',
   blue: '175CD3',
   orange: 'B45309',
   red: 'B42318',
   white: 'FFFFFF',
   border: 'D8DEE6',
-  muted: '667085',
-  light: 'F8FAFC',
   yellowSoft: 'FFF8D6'
 });
 
@@ -28,7 +25,9 @@ const RESULT_COLUMNS = [
   { header: 'Número de celular', key: 'phone', width: 20 },
   { header: 'Tipo de documento', key: 'documentType', width: 18 },
   { header: 'Número de documento', key: 'documentNumber', width: 21 },
-  { header: 'Análisis de contenido', key: 'analysis', width: 48 },
+  { header: 'Residencia', key: 'residence', width: 24 },
+  { header: 'Medio de transporte', key: 'transportMode', width: 22 },
+  { header: 'Resultado', key: 'analysis', width: 46 },
   { header: 'Evidencia encontrada', key: 'evidence', width: 48 },
   { header: 'Responsable de revisión', key: 'reviewer', width: 26 },
   { header: 'Observación del responsable', key: 'reviewerObservation', width: 44 }
@@ -63,7 +62,13 @@ function candidateAnalysisText(result = {}) {
   const reasons = safeArray(result.match?.reasons);
   return reasons.length
     ? reasons.join('\n')
-    : compact(result.analysis?.summary) || 'Sin análisis descriptivo.';
+    : compact(result.analysis?.summary) || 'Sin resultado descriptivo.';
+}
+
+function candidateResidence(candidate = {}) {
+  return [candidate.locality, candidate.neighborhood, candidate.zone]
+    .map(compact)
+    .find(Boolean) || '';
 }
 
 function exportCandidate(candidate = {}) {
@@ -73,7 +78,8 @@ function exportCandidate(candidate = {}) {
     phone: compact(candidate.phone),
     documentType: compact(candidate.documentType),
     documentNumber: compact(candidate.documentNumber),
-    vacancyTitle: compact(candidate.vacancy?.title || candidate.vacancyTitle)
+    residence: candidateResidence(candidate),
+    transportMode: compact(candidate.transportMode)
   };
 }
 
@@ -102,27 +108,8 @@ export function createCvReviewExportSnapshot(review = {}) {
   return {
     vacancy: {
       id: compact(review.vacancy?.id),
-      title: compact(review.vacancy?.title) || 'Vacante sin nombre',
-      city: compact(review.vacancy?.city)
+      title: compact(review.vacancy?.title) || 'Vacante sin nombre'
     },
-    desiredProfile: compact(review.desiredProfile),
-    interpretedProfile: {
-      summary: compact(review.interpretedProfile?.summary),
-      criteria: Array.isArray(review.interpretedProfile?.criteria)
-        ? review.interpretedProfile.criteria.map((criterion) => ({
-          label: compact(criterion.label),
-          description: compact(criterion.description),
-          priority: compact(criterion.priority),
-          minimumMonths: Number.isFinite(Number(criterion.minimumMonths))
-            ? Number(criterion.minimumMonths)
-            : null
-        }))
-        : [],
-      warnings: safeArray(review.interpretedProfile?.warnings)
-    },
-    modelUsed: compact(review.modelUsed),
-    warnings: safeArray(review.warnings),
-    truncated: Boolean(review.truncated),
     groups,
     generatedAt: new Date().toISOString()
   };
@@ -137,98 +124,13 @@ function thinBorder() {
   };
 }
 
-function styleTitle(sheet, title, subtitle, color = COLORS.navy, columnCount = RESULT_COLUMNS.length) {
-  sheet.mergeCells(1, 1, 1, columnCount);
-  sheet.getCell('A1').value = title;
-  sheet.getCell('A1').font = { bold: true, size: 18, color: { argb: COLORS.white } };
-  sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
-  sheet.getCell('A1').alignment = { vertical: 'middle' };
-  sheet.getRow(1).height = 30;
-
-  sheet.mergeCells(2, 1, 2, columnCount);
-  sheet.getCell('A2').value = subtitle;
-  sheet.getCell('A2').font = { italic: true, color: { argb: COLORS.muted } };
-  sheet.getCell('A2').alignment = { vertical: 'middle', wrapText: true };
-  sheet.getRow(2).height = 30;
-}
-
-function addSummarySheet(workbook, snapshot) {
-  const sheet = workbook.addWorksheet('Resumen', { views: [{ state: 'frozen', ySplit: 3 }] });
-  const columnCount = RESULT_COLUMNS.length;
-  styleTitle(
-    sheet,
-    'Criterios del análisis',
-    `${snapshot.vacancy.title}${snapshot.vacancy.city ? ` · ${snapshot.vacancy.city}` : ''}`,
-    COLORS.navy,
-    columnCount
-  );
-  sheet.columns = Array.from({ length: columnCount }, () => ({ width: 18 }));
-
-  sheet.mergeCells(4, 1, 4, columnCount);
-  sheet.getCell('A4').value = 'Perfil solicitado';
-  sheet.getCell('A4').font = { bold: true, color: { argb: COLORS.navy } };
-  sheet.mergeCells(5, 1, 7, columnCount);
-  sheet.getCell('A5').value = snapshot.desiredProfile || 'Sin texto registrado.';
-  sheet.getCell('A5').alignment = { vertical: 'top', wrapText: true };
-  sheet.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.light } };
-  sheet.getCell('A5').border = thinBorder();
-
-  sheet.mergeCells(9, 1, 9, columnCount);
-  sheet.getCell('A9').value = 'Interpretación de Lórren';
-  sheet.getCell('A9').font = { bold: true, color: { argb: COLORS.navy } };
-  sheet.mergeCells(10, 1, 12, columnCount);
-  sheet.getCell('A10').value = snapshot.interpretedProfile.summary || 'Sin resumen interpretado.';
-  sheet.getCell('A10').alignment = { vertical: 'top', wrapText: true };
-  sheet.getCell('A10').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.tealSoft } };
-  sheet.getCell('A10').border = thinBorder();
-
-  const criteriaStart = 14;
-  sheet.getCell(criteriaStart, 1).value = 'Prioridad';
-  sheet.getCell(criteriaStart, 2).value = 'Criterio';
-  sheet.mergeCells(criteriaStart, 3, criteriaStart, 7);
-  sheet.getCell(criteriaStart, 3).value = 'Descripción';
-  sheet.mergeCells(criteriaStart, 8, criteriaStart, 9);
-  sheet.getCell(criteriaStart, 8).value = 'Mínimo meses';
-  const header = sheet.getRow(criteriaStart);
-  header.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: COLORS.white } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.teal } };
-    cell.border = thinBorder();
-    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-  });
-
-  snapshot.interpretedProfile.criteria.forEach((criterion, index) => {
-    const rowNumber = criteriaStart + index + 1;
-    sheet.getCell(rowNumber, 1).value = criterion.priority === 'REQUIRED' ? 'Importante' : 'Deseable';
-    sheet.getCell(rowNumber, 2).value = criterion.label;
-    sheet.mergeCells(rowNumber, 3, rowNumber, 7);
-    sheet.getCell(rowNumber, 3).value = criterion.description;
-    sheet.mergeCells(rowNumber, 8, rowNumber, 9);
-    sheet.getCell(rowNumber, 8).value = criterion.minimumMonths ?? '';
-    for (let column = 1; column <= columnCount; column += 1) {
-      const cell = sheet.getCell(rowNumber, column);
-      cell.border = thinBorder();
-      cell.alignment = { vertical: 'top', wrapText: true };
-    }
-  });
-
-  return sheet;
-}
-
 function addResultSheet(workbook, snapshot, groupKey) {
   const meta = CV_REVIEW_EXPORT_GROUPS[groupKey];
   const results = snapshot.groups[groupKey] || [];
-  const sheet = workbook.addWorksheet(meta.sheet, { views: [{ state: 'frozen', ySplit: 5 }] });
-  sheet.columns = RESULT_COLUMNS.map(({ key, width }) => ({ key, width }));
-  const generated = new Intl.DateTimeFormat('es-CO', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'America/Bogota'
-  }).format(new Date(snapshot.generatedAt));
-  styleTitle(sheet, meta.label, `${snapshot.vacancy.title} · generado ${generated}`, meta.color);
+  const sheet = workbook.addWorksheet(meta.sheet, { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = RESULT_COLUMNS.map(({ header, key, width }) => ({ header, key, width }));
 
-  sheet.getRow(4).values = RESULT_COLUMNS.map((column) => column.header);
-  const header = sheet.getRow(4);
+  const header = sheet.getRow(1);
   header.height = 30;
   header.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: COLORS.white } };
@@ -246,6 +148,8 @@ function addResultSheet(workbook, snapshot, groupKey) {
       phone: candidate.phone,
       documentType: candidate.documentType,
       documentNumber: candidate.documentNumber,
+      residence: candidate.residence,
+      transportMode: candidate.transportMode,
       analysis: candidateAnalysisText(result),
       evidence: joinList(result.match?.evidence),
       reviewer: '',
@@ -277,8 +181,8 @@ function addResultSheet(workbook, snapshot, groupKey) {
   }
 
   sheet.autoFilter = {
-    from: { row: 4, column: 1 },
-    to: { row: 4, column: RESULT_COLUMNS.length }
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: RESULT_COLUMNS.length }
   };
   sheet.pageSetup = {
     orientation: 'landscape',
@@ -297,7 +201,6 @@ export function buildCvAnalysisWorkbook(snapshot, { group = 'all' } = {}) {
   workbook.modified = new Date();
   workbook.calcProperties.fullCalcOnLoad = true;
 
-  addSummarySheet(workbook, snapshot);
   const groupKeys = normalizedGroup === 'all'
     ? ['strong', 'possible', 'low', 'manual']
     : [normalizedGroup];
@@ -318,7 +221,7 @@ function slug(value = '') {
 export async function sendCvAnalysisWorkbook(res, snapshot, { group = 'all' } = {}) {
   const normalizedGroup = Object.hasOwn(CV_REVIEW_EXPORT_GROUPS, group) ? group : 'all';
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: normalizedGroup });
-  const filename = `analisis-hv-${slug(snapshot.vacancy?.title)}-${normalizedGroup}.xlsx`;
+  const filename = `candidatos-${slug(snapshot.vacancy?.title)}-${normalizedGroup}.xlsx`;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   await workbook.xlsx.write(res);
