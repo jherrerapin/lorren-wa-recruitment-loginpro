@@ -54,6 +54,21 @@ function cachedCandidateForReview(id, vacancy) {
   };
 }
 
+function interpretedOperationProfile() {
+  return {
+    summary: 'Perfil de operación logística.',
+    criteria: [{
+      id: 'operation',
+      label: 'Experiencia logística',
+      description: 'Experiencia relacionada con operación logística.',
+      priority: 'REQUIRED',
+      minimumMonths: null,
+      keywords: ['logística', 'operación']
+    }],
+    warnings: []
+  };
+}
+
 test('el análisis combina requisitos de vacante, texto del coordinador, HV y registro sin mezclar fuentes', async () => {
   const requests = [];
   const vacancy = {
@@ -215,18 +230,7 @@ test('un fallo completo del lote usa un único reintento y no genera llamadas in
   const openAiPost = async (payload) => {
     requests.push(payload);
     if (payload.text.format.name === 'loren_desired_candidate_profile') {
-      return structuredResponse({
-        summary: 'Perfil de operación logística.',
-        criteria: [{
-          id: 'operation',
-          label: 'Experiencia logística',
-          description: 'Experiencia relacionada con operación logística.',
-          priority: 'REQUIRED',
-          minimumMonths: null,
-          keywords: ['logística', 'operación']
-        }],
-        warnings: []
-      });
+      return structuredResponse(interpretedOperationProfile());
     }
     throw new Error('simulated comparison timeout');
   };
@@ -257,6 +261,72 @@ test('un fallo completo del lote usa un único reintento y no genera llamadas in
     result.groups.manual.every((item) => /comparación automática del lote/i.test(item.manualReason)),
     true
   );
+});
+
+test('los lotes comparten un máximo global de tres reintentos individuales', async () => {
+  const requests = [];
+  const vacancy = {
+    id: 'vacancy-shared-retry-budget',
+    title: 'Auxiliar de operación',
+    city: 'Bogotá',
+    requirements: 'Experiencia relacionada con operación logística.',
+    roleDescription: 'Apoya cargue, descargue e inventarios.'
+  };
+  const candidates = Array.from(
+    { length: 35 },
+    (_, index) => cachedCandidateForReview(`shared-${index + 1}`, vacancy)
+  );
+  const prisma = {
+    vacancy: {
+      findUnique: async () => vacancy
+    },
+    candidate: {
+      findMany: async () => candidates
+    }
+  };
+  const openAiPost = async (payload) => {
+    requests.push(payload);
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      return structuredResponse(interpretedOperationProfile());
+    }
+    const input = JSON.parse(payload.input[1].content[0].text);
+    if (input.candidates.length !== 1) {
+      return structuredResponse({ results: [] });
+    }
+    const candidateId = input.candidates[0].candidateId;
+    return structuredResponse({
+      results: [{
+        candidateId,
+        level: 'LOW',
+        score: 20,
+        reasons: ['La información disponible es limitada.'],
+        evidence: ['Experiencia operativa general.'],
+        gaps: ['Falta confirmar experiencia específica.']
+      }]
+    });
+  };
+
+  const result = await reviewVacancyCandidates(
+    prisma,
+    {
+      vacancyId: vacancy.id,
+      desiredProfile: 'Prioriza experiencia equivalente en cargue, descargue o inventarios.'
+    },
+    { openAiPost, model: 'test-cv-model' }
+  );
+
+  const matchRequests = requests.filter(
+    (payload) => payload.text.format.name === 'loren_candidate_profile_matches'
+  );
+  const individualRequests = matchRequests.filter((payload) => {
+    const input = JSON.parse(payload.input[1].content[0].text);
+    return input.candidates.length === 1;
+  });
+  assert.equal(individualRequests.length, 3);
+  assert.equal(result.stats.low, 3);
+  assert.equal(result.stats.manual, 32);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /respuestas válidas omitieron perfiles/i);
 });
 
 test('la agrupación conserva el nivel y ordena cada sección de mayor a menor porcentaje', () => {
