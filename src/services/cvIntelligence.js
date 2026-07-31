@@ -700,7 +700,7 @@ async function compareCandidateBatchReliably(
   let missingCandidates = candidates.filter((candidate) => !matches.has(candidate.candidateId));
   let recoveryError = null;
 
-  if (missingCandidates.length) {
+  if (missingCandidates.length > 1) {
     try {
       const response = ensureMatchResults(
         await matchCandidateBatch(comparisonProfile, missingCandidates, options)
