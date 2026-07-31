@@ -15,6 +15,7 @@
   const CHALLENGE_TIMEOUT_MS = 9_000;
   const FINAL_TIMEOUT_MS = 12_000;
   const CAMERA_READY_TIMEOUT_MS = 10_000;
+  const RUNTIME_MAX_IDLE_MS = 10 * 60 * 1000;
   const BACKENDS = Object.freeze(['webgl', 'wasm', 'cpu']);
   const activeStreams = new Set();
 
@@ -25,6 +26,7 @@
   let runtimeGeneration = 0;
   let runtimeStale = true;
   let runtimeReason = 'initial';
+  let runtimeLastUsedAt = 0;
   let activeDetections = 0;
   let releaseQueue = Promise.resolve();
 
@@ -108,9 +110,14 @@
 
   async function createHuman(backend) {
     const human = new window.Human.Human(humanConfig(backend));
-    await human.load();
-    if (typeof human.warmup === 'function') await human.warmup();
-    return human;
+    try {
+      await human.load();
+      if (typeof human.warmup === 'function') await human.warmup();
+      return human;
+    } catch (error) {
+      await releaseHuman(human);
+      throw error;
+    }
   }
 
   async function releaseHuman(instance) {
@@ -132,12 +139,16 @@
     humanInstanceValue = null;
     runtimeStale = true;
     runtimeReason = String(reason || 'runtime-invalidated');
+    runtimeLastUsedAt = 0;
     if (options.rotateBackend === true) backendIndex = (backendIndex + 1) % BACKENDS.length;
     releaseQueue = releaseQueue.then(() => releaseHuman(previous)).catch(() => {});
     return releaseQueue;
   }
 
   async function humanInstance() {
+    if (humanPromise && !runtimeStale && runtimeLastUsedAt && Date.now() - runtimeLastUsedAt > RUNTIME_MAX_IDLE_MS) {
+      await invalidateRuntime('runtime-idle');
+    }
     if (humanPromise && !runtimeStale) return humanPromise;
     if (document.visibilityState === 'hidden') throw new Error('biometric_page_not_visible');
 
@@ -160,6 +171,7 @@
           humanInstanceValue = human;
           runtimeStale = false;
           runtimeReason = null;
+          runtimeLastUsedAt = Date.now();
           return human;
         } catch (error) {
           failures.push(error);
@@ -306,6 +318,7 @@
     activeDetections += 1;
     try {
       result = await human.detect(video);
+      runtimeLastUsedAt = Date.now();
     } catch (cause) {
       invalidateRuntime('detect-failed');
       const error = new Error('biometric_runtime_unavailable');
