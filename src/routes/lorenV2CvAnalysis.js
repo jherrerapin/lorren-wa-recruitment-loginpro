@@ -248,7 +248,7 @@ function renderRegisteredData(candidate = {}) {
 
 function operatorManualReason(reason = '') {
   const value = normalizeString(reason);
-  if (!value) return 'Este perfil necesita revisión manual.';
+  if (!value) return '';
   if (/(lote|reintent|modelo|openai|comparación automática|respuesta de comparación|código interno)/i.test(value)) {
     return 'No fue posible completar la comparación de este perfil. Revísalo manualmente.';
   }
@@ -264,7 +264,9 @@ function renderResultCard(result, kind, { isDev = false } = {}) {
     low: 'Poca evidencia',
     manual: 'Revisar manualmente'
   };
-  const manualReason = isDev ? result.manualReason : operatorManualReason(result.manualReason);
+  const manualReason = result.manualReason
+    ? (isDev ? result.manualReason : operatorManualReason(result.manualReason))
+    : '';
   return `<article class="result ${kind}">
     <div class="result-top">
       <div><h3>${escapeHtml(candidate.fullName || 'Candidato sin nombre')}</h3></div>
