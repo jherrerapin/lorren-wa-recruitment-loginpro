@@ -1,3 +1,8 @@
+import {
+  calculateAttendanceDistanceMeters,
+  isAttendanceInsideGeofence
+} from '../domain/attendanceDistance.js';
+
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']);
 const BREAK_MARK_TYPES = new Set(['BREAK_START', 'BREAK_END']);
 const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
@@ -32,6 +37,11 @@ function numberValue(value, label, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${label}_invalid`);
   return number;
+}
+
+function finitePointNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function normalizeCaptureMode(value) {
@@ -95,6 +105,32 @@ function requirePrisma(prisma) {
       throw new Error(`attendance_break_${modelName}_contract_invalid`);
     }
   }
+}
+
+function requireGeofence(point, input) {
+  const latitude = finitePointNumber(point?.attendanceLatitude);
+  const longitude = finitePointNumber(point?.attendanceLongitude);
+  const radiusMeters = finitePointNumber(point?.geofenceRadiusMeters);
+  if (latitude === null || longitude === null || radiusMeters === null || radiusMeters <= 0) {
+    throw new Error('attendance_operation_geofence_required');
+  }
+  if (input.latitude === null || input.longitude === null) {
+    throw new Error('attendance_location_required');
+  }
+
+  const maxAccuracyMeters = finitePointNumber(point?.maxLocationAccuracyMeters) ?? 100;
+  if (input.accuracyMeters === null || input.accuracyMeters > maxAccuracyMeters) {
+    throw new Error('attendance_location_accuracy_insufficient');
+  }
+
+  const distanceMeters = calculateAttendanceDistanceMeters(
+    { latitude, longitude },
+    { latitude: input.latitude, longitude: input.longitude }
+  );
+  if (isAttendanceInsideGeofence(distanceMeters, radiusMeters) !== true) {
+    throw new Error('attendance_outside_operation_range');
+  }
+  return { distanceMeters, insideGeofence: true };
 }
 
 function replayResult(mark) {
@@ -164,6 +200,8 @@ async function insideTransaction(client, input) {
     throw new Error('attendance_break_end_before_start');
   }
 
+  const point = assignment.serviceRequest.operationPoint;
+  const geofence = requireGeofence(point, input);
   const workerDevice = input.installationIdHash
     ? await client.dispatchWorkerDevice.findFirst({
         where: {
@@ -187,6 +225,8 @@ async function insideTransaction(client, input) {
       latitude: input.latitude,
       longitude: input.longitude,
       accuracyMeters: input.accuracyMeters,
+      distanceToPointMeters: geofence.distanceMeters,
+      insideGeofence: geofence.insideGeofence,
       installationIdHash: input.installationIdHash,
       ipAddress: input.ipAddress,
       userAgent: input.userAgent,
