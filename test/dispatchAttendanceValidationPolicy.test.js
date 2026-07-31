@@ -54,20 +54,21 @@ test('registra provisionalmente un dispositivo nuevo y exige revisión', () => {
   assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.UNAUTHORIZED_DEVICE));
 });
 
-test('una marcación fuera de geocerca requiere revisión, no confirmación previa obligatoria', () => {
+test('rechaza una marcación fuera de la geocerca', () => {
   const result = evaluateArrivalValidation(trustedArrival({ withinGeofence: false }));
 
-  assert.equal(result.canRecordArrival, true);
-  assert.equal(result.attendanceStatus, ATTENDANCE_STATUS.ARRIVAL_REPORTED);
-  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED);
-  assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE));
+  assert.equal(result.canRecordArrival, false);
+  assert.equal(result.attendanceStatus, ATTENDANCE_STATUS.PENDING);
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
+  assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE]);
 });
 
-test('una precisión GPS insuficiente impide la auto-validación', () => {
+test('rechaza una precisión GPS superior al máximo permitido', () => {
   const result = evaluateArrivalValidation(trustedArrival({ accuracyMeters: 180 }));
 
-  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED);
-  assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY));
+  assert.equal(result.canRecordArrival, false);
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
+  assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY]);
 });
 
 test('una señal de dispositivo compartido produce riesgo crítico y revisión', () => {
@@ -79,7 +80,7 @@ test('una señal de dispositivo compartido produce riesgo crítico y revisión',
   assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.SHARED_DEVICE_SIGNAL));
 });
 
-test('una captura web offline siempre queda pendiente de revisión aunque la geocerca sea válida', () => {
+test('una captura web offline queda pendiente de revisión solo cuando cumple la geocerca', () => {
   const result = evaluateArrivalValidation(trustedArrival({
     captureMode: 'OFFLINE_WEB',
     syncDelayMinutes: 18,
@@ -142,19 +143,20 @@ test('rechaza entradas nulas o primitivas sin producir TypeError', () => {
   }
 });
 
-test('un punto sin geocerca no inventa una ausencia de ubicación si recibió precisión válida', () => {
+test('rechaza un punto sin geocerca configurada', () => {
   const result = evaluateArrivalValidation(trustedArrival({
     hasConfiguredGeofence: false,
     withinGeofence: undefined,
     accuracyMeters: 15
   }));
 
-  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED);
+  assert.equal(result.canRecordArrival, false);
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
   assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED]);
-  assert.equal(result.riskScore, 30);
+  assert.equal(result.riskScore, 100);
 });
 
-test('rechaza booleanos y estructuras complejas como valores numéricos', () => {
+test('rechaza valores numéricos inválidos en la ubicación', () => {
   const result = evaluateArrivalValidation(trustedArrival({
     minutesLate: true,
     toleranceMinutes: [],
@@ -162,7 +164,8 @@ test('rechaza booleanos y estructuras complejas como valores numéricos', () => 
     maxAccuracyMeters: false
   }));
 
-  assert.equal(result.reportedPunctuality, ATTENDANCE_STATUS.ON_TIME);
-  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED);
-  assert.ok(result.riskFlags.includes(ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE));
+  assert.equal(result.canRecordArrival, false);
+  assert.equal(result.reportedPunctuality, null);
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
+  assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE]);
 });
