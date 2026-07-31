@@ -276,7 +276,7 @@ function cachedCandidate(id, experienceSummary) {
   };
 }
 
-test('la revisión por vacante interpreta el perfil, ordena coincidencias y separa comparaciones faltantes', async () => {
+test('la revisión por vacante combina contexto y reintenta candidatos omitidos', async () => {
   const candidates = [
     cachedCandidate('candidate-strong', 'Dos años manejando inventarios y Excel.'),
     cachedCandidate('candidate-possible', 'Seis meses apoyando bodega.'),
@@ -299,6 +299,18 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
         }],
         warnings: []
       } }] }] } };
+    }
+    const matchInput = JSON.parse(payload.input[1].content[0].text);
+    const requestedIds = matchInput.candidates.map((candidate) => candidate.candidateId);
+    if (requestedIds.length === 1 && requestedIds[0] === 'candidate-unmatched') {
+      return { data: { output: [{ content: [{ parsed: { results: [{
+        candidateId: 'candidate-unmatched',
+        level: 'LOW',
+        score: 18,
+        reasons: ['La experiencia disponible está en otro contexto laboral.'],
+        evidence: ['Experiencia en atención al cliente.'],
+        gaps: ['No se encontró experiencia equivalente en inventarios.']
+      }] } }] }] } };
     }
     return { data: { output: [{ content: [{ parsed: { results: [
       {
@@ -344,21 +356,27 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
   assert.equal(review.stats.total, 3);
   assert.equal(review.stats.strong, 1);
   assert.equal(review.stats.possible, 1);
-  assert.equal(review.stats.manual, 1);
+  assert.equal(review.stats.low, 1);
+  assert.equal(review.stats.manual, 0);
   assert.equal(review.groups.strong[0].candidate.id, 'candidate-strong');
   assert.deepEqual(review.groups.strong[0].match.evidence, [
     'dos años manejando inventarios y Excel.',
     'Registro: medio de transporte Moto.'
   ]);
-  assert.equal(review.groups.manual[0].candidate.id, 'candidate-unmatched');
-  assert.match(review.groups.manual[0].manualReason, /no fue posible compararla/i);
-  assert.equal(calls.length, 2);
+  assert.equal(review.groups.low[0].candidate.id, 'candidate-unmatched');
+  assert.equal(review.groups.low[0].match.score, 18);
+  assert.equal(calls.length, 3);
   assert.equal(calls.every((payload) => payload.model === 'gpt-5.6-terra'), true);
 
   const profileInput = JSON.parse(calls[0].input[1].content[0].text);
   assert.equal(profileInput.vacancy.requirements, 'Debe contar con moto propia.');
 
   const matchInput = JSON.parse(calls[1].input[1].content[0].text);
+  assert.equal(matchInput.comparisonProfile.vacancy.requirements, 'Debe contar con moto propia.');
+  assert.equal(
+    matchInput.comparisonProfile.coordinatorRequest,
+    'Busco experiencia de un año en inventarios y manejo de Excel.'
+  );
   const strongInput = matchInput.candidates.find((candidate) => candidate.candidateId === 'candidate-strong');
   assert.equal(strongInput.sources.cv.experienceSummary, 'Dos años manejando inventarios y Excel.');
   assert.deepEqual(strongInput.sources.registration, {
@@ -368,8 +386,23 @@ test('la revisión por vacante interpreta el perfil, ordena coincidencias y sepa
   for (const excludedField of ['fullName', 'phone', 'documentNumber', 'age', 'gender', 'medicalRestrictions']) {
     assert.equal(JSON.stringify(strongInput).includes(`"${excludedField}"`), false);
   }
+  const initialMatchSchema = calls[1].text.format.schema;
+  assert.deepEqual(
+    initialMatchSchema.properties.results.items.properties.candidateId.enum,
+    ['candidate-strong', 'candidate-possible', 'candidate-unmatched']
+  );
+  const retryInput = JSON.parse(calls[2].input[1].content[0].text);
+  assert.deepEqual(retryInput.candidates.map((candidate) => candidate.candidateId), ['candidate-unmatched']);
+  assert.deepEqual(
+    calls[2].text.format.schema.properties.results.items.properties.candidateId.enum,
+    ['candidate-unmatched']
+  );
+  assert.match(calls[0].input[0].content[0].text, /requisitos y la descripción de la vacante son la base/i);
+  assert.match(calls[0].input[0].content[0].text, /no exijas coincidencias literales/i);
   assert.match(calls[1].input[0].content[0].text, /sources\.cv/);
   assert.match(calls[1].input[0].content[0].text, /sources\.registration/);
+  assert.match(calls[1].input[0].content[0].text, /significado y contexto/i);
+  assert.match(calls[1].input[0].content[0].text, /exactamente un resultado por cada candidateId/i);
   assert.match(calls[1].input[0].content[0].text, /No antepongas "Hoja de vida:"/);
   assert.match(calls[1].input[0].content[0].text, /Usa "Registro:" solo/);
 });

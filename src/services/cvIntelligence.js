@@ -114,6 +114,29 @@ const CANDIDATE_MATCH_SCHEMA = {
   }
 };
 
+function candidateMatchSchema(candidateIds = []) {
+  const allowedIds = candidateIds.map(compact).filter(Boolean);
+  return {
+    ...CANDIDATE_MATCH_SCHEMA,
+    schema: {
+      ...CANDIDATE_MATCH_SCHEMA.schema,
+      properties: {
+        ...CANDIDATE_MATCH_SCHEMA.schema.properties,
+        results: {
+          ...CANDIDATE_MATCH_SCHEMA.schema.properties.results,
+          items: {
+            ...CANDIDATE_MATCH_SCHEMA.schema.properties.results.items,
+            properties: {
+              ...CANDIDATE_MATCH_SCHEMA.schema.properties.results.items.properties,
+              candidateId: { type: 'string', enum: allowedIds }
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
 function parseOutput(data = {}) {
   for (const item of data?.output || []) {
     for (const part of item?.content || []) {
@@ -532,9 +555,12 @@ function candidateForMatching(candidate, analysis) {
 async function interpretDesiredProfile(vacancy, desiredProfile, options = {}) {
   return requestStructuredOutput({
     schema: DESIRED_PROFILE_SCHEMA,
-    systemText: `Convierte la descripción sencilla de un coordinador en criterios claros para revisar perfiles de candidatos.
-Puedes usar requisitos que estén escritos explícitamente en la vacante o en la solicitud del coordinador.
-No agregues requisitos que no aparezcan en ninguna de esas dos fuentes.
+    systemText: `Convierte la información de una vacante y el complemento escrito por el coordinador en criterios claros para revisar perfiles.
+Los requisitos y la descripción de la vacante son la base del perfil y no deben desaparecer.
+La solicitud del coordinador complementa, precisa o prioriza esa base, pero no la reemplaza silenciosamente.
+Interpreta el significado y el contexto: considera sinónimos, funciones equivalentes y experiencia transferible cuando la evidencia lo permita.
+No exijas coincidencias literales de palabras ni conviertas la lista de keywords en una búsqueda exacta.
+No agregues requisitos que no aparezcan en la vacante ni en la solicitud del coordinador.
 Separa lo indispensable de lo deseable. Si un tiempo mínimo no está claro, usa null.
 No uses nombre, género, edad, fotografía ni otros rasgos personales como criterios.
 Escribe etiquetas y explicaciones fáciles de entender.`,
@@ -550,24 +576,43 @@ Escribe etiquetas y explicaciones fáciles de entender.`,
   }, options);
 }
 
-async function matchCandidateBatch(interpretedProfile, candidates, options = {}) {
+function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
+  return {
+    vacancy: {
+      title: vacancy.title || null,
+      city: vacancy.city || null,
+      requirements: vacancy.requirements || null,
+      roleDescription: vacancy.roleDescription || null
+    },
+    coordinatorRequest: desiredProfile,
+    interpretedProfile
+  };
+}
+
+async function matchCandidateBatch(comparisonProfile, candidates, options = {}) {
+  const candidateIds = candidates.map((candidate) => compact(candidate.candidateId)).filter(Boolean);
   return requestStructuredOutput({
-    schema: CANDIDATE_MATCH_SCHEMA,
-    systemText: `Compara la información disponible de cada candidato con un perfil buscado para apoyar a un coordinador humano.
+    schema: candidateMatchSchema(candidateIds),
+    systemText: `Compara la información disponible de cada candidato con el perfil buscado para apoyar a un coordinador humano.
+El perfil contiene la vacante original, el complemento del coordinador y una interpretación estructurada.
+Los requisitos y la descripción de la vacante son la base. El texto del coordinador los complementa, precisa o prioriza; no los sustituye silenciosamente.
+Evalúa por significado y contexto, no por coincidencia literal de palabras. Reconoce sinónimos, responsabilidades equivalentes y experiencia transferible cuando estén respaldados por la información disponible.
+Las keywords son orientación semántica, no una condición para encontrar exactamente las mismas palabras.
 Cada candidato contiene dos fuentes separadas: sources.cv para la hoja de vida y sources.registration para los datos declarados durante el registro.
 Usa únicamente la evidencia entregada. No inventes experiencia, estudios ni habilidades.
 Para experiencia, estudios, cargos, habilidades y certificaciones, usa la hoja de vida.
 Del registro solo recibirás medio de transporte y residencia; no esperes que esos datos aparezcan en la hoja de vida.
 No antepongas "Hoja de vida:" a las evidencias tomadas del documento; escríbelas directamente para evitar repeticiones.
 Usa "Registro:" solo cuando la evidencia provenga del medio de transporte o la residencia registrados por el candidato.
-Si las fuentes se contradicen, muestra el punto como algo por confirmar y no elijas silenciosamente una versión.
+Si las fuentes o los dos componentes del perfil se contradicen, muestra el punto como algo por confirmar y no elimines silenciosamente un requisito.
 La ausencia de información debe aparecer como un faltante, no como una afirmación negativa.
 STRONG significa que existe evidencia clara para la mayoría de criterios indispensables.
 POSSIBLE significa que hay señales útiles, pero faltan datos o experiencia para confirmar.
 LOW significa que la información sí fue revisada, pero contiene poca evidencia relacionada.
+Devuelve exactamente un resultado por cada candidateId recibido, conserva el identificador sin modificarlo y no omitas candidatos aunque tengan poca evidencia.
 No rechaces candidatos ni uses información personal. Devuelve razones breves y evidencia concreta.`,
     userContent: JSON.stringify({
-      interpretedProfile,
+      comparisonProfile,
       candidates
     })
   }, options);
@@ -587,6 +632,56 @@ function normalizeMatch(match = {}) {
       ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 6)
       : [],
     gaps: Array.isArray(match.gaps) ? match.gaps.map(compact).filter(Boolean).slice(0, 6) : []
+  };
+}
+
+function collectExpectedMatches(response, candidateIds = []) {
+  const expectedIds = new Set(candidateIds.map(compact).filter(Boolean));
+  const matches = new Map();
+  const results = Array.isArray(response?.results) ? response.results : [];
+  for (const result of results) {
+    const normalized = normalizeMatch(result);
+    if (!expectedIds.has(normalized.candidateId) || matches.has(normalized.candidateId)) continue;
+    matches.set(normalized.candidateId, normalized);
+  }
+  return matches;
+}
+
+async function compareCandidateBatchReliably(comparisonProfile, batch, options = {}) {
+  const candidates = batch.map((item) => candidateForMatching(item.candidate, item.analysis));
+  const candidateIds = candidates.map((candidate) => candidate.candidateId);
+  const matches = new Map();
+  let initialError = null;
+
+  try {
+    const response = await matchCandidateBatch(comparisonProfile, candidates, options);
+    for (const [candidateId, match] of collectExpectedMatches(response, candidateIds)) {
+      matches.set(candidateId, match);
+    }
+  } catch (error) {
+    initialError = safeErrorMessage(error);
+  }
+
+  const missingCandidates = candidates.filter((candidate) => !matches.has(candidate.candidateId));
+  const retries = await mapWithConcurrency(missingCandidates, 3, async (candidate) => {
+    try {
+      const response = await matchCandidateBatch(comparisonProfile, [candidate], options);
+      return collectExpectedMatches(response, [candidate.candidateId]).get(candidate.candidateId) || null;
+    } catch {
+      return null;
+    }
+  });
+
+  for (const match of retries) {
+    if (match) matches.set(match.candidateId, match);
+  }
+
+  const missingIds = candidateIds.filter((candidateId) => !matches.has(candidateId));
+  return {
+    failed: missingIds.length > 0,
+    results: [...matches.values()],
+    missingIds,
+    error: initialError
   };
 }
 
@@ -706,27 +801,15 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
   for (let index = 0; index < readable.length; index += MATCH_BATCH_SIZE) {
     batches.push(readable.slice(index, index + MATCH_BATCH_SIZE));
   }
-  const responses = await mapWithConcurrency(batches, 2, async (batch) => {
-    try {
-      const response = await matchCandidateBatch(
-        interpretedProfile,
-        batch.map((item) => candidateForMatching(item.candidate, item.analysis)),
-        options
-      );
-      return {
-        failed: !Array.isArray(response?.results),
-        results: Array.isArray(response?.results) ? response.results : []
-      };
-    } catch (error) {
-      return { failed: true, results: [], error: safeErrorMessage(error) };
-    }
-  });
-  const matches = responses
-    .flatMap((response) => response.results)
-    .map(normalizeMatch)
-    .filter((item) => item.candidateId);
+  const comparisonProfile = buildComparisonProfile(vacancy, cleanProfile, interpretedProfile);
+  const responses = await mapWithConcurrency(
+    batches,
+    2,
+    (batch) => compareCandidateBatchReliably(comparisonProfile, batch, options)
+  );
+  const matches = responses.flatMap((response) => response.results);
   const comparisonWarning = responses.some((response) => response.failed)
-    ? 'Algunas hojas de vida se pudieron leer, pero no comparar. Quedaron en revisión manual para no ocultarlas.'
+    ? 'Algunas comparaciones no pudieron completarse incluso después de reintentarlas individualmente. Esos perfiles quedaron visibles para revisión manual.'
     : null;
 
   const matchesByCandidate = new Map(matches.map((match) => [match.candidateId, match]));
@@ -736,7 +819,9 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
       candidate: item.candidate,
       analysis: item.analysis,
       match,
-      manualReason: match ? null : 'La hoja de vida se leyó, pero no fue posible compararla con el perfil.'
+      manualReason: match
+        ? null
+        : 'No fue posible completar la comparación automática después de reintentarla. Revisa este perfil manualmente.'
     };
   });
   const results = [...reviewed, ...manual];
