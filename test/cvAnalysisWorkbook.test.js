@@ -14,6 +14,8 @@ function sampleReview() {
     phone: '300 123 4567',
     documentType: 'CC',
     documentNumber: '1234567890',
+    locality: 'Engativá',
+    transportMode: 'Moto',
     cvOriginalName: 'maria-prueba.pdf',
     cvData: Buffer.from('contenido pesado que no debe ir en la instantánea'),
     vacancy: { id: 'vacancy-excel', title: 'Líder de operación' }
@@ -25,7 +27,7 @@ function sampleReview() {
       level: 'STRONG',
       score: 91.4,
       reasons: ['Experiencia clara coordinando personal operativo.'],
-      evidence: ['Dos años como líder de operación.', 'Registro: medio de transporte Moto.'],
+      evidence: ['Dos años como líder de operación.'],
       gaps: ['Confirmar disponibilidad para turnos.']
     },
     manualReason: null
@@ -91,7 +93,7 @@ test('normaliza celulares colombianos y construye enlace clicable a WhatsApp Web
   assert.equal(buildWhatsappWebUrl(''), null);
 });
 
-test('la instantánea conserva solo información útil para revisión', () => {
+test('la instantánea conserva solo la información que se exporta', () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const result = snapshot.groups.strong[0];
   const candidate = result.candidate;
@@ -101,31 +103,27 @@ test('la instantánea conserva solo información útil para revisión', () => {
   assert.equal(candidate.documentNumber, '1234567890');
   assert.equal(Object.hasOwn(candidate, 'cvData'), false);
   assert.equal(Object.hasOwn(candidate, 'cvOriginalName'), false);
+  assert.equal(Object.hasOwn(candidate, 'locality'), false);
+  assert.equal(Object.hasOwn(candidate, 'transportMode'), false);
   assert.equal(Object.hasOwn(result.match, 'gaps'), false);
+  assert.equal(Object.hasOwn(snapshot, 'desiredProfile'), false);
+  assert.equal(Object.hasOwn(snapshot, 'interpretedProfile'), false);
+  assert.equal(Object.hasOwn(snapshot, 'modelUsed'), false);
   assert.equal(Object.hasOwn(snapshot, 'stats'), false);
-  assert.equal(snapshot.desiredProfile, 'Busco liderazgo operativo, inventarios y Excel.');
 });
 
-test('el Excel elimina conteos y campos innecesarios, conservando decisión y revisión', async () => {
+test('el Excel abre directamente en las tablas y conserva las columnas existentes', async () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: 'all' });
 
   assert.deepEqual(
     workbook.worksheets.map((sheet) => sheet.name),
-    ['Resumen', 'Coincidencia alta', 'Pueden encajar', 'Poca evidencia', 'Revisión manual']
+    ['Coincidencia alta', 'Pueden encajar', 'Poca evidencia', 'Revisión manual']
   );
-
-  const summary = workbook.getWorksheet('Resumen');
-  assert.equal(summary.getCell('A1').value, 'Criterios del análisis');
-  assert.equal(summary.getCell('A4').value, 'Perfil solicitado');
-  assert.equal(summary.getCell('A9').value, 'Interpretación de Lórren');
-  assert.equal(summary.getCell('H14').value, 'Mínimo meses');
-  const summaryValues = [];
-  summary.eachRow((row) => row.eachCell((cell) => summaryValues.push(String(cell.value ?? ''))));
-  assert.doesNotMatch(summaryValues.join(' '), /Total|Coincidencia alta|Revisión manual/);
+  assert.equal(workbook.getWorksheet('Resumen'), undefined);
 
   const sheet = workbook.getWorksheet('Coincidencia alta');
-  const headers = sheet.getRow(4).values.slice(1);
+  const headers = sheet.getRow(1).values.slice(1);
   assert.deepEqual(headers, [
     'Coincidencia',
     'Nombre completo',
@@ -137,9 +135,9 @@ test('el Excel elimina conteos y campos innecesarios, conservando decisión y re
     'Responsable de revisión',
     'Observación del responsable'
   ]);
-  assert.doesNotMatch(headers.join(' '), /Sección|Lo que falta confirmar|Archivo HV/);
+  assert.doesNotMatch(headers.join(' '), /Archivo|Documento HV|Nombre del documento|Residencia|Transporte/i);
 
-  const row = sheet.getRow(5);
+  const row = sheet.getRow(2);
   assert.equal(row.getCell('fullName').value, 'María de Prueba');
   assert.equal(row.getCell('documentType').value, 'CC');
   assert.equal(row.getCell('documentNumber').value, '1234567890');
@@ -155,12 +153,20 @@ test('el Excel elimina conteos y campos innecesarios, conservando decisión y re
   assert.match(row.getCell('analysis').value, /Experiencia clara coordinando personal operativo/i);
   assert.match(row.getCell('evidence').value, /Dos años como líder de operación/i);
 
+  const allValues = [];
+  workbook.eachSheet((worksheet) => {
+    worksheet.eachRow((worksheetRow) => {
+      worksheetRow.eachCell((cell) => allValues.push(String(cell.value?.text ?? cell.value ?? '')));
+    });
+  });
+  assert.doesNotMatch(allValues.join(' '), /maria-prueba\.pdf|Criterios del análisis|Perfil solicitado|Interpretación de Lórren/i);
+
   const buffer = await workbook.xlsx.writeBuffer();
   assert.ok(buffer.byteLength > 0);
 });
 
-test('la descarga de una sección no agrega hojas de otras clasificaciones', () => {
+test('la descarga de una sección no agrega resumen ni otras clasificaciones', () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: 'low' });
-  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Resumen', 'Poca evidencia']);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Poca evidencia']);
 });
