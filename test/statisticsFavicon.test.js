@@ -11,6 +11,6 @@ for (const routePath of [
 ]) {
   test(`${routePath} declara el favicon canónico`, () => {
     const source = fs.readFileSync(routePath, 'utf8');
-    assert.match(source, new RegExp(CANONICAL_FAVICON.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(source.includes(CANONICAL_FAVICON), true);
   });
 }
