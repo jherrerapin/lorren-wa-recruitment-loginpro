@@ -1,0 +1,43 @@
+name: Apply issue 866 document number filter
+
+on:
+  push:
+    branches:
+      - fix/866-document-number-filter
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out correction branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/866-document-number-filter
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact correction
+        run: python3 .github/scripts/apply-issue-866.py
+
+      - name: Remove temporary application files
+        run: rm -f .github/scripts/apply-issue-866.py .github/workflows/apply-issue-866.yml
+
+      - name: Validate syntax and focused contracts
+        run: |
+          node --check src/routes/admin.js
+          node --check test/adminCandidateDocumentNumberSearch.test.js
+          node --test test/adminCandidateDocumentNumberSearch.test.js
+          git diff --check
+
+      - name: Commit validated correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: buscar candidatos por número de documento (#866)"
+          git push origin HEAD:fix/866-document-number-filter
