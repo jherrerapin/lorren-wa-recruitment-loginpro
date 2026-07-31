@@ -1,16 +1,20 @@
 name: Apply issue 866 document number filter
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/866-document-number-filter
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: github.head_ref == 'fix/866-document-number-filter'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,7 +29,7 @@ jobs:
         run: python3 .github/scripts/apply-issue-866.py
 
       - name: Remove temporary application files
-        run: rm -f .github/scripts/apply-issue-866.py .github/workflows/apply-issue-866.yml
+        run: rm -f .github/issue-866-trigger .github/scripts/apply-issue-866.py .github/workflows/apply-issue-866.yml
 
       - name: Validate syntax and focused contracts
         run: |
