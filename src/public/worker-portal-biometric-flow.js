@@ -573,9 +573,9 @@
     closeModal(dialog);
   }
 
-  function pauseOpenVerification(reason) {
+  function pauseOpenVerification(_reason) {
     if (!dialog.open || !isBiometricMark()) return;
-    resumeVerificationPending = Boolean(photoConsent?.checked && !state.biometricVerified);
+    resumeVerificationPending = Boolean(photoConsent?.checked);
     runToken += 1;
     stopCamera();
     clearPhoto();
@@ -607,6 +607,7 @@
   }
 
   function resumeOpenVerification(_reason) {
+    biometricApi?.prepare?.().catch(() => {});
     if (dialog.open) requestLocation(runToken);
     scheduleResumeVerification();
   }
