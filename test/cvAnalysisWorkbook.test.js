@@ -4,8 +4,19 @@ import assert from 'node:assert/strict';
 import {
   buildCvAnalysisWorkbook,
   buildWhatsappWebUrl,
-  createCvReviewExportSnapshot
+  createCvReviewExportSnapshot,
+  CV_REVIEW_EXPORT_GROUPS
 } from '../src/services/cvAnalysisWorkbook.js';
+
+function cvAnalysis(summary, extracted = {}) {
+  return {
+    summary,
+    rawResponse: {
+      source: 'lorren_v2_cv_analysis',
+      extracted
+    }
+  };
+}
 
 function sampleReview() {
   const candidate = {
@@ -22,7 +33,10 @@ function sampleReview() {
   };
   const strong = {
     candidate,
-    analysis: { summary: 'Perfil con liderazgo e inventarios.' },
+    analysis: cvAnalysis('Perfil con liderazgo e inventarios.', {
+      experienceSummary: 'Dos años liderando personal operativo y controlando inventarios.',
+      educationSummary: 'Tecnóloga en Gestión Logística.'
+    }),
     match: {
       level: 'STRONG',
       score: 91.4,
@@ -34,7 +48,16 @@ function sampleReview() {
   };
   const possible = {
     candidate: { ...candidate, id: 'candidate-possible', fullName: 'Persona Posible', phone: '573112223333' },
-    analysis: { summary: 'Experiencia relacionada.' },
+    analysis: cvAnalysis('Experiencia relacionada.', {
+      experienceSummary: null,
+      educationSummary: 'Bachiller académico.',
+      experience: [{
+        role: 'Auxiliar logístico',
+        company: 'Empresa de prueba',
+        duration: '1 año',
+        responsibilities: ['Recepción de mercancía', 'Apoyo de inventarios']
+      }]
+    }),
     match: {
       level: 'POSSIBLE',
       score: 63,
@@ -46,7 +69,10 @@ function sampleReview() {
   };
   const low = {
     candidate: { ...candidate, id: 'candidate-low', fullName: 'Persona Baja', phone: '' },
-    analysis: { summary: 'Poca relación con el perfil.' },
+    analysis: cvAnalysis('Poca relación con el perfil.', {
+      experienceSummary: 'Experiencia comercial.',
+      educationSummary: 'Técnica en ventas.'
+    }),
     match: {
       level: 'LOW',
       score: 20,
@@ -93,7 +119,7 @@ test('normaliza celulares colombianos y construye enlace clicable a WhatsApp Web
   assert.equal(buildWhatsappWebUrl(''), null);
 });
 
-test('la instantánea conserva solo la información que se exporta', () => {
+test('la instantánea conserva la experiencia y los estudios extraídos de la hoja de vida', () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const result = snapshot.groups.strong[0];
   const candidate = result.candidate;
@@ -101,6 +127,8 @@ test('la instantánea conserva solo la información que se exporta', () => {
   assert.equal(candidate.fullName, 'María de Prueba');
   assert.equal(candidate.documentType, 'CC');
   assert.equal(candidate.documentNumber, '1234567890');
+  assert.equal(result.analysis.experience, 'Dos años liderando personal operativo y controlando inventarios.');
+  assert.equal(result.analysis.education, 'Tecnóloga en Gestión Logística.');
   assert.equal(Object.hasOwn(candidate, 'cvData'), false);
   assert.equal(Object.hasOwn(candidate, 'cvOriginalName'), false);
   assert.equal(Object.hasOwn(candidate, 'locality'), false);
@@ -112,7 +140,13 @@ test('la instantánea conserva solo la información que se exporta', () => {
   assert.equal(Object.hasOwn(snapshot, 'stats'), false);
 });
 
-test('el Excel abre directamente en las tablas y conserva las columnas existentes', async () => {
+test('usa el detalle de cargos cuando la hoja de vida no trae resumen de experiencia', () => {
+  const snapshot = createCvReviewExportSnapshot(sampleReview());
+  assert.match(snapshot.groups.possible[0].analysis.experience, /Auxiliar logístico · Empresa de prueba/);
+  assert.match(snapshot.groups.possible[0].analysis.experience, /Recepción de mercancía; Apoyo de inventarios/);
+});
+
+test('el Excel agrega experiencia y estudios sin recuperar campos retirados', async () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: 'all' });
 
@@ -130,6 +164,8 @@ test('el Excel abre directamente en las tablas y conserva las columnas existente
     'Número de celular',
     'Tipo de documento',
     'Número de documento',
+    'Experiencia',
+    'Estudios',
     'Análisis de contenido',
     'Evidencia encontrada',
     'Responsable de revisión',
@@ -141,6 +177,8 @@ test('el Excel abre directamente en las tablas y conserva las columnas existente
   assert.equal(row.getCell('fullName').value, 'María de Prueba');
   assert.equal(row.getCell('documentType').value, 'CC');
   assert.equal(row.getCell('documentNumber').value, '1234567890');
+  assert.equal(row.getCell('experience').value, 'Dos años liderando personal operativo y controlando inventarios.');
+  assert.equal(row.getCell('education').value, 'Tecnóloga en Gestión Logística.');
   assert.equal(row.getCell('score').value, 91);
   assert.equal(row.getCell('reviewer').value, '');
   assert.equal(row.getCell('reviewerObservation').value, '');
@@ -163,6 +201,13 @@ test('el Excel abre directamente en las tablas y conserva las columnas existente
 
   const buffer = await workbook.xlsx.writeBuffer();
   assert.ok(buffer.byteLength > 0);
+});
+
+test('la selección múltiple incluye únicamente las categorías marcadas', () => {
+  assert.equal(Object.hasOwn(CV_REVIEW_EXPORT_GROUPS, 'strong,possible'), true);
+  const snapshot = createCvReviewExportSnapshot(sampleReview());
+  const workbook = buildCvAnalysisWorkbook(snapshot, { group: 'strong,possible' });
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Coincidencia alta', 'Pueden encajar']);
 });
 
 test('la descarga de una sección no agrega resumen ni otras clasificaciones', () => {
