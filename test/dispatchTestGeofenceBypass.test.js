@@ -2,138 +2,167 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  DISPATCH_TEST_GEOFENCE_BYPASS_ACTION,
-  DISPATCH_TEST_GEOFENCE_BYPASS_RADIUS_SENTINEL_METERS,
-  applyDispatchTestGeofenceBypassToAssignment,
-  getDispatchTestGeofenceBypassStatus,
-  isDispatchTestGeofenceBypassEnabled,
-  setDispatchTestGeofenceBypass
-} from '../src/services/dispatchTestGeofenceBypass.js';
+  ATTENDANCE_RISK_FLAG,
+  ATTENDANCE_VALIDATION_STATUS,
+  evaluateArrivalValidation
+} from '../src/modules/dispatch-attendance/domain/attendanceValidationPolicy.js';
+import { registerDispatchDeparture } from '../src/modules/dispatch-attendance/application/registerDeparture.js';
+import { registerDispatchBreak } from '../src/modules/dispatch-attendance/application/registerBreak.js';
 
-function fakePrisma({ clientIsTest = true, latestAction = null } = {}) {
-  const events = [];
-  if (latestAction) events.push({ action: latestAction });
+const NOW = new Date('2026-07-31T13:00:00.000Z');
+const ARRIVAL_AT = new Date('2026-07-31T12:00:00.000Z');
+
+function validPolicyInput(overrides = {}) {
   return {
-    events,
-    dispatchOperationPoint: {
-      async findFirst() {
-        return {
-          id: 'operation-test',
-          name: 'Operación de prueba',
-          client: { id: 'client-test', isTestClient: clientIsTest }
-        };
-      }
-    },
-    devAuditEvent: {
-      async findFirst() { return events.at(-1) || null; },
-      async create({ data }) {
-        events.push(data);
-        return data;
-      }
-    }
+    assignmentActive: true,
+    attendanceEnabled: true,
+    duplicateMark: false,
+    arrivalWindowOpen: true,
+    hasConfiguredGeofence: true,
+    withinGeofence: true,
+    accuracyMeters: 12,
+    maxAccuracyMeters: 50,
+    authorizedDevice: true,
+    sharedDeviceSignal: false,
+    persistentStorageAvailable: true,
+    hasFreshPhoto: true,
+    minutesLate: 0,
+    toleranceMinutes: 0,
+    captureMode: 'ONLINE_WEB',
+    syncDelayMinutes: 0,
+    ...overrides
   };
 }
 
-function testAssignment({ workerIsTest = true, clientIsTest = true } = {}) {
+function assignment() {
   return {
-    id: 'assignment-test',
-    workerId: 'worker-test',
-    worker: { isTestProfile: workerIsTest },
+    id: 'assignment-1',
+    workerId: 'worker-1',
+    status: 'CONFIRMED',
+    attendanceSession: {
+      id: 'session-1',
+      arrivalReportedAt: ARRIVAL_AT,
+      departureReportedAt: null,
+      expectedStartAt: ARRIVAL_AT,
+      expectedEndAt: new Date('2026-07-31T20:00:00.000Z'),
+      attendanceStatus: 'ON_TIME',
+      validationStatus: 'AUTO_VALIDATED',
+      riskScore: 0,
+      riskFlags: []
+    },
     serviceRequest: {
       operationPoint: {
-        id: 'operation-test',
-        clientId: 'client-test',
+        attendanceEnabled: true,
+        attendanceLatitude: 4.7111,
+        attendanceLongitude: -74.0721,
         geofenceRadiusMeters: 100,
-        maxLocationAccuracyMeters: 50,
-        client: { isTestClient: clientIsTest }
+        maxLocationAccuracyMeters: 50
       }
     }
   };
 }
 
+function fakePrisma() {
+  const writes = { marks: 0, sessions: 0 };
+  const client = {
+    dispatchAssignment: {
+      async findUnique() { return assignment(); }
+    },
+    dispatchAttendanceSession: {
+      async update() {
+        writes.sessions += 1;
+        throw new Error('unexpected_session_write');
+      }
+    },
+    dispatchAttendanceMark: {
+      async findUnique() { return null; },
+      async findMany() { return []; },
+      async create() {
+        writes.marks += 1;
+        throw new Error('unexpected_mark_write');
+      }
+    },
+    dispatchWorkerDevice: {
+      async findFirst() { return { id: 'device-1' }; },
+      async count() { return 0; }
+    }
+  };
+  return {
+    writes,
+    ...client,
+    async $transaction(callback) { return callback(client); }
+  };
+}
 
-test('un cliente real no puede habilitar la excepción de ubicación', async () => {
-  const prisma = fakePrisma({ clientIsTest: false });
-  const status = await getDispatchTestGeofenceBypassStatus(prisma, {
-    clientId: 'client-real',
-    operationPointId: 'operation-real'
-  });
-  assert.equal(status.eligible, false);
-  await assert.rejects(() => setDispatchTestGeofenceBypass(prisma, {
-    clientId: 'client-real',
-    operationPointId: 'operation-real',
-    enabled: true,
-    actorUsername: 'dev'
-  }), /dispatch_test_geofence_bypass_not_allowed/);
+function outsideInput(markType) {
+  return {
+    assignmentId: 'assignment-1',
+    expectedWorkerId: 'worker-1',
+    idempotencyKey: `${markType.toLowerCase()}-outside-123456`,
+    markType,
+    now: NOW,
+    captureMode: 'ONLINE_WEB',
+    latitude: 6.2442,
+    longitude: -75.5812,
+    accuracyMeters: 12,
+    installationIdHash: 'installation-hash',
+    persistentStorageAvailable: true,
+    hasFreshPhoto: true,
+    evidenceStorageKey: 'attendance/test.jpg',
+    evidenceMimeType: 'image/jpeg'
+  };
+}
+
+test('la autoridad rechaza geocerca ausente, ubicación externa y precisión insuficiente', () => {
+  const cases = [
+    [validPolicyInput({ hasConfiguredGeofence: false }), ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED],
+    [validPolicyInput({ withinGeofence: null }), ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE],
+    [validPolicyInput({ withinGeofence: false }), ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE],
+    [validPolicyInput({ accuracyMeters: 80 }), ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY]
+  ];
+
+  for (const [input, expectedFlag] of cases) {
+    const result = evaluateArrivalValidation(input);
+    assert.equal(result.canRecordArrival, false);
+    assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
+    assert.deepEqual(result.riskFlags, [expectedFlag]);
+  }
 });
 
+test('la llegada consulta la política antes de crear la sesión o la marca', () => {
+  const source = fs.readFileSync('src/modules/dispatch-attendance/application/registerArrival.js', 'utf8');
+  const validationPosition = source.indexOf('const validation = evaluateArrivalValidation');
+  const rejectionPosition = source.indexOf('if (!validation.canRecordArrival)');
+  const createPosition = source.indexOf('dispatchAttendanceSession.create');
 
-test('DEV puede habilitar y deshabilitar la excepción auditada en una operación de prueba', async () => {
+  assert.ok(validationPosition >= 0);
+  assert.ok(rejectionPosition > validationPosition);
+  assert.ok(createPosition > rejectionPosition);
+});
+
+test('la salida fuera del radio no crea marca ni actualiza la jornada', async () => {
   const prisma = fakePrisma();
-  const enabled = await setDispatchTestGeofenceBypass(prisma, {
-    clientId: 'client-test',
-    operationPointId: 'operation-test',
-    enabled: true,
-    actorUsername: 'dev',
-    actorRole: 'dev'
-  });
-  assert.equal(enabled.enabled, true);
-  assert.equal(prisma.events.at(-1).action, DISPATCH_TEST_GEOFENCE_BYPASS_ACTION.ENABLED);
-
-  const disabled = await setDispatchTestGeofenceBypass(prisma, {
-    clientId: 'client-test',
-    operationPointId: 'operation-test',
-    enabled: false,
-    actorUsername: 'dev',
-    actorRole: 'dev'
-  });
-  assert.equal(disabled.enabled, false);
-  assert.equal(prisma.events.at(-1).action, DISPATCH_TEST_GEOFENCE_BYPASS_ACTION.DISABLED);
+  await assert.rejects(
+    () => registerDispatchDeparture(prisma, outsideInput('DEPARTURE')),
+    /attendance_outside_operation_range/
+  );
+  assert.deepEqual(prisma.writes, { marks: 0, sessions: 0 });
 });
 
-
-test('la excepción efectiva exige simultáneamente cliente y auxiliar de prueba', async () => {
-  const prisma = fakePrisma({ latestAction: DISPATCH_TEST_GEOFENCE_BYPASS_ACTION.ENABLED });
-  assert.equal(await isDispatchTestGeofenceBypassEnabled(prisma, {
-    operationPointId: 'operation-test', clientIsTest: true, workerIsTest: true
-  }), true);
-  assert.equal(await isDispatchTestGeofenceBypassEnabled(prisma, {
-    operationPointId: 'operation-test', clientIsTest: false, workerIsTest: true
-  }), false);
-  assert.equal(await isDispatchTestGeofenceBypassEnabled(prisma, {
-    operationPointId: 'operation-test', clientIsTest: true, workerIsTest: false
-  }), false);
+test('el inicio de almuerzo fuera del radio no crea ninguna marca', async () => {
+  const prisma = fakePrisma();
+  await assert.rejects(
+    () => registerDispatchBreak(prisma, outsideInput('BREAK_START')),
+    /attendance_outside_operation_range/
+  );
+  assert.deepEqual(prisma.writes, { marks: 0, sessions: 0 });
 });
 
-
-test('solo la triple condición reemplaza temporalmente la geocerca', async () => {
-  const prisma = fakePrisma({ latestAction: DISPATCH_TEST_GEOFENCE_BYPASS_ACTION.ENABLED });
-  const applied = await applyDispatchTestGeofenceBypassToAssignment(prisma, testAssignment());
-  assert.equal(applied.serviceRequest.operationPoint.geofenceRadiusMeters, DISPATCH_TEST_GEOFENCE_BYPASS_RADIUS_SENTINEL_METERS);
-  assert.equal(applied.serviceRequest.operationPoint.maxLocationAccuracyMeters, 100_000);
-  assert.equal(applied.serviceRequest.operationPoint.testGeofenceBypassEnabled, true);
-
-  const realWorker = await applyDispatchTestGeofenceBypassToAssignment(prisma, testAssignment({ workerIsTest: false }));
-  assert.equal(realWorker.serviceRequest.operationPoint.geofenceRadiusMeters, 100);
-  const realClient = await applyDispatchTestGeofenceBypassToAssignment(prisma, testAssignment({ clientIsTest: false }));
-  assert.equal(realClient.serviceRequest.operationPoint.geofenceRadiusMeters, 100);
-});
-
-
-test('rutas, interfaz y Prisma mantienen la excepción fuera del celular del auxiliar', () => {
-  const route = fs.readFileSync('src/routes/dispatchAttendancePointConfig.js', 'utf8');
-  const ui = fs.readFileSync('src/public/attendance-test-geofence-bypass.js', 'utf8');
-  const loader = fs.readFileSync('src/public/attendance-admin-runtime.js', 'utf8');
-  const prisma = fs.readFileSync('src/lib/prisma.js', 'utf8');
-  const distance = fs.readFileSync('src/modules/dispatch-attendance/domain/attendanceDistance.js', 'utf8');
-
-  assert.match(route, /currentRole\(req\) === 'dev'/);
-  assert.match(route, /x-requested-with/);
-  assert.match(route, /prueba-geocerca/);
-  assert.match(ui, /Solo aplica al cliente, operación y auxiliar marcados como prueba/);
-  assert.match(loader, /attendance-test-geofence-bypass\.js/);
-  assert.match(prisma, /isTestProfile/);
-  assert.match(prisma, /isTestClient/);
-  assert.match(prisma, /isDispatchTestGeofenceBypassEnabled/);
-  assert.match(distance, /ATTENDANCE_TEST_GEOFENCE_BYPASS_RADIUS_SENTINEL_METERS/);
+test('Prisma ya no modifica asignaciones ni radios según perfiles de prueba', () => {
+  const source = fs.readFileSync('src/lib/prisma.js', 'utf8');
+  assert.doesNotMatch(source, /dispatchTestGeofenceBypass/);
+  assert.doesNotMatch(source, /isTestClient/);
+  assert.doesNotMatch(source, /isTestProfile/);
+  assert.doesNotMatch(source, /99_999|100_000/);
+  assert.doesNotMatch(source, /\.\$use\(/);
 });
