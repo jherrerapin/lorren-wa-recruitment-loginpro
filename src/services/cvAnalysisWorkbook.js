@@ -25,9 +25,7 @@ const RESULT_COLUMNS = [
   { header: 'Número de celular', key: 'phone', width: 20 },
   { header: 'Tipo de documento', key: 'documentType', width: 18 },
   { header: 'Número de documento', key: 'documentNumber', width: 21 },
-  { header: 'Residencia', key: 'residence', width: 24 },
-  { header: 'Medio de transporte', key: 'transportMode', width: 22 },
-  { header: 'Resultado', key: 'analysis', width: 46 },
+  { header: 'Análisis de contenido', key: 'analysis', width: 48 },
   { header: 'Evidencia encontrada', key: 'evidence', width: 48 },
   { header: 'Responsable de revisión', key: 'reviewer', width: 26 },
   { header: 'Observación del responsable', key: 'reviewerObservation', width: 44 }
@@ -62,13 +60,7 @@ function candidateAnalysisText(result = {}) {
   const reasons = safeArray(result.match?.reasons);
   return reasons.length
     ? reasons.join('\n')
-    : compact(result.analysis?.summary) || 'Sin resultado descriptivo.';
-}
-
-function candidateResidence(candidate = {}) {
-  return [candidate.locality, candidate.neighborhood, candidate.zone]
-    .map(compact)
-    .find(Boolean) || '';
+    : compact(result.analysis?.summary) || 'Sin análisis descriptivo.';
 }
 
 function exportCandidate(candidate = {}) {
@@ -77,9 +69,7 @@ function exportCandidate(candidate = {}) {
     fullName: compact(candidate.fullName) || 'Sin nombre',
     phone: compact(candidate.phone),
     documentType: compact(candidate.documentType),
-    documentNumber: compact(candidate.documentNumber),
-    residence: candidateResidence(candidate),
-    transportMode: compact(candidate.transportMode)
+    documentNumber: compact(candidate.documentNumber)
   };
 }
 
@@ -148,8 +138,6 @@ function addResultSheet(workbook, snapshot, groupKey) {
       phone: candidate.phone,
       documentType: candidate.documentType,
       documentNumber: candidate.documentNumber,
-      residence: candidate.residence,
-      transportMode: candidate.transportMode,
       analysis: candidateAnalysisText(result),
       evidence: joinList(result.match?.evidence),
       reviewer: '',
