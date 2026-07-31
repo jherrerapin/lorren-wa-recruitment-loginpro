@@ -11,6 +11,16 @@ import {
   reviewVacancyCandidates,
   safeErrorMessage
 } from '../services/cvIntelligence.js';
+import {
+  createCvReviewExportSnapshot,
+  CV_REVIEW_EXPORT_GROUPS,
+  sendCvAnalysisWorkbook
+} from '../services/cvAnalysisWorkbook.js';
+import {
+  getCvReviewExportOwnerKey,
+  loadCvReviewExportSnapshot,
+  storeCvReviewExportSnapshot
+} from '../services/cvReviewExportStore.js';
 
 function escapeHtml(value = '') {
   return String(value)
@@ -76,6 +86,8 @@ function renderLayout({ title, body, req = {} }) {
     .btn { display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:9px; padding:10px 14px; background:var(--green); color:#fff; font-size:13px; font-weight:800; cursor:pointer; text-decoration:none; }
     .btn.secondary { color:#344054; background:#fff; border:1px solid #cfd4dc; }
     .btn.small { padding:7px 10px; font-size:12px; }
+    .export-form { margin:0; }
+    .group-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .alert { border-radius:10px; padding:11px 13px; margin-bottom:15px; background:var(--green-soft); color:var(--green); font-weight:750; }
     .alert.error { background:#fff1f0; color:var(--red); border:1px solid #fecdca; }
     .alert.warn { background:#fffaeb; color:#93370d; border:1px solid #fedf89; }
@@ -117,7 +129,7 @@ function renderLayout({ title, body, req = {} }) {
     th,td { padding:10px; border-bottom:1px solid #eaecef; vertical-align:top; }
     tr:last-child td { border-bottom:0; }
     .empty { text-align:center; color:var(--muted); padding:28px 14px; }
-    @media(max-width:760px) { .page{padding:15px 10px 40px}.setup{grid-template-columns:1fr}.actions .btn{width:100%}.navbar{padding:0 10px;gap:12px}.result-grid{grid-template-columns:1fr} }
+    @media(max-width:760px) { .page{padding:15px 10px 40px}.setup{grid-template-columns:1fr}.actions .btn{width:100%}.navbar{padding:0 10px;gap:12px}.result-grid{grid-template-columns:1fr}.group-head{align-items:flex-start;flex-direction:column} }
   </style>
 </head>
 <body>
@@ -260,22 +272,36 @@ function renderResultCard(result, kind) {
   </article>`;
 }
 
-function renderResultGroup(title, help, items, kind) {
+function renderExportForm(reviewToken, group, label, secondary = true) {
+  if (!reviewToken || !Object.hasOwn(CV_REVIEW_EXPORT_GROUPS, group)) return '';
+  return `<form class="export-form" method="post" action="/admin/estadisticas/cv-analysis/export">
+    <input type="hidden" name="reviewToken" value="${escapeHtml(reviewToken)}">
+    <input type="hidden" name="group" value="${escapeHtml(group)}">
+    <button class="btn ${secondary ? 'secondary ' : ''}small" type="submit">${escapeHtml(label)}</button>
+  </form>`;
+}
+
+function renderResultGroup(title, help, items, kind, reviewToken) {
   if (!items.length) return '';
   return `<section class="group">
-    <div class="group-head"><div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(help)}</p></div><span class="badge">${items.length}</span></div>
+    <div class="group-head">
+      <div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(help)}</p></div>
+      <div class="group-actions"><span class="badge">${items.length}</span>${renderExportForm(reviewToken, kind, 'Descargar esta sección')}</div>
+    </div>
     <div class="result-grid">${items.map((item) => renderResultCard(item, kind)).join('')}</div>
   </section>`;
 }
 
-function renderReviewResults(review) {
+function renderReviewResults(review, reviewToken = '') {
   if (!review?.ok) return '';
   if (!review.stats.total) return '<section class="card"><div class="empty">No hay hojas de vida para revisar en esta vacante.</div></section>';
   const groups = review.groups;
   return `${review.truncated ? '<div class="alert warn">Se revisaron las 120 hojas de vida más recientes. Usa una vacante o periodo más específico si necesitas abarcar más registros.</div>' : ''}
     <section class="card">
-      <h2>3. Resultado de la revisión</h2>
-      <p>El orden combina la hoja de vida con el medio de transporte y la residencia registrados. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p>
+      <div class="group-head">
+        <div><h2>3. Resultado de la revisión</h2><p>El orden combina la hoja de vida con el medio de transporte y la residencia registrados. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p></div>
+        ${renderExportForm(reviewToken, 'all', 'Descargar Excel completo', false)}
+      </div>
       <div class="grid">
         <div class="kpi"><strong>${review.stats.total}</strong><span>Hojas de vida encontradas</span></div>
         <div class="kpi good"><strong>${review.stats.strong}</strong><span>Con evidencia clara del perfil</span></div>
@@ -284,12 +310,12 @@ function renderReviewResults(review) {
         <div class="kpi warn"><strong>${review.stats.manual}</strong><span>Necesitan revisión manual</span></div>
       </div>
       ${review.warnings?.length ? `<div class="alert warn" style="margin-top:12px">${review.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
-      <p class="muted" style="margin-top:12px">Modelo usado: ${escapeHtml(review.modelUsed || 'No informado')}</p>
+      <p class="muted" style="margin-top:12px">Modelo usado: ${escapeHtml(review.modelUsed || 'No informado')} · El Excel incluye columnas editables para responsable y observaciones.</p>
     </section>
-    ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida y/o el registro contienen evidencia clara de varios puntos importantes.', groups.strong, 'strong')}
-    ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas, pero conviene confirmar experiencia o información faltante.', groups.possible, 'possible')}
-    ${renderResultGroup('Poca evidencia para el perfil', 'La hoja de vida y los datos registrados muestran poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low')}
-    ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual')}`;
+    ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida y/o el registro contienen evidencia clara de varios puntos importantes.', groups.strong, 'strong', reviewToken)}
+    ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas, pero conviene confirmar experiencia o información faltante.', groups.possible, 'possible', reviewToken)}
+    ${renderResultGroup('Poca evidencia para el perfil', 'La hoja de vida y los datos registrados muestran poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low', reviewToken)}
+    ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual', reviewToken)}`;
 }
 
 function errorMessage(reason = '') {
@@ -337,7 +363,7 @@ async function loadCandidates(prisma, vacancyId, accessContext = {}) {
   });
 }
 
-function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desiredProfile = '', review = null, message = '', error = '', showCandidates = true }) {
+function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desiredProfile = '', review = null, reviewToken = '', message = '', error = '', showCandidates = true }) {
   const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
     ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
     <section class="card hero">
@@ -346,7 +372,7 @@ function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desi
     </section>
     ${renderProfileForm(vacancies, { vacancyId, desiredProfile })}
     ${review
-      ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review)}`
+      ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review, reviewToken)}`
       : showCandidates ? renderCandidateTable(candidates, vacancyId) : ''}`;
   return renderLayout({ title: 'Análisis de hojas de vida — Lórren', body, req });
 }
@@ -407,7 +433,11 @@ export function lorenV2CvAnalysisRouter(prisma) {
         }));
       }
 
-      return res.send(renderPage({ req, vacancies, vacancyId, desiredProfile, review }));
+      const ownerKey = getCvReviewExportOwnerKey(req);
+      const reviewToken = ownerKey
+        ? storeCvReviewExportSnapshot(createCvReviewExportSnapshot(review), { ownerKey })
+        : '';
+      return res.send(renderPage({ req, vacancies, vacancyId, desiredProfile, review, reviewToken }));
     } catch (error) {
       console.error('[CV_REVIEW_ERROR]', { vacancyId, error: safeErrorMessage(error) });
       return res.status(500).send(renderPage({
@@ -418,6 +448,42 @@ export function lorenV2CvAnalysisRouter(prisma) {
         error: 'No fue posible revisar las hojas de vida en este momento. Intenta nuevamente; si el problema continúa, informa al administrador.',
         showCandidates: false
       }));
+    }
+  });
+
+  router.post('/export', async (req, res) => {
+    const reviewToken = normalizeString(req.body?.reviewToken) || '';
+    const requestedGroup = normalizeString(req.body?.group) || 'all';
+    const group = Object.hasOwn(CV_REVIEW_EXPORT_GROUPS, requestedGroup) ? requestedGroup : 'all';
+    const ownerKey = getCvReviewExportOwnerKey(req);
+    const snapshot = ownerKey
+      ? loadCvReviewExportSnapshot(reviewToken, { ownerKey })
+      : null;
+    if (!snapshot) {
+      return res.status(410).send('La descarga expiró o no pertenece a esta sesión. Ejecuta nuevamente el análisis para generar un Excel actualizado.');
+    }
+
+    const allowedVacancy = await prisma.vacancy.findFirst({
+      where: {
+        AND: [
+          buildVacancyAccessWhere(getAccessContext(req)),
+          { id: snapshot.vacancy.id }
+        ]
+      },
+      select: { id: true }
+    });
+    if (!allowedVacancy) return res.status(403).send('No tienes acceso a la vacante de este análisis.');
+
+    try {
+      return await sendCvAnalysisWorkbook(res, snapshot, { group });
+    } catch (error) {
+      console.error('[CV_REVIEW_EXPORT_ERROR]', {
+        vacancyId: snapshot.vacancy.id,
+        group,
+        error: safeErrorMessage(error)
+      });
+      if (!res.headersSent) return res.status(500).send('No fue posible generar el archivo Excel.');
+      return res.end();
     }
   });
 
