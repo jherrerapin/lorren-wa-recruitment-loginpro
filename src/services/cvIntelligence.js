@@ -662,7 +662,12 @@ function ensureMatchResults(response) {
   return response;
 }
 
-async function compareCandidateBatchReliably(comparisonProfile, batch, options = {}) {
+async function compareCandidateBatchReliably(
+  comparisonProfile,
+  batch,
+  individualRetryBudget,
+  options = {}
+) {
   const candidates = batch.map((item) => candidateForMatching(item.candidate, item.analysis));
   const candidateIds = candidates.map((candidate) => candidate.candidateId);
   const matches = new Map();
@@ -711,7 +716,14 @@ async function compareCandidateBatchReliably(comparisonProfile, batch, options =
   }
 
   missingCandidates = candidates.filter((candidate) => !matches.has(candidate.candidateId));
-  const individualCandidates = missingCandidates.slice(0, MAX_INDIVIDUAL_MATCH_RETRIES);
+  const remainingBudget = Math.max(0, Number(individualRetryBudget?.remaining || 0));
+  const individualCandidates = missingCandidates.slice(0, remainingBudget);
+  if (individualRetryBudget) {
+    individualRetryBudget.remaining = Math.max(
+      0,
+      remainingBudget - individualCandidates.length
+    );
+  }
   const individualMatches = await mapWithConcurrency(individualCandidates, 3, async (candidate) => {
     try {
       const response = ensureMatchResults(
@@ -854,10 +866,16 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
     batches.push(readable.slice(index, index + MATCH_BATCH_SIZE));
   }
   const comparisonProfile = buildComparisonProfile(vacancy, cleanProfile, interpretedProfile);
+  const individualRetryBudget = { remaining: MAX_INDIVIDUAL_MATCH_RETRIES };
   const responses = await mapWithConcurrency(
     batches,
     2,
-    (batch) => compareCandidateBatchReliably(comparisonProfile, batch, options)
+    (batch) => compareCandidateBatchReliably(
+      comparisonProfile,
+      batch,
+      individualRetryBudget,
+      options
+    )
   );
   const matches = responses.flatMap((response) => response.results);
   const hasBatchFailure = responses.some((response) => response.failureType === 'batch');
