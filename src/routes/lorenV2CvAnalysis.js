@@ -60,9 +60,10 @@ function renderLayout({ title, body, req = {} }) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
+  <link rel="icon" type="image/svg+xml" href="/public/favicon-loginpro.svg">
   <style>
     :root { --navy:#1e2d3d; --green:#0d7a6b; --green-soft:#e6f4f1; --border:#e1e4e8; --muted:#667085; --bg:#f4f5f7; --orange:#b45309; --red:#b42318; --blue:#175cd3; }
-    * { box-sizing: border-box; }
+    * { box-sizing:border-box; }
     body { margin:0; font-family:Inter,Arial,sans-serif; background:var(--bg); color:#1a1d23; }
     .navbar { background:var(--navy); padding:0 24px; display:flex; align-items:center; gap:20px; min-height:52px; flex-wrap:wrap; }
     .navbar a { color:#cbd5e0; text-decoration:none; font-size:13px; font-weight:700; }
@@ -124,7 +125,7 @@ function renderLayout({ title, body, req = {} }) {
     .registered-item span { display:block; color:var(--muted); font-size:10px; margin-bottom:2px; }
     .registered-item strong { display:block; color:var(--navy); font-size:12px; line-height:1.35; }
     .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:11px; }
-    table { width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; min-width:760px; }
     th { text-align:left; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.05em; background:#f9fafb; }
     th,td { padding:10px; border-bottom:1px solid #eaecef; vertical-align:top; }
     tr:last-child td { border-bottom:0; }
@@ -197,15 +198,14 @@ function renderCandidateTable(candidates = [], vacancyId = '') {
   if (!candidates.length) return '<section class="card"><div class="empty">Esta vacante todavía no tiene candidatos con hoja de vida.</div></section>';
   const rows = candidates.map((candidate) => `<tr>
     <td><strong>${escapeHtml(candidate.fullName || 'Sin nombre')}</strong><br><span class="muted">${escapeHtml(candidate.phone || '')}</span></td>
-    <td>${escapeHtml(candidate.cvOriginalName || 'Hoja de vida almacenada')}<br><span class="muted">${escapeHtml(candidate.cvMimeType || '')}</span></td>
     <td>${statusBadge(candidate)}</td>
     <td>${latestAnalysis(candidate) ? formatDate(latestAnalysis(candidate).analysedAt) : 'Sin análisis'}</td>
     <td><a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}">Ver candidato</a></td>
   </tr>`).join('');
   return `<section class="card">
-    <h2>Hojas de vida disponibles (${candidates.length})</h2>
+    <h2>Hojas de vida disponibles</h2>
     <p>Al iniciar la revisión se reutilizarán los análisis completos, se procesarán los documentos pendientes y se combinarán con los datos del registro.</p>
-    <div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Archivo</th><th>Lectura</th><th>Último análisis</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Lectura</th><th>Último análisis</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   </section>`;
 }
 
@@ -256,7 +256,7 @@ function renderResultCard(result, kind) {
   };
   return `<article class="result ${kind}">
     <div class="result-top">
-      <div><h3>${escapeHtml(candidate.fullName || 'Candidato sin nombre')}</h3><span class="muted">${escapeHtml(candidate.cvOriginalName || 'Hoja de vida almacenada')}</span></div>
+      <div><h3>${escapeHtml(candidate.fullName || 'Candidato sin nombre')}</h3></div>
       ${match ? `<div class="score">${Math.round(match.score)}%</div>` : '<span class="badge error">Manual</span>'}
     </div>
     <span class="badge ${kind === 'strong' ? 'ok' : kind === 'manual' ? 'error' : 'warn'}" style="margin-top:10px">${labels[kind]}</span>
@@ -264,7 +264,6 @@ function renderResultCard(result, kind) {
     ${renderRegisteredData(candidate)}
     ${renderStringList('Por qué puede servir', match?.reasons)}
     ${renderStringList('Evidencia encontrada (HV o registro)', match?.evidence)}
-    ${renderStringList('Lo que falta confirmar', match?.gaps)}
     <div class="result-actions">
       <a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}">Ver candidato</a>
       <a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}/cv">Descargar HV</a>
@@ -305,7 +304,7 @@ function renderReviewResults(review, reviewToken = '') {
       <div class="grid">
         <div class="kpi"><strong>${review.stats.total}</strong><span>Hojas de vida encontradas</span></div>
         <div class="kpi good"><strong>${review.stats.strong}</strong><span>Con evidencia clara del perfil</span></div>
-        <div class="kpi info"><strong>${review.stats.possible}</strong><span>Pueden encajar; falta confirmar</span></div>
+        <div class="kpi info"><strong>${review.stats.possible}</strong><span>Pueden encajar</span></div>
         <div class="kpi warn"><strong>${review.stats.low}</strong><span>Con poca evidencia relacionada</span></div>
         <div class="kpi warn"><strong>${review.stats.manual}</strong><span>Necesitan revisión manual</span></div>
       </div>
@@ -313,7 +312,7 @@ function renderReviewResults(review, reviewToken = '') {
       <p class="muted" style="margin-top:12px">Modelo usado: ${escapeHtml(review.modelUsed || 'No informado')} · El Excel incluye columnas editables para responsable y observaciones.</p>
     </section>
     ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida y/o el registro contienen evidencia clara de varios puntos importantes.', groups.strong, 'strong', reviewToken)}
-    ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas, pero conviene confirmar experiencia o información faltante.', groups.possible, 'possible', reviewToken)}
+    ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas y conviene una revisión humana antes de decidir.', groups.possible, 'possible', reviewToken)}
     ${renderResultGroup('Poca evidencia para el perfil', 'La hoja de vida y los datos registrados muestran poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low', reviewToken)}
     ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual', reviewToken)}`;
 }
