@@ -263,18 +263,19 @@ test('un fallo completo del lote usa un único reintento y no genera llamadas in
   );
 });
 
-test('los lotes comparten un máximo global de tres reintentos individuales', async () => {
+test('el último lote unitario también consume el presupuesto global de tres reintentos', async () => {
   const requests = [];
+  const singleRequestCounts = new Map();
   const vacancy = {
-    id: 'vacancy-shared-retry-budget',
+    id: 'vacancy-unit-batch-budget',
     title: 'Auxiliar de operación',
     city: 'Bogotá',
     requirements: 'Experiencia relacionada con operación logística.',
     roleDescription: 'Apoya cargue, descargue e inventarios.'
   };
   const candidates = Array.from(
-    { length: 35 },
-    (_, index) => cachedCandidateForReview(`shared-${index + 1}`, vacancy)
+    { length: 31 },
+    (_, index) => cachedCandidateForReview(`unit-${index + 1}`, vacancy)
   );
   const prisma = {
     vacancy: {
@@ -294,6 +295,11 @@ test('los lotes comparten un máximo global de tres reintentos individuales', as
       return structuredResponse({ results: [] });
     }
     const candidateId = input.candidates[0].candidateId;
+    const requestCount = (singleRequestCounts.get(candidateId) || 0) + 1;
+    singleRequestCounts.set(candidateId, requestCount);
+    if (candidateId === 'unit-31' && requestCount === 1) {
+      return structuredResponse({ results: [] });
+    }
     return structuredResponse({
       results: [{
         candidateId,
@@ -318,13 +324,13 @@ test('los lotes comparten un máximo global de tres reintentos individuales', as
   const matchRequests = requests.filter(
     (payload) => payload.text.format.name === 'loren_candidate_profile_matches'
   );
-  const individualRequests = matchRequests.filter((payload) => {
+  const singleCandidateRequests = matchRequests.filter((payload) => {
     const input = JSON.parse(payload.input[1].content[0].text);
     return input.candidates.length === 1;
   });
-  assert.equal(individualRequests.length, 3);
+  assert.equal(singleCandidateRequests.length, 4);
   assert.equal(result.stats.low, 3);
-  assert.equal(result.stats.manual, 32);
+  assert.equal(result.stats.manual, 28);
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0], /respuestas válidas omitieron perfiles/i);
 });
