@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const source = fs.readFileSync('src/routes/admin.js', 'utf8');
+const source = fs.readFileSync('src/routes/adminLegacy.js', 'utf8');
 
 function between(content, start, end) {
   const startIndex = content.indexOf(start);
