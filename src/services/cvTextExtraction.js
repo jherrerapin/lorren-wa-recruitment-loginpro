@@ -1,6 +1,10 @@
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { extractLegacyWordText } from './legacyWordText.js';
+import {
+  assessExtractedCvText,
+  detectCvDocumentMetadata
+} from './cvDocumentMetadata.js';
 
 const MAX_TEXT_LENGTH = 12000;
 
@@ -13,18 +17,23 @@ function normalizeText(value = '') {
     .slice(0, MAX_TEXT_LENGTH);
 }
 
-function isPdf(mimeType = '', fileName = '') {
-  return String(mimeType || '').includes('pdf') || String(fileName || '').toLowerCase().endsWith('.pdf');
+function extractionMetadata(detected) {
+  return {
+    detectedKind: detected.kind,
+    detectedMimeType: detected.mimeType,
+    detectedExtension: detected.extension,
+    detectionSource: detected.source,
+    metadataMismatch: detected.metadataMismatch,
+    metadataConflict: detected.metadataConflict,
+    signatureKind: detected.signatureKind,
+    mimeKind: detected.mimeKind,
+    extensionKind: detected.extensionKind
+  };
 }
 
-function isDoc(mimeType = '', fileName = '') {
-  const name = String(fileName || '').toLowerCase();
-  return name.endsWith('.doc') || String(mimeType || '').toLowerCase() === 'application/msword';
-}
-
-function isDocx(mimeType = '', fileName = '') {
-  const name = String(fileName || '').toLowerCase();
-  return name.endsWith('.docx') || String(mimeType || '').includes('wordprocessingml.document');
+function safeExtractionError(error) {
+  const code = String(error?.code || error?.name || 'unknown_error').trim();
+  return code.slice(0, 120);
 }
 
 export async function extractCvText(buffer, options = {}) {
@@ -32,25 +41,81 @@ export async function extractCvText(buffer, options = {}) {
     return { ok: false, text: '', reason: 'missing_buffer' };
   }
 
-  const mimeType = options.mimeType || '';
-  const fileName = options.fileName || '';
+  const detected = detectCvDocumentMetadata(buffer, {
+    mimeType: options.mimeType,
+    fileName: options.fileName
+  });
+  const metadata = extractionMetadata(detected);
 
-  if (isPdf(mimeType, fileName)) {
-    const result = await pdfParse(buffer);
-    const text = normalizeText(result?.text || '');
-    return { ok: Boolean(text), text, reason: text ? 'pdf_text_extracted' : 'empty_pdf_text' };
+  if (detected.kind === 'pdf') {
+    try {
+      const result = await pdfParse(buffer);
+      const rawText = normalizeText(result?.text || '');
+      if (!rawText) {
+        return { ok: false, text: '', reason: 'empty_pdf_text', quality: assessExtractedCvText(''), ...metadata };
+      }
+
+      const quality = assessExtractedCvText(rawText);
+      if (!quality.useful) {
+        return {
+          ok: true,
+          text: '',
+          rawText,
+          reason: 'low_quality_pdf_text',
+          quality,
+          ...metadata
+        };
+      }
+
+      return { ok: true, text: rawText, reason: 'pdf_text_extracted', quality, ...metadata };
+    } catch (error) {
+      return {
+        ok: false,
+        text: '',
+        reason: 'text_extraction_failed',
+        error: safeExtractionError(error),
+        ...metadata
+      };
+    }
   }
 
-  if (isDoc(mimeType, fileName)) {
+  if (detected.kind === 'doc') {
     const result = extractLegacyWordText(buffer);
-    return { ...result, text: normalizeText(result.text) };
+    const text = normalizeText(result.text);
+    return {
+      ...result,
+      text,
+      quality: assessExtractedCvText(text),
+      ...metadata
+    };
   }
 
-  if (isDocx(mimeType, fileName)) {
-    const result = await mammoth.extractRawText({ buffer });
-    const text = normalizeText(result?.value || '');
-    return { ok: Boolean(text), text, reason: text ? 'docx_text_extracted' : 'empty_docx_text' };
+  if (detected.kind === 'docx') {
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      const text = normalizeText(result?.value || '');
+      return {
+        ok: Boolean(text),
+        text,
+        reason: text ? 'docx_text_extracted' : 'empty_docx_text',
+        quality: assessExtractedCvText(text),
+        ...metadata
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        text: '',
+        reason: 'text_extraction_failed',
+        error: safeExtractionError(error),
+        ...metadata
+      };
+    }
   }
 
-  return { ok: false, text: '', reason: 'unsupported_file_type' };
+  return {
+    ok: false,
+    text: '',
+    reason: 'unsupported_file_type',
+    ...metadata
+  };
 }

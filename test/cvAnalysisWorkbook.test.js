@@ -91,19 +91,22 @@ test('normaliza celulares colombianos y construye enlace clicable a WhatsApp Web
   assert.equal(buildWhatsappWebUrl(''), null);
 });
 
-test('la instantánea conserva solo datos exportables y excluye el archivo binario', () => {
+test('la instantánea conserva solo información útil para revisión', () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
-  const candidate = snapshot.groups.strong[0].candidate;
+  const result = snapshot.groups.strong[0];
+  const candidate = result.candidate;
 
   assert.equal(candidate.fullName, 'María de Prueba');
   assert.equal(candidate.documentType, 'CC');
   assert.equal(candidate.documentNumber, '1234567890');
   assert.equal(Object.hasOwn(candidate, 'cvData'), false);
+  assert.equal(Object.hasOwn(candidate, 'cvOriginalName'), false);
+  assert.equal(Object.hasOwn(result.match, 'gaps'), false);
+  assert.equal(Object.hasOwn(snapshot, 'stats'), false);
   assert.equal(snapshot.desiredProfile, 'Busco liderazgo operativo, inventarios y Excel.');
-  assert.equal(snapshot.interpretedProfile.criteria[0].label, 'Manejo de personal');
 });
 
-test('el Excel completo separa las cuatro secciones y conserva campos editables', async () => {
+test('el Excel elimina conteos y campos innecesarios, conservando decisión y revisión', async () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: 'all' });
 
@@ -113,14 +116,29 @@ test('el Excel completo separa las cuatro secciones y conserva campos editables'
   );
 
   const summary = workbook.getWorksheet('Resumen');
-  assert.equal(summary.getCell('A1').value, 'Análisis de hojas de vida');
-  assert.equal(summary.getCell('A8').value, 'Texto escrito por el coordinador');
-  assert.equal(summary.getCell('K18').value, 'Mínimo meses');
+  assert.equal(summary.getCell('A1').value, 'Criterios del análisis');
+  assert.equal(summary.getCell('A4').value, 'Perfil solicitado');
+  assert.equal(summary.getCell('A9').value, 'Interpretación de Lórren');
+  assert.equal(summary.getCell('H14').value, 'Mínimo meses');
+  const summaryValues = [];
+  summary.eachRow((row) => row.eachCell((cell) => summaryValues.push(String(cell.value ?? ''))));
+  assert.doesNotMatch(summaryValues.join(' '), /Total|Coincidencia alta|Revisión manual/);
 
   const sheet = workbook.getWorksheet('Coincidencia alta');
-  assert.equal(sheet.getCell('A1').value, 'Coincidencia alta');
-  assert.equal(sheet.getCell('A4').value, 'Sección');
-  assert.equal(sheet.getCell('D4').value, 'Número de celular');
+  const headers = sheet.getRow(4).values.slice(1);
+  assert.deepEqual(headers, [
+    'Coincidencia',
+    'Nombre completo',
+    'Número de celular',
+    'Tipo de documento',
+    'Número de documento',
+    'Análisis de contenido',
+    'Evidencia encontrada',
+    'Responsable de revisión',
+    'Observación del responsable'
+  ]);
+  assert.doesNotMatch(headers.join(' '), /Sección|Lo que falta confirmar|Archivo HV/);
+
   const row = sheet.getRow(5);
   assert.equal(row.getCell('fullName').value, 'María de Prueba');
   assert.equal(row.getCell('documentType').value, 'CC');
@@ -136,7 +154,6 @@ test('el Excel completo separa las cuatro secciones y conserva campos editables'
   assert.equal(phone.hyperlink, 'https://web.whatsapp.com/send?phone=573001234567');
   assert.match(row.getCell('analysis').value, /Experiencia clara coordinando personal operativo/i);
   assert.match(row.getCell('evidence').value, /Dos años como líder de operación/i);
-  assert.match(row.getCell('gaps').value, /Confirmar disponibilidad/i);
 
   const buffer = await workbook.xlsx.writeBuffer();
   assert.ok(buffer.byteLength > 0);

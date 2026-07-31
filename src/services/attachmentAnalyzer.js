@@ -1,5 +1,6 @@
-import { extractLegacyWordText } from './legacyWordText.js';
 import { OPENAI_ATTACHMENT_MODEL } from './openAiModelConfig.js';
+import { extractCvText } from './cvTextExtraction.js';
+import { detectCvDocumentMetadata } from './cvDocumentMetadata.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MODEL = OPENAI_ATTACHMENT_MODEL;
@@ -16,16 +17,6 @@ async function postResponses(payload) {
   });
 }
 
-async function parsePdfBuffer(buffer) {
-  const { default: pdfParse } = await import('pdf-parse');
-  return pdfParse(buffer);
-}
-
-async function extractDocxText(buffer) {
-  const { default: mammoth } = await import('mammoth');
-  return mammoth.extractRawText({ buffer });
-}
-
 function buildResult(partial = {}) {
   return {
     attachmentKind: partial.attachmentKind || 'unknown',
@@ -33,27 +24,53 @@ function buildResult(partial = {}) {
     confidence: Number(partial.confidence || 0.2),
     rationale: partial.rationale || 'insufficient_evidence',
     extractedText: partial.extractedText || '',
-    evidence: partial.evidence || []
+    evidence: partial.evidence || [],
+    diagnostics: partial.diagnostics || null
   };
 }
 
 function classifyFromText(text = '', attachmentKind = 'document') {
-  const n = String(text || '').toLowerCase();
-  if (!n.trim()) {
-    return buildResult({ attachmentKind, classification: 'UNREADABLE', confidence: 0.2, rationale: 'empty_text' });
+  const normalized = String(text || '').toLowerCase();
+  if (!normalized.trim()) {
+    return buildResult({
+      attachmentKind,
+      classification: 'UNREADABLE',
+      confidence: 0.2,
+      rationale: 'empty_text'
+    });
   }
-  if (/hoja de vida|curriculum|currículum|experiencia laboral|perfil profesional/.test(n)) {
-    return buildResult({ attachmentKind, classification: 'CV_VALID', confidence: 0.9, rationale: 'cv_keywords', extractedText: text, evidence: ['texto_cv'] });
+  if (/hoja de vida|curriculum|currículum|experiencia laboral|perfil profesional/.test(normalized)) {
+    return buildResult({
+      attachmentKind,
+      classification: 'CV_VALID',
+      confidence: 0.9,
+      rationale: 'cv_keywords',
+      extractedText: text,
+      evidence: ['texto_cv']
+    });
   }
-  if (/cedula|c[eé]dula|identidad|dni|passport|pasaporte/.test(n)) {
-    return buildResult({ attachmentKind, classification: 'ID_DOC', confidence: 0.92, rationale: 'identity_keywords', extractedText: text, evidence: ['texto_id'] });
+  if (/cedula|c[eé]dula|identidad|dni|passport|pasaporte/.test(normalized)) {
+    return buildResult({
+      attachmentKind,
+      classification: 'ID_DOC',
+      confidence: 0.92,
+      rationale: 'identity_keywords',
+      extractedText: text,
+      evidence: ['texto_id']
+    });
   }
-  return buildResult({ attachmentKind, classification: 'OTHER', confidence: 0.64, rationale: 'non_cv_text', extractedText: text, evidence: ['texto_otro'] });
+  return buildResult({
+    attachmentKind,
+    classification: 'OTHER',
+    confidence: 0.64,
+    rationale: 'non_cv_text',
+    extractedText: text,
+    evidence: ['texto_otro']
+  });
 }
 
 function parseStructuredOutput(data = {}) {
-  const output = data?.output || [];
-  for (const item of output) {
+  for (const item of data?.output || []) {
     for (const part of item?.content || []) {
       if (part?.parsed && typeof part.parsed === 'object') return part.parsed;
       if (typeof part?.text === 'string') {
@@ -64,19 +81,32 @@ function parseStructuredOutput(data = {}) {
   return null;
 }
 
-async function classifyWithResponses({ mimeType = '', filename = '', textHint = '', base64 = null } = {}) {
+async function classifyWithResponses({ mimeType = '', filename = '', textHint = '', buffer = null } = {}) {
+  const attachmentKind = mimeType.startsWith('image/') ? 'image' : 'document';
   if (!process.env.OPENAI_API_KEY) {
     return buildResult({
-      attachmentKind: mimeType.startsWith('image/') ? 'image' : 'document',
+      attachmentKind,
       classification: 'UNREADABLE',
       confidence: 0.2,
       rationale: 'openai_disabled'
     });
   }
 
-  const inputContent = [{ type: 'input_text', text: `mimeType=${mimeType}; filename=${filename}; textHint=${String(textHint || '').slice(0, 1000)}` }];
-  if (base64 && mimeType.startsWith('image/')) {
-    inputContent.push({ type: 'input_image', image_url: `data:${mimeType};base64,${base64}` });
+  const inputContent = [{
+    type: 'input_text',
+    text: `mimeType=${mimeType}; filename=${filename}; textHint=${String(textHint || '').slice(0, 1000)}`
+  }];
+  if (buffer && mimeType.startsWith('image/')) {
+    inputContent.push({
+      type: 'input_image',
+      image_url: `data:${mimeType};base64,${buffer.toString('base64')}`
+    });
+  } else if (buffer && ['application/pdf'].includes(mimeType)) {
+    inputContent.push({
+      type: 'input_file',
+      filename: filename || 'hoja-de-vida.pdf',
+      file_data: `data:${mimeType};base64,${buffer.toString('base64')}`
+    });
   }
 
   const payload = {
@@ -84,7 +114,10 @@ async function classifyWithResponses({ mimeType = '', filename = '', textHint = 
     input: [
       {
         role: 'system',
-        content: [{ type: 'input_text', text: 'Clasifica adjuntos para reclutamiento. Devuelve JSON estricto con: classification, confidence, rationale, evidence (array). Usa: CV_VALID|CV_IMAGE_ONLY|ID_DOC|OTHER|UNREADABLE.' }]
+        content: [{
+          type: 'input_text',
+          text: 'Clasifica adjuntos para reclutamiento. Devuelve JSON estricto con: classification, confidence, rationale, evidence (array). Usa: CV_VALID|CV_IMAGE_ONLY|ID_DOC|OTHER|UNREADABLE. No inventes texto ni datos que no sean visibles en el documento.'
+        }]
       },
       { role: 'user', content: inputContent }
     ],
@@ -97,7 +130,10 @@ async function classifyWithResponses({ mimeType = '', filename = '', textHint = 
           type: 'object',
           additionalProperties: false,
           properties: {
-            classification: { type: 'string', enum: ['CV_VALID', 'CV_IMAGE_ONLY', 'ID_DOC', 'OTHER', 'UNREADABLE'] },
+            classification: {
+              type: 'string',
+              enum: ['CV_VALID', 'CV_IMAGE_ONLY', 'ID_DOC', 'OTHER', 'UNREADABLE']
+            },
             confidence: { type: 'number', minimum: 0, maximum: 1 },
             rationale: { type: 'string' },
             evidence: { type: 'array', items: { type: 'string' } }
@@ -112,21 +148,36 @@ async function classifyWithResponses({ mimeType = '', filename = '', textHint = 
     const response = await postResponses(payload);
     const parsed = parseStructuredOutput(response.data);
     return buildResult({
-      attachmentKind: mimeType.startsWith('image/') ? 'image' : 'document',
+      attachmentKind,
       classification: parsed?.classification,
       confidence: parsed?.confidence,
       rationale: parsed?.rationale,
       evidence: parsed?.evidence
     });
   } catch {
-    return buildResult({ attachmentKind: mimeType.startsWith('image/') ? 'image' : 'document', classification: 'UNREADABLE', confidence: 0.2, rationale: 'responses_error' });
+    return buildResult({
+      attachmentKind,
+      classification: 'UNREADABLE',
+      confidence: 0.2,
+      rationale: 'responses_error'
+    });
   }
+}
+
+function diagnosticsFromExtraction(textResult = {}, detected = {}) {
+  return {
+    detectedKind: detected.kind || textResult.detectedKind || 'unknown',
+    detectedMimeType: detected.mimeType || textResult.detectedMimeType || 'application/octet-stream',
+    detectionSource: detected.source || textResult.detectionSource || 'unknown',
+    metadataMismatch: Boolean(detected.metadataMismatch || textResult.metadataMismatch),
+    metadataConflict: Boolean(detected.metadataConflict || textResult.metadataConflict),
+    extractionReason: textResult.reason || null,
+    quality: textResult.quality || null
+  };
 }
 
 export async function analyzeAttachment({ buffer, mimeType = '', filename = '' } = {}) {
   const mime = String(mimeType || '').toLowerCase();
-  const name = String(filename || '').toLowerCase();
-
   if (mime.startsWith('image/')) {
     return buildResult({
       attachmentKind: 'image',
@@ -137,61 +188,85 @@ export async function analyzeAttachment({ buffer, mimeType = '', filename = '' }
     });
   }
 
-  if (mime.includes('pdf') || name.endsWith('.pdf')) {
-    const parsed = await parsePdfBuffer(buffer).catch(() => ({ text: '' }));
-    const text = String(parsed?.text || '').slice(0, 6000);
-    if (process.env.OPENAI_API_KEY) {
-      const ai = await classifyWithResponses({ mimeType: mime || 'application/pdf', filename: name, textHint: text });
-      if (ai.classification !== 'UNREADABLE' || text.trim().length < MIN_TEXT_LENGTH) {
-        return buildResult({ ...ai, attachmentKind: 'pdf', extractedText: text });
-      }
-    }
-    return buildResult({ ...classifyFromText(text, 'pdf'), attachmentKind: 'pdf', extractedText: text });
+  const detected = detectCvDocumentMetadata(buffer, { mimeType, fileName: filename });
+  if (!['pdf', 'doc', 'docx'].includes(detected.kind)) {
+    return buildResult({
+      attachmentKind: 'other',
+      classification: 'OTHER',
+      confidence: 0.5,
+      rationale: 'unsupported_format',
+      evidence: ['unsupported_format'],
+      diagnostics: diagnosticsFromExtraction({}, detected)
+    });
   }
 
-  if (mime === 'application/msword' || name.endsWith('.doc')) {
-    const extracted = extractLegacyWordText(buffer);
-    if (extracted.reason === 'invalid_doc_container') {
+  const textResult = await extractCvText(buffer, {
+    mimeType: detected.mimeType,
+    fileName: filename
+  });
+  const diagnostics = diagnosticsFromExtraction(textResult, detected);
+  const extractedText = String(textResult.text || '');
+
+  if (detected.kind === 'doc' && textResult.reason === 'invalid_doc_container') {
+    return buildResult({
+      attachmentKind: 'doc',
+      classification: 'OTHER',
+      confidence: 1,
+      rationale: 'invalid_legacy_word_container',
+      evidence: ['doc_extension_without_ole_container'],
+      diagnostics
+    });
+  }
+
+  const needsVisualPdf = detected.kind === 'pdf'
+    && (!textResult.ok || extractedText.trim().length < MIN_TEXT_LENGTH);
+  if (needsVisualPdf && process.env.OPENAI_API_KEY) {
+    const ai = await classifyWithResponses({
+      mimeType: detected.mimeType,
+      filename,
+      textHint: textResult.rawText || extractedText,
+      buffer
+    });
+    return buildResult({
+      ...ai,
+      attachmentKind: detected.kind,
+      extractedText: textResult.rawText || extractedText,
+      diagnostics
+    });
+  }
+
+  if (!textResult.ok || !extractedText.trim()) {
+    return buildResult({
+      attachmentKind: detected.kind,
+      classification: 'UNREADABLE',
+      confidence: 0.2,
+      rationale: textResult.reason || 'empty_text',
+      extractedText,
+      evidence: ['manual_review_required'],
+      diagnostics
+    });
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    const ai = await classifyWithResponses({
+      mimeType: detected.mimeType,
+      filename,
+      textHint: extractedText
+    });
+    if (ai.classification !== 'UNREADABLE') {
       return buildResult({
-        attachmentKind: 'doc',
-        classification: 'OTHER',
-        confidence: 1,
-        rationale: 'invalid_legacy_word_container',
-        evidence: ['doc_extension_without_ole_container']
+        ...ai,
+        attachmentKind: detected.kind,
+        extractedText,
+        diagnostics
       });
     }
-
-    const text = String(extracted.text || '').slice(0, 6000);
-    if (!text) {
-      return buildResult({
-        attachmentKind: 'doc',
-        classification: 'CV_VALID',
-        confidence: 0.45,
-        rationale: 'legacy_word_container_requires_manual_review',
-        evidence: ['legacy_word_ole_container', 'manual_review_recommended']
-      });
-    }
-
-    if (process.env.OPENAI_API_KEY) {
-      const ai = await classifyWithResponses({ mimeType: mime || 'application/msword', filename: name, textHint: text });
-      if (ai.classification !== 'UNREADABLE' || text.trim().length < MIN_TEXT_LENGTH) {
-        return buildResult({ ...ai, attachmentKind: 'doc', extractedText: text });
-      }
-    }
-    return buildResult({ ...classifyFromText(text, 'doc'), attachmentKind: 'doc', extractedText: text });
   }
 
-  if (mime.includes('wordprocessingml.document') || name.endsWith('.docx')) {
-    const parsed = await extractDocxText(buffer).catch(() => ({ value: '' }));
-    const text = String(parsed?.value || '').slice(0, 6000);
-    if (process.env.OPENAI_API_KEY) {
-      const ai = await classifyWithResponses({ mimeType: mime || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: name, textHint: text });
-      if (ai.classification !== 'UNREADABLE' || text.trim().length < MIN_TEXT_LENGTH) {
-        return buildResult({ ...ai, attachmentKind: 'docx', extractedText: text });
-      }
-    }
-    return buildResult({ ...classifyFromText(text, 'docx'), attachmentKind: 'docx', extractedText: text });
-  }
-
-  return buildResult({ attachmentKind: 'other', classification: 'OTHER', confidence: 0.5, rationale: 'unsupported_format', evidence: ['unsupported_format'] });
+  return buildResult({
+    ...classifyFromText(extractedText, detected.kind),
+    attachmentKind: detected.kind,
+    extractedText,
+    diagnostics
+  });
 }

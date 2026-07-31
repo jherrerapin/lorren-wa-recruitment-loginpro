@@ -6,6 +6,11 @@ import {
   deleteObjectFromR2,
   isStorageConfigured
 } from './storage.js';
+import {
+  buildHeaderSafeCvFilename,
+  detectCvDocumentMetadata,
+  normalizeStoredCvFilename
+} from './cvDocumentMetadata.js';
 
 function sanitizeNamePart(value = '') {
   const normalized = String(value || '')
@@ -15,6 +20,29 @@ function sanitizeNamePart(value = '') {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
   return normalized || 'file';
+}
+
+function normalizeResolvedCandidateMetadata(candidate, buffer) {
+  if (!candidate || !Buffer.isBuffer(buffer)) return null;
+  const detected = detectCvDocumentMetadata(buffer, {
+    mimeType: candidate.cvMimeType,
+    fileName: candidate.cvOriginalName
+  });
+
+  if (detected.kind !== 'unknown') {
+    candidate.cvMimeType = detected.mimeType;
+    candidate.cvOriginalName = buildHeaderSafeCvFilename(candidate.cvOriginalName, detected);
+  } else if (candidate.cvOriginalName) {
+    candidate.cvOriginalName = buildHeaderSafeCvFilename(candidate.cvOriginalName, detected);
+  }
+
+  Object.defineProperty(candidate, 'cvResolvedMetadata', {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: detected
+  });
+  return detected;
 }
 
 export function candidateHasStoredCv(candidate = {}) {
@@ -29,8 +57,14 @@ export function buildCandidateCvStorageKey(candidateId, originalName = 'hoja_de_
 }
 
 export async function storeCandidateCv(prisma, candidateId, buffer, options = {}) {
-  const originalName = options.originalName || 'hoja_de_vida';
-  const mimeType = options.mimeType || 'application/octet-stream';
+  const detected = detectCvDocumentMetadata(buffer, {
+    mimeType: options.mimeType,
+    fileName: options.originalName
+  });
+  const originalName = normalizeStoredCvFilename(options.originalName || 'hoja_de_vida', detected);
+  const mimeType = detected.kind === 'unknown'
+    ? (options.mimeType || 'application/octet-stream')
+    : detected.mimeType;
   const currentCvStorageKey = options.currentCvStorageKey || null;
 
   if (!isStorageConfigured()) {
@@ -59,7 +93,11 @@ export async function storeCandidateCv(prisma, candidateId, buffer, options = {}
 
   if (currentCvStorageKey && currentCvStorageKey !== storageKey) {
     await deleteObjectFromR2(currentCvStorageKey).catch((error) => {
-      console.warn('[CV_STORAGE_DELETE_OLD_FAILED]', { candidateId, currentCvStorageKey, error: error?.message || error });
+      console.warn('[CV_STORAGE_DELETE_OLD_FAILED]', {
+        candidateId,
+        currentCvStorageKey,
+        error: error?.message || error
+      });
     });
   }
 
@@ -68,19 +106,26 @@ export async function storeCandidateCv(prisma, candidateId, buffer, options = {}
 
 export async function resolveCandidateCvBuffer(candidate) {
   if (!candidate) return null;
+
+  let buffer = null;
   if (candidate.cvStorageKey && isStorageConfigured()) {
-    return downloadBufferFromR2(candidate.cvStorageKey);
+    buffer = await downloadBufferFromR2(candidate.cvStorageKey);
+  } else if (candidate.cvData) {
+    buffer = Buffer.isBuffer(candidate.cvData) ? candidate.cvData : Buffer.from(candidate.cvData);
   }
-  if (candidate.cvData) {
-    return Buffer.isBuffer(candidate.cvData) ? candidate.cvData : Buffer.from(candidate.cvData);
-  }
-  return null;
+
+  if (buffer) normalizeResolvedCandidateMetadata(candidate, buffer);
+  return buffer;
 }
 
 export async function clearCandidateCvStorage(candidate = {}) {
   if (candidate.cvStorageKey) {
     await deleteObjectFromR2(candidate.cvStorageKey).catch((error) => {
-      console.warn('[CV_STORAGE_DELETE_FAILED]', { candidateId: candidate.id, cvStorageKey: candidate.cvStorageKey, error: error?.message || error });
+      console.warn('[CV_STORAGE_DELETE_FAILED]', {
+        candidateId: candidate.id,
+        cvStorageKey: candidate.cvStorageKey,
+        error: error?.message || error
+      });
     });
   }
 }
