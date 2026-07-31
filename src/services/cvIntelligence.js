@@ -18,6 +18,8 @@ const URL = 'https://api.openai.com/v1/responses';
 const MODEL = OPENAI_CV_MODEL;
 const MAX_CANDIDATES_PER_REVIEW = 120;
 const MATCH_BATCH_SIZE = 30;
+const MATCH_BATCH_RETRY_LIMIT = 1;
+const MAX_INDIVIDUAL_MATCH_RETRIES = 3;
 const VISUAL_CONFIDENCE_THRESHOLD = 0.5;
 const MIN_USEFUL_PDF_TEXT_LENGTH = 80;
 
@@ -647,41 +649,116 @@ function collectExpectedMatches(response, candidateIds = []) {
   return matches;
 }
 
-async function compareCandidateBatchReliably(comparisonProfile, batch, options = {}) {
+function addExpectedMatches(target, response, candidateIds = []) {
+  for (const [candidateId, match] of collectExpectedMatches(response, candidateIds)) {
+    if (!target.has(candidateId)) target.set(candidateId, match);
+  }
+}
+
+function ensureMatchResults(response) {
+  if (!Array.isArray(response?.results)) {
+    throw new Error('match_batch_without_results');
+  }
+  return response;
+}
+
+function reserveIndividualRetries(individualRetryBudget, requested) {
+  const available = Math.max(0, Number(individualRetryBudget?.remaining || 0));
+  const granted = Math.min(Math.max(0, Number(requested || 0)), available);
+  if (individualRetryBudget) {
+    individualRetryBudget.remaining = available - granted;
+  }
+  return granted;
+}
+
+async function compareCandidateBatchReliably(
+  comparisonProfile,
+  batch,
+  individualRetryBudget,
+  options = {}
+) {
   const candidates = batch.map((item) => candidateForMatching(item.candidate, item.analysis));
   const candidateIds = candidates.map((candidate) => candidate.candidateId);
   const matches = new Map();
-  let initialError = null;
+  let batchError = null;
+  let batchSucceeded = false;
 
-  try {
-    const response = await matchCandidateBatch(comparisonProfile, candidates, options);
-    for (const [candidateId, match] of collectExpectedMatches(response, candidateIds)) {
-      matches.set(candidateId, match);
+  for (let attempt = 0; attempt <= MATCH_BATCH_RETRY_LIMIT; attempt += 1) {
+    if (attempt > 0 && candidates.length === 1) {
+      const reserved = reserveIndividualRetries(individualRetryBudget, 1);
+      if (!reserved) {
+        batchError = 'individual_retry_budget_exhausted';
+        break;
+      }
     }
-  } catch (error) {
-    initialError = safeErrorMessage(error);
+    try {
+      const response = ensureMatchResults(
+        await matchCandidateBatch(comparisonProfile, candidates, options)
+      );
+      addExpectedMatches(matches, response, candidateIds);
+      batchSucceeded = true;
+      break;
+    } catch (error) {
+      batchError = safeErrorMessage(error);
+    }
   }
 
-  const missingCandidates = candidates.filter((candidate) => !matches.has(candidate.candidateId));
-  const retries = await mapWithConcurrency(missingCandidates, 3, async (candidate) => {
+  if (!batchSucceeded) {
+    return {
+      failed: true,
+      failureType: 'batch',
+      results: [],
+      missingIds: candidateIds,
+      error: batchError
+    };
+  }
+
+  let missingCandidates = candidates.filter((candidate) => !matches.has(candidate.candidateId));
+  let recoveryError = null;
+
+  if (missingCandidates.length > 1) {
     try {
-      const response = await matchCandidateBatch(comparisonProfile, [candidate], options);
+      const response = ensureMatchResults(
+        await matchCandidateBatch(comparisonProfile, missingCandidates, options)
+      );
+      addExpectedMatches(
+        matches,
+        response,
+        missingCandidates.map((candidate) => candidate.candidateId)
+      );
+    } catch (error) {
+      recoveryError = safeErrorMessage(error);
+    }
+  }
+
+  missingCandidates = candidates.filter((candidate) => !matches.has(candidate.candidateId));
+  const individualRetryCount = reserveIndividualRetries(
+    individualRetryBudget,
+    missingCandidates.length
+  );
+  const individualCandidates = missingCandidates.slice(0, individualRetryCount);
+  const individualMatches = await mapWithConcurrency(individualCandidates, 3, async (candidate) => {
+    try {
+      const response = ensureMatchResults(
+        await matchCandidateBatch(comparisonProfile, [candidate], options)
+      );
       return collectExpectedMatches(response, [candidate.candidateId]).get(candidate.candidateId) || null;
     } catch {
       return null;
     }
   });
 
-  for (const match of retries) {
-    if (match) matches.set(match.candidateId, match);
+  for (const match of individualMatches) {
+    if (match && !matches.has(match.candidateId)) matches.set(match.candidateId, match);
   }
 
   const missingIds = candidateIds.filter((candidateId) => !matches.has(candidateId));
   return {
     failed: missingIds.length > 0,
+    failureType: missingIds.length ? 'partial' : null,
     results: [...matches.values()],
     missingIds,
-    error: initialError
+    error: recoveryError
   };
 }
 
@@ -802,15 +879,35 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
     batches.push(readable.slice(index, index + MATCH_BATCH_SIZE));
   }
   const comparisonProfile = buildComparisonProfile(vacancy, cleanProfile, interpretedProfile);
+  const individualRetryBudget = { remaining: MAX_INDIVIDUAL_MATCH_RETRIES };
   const responses = await mapWithConcurrency(
     batches,
     2,
-    (batch) => compareCandidateBatchReliably(comparisonProfile, batch, options)
+    (batch) => compareCandidateBatchReliably(
+      comparisonProfile,
+      batch,
+      individualRetryBudget,
+      options
+    )
   );
   const matches = responses.flatMap((response) => response.results);
-  const comparisonWarning = responses.some((response) => response.failed)
-    ? 'Algunas comparaciones no pudieron completarse incluso después de reintentarlas individualmente. Esos perfiles quedaron visibles para revisión manual.'
-    : null;
+  const hasBatchFailure = responses.some((response) => response.failureType === 'batch');
+  const hasPartialFailure = responses.some((response) => response.failureType === 'partial');
+  const comparisonWarning = hasBatchFailure
+    ? 'No fue posible ejecutar algunos lotes de comparación después de un único reintento controlado. Los perfiles permanecen visibles para revisión manual sin generar llamadas individuales masivas.'
+    : hasPartialFailure
+      ? 'Algunas respuestas válidas omitieron perfiles incluso después de reintentos acotados. Esos perfiles permanecen visibles para revisión manual.'
+      : null;
+
+  const manualReasonsByCandidate = new Map();
+  for (const response of responses) {
+    const reason = response.failureType === 'batch'
+      ? 'No fue posible ejecutar la comparación automática del lote después de un reintento controlado. Revisa este perfil manualmente.'
+      : 'La respuesta de comparación siguió incompleta después de reintentos acotados. Revisa este perfil manualmente.';
+    for (const candidateId of response.missingIds || []) {
+      manualReasonsByCandidate.set(candidateId, reason);
+    }
+  }
 
   const matchesByCandidate = new Map(matches.map((match) => [match.candidateId, match]));
   const reviewed = readable.map((item) => {
@@ -821,7 +918,8 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
       match,
       manualReason: match
         ? null
-        : 'No fue posible completar la comparación automática después de reintentarla. Revisa este perfil manualmente.'
+        : manualReasonsByCandidate.get(item.candidate.id)
+          || 'No fue posible completar la comparación automática. Revisa este perfil manualmente.'
     };
   });
   const results = [...reviewed, ...manual];
