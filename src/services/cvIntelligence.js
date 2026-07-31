@@ -662,6 +662,15 @@ function ensureMatchResults(response) {
   return response;
 }
 
+function reserveIndividualRetries(individualRetryBudget, requested) {
+  const available = Math.max(0, Number(individualRetryBudget?.remaining || 0));
+  const granted = Math.min(Math.max(0, Number(requested || 0)), available);
+  if (individualRetryBudget) {
+    individualRetryBudget.remaining = available - granted;
+  }
+  return granted;
+}
+
 async function compareCandidateBatchReliably(
   comparisonProfile,
   batch,
@@ -675,6 +684,13 @@ async function compareCandidateBatchReliably(
   let batchSucceeded = false;
 
   for (let attempt = 0; attempt <= MATCH_BATCH_RETRY_LIMIT; attempt += 1) {
+    if (attempt > 0 && candidates.length === 1) {
+      const reserved = reserveIndividualRetries(individualRetryBudget, 1);
+      if (!reserved) {
+        batchError = 'individual_retry_budget_exhausted';
+        break;
+      }
+    }
     try {
       const response = ensureMatchResults(
         await matchCandidateBatch(comparisonProfile, candidates, options)
@@ -716,14 +732,11 @@ async function compareCandidateBatchReliably(
   }
 
   missingCandidates = candidates.filter((candidate) => !matches.has(candidate.candidateId));
-  const remainingBudget = Math.max(0, Number(individualRetryBudget?.remaining || 0));
-  const individualCandidates = missingCandidates.slice(0, remainingBudget);
-  if (individualRetryBudget) {
-    individualRetryBudget.remaining = Math.max(
-      0,
-      remainingBudget - individualCandidates.length
-    );
-  }
+  const individualRetryCount = reserveIndividualRetries(
+    individualRetryBudget,
+    missingCandidates.length
+  );
+  const individualCandidates = missingCandidates.slice(0, individualRetryCount);
   const individualMatches = await mapWithConcurrency(individualCandidates, 3, async (candidate) => {
     try {
       const response = ensureMatchResults(
