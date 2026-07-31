@@ -34,6 +34,7 @@ function renderStatisticsHub(req = {}) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Estadísticas</title>
+  <link rel="icon" type="image/svg+xml" href="/public/favicon-loginpro.svg">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1d23; font-size: 14px; }

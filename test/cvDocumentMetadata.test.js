@@ -25,6 +25,16 @@ test('firma PDF prevalece sobre MIME Word y registra la contradicción', () => {
   assert.equal(detected.extensionKind, 'pdf');
 });
 
+test('PDF con bytes iniciales antes de la firma sigue detectándose por contenido', () => {
+  const detected = detectCvDocumentMetadata(
+    Buffer.concat([Buffer.from('\uFEFFcabecera-ajena\n'), Buffer.from('%PDF-1.7\ncontenido')]),
+    { mimeType: 'application/octet-stream', fileName: 'archivo.bin' }
+  );
+
+  assert.equal(detected.kind, 'pdf');
+  assert.equal(detected.source, 'signature');
+});
+
 test('Word clásico renombrado como PDF se identifica como DOC', () => {
   const detected = detectCvDocumentMetadata(OLE_BUFFER, {
     mimeType: 'application/pdf',
@@ -35,6 +45,21 @@ test('Word clásico renombrado como PDF se identifica como DOC', () => {
   assert.equal(detected.mimeType, 'application/msword');
   assert.equal(detected.extension, '.doc');
   assert.equal(detected.metadataMismatch, true);
+});
+
+test('DOCX se detecta aunque sus entradas aparezcan después del primer megabyte', () => {
+  const detected = detectCvDocumentMetadata(Buffer.concat([
+    Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+    Buffer.alloc((1024 * 1024) + 32),
+    Buffer.from('[Content_Types].xml'),
+    Buffer.from('word/document.xml')
+  ]), {
+    mimeType: 'application/octet-stream',
+    fileName: 'archivo.bin'
+  });
+
+  assert.equal(detected.kind, 'docx');
+  assert.equal(detected.source, 'signature');
 });
 
 test('nombre Unicode combinado se convierte en encabezado HTTP seguro', () => {
