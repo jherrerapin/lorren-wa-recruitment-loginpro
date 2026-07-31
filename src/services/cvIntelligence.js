@@ -17,11 +17,15 @@ const AttachmentClassification = Object.freeze({
 const URL = 'https://api.openai.com/v1/responses';
 const MODEL = OPENAI_CV_MODEL;
 const MAX_CANDIDATES_PER_REVIEW = 120;
-const MATCH_BATCH_SIZE = 30;
+const MATCH_BATCH_SIZE = 12;
 const MATCH_BATCH_RETRY_LIMIT = 1;
 const MAX_INDIVIDUAL_MATCH_RETRIES = 3;
 const VISUAL_CONFIDENCE_THRESHOLD = 0.5;
 const MIN_USEFUL_PDF_TEXT_LENGTH = 80;
+const REVIEW_CACHE_TTL_MS = 5 * 60 * 1000;
+const REVIEW_CACHE_MAX_ENTRIES = 100;
+const profileInterpretationCache = new Map();
+const candidateComparisonCache = new Map();
 
 const CV_REVIEW_EXTRACTION_SCHEMA = {
   ...CV_EXTRACTION_SCHEMA,
@@ -104,9 +108,24 @@ const CANDIDATE_MATCH_SCHEMA = {
             candidateId: { type: 'string' },
             level: { type: 'string', enum: ['STRONG', 'POSSIBLE', 'LOW'] },
             score: { type: 'number', minimum: 0, maximum: 100 },
-            reasons: { type: 'array', items: { type: 'string' } },
-            evidence: { type: 'array', items: { type: 'string' } },
-            gaps: { type: 'array', items: { type: 'string' } }
+            reasons: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 4,
+              items: { type: 'string', maxLength: 320 }
+            },
+            evidence: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 5,
+              items: { type: 'string', maxLength: 320 }
+            },
+            gaps: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 4,
+              items: { type: 'string', maxLength: 320 }
+            }
           },
           required: ['candidateId', 'level', 'score', 'reasons', 'evidence', 'gaps']
         }
@@ -126,6 +145,8 @@ function candidateMatchSchema(candidateIds = []) {
         ...CANDIDATE_MATCH_SCHEMA.schema.properties,
         results: {
           ...CANDIDATE_MATCH_SCHEMA.schema.properties.results,
+          minItems: allowedIds.length,
+          maxItems: allowedIds.length,
           items: {
             ...CANDIDATE_MATCH_SCHEMA.schema.properties.results.items,
             properties: {
@@ -153,6 +174,58 @@ function parseOutput(data = {}) {
 
 function compact(value = '') {
   return String(value || '').trim();
+}
+
+function cloneJson(value) {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function stableJsonValue(value) {
+  if (Array.isArray(value)) return value.map(stableJsonValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.keys(value)
+    .sort()
+    .reduce((result, key) => {
+      result[key] = stableJsonValue(value[key]);
+      return result;
+    }, {});
+}
+
+function reviewCacheKey(scope, payload) {
+  const serialized = JSON.stringify(stableJsonValue(payload));
+  return crypto.createHash('sha256').update(`${scope}:${serialized}`).digest('hex');
+}
+
+function readReviewCache(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  cache.delete(key);
+  cache.set(key, entry);
+  return cloneJson(entry.value);
+}
+
+function writeReviewCache(cache, key, value) {
+  if (value === null || value === undefined) return;
+  cache.delete(key);
+  cache.set(key, {
+    expiresAt: Date.now() + REVIEW_CACHE_TTL_MS,
+    value: cloneJson(value)
+  });
+  while (cache.size > REVIEW_CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+}
+
+export function clearCvIntelligenceCachesForTest() {
+  profileInterpretationCache.clear();
+  candidateComparisonCache.clear();
 }
 
 function normalizeCompare(value = '') {
@@ -554,8 +627,33 @@ function candidateForMatching(candidate, analysis) {
   };
 }
 
+function isValidInterpretedProfile(profile) {
+  return Boolean(
+    profile
+    && typeof profile === 'object'
+    && typeof profile.summary === 'string'
+    && Array.isArray(profile.criteria)
+    && Array.isArray(profile.warnings)
+  );
+}
+
 async function interpretDesiredProfile(vacancy, desiredProfile, options = {}) {
-  return requestStructuredOutput({
+  const model = selectedModel(options);
+  const cacheKey = reviewCacheKey('profile', {
+    model,
+    vacancy: {
+      id: vacancy.id || null,
+      title: vacancy.title || null,
+      city: vacancy.city || null,
+      requirements: vacancy.requirements || null,
+      roleDescription: vacancy.roleDescription || null
+    },
+    coordinatorRequest: desiredProfile
+  });
+  const cached = readReviewCache(profileInterpretationCache, cacheKey);
+  if (cached) return cached;
+
+  const interpreted = await requestStructuredOutput({
     schema: DESIRED_PROFILE_SCHEMA,
     systemText: `Convierte la información de una vacante y el complemento escrito por el coordinador en criterios claros para revisar perfiles.
 Los requisitos y la descripción de la vacante son la base del perfil y no deben desaparecer.
@@ -576,6 +674,11 @@ Escribe etiquetas y explicaciones fáciles de entender.`,
       coordinatorRequest: desiredProfile
     })
   }, options);
+
+  if (isValidInterpretedProfile(interpreted)) {
+    writeReviewCache(profileInterpretationCache, cacheKey, interpreted);
+  }
+  return interpreted;
 }
 
 function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
@@ -591,9 +694,30 @@ function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
   };
 }
 
+function completeMatchResponse(response, candidateIds = []) {
+  if (!Array.isArray(response?.results) || response.results.length !== candidateIds.length) return false;
+  const expected = new Set(candidateIds.map(compact).filter(Boolean));
+  const found = new Set();
+  for (const result of response.results) {
+    const candidateId = compact(result?.candidateId);
+    if (!expected.has(candidateId) || found.has(candidateId)) return false;
+    found.add(candidateId);
+  }
+  return found.size === expected.size;
+}
+
 async function matchCandidateBatch(comparisonProfile, candidates, options = {}) {
   const candidateIds = candidates.map((candidate) => compact(candidate.candidateId)).filter(Boolean);
-  return requestStructuredOutput({
+  const model = selectedModel(options);
+  const cacheKey = reviewCacheKey('matches', {
+    model,
+    comparisonProfile,
+    candidates
+  });
+  const cached = readReviewCache(candidateComparisonCache, cacheKey);
+  if (cached) return cached;
+
+  const response = await requestStructuredOutput({
     schema: candidateMatchSchema(candidateIds),
     systemText: `Compara la información disponible de cada candidato con el perfil buscado para apoyar a un coordinador humano.
 El perfil contiene la vacante original, el complemento del coordinador y una interpretación estructurada.
@@ -618,6 +742,11 @@ No rechaces candidatos ni uses información personal. Devuelve razones breves y 
       candidates
     })
   }, options);
+
+  if (completeMatchResponse(response, candidateIds)) {
+    writeReviewCache(candidateComparisonCache, cacheKey, response);
+  }
+  return response;
 }
 
 function normalizeMatch(match = {}) {
@@ -629,11 +758,11 @@ function normalizeMatch(match = {}) {
     candidateId: compact(match.candidateId),
     level,
     score,
-    reasons: Array.isArray(match.reasons) ? match.reasons.map(compact).filter(Boolean).slice(0, 5) : [],
+    reasons: Array.isArray(match.reasons) ? match.reasons.map(compact).filter(Boolean).slice(0, 4) : [],
     evidence: Array.isArray(match.evidence)
-      ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 6)
+      ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 5)
       : [],
-    gaps: Array.isArray(match.gaps) ? match.gaps.map(compact).filter(Boolean).slice(0, 6) : []
+    gaps: Array.isArray(match.gaps) ? match.gaps.map(compact).filter(Boolean).slice(0, 4) : []
   };
 }
 
