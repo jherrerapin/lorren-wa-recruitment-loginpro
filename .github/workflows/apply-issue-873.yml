@@ -1,7 +1,7 @@
 name: Apply issue 873 complete candidate search
 
 on:
-  pull_request:
+  pull_request_target:
     branches:
       - automation/873-complete-candidate-search-runner
     types:
@@ -14,18 +14,19 @@ permissions:
 
 jobs:
   apply:
-    if: github.head_ref == 'fix/873-complete-candidate-search'
+    if: github.event.pull_request.head.ref == 'fix/873-complete-candidate-search' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out functional branch
         uses: actions/checkout@v4
         with:
-          ref: fix/873-complete-candidate-search
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Load exact correction
+      - name: Load exact correction from trusted base branch
         run: |
           git fetch origin automation/873-complete-candidate-search-runner
           git show origin/automation/873-complete-candidate-search-runner:.github/scripts/apply-issue-873.py > /tmp/apply-issue-873.py
