@@ -1,3 +1,4 @@
+import './vacancyDashboardSearchExpansion.js';
 import { getCandidateResidenceValue } from './candidateData.js';
 
 function hasValue(value) {
