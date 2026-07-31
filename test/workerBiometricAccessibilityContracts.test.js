@@ -119,6 +119,8 @@ test('Human se invalida al suspender la página y puede cambiar de backend', asy
   assert.match(mobile, /cacheSensitivity:\s*0/);
   assert.match(mobile, /deallocate:\s*true/);
   assert.match(mobile, /const BACKENDS = Object\.freeze\(\['webgl', 'wasm', 'cpu'\]\)/);
+  assert.match(mobile, /const RUNTIME_MAX_IDLE_MS = 10 \* 60 \* 1000/);
+  assert.match(mobile, /invalidateRuntime\('runtime-idle'\)/);
   assert.match(mobile, /function invalidateRuntime/);
   assert.match(mobile, /async function recover/);
   assert.match(mobile, /rotateBackend:\s*options\.rotateBackend === true/);
@@ -152,6 +154,8 @@ test('el controlador pausa y reanuda automáticamente una validación interrumpi
   assert.match(flow, /function resumeOpenVerification/);
   assert.match(flow, /resumeVerificationPending/);
   assert.match(flow, /scheduleResumeVerification\(\)/);
+  assert.match(flow, /resumeVerificationPending = Boolean\(photoConsent\?\.checked\)/);
+  assert.match(flow, /biometricApi\?\.prepare\?\.\(\)\.catch/);
   assert.match(flow, /document\.addEventListener\('visibilitychange'/);
   assert.match(flow, /document\.addEventListener\('freeze'/);
   assert.match(flow, /document\.addEventListener\('resume'/);
