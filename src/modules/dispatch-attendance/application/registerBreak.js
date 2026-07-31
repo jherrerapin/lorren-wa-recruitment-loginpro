@@ -40,6 +40,7 @@ function numberValue(value, label, min, max) {
 }
 
 function finitePointNumber(value) {
+  if (value === undefined || value === null || value === '' || typeof value === 'boolean') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
