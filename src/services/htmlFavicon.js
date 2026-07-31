@@ -1,6 +1,6 @@
 export const GLOBAL_FAVICON_HREF = '/public/favicon-loginpro.svg?v=20260731';
 
-const ICON_LINK_PATTERN = /[ \t]*<link\b[^>]*\brel\s*=\s*["'][^"']*\bicon\b[^"']*["'][^>]*>\s*\n?/gi;
+const ICON_LINK_PATTERN = /[ \t]*<link\b(?=[^>]*\brel\s*=\s*["'](?:shortcut\s+)?icon["'])[^>]*>\s*\n?/gi;
 
 export function ensureGlobalFavicon(html) {
   if (typeof html !== 'string' || !/<head\b[^>]*>/i.test(html) || !/<\/head>/i.test(html)) {
