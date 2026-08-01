@@ -202,7 +202,6 @@ function reviewCacheKey(scope, payload) {
   return crypto.createHash('sha256').update(`${scope}:${serialized}`).digest('hex');
 }
 
-
 function cleanText(value, maxLength = 320) {
   const text = compact(value).replace(/\s+/g, ' ');
   return text ? text.slice(0, maxLength) : null;
@@ -275,6 +274,12 @@ async function persistAnalysisUsage(prisma, usage, context = {}) {
   }
 }
 
+function parseStoredJson(value, fallback = []) {
+  if (Array.isArray(value) || (value && typeof value === 'object')) return value;
+  if (typeof value !== 'string') return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
 function validStoredMatch(row = {}, expectedCandidateId = '') {
   const candidateId = compact(row.candidateId);
   const level = compact(row.level);
@@ -284,12 +289,6 @@ function validStoredMatch(row = {}, expectedCandidateId = '') {
     && Array.isArray(parseStoredJson(row.reasons))
     && Array.isArray(parseStoredJson(row.evidence))
     && Array.isArray(parseStoredJson(row.gaps));
-}
-
-function parseStoredJson(value, fallback = []) {
-  if (Array.isArray(value) || (value && typeof value === 'object')) return value;
-  if (typeof value !== 'string') return fallback;
-  try { return JSON.parse(value); } catch { return fallback; }
 }
 
 function storedMatch(row = {}) {
@@ -995,6 +994,7 @@ Escribe etiquetas y explicaciones fáciles de entender.`,
 function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
   return {
     vacancy: {
+      id: vacancy.id || null,
       title: vacancy.title || null,
       city: vacancy.city || null,
       requirements: vacancy.requirements || null,
@@ -1101,9 +1101,9 @@ function addExpectedMatches(target, response, candidateIds = []) {
   }
 }
 
-function ensureMatchResults(response) {
-  if (!Array.isArray(response?.results)) {
-    throw new Error('match_batch_without_results');
+function ensureMatchResults(response, candidateIds = []) {
+  if (!completeMatchResponse(response, candidateIds)) {
+    throw new Error('match_batch_invalid_results');
   }
   return response;
 }
@@ -1143,7 +1143,8 @@ async function compareCandidateBatchReliably(
         await matchCandidateBatch(prisma, comparisonProfile, candidates, {
           ...options,
           usageVacancyId: batch[0]?.candidate?.vacancyId
-        })
+        }),
+        candidateIds
       );
       addExpectedMatches(matches, response, candidateIds);
       batchSucceeded = true;
@@ -1168,17 +1169,15 @@ async function compareCandidateBatchReliably(
 
   if (missingCandidates.length > 1) {
     try {
+      const missingCandidateIds = missingCandidates.map((candidate) => candidate.candidateId);
       const response = ensureMatchResults(
         await matchCandidateBatch(prisma, comparisonProfile, missingCandidates, {
           ...options,
           usageVacancyId: batch[0]?.candidate?.vacancyId
-        })
+        }),
+        missingCandidateIds
       );
-      addExpectedMatches(
-        matches,
-        response,
-        missingCandidates.map((candidate) => candidate.candidateId)
-      );
+      addExpectedMatches(matches, response, missingCandidateIds);
     } catch (error) {
       recoveryError = safeErrorMessage(error);
     }
@@ -1196,7 +1195,8 @@ async function compareCandidateBatchReliably(
         await matchCandidateBatch(prisma, comparisonProfile, [candidate], {
           ...options,
           usageVacancyId: batch[0]?.candidate?.vacancyId
-        })
+        }),
+        [candidate.candidateId]
       );
       return collectExpectedMatches(response, [candidate.candidateId]).get(candidate.candidateId) || null;
     } catch {
@@ -1334,13 +1334,22 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
   const comparisonProfile = buildComparisonProfile(vacancy, cleanProfile, interpretedProfile);
   const comparisonEntries = readable.map((item) => {
     const candidatePayload = candidateForMatching(item.candidate, item.analysis);
+    const analysisEvidence = parseCvAnalysisEvidence(item.analysis);
+    const analysisVersion = {
+      id: item.analysis?.id || null,
+      analysedAt: item.analysis?.analysedAt || null,
+      documentReference: analysisEvidence?.documentReference
+        || candidateCvReference(item.candidate)
+    };
     return {
       item,
       candidatePayload,
       modelUsed,
       fingerprint: reviewCacheKey('candidate-match', {
         model: modelUsed,
+        vacancyId: item.candidate.vacancyId || vacancy.id || null,
         comparisonProfile,
+        analysisVersion,
         candidate: candidatePayload
       })
     };
