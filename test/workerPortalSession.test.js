@@ -60,7 +60,7 @@ test('rechaza tokens, fuentes aleatorias y TTL invalidos', () => {
   assert.throws(() => buildWorkerPortalSessionExpiry(NOW, 30 * 24 * 60 + 1), /worker_portal_session_ttl_invalid/);
 });
 
-test('define cookie segura, HttpOnly y restringida al portal', () => {
+test('define cookie segura, HttpOnly y compatible con el primer inicio de la PWA', () => {
   const expiresAt = buildWorkerPortalSessionExpiry(NOW, 60);
   const cookie = buildWorkerPortalSessionCookie(expiresAt, NOW);
 
@@ -69,7 +69,7 @@ test('define cookie segura, HttpOnly y restringida al portal', () => {
   assert.deepEqual(cookie.options, {
     httpOnly: true,
     secure: true,
-    sameSite: 'strict',
+    sameSite: 'lax',
     path: WORKER_PORTAL_SESSION_COOKIE_PATH,
     maxAge: 60 * 60 * 1000
   });
@@ -105,6 +105,7 @@ test('activa dispositivo y crea sesion mediante una sola operacion de repositori
   assert.equal(result.expiresAt.toISOString(), '2026-07-22T18:00:00.000Z');
   assert.equal(result.cookie.options.httpOnly, true);
   assert.equal(result.cookie.options.secure, true);
+  assert.equal(result.cookie.options.sameSite, 'lax');
 
   assert.equal(repositoryInput.purpose, 'PRIMARY_DEVICE_ACTIVATION');
   assert.equal(
