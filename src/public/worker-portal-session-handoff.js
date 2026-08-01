@@ -4,6 +4,7 @@
   const PORTAL_PATH = '/operaciones/portal';
   const CREATE_HANDOFF_PATH = `${PORTAL_PATH}/sesion-transferencia/crear`;
   const CONTINUE_HANDOFF_PATH = `${PORTAL_PATH}/sesion-transferencia/continuar`;
+  const INSTALL_QUERY_PARAM = 'instalarPortal';
   const INSTALL_BUTTON_IDS = new Set([
     'open-worker-portal-install',
     'install-worker-portal'
@@ -15,9 +16,17 @@
     return String(window.navigator.userAgent || '');
   }
 
+  function isAndroid() {
+    return /Android/i.test(userAgent());
+  }
+
   function isAndroidInAppBrowser() {
-    return /Android/i.test(userAgent())
+    return isAndroid()
       && /WhatsApp|FBAN|FBAV|Instagram|Line\/|wv\)/i.test(userAgent());
+  }
+
+  function handoffAlreadyCompleted() {
+    return new URL(window.location.href).searchParams.get(INSTALL_QUERY_PARAM) === '1';
   }
 
   function installButtonFromEvent(event) {
@@ -39,13 +48,15 @@
     status.textContent = message;
   }
 
-  function prepareInAppInstallButtons() {
-    if (!isAndroidInAppBrowser()) return;
+  function prepareInstallButtons() {
+    if (!isAndroid() || handoffAlreadyCompleted()) return;
     for (const id of INSTALL_BUTTON_IDS) {
       const button = document.getElementById(id);
       if (!button) continue;
       button.disabled = false;
-      button.textContent = 'Abrir en Chrome y descargar';
+      if (isAndroidInAppBrowser()) {
+        button.textContent = 'Abrir en Chrome y descargar';
+      }
       button.dataset.installAction = 'session-handoff';
     }
   }
@@ -68,15 +79,20 @@
     return payload.handoffToken;
   }
 
-  function chromeIntentUrl(handoffToken) {
+  function continueUrl(handoffToken) {
     const target = new URL(CONTINUE_HANDOFF_PATH, window.location.origin);
     target.searchParams.set('transferencia', handoffToken);
+    return target;
+  }
+
+  function chromeIntentUrl(handoffToken) {
+    const target = continueUrl(handoffToken);
     const scheme = target.protocol.replace(':', '');
     return `intent://${target.host}${target.pathname}${target.search}#Intent;scheme=${scheme};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(target.toString())};end`;
   }
 
   async function handleInstallClick(event) {
-    if (!isAndroidInAppBrowser()) return;
+    if (!isAndroid() || handoffAlreadyCompleted()) return;
     const button = installButtonFromEvent(event);
     if (!button) return;
 
@@ -88,26 +104,34 @@
     handoffInProgress = true;
     const originalText = button.textContent;
     button.disabled = true;
-    button.textContent = 'Transfiriendo sesión…';
-    setStatus('Preparando el acceso seguro en Chrome.');
+    button.textContent = 'Preparando aplicación…';
+    setStatus('Asegurando que la aplicación conserve tu sesión activa.');
 
     try {
       const handoffToken = await createSessionHandoff();
-      button.textContent = 'Abriendo Chrome…';
-      setStatus('Chrome abrirá el portal con tu sesión activa.');
-      window.location.href = chromeIntentUrl(handoffToken);
+      if (isAndroidInAppBrowser()) {
+        button.textContent = 'Abriendo Chrome…';
+        setStatus('Chrome abrirá el portal con tu sesión activa.');
+        window.location.href = chromeIntentUrl(handoffToken);
+        return;
+      }
+      button.textContent = 'Continuando…';
+      setStatus('La descarga continuará con la sesión preparada.');
+      window.location.href = continueUrl(handoffToken).toString();
     } catch {
       handoffInProgress = false;
       button.disabled = false;
-      button.textContent = originalText || 'Abrir en Chrome y descargar';
-      setStatus('No fue posible transferir la sesión. Recarga el portal e intenta nuevamente.', true);
+      button.textContent = originalText || (isAndroidInAppBrowser()
+        ? 'Abrir en Chrome y descargar'
+        : 'Descargar app');
+      setStatus('No fue posible preparar la sesión de la aplicación. Recarga el portal e intenta nuevamente.', true);
     }
   }
 
-  if (!isAndroidInAppBrowser()) return;
+  if (!isAndroid() || handoffAlreadyCompleted()) return;
 
   document.addEventListener('click', handleInstallClick, true);
-  const observer = new MutationObserver(prepareInAppInstallButtons);
+  const observer = new MutationObserver(prepareInstallButtons);
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  prepareInAppInstallButtons();
+  prepareInstallButtons();
 })();
