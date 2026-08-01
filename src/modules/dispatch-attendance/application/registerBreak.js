@@ -2,6 +2,10 @@ import {
   calculateAttendanceDistanceMeters,
   isAttendanceInsideGeofence
 } from '../domain/attendanceDistance.js';
+import {
+  ATTENDANCE_RISK_FLAG,
+  ATTENDANCE_VALIDATION_STATUS
+} from '../domain/attendanceValidationPolicy.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']);
 const BREAK_MARK_TYPES = new Set(['BREAK_START', 'BREAK_END']);
@@ -89,6 +93,7 @@ function normalizeInput(input = {}) {
     longitude: numberValue(input.longitude, 'longitude', -180, 180),
     accuracyMeters: numberValue(input.accuracyMeters, 'accuracy_meters', 0, 100_000),
     installationIdHash: optionalString(input.installationIdHash, 'installation_id_hash'),
+    persistentStorageAvailable: input.persistentStorageAvailable === true,
     ipAddress: optionalString(input.ipAddress, 'ip_address'),
     userAgent: optionalString(input.userAgent, 'user_agent')
   };
@@ -98,6 +103,7 @@ function requirePrisma(prisma) {
   if (typeof prisma?.$transaction !== 'function') throw new Error('attendance_break_transaction_required');
   const required = {
     dispatchAssignment: ['findUnique'],
+    dispatchAttendanceSession: ['update'],
     dispatchAttendanceMark: ['findUnique', 'findMany', 'create'],
     dispatchWorkerDevice: ['findFirst']
   };
@@ -145,6 +151,37 @@ function replayResult(mark) {
       riskScore: mark.riskScore,
       riskFlags: Array.isArray(mark.riskFlags) ? mark.riskFlags : []
     }
+  };
+}
+
+function addRiskFlag(riskFlags, flag) {
+  if (riskFlags.includes(flag)) return false;
+  riskFlags.push(flag);
+  return true;
+}
+
+function breakValidation(session, input) {
+  const riskFlags = Array.isArray(session.riskFlags) ? [...session.riskFlags] : [];
+  let riskScore = Number(session.riskScore) || 0;
+  let validationStatus = session.validationStatus || ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED;
+
+  if (input.captureMode === OFFLINE_WEB_CAPTURE_MODE) {
+    if (addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE)) riskScore += 40;
+    addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.CLIENT_CLOCK_UNTRUSTED);
+    if (!input.persistentStorageAvailable && addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.PERSISTENT_STORAGE_UNAVAILABLE)) {
+      riskScore += 20;
+    }
+    const syncDelayMinutes = Math.max(0, Math.floor((input.now.getTime() - input.reportedAt.getTime()) / 60_000));
+    if (syncDelayMinutes >= 5 && addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.DELAYED_SYNC)) {
+      riskScore += Math.min(25, 10 + Math.floor(syncDelayMinutes / 60) * 5);
+    }
+    validationStatus = ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED;
+  }
+
+  return {
+    validationStatus,
+    riskScore: Math.max(0, Math.min(100, Math.round(riskScore))),
+    riskFlags
   };
 }
 
@@ -214,7 +251,7 @@ async function insideTransaction(client, input) {
       })
     : null;
 
-  const riskFlags = Array.isArray(session.riskFlags) ? session.riskFlags : [];
+  const validation = breakValidation(session, input);
   const mark = await client.dispatchAttendanceMark.create({
     data: {
       attendanceSessionId: session.id,
@@ -231,22 +268,29 @@ async function insideTransaction(client, input) {
       installationIdHash: input.installationIdHash,
       ipAddress: input.ipAddress,
       userAgent: input.userAgent,
-      decision: session.validationStatus,
-      riskScore: Number(session.riskScore) || 0,
-      riskFlags
+      decision: validation.validationStatus,
+      riskScore: validation.riskScore,
+      riskFlags: validation.riskFlags
     }
   });
+
+  const attendanceSession = input.captureMode === OFFLINE_WEB_CAPTURE_MODE
+    ? await client.dispatchAttendanceSession.update({
+        where: { id: session.id },
+        data: {
+          validationStatus: validation.validationStatus,
+          riskScore: validation.riskScore,
+          riskFlags: validation.riskFlags
+        }
+      })
+    : session;
 
   return {
     recorded: true,
     replayed: false,
-    attendanceSession: session,
+    attendanceSession,
     attendanceMark: mark,
-    validation: {
-      validationStatus: session.validationStatus,
-      riskScore: Number(session.riskScore) || 0,
-      riskFlags
-    }
+    validation
   };
 }
 
