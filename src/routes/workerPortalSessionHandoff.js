@@ -7,6 +7,7 @@ import {
   randomBytes
 } from 'node:crypto';
 import {
+  WORKER_PORTAL_SESSION_COOKIE_NAME,
   buildWorkerPortalSessionCookie,
   generateWorkerPortalSessionToken,
   hashWorkerPortalSessionToken,
@@ -256,7 +257,6 @@ export function createWorkerPortalSessionHandoffRouter(prisma, options = {}) {
   const nowFn = options.nowFn || (() => new Date());
   const randomBytesFn = options.randomBytesFn || randomBytes;
   const ttlMs = normalizeHandoffTtl(options.ttlMs);
-  const secret = resolveHandoffSecret(options);
   let repository = options.repository || null;
 
   function getRepository() {
@@ -274,7 +274,7 @@ export function createWorkerPortalSessionHandoffRouter(prisma, options = {}) {
 
     try {
       const now = validDate(nowFn(), 'worker_portal_handoff_now');
-      const rawSessionToken = req.cookies?.['__Secure-lorren-attendance'];
+      const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
       const installationId = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
       if (!rawSessionToken || !installationId) {
         return res.status(401).json({ ok: false, error: 'portal_session_required' });
@@ -293,7 +293,7 @@ export function createWorkerPortalSessionHandoffRouter(prisma, options = {}) {
         installationId,
         now,
         ttlMs,
-        secret,
+        secret: resolveHandoffSecret(options),
         randomBytesFn
       });
 
@@ -320,7 +320,7 @@ export function createWorkerPortalSessionHandoffRouter(prisma, options = {}) {
       const payload = readWorkerPortalSessionHandoffToken({
         token: transferToken,
         now,
-        secret
+        secret: resolveHandoffSecret(options)
       });
 
       const session = await resolveSessionFn({
