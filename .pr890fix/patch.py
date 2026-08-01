@@ -7,92 +7,39 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+# La lógica principal puede haber sido aplicada directamente antes de esta ejecución.
+# Solo se parchea cuando todavía aparece la versión anterior.
 service_path = Path('src/services/cvIntelligence.js')
 service = service_path.read_text(encoding='utf-8')
 
-service = replace_once(
-    service,
-    """function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
+old_profile = """function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
   return {
     vacancy: {
-      title: vacancy.title || null,""",
-    """function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
+      title: vacancy.title || null,"""
+new_profile = """function buildComparisonProfile(vacancy, desiredProfile, interpretedProfile) {
   return {
     vacancy: {
       id: vacancy.id || null,
-      title: vacancy.title || null,""",
-    'vacancy id in comparison profile'
-)
+      title: vacancy.title || null,"""
+if old_profile in service:
+    service = service.replace(old_profile, new_profile, 1)
 
-service = replace_once(
-    service,
-    """function ensureMatchResults(response) {
+old_ensure = """function ensureMatchResults(response) {
   if (!Array.isArray(response?.results)) {
     throw new Error('match_batch_without_results');
   }
   return response;
-}""",
-    """function ensureMatchResults(response, candidateIds = []) {
+}"""
+new_ensure = """function ensureMatchResults(response, candidateIds = []) {
   if (!completeMatchResponse(response, candidateIds)) {
     throw new Error('match_batch_invalid_results');
   }
   return response;
-}""",
-    'strict match response validation'
-)
+}"""
+if old_ensure in service:
+    service = service.replace(old_ensure, new_ensure, 1)
 
-service = service.replace(
-    """ensureMatchResults(
-        await matchCandidateBatch(prisma, comparisonProfile, candidates, {
-          ...options,
-          usageVacancyId: batch[0]?.candidate?.vacancyId
-        })
-      )""",
-    """ensureMatchResults(
-        await matchCandidateBatch(prisma, comparisonProfile, candidates, {
-          ...options,
-          usageVacancyId: batch[0]?.candidate?.vacancyId
-        }),
-        candidateIds
-      )""",
-    1
-)
-service = service.replace(
-    """ensureMatchResults(
-        await matchCandidateBatch(prisma, comparisonProfile, missingCandidates, {
-          ...options,
-          usageVacancyId: batch[0]?.candidate?.vacancyId
-        })
-      )""",
-    """ensureMatchResults(
-        await matchCandidateBatch(prisma, comparisonProfile, missingCandidates, {
-          ...options,
-          usageVacancyId: batch[0]?.candidate?.vacancyId
-        }),
-        missingCandidates.map((candidate) => candidate.candidateId)
-      )""",
-    1
-)
-service = service.replace(
-    """ensureMatchResults(
-        await matchCandidateBatch(prisma, comparisonProfile, [candidate], {
-          ...options,
-          usageVacancyId: batch[0]?.candidate?.vacancyId
-        })
-      )""",
-    """ensureMatchResults(
-        await matchCandidateBatch(prisma, comparisonProfile, [candidate], {
-          ...options,
-          usageVacancyId: batch[0]?.candidate?.vacancyId
-        }),
-        [candidate.candidateId]
-      )""",
-    1
-)
-
-service = replace_once(
-    service,
-    """  const comparisonEntries = readable.map((item) => {
+old_entries = """  const comparisonEntries = readable.map((item) => {
     const candidatePayload = candidateForMatching(item.candidate, item.analysis);
     return {
       item,
@@ -104,8 +51,8 @@ service = replace_once(
         candidate: candidatePayload
       })
     };
-  });""",
-    """  const comparisonEntries = readable.map((item) => {
+  });"""
+new_entries = """  const comparisonEntries = readable.map((item) => {
     const candidatePayload = candidateForMatching(item.candidate, item.analysis);
     const analysisEvidence = parseCvAnalysisEvidence(item.analysis);
     const analysisVersion = {
@@ -126,40 +73,43 @@ service = replace_once(
         candidate: candidatePayload
       })
     };
-  });""",
-    'vacancy and current analysis in candidate fingerprint'
-)
+  });"""
+if old_entries in service:
+    service = service.replace(old_entries, new_entries, 1)
 
 service_path.write_text(service, encoding='utf-8')
 
 schema_path = Path('prisma/schema.prisma')
 schema = schema_path.read_text(encoding='utf-8')
 
-schema = replace_once(
-    schema,
-    """  dispatchWorkers        DispatchWorkerVacancy[]
+if 'cvReviewProfiles       CvReviewProfile[]' not in schema:
+    schema = replace_once(
+        schema,
+        """  dispatchWorkers        DispatchWorkerVacancy[]
 }""",
-    """  dispatchWorkers        DispatchWorkerVacancy[]
+        """  dispatchWorkers        DispatchWorkerVacancy[]
   cvReviewProfiles       CvReviewProfile[]
   cvCandidateComparisons CvCandidateComparison[]
   cvAnalysisUsages       CvAnalysisUsage[]
 }""",
-    'vacancy cache relations'
-)
+        'vacancy cache relations'
+    )
 
-schema = replace_once(
-    schema,
-    """  dispatchWorker         DispatchWorker?
+if 'cvCandidateComparisons CvCandidateComparison[]' not in schema.split('model CandidateDataConsentEvent')[0]:
+    schema = replace_once(
+        schema,
+        """  dispatchWorker         DispatchWorker?
 
   @@index([campaignId])""",
-    """  dispatchWorker         DispatchWorker?
+        """  dispatchWorker         DispatchWorker?
   cvCandidateComparisons CvCandidateComparison[]
 
   @@index([campaignId])""",
-    'candidate comparison relation'
-)
+        'candidate comparison relation'
+    )
 
-models = """model CvReviewProfile {
+if 'model CvReviewProfile {' not in schema:
+    models = """model CvReviewProfile {
   id                 String   @id @default(cuid())
   fingerprint        String   @unique
   vacancyId          String
@@ -213,7 +163,8 @@ model CvAnalysisUsage {
 }
 
 """
-schema = replace_once(schema, 'model AppUser {', models + 'model AppUser {', 'cache models')
+    schema = replace_once(schema, 'model AppUser {', models + 'model AppUser {', 'cache models')
+
 schema_path.write_text(schema, encoding='utf-8')
 
 test_path = Path('test/cvTokenSavings.test.js')
@@ -224,9 +175,10 @@ test_text = test_text.replace(
     1
 )
 
-test_text = replace_once(
-    test_text,
-    """  clearCvIntelligenceCachesForTest();
+if 'analysis-existing-replaced' not in test_text:
+    test_text = replace_once(
+        test_text,
+        """  clearCvIntelligenceCachesForTest();
   requests.length = 0;
   prisma.setCandidates([{ ...firstCandidate, transportMode: 'Bicicleta' }, newCandidate]);
   await reviewVacancyCandidates(prisma, { vacancyId: targetVacancy.id, desiredProfile }, { openAiPost });
@@ -234,7 +186,7 @@ test_text = replace_once(
   const changedInput = JSON.parse(requests[0].input[1].content[0].text);
   assert.deepEqual(changedInput.candidates.map((item) => item.candidateId), ['existing']);
 });""",
-    """  clearCvIntelligenceCachesForTest();
+        """  clearCvIntelligenceCachesForTest();
   requests.length = 0;
   prisma.setCandidates([{ ...firstCandidate, transportMode: 'Bicicleta' }, newCandidate]);
   await reviewVacancyCandidates(prisma, { vacancyId: targetVacancy.id, desiredProfile }, { openAiPost });
@@ -263,15 +215,16 @@ test_text = replace_once(
   const replacedInput = JSON.parse(requests[0].input[1].content[0].text);
   assert.deepEqual(replacedInput.candidates.map((item) => item.candidateId), ['existing']);
 });""",
-    'document replacement invalidation test'
-)
+        'document replacement invalidation test'
+    )
 
-test_text = replace_once(
-    test_text,
-    """    const input = JSON.parse(payload.input[1].content[0].text);
+old_partial = """    const input = JSON.parse(payload.input[1].content[0].text);
     if (input.candidates.length === 1) return structuredResponse({ results: [] }, usage);
-    return structuredResponse({ results: [matchResult(input.candidates[0].candidateId)] }, usage);""",
-    """    const input = JSON.parse(payload.input[1].content[0].text);
+    return structuredResponse({ results: [matchResult(input.candidates[0].candidateId)] }, usage);"""
+if old_partial in test_text:
+    test_text = test_text.replace(
+        old_partial,
+        """    const input = JSON.parse(payload.input[1].content[0].text);
     if (input.candidates.length === 1) return structuredResponse({ results: [] }, usage);
     return structuredResponse({
       results: [
@@ -280,7 +233,7 @@ test_text = replace_once(
         matchResult('unknown-candidate')
       ]
     }, usage);""",
-    'malformed response persistence test'
-)
+        1
+    )
 
 test_path.write_text(test_text, encoding='utf-8')
