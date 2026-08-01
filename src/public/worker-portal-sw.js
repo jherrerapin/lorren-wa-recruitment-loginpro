@@ -2,7 +2,11 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v7';
+const CACHE_NAME = 'lorren-worker-portal-shell-v8';
+const NETWORK_FIRST_ASSETS = new Set([
+  '/public/worker-biometric.js',
+  '/public/worker-portal-install.js'
+]);
 const STATIC_ASSETS = [
   '/operaciones/portal/offline.js',
   '/operaciones/portal/manifest.webmanifest',
@@ -12,7 +16,8 @@ const STATIC_ASSETS = [
   '/public/worker-biometric-mobile.js',
   '/public/worker-portal-biometric-flow.js',
   '/public/worker-portal-offline-v2.js',
-  '/public/worker-portal-offline-controller.js'
+  '/public/worker-portal-offline-controller.js',
+  '/public/worker-portal-install.js'
 ];
 const DB_NAME = 'lorren-worker-portal-v1';
 const DB_VERSION = 1;
@@ -169,6 +174,20 @@ async function cacheFirst(request) {
   const response = await fetch(request);
   if (response.ok) await cache.put(new Request(new URL(request.url).pathname), response.clone());
   return response;
+}
+
+async function networkFirstStatic(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cacheKey = new Request(new URL(request.url).pathname);
+  try {
+    const response = await fetch(request, { cache: 'no-store' });
+    if (response.ok) await cache.put(cacheKey, response.clone());
+    return response;
+  } catch {
+    const cached = await cache.match(cacheKey, { ignoreSearch: true });
+    if (cached) return cached;
+    throw new Error('portal_static_asset_unavailable');
+  }
 }
 
 function buildMarkForm(record) {
@@ -379,7 +398,8 @@ self.addEventListener('activate', (event) => {
         .filter((name) => name.startsWith('lorren-worker-portal-') && name !== CACHE_NAME)
         .map((name) => caches.delete(name))
     )),
-    self.clients.claim()
+    self.clients.claim(),
+    notifyClients({ type: 'PORTAL_SHELL_UPDATED', cacheName: CACHE_NAME })
   ]));
 });
 
@@ -390,6 +410,10 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (request.mode === 'navigate' && (url.pathname === PORTAL_PATH || url.pathname === `${PORTAL_PATH}/`)) {
     event.respondWith(networkFirstPortal(request));
+    return;
+  }
+  if (NETWORK_FIRST_ASSETS.has(url.pathname)) {
+    event.respondWith(networkFirstStatic(request));
     return;
   }
   if (STATIC_ASSETS.includes(url.pathname)) event.respondWith(cacheFirst(request));
