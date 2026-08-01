@@ -5,34 +5,45 @@
   if (normalizedPath !== '/operaciones/portal') return;
 
   const ENROLLMENT_SUCCESS_PATTERN = /rostro\s+registrado/i;
+  const INSTALL_QUERY_PARAM = 'instalarPortal';
   const OFFER_DELAY_MS = 700;
   const MAX_DIALOG_WAIT_ATTEMPTS = 16;
   const DIALOG_WAIT_MS = 250;
+  const PROMPT_READY_TIMEOUT_MS = 12_000;
 
   let deferredInstallPrompt = null;
   let offerScheduled = false;
   let automaticOfferShown = false;
   let installedThisSession = false;
+  let promptReadyTimer = null;
 
   function isStandalone() {
     return window.matchMedia?.('(display-mode: standalone)')?.matches === true
       || window.navigator.standalone === true;
   }
 
+  function userAgent() {
+    return String(window.navigator.userAgent || '');
+  }
+
   function isIos() {
-    const userAgent = String(navigator.userAgent || '');
-    const classicIos = /iPad|iPhone|iPod/i.test(userAgent);
+    const classicIos = /iPad|iPhone|iPod/i.test(userAgent());
     const ipadDesktopMode = navigator.platform === 'MacIntel'
       && Number(navigator.maxTouchPoints || 0) > 1;
     return classicIos || ipadDesktopMode;
   }
 
   function isAndroid() {
-    return /Android/i.test(String(navigator.userAgent || ''));
+    return /Android/i.test(userAgent());
+  }
+
+  function isChromiumBrowser() {
+    return /Chrome|Chromium|CriOS|EdgA|SamsungBrowser/i.test(userAgent())
+      && !/Firefox|FxiOS|OPR\//i.test(userAgent());
   }
 
   function isInAppBrowser() {
-    return /WhatsApp|FBAN|FBAV|Instagram|Line\//i.test(String(navigator.userAgent || ''));
+    return /WhatsApp|FBAN|FBAV|Instagram|Line\/|wv\)/i.test(userAgent());
   }
 
   function createElement(tagName, attributes = {}, text = '') {
@@ -54,6 +65,7 @@
       .portal-install-cta-icon{display:grid;place-items:center;width:48px;height:48px;border-radius:14px;background:#176c36;color:#fff;font-size:23px;font-weight:900}
       .portal-install-cta-copy strong{display:block;color:#163b24;font-size:14px}.portal-install-cta-copy span{display:block;margin-top:3px;color:#55705f;font-size:12px;line-height:1.35}
       .portal-install-cta-button{min-height:44px;border:0;border-radius:11px;padding:10px 14px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer;white-space:nowrap}
+      .portal-install-cta-button:disabled{cursor:progress;opacity:.62}
       #portal-install-dialog{width:min(calc(100% - 24px),500px);border:0;border-radius:22px;padding:0;box-shadow:0 24px 72px rgba(23,33,43,.3)}
       #portal-install-dialog::backdrop{background:rgba(12,21,29,.72)}
       .portal-install-body{padding:24px}.portal-install-icon{display:grid;place-items:center;width:64px;height:64px;margin-bottom:16px;border-radius:18px;background:#eaf8ef;color:#176c36;font-size:31px;font-weight:900}
@@ -63,17 +75,75 @@
       .portal-install-instructions{margin:18px 0 0;padding:15px;border-radius:14px;background:#fff6df;color:#68490c;line-height:1.5}.portal-install-instructions ol{margin:9px 0 0;padding-left:22px}.portal-install-instructions li+li{margin-top:7px}
       .portal-install-status{margin-top:15px;padding:13px;border-radius:12px;background:#f2f5f7;color:#263645;font-weight:750}.portal-install-status.ok{background:#eaf8ef;color:#176c36}.portal-install-status.warning{background:#fff6df;color:#76520b}
       .portal-install-actions{display:grid;gap:10px;margin-top:19px}.portal-install-primary,.portal-install-secondary{width:100%;min-height:54px;border:0;border-radius:13px;padding:14px 16px;font:inherit;font-weight:850;cursor:pointer}
-      .portal-install-primary{background:#176c36;color:#fff}.portal-install-secondary{background:#edf1f4;color:#263645}.portal-install-primary:disabled{cursor:not-allowed;opacity:.55}
+      .portal-install-primary{background:#176c36;color:#fff}.portal-install-secondary{background:#edf1f4;color:#263645}.portal-install-primary:disabled{cursor:progress;opacity:.55}
       @media(max-width:620px){#portal-install-cta{grid-template-columns:44px minmax(0,1fr)}.portal-install-cta-icon{width:44px;height:44px}.portal-install-cta-button{grid-column:1/-1;width:100%}}
       @media(max-width:760px){#portal-install-dialog{inset:0;width:100vw;max-width:none;height:100dvh;max-height:100dvh;margin:0;border-radius:0}.portal-install-body{min-height:100dvh;padding:max(24px,env(safe-area-inset-top)) 20px max(20px,env(safe-area-inset-bottom));display:flex;flex-direction:column}.portal-install-actions{margin-top:auto;padding-top:20px}}
     `;
     document.head.append(style);
   }
 
+  function removeInstallQueryParam() {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has(INSTALL_QUERY_PARAM)) return;
+    url.searchParams.delete(INSTALL_QUERY_PARAM);
+    window.history.replaceState(null, document.title, `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function requestedInstallFromExternalBrowser() {
+    return new URL(window.location.href).searchParams.get(INSTALL_QUERY_PARAM) === '1';
+  }
+
+  function androidChromeIntentUrl() {
+    const url = new URL(window.location.href);
+    url.searchParams.set(INSTALL_QUERY_PARAM, '1');
+    const path = `${url.host}${url.pathname}${url.search}${url.hash}`;
+    return `intent://${path}#Intent;scheme=${url.protocol.replace(':', '')};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url.href)};end`;
+  }
+
   function removeInstallUi() {
+    window.clearTimeout(promptReadyTimer);
     document.getElementById('portal-install-cta')?.remove();
     const dialog = document.getElementById('portal-install-dialog');
     if (dialog?.open && typeof dialog.close === 'function') dialog.close();
+  }
+
+  function configureCtaButton(button) {
+    if (!button) return;
+    button.disabled = false;
+    button.textContent = 'Descargar app';
+
+    if (isAndroid() && isInAppBrowser()) {
+      button.textContent = 'Abrir en Chrome y descargar';
+      button.dataset.installAction = 'open-chrome';
+      return;
+    }
+
+    if (deferredInstallPrompt) {
+      button.dataset.installAction = 'native-prompt';
+      return;
+    }
+
+    if (isAndroid() && isChromiumBrowser()) {
+      button.disabled = true;
+      button.textContent = 'Preparando descarga…';
+      button.dataset.installAction = 'waiting-prompt';
+      window.clearTimeout(promptReadyTimer);
+      promptReadyTimer = window.setTimeout(() => {
+        if (deferredInstallPrompt || isStandalone() || installedThisSession) return;
+        button.disabled = false;
+        button.textContent = 'Reintentar descarga';
+        button.dataset.installAction = 'retry-installability';
+      }, PROMPT_READY_TIMEOUT_MS);
+      return;
+    }
+
+    if (isIos()) {
+      button.textContent = 'Agregar app al iPhone';
+      button.dataset.installAction = 'ios-instructions';
+      return;
+    }
+
+    button.dataset.installAction = 'manual-fallback';
   }
 
   function buildPersistentCta() {
@@ -82,25 +152,28 @@
       return null;
     }
     const existing = document.getElementById('portal-install-cta');
-    if (existing) return existing;
+    if (existing) {
+      configureCtaButton(existing.querySelector('#open-worker-portal-install'));
+      return existing;
+    }
 
     installStyles();
     const cta = createElement('section', {
       id: 'portal-install-cta',
-      'aria-label': 'Instalar Portal del Auxiliar'
+      'aria-label': 'Descargar Portal del Auxiliar'
     });
     const icon = createElement('div', { className: 'portal-install-cta-icon', 'aria-hidden': 'true' }, 'L');
     const copy = createElement('div', { className: 'portal-install-cta-copy' });
     copy.append(
-      createElement('strong', {}, 'Instala el Portal del Auxiliar'),
-      createElement('span', {}, 'Déjalo como aplicación en este teléfono para abrirlo más rápido y usar el modo offline.')
+      createElement('strong', {}, 'Descarga el Portal del Auxiliar'),
+      createElement('span', {}, 'Instálalo como aplicación para abrirlo rápido y conservar las marcaciones offline.')
     );
     const button = createElement('button', {
       type: 'button',
       className: 'portal-install-cta-button',
       id: 'open-worker-portal-install'
-    }, 'Instalar portal');
-    button.addEventListener('click', showInstallDialog);
+    }, 'Descargar app');
+    button.addEventListener('click', handlePersistentButton);
     cta.append(icon, copy, button);
 
     const connectivity = document.getElementById('portal-connectivity');
@@ -108,6 +181,7 @@
     if (connectivity?.parentNode) connectivity.insertAdjacentElement('afterend', cta);
     else if (header?.parentNode) header.insertAdjacentElement('afterend', cta);
     else document.querySelector('main')?.prepend(cta);
+    configureCtaButton(button);
     return cta;
   }
 
@@ -124,18 +198,18 @@
     const body = createElement('div', { className: 'portal-install-body' });
     const icon = createElement('div', { className: 'portal-install-icon', 'aria-hidden': 'true' }, 'L');
     const brand = createElement('p', { className: 'portal-install-brand' }, 'Lórren · Portal del Auxiliar');
-    const title = createElement('h2', { className: 'portal-install-title', id: 'portal-install-title' }, 'Instala el portal en este teléfono');
-    const copy = createElement('p', { className: 'portal-install-copy', id: 'portal-install-copy' }, 'Ábrelo como una aplicación y conserva el acceso a tus marcaciones cuando la conexión falle.');
+    const title = createElement('h2', { className: 'portal-install-title', id: 'portal-install-title' }, 'Descarga el portal en este teléfono');
+    const copy = createElement('p', { className: 'portal-install-copy', id: 'portal-install-copy' }, 'Chrome abrirá el instalador oficial. No se descarga un APK ni necesitas entrar a Play Store.');
     const benefits = createElement('ul', { className: 'portal-install-benefits' });
     benefits.append(
-      createElement('li', {}, 'Acceso directo desde la pantalla de inicio.'),
-      createElement('li', {}, 'Apertura en una ventana independiente del navegador.'),
-      createElement('li', {}, 'Soporte para guardar marcaciones cuando no haya internet.')
+      createElement('li', {}, 'Icono propio en la pantalla de inicio.'),
+      createElement('li', {}, 'Apertura como una aplicación independiente.'),
+      createElement('li', {}, 'Soporte para guardar marcaciones sin conexión.')
     );
     const instructions = createElement('div', { className: 'portal-install-instructions', id: 'portal-install-instructions', hidden: true });
     const status = createElement('div', { className: 'portal-install-status', id: 'portal-install-status', role: 'status', 'aria-live': 'polite', hidden: true });
     const actions = createElement('div', { className: 'portal-install-actions' });
-    const installButton = createElement('button', { type: 'button', className: 'portal-install-primary', id: 'install-worker-portal' }, 'Instalar Portal del Auxiliar');
+    const installButton = createElement('button', { type: 'button', className: 'portal-install-primary', id: 'install-worker-portal' }, 'Descargar app');
     const closeButton = createElement('button', { type: 'button', className: 'portal-install-secondary', id: 'dismiss-worker-portal-install' }, 'Ahora no');
 
     actions.append(installButton, closeButton);
@@ -148,7 +222,7 @@
       event.preventDefault();
       closeDialog(dialog);
     });
-    installButton.addEventListener('click', () => handleInstall(dialog));
+    installButton.addEventListener('click', () => handleNativeInstall(dialog));
     return dialog;
   }
 
@@ -172,38 +246,38 @@
     status.textContent = message;
   }
 
-  function renderManualInstructions(dialog) {
+  function renderIosInstructions(dialog) {
     const instructions = dialog.querySelector('#portal-install-instructions');
     const installButton = dialog.querySelector('#install-worker-portal');
     const closeButton = dialog.querySelector('#dismiss-worker-portal-install');
     if (!instructions || !installButton || !closeButton) return;
-
     instructions.hidden = false;
     installButton.hidden = true;
     closeButton.textContent = 'Entendido';
-
-    if (isInAppBrowser()) {
-      instructions.innerHTML = '<strong>Primero abre este portal en el navegador del teléfono:</strong><ol><li>Pulsa el menú de esta pantalla.</li><li>Selecciona “Abrir en Chrome” o “Abrir en Safari”.</li><li>Desde el navegador, instala o agrega el portal a la pantalla de inicio.</li></ol>';
-    } else if (isIos()) {
-      instructions.innerHTML = '<strong>En iPhone o iPad:</strong><ol><li>Pulsa el botón Compartir de Safari.</li><li>Selecciona “Agregar a pantalla de inicio”.</li><li>Pulsa “Agregar”.</li></ol>';
-    } else if (isAndroid()) {
-      instructions.innerHTML = '<strong>En Android:</strong><ol><li>Abre el menú ⋮ del navegador.</li><li>Pulsa “Instalar aplicación” o “Agregar a pantalla principal”.</li><li>Confirma la instalación.</li></ol>';
-    } else {
-      instructions.innerHTML = '<strong>Instalación manual:</strong><ol><li>Abre el menú del navegador.</li><li>Busca “Instalar aplicación” o “Agregar a pantalla de inicio”.</li><li>Confirma la instalación.</li></ol>';
-    }
+    instructions.innerHTML = '<strong>Apple no permite iniciar esta instalación desde un botón:</strong><ol><li>Pulsa Compartir en Safari.</li><li>Selecciona “Agregar a pantalla de inicio”.</li><li>Pulsa “Agregar”.</li></ol>';
+    setStatus(dialog, 'En iPhone la instalación depende del menú de Safari.', 'warning');
   }
 
-  function renderInstallState(dialog) {
+  function renderPromptNotReady(dialog) {
+    const installButton = dialog.querySelector('#install-worker-portal');
+    if (!installButton) return;
+    installButton.hidden = false;
+    installButton.disabled = true;
+    installButton.textContent = 'Preparando descarga…';
+    setStatus(dialog, 'Chrome está verificando que la aplicación esté lista para instalarse.');
+  }
+
+  function renderNativeReady(dialog) {
+    const instructions = dialog.querySelector('#portal-install-instructions');
     const installButton = dialog.querySelector('#install-worker-portal');
     const closeButton = dialog.querySelector('#dismiss-worker-portal-install');
-    const instructions = dialog.querySelector('#portal-install-instructions');
     if (!installButton || !closeButton || !instructions) return;
     instructions.hidden = true;
     installButton.hidden = false;
     installButton.disabled = false;
-    installButton.textContent = 'Instalar Portal del Auxiliar';
+    installButton.textContent = 'Descargar app';
     closeButton.textContent = 'Ahora no';
-    setStatus(dialog, 'La instalación requiere tu confirmación.');
+    setStatus(dialog, 'Pulsa descargar para abrir el instalador oficial de Chrome.');
   }
 
   function showInstallDialog() {
@@ -212,26 +286,79 @@
       return;
     }
     const dialog = buildDialog();
-    if (deferredInstallPrompt) renderInstallState(dialog);
-    else renderManualInstructions(dialog);
+    if (deferredInstallPrompt) renderNativeReady(dialog);
+    else if (isIos()) renderIosInstructions(dialog);
+    else renderPromptNotReady(dialog);
     showDialog(dialog);
   }
 
-  async function handleInstall(dialog) {
+  async function refreshInstallability() {
+    try {
+      const registration = await navigator.serviceWorker?.ready;
+      await registration?.update?.();
+    } catch {
+      // El botón permanece disponible para volver a intentar.
+    }
+    const manifestLink = document.querySelector('link[rel="manifest"]');
+    if (manifestLink?.href) {
+      fetch(manifestLink.href, { cache: 'reload', credentials: 'same-origin' }).catch(() => {});
+    }
+  }
+
+  function handlePersistentButton(event) {
+    const button = event.currentTarget;
+    const action = button?.dataset?.installAction;
+
+    if (action === 'open-chrome') {
+      window.location.href = androidChromeIntentUrl();
+      return;
+    }
+
+    if (action === 'native-prompt' && deferredInstallPrompt) {
+      showInstallDialog();
+      return;
+    }
+
+    if (action === 'ios-instructions') {
+      showInstallDialog();
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = 'Preparando descarga…';
+    refreshInstallability().finally(() => {
+      if (deferredInstallPrompt) {
+        configureCtaButton(button);
+        showInstallDialog();
+        return;
+      }
+      window.setTimeout(() => configureCtaButton(button), 1200);
+    });
+  }
+
+  async function handleNativeInstall(dialog) {
     const installButton = dialog.querySelector('#install-worker-portal');
     if (!installButton) return;
 
     if (!deferredInstallPrompt) {
-      renderManualInstructions(dialog);
-      setStatus(dialog, 'El navegador no habilitó la instalación directa. Sigue los pasos mostrados.', 'warning');
+      if (isAndroid() && isInAppBrowser()) {
+        window.location.href = androidChromeIntentUrl();
+        return;
+      }
+      if (isIos()) {
+        renderIosInstructions(dialog);
+        return;
+      }
+      renderPromptNotReady(dialog);
+      await refreshInstallability();
       return;
     }
 
     const promptEvent = deferredInstallPrompt;
     deferredInstallPrompt = null;
     installButton.disabled = true;
-    installButton.textContent = 'Abriendo instalación…';
-    setStatus(dialog, 'Confirma la instalación en la ventana del navegador.');
+    installButton.textContent = 'Abriendo descarga…';
+    setStatus(dialog, 'Confirma la instalación en la ventana de Chrome.');
 
     try {
       await promptEvent.prompt();
@@ -245,11 +372,13 @@
         if (closeButton) closeButton.textContent = 'Continuar';
         return;
       }
-      setStatus(dialog, 'La instalación fue cancelada. El botón seguirá disponible.', 'warning');
-      renderManualInstructions(dialog);
+      setStatus(dialog, 'La descarga fue cancelada. Puedes volver a intentarlo.', 'warning');
+      installButton.disabled = false;
+      installButton.textContent = 'Reintentar descarga';
     } catch {
-      renderManualInstructions(dialog);
-      setStatus(dialog, 'No fue posible abrir la instalación automática. Sigue los pasos mostrados.', 'warning');
+      setStatus(dialog, 'Chrome no pudo abrir el instalador. Recarga el portal e inténtalo nuevamente.', 'warning');
+      installButton.disabled = false;
+      installButton.textContent = 'Reintentar descarga';
     }
   }
 
@@ -295,14 +424,20 @@
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
+    window.clearTimeout(promptReadyTimer);
     buildPersistentCta();
     const dialog = document.getElementById('portal-install-dialog');
-    if (dialog?.open) renderInstallState(dialog);
+    if (dialog?.open) renderNativeReady(dialog);
+    if (requestedInstallFromExternalBrowser()) {
+      removeInstallQueryParam();
+      showInstallDialog();
+    }
   });
 
   window.addEventListener('appinstalled', () => {
     installedThisSession = true;
     deferredInstallPrompt = null;
+    removeInstallQueryParam();
     document.getElementById('portal-install-cta')?.remove();
     const dialog = document.getElementById('portal-install-dialog');
     if (!dialog) return;
@@ -321,4 +456,5 @@
   installStyles();
   buildPersistentCta();
   observeEnrollmentSuccess();
+  refreshInstallability();
 })();
