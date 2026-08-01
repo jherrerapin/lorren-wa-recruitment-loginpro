@@ -1,17 +1,17 @@
 name: Apply PR 890 final fixes
 
 on:
-  push:
-    branches:
-      - fix/cv-token-savings-persistent-cache
-    paths:
-      - .pr890fix/run
+  pull_request:
+    types:
+      - ready_for_review
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   fix:
+    if: github.event.pull_request.number == 890 && github.event.pull_request.head.ref == 'fix/cv-token-savings-persistent-cache'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
