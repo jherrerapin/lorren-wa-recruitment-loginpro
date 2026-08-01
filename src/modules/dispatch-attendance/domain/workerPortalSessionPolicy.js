@@ -77,7 +77,7 @@ export function buildWorkerPortalSessionCookie(expiresAt, now = new Date()) {
     options: {
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'lax',
       path: WORKER_PORTAL_SESSION_COOKIE_PATH,
       maxAge
     }

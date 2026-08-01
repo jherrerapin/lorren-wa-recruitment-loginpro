@@ -9,12 +9,12 @@ const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
 
-test('el cargador incluye la instalación y el traspaso de sesión con una versión nueva', () => {
+test('el cargador incluye instalación y preparación de sesión en todo Android', () => {
   assert.match(loaderSource, /worker-portal-install\.js/);
   assert.match(loaderSource, /worker-portal-session-handoff\.js/);
-  assert.match(loaderSource, /20260801-install-button-cache-v3/);
-  assert.match(loaderSource, /Android/);
-  assert.match(loaderSource, /WhatsApp\|FBAN\|FBAV\|Instagram/);
+  assert.match(loaderSource, /20260801-pwa-session-launch-v1/);
+  assert.match(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF = \/Android/);
+  assert.doesNotMatch(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF[\s\S]*WhatsApp\|FBAN/);
 });
 
 
@@ -45,14 +45,23 @@ test('Android usa el diálogo nativo iniciado por el usuario cuando está dispon
 });
 
 
-test('el navegador interno transfiere la sesión antes de abrir Chrome', () => {
+test('Android renueva la sesión antes de abrir el instalador', () => {
   assert.match(handoffSource, /sesion-transferencia\/crear/);
   assert.match(handoffSource, /sesion-transferencia\/continuar/);
   assert.match(handoffSource, /X-Requested-With/);
   assert.match(handoffSource, /credentials: 'include'/);
   assert.match(handoffSource, /stopImmediatePropagation/);
+  assert.match(handoffSource, /handoffAlreadyCompleted/);
+  assert.match(handoffSource, /Preparando aplicación/);
+  assert.match(handoffSource, /window\.location\.href = continueUrl\(handoffToken\)\.toString\(\)/);
+});
+
+
+test('el navegador interno transfiere esa sesión a Chrome', () => {
+  assert.match(handoffSource, /isAndroidInAppBrowser/);
   assert.match(handoffSource, /package=com\.android\.chrome/);
   assert.match(handoffSource, /Abrir en Chrome y descargar/);
+  assert.match(handoffSource, /window\.location\.href = chromeIntentUrl\(handoffToken\)/);
 });
 
 
