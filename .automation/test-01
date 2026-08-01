@@ -1,0 +1,97 @@
+      results: input.candidates.map((item) => matchResult(item.candidateId))
+    }, usage);
+  };
+
+  const first = await reviewVacancyCandidates(
+    prisma,
+    { vacancyId: targetVacancy.id, desiredProfile },
+    { openAiPost, model: 'gpt-5.6-terra' }
+  );
+  assert.equal(first.ok, true);
+  assert.deepEqual(prisma.getCandidateWhere().status.in, ['REGISTRADO', 'CONTACTADO', 'APROBADO']);
+  assert.equal(requests.length, 2);
+  assert.equal(prisma.stores.profiles.size, 1);
+  assert.equal(prisma.stores.comparisons.size, 2);
+
+  clearCvIntelligenceCachesForTest();
+  requests.length = 0;
+  const second = await reviewVacancyCandidates(
+    prisma,
+    { vacancyId: targetVacancy.id, desiredProfile },
+    { openAiPost, model: 'gpt-5.6-terra' }
+  );
+  assert.equal(second.ok, true);
+  assert.equal(requests.length, 0);
+  assert.deepEqual(second.groups.strong.map((item) => item.candidate.id), ['one', 'two']);
+});
+
+test('un candidato nuevo procesa únicamente ese candidato y cambios relevantes invalidan su huella', async () => {
+  clearCvIntelligenceCachesForTest();
+  const targetVacancy = vacancy();
+  const firstCandidate = candidate('existing', targetVacancy);
+  const prisma = persistentPrisma(targetVacancy, [firstCandidate]);
+  const requests = [];
+  const openAiPost = async (payload) => {
+    requests.push(payload);
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      return structuredResponse(profileResult());
+    }
+    const input = JSON.parse(payload.input[1].content[0].text);
+    return structuredResponse({ results: input.candidates.map((item) => matchResult(item.candidateId)) });
+  };
+
+  await reviewVacancyCandidates(prisma, { vacancyId: targetVacancy.id, desiredProfile }, { openAiPost });
+  clearCvIntelligenceCachesForTest();
+  requests.length = 0;
+  const newCandidate = candidate('new', targetVacancy, { status: 'CONTACTADO' });
+  prisma.setCandidates([firstCandidate, newCandidate]);
+  await reviewVacancyCandidates(prisma, { vacancyId: targetVacancy.id, desiredProfile }, { openAiPost });
+  assert.equal(requests.length, 1);
+  const newInput = JSON.parse(requests[0].input[1].content[0].text);
+  assert.deepEqual(newInput.candidates.map((item) => item.candidateId), ['new']);
+
+  clearCvIntelligenceCachesForTest();
+  requests.length = 0;
+  prisma.setCandidates([{ ...firstCandidate, transportMode: 'Bicicleta' }, newCandidate]);
+  await reviewVacancyCandidates(prisma, { vacancyId: targetVacancy.id, desiredProfile }, { openAiPost });
+  assert.equal(requests.length, 1);
+  const changedInput = JSON.parse(requests[0].input[1].content[0].text);
+  assert.deepEqual(changedInput.candidates.map((item) => item.candidateId), ['existing']);
+});
+
+test('no persiste una comparación parcial y registra usage sin PII', async () => {
+  clearCvIntelligenceCachesForTest();
+  const targetVacancy = vacancy();
+  const candidates = [candidate('partial-one', targetVacancy), candidate('partial-two', targetVacancy)];
+  const prisma = persistentPrisma(targetVacancy, candidates);
+  const openAiPost = async (payload) => {
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      return structuredResponse(profileResult(), usage);
+    }
+    const input = JSON.parse(payload.input[1].content[0].text);
+    if (input.candidates.length === 1) return structuredResponse({ results: [] }, usage);
+    return structuredResponse({ results: [matchResult(input.candidates[0].candidateId)] }, usage);
+  };
+
+  const result = await reviewVacancyCandidates(
+    prisma,
+    { vacancyId: targetVacancy.id, desiredProfile },
+    { openAiPost }
+  );
+  assert.equal(result.ok, true);
+  assert.equal(prisma.stores.comparisons.size, 0);
+  assert.equal(prisma.stores.comparisonWrites.length, 0);
+  assert.ok(prisma.stores.usage.length >= 2);
+  for (const row of prisma.stores.usage) {
+    assert.equal(row.inputTokens, 1000);
+    assert.equal(row.cachedInputTokens, 600);
+    assert.equal(row.cacheWriteTokens, 50);
+    assert.equal(row.outputTokens, 120);
+    assert.equal(row.reasoningTokens, 30);
+    assert.equal(row.totalTokens, 1120);
+    assert.equal(Object.hasOwn(row, 'prompt'), false);
+    assert.equal(Object.hasOwn(row, 'response'), false);
+    assert.equal(Object.hasOwn(row, 'phone'), false);
+    assert.equal(Object.hasOwn(row, 'documentNumber'), false);
+  }
+});
