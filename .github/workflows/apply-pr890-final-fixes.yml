@@ -1,0 +1,48 @@
+name: Apply PR 890 final fixes
+
+on:
+  push:
+    branches:
+      - fix/cv-token-savings-persistent-cache
+    paths:
+      - .pr890fix/run
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/cv-token-savings-persistent-cache
+          fetch-depth: 0
+
+      - name: Apply reviewed fixes
+        run: python .pr890fix/patch.py
+
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/services/cvIntelligence.js
+          node --check test/cvTokenSavings.test.js
+          npm ci
+          DATABASE_URL='postgresql://user:pass@localhost:5432/lorren_test' npx prisma validate
+          npm run build
+          node --test test/cvTokenSavings.test.js test/cvIntelligenceReviewContracts.test.js test/attachmentAnalysisContract.test.js
+          git diff --check
+
+      - name: Commit validated changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .pr890fix .cv-finalize
+          rm -f .github/workflows/finalize-cv-token-savings.yml
+          rm -f .github/workflows/apply-pr890-final-fixes.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: completar ahorro persistente de tokens HV'
+          git push origin HEAD:fix/cv-token-savings-persistent-cache
