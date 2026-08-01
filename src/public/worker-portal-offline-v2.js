@@ -219,7 +219,7 @@
   async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return null;
     registration = await navigator.serviceWorker.register('/operaciones/portal/service-worker.js', {
-      scope: '/operaciones/portal/'
+      scope: '/operaciones/portal'
     });
     registration = await navigator.serviceWorker.ready;
     postToServiceWorker({ type: 'CACHE_PORTAL' });
