@@ -1,0 +1,84 @@
+name: Patch CV document fingerprint
+
+on:
+  push:
+    branches:
+      - fix/cv-token-savings-persistent-cache
+    paths:
+      - .fingerprint/apply
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/cv-token-savings-persistent-cache
+          fetch-depth: 0
+      - name: Include document reference only in persistent fingerprint
+        shell: python
+        run: |
+          from pathlib import Path
+          service = Path('src/services/cvIntelligence.js')
+          text = service.read_text()
+          old = '''  const comparisonEntries = readable.map((item) => {
+    const candidatePayload = candidateForMatching(item.candidate, item.analysis);
+    return {
+      item,
+      candidatePayload,
+      modelUsed,
+      fingerprint: reviewCacheKey('candidate-match', {
+        model: modelUsed,
+        comparisonProfile,
+        candidate: candidatePayload
+      })
+    };
+  });'''
+          new = '''  const comparisonEntries = readable.map((item) => {
+    const candidatePayload = candidateForMatching(item.candidate, item.analysis);
+    const documentReference = parseCvAnalysisEvidence(item.analysis)?.documentReference
+      || candidateCvReference(item.candidate);
+    return {
+      item,
+      candidatePayload,
+      modelUsed,
+      fingerprint: reviewCacheKey('candidate-match', {
+        model: modelUsed,
+        comparisonProfile,
+        documentReference,
+        candidate: candidatePayload
+      })
+    };
+  });'''
+          if old not in text:
+              raise SystemExit('Comparison fingerprint block not found')
+          service.write_text(text.replace(old, new, 1))
+
+          test_file = Path('test/cvTokenSavings.test.js')
+          test_text = test_file.read_text()
+          test_text = test_text.replace('return structuredResponse({      results:', 'return structuredResponse({\n      results:', 1)
+          test_file.write_text(test_text)
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/services/cvIntelligence.js
+          node --check test/cvTokenSavings.test.js
+          npm ci
+          DATABASE_URL='postgresql://user:pass@localhost:5432/lorren_test' npx prisma validate
+          npm run build
+          node --test test/cvTokenSavings.test.js test/cvIntelligenceReviewContracts.test.js test/attachmentAnalysisContract.test.js
+          git diff --check
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .fingerprint
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- src/services/cvIntelligence.js test/cvTokenSavings.test.js .fingerprint
+          git commit -m 'fix: invalidar caché al cambiar la hoja de vida'
+          git push origin HEAD:fix/cv-token-savings-persistent-cache
