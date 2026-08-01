@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { workerPortalRouter as coreWorkerPortalRouter, applyWorkerPortalSecurityHeaders } from './workerPortalCore.js';
+import { createWorkerPortalSessionHandoffRouter } from './workerPortalSessionHandoff.js';
 import { resolveWorkerPortalSession } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { createPrismaWorkerPortalSessionRepository } from '../modules/dispatch-attendance/infrastructure/prismaWorkerPortalSessionRepository.js';
 import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
@@ -459,6 +460,17 @@ export function workerPortalRouter(prisma, options = {}) {
       return strictError(res, status, code, 'No fue posible completar la validación facial.');
     }
   });
+
+  router.use('/sesion-transferencia', createWorkerPortalSessionHandoffRouter(prisma, {
+    repository: getRepository(),
+    resolveSessionFn,
+    nowFn,
+    env: options.env || process.env,
+    secret: options.handoffSecret ?? options.installationPepper,
+    ttlMs: options.handoffTtlMs,
+    randomBytesFn: options.handoffRandomBytesFn,
+    rotateSessionTokenFn: options.rotateSessionTokenFn
+  }));
 
   return router;
 }

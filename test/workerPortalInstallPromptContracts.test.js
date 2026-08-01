@@ -4,20 +4,24 @@ import fs from 'node:fs';
 
 const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
 const installSource = fs.readFileSync(new URL('../src/public/worker-portal-install.js', import.meta.url), 'utf8');
+const handoffSource = fs.readFileSync(new URL('../src/public/worker-portal-session-handoff.js', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
 
-test('el cargador incluye el flujo de instalación con una versión nueva', () => {
+test('el cargador incluye la instalación y el traspaso de sesión con una versión nueva', () => {
   assert.match(loaderSource, /worker-portal-install\.js/);
-  assert.match(loaderSource, /20260801-install-button-cache-v2/);
+  assert.match(loaderSource, /worker-portal-session-handoff\.js/);
+  assert.match(loaderSource, /20260801-install-button-cache-v3/);
+  assert.match(loaderSource, /Android/);
+  assert.match(loaderSource, /WhatsApp\|FBAN\|FBAV\|Instagram/);
 });
 
 
-test('el portal muestra un acceso de instalación aunque el rostro ya estuviera registrado', () => {
+test('el portal muestra un acceso de descarga aunque el rostro ya estuviera registrado', () => {
   assert.match(installSource, /portal-install-cta/);
   assert.match(installSource, /open-worker-portal-install/);
-  assert.match(installSource, /Instalar portal/);
+  assert.match(installSource, /Descargar app/);
   assert.match(installSource, /buildPersistentCta\(\)/);
   assert.match(installSource, /insertAdjacentElement\('afterend', cta\)/);
 });
@@ -37,16 +41,25 @@ test('Android usa el diálogo nativo iniciado por el usuario cuando está dispon
   assert.match(installSource, /event\.preventDefault\(\)/);
   assert.match(installSource, /promptEvent\.prompt\(\)/);
   assert.match(installSource, /promptEvent\.userChoice/);
-  assert.match(installSource, /Instalar Portal del Auxiliar/);
+  assert.match(installSource, /Descargar app/);
 });
 
 
-test('iPhone y navegadores internos reciben instrucciones manuales', () => {
+test('el navegador interno transfiere la sesión antes de abrir Chrome', () => {
+  assert.match(handoffSource, /sesion-transferencia\/crear/);
+  assert.match(handoffSource, /sesion-transferencia\/continuar/);
+  assert.match(handoffSource, /X-Requested-With/);
+  assert.match(handoffSource, /credentials: 'include'/);
+  assert.match(handoffSource, /stopImmediatePropagation/);
+  assert.match(handoffSource, /package=com\.android\.chrome/);
+  assert.match(handoffSource, /Abrir en Chrome y descargar/);
+});
+
+
+test('iPhone conserva la instalación guiada por Safari', () => {
   assert.match(installSource, /iPad\|iPhone\|iPod/);
-  assert.match(installSource, /WhatsApp\|FBAN\|FBAV\|Instagram/);
   assert.match(installSource, /Agregar a pantalla de inicio/);
-  assert.match(installSource, /Abrir en Chrome/);
-  assert.match(installSource, /Abrir en Safari/);
+  assert.match(installSource, /Apple no permite iniciar esta instalación desde un botón/);
 });
 
 
