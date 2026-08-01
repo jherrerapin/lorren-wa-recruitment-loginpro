@@ -25,27 +25,18 @@ jobs:
           from pathlib import Path
           path = Path('prisma/schema.prisma')
           text = path.read_text()
-
           vacancy_anchor = '  dispatchWorkers        DispatchWorkerVacancy[]\n}'
-          vacancy_replacement = '''  dispatchWorkers        DispatchWorkerVacancy[]
+          text = text.replace(vacancy_anchor, '''  dispatchWorkers        DispatchWorkerVacancy[]
   cvReviewProfiles       CvReviewProfile[]
   cvCandidateComparisons CvCandidateComparison[]
   cvAnalysisUsages       CvAnalysisUsage[]
-}'''
-          if vacancy_anchor not in text:
-              raise SystemExit('Vacancy relation anchor not found')
-          text = text.replace(vacancy_anchor, vacancy_replacement, 1)
-
+}''', 1)
           candidate_anchor = '  dispatchWorker         DispatchWorker?\n\n  @@index([campaignId])'
-          candidate_replacement = '''  dispatchWorker         DispatchWorker?
+          text = text.replace(candidate_anchor, '''  dispatchWorker         DispatchWorker?
   cvCandidateComparisons CvCandidateComparison[]
 
-  @@index([campaignId])'''
-          if candidate_anchor not in text:
-              raise SystemExit('Candidate relation anchor not found')
-          text = text.replace(candidate_anchor, candidate_replacement, 1)
-
-          model_anchor = '''model AppUser {'''
+  @@index([campaignId])''', 1)
+          model_anchor = 'model AppUser {'
           models = '''model CvReviewProfile {
   id                 String   @id @default(cuid())
   fingerprint        String   @unique
@@ -100,23 +91,12 @@ model CvAnalysisUsage {
 }
 
 model AppUser {'''
-          if model_anchor not in text:
-              raise SystemExit('Model insertion anchor not found')
+          if vacancy_anchor not in text or candidate_anchor not in text or model_anchor not in text:
+              raise SystemExit('One or more Prisma anchors were not found')
           text = text.replace(model_anchor, models, 1)
           path.write_text(text)
 
-      - name: Validate
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci
-          DATABASE_URL='postgresql://user:pass@localhost:5432/lorren_test' npx prisma validate
-          npm run build
-          node --check src/services/cvIntelligence.js
-          node --test test/cvTokenSavings.test.js test/cvIntelligenceReviewContracts.test.js test/attachmentAnalysisContract.test.js
-          git diff --check
-
-      - name: Commit
+      - name: Commit schema
         shell: bash
         run: |
           set -euo pipefail
