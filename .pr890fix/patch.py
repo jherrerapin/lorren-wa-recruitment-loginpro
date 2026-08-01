@@ -95,7 +95,8 @@ if 'cvReviewProfiles       CvReviewProfile[]' not in schema:
         'vacancy cache relations'
     )
 
-if 'cvCandidateComparisons CvCandidateComparison[]' not in schema.split('model CandidateDataConsentEvent')[0]:
+candidate_model = schema.split('model Candidate {', 1)[1].split('model CandidateDataConsentEvent', 1)[0]
+if 'cvCandidateComparisons CvCandidateComparison[]' not in candidate_model:
     schema = replace_once(
         schema,
         """  dispatchWorker         DispatchWorker?
