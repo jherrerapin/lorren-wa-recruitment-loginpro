@@ -26,17 +26,19 @@ jobs:
           path = Path('prisma/schema.prisma')
           text = path.read_text()
           vacancy_anchor = '  dispatchWorkers        DispatchWorkerVacancy[]\n}'
+          candidate_anchor = '  dispatchWorker         DispatchWorker?\n\n  @@index([campaignId])'
+          model_anchor = 'model AppUser {'
+          if vacancy_anchor not in text or candidate_anchor not in text or model_anchor not in text:
+              raise SystemExit('One or more Prisma anchors were not found')
           text = text.replace(vacancy_anchor, '''  dispatchWorkers        DispatchWorkerVacancy[]
   cvReviewProfiles       CvReviewProfile[]
   cvCandidateComparisons CvCandidateComparison[]
   cvAnalysisUsages       CvAnalysisUsage[]
 }''', 1)
-          candidate_anchor = '  dispatchWorker         DispatchWorker?\n\n  @@index([campaignId])'
           text = text.replace(candidate_anchor, '''  dispatchWorker         DispatchWorker?
   cvCandidateComparisons CvCandidateComparison[]
 
   @@index([campaignId])''', 1)
-          model_anchor = 'model AppUser {'
           models = '''model CvReviewProfile {
   id                 String   @id @default(cuid())
   fingerprint        String   @unique
@@ -91,8 +93,6 @@ model CvAnalysisUsage {
 }
 
 model AppUser {'''
-          if vacancy_anchor not in text or candidate_anchor not in text or model_anchor not in text:
-              raise SystemExit('One or more Prisma anchors were not found')
           text = text.replace(model_anchor, models, 1)
           path.write_text(text)
 
