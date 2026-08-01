@@ -238,7 +238,7 @@ async function syncRecord(rawRecord) {
       markType: record.markType,
       error: 'offline_capture_expired'
     });
-    return { retry: false, sessionRequired: false };
+    return { retry: false, sessionRequired: false, blockAssignment: true };
   }
 
   const inProgress = {
@@ -278,7 +278,7 @@ async function syncRecord(rawRecord) {
       markType: record.markType,
       error: 'network_unavailable'
     });
-    return { retry: true, sessionRequired: false, error };
+    return { retry: true, sessionRequired: false, blockAssignment: true, error };
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -299,7 +299,7 @@ async function syncRecord(rawRecord) {
       state,
       payload
     });
-    return { retry: false, sessionRequired: false };
+    return { retry: false, sessionRequired: false, blockAssignment: false };
   }
 
   if (response.status === 401) {
@@ -315,7 +315,7 @@ async function syncRecord(rawRecord) {
       markType: record.markType,
       error: 'portal_session_required'
     });
-    return { retry: false, sessionRequired: true };
+    return { retry: false, sessionRequired: true, blockAssignment: true };
   }
 
   if (terminalRejection(response.status, payload.error)) {
@@ -333,7 +333,7 @@ async function syncRecord(rawRecord) {
       markType: record.markType,
       error: payload.error || 'mark_rejected'
     });
-    return { retry: false, sessionRequired: false };
+    return { retry: false, sessionRequired: false, blockAssignment: !alreadyRecorded };
   }
 
   await putQueueRecord({
@@ -348,15 +348,19 @@ async function syncRecord(rawRecord) {
     markType: record.markType,
     error: payload.error || `http_${response.status}`
   });
-  return { retry: response.status >= 500, sessionRequired: false };
+  return { retry: response.status >= 500, sessionRequired: false, blockAssignment: true };
 }
 
 async function syncQueue({ throwOnRetry = false } = {}) {
   const records = (await readQueue()).sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt)));
+  const blockedAssignments = new Set();
   let shouldRetry = false;
   for (const record of records) {
+    const assignmentId = String(record.assignmentId || '');
+    if (blockedAssignments.has(assignmentId)) continue;
     const result = await syncRecord(record);
     shouldRetry = shouldRetry || result.retry;
+    if (result.blockAssignment) blockedAssignments.add(assignmentId);
     if (result.sessionRequired) break;
   }
   if (throwOnRetry && shouldRetry) throw new Error('arrival_sync_retry_required');
