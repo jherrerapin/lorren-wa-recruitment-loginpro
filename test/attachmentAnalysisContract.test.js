@@ -283,6 +283,7 @@ test('la revisión por vacante combina contexto y reintenta candidatos omitidos'
     cachedCandidate('candidate-unmatched', 'Experiencia en atención al cliente.')
   ];
   const calls = [];
+  let matchCalls = 0;
   const openAiPost = async (payload) => {
     calls.push(payload);
     const schemaName = payload.text.format.name;
@@ -302,6 +303,35 @@ test('la revisión por vacante combina contexto y reintenta candidatos omitidos'
     }
     const matchInput = JSON.parse(payload.input[1].content[0].text);
     const requestedIds = matchInput.candidates.map((candidate) => candidate.candidateId);
+    matchCalls += 1;
+    if (matchCalls > 1 && requestedIds.length === 3) {
+      return { data: { output: [{ content: [{ parsed: { results: [
+        {
+          candidateId: 'candidate-possible',
+          level: 'POSSIBLE',
+          score: 58,
+          reasons: ['Tiene experiencia relacionada con bodega.'],
+          evidence: ['Hoja de vida: seis meses apoyando bodega.', 'Registro: transporte público.'],
+          gaps: ['Falta confirmar un año de experiencia.']
+        },
+        {
+          candidateId: 'candidate-strong',
+          level: 'STRONG',
+          score: 92,
+          reasons: ['Cumple experiencia y Excel.'],
+          evidence: ['Hoja de vida: dos años manejando inventarios y Excel.', 'Registro: medio de transporte Moto.'],
+          gaps: []
+        },
+        {
+          candidateId: 'candidate-unmatched',
+          level: 'LOW',
+          score: 18,
+          reasons: ['La experiencia disponible está en otro contexto laboral.'],
+          evidence: ['Experiencia en atención al cliente.'],
+          gaps: ['No se encontró experiencia equivalente en inventarios.']
+        }
+      ] } }] }] } };
+    }
     if (requestedIds.length === 1 && requestedIds[0] === 'candidate-unmatched') {
       return { data: { output: [{ content: [{ parsed: { results: [{
         candidateId: 'candidate-unmatched',
@@ -392,10 +422,13 @@ test('la revisión por vacante combina contexto y reintenta candidatos omitidos'
     ['candidate-strong', 'candidate-possible', 'candidate-unmatched']
   );
   const retryInput = JSON.parse(calls[2].input[1].content[0].text);
-  assert.deepEqual(retryInput.candidates.map((candidate) => candidate.candidateId), ['candidate-unmatched']);
+  assert.deepEqual(
+    retryInput.candidates.map((candidate) => candidate.candidateId),
+    ['candidate-strong', 'candidate-possible', 'candidate-unmatched']
+  );
   assert.deepEqual(
     calls[2].text.format.schema.properties.results.items.properties.candidateId.enum,
-    ['candidate-unmatched']
+    ['candidate-strong', 'candidate-possible', 'candidate-unmatched']
   );
   assert.match(calls[0].input[0].content[0].text, /requisitos y la descripción de la vacante son la base/i);
   assert.match(calls[0].input[0].content[0].text, /no exijas coincidencias literales/i);

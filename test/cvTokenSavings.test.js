@@ -177,7 +177,8 @@ test('filtra estados y una revisión persistida idéntica hace cero llamadas a O
     assert.equal(input.candidates[0].sources.cv.skills.length, 15);
     assert.equal(input.candidates[0].sources.cv.certifications.length, 10);
     assert.equal(typeof payload.prompt_cache_key, 'string');
-    return structuredResponse({      results: input.candidates.map((item) => matchResult(item.candidateId))
+    return structuredResponse({
+      results: input.candidates.map((item) => matchResult(item.candidateId))
     }, usage);
   };
 
@@ -236,6 +237,27 @@ test('un candidato nuevo procesa únicamente ese candidato y cambios relevantes 
   assert.equal(requests.length, 1);
   const changedInput = JSON.parse(requests[0].input[1].content[0].text);
   assert.deepEqual(changedInput.candidates.map((item) => item.candidateId), ['existing']);
+
+  clearCvIntelligenceCachesForTest();
+  requests.length = 0;
+  const replacedAnalysis = {
+    ...firstCandidate.attachmentAnalyses[0],
+    id: 'analysis-existing-replaced',
+    analysedAt: new Date('2026-08-01T01:00:00.000Z'),
+    rawResponse: {
+      ...firstCandidate.attachmentAnalyses[0].rawResponse,
+      documentReference: 'storage:candidates/existing/hv-replaced.pdf'
+    }
+  };
+  prisma.setCandidates([{
+    ...firstCandidate,
+    cvStorageKey: 'candidates/existing/hv-replaced.pdf',
+    attachmentAnalyses: [replacedAnalysis]
+  }, newCandidate]);
+  await reviewVacancyCandidates(prisma, { vacancyId: targetVacancy.id, desiredProfile }, { openAiPost });
+  assert.equal(requests.length, 1);
+  const replacedInput = JSON.parse(requests[0].input[1].content[0].text);
+  assert.deepEqual(replacedInput.candidates.map((item) => item.candidateId), ['existing']);
 });
 
 test('no persiste una comparación parcial y registra usage sin PII', async () => {
@@ -249,7 +271,13 @@ test('no persiste una comparación parcial y registra usage sin PII', async () =
     }
     const input = JSON.parse(payload.input[1].content[0].text);
     if (input.candidates.length === 1) return structuredResponse({ results: [] }, usage);
-    return structuredResponse({ results: [matchResult(input.candidates[0].candidateId)] }, usage);
+    return structuredResponse({
+      results: [
+        matchResult(input.candidates[0].candidateId),
+        matchResult(input.candidates[0].candidateId),
+        matchResult('unknown-candidate')
+      ]
+    }, usage);
   };
 
   const result = await reviewVacancyCandidates(
