@@ -26,6 +26,11 @@ const REVIEW_CACHE_TTL_MS = 5 * 60 * 1000;
 const REVIEW_CACHE_MAX_ENTRIES = 100;
 const profileInterpretationCache = new Map();
 const candidateComparisonCache = new Map();
+const ELIGIBLE_CANDIDATE_STATUSES = ['REGISTRADO', 'CONTACTADO', 'APROBADO'];
+const MAX_MATCH_EXPERIENCES = 5;
+const MAX_MATCH_RESPONSIBILITIES = 4;
+const MAX_MATCH_SKILLS = 15;
+const MAX_MATCH_CERTIFICATIONS = 10;
 
 const CV_REVIEW_EXTRACTION_SCHEMA = {
   ...CV_EXTRACTION_SCHEMA,
@@ -172,8 +177,7 @@ function parseOutput(data = {}) {
   return null;
 }
 
-function compact(value = '') {
-  return String(value || '').trim();
+function compact(value = '') {  return String(value || '').trim();
 }
 
 function cloneJson(value) {
@@ -195,6 +199,251 @@ function stableJsonValue(value) {
 function reviewCacheKey(scope, payload) {
   const serialized = JSON.stringify(stableJsonValue(payload));
   return crypto.createHash('sha256').update(`${scope}:${serialized}`).digest('hex');
+}
+
+
+function cleanText(value, maxLength = 320) {
+  const text = compact(value).replace(/\s+/g, ' ');
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function withoutEmptyValues(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map(withoutEmptyValues)
+      .filter((item) => item !== null && item !== undefined && item !== '');
+  }
+  if (!value || typeof value !== 'object') return value;
+  return Object.entries(value).reduce((result, [key, item]) => {
+    const cleaned = withoutEmptyValues(item);
+    const emptyObject = cleaned && typeof cleaned === 'object'
+      && !Array.isArray(cleaned)
+      && Object.keys(cleaned).length === 0;
+    if (cleaned === null || cleaned === undefined || cleaned === '' || emptyObject) return result;
+    result[key] = cleaned;
+    return result;
+  }, {});
+}
+
+function usageNumbers(usage = {}) {
+  return {
+    inputTokens: Number(usage.input_tokens || 0),
+    cachedInputTokens: Number(usage.input_tokens_details?.cached_tokens || 0),
+    cacheWriteTokens: Number(usage.input_tokens_details?.cache_write_tokens || 0),
+    outputTokens: Number(usage.output_tokens || 0),
+    reasoningTokens: Number(usage.output_tokens_details?.reasoning_tokens || 0),
+    totalTokens: Number(usage.total_tokens || 0)
+  };
+}
+
+async function persistAnalysisUsage(prisma, usage, context = {}) {
+  if (!usage) return;
+  const values = usageNumbers(usage);
+  const data = {
+    stage: compact(context.stage) || 'unknown',
+    vacancyId: compact(context.vacancyId) || null,
+    candidateCount: Math.max(0, Number(context.candidateCount || 0)),
+    modelUsed: compact(context.modelUsed) || MODEL,
+    ...values
+  };
+  try {
+    if (prisma?.cvAnalysisUsage?.create) {
+      await prisma.cvAnalysisUsage.create({ data });
+    } else if (prisma?.$executeRawUnsafe) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CvAnalysisUsage"
+          ("id", "stage", "vacancyId", "candidateCount", "modelUsed", "inputTokens",
+           "cachedInputTokens", "cacheWriteTokens", "outputTokens", "reasoningTokens",
+           "totalTokens", "createdAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+        crypto.randomUUID(),
+        data.stage,
+        data.vacancyId,
+        data.candidateCount,
+        data.modelUsed,
+        data.inputTokens,
+        data.cachedInputTokens,
+        data.cacheWriteTokens,
+        data.outputTokens,
+        data.reasoningTokens,
+        data.totalTokens
+      );
+    }
+  } catch {
+    // La medición nunca debe impedir el análisis principal.
+  }
+}
+
+function validStoredMatch(row = {}, expectedCandidateId = '') {
+  const candidateId = compact(row.candidateId);
+  const level = compact(row.level);
+  return candidateId === compact(expectedCandidateId)
+    && ['STRONG', 'POSSIBLE', 'LOW'].includes(level)
+    && Number.isFinite(Number(row.score))
+    && Array.isArray(parseStoredJson(row.reasons))
+    && Array.isArray(parseStoredJson(row.evidence))
+    && Array.isArray(parseStoredJson(row.gaps));
+}
+
+function parseStoredJson(value, fallback = []) {
+  if (Array.isArray(value) || (value && typeof value === 'object')) return value;
+  if (typeof value !== 'string') return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function storedMatch(row = {}) {
+  return normalizeMatch({
+    candidateId: row.candidateId,
+    level: row.level,
+    score: row.score,
+    reasons: parseStoredJson(row.reasons),
+    evidence: parseStoredJson(row.evidence),
+    gaps: parseStoredJson(row.gaps)
+  });
+}
+
+async function readStoredProfile(prisma, fingerprint) {
+  try {
+    let row = null;
+    if (prisma?.cvReviewProfile?.findUnique) {
+      row = await prisma.cvReviewProfile.findUnique({ where: { fingerprint } });
+    } else if (prisma?.$queryRawUnsafe) {
+      [row] = await prisma.$queryRawUnsafe(
+        'SELECT "interpretedProfile" FROM "CvReviewProfile" WHERE "fingerprint" = $1 LIMIT 1',
+        fingerprint
+      );
+    }
+    const profile = parseStoredJson(row?.interpretedProfile, null);
+    return isValidInterpretedProfile(profile) ? cloneJson(profile) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeStoredProfile(prisma, { fingerprint, vacancyId, modelUsed, interpretedProfile }) {
+  if (!isValidInterpretedProfile(interpretedProfile)) return;
+  try {
+    if (prisma?.cvReviewProfile?.upsert) {
+      await prisma.cvReviewProfile.upsert({
+        where: { fingerprint },
+        create: { fingerprint, vacancyId, modelUsed, interpretedProfile },
+        update: { modelUsed, interpretedProfile }
+      });
+    } else if (prisma?.$executeRawUnsafe) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CvReviewProfile"
+          ("id", "fingerprint", "vacancyId", "modelUsed", "interpretedProfile", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5::jsonb, NOW(), NOW())
+         ON CONFLICT ("fingerprint") DO UPDATE
+         SET "modelUsed" = EXCLUDED."modelUsed",
+             "interpretedProfile" = EXCLUDED."interpretedProfile",
+             "updatedAt" = NOW()`,
+        crypto.randomUUID(),
+        fingerprint,
+        vacancyId,
+        modelUsed,
+        JSON.stringify(interpretedProfile)
+      );
+    }
+  } catch {
+    // Compatibilidad durante despliegue gradual de la migración.
+  }
+}
+
+async function readStoredComparisons(prisma, entries = []) {
+  const result = new Map();
+  if (!entries.length) return result;
+  const fingerprints = entries.map((entry) => entry.fingerprint);
+  try {
+    let rows = [];
+    if (prisma?.cvCandidateComparison?.findMany) {      rows = await prisma.cvCandidateComparison.findMany({
+        where: { fingerprint: { in: fingerprints } }
+      });
+    } else if (prisma?.$queryRawUnsafe) {
+      const placeholders = fingerprints.map((_, index) => `$${index + 1}`).join(', ');
+      rows = await prisma.$queryRawUnsafe(
+        `SELECT "fingerprint", "candidateId", "level", "score", "reasons", "evidence", "gaps"
+         FROM "CvCandidateComparison"
+         WHERE "fingerprint" IN (${placeholders})`,
+        ...fingerprints
+      );
+    }
+    const expectedByFingerprint = new Map(entries.map((entry) => [
+      entry.fingerprint,
+      entry.item.candidate.id
+    ]));
+    for (const row of rows || []) {
+      const expectedCandidateId = expectedByFingerprint.get(row.fingerprint);
+      if (!expectedCandidateId || !validStoredMatch(row, expectedCandidateId)) continue;
+      result.set(expectedCandidateId, storedMatch(row));
+    }
+  } catch {
+    return new Map();
+  }
+  return result;
+}
+
+async function writeStoredComparisons(prisma, entries = [], matches = []) {
+  if (!entries.length || !matches.length) return;
+  const entryByCandidate = new Map(entries.map((entry) => [entry.item.candidate.id, entry]));
+  for (const match of matches) {
+    const entry = entryByCandidate.get(match.candidateId);
+    if (!entry || !validStoredMatch(match, match.candidateId)) continue;
+    const data = {
+      fingerprint: entry.fingerprint,
+      candidateId: match.candidateId,
+      vacancyId: entry.item.candidate.vacancyId || null,
+      modelUsed: entry.modelUsed,
+      level: match.level,
+      score: match.score,
+      reasons: match.reasons,
+      evidence: match.evidence,
+      gaps: match.gaps
+    };
+    try {
+      if (prisma?.cvCandidateComparison?.upsert) {
+        await prisma.cvCandidateComparison.upsert({
+          where: { fingerprint: entry.fingerprint },
+          create: data,
+          update: {
+            level: data.level,
+            score: data.score,
+            reasons: data.reasons,
+            evidence: data.evidence,
+            gaps: data.gaps,
+            modelUsed: data.modelUsed
+          }
+        });
+      } else if (prisma?.$executeRawUnsafe) {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "CvCandidateComparison"
+            ("id", "fingerprint", "candidateId", "vacancyId", "modelUsed", "level", "score",
+             "reasons", "evidence", "gaps", "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, NOW(), NOW())
+           ON CONFLICT ("fingerprint") DO UPDATE
+           SET "level" = EXCLUDED."level",
+               "score" = EXCLUDED."score",
+               "reasons" = EXCLUDED."reasons",
+               "evidence" = EXCLUDED."evidence",
+               "gaps" = EXCLUDED."gaps",
+               "modelUsed" = EXCLUDED."modelUsed",
+               "updatedAt" = NOW()`,
+          crypto.randomUUID(),
+          data.fingerprint,
+          data.candidateId,
+          data.vacancyId,
+          data.modelUsed,
+          data.level,
+          data.score,
+          JSON.stringify(data.reasons),
+          JSON.stringify(data.evidence),
+          JSON.stringify(data.gaps)
+        );
+      }
+    } catch {
+      // Una falla de persistencia no invalida el resultado ya obtenido.
+    }
+  }
 }
 
 function readReviewCache(cache, key) {
@@ -286,8 +535,7 @@ function selectedModel(options = {}) {
   return compact(options.model) || MODEL;
 }
 
-function candidateCvReference(candidate = {}) {
-  const storageKey = compact(candidate.cvStorageKey);
+function candidateCvReference(candidate = {}) {  const storageKey = compact(candidate.cvStorageKey);
   if (storageKey) return `storage:${storageKey}`;
   if (!candidate.cvData) return null;
   const buffer = Buffer.isBuffer(candidate.cvData) ? candidate.cvData : Buffer.from(candidate.cvData);
@@ -296,8 +544,13 @@ function candidateCvReference(candidate = {}) {
 
 async function requestStructuredOutput({ schema, systemText, userContent }, options = {}) {
   if (!isOpenAiAvailable(options)) return null;
+  const modelUsed = selectedModel(options);
   const payload = {
-    model: selectedModel(options),
+    model: modelUsed,
+    prompt_cache_key: reviewCacheKey('openai-prefix', {
+      model: modelUsed,
+      schema: schema.name
+    }),
     input: [
       {
         role: 'system',
@@ -331,7 +584,14 @@ async function requestStructuredOutput({ schema, systemText, userContent }, opti
       timeout: Number(process.env.OPENAI_CV_TIMEOUT_MS || 45000)
     });
 
-  return parseOutput(response?.data || response);
+  const responseData = response?.data || response;
+  await persistAnalysisUsage(options.prisma, responseData?.usage, {
+    stage: options.usageStage,
+    vacancyId: options.usageVacancyId,
+    candidateCount: options.usageCandidateCount,
+    modelUsed
+  });
+  return parseOutput(responseData);
 }
 
 async function persistAttachmentAnalysis(prisma, candidate, data = {}) {
@@ -454,8 +714,7 @@ export async function analyzeCandidateCv(prisma, candidateId, options = {}) {
 
   const visualFallback = shouldUseVisualPdfFallback(candidate, textResult);
   if (!textResult.ok && !visualFallback) {
-    const classification = textResult.reason === 'unsupported_file_type'
-      ? AttachmentClassification.OTHER
+    const classification = textResult.reason === 'unsupported_file_type'      ? AttachmentClassification.OTHER
       : AttachmentClassification.UNREADABLE;
     const analysis = await persistAttachmentAnalysis(prisma, candidate, {
       classification,
@@ -490,13 +749,20 @@ export async function analyzeCandidateCv(prisma, candidateId, options = {}) {
 
   let extracted;
   try {
+    const extractionOptions = {
+      ...options,
+      prisma,
+      usageStage: 'cv_extraction',
+      usageVacancyId: candidate.vacancyId,
+      usageCandidateCount: 1
+    };
     extracted = visualFallback
       ? await extractCvWithAi({
         buffer,
         mimeType: candidate.cvMimeType,
         fileName: candidate.cvOriginalName
-      }, options)
-      : await extractCvWithAi({ text: textResult.text }, options);
+      }, extractionOptions)
+      : await extractCvWithAi({ text: textResult.text }, extractionOptions);
   } catch (error) {
     const reason = visualFallback ? 'visual_analysis_failed' : 'ai_analysis_failed';
     const analysis = await persistAttachmentAnalysis(prisma, candidate, {
@@ -599,32 +865,54 @@ async function mapWithConcurrency(items, limit, worker) {
 
 function candidateForMatching(candidate, analysis) {
   const extracted = parseCvAnalysisEvidence(analysis).extracted || {};
-  const registeredTransport = normalizeTransportMode(candidate.transportMode) || compact(candidate.transportMode) || null;
-  const registeredResidence = compact(candidate.locality)
-    || compact(candidate.neighborhood)
-    || compact(candidate.zone)
-    || null;
-  return {
+  const registeredTransport = normalizeTransportMode(candidate.transportMode)
+    || cleanText(candidate.transportMode, 80);
+  const registeredResidence = cleanText(
+    candidate.locality || candidate.neighborhood || candidate.zone,
+    160
+  );
+  const experience = Array.isArray(extracted.experience)
+    ? extracted.experience.slice(0, MAX_MATCH_EXPERIENCES).map((item) => withoutEmptyValues({
+      role: cleanText(item?.role, 160),
+      company: cleanText(item?.company, 160),
+      duration: cleanText(item?.duration, 100),
+      responsibilities: Array.isArray(item?.responsibilities)
+        ? item.responsibilities
+          .map((value) => cleanText(value, 240))
+          .filter(Boolean)
+          .slice(0, MAX_MATCH_RESPONSIBILITIES)
+        : []
+    }))
+    : [];
+
+  return withoutEmptyValues({
     candidateId: candidate.id,
     sources: {
       cv: {
         confidence: Number(analysis.confidence || 0),
-        city: extracted.city || null,
-        locality: extracted.locality || null,
-        experienceSummary: extracted.experienceSummary || null,
-        lastRole: extracted.lastRole || null,
-        educationSummary: extracted.educationSummary || null,
+        city: cleanText(extracted.city, 120),
+        locality: cleanText(extracted.locality, 160),
+        experienceSummary: cleanText(extracted.experienceSummary, 900),
+        lastRole: cleanText(extracted.lastRole, 180),
+        educationSummary: cleanText(extracted.educationSummary, 600),
         estimatedExperienceMonths: extracted.estimatedExperienceMonths ?? null,
-        skills: Array.isArray(extracted.skills) ? extracted.skills : [],
-        certifications: Array.isArray(extracted.certifications) ? extracted.certifications : [],
-        experience: Array.isArray(extracted.experience) ? extracted.experience : []
+        skills: Array.isArray(extracted.skills)
+          ? extracted.skills.map((value) => cleanText(value, 120)).filter(Boolean).slice(0, MAX_MATCH_SKILLS)
+          : [],
+        certifications: Array.isArray(extracted.certifications)
+          ? extracted.certifications
+            .map((value) => cleanText(value, 160))
+            .filter(Boolean)
+            .slice(0, MAX_MATCH_CERTIFICATIONS)
+          : [],
+        experience
       },
       registration: {
         transportMode: registeredTransport,
         residence: registeredResidence
       }
     }
-  };
+  });
 }
 
 function isValidInterpretedProfile(profile) {
@@ -637,8 +925,9 @@ function isValidInterpretedProfile(profile) {
   );
 }
 
-async function interpretDesiredProfile(vacancy, desiredProfile, options = {}) {
+async function interpretDesiredProfile(prisma, vacancy, desiredProfile, options = {}) {
   const model = selectedModel(options);
+  const normalizedRequest = compact(desiredProfile).replace(/\s+/g, ' ');
   const cacheKey = reviewCacheKey('profile', {
     model,
     vacancy: {
@@ -648,10 +937,16 @@ async function interpretDesiredProfile(vacancy, desiredProfile, options = {}) {
       requirements: vacancy.requirements || null,
       roleDescription: vacancy.roleDescription || null
     },
-    coordinatorRequest: desiredProfile
+    coordinatorRequest: normalizedRequest
   });
   const cached = readReviewCache(profileInterpretationCache, cacheKey);
   if (cached) return cached;
+
+  const stored = await readStoredProfile(prisma, cacheKey);
+  if (stored) {
+    writeReviewCache(profileInterpretationCache, cacheKey, stored);
+    return stored;
+  }
 
   const interpreted = await requestStructuredOutput({
     schema: DESIRED_PROFILE_SCHEMA,
@@ -671,12 +966,24 @@ Escribe etiquetas y explicaciones fáciles de entender.`,
         requirements: vacancy.requirements || null,
         roleDescription: vacancy.roleDescription || null
       },
-      coordinatorRequest: desiredProfile
+      coordinatorRequest: normalizedRequest
     })
-  }, options);
+  }, {
+    ...options,
+    prisma,
+    usageStage: 'profile_interpretation',
+    usageVacancyId: vacancy.id,
+    usageCandidateCount: 0
+  });
 
   if (isValidInterpretedProfile(interpreted)) {
     writeReviewCache(profileInterpretationCache, cacheKey, interpreted);
+    await writeStoredProfile(prisma, {
+      fingerprint: cacheKey,
+      vacancyId: vacancy.id,
+      modelUsed: model,
+      interpretedProfile: interpreted
+    });
   }
   return interpreted;
 }
@@ -706,7 +1013,7 @@ function completeMatchResponse(response, candidateIds = []) {
   return found.size === expected.size;
 }
 
-async function matchCandidateBatch(comparisonProfile, candidates, options = {}) {
+async function matchCandidateBatch(prisma, comparisonProfile, candidates, options = {}) {
   const candidateIds = candidates.map((candidate) => compact(candidate.candidateId)).filter(Boolean);
   const model = selectedModel(options);
   const cacheKey = reviewCacheKey('matches', {
@@ -741,7 +1048,13 @@ No rechaces candidatos ni uses información personal. Devuelve razones breves y 
       comparisonProfile,
       candidates
     })
-  }, options);
+  }, {
+    ...options,
+    prisma,
+    usageStage: 'candidate_comparison',
+    usageVacancyId: options.usageVacancyId,
+    usageCandidateCount: candidates.length
+  });
 
   if (completeMatchResponse(response, candidateIds)) {
     writeReviewCache(candidateComparisonCache, cacheKey, response);
@@ -760,8 +1073,7 @@ function normalizeMatch(match = {}) {
     score,
     reasons: Array.isArray(match.reasons) ? match.reasons.map(compact).filter(Boolean).slice(0, 4) : [],
     evidence: Array.isArray(match.evidence)
-      ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 5)
-      : [],
+      ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 5)      : [],
     gaps: Array.isArray(match.gaps) ? match.gaps.map(compact).filter(Boolean).slice(0, 4) : []
   };
 }
@@ -801,6 +1113,7 @@ function reserveIndividualRetries(individualRetryBudget, requested) {
 }
 
 async function compareCandidateBatchReliably(
+  prisma,
   comparisonProfile,
   batch,
   individualRetryBudget,
@@ -822,7 +1135,10 @@ async function compareCandidateBatchReliably(
     }
     try {
       const response = ensureMatchResults(
-        await matchCandidateBatch(comparisonProfile, candidates, options)
+        await matchCandidateBatch(prisma, comparisonProfile, candidates, {
+          ...options,
+          usageVacancyId: batch[0]?.candidate?.vacancyId
+        })
       );
       addExpectedMatches(matches, response, candidateIds);
       batchSucceeded = true;
@@ -848,7 +1164,10 @@ async function compareCandidateBatchReliably(
   if (missingCandidates.length > 1) {
     try {
       const response = ensureMatchResults(
-        await matchCandidateBatch(comparisonProfile, missingCandidates, options)
+        await matchCandidateBatch(prisma, comparisonProfile, missingCandidates, {
+          ...options,
+          usageVacancyId: batch[0]?.candidate?.vacancyId
+        })
       );
       addExpectedMatches(
         matches,
@@ -869,7 +1188,10 @@ async function compareCandidateBatchReliably(
   const individualMatches = await mapWithConcurrency(individualCandidates, 3, async (candidate) => {
     try {
       const response = ensureMatchResults(
-        await matchCandidateBatch(comparisonProfile, [candidate], options)
+        await matchCandidateBatch(prisma, comparisonProfile, [candidate], {
+          ...options,
+          usageVacancyId: batch[0]?.candidate?.vacancyId
+        })
       );
       return collectExpectedMatches(response, [candidate.candidateId]).get(candidate.candidateId) || null;
     } catch {
@@ -928,6 +1250,7 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
   const loadedCandidates = await prisma.candidate.findMany({
     where: {
       vacancyId: cleanVacancyId,
+      status: { in: ELIGIBLE_CANDIDATE_STATUSES },
       OR: [
         { cvStorageKey: { not: null } },
         { cvData: { not: null } },
@@ -960,7 +1283,7 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
 
   let interpretedProfile;
   try {
-    interpretedProfile = await interpretDesiredProfile(vacancy, cleanProfile, options);
+    interpretedProfile = await interpretDesiredProfile(prisma, vacancy, cleanProfile, options);
   } catch (error) {
     return { ok: false, reason: 'profile_analysis_failed', error: safeErrorMessage(error), vacancy };
   }
@@ -1003,23 +1326,50 @@ export async function reviewVacancyCandidates(prisma, { vacancyId, desiredProfil
       manualReason: item.analysis?.summary || failureSummary(item.failureReason)
     }));
 
-  const batches = [];
-  for (let index = 0; index < readable.length; index += MATCH_BATCH_SIZE) {
-    batches.push(readable.slice(index, index + MATCH_BATCH_SIZE));
-  }
   const comparisonProfile = buildComparisonProfile(vacancy, cleanProfile, interpretedProfile);
+  const comparisonEntries = readable.map((item) => {
+    const candidatePayload = candidateForMatching(item.candidate, item.analysis);
+    return {
+      item,
+      candidatePayload,
+      modelUsed,
+      fingerprint: reviewCacheKey('candidate-match', {
+        model: modelUsed,
+        comparisonProfile,
+        candidate: candidatePayload
+      })
+    };
+  });
+  const storedMatches = await readStoredComparisons(prisma, comparisonEntries);
+  const pendingReadable = comparisonEntries
+    .filter((entry) => !storedMatches.has(entry.item.candidate.id))
+    .map((entry) => entry.item);
+
+  const batches = [];
+  for (let index = 0; index < pendingReadable.length; index += MATCH_BATCH_SIZE) {
+    batches.push(pendingReadable.slice(index, index + MATCH_BATCH_SIZE));
+  }
   const individualRetryBudget = { remaining: MAX_INDIVIDUAL_MATCH_RETRIES };
   const responses = await mapWithConcurrency(
     batches,
     2,
     (batch) => compareCandidateBatchReliably(
+      prisma,
       comparisonProfile,
       batch,
       individualRetryBudget,
       options
     )
   );
-  const matches = responses.flatMap((response) => response.results);
+  const newMatches = responses.flatMap((response) => response.results);
+  const successfulCandidateIds = new Set(
+    responses
+      .filter((response) => !response.failed)
+      .flatMap((response) => response.results.map((match) => match.candidateId))
+  );
+  const matchesToPersist = newMatches.filter((match) => successfulCandidateIds.has(match.candidateId));
+  await writeStoredComparisons(prisma, comparisonEntries, matchesToPersist);
+  const matches = [...storedMatches.values(), ...newMatches];
   const hasBatchFailure = responses.some((response) => response.failureType === 'batch');
   const hasPartialFailure = responses.some((response) => response.failureType === 'partial');
   const comparisonWarning = hasBatchFailure
