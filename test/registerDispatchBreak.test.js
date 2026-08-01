@@ -33,6 +33,13 @@ function createFixture(overrides = {}) {
     dispatchAssignment: {
       async findUnique({ where }) { return where.id === assignment.id ? assignment : null; }
     },
+    dispatchAttendanceSession: {
+      async update({ where, data }) {
+        assert.equal(where.id, session.id);
+        Object.assign(session, data);
+        return session;
+      }
+    },
     dispatchAttendanceMark: {
       async findUnique({ where, include }) {
         const mark = marks.find((item) => item.idempotencyKey === where.idempotencyKey) || null;
@@ -56,7 +63,7 @@ function createFixture(overrides = {}) {
       return callback(client);
     }
   };
-  return { prisma, marks };
+  return { prisma, marks, session };
 }
 
 function input(markType, at, overrides = {}) {
@@ -71,6 +78,7 @@ function input(markType, at, overrides = {}) {
     longitude: -74.072,
     accuracyMeters: 15,
     installationIdHash: 'installation-hash',
+    persistentStorageAvailable: true,
     ...overrides
   };
 }
@@ -127,6 +135,29 @@ test('usa la hora capturada para validar el orden de un almuerzo sincronizado', 
     }
   ));
   assert.equal(result.recorded, true);
+});
+
+test('marca todo almuerzo offline como pendiente de revisión', async () => {
+  const { prisma, session } = createFixture();
+  const result = await registerDispatchBreak(prisma, input(
+    'BREAK_START',
+    '2026-07-25T17:00:00.000Z',
+    {
+      captureMode: 'OFFLINE_WEB',
+      now: new Date('2026-07-25T17:12:00.000Z'),
+      clientCapturedAt: new Date('2026-07-25T17:00:00.000Z'),
+      persistentStorageAvailable: false
+    }
+  ));
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.validation.validationStatus, 'REVIEW_REQUIRED');
+  assert.equal(result.attendanceMark.decision, 'REVIEW_REQUIRED');
+  assert.ok(result.validation.riskFlags.includes('OFFLINE_WEB_CAPTURE'));
+  assert.ok(result.validation.riskFlags.includes('CLIENT_CLOCK_UNTRUSTED'));
+  assert.ok(result.validation.riskFlags.includes('PERSISTENT_STORAGE_UNAVAILABLE'));
+  assert.ok(result.validation.riskFlags.includes('DELAYED_SYNC'));
+  assert.equal(session.validationStatus, 'REVIEW_REQUIRED');
 });
 
 test('no permite finalizar el almuerzo sin haberlo iniciado', async () => {
