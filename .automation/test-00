@@ -1,0 +1,180 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  clearCvIntelligenceCachesForTest,
+  reviewVacancyCandidates
+} from '../src/services/cvIntelligence.js';
+
+function structuredResponse(parsed, usage = null) {
+  return {
+    data: {
+      output: [{ content: [{ parsed }] }],
+      ...(usage ? { usage } : {})
+    }
+  };
+}
+
+function vacancy() {
+  return {
+    id: 'vacancy-token-test',
+    title: 'Líder de operación',
+    city: 'Neiva',
+    requirements: 'Técnico o tecnólogo con un año de experiencia logística y manejo de personal.',
+    roleDescription: 'Coordina personal y operación logística.'
+  };
+}
+
+function candidate(id, targetVacancy, overrides = {}) {
+  const cvStorageKey = `candidates/${id}/hv.pdf`;
+  return {
+    id,
+    vacancyId: targetVacancy.id,
+    fullName: `Persona ${id}`,
+    phone: `300${id}`,
+    status: 'REGISTRADO',
+    transportMode: 'Moto',
+    locality: 'Neiva',
+    neighborhood: null,
+    zone: null,
+    cvStorageKey,
+    cvData: null,
+    cvOriginalName: `${id}.pdf`,
+    cvMimeType: 'application/pdf',
+    updatedAt: new Date('2026-07-31T12:00:00.000Z'),
+    vacancy: targetVacancy,
+    attachmentAnalyses: [{
+      id: `analysis-${id}`,
+      classification: 'CV_VALID',
+      confidence: 0.94,
+      rawResponse: {
+        documentReference: `storage:${cvStorageKey}`,
+        extracted: {
+          city: 'Neiva',
+          locality: 'Neiva',
+          experienceSummary: 'Experiencia en coordinación logística, inventarios y manejo de personal.',
+          lastRole: 'Líder de operación',
+          educationSummary: 'Tecnólogo en logística',
+          estimatedExperienceMonths: 24,
+          skills: Array.from({ length: 22 }, (_, index) => `Habilidad ${index + 1}`),
+          certifications: Array.from({ length: 14 }, (_, index) => `Certificación ${index + 1}`),
+          experience: Array.from({ length: 8 }, (_, index) => ({
+            role: `Cargo ${index + 1}`,
+            company: `Empresa ${index + 1}`,
+            duration: '12 meses',
+            responsibilities: Array.from({ length: 7 }, (_, item) => `Responsabilidad ${item + 1}`)
+          }))
+        }
+      }
+    }],
+    ...overrides
+  };
+}
+
+function profileResult() {
+  return {
+    summary: 'Perfil técnico o tecnológico con liderazgo logístico.',
+    criteria: [{
+      id: 'logistica',
+      label: 'Experiencia logística',
+      description: 'Experiencia relacionada con operación logística y manejo de personal.',
+      priority: 'REQUIRED',
+      minimumMonths: 12,
+      keywords: ['logística', 'operación', 'personal']
+    }],
+    warnings: []
+  };
+}
+
+function matchResult(candidateId, score = 88) {
+  return {
+    candidateId,
+    level: score >= 75 ? 'STRONG' : 'POSSIBLE',
+    score,
+    reasons: ['Experiencia logística relacionada.'],
+    evidence: ['Coordinación de personal e inventarios.'],
+    gaps: []
+  };
+}
+
+function persistentPrisma(targetVacancy, initialCandidates) {
+  let candidates = [...initialCandidates];
+  let candidateWhere = null;
+  const profiles = new Map();
+  const comparisons = new Map();
+  const usage = [];
+  const comparisonWrites = [];
+
+  return {
+    setCandidates(next) { candidates = [...next]; },
+    stores: { profiles, comparisons, usage, comparisonWrites },
+    getCandidateWhere() { return candidateWhere; },
+    vacancy: {
+      findUnique: async ({ where }) => where.id === targetVacancy.id ? targetVacancy : null
+    },
+    candidate: {
+      findMany: async ({ where }) => {
+        candidateWhere = where;
+        return candidates;
+      }
+    },
+    cvReviewProfile: {
+      findUnique: async ({ where }) => profiles.get(where.fingerprint) || null,
+      upsert: async ({ where, create, update }) => {
+        const row = profiles.get(where.fingerprint)
+          ? { ...profiles.get(where.fingerprint), ...update }
+          : { ...create };
+        profiles.set(where.fingerprint, row);
+        return row;
+      }
+    },
+    cvCandidateComparison: {
+      findMany: async ({ where }) => {
+        const fingerprints = new Set(where.fingerprint.in);
+        return [...comparisons.values()].filter((row) => fingerprints.has(row.fingerprint));
+      },
+      upsert: async ({ where, create, update }) => {
+        comparisonWrites.push({ where, create, update });
+        const row = comparisons.get(where.fingerprint)
+          ? { ...comparisons.get(where.fingerprint), ...update }
+          : { ...create };
+        comparisons.set(where.fingerprint, row);
+        return row;
+      }
+    },
+    cvAnalysisUsage: {
+      create: async ({ data }) => {
+        usage.push({ ...data });
+        return data;
+      }
+    }
+  };
+}
+
+const desiredProfile = 'Prioriza formación técnica o tecnológica, un año de logística y manejo de personal.';
+const usage = {
+  input_tokens: 1000,
+  input_tokens_details: { cached_tokens: 600, cache_write_tokens: 50 },
+  output_tokens: 120,
+  output_tokens_details: { reasoning_tokens: 30 },
+  total_tokens: 1120
+};
+
+test('filtra estados y una revisión persistida idéntica hace cero llamadas a OpenAI', async () => {
+  clearCvIntelligenceCachesForTest();
+  const targetVacancy = vacancy();
+  const candidates = [candidate('one', targetVacancy), candidate('two', targetVacancy, { status: 'APROBADO' })];
+  const prisma = persistentPrisma(targetVacancy, candidates);
+  const requests = [];
+  const openAiPost = async (payload) => {
+    requests.push(payload);
+    if (payload.text.format.name === 'loren_desired_candidate_profile') {
+      return structuredResponse(profileResult(), usage);
+    }
+    const input = JSON.parse(payload.input[1].content[0].text);
+    assert.equal(input.candidates[0].sources.cv.experience.length, 5);
+    assert.equal(input.candidates[0].sources.cv.experience[0].responsibilities.length, 4);
+    assert.equal(input.candidates[0].sources.cv.skills.length, 15);
+    assert.equal(input.candidates[0].sources.cv.certifications.length, 10);
+    assert.equal(typeof payload.prompt_cache_key, 'string');
+    return structuredResponse({
