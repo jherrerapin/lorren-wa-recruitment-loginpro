@@ -1,0 +1,180 @@
+import axios from 'axios';
+import crypto from 'node:crypto';
+import { CV_EXTRACTION_SCHEMA } from '../ai/cvExtractionSchema.js';
+import { resolveCandidateCvBuffer } from './cvStorage.js';
+import { extractCvText } from './cvTextExtraction.js';
+import { OPENAI_CV_MODEL } from './openAiModelConfig.js';
+import { normalizeTransportMode } from './transportMode.js';
+import { safeErrorMessage } from './errorSanitization.js';
+
+export { safeErrorMessage };
+
+const AttachmentClassification = Object.freeze({
+  CV_VALID: 'CV_VALID',
+  OTHER: 'OTHER',
+  UNREADABLE: 'UNREADABLE'
+});
+const URL = 'https://api.openai.com/v1/responses';
+const MODEL = OPENAI_CV_MODEL;
+const MAX_CANDIDATES_PER_REVIEW = 120;
+const MATCH_BATCH_SIZE = 12;
+const MATCH_BATCH_RETRY_LIMIT = 1;
+const MAX_INDIVIDUAL_MATCH_RETRIES = 3;
+const VISUAL_CONFIDENCE_THRESHOLD = 0.5;
+const MIN_USEFUL_PDF_TEXT_LENGTH = 80;
+const REVIEW_CACHE_TTL_MS = 5 * 60 * 1000;
+const REVIEW_CACHE_MAX_ENTRIES = 100;
+const profileInterpretationCache = new Map();
+const candidateComparisonCache = new Map();
+const ELIGIBLE_CANDIDATE_STATUSES = ['REGISTRADO', 'CONTACTADO', 'APROBADO'];
+const MAX_MATCH_EXPERIENCES = 5;
+const MAX_MATCH_RESPONSIBILITIES = 4;
+const MAX_MATCH_SKILLS = 15;
+const MAX_MATCH_CERTIFICATIONS = 10;
+
+const CV_REVIEW_EXTRACTION_SCHEMA = {
+  ...CV_EXTRACTION_SCHEMA,
+  name: 'loren_cv_review_extraction',
+  schema: {
+    ...CV_EXTRACTION_SCHEMA.schema,
+    properties: {
+      ...CV_EXTRACTION_SCHEMA.schema.properties,
+      skills: { type: 'array', items: { type: 'string' } },
+      certifications: { type: 'array', items: { type: 'string' } },
+      estimatedExperienceMonths: { type: ['number', 'null'], minimum: 0 },
+      experience: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            role: { type: ['string', 'null'] },
+            company: { type: ['string', 'null'] },
+            duration: { type: ['string', 'null'] },
+            responsibilities: { type: 'array', items: { type: 'string' } }
+          },
+          required: ['role', 'company', 'duration', 'responsibilities']
+        }
+      }
+    },
+    required: [
+      ...CV_EXTRACTION_SCHEMA.schema.required,
+      'skills',
+      'certifications',
+      'estimatedExperienceMonths',
+      'experience'
+    ]
+  }
+};
+
+const DESIRED_PROFILE_SCHEMA = {
+  name: 'loren_desired_candidate_profile',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      summary: { type: 'string' },
+      criteria: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            description: { type: 'string' },
+            priority: { type: 'string', enum: ['REQUIRED', 'PREFERRED'] },
+            minimumMonths: { type: ['number', 'null'], minimum: 0 },
+            keywords: { type: 'array', items: { type: 'string' } }
+          },
+          required: ['id', 'label', 'description', 'priority', 'minimumMonths', 'keywords']
+        }
+      },
+      warnings: { type: 'array', items: { type: 'string' } }
+    },
+    required: ['summary', 'criteria', 'warnings']
+  }
+};
+
+const CANDIDATE_MATCH_SCHEMA = {
+  name: 'loren_candidate_profile_matches',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      results: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            candidateId: { type: 'string' },
+            level: { type: 'string', enum: ['STRONG', 'POSSIBLE', 'LOW'] },
+            score: { type: 'number', minimum: 0, maximum: 100 },
+            reasons: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 4,
+              items: { type: 'string', maxLength: 320 }
+            },
+            evidence: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 5,
+              items: { type: 'string', maxLength: 320 }
+            },
+            gaps: {
+              type: 'array',
+              minItems: 0,
+              maxItems: 4,
+              items: { type: 'string', maxLength: 320 }
+            }
+          },
+          required: ['candidateId', 'level', 'score', 'reasons', 'evidence', 'gaps']
+        }
+      }
+    },
+    required: ['results']
+  }
+};
+
+function candidateMatchSchema(candidateIds = []) {
+  const allowedIds = candidateIds.map(compact).filter(Boolean);
+  return {
+    ...CANDIDATE_MATCH_SCHEMA,
+    schema: {
+      ...CANDIDATE_MATCH_SCHEMA.schema,
+      properties: {
+        ...CANDIDATE_MATCH_SCHEMA.schema.properties,
+        results: {
+          ...CANDIDATE_MATCH_SCHEMA.schema.properties.results,
+          minItems: allowedIds.length,
+          maxItems: allowedIds.length,
+          items: {
+            ...CANDIDATE_MATCH_SCHEMA.schema.properties.results.items,
+            properties: {
+              ...CANDIDATE_MATCH_SCHEMA.schema.properties.results.items.properties,
+              candidateId: { type: 'string', enum: allowedIds }
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
+function parseOutput(data = {}) {
+  for (const item of data?.output || []) {
+    for (const part of item?.content || []) {
+      if (part?.parsed && typeof part.parsed === 'object') return part.parsed;
+      if (typeof part?.text === 'string') {
+        try { return JSON.parse(part.text); } catch {}
+      }
+    }
+  }
+  return null;
+}
+
+function compact(value = '') {
