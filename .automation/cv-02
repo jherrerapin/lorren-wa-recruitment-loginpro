@@ -1,0 +1,180 @@
+      rows = await prisma.cvCandidateComparison.findMany({
+        where: { fingerprint: { in: fingerprints } }
+      });
+    } else if (prisma?.$queryRawUnsafe) {
+      const placeholders = fingerprints.map((_, index) => `$${index + 1}`).join(', ');
+      rows = await prisma.$queryRawUnsafe(
+        `SELECT "fingerprint", "candidateId", "level", "score", "reasons", "evidence", "gaps"
+         FROM "CvCandidateComparison"
+         WHERE "fingerprint" IN (${placeholders})`,
+        ...fingerprints
+      );
+    }
+    const expectedByFingerprint = new Map(entries.map((entry) => [
+      entry.fingerprint,
+      entry.item.candidate.id
+    ]));
+    for (const row of rows || []) {
+      const expectedCandidateId = expectedByFingerprint.get(row.fingerprint);
+      if (!expectedCandidateId || !validStoredMatch(row, expectedCandidateId)) continue;
+      result.set(expectedCandidateId, storedMatch(row));
+    }
+  } catch {
+    return new Map();
+  }
+  return result;
+}
+
+async function writeStoredComparisons(prisma, entries = [], matches = []) {
+  if (!entries.length || !matches.length) return;
+  const entryByCandidate = new Map(entries.map((entry) => [entry.item.candidate.id, entry]));
+  for (const match of matches) {
+    const entry = entryByCandidate.get(match.candidateId);
+    if (!entry || !validStoredMatch(match, match.candidateId)) continue;
+    const data = {
+      fingerprint: entry.fingerprint,
+      candidateId: match.candidateId,
+      vacancyId: entry.item.candidate.vacancyId || null,
+      modelUsed: entry.modelUsed,
+      level: match.level,
+      score: match.score,
+      reasons: match.reasons,
+      evidence: match.evidence,
+      gaps: match.gaps
+    };
+    try {
+      if (prisma?.cvCandidateComparison?.upsert) {
+        await prisma.cvCandidateComparison.upsert({
+          where: { fingerprint: entry.fingerprint },
+          create: data,
+          update: {
+            level: data.level,
+            score: data.score,
+            reasons: data.reasons,
+            evidence: data.evidence,
+            gaps: data.gaps,
+            modelUsed: data.modelUsed
+          }
+        });
+      } else if (prisma?.$executeRawUnsafe) {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "CvCandidateComparison"
+            ("id", "fingerprint", "candidateId", "vacancyId", "modelUsed", "level", "score",
+             "reasons", "evidence", "gaps", "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, NOW(), NOW())
+           ON CONFLICT ("fingerprint") DO UPDATE
+           SET "level" = EXCLUDED."level",
+               "score" = EXCLUDED."score",
+               "reasons" = EXCLUDED."reasons",
+               "evidence" = EXCLUDED."evidence",
+               "gaps" = EXCLUDED."gaps",
+               "modelUsed" = EXCLUDED."modelUsed",
+               "updatedAt" = NOW()`,
+          crypto.randomUUID(),
+          data.fingerprint,
+          data.candidateId,
+          data.vacancyId,
+          data.modelUsed,
+          data.level,
+          data.score,
+          JSON.stringify(data.reasons),
+          JSON.stringify(data.evidence),
+          JSON.stringify(data.gaps)
+        );
+      }
+    } catch {
+      // Una falla de persistencia no invalida el resultado ya obtenido.
+    }
+  }
+}
+
+function readReviewCache(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  cache.delete(key);
+  cache.set(key, entry);
+  return cloneJson(entry.value);
+}
+
+function writeReviewCache(cache, key, value) {
+  if (value === null || value === undefined) return;
+  cache.delete(key);
+  cache.set(key, {
+    expiresAt: Date.now() + REVIEW_CACHE_TTL_MS,
+    value: cloneJson(value)
+  });
+  while (cache.size > REVIEW_CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+}
+
+export function clearCvIntelligenceCachesForTest() {
+  profileInterpretationCache.clear();
+  candidateComparisonCache.clear();
+}
+
+function normalizeCompare(value = '') {
+  return compact(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function compareField(label, chatValue, cvValue) {
+  const chat = normalizeCompare(chatValue);
+  const cv = normalizeCompare(cvValue);
+  if (!chat || !cv) return null;
+  if (chat === cv || chat.includes(cv) || cv.includes(chat)) {
+    return { field: label, status: 'match', chatValue, cvValue };
+  }
+  return { field: label, status: 'mismatch', chatValue, cvValue };
+}
+
+function compareCandidateWithCv(candidate = {}, extracted = {}) {
+  return [
+    compareField('Nombre', candidate.fullName, extracted.fullName),
+    compareField('Documento', candidate.documentNumber, extracted.documentNumber),
+    compareField('Teléfono', candidate.phone, extracted.phone),
+    compareField('Localidad', candidate.locality, extracted.locality)
+  ].filter(Boolean);
+}
+
+function failureSummary(reason = '') {
+  const summaries = {
+    candidate_without_cv: 'El candidato no tiene una hoja de vida almacenada.',
+    cv_read_failed: 'No fue posible leer el archivo almacenado.',
+    unsupported_file_type: 'Formato no compatible. La hoja de vida debe estar en PDF o DOCX.',
+    missing_buffer: 'No existe contenido de archivo disponible para analizar.',
+    empty_pdf_text: 'El PDF no contiene texto legible y necesita revisión manual.',
+    empty_docx_text: 'El DOCX no contiene texto legible.',
+    text_extraction_failed: 'No fue posible extraer el texto del archivo.',
+    ai_not_configured: 'La extracción inteligente no está configurada.',
+    ai_no_structured_output: 'La extracción inteligente no devolvió un resultado estructurado.',
+    ai_analysis_failed: 'La extracción inteligente no pudo completarse.',
+    visual_analysis_failed: 'No fue posible leer visualmente el PDF.',
+    visual_no_structured_output: 'La lectura visual no encontró información suficiente.',
+    low_visual_confidence: 'La lectura visual no fue suficientemente clara; conviene revisar el archivo manualmente.',
+    profile_too_short: 'Describe con un poco más de detalle el perfil que necesitas.',
+    profile_analysis_failed: 'No fue posible interpretar el perfil buscado.',
+    match_analysis_failed: 'No fue posible comparar los perfiles en este momento.'
+  };
+  return summaries[reason] || 'No fue posible completar el análisis de la hoja de vida.';
+}
+
+function isOpenAiAvailable(options = {}) {
+  return Boolean(options.openAiPost || process.env.OPENAI_API_KEY);
+}
+
+function selectedModel(options = {}) {
+  return compact(options.model) || MODEL;
+}
+
+function candidateCvReference(candidate = {}) {
