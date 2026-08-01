@@ -187,6 +187,9 @@ model Vacancy {
   accessUsers            AppUser[]              @relation("AppUserVacancies")
   scopedAccessUsers      AppUser[]              @relation("AppUserScopeVacancy")
   dispatchWorkers        DispatchWorkerVacancy[]
+  cvReviewProfiles       CvReviewProfile[]
+  cvCandidateComparisons CvCandidateComparison[]
+  cvAnalysisUsages       CvAnalysisUsage[]
 }
 
 model Campaign {
@@ -314,6 +317,7 @@ model Candidate {
   attachmentAnalyses     AttachmentAnalysis[]
   dataConsentEvents      CandidateDataConsentEvent[]
   dispatchWorker         DispatchWorker?
+  cvCandidateComparisons CvCandidateComparison[]
 
   @@index([campaignId])
   @@index([sourceType])
@@ -385,6 +389,59 @@ model AttachmentAnalysis {
 
   @@index([candidateId])
   @@index([classification])
+}
+
+model CvReviewProfile {
+  id                 String   @id @default(cuid())
+  fingerprint        String   @unique
+  vacancyId          String
+  vacancy            Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  modelUsed          String
+  interpretedProfile Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([vacancyId])
+}
+
+model CvCandidateComparison {
+  id          String    @id @default(cuid())
+  fingerprint String    @unique
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancyId   String?
+  vacancy     Vacancy?  @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
+  modelUsed   String
+  level       String
+  score       Float
+  reasons     Json
+  evidence    Json
+  gaps        Json
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([candidateId])
+  @@index([vacancyId])
+}
+
+model CvAnalysisUsage {
+  id                String   @id @default(cuid())
+  stage             String
+  vacancyId         String?
+  vacancy           Vacancy? @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
+  candidateCount    Int      @default(0)
+  modelUsed         String
+  inputTokens       Int      @default(0)
+  cachedInputTokens Int      @default(0)
+  cacheWriteTokens  Int      @default(0)
+  outputTokens      Int      @default(0)
+  reasoningTokens   Int      @default(0)
+  totalTokens       Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([stage, createdAt])
+  @@index([vacancyId, createdAt])
 }
 
 model AppUser {

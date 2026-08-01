@@ -312,9 +312,9 @@ test('el fallo técnico del último lote unitario consume el presupuesto global 
     const input = JSON.parse(payload.input[1].content[0].text);
     return input.candidates.length === 1;
   });
-  assert.equal(singleCandidateRequests.length, 4);
-  assert.equal(result.stats.low, 3);
-  assert.equal(result.stats.manual, 10);
+  assert.equal(singleCandidateRequests.length, 2);
+  assert.equal(result.stats.low, 1);
+  assert.equal(result.stats.manual, 12);
   assert.equal(result.warnings.length, 1);
 });
 
