@@ -5,7 +5,9 @@ import fs from 'node:fs';
 const routeSource = fs.readFileSync(new URL('../src/routes/workerPortalCore.js', import.meta.url), 'utf8');
 const strictRouteSource = fs.readFileSync(new URL('../src/routes/workerPortal.js', import.meta.url), 'utf8');
 const viewSource = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
-const offlineSource = fs.readFileSync(new URL('../src/public/worker-portal-offline.js', import.meta.url), 'utf8');
+const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
+const offlineSource = fs.readFileSync(new URL('../src/public/worker-portal-offline-v2.js', import.meta.url), 'utf8');
+const offlineControllerSource = fs.readFileSync(new URL('../src/public/worker-portal-offline-controller.js', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 const release = JSON.parse(fs.readFileSync(new URL('../src/public/attendance-portal-release.json', import.meta.url), 'utf8'));
@@ -27,30 +29,58 @@ test('el service worker se sirve con alcance explícito', () => {
 });
 
 
-test('los recursos offline están dentro del alcance', () => {
-  assert.match(viewSource, /src="\/operaciones\/portal\/offline\.js"/);
-  assert.match(serviceWorkerSource, /'\/operaciones\/portal\/offline\.js'/);
-  assert.match(serviceWorkerSource, /'\/operaciones\/portal\/manifest\.webmanifest'/);
-  assert.match(serviceWorkerSource, /'\/operaciones\/portal\/icon\.svg'/);
+test('el cargador incluye el runtime y controlador offline completos', () => {
+  assert.match(loaderSource, /worker-portal-offline-v2\.js/);
+  assert.match(loaderSource, /worker-portal-offline-controller\.js/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-biometric\.js'/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-biometric-core\.js'/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-biometric-mobile\.js'/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-portal-biometric-flow\.js'/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline-v2\.js'/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline-controller\.js'/);
 });
 
 
-test('la cola heredada conserva idempotencia pero producción exige biometría en línea', () => {
+test('la cola offline cubre llegada, almuerzo y salida con idempotencia', () => {
   assert.match(offlineSource, /indexedDB\.open/);
   assert.match(offlineSource, /arrivalQueue/);
   assert.match(offlineSource, /arrivalReceipts/);
   assert.match(offlineSource, /idempotencyKey/);
-  assert.match(offlineSource, /markType/);
-  assert.match(strictRouteSource, /online_biometric_required/);
-  assert.match(serviceWorkerSource, /La asistencia requiere conexión/);
+  assert.match(offlineSource, /'ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'/);
+  assert.match(offlineSource, /queueBreakStart/);
+  assert.match(offlineSource, /queueBreakEnd/);
+  assert.match(offlineSource, /queueDeparture/);
 });
 
 
-test('la sincronización heredada conserva evidencia para registros antiguos', () => {
-  assert.match(serviceWorkerSource, /credentials: 'include'/);
+test('la sincronización envía las cuatro marcaciones al endpoint correcto', () => {
+  assert.match(serviceWorkerSource, /ARRIVAL: 'llegada'/);
+  assert.match(serviceWorkerSource, /BREAK_START: 'inicio-almuerzo'/);
+  assert.match(serviceWorkerSource, /BREAK_END: 'fin-almuerzo'/);
+  assert.match(serviceWorkerSource, /DEPARTURE: 'salida'/);
   assert.match(serviceWorkerSource, /form\.set\('clientCapturedAt'/);
   assert.match(serviceWorkerSource, /form\.set\('captureMode', 'OFFLINE_WEB'\)/);
-  assert.match(serviceWorkerSource, /record\.markType === 'DEPARTURE' \? 'salida' : 'llegada'/);
+  assert.match(serviceWorkerSource, /credentials: 'include'/);
+});
+
+
+test('producción conserva biometría verificada online y admite evidencia offline para revisión', () => {
+  assert.match(strictRouteSource, /captureMode === ONLINE_WEB_CAPTURE_MODE/);
+  assert.match(strictRouteSource, /verifiedBiometricMetadata/);
+  assert.match(strictRouteSource, /captureMode === OFFLINE_WEB_CAPTURE_MODE/);
+  assert.match(strictRouteSource, /requiresReview: captureMode === OFFLINE_WEB_CAPTURE_MODE/);
+  assert.doesNotMatch(strictRouteSource, /Esta marcación requiere conexión para validar el rostro/);
+});
+
+
+test('el controlador permite continuar la secuencia completa sin conexión', () => {
+  assert.match(offlineControllerSource, /document\.addEventListener\('click'.*true\);/s);
+  assert.match(offlineControllerSource, /Sin conexión: se guardarán la hora, la ubicación y una selfie/);
+  assert.match(offlineControllerSource, /stage === 1/);
+  assert.match(offlineControllerSource, /createMarkButton\('BREAK_START'\)/);
+  assert.match(offlineControllerSource, /createMarkButton\('BREAK_END'\)/);
+  assert.match(offlineControllerSource, /createMarkButton\('DEPARTURE'\)/);
+  assert.match(offlineControllerSource, /MutationObserver/);
 });
 
 
@@ -68,6 +98,7 @@ test('solo se conserva offline una página autenticada', () => {
   assert.match(serviceWorkerSource, /mode === 'active'/);
   assert.match(serviceWorkerSource, /mode === 'inactive'/);
   assert.match(serviceWorkerSource, /cache\.delete\(PORTAL_CACHE_KEY\)/);
+  assert.match(serviceWorkerSource, /Abre el portal una vez con conexión/);
 });
 
 
