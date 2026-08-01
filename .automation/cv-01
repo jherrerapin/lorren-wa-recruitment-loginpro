@@ -1,0 +1,180 @@
+  return String(value || '').trim();
+}
+
+function cloneJson(value) {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function stableJsonValue(value) {
+  if (Array.isArray(value)) return value.map(stableJsonValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.keys(value)
+    .sort()
+    .reduce((result, key) => {
+      result[key] = stableJsonValue(value[key]);
+      return result;
+    }, {});
+}
+
+function reviewCacheKey(scope, payload) {
+  const serialized = JSON.stringify(stableJsonValue(payload));
+  return crypto.createHash('sha256').update(`${scope}:${serialized}`).digest('hex');
+}
+
+
+function cleanText(value, maxLength = 320) {
+  const text = compact(value).replace(/\s+/g, ' ');
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function withoutEmptyValues(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map(withoutEmptyValues)
+      .filter((item) => item !== null && item !== undefined && item !== '');
+  }
+  if (!value || typeof value !== 'object') return value;
+  return Object.entries(value).reduce((result, [key, item]) => {
+    const cleaned = withoutEmptyValues(item);
+    const emptyObject = cleaned && typeof cleaned === 'object'
+      && !Array.isArray(cleaned)
+      && Object.keys(cleaned).length === 0;
+    if (cleaned === null || cleaned === undefined || cleaned === '' || emptyObject) return result;
+    result[key] = cleaned;
+    return result;
+  }, {});
+}
+
+function usageNumbers(usage = {}) {
+  return {
+    inputTokens: Number(usage.input_tokens || 0),
+    cachedInputTokens: Number(usage.input_tokens_details?.cached_tokens || 0),
+    cacheWriteTokens: Number(usage.input_tokens_details?.cache_write_tokens || 0),
+    outputTokens: Number(usage.output_tokens || 0),
+    reasoningTokens: Number(usage.output_tokens_details?.reasoning_tokens || 0),
+    totalTokens: Number(usage.total_tokens || 0)
+  };
+}
+
+async function persistAnalysisUsage(prisma, usage, context = {}) {
+  if (!usage) return;
+  const values = usageNumbers(usage);
+  const data = {
+    stage: compact(context.stage) || 'unknown',
+    vacancyId: compact(context.vacancyId) || null,
+    candidateCount: Math.max(0, Number(context.candidateCount || 0)),
+    modelUsed: compact(context.modelUsed) || MODEL,
+    ...values
+  };
+  try {
+    if (prisma?.cvAnalysisUsage?.create) {
+      await prisma.cvAnalysisUsage.create({ data });
+    } else if (prisma?.$executeRawUnsafe) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CvAnalysisUsage"
+          ("id", "stage", "vacancyId", "candidateCount", "modelUsed", "inputTokens",
+           "cachedInputTokens", "cacheWriteTokens", "outputTokens", "reasoningTokens",
+           "totalTokens", "createdAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+        crypto.randomUUID(),
+        data.stage,
+        data.vacancyId,
+        data.candidateCount,
+        data.modelUsed,
+        data.inputTokens,
+        data.cachedInputTokens,
+        data.cacheWriteTokens,
+        data.outputTokens,
+        data.reasoningTokens,
+        data.totalTokens
+      );
+    }
+  } catch {
+    // La medición nunca debe impedir el análisis principal.
+  }
+}
+
+function validStoredMatch(row = {}, expectedCandidateId = '') {
+  const candidateId = compact(row.candidateId);
+  const level = compact(row.level);
+  return candidateId === compact(expectedCandidateId)
+    && ['STRONG', 'POSSIBLE', 'LOW'].includes(level)
+    && Number.isFinite(Number(row.score))
+    && Array.isArray(parseStoredJson(row.reasons))
+    && Array.isArray(parseStoredJson(row.evidence))
+    && Array.isArray(parseStoredJson(row.gaps));
+}
+
+function parseStoredJson(value, fallback = []) {
+  if (Array.isArray(value) || (value && typeof value === 'object')) return value;
+  if (typeof value !== 'string') return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function storedMatch(row = {}) {
+  return normalizeMatch({
+    candidateId: row.candidateId,
+    level: row.level,
+    score: row.score,
+    reasons: parseStoredJson(row.reasons),
+    evidence: parseStoredJson(row.evidence),
+    gaps: parseStoredJson(row.gaps)
+  });
+}
+
+async function readStoredProfile(prisma, fingerprint) {
+  try {
+    let row = null;
+    if (prisma?.cvReviewProfile?.findUnique) {
+      row = await prisma.cvReviewProfile.findUnique({ where: { fingerprint } });
+    } else if (prisma?.$queryRawUnsafe) {
+      [row] = await prisma.$queryRawUnsafe(
+        'SELECT "interpretedProfile" FROM "CvReviewProfile" WHERE "fingerprint" = $1 LIMIT 1',
+        fingerprint
+      );
+    }
+    const profile = parseStoredJson(row?.interpretedProfile, null);
+    return isValidInterpretedProfile(profile) ? cloneJson(profile) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeStoredProfile(prisma, { fingerprint, vacancyId, modelUsed, interpretedProfile }) {
+  if (!isValidInterpretedProfile(interpretedProfile)) return;
+  try {
+    if (prisma?.cvReviewProfile?.upsert) {
+      await prisma.cvReviewProfile.upsert({
+        where: { fingerprint },
+        create: { fingerprint, vacancyId, modelUsed, interpretedProfile },
+        update: { modelUsed, interpretedProfile }
+      });
+    } else if (prisma?.$executeRawUnsafe) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CvReviewProfile"
+          ("id", "fingerprint", "vacancyId", "modelUsed", "interpretedProfile", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5::jsonb, NOW(), NOW())
+         ON CONFLICT ("fingerprint") DO UPDATE
+         SET "modelUsed" = EXCLUDED."modelUsed",
+             "interpretedProfile" = EXCLUDED."interpretedProfile",
+             "updatedAt" = NOW()`,
+        crypto.randomUUID(),
+        fingerprint,
+        vacancyId,
+        modelUsed,
+        JSON.stringify(interpretedProfile)
+      );
+    }
+  } catch {
+    // Compatibilidad durante despliegue gradual de la migración.
+  }
+}
+
+async function readStoredComparisons(prisma, entries = []) {
+  const result = new Map();
+  if (!entries.length) return result;
+  const fingerprints = entries.map((entry) => entry.fingerprint);
+  try {
+    let rows = [];
+    if (prisma?.cvCandidateComparison?.findMany) {
