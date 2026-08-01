@@ -177,7 +177,8 @@ function parseOutput(data = {}) {
   return null;
 }
 
-function compact(value = '') {  return String(value || '').trim();
+function compact(value = '') {
+  return String(value || '').trim();
 }
 
 function cloneJson(value) {
@@ -356,7 +357,8 @@ async function readStoredComparisons(prisma, entries = []) {
   const fingerprints = entries.map((entry) => entry.fingerprint);
   try {
     let rows = [];
-    if (prisma?.cvCandidateComparison?.findMany) {      rows = await prisma.cvCandidateComparison.findMany({
+    if (prisma?.cvCandidateComparison?.findMany) {
+      rows = await prisma.cvCandidateComparison.findMany({
         where: { fingerprint: { in: fingerprints } }
       });
     } else if (prisma?.$queryRawUnsafe) {
@@ -535,7 +537,8 @@ function selectedModel(options = {}) {
   return compact(options.model) || MODEL;
 }
 
-function candidateCvReference(candidate = {}) {  const storageKey = compact(candidate.cvStorageKey);
+function candidateCvReference(candidate = {}) {
+  const storageKey = compact(candidate.cvStorageKey);
   if (storageKey) return `storage:${storageKey}`;
   if (!candidate.cvData) return null;
   const buffer = Buffer.isBuffer(candidate.cvData) ? candidate.cvData : Buffer.from(candidate.cvData);
@@ -714,7 +717,8 @@ export async function analyzeCandidateCv(prisma, candidateId, options = {}) {
 
   const visualFallback = shouldUseVisualPdfFallback(candidate, textResult);
   if (!textResult.ok && !visualFallback) {
-    const classification = textResult.reason === 'unsupported_file_type'      ? AttachmentClassification.OTHER
+    const classification = textResult.reason === 'unsupported_file_type'
+      ? AttachmentClassification.OTHER
       : AttachmentClassification.UNREADABLE;
     const analysis = await persistAttachmentAnalysis(prisma, candidate, {
       classification,
@@ -1073,7 +1077,8 @@ function normalizeMatch(match = {}) {
     score,
     reasons: Array.isArray(match.reasons) ? match.reasons.map(compact).filter(Boolean).slice(0, 4) : [],
     evidence: Array.isArray(match.evidence)
-      ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 5)      : [],
+      ? match.evidence.map((item) => compact(item).replace(/^Hoja de vida:\s*/i, '')).filter(Boolean).slice(0, 5)
+      : [],
     gaps: Array.isArray(match.gaps) ? match.gaps.map(compact).filter(Boolean).slice(0, 4) : []
   };
 }
