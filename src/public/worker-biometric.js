@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260801-install-after-face-v1';
+const BIOMETRIC_ASSET_RELEASE = '20260801-install-button-cache-v2';
 
 document.write(`<script src="/public/worker-biometric-core.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-biometric-mobile.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
