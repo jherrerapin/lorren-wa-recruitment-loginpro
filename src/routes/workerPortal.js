@@ -24,6 +24,8 @@ export * from './workerPortalCore.js';
 
 const HUMAN_CDN_ORIGIN = 'https://cdn.jsdelivr.net';
 const WORKER_PORTAL_REQUEST_HEADER = 'worker-portal';
+const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
+const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
 const STRICT_MARK_PATHS = [
   '/asignaciones/:assignmentId/llegada',
   '/asignaciones/:assignmentId/inicio-almuerzo',
@@ -232,8 +234,16 @@ export function workerPortalRouter(prisma, options = {}) {
       const latitude = finiteNumber(req.body?.latitude, { min: -90, max: 90 });
       const longitude = finiteNumber(req.body?.longitude, { min: -180, max: 180 });
       const accuracyMeters = finiteNumber(req.body?.accuracyMeters, { min: 0, max: 100_000 });
-      if (!markType || !idempotencyKey || latitude === null || longitude === null || accuracyMeters === null) {
-        return strictError(res, 400, 'mark_request_invalid', 'No fue posible validar la ubicación.');
+      const captureMode = normalizedString(req.body?.captureMode, 40)?.toUpperCase();
+      if (
+        !markType
+        || !idempotencyKey
+        || latitude === null
+        || longitude === null
+        || accuracyMeters === null
+        || ![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(captureMode)
+      ) {
+        return strictError(res, 400, 'mark_request_invalid', 'No fue posible validar la ubicación o el modo de captura.');
       }
 
       const assignment = await prisma.dispatchAssignment.findFirst({
@@ -269,10 +279,7 @@ export function workerPortalRouter(prisma, options = {}) {
         return strictError(res, 409, 'outside_operation_range', 'Debes estar dentro del rango de la operación para marcar asistencia.');
       }
 
-      if (BIOMETRIC_MARK_TYPES.has(markType)) {
-        if (String(req.body?.captureMode || '').toUpperCase() !== 'ONLINE_WEB') {
-          return strictError(res, 409, 'online_biometric_required', 'Esta marcación requiere conexión para validar el rostro.');
-        }
+      if (BIOMETRIC_MARK_TYPES.has(markType) && captureMode === ONLINE_WEB_CAPTURE_MODE) {
         const event = await prisma.devAuditEvent.findFirst({
           where: {
             entityType: ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
@@ -290,7 +297,21 @@ export function workerPortalRouter(prisma, options = {}) {
         }
       }
 
-      req.lorrenStrictAttendance = { workerId: portalSession.workerId, markType, distanceMeters, insideGeofence: true };
+      if (BIOMETRIC_MARK_TYPES.has(markType) && captureMode === OFFLINE_WEB_CAPTURE_MODE) {
+        const clientCapturedAt = new Date(req.body?.clientCapturedAt);
+        if (Number.isNaN(clientCapturedAt.getTime())) {
+          return strictError(res, 400, 'mark_request_invalid', 'La hora de la marcación sin conexión no es válida.');
+        }
+      }
+
+      req.lorrenStrictAttendance = {
+        workerId: portalSession.workerId,
+        markType,
+        captureMode,
+        distanceMeters,
+        insideGeofence: true,
+        requiresReview: captureMode === OFFLINE_WEB_CAPTURE_MODE
+      };
       return next();
     } catch (error) {
       console.error('[WORKER_PORTAL_STRICT_MARK_GUARD_FAILED]', {
