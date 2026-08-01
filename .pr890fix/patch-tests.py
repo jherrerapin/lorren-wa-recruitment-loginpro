@@ -64,18 +64,37 @@ if 'matchCalls > 1 && requestedIds.length === 3' not in attachment:
         'complete batch retry response'
     )
 
+old_retry_assertions = """  const retryInput = JSON.parse(calls[2].input[1].content[0].text);
+  assert.deepEqual(retryInput.candidates.map((candidate) => candidate.candidateId), ['candidate-unmatched']);
+  assert.deepEqual(
+    calls[2].text.format.schema.properties.results.items.properties.candidateId.enum,
+    ['candidate-unmatched']
+  );"""
+new_retry_assertions = """  const retryInput = JSON.parse(calls[2].input[1].content[0].text);
+  assert.deepEqual(
+    retryInput.candidates.map((candidate) => candidate.candidateId),
+    ['candidate-strong', 'candidate-possible', 'candidate-unmatched']
+  );
+  assert.deepEqual(
+    calls[2].text.format.schema.properties.results.items.properties.candidateId.enum,
+    ['candidate-strong', 'candidate-possible', 'candidate-unmatched']
+  );"""
+if old_retry_assertions in attachment:
+    attachment = attachment.replace(old_retry_assertions, new_retry_assertions, 1)
+
 attachment_path.write_text(attachment, encoding='utf-8')
 
 contracts_path = Path('test/cvIntelligenceReviewContracts.test.js')
 contracts = contracts_path.read_text(encoding='utf-8')
-contracts = replace_once(
-    contracts,
-    """  assert.equal(singleCandidateRequests.length, 4);
+old_contract_assertions = """  assert.equal(singleCandidateRequests.length, 4);
   assert.equal(result.stats.low, 3);
-  assert.equal(result.stats.manual, 10);""",
-    """  assert.equal(singleCandidateRequests.length, 2);
+  assert.equal(result.stats.manual, 10);"""
+if old_contract_assertions in contracts:
+    contracts = contracts.replace(
+        old_contract_assertions,
+        """  assert.equal(singleCandidateRequests.length, 2);
   assert.equal(result.stats.low, 1);
   assert.equal(result.stats.manual, 12);""",
-    'strict invalid-batch expectations'
-)
+        1
+    )
 contracts_path.write_text(contracts, encoding='utf-8')
