@@ -32,7 +32,12 @@
   if (!dialog || !resultBox || !submitButton) return;
 
   const MAX_AUTOMATIC_ATTEMPTS = 2;
-  const FLOW_VERSION = '2026-07-30-single-controller-v1';
+  const FLOW_RELEASE = '20260731-lifecycle-recovery';
+  const BACKEND_RECOVERY_ERRORS = new Set([
+    'biometric_runtime_unavailable',
+    'biometric_baseline_timeout',
+    'biometric_final_timeout'
+  ]);
 
   let biometricReady = false;
   let enrollmentStream = null;
@@ -40,6 +45,8 @@
   let photoUrl = null;
   let runToken = 0;
   let verificationInProgress = false;
+  let resumeVerificationPending = false;
+  let resumeTimer = null;
 
   const state = {
     assignmentId: null,
@@ -114,13 +121,23 @@
     setStatus(message, 'neutral');
   }
 
+  function errorCode(error) {
+    return String(error?.message || 'biometric_unknown_error');
+  }
+
   function publicErrorMessage(error) {
-    const code = String(error?.message || '');
+    const code = errorCode(error);
     const messages = {
       camera_unavailable: 'No fue posible abrir la cámara frontal.',
       camera_stream_unavailable: 'La cámara no entregó imagen. Cierra otras aplicaciones que puedan estar usándola.',
-      biometric_runtime_unavailable: 'El reconocimiento facial no pudo cargarse. Revisa la conexión.',
+      camera_stream_muted: 'La cámara quedó pausada por el teléfono. Vuelve a intentarlo con la pantalla activa.',
+      biometric_page_not_visible: 'Mantén esta pantalla visible durante la validación.',
+      biometric_runtime_unavailable: 'El reconocimiento facial se reinició, pero no pudo quedar listo.',
+      biometric_enrollment_timeout: 'No se obtuvo una captura estable para registrar el rostro.',
       biometric_capture_timeout: 'No se obtuvo una captura estable dentro del tiempo disponible.',
+      biometric_baseline_timeout: 'No se logró confirmar la posición frontal inicial.',
+      biometric_challenge_timeout: 'No se confirmó el movimiento solicitado.',
+      biometric_final_timeout: 'No se logró confirmar el rostro al volver a mirar de frente.',
       biometric_challenge_not_completed: 'No se confirmó el movimiento solicitado.',
       biometric_descriptor_unavailable: 'No se pudieron leer correctamente los rasgos del rostro.',
       biometric_descriptor_inconsistent: 'La imagen cambió demasiado durante la validación.',
@@ -130,7 +147,8 @@
       biometric_enrollment_required: 'Debes registrar nuevamente tu rostro antes de marcar.',
       portal_session_required: 'Tu sesión del portal venció.',
       assignment_not_available: 'La asignación ya no está disponible para marcar.',
-      biometric_request_invalid: 'No fue posible preparar la validación facial.'
+      biometric_request_invalid: 'No fue posible preparar la validación facial.',
+      biometric_challenge_failed: 'No fue posible iniciar la validación facial.'
     };
     return messages[code] || 'No fue posible confirmar tu identidad.';
   }
@@ -314,6 +332,33 @@
     updateSubmitState();
   }
 
+  function waitUntilVisible() {
+    if (document.visibilityState !== 'hidden') return Promise.resolve();
+    return new Promise((resolve) => {
+      const visible = () => {
+        if (document.visibilityState === 'hidden') return;
+        document.removeEventListener('visibilitychange', visible, true);
+        resolve();
+      };
+      document.addEventListener('visibilitychange', visible, true);
+    });
+  }
+
+  async function recoverAfterFailure(error, localRunToken) {
+    const code = errorCode(error);
+    await waitUntilVisible();
+    if (localRunToken !== runToken || !dialog.open) return;
+
+    if (BACKEND_RECOVERY_ERRORS.has(code) && biometricApi?.recover) {
+      setStatus('Reiniciando el motor facial y la cámara…', 'warning');
+      await biometricApi.recover({ reason: code, rotateBackend: true });
+      return;
+    }
+
+    setStatus('Preparando un nuevo intento con la cámara…', 'warning');
+    await new Promise((resolve) => window.setTimeout(resolve, 450));
+  }
+
   async function runSingleVerificationAttempt(localRunToken, attemptNumber) {
     if (localRunToken !== runToken || !dialog.open) throw new Error('biometric_flow_cancelled');
     stopCamera();
@@ -385,10 +430,10 @@
         } catch (error) {
           lastError = error;
           stopCamera();
-          if (String(error?.message || '') === 'biometric_flow_cancelled') return;
+          if (errorCode(error) === 'biometric_flow_cancelled') return;
           if (attempt < MAX_AUTOMATIC_ATTEMPTS) {
-            setStatus('La primera lectura no concluyó. Reintentando automáticamente…', 'warning');
-            await new Promise((resolve) => window.setTimeout(resolve, 500));
+            await recoverAfterFailure(error, localRunToken);
+            if (localRunToken !== runToken || !dialog.open) return;
           }
         }
       }
@@ -411,6 +456,9 @@
   function resetMarkDialog() {
     runToken += 1;
     verificationInProgress = false;
+    resumeVerificationPending = false;
+    if (resumeTimer) window.clearTimeout(resumeTimer);
+    resumeTimer = null;
     stopCamera();
     clearPhoto();
 
@@ -517,10 +565,51 @@
 
   function closeMarkDialog() {
     runToken += 1;
-    verificationInProgress = false;
+    resumeVerificationPending = false;
+    if (resumeTimer) window.clearTimeout(resumeTimer);
+    resumeTimer = null;
     stopCamera();
     clearPhoto();
     closeModal(dialog);
+  }
+
+  function pauseOpenVerification(_reason) {
+    if (!dialog.open || !isBiometricMark()) return;
+    resumeVerificationPending = Boolean(photoConsent?.checked);
+    runToken += 1;
+    stopCamera();
+    clearPhoto();
+    state.locationEvidence = null;
+    state.idempotencyKey = null;
+    state.biometricChallenge = null;
+    state.biometricVerified = false;
+    if (locationStatus) locationStatus.textContent = 'La ubicación se actualizará al volver.';
+    updateSubmitState();
+    if (resumeVerificationPending) {
+      setStatus('La validación se pausó mientras el teléfono estaba inactivo. Se reanudará automáticamente.', 'warning');
+    }
+  }
+
+  function scheduleResumeVerification() {
+    if (!resumeVerificationPending || !dialog.open || !photoConsent?.checked) return;
+    if (resumeTimer) window.clearTimeout(resumeTimer);
+    resumeTimer = window.setTimeout(() => {
+      resumeTimer = null;
+      if (!resumeVerificationPending || !dialog.open || document.visibilityState === 'hidden') return;
+      if (verificationInProgress) {
+        scheduleResumeVerification();
+        return;
+      }
+      resumeVerificationPending = false;
+      setStatus('Reiniciando reconocimiento facial…', 'neutral');
+      runAutomaticVerification();
+    }, 180);
+  }
+
+  function resumeOpenVerification(_reason) {
+    biometricApi?.prepare?.().catch(() => {});
+    if (dialog.open) requestLocation(runToken);
+    scheduleResumeVerification();
   }
 
   function renderConnectivity() {
@@ -531,7 +620,7 @@
     else if (biometricReady) setButtonsReady(true);
   }
 
-  document.documentElement.dataset.lorrenBiometricFlow = FLOW_VERSION;
+  document.documentElement.dataset.lorrenBiometricFlow = FLOW_RELEASE;
 
   startEnrollmentButton?.addEventListener('click', enrollFace);
   enrollmentDialog?.addEventListener('cancel', (event) => event.preventDefault());
@@ -543,6 +632,7 @@
 
   photoConsent?.addEventListener('change', () => {
     if (!photoConsent.checked) {
+      resumeVerificationPending = false;
       if (!verificationInProgress) {
         state.biometricVerified = false;
         clearPhoto();
@@ -563,6 +653,17 @@
     event.preventDefault();
     closeMarkDialog();
   });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') pauseOpenVerification('document-hidden');
+    else resumeOpenVerification('document-visible');
+  }, { capture: true });
+  document.addEventListener('freeze', () => pauseOpenVerification('document-frozen'), { capture: true });
+  document.addEventListener('resume', () => resumeOpenVerification('document-resumed'), { capture: true });
+  window.addEventListener('pagehide', () => pauseOpenVerification('page-hidden'), { capture: true });
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted || document.wasDiscarded) resumeOpenVerification('page-restored');
+  }, { capture: true });
 
   window.addEventListener('online', () => {
     renderConnectivity();

@@ -4,21 +4,21 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('el portal carga un único motor biométrico móvil antes del endurecimiento y del flujo', async () => {
+test('el portal carga un único motor móvil y un único controlador biométrico', async () => {
   const loader = await read('src/public/worker-biometric.js');
   const corePosition = loader.indexOf('/public/worker-biometric-core.js');
   const mobilePosition = loader.indexOf('/public/worker-biometric-mobile.js');
-  const hardeningPosition = loader.indexOf('/public/worker-portal-hardening.js');
   const flowPosition = loader.indexOf('/public/worker-portal-biometric-flow.js');
 
   assert.ok(corePosition >= 0);
   assert.ok(mobilePosition > corePosition);
-  assert.ok(hardeningPosition > mobilePosition);
-  assert.ok(flowPosition > hardeningPosition);
-  assert.match(loader, /BIOMETRIC_ASSET_VERSION\s*=\s*'20260730-mobile-camera-v3'/);
+  assert.ok(flowPosition > mobilePosition);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260731-lifecycle-recovery'/);
+  assert.doesNotMatch(loader, /worker-portal-hardening\.js/);
   assert.doesNotMatch(loader, /worker-biometric-camera-recovery\.js/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js/);
   assert.match(loader, /\/operaciones\/portal\/offline\.js/);
+  await assert.rejects(read('src/public/worker-portal-hardening.js'));
 });
 
 test('la autorización aparece antes del estado, la cámara y la ubicación', async () => {
@@ -53,13 +53,14 @@ test('la ventana móvil mantiene autorización, estado, cámara y acciones sin d
   assert.match(view, /#submit-mark\s*\{\s*min-height:\s*60px/);
 });
 
-test('marcar la autorización inicia el flujo y los reintentos son automáticos', async () => {
+test('marcar la autorización inicia el flujo y el segundo intento reconstruye recursos', async () => {
   const flow = await read('src/public/worker-portal-biometric-flow.js');
 
   assert.match(flow, /photoConsent\?\.addEventListener\('change'/);
   assert.match(flow, /runAutomaticVerification\(\)/);
   assert.match(flow, /const MAX_AUTOMATIC_ATTEMPTS = 2/);
   assert.match(flow, /for \(let attempt = 1; attempt <= MAX_AUTOMATIC_ATTEMPTS; attempt \+= 1\)/);
+  assert.match(flow, /await biometricApi\.recover\(\{ reason: code, rotateBackend: true \}\)/);
   assert.match(flow, /state\.idempotencyKey = newIdempotencyKey\(\)/);
   assert.match(flow, /portalBiometricRequest\('desafio'/);
   assert.match(flow, /portalBiometricRequest\('verificar'/);
@@ -92,10 +93,10 @@ test('el encuadre móvil muestra el vídeo completo y una guía facial amplia', 
   assert.match(view, /\.face-frame[\s\S]*border-radius:\s*24px/);
   assert.match(view, /#camera-step \.face-stage\s*\{\s*width:\s*100%;\s*max-width:\s*none/);
   assert.match(view, /id="camera-video" playsinline autoplay muted/);
-  assert.match(view, /worker-biometric\.js\?v=20260730-mobile-camera-v3/);
+  assert.match(view, /worker-biometric\.js\?v=/);
 });
 
-test('cada apertura reinicia el vídeo y exige un fotograma renderizado', async () => {
+test('cada apertura exige pista activa, no silenciada y fotogramas visibles', async () => {
   const mobile = await read('src/public/worker-biometric-mobile.js');
 
   assert.match(mobile, /video\.pause\(\)/);
@@ -103,13 +104,67 @@ test('cada apertura reinicia el vídeo y exige un fotograma renderizado', async 
   assert.match(mobile, /requestVideoFrameCallback/);
   assert.match(mobile, /getVideoPlaybackQuality/);
   assert.match(mobile, /track\.readyState !== 'live'/);
+  assert.match(mobile, /track\.enabled !== true/);
+  assert.match(mobile, /track\.muted === true/);
+  assert.match(mobile, /track\.addEventListener\('mute'/);
+  assert.match(mobile, /track\.addEventListener\('unmute'/);
+  assert.match(mobile, /hasVisiblePixels\(video\)/);
   assert.match(mobile, /for \(const constraints of attempts\)/);
-  assert.match(mobile, /facingMode:\s*\{ ideal:\s*'user' \}/);
   assert.match(mobile, /\{ video: true, audio: false \}/);
-  assert.doesNotMatch(mobile, /resizeMode:\s*'none'/);
 });
 
-test('la tolerancia visual aumenta sin relajar identidad, rostro real ni desafío', async () => {
+test('Human se invalida al suspender la página y puede cambiar de backend', async () => {
+  const mobile = await read('src/public/worker-biometric-mobile.js');
+
+  assert.match(mobile, /cacheSensitivity:\s*0/);
+  assert.match(mobile, /deallocate:\s*true/);
+  assert.match(mobile, /const BACKENDS = Object\.freeze\(\['webgl', 'wasm', 'cpu'\]\)/);
+  assert.match(mobile, /const RUNTIME_MAX_IDLE_MS = 10 \* 60 \* 1000/);
+  assert.match(mobile, /invalidateRuntime\('runtime-idle'\)/);
+  assert.match(mobile, /function invalidateRuntime/);
+  assert.match(mobile, /async function recover/);
+  assert.match(mobile, /rotateBackend:\s*options\.rotateBackend === true/);
+  assert.match(mobile, /document\.addEventListener\('visibilitychange'/);
+  assert.match(mobile, /document\.addEventListener\('freeze'/);
+  assert.match(mobile, /document\.addEventListener\('resume'/);
+  assert.match(mobile, /window\.addEventListener\('pagehide'/);
+  assert.match(mobile, /window\.addEventListener\('pageshow'/);
+  assert.match(mobile, /document\.wasDiscarded/);
+});
+
+test('la verificación usa tiempos independientes por etapa', async () => {
+  const mobile = await read('src/public/worker-biometric-mobile.js');
+
+  assert.match(mobile, /const BASELINE_TIMEOUT_MS = 12_000/);
+  assert.match(mobile, /const CHALLENGE_TIMEOUT_MS = 9_000/);
+  assert.match(mobile, /const FINAL_TIMEOUT_MS = 12_000/);
+  assert.match(mobile, /const baselineDeadline = Date\.now\(\) \+ /);
+  assert.match(mobile, /const challengeDeadline = Date\.now\(\) \+ /);
+  assert.match(mobile, /const finalDeadline = Date\.now\(\) \+ /);
+  assert.match(mobile, /biometric_baseline_timeout/);
+  assert.match(mobile, /biometric_challenge_timeout/);
+  assert.match(mobile, /biometric_final_timeout/);
+  assert.doesNotMatch(mobile, /const timeoutAt = Date\.now\(\) \+ \(options\.timeoutMs \|\| CAPTURE_TIMEOUT_MS\)/);
+});
+
+test('el controlador pausa y reanuda automáticamente una validación interrumpida', async () => {
+  const flow = await read('src/public/worker-portal-biometric-flow.js');
+
+  assert.match(flow, /function pauseOpenVerification/);
+  assert.match(flow, /function resumeOpenVerification/);
+  assert.match(flow, /resumeVerificationPending/);
+  assert.match(flow, /scheduleResumeVerification\(\)/);
+  assert.match(flow, /resumeVerificationPending = Boolean\(photoConsent\?\.checked\)/);
+  assert.match(flow, /biometricApi\?\.prepare\?\.\(\)\.catch/);
+  assert.match(flow, /document\.addEventListener\('visibilitychange'/);
+  assert.match(flow, /document\.addEventListener\('freeze'/);
+  assert.match(flow, /document\.addEventListener\('resume'/);
+  assert.match(flow, /window\.addEventListener\('pagehide'/);
+  assert.match(flow, /window\.addEventListener\('pageshow'/);
+  assert.match(flow, /Reiniciando reconocimiento facial/);
+});
+
+test('la tolerancia visual no relaja identidad, rostro real ni desafío', async () => {
   const mobile = await read('src/public/worker-biometric-mobile.js');
 
   assert.match(mobile, /faceRatio < 0\.13/);
