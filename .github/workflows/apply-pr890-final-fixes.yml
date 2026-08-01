@@ -20,7 +20,11 @@ jobs:
           fetch-depth: 0
 
       - name: Apply reviewed fixes
-        run: python .pr890fix/patch.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .pr890fix/patch.py
+          python .pr890fix/patch-tests.py
 
       - name: Validate
         shell: bash
@@ -28,6 +32,8 @@ jobs:
           set -euo pipefail
           node --check src/services/cvIntelligence.js
           node --check test/cvTokenSavings.test.js
+          node --check test/cvIntelligenceReviewContracts.test.js
+          node --check test/attachmentAnalysisContract.test.js
           npm ci
           DATABASE_URL='postgresql://user:pass@localhost:5432/lorren_test' npx prisma validate
           npm run build
