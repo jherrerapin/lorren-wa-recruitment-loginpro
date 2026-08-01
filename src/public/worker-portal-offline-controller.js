@@ -178,6 +178,7 @@
           ? 'Finalizar almuerzo'
           : 'Registrar salida';
     button.disabled = disabled;
+    if (disabled) button.setAttribute('data-offline-disabled', 'true');
     return button;
   }
 
@@ -224,6 +225,7 @@
       return leftDate.localeCompare(rightDate);
     });
     for (const record of sorted) {
+      if (String(record.state || '').toUpperCase() === 'REJECTED') continue;
       const id = String(record.assignmentId || '');
       const stage = MARK_STAGE[String(record.markType || '').toUpperCase()] || 0;
       if (id && stage) stages.set(id, Math.max(stages.get(id) || 0, stage));
@@ -234,7 +236,7 @@
   function enableOfflineButtons() {
     if (navigator.onLine) return;
     document.querySelectorAll('.mark-button[data-mark-type]').forEach((button) => {
-      if (!button.hasAttribute('data-server-disabled')) button.disabled = false;
+      if (!button.hasAttribute('data-server-disabled') && !button.hasAttribute('data-offline-disabled')) button.disabled = false;
     });
   }
 
