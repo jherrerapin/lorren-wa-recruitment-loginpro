@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260801-pwa-session-launch-v1';
+const BIOMETRIC_ASSET_RELEASE = '20260801-biometric-integrity-v2';
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
 const LOAD_WORKER_PORTAL_HANDOFF = /Android/i.test(WORKER_PORTAL_USER_AGENT);
 
