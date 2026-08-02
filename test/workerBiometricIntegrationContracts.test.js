@@ -7,6 +7,7 @@ import {
   assertWorkerBiometricAttemptAllowed,
   assessWorkerBiometric,
   enrollWorkerBiometric,
+  getWorkerBiometricEnrollment,
   isWorkerBiometricVerificationUsable,
   issueWorkerBiometricChallenge
 } from '../src/services/workerBiometricService.js';
@@ -111,7 +112,7 @@ function strictEnrollmentInput(overrides = {}) {
   };
 }
 
-function validChallengeEvidence(action) {
+function validChallengeEvidence(action, overrides = {}) {
   return {
     kind: 'MODEL_AND_ACTIVE_CHALLENGE_V2',
     action,
@@ -126,8 +127,12 @@ function validChallengeEvidence(action) {
     baselineFaceRatio: 0.35,
     actionFaceRatio: action === 'MOVE_CLOSER' ? 0.43 : 0.36,
     finalFaceRatio: 0.36,
+    actionDescriptors: sampleSet(3, 0.055),
+    actionRealScores: [0.8, 0.82, 0.81],
+    actionLiveScores: [0.68, 0.7, 0.69],
     actionRealScoreMin: 0.8,
-    actionLiveScoreMin: 0.61
+    actionLiveScoreMin: 0.68,
+    ...overrides
   };
 }
 
@@ -183,6 +188,8 @@ test('el enrolamiento estricto recalcula la plantilla desde tres muestras válid
   assert.ok(event.metadata.minimumSampleSimilarity > 0.99);
   assert.notEqual(event.metadata.descriptorHash, null);
   assert.notEqual(event.metadata.captureHash, null);
+  const enrollment = await getWorkerBiometricEnrollment(prisma, WORKER_ID, { env: ENV });
+  assert.equal(enrollment.evidenceVersion, 2);
 });
 
 test('ninguna puntuación declarada arriba puede ocultar una muestra con liveness bajo', async () => {
@@ -197,7 +204,21 @@ test('ninguna puntuación declarada arriba puede ocultar una muestra con livenes
   assert.ok(assessment.riskFlags.includes('BIOMETRIC_LIVENESS_LOW'));
 });
 
-test('un desafío activo coherente y cuatro muestras consistentes producen verificación temporal', async () => {
+test('el movimiento también exige liveness real en sus tres fotogramas', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const evidence = validChallengeEvidence('TURN_SIDE', {
+    actionLiveScores: [0.7, 0.1, 0.69]
+  });
+  const assessment = await assessStrict(prisma, {
+    idempotencyKey: 'low-action-live-12345',
+    challengeEvidence: evidence
+  });
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_LIVENESS_LOW'));
+});
+
+test('un desafío activo coherente y siete muestras consistentes producen verificación temporal', async () => {
   const prisma = fakePrisma();
   await enrollStrict(prisma);
   const assessment = await assessStrict(prisma);
@@ -207,14 +228,16 @@ test('un desafío activo coherente y cuatro muestras consistentes producen verif
   assert.equal(assessment.realScore, 0.8);
   assert.equal(assessment.liveScore, 0.71);
   assert.ok(assessment.minimumSampleSimilarity > 0.99);
+  assert.ok(assessment.actionIdentitySimilarity > 0.99);
+  assert.equal(assessment.challengeEvidence.actionDescriptors, undefined);
+  assert.equal(typeof assessment.challengeEvidence.actionCaptureHash, 'string');
   assert.ok(new Date(assessment.validUntil) > new Date(assessment.assessedAt));
 });
 
 test('el servidor rechaza geometría que no demuestra el movimiento firmado', async () => {
   const prisma = fakePrisma();
   await enrollStrict(prisma);
-  const evidence = validChallengeEvidence('TURN_SIDE');
-  evidence.actionYaw = 0.08;
+  const evidence = validChallengeEvidence('TURN_SIDE', { actionYaw: 0.08 });
   const assessment = await assessStrict(prisma, {
     idempotencyKey: 'bad-geometry-1234567',
     challengeEvidence: evidence
@@ -238,15 +261,40 @@ test('muestras faciales incompatibles no se promedian para fabricar una coincide
   assert.ok(assessment.riskFlags.includes('BIOMETRIC_SAMPLES_INCONSISTENT'));
 });
 
-test('una secuencia exacta reutilizada queda marcada como replay', async () => {
+test('un enrolamiento legado exige renovación antes de una verificación v2', async () => {
+  const prisma = fakePrisma();
+  await enrollWorkerBiometric(prisma, {
+    workerId: WORKER_ID,
+    workerLabel: 'Auxiliar legado',
+    descriptor: baseDescriptor,
+    realScore: 0.9,
+    liveScore: 0.9,
+    consentAccepted: true,
+    actorUsername: 'legacy-admin',
+    actorRole: 'admin'
+  }, { now: NOW, env: ENV });
+  const enrollment = await getWorkerBiometricEnrollment(prisma, WORKER_ID, { env: ENV });
+  assert.equal(enrollment.evidenceVersion, 1);
+  const assessment = await assessStrict(prisma, { idempotencyKey: 'legacy-upgrade-12345' });
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_ENROLLMENT_UPGRADE_REQUIRED'));
+});
+
+test('una secuencia completa reutilizada queda marcada como replay', async () => {
   const prisma = fakePrisma();
   await enrollStrict(prisma);
   const samples = sampleSet(4, 0.015);
-  const first = await assessStrict(prisma, { idempotencyKey: 'fresh-capture-123456', samples });
+  const evidence = validChallengeEvidence('TURN_SIDE');
+  const first = await assessStrict(prisma, {
+    idempotencyKey: 'fresh-capture-123456',
+    samples,
+    challengeEvidence: evidence
+  });
   assert.equal(first.verified, true);
   const replay = await assessStrict(prisma, {
     idempotencyKey: 'replayed-capture-1234',
     samples,
+    challengeEvidence: evidence,
     now: new Date(NOW.getTime() + 12_000)
   });
   assert.equal(replay.verified, false);
@@ -315,11 +363,14 @@ test('los archivos del navegador envían evidencia completa y nunca elevan el li
   assert.match(mobile, /sampleDescriptors:/);
   assert.match(mobile, /sampleRealScores:/);
   assert.match(mobile, /sampleLiveScores:/);
+  assert.match(mobile, /actionDescriptors:/);
+  assert.match(mobile, /actionLiveScores:/);
   assert.match(mobile, /MODEL_AND_ACTIVE_CHALLENGE_V2/);
   assert.match(mobile, /REQUIRED_ACTION_FRAMES = 3/);
   assert.match(flow, /challengeEvidence:\s*capture\.challengeEvidence/);
   assert.match(flow, /sampleDescriptors:\s*capture\.sampleDescriptors/);
   assert.match(route, /evidenceVersion:\s*WORKER_BIOMETRIC_EVIDENCE_VERSION/);
+  assert.match(route, /hasCurrentBiometricEnrollment/);
   assert.match(route, /validUntil:\s*assessment\.validUntil/);
   assert.match(route, /consumeVerifiedAssessmentAfterSuccess/);
   assert.match(loader, /20260801-biometric-integrity-v2/);
