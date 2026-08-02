@@ -27,8 +27,11 @@ const REAL_THRESHOLD = 0.55;
 const LIVE_THRESHOLD = 0.55;
 const MATCH_THRESHOLD = 0.85;
 const SAMPLE_CONSISTENCY_THRESHOLD = 0.78;
+const ACTION_SAMPLE_CONSISTENCY_THRESHOLD = 0.65;
+const ACTION_IDENTITY_THRESHOLD = 0.65;
 const ENROLLMENT_SAMPLE_COUNT = 3;
 const VERIFICATION_SAMPLE_COUNT = 4;
+const ACTION_SAMPLE_COUNT = 3;
 const MIN_CHALLENGE_DURATION_MS = 200;
 const MAX_CHALLENGE_DURATION_MS = 12_000;
 const MIN_CAPTURE_DURATION_MS = 700;
@@ -277,7 +280,8 @@ export async function loadWorkerBiometricStatusMap(prisma, workerIds = []) {
     return [id, {
       enrolled: event?.action === WORKER_BIOMETRIC_ACTION.ENROLLED,
       enrolledAt: event?.action === WORKER_BIOMETRIC_ACTION.ENROLLED ? event.createdAt : null,
-      modelVersion: event?.metadata?.modelVersion || null
+      modelVersion: event?.metadata?.modelVersion || null,
+      evidenceVersion: Number(event?.metadata?.evidenceVersion || 1)
     }];
   }));
 }
@@ -381,18 +385,26 @@ export async function revokeWorkerBiometric(prisma, input = {}, options = {}) {
 
 export async function getWorkerBiometricEnrollment(prisma, workerId, options = {}) {
   const normalizedWorkerId = normalizeString(workerId, 120);
-  if (!normalizedWorkerId) return { enrolled: false, descriptor: null };
+  if (!normalizedWorkerId) return { enrolled: false, descriptor: null, evidenceVersion: null };
   const event = await findLatestEnrollmentEvent(prisma, normalizedWorkerId);
-  if (!event || event.action !== WORKER_BIOMETRIC_ACTION.ENROLLED) return { enrolled: false, descriptor: null };
+  if (!event || event.action !== WORKER_BIOMETRIC_ACTION.ENROLLED) {
+    return { enrolled: false, descriptor: null, evidenceVersion: null };
+  }
   try {
     return {
       enrolled: true,
       descriptor: decryptDescriptor(event.metadata?.template, options.env || process.env),
       modelVersion: event.metadata?.modelVersion || null,
+      evidenceVersion: Number(event.metadata?.evidenceVersion || 1),
       enrolledAt: event.createdAt
     };
   } catch {
-    return { enrolled: true, descriptor: null, templateInvalid: true };
+    return {
+      enrolled: true,
+      descriptor: null,
+      evidenceVersion: Number(event.metadata?.evidenceVersion || 1),
+      templateInvalid: true
+    };
   }
 }
 
@@ -455,11 +467,38 @@ function normalizeChallengeEvidence(value, expectedAction) {
   if (value.kind !== 'MODEL_AND_ACTIVE_CHALLENGE_V2' || value.action !== expectedAction) {
     throw new Error('attendance_biometric_challenge_evidence_invalid');
   }
+
+  const actionDescriptors = normalizeDescriptorSamples(
+    value.actionDescriptors,
+    ACTION_SAMPLE_COUNT,
+    'attendance_biometric_action_samples'
+  );
+  const actionRealScores = normalizeScoreArray(
+    value.actionRealScores,
+    ACTION_SAMPLE_COUNT,
+    'attendance_biometric_action_real_scores'
+  );
+  const actionLiveScores = normalizeScoreArray(
+    value.actionLiveScores,
+    ACTION_SAMPLE_COUNT,
+    'attendance_biometric_action_live_scores'
+  );
+  if (actionRealScores.some((score) => score < REAL_THRESHOLD)) {
+    throw new Error('attendance_biometric_antispoof_low');
+  }
+  if (actionLiveScores.some((score) => score < LIVE_THRESHOLD)) {
+    throw new Error('attendance_biometric_liveness_low');
+  }
+  const actionMinimumSimilarity = minimumSampleSimilarity(actionDescriptors);
+  if (actionMinimumSimilarity < ACTION_SAMPLE_CONSISTENCY_THRESHOLD) {
+    throw new Error('attendance_biometric_challenge_evidence_invalid');
+  }
+
   const evidence = {
     kind: value.kind,
     action: value.action,
     baselineFrames: finiteNumber(value.baselineFrames, 'attendance_biometric_baseline_frames', { min: 2, max: 20 }),
-    actionFrames: finiteNumber(value.actionFrames, 'attendance_biometric_action_frames', { min: 3, max: 40 }),
+    actionFrames: finiteNumber(value.actionFrames, 'attendance_biometric_action_frames', { min: ACTION_SAMPLE_COUNT, max: 40 }),
     finalFrames: finiteNumber(value.finalFrames, 'attendance_biometric_final_frames', { min: 2, max: 20 }),
     captureDurationMs: finiteNumber(value.captureDurationMs, 'attendance_biometric_capture_duration', {
       min: MIN_CAPTURE_DURATION_MS,
@@ -475,15 +514,14 @@ function normalizeChallengeEvidence(value, expectedAction) {
     baselineFaceRatio: finiteNumber(value.baselineFaceRatio, 'attendance_biometric_baseline_ratio', { min: 0.05, max: 0.95 }),
     actionFaceRatio: finiteNumber(value.actionFaceRatio, 'attendance_biometric_action_ratio', { min: 0.05, max: 0.95 }),
     finalFaceRatio: finiteNumber(value.finalFaceRatio, 'attendance_biometric_final_ratio', { min: 0.05, max: 0.95 }),
-    actionRealScoreMin: finiteNumber(value.actionRealScoreMin, 'attendance_biometric_action_real', { min: 0, max: 1 }),
-    actionLiveScoreMin: finiteNumber(value.actionLiveScoreMin, 'attendance_biometric_action_live', { min: 0, max: 1 })
+    actionRealScoreMin: Math.min(...actionRealScores),
+    actionLiveScoreMin: Math.min(...actionLiveScores),
+    actionMinimumSimilarity,
+    actionDescriptors
   };
 
   if (Math.abs(evidence.baselineYaw) >= 0.25 || Math.abs(evidence.finalYaw) >= 0.25) {
     throw new Error('attendance_biometric_challenge_evidence_invalid');
-  }
-  if (evidence.actionRealScoreMin < REAL_THRESHOLD) {
-    throw new Error('attendance_biometric_antispoof_low');
   }
   if (expectedAction === 'TURN_SIDE') {
     if (Math.abs(evidence.actionYaw) < 0.20 || Math.abs(evidence.actionYaw - evidence.baselineYaw) < 0.16) {
@@ -624,12 +662,14 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
   let descriptor = null;
   let challenge = null;
   let challengeEvidence = null;
+  let publicChallengeEvidence = null;
   let similarity = null;
   let hash = null;
   let captureHash = null;
   let realScore = Number(input.realScore);
   let liveScore = Number(input.liveScore);
   let minimumSampleSimilarityValue = null;
+  let actionIdentitySimilarity = null;
   let sampleCount = 1;
   const strictEvidence = Number(input.evidenceVersion) === WORKER_BIOMETRIC_EVIDENCE_VERSION;
 
@@ -637,6 +677,8 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     addFlag(flags, 'BIOMETRIC_NOT_ENROLLED', 35, state);
   } else if (!enrollment.descriptor) {
     addFlag(flags, 'BIOMETRIC_TEMPLATE_UNAVAILABLE', 60, state);
+  } else if (strictEvidence && enrollment.evidenceVersion !== WORKER_BIOMETRIC_EVIDENCE_VERSION) {
+    addFlag(flags, 'BIOMETRIC_ENROLLMENT_UPGRADE_REQUIRED', 70, state);
   }
 
   try {
@@ -657,13 +699,28 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
       const samples = validateStrictSamples(input, VERIFICATION_SAMPLE_COUNT, 'verification');
       descriptor = samples.descriptor;
       hash = descriptorHash(descriptor);
-      captureHash = samples.captureHash;
       realScore = samples.realScore;
       liveScore = samples.liveScore;
       minimumSampleSimilarityValue = samples.minimumSimilarity;
       sampleCount = VERIFICATION_SAMPLE_COUNT;
       if (!challenge) throw new Error('attendance_biometric_challenge_invalid');
       challengeEvidence = normalizeChallengeEvidence(input.challengeEvidence, challenge.action);
+      const actionDescriptor = averageDescriptors(challengeEvidence.actionDescriptors);
+      actionIdentitySimilarity = humanFaceSimilarity(descriptor, actionDescriptor);
+      if (actionIdentitySimilarity < ACTION_IDENTITY_THRESHOLD) {
+        throw new Error('attendance_biometric_challenge_identity_inconsistent');
+      }
+      captureHash = descriptorSequenceHash([
+        ...samples.descriptors,
+        ...challengeEvidence.actionDescriptors
+      ]);
+      publicChallengeEvidence = {
+        ...challengeEvidence,
+        actionDescriptors: undefined,
+        actionCaptureHash: descriptorSequenceHash(challengeEvidence.actionDescriptors),
+        actionIdentitySimilarity
+      };
+      delete publicChallengeEvidence.actionDescriptors;
     } catch (error) {
       const code = error?.message;
       if (code === 'attendance_biometric_antispoof_low') addFlag(flags, 'BIOMETRIC_ANTISPOOF_LOW', 50, state);
@@ -701,12 +758,14 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     matchThreshold: MATCH_THRESHOLD,
     minimumSampleSimilarity: minimumSampleSimilarityValue,
     sampleConsistencyThreshold: SAMPLE_CONSISTENCY_THRESHOLD,
+    actionIdentitySimilarity,
+    actionIdentityThreshold: ACTION_IDENTITY_THRESHOLD,
     sampleCount,
     realScore: Number.isFinite(realScore) ? realScore : null,
     liveScore: Number.isFinite(liveScore) ? liveScore : null,
     challengeAction: challenge?.action || normalizeString(input.challengeAction, 40),
     challengeCompleted: input.challengeCompleted === true,
-    challengeEvidence,
+    challengeEvidence: publicChallengeEvidence,
     descriptorHash: hash,
     captureHash,
     evidenceVersion: strictEvidence ? WORKER_BIOMETRIC_EVIDENCE_VERSION : 1,
