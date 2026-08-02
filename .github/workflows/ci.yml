@@ -3,6 +3,9 @@ name: CI
 # Pausado temporalmente para controlar el consumo mensual de GitHub Actions.
 # Se conserva la ejecución manual desde la pestaña Actions.
 on:
+  push:
+    branches:
+      - fix/898-biometric-integrity
   workflow_dispatch:
 
 permissions:
