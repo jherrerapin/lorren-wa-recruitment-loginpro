@@ -13,9 +13,9 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
-function asPositiveInt(value, fallback = 1) {
+function asPositiveInt(value, fallback = 1, maximum = Number.MAX_SAFE_INTEGER) {
   const parsed = Number.parseInt(String(value || ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
 }
 
 function requireDev(req, res, next) {
@@ -64,7 +64,9 @@ function buildIssueTitleMap(report) {
 
 function buildSummaryDiagnosis(report) {
   const { summary } = report;
-  if (!summary.conversations) return 'No se encontraron conversaciones visibles en el periodo seleccionado.';
+  if (!summary.conversations) {
+    return 'No se encontraron conversaciones visibles en el periodo seleccionado.';
+  }
   if (summary.highRisk > 0) {
     return `${summary.highRisk} conversaciones presentan hallazgos de riesgo alto. La prioridad debe ser revisar esos casos antes de modificar el tono general del bot.`;
   }
@@ -135,7 +137,7 @@ function renderConversation(conversation) {
 }
 
 export function renderConversationAuditPage(report, query = {}) {
-  const days = asPositiveInt(query.days, report.range.days || 15);
+  const days = asPositiveInt(query.days, report.range.days || 15, 90);
   const risk = RISK_OPTIONS.has(String(query.risk || '').toUpperCase()) ? String(query.risk).toUpperCase() : 'ALL';
   const filtered = risk === 'ALL' ? report.conversations : report.conversations.filter((item) => item.risk.label === risk);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -196,7 +198,7 @@ export function conversationAuditRouter(prisma, dependencies = {}) {
 
   router.get('/', async (req, res) => {
     try {
-      const days = asPositiveInt(req.query.days, 15);
+      const days = asPositiveInt(req.query.days, 15, 90);
       const report = await loadReport(prisma, { days });
       res.set('Cache-Control', 'no-store');
       return res.send(renderConversationAuditPage(report, req.query));
@@ -208,7 +210,7 @@ export function conversationAuditRouter(prisma, dependencies = {}) {
 
   router.get('/export.json', async (req, res) => {
     try {
-      const days = asPositiveInt(req.query.days, 15);
+      const days = asPositiveInt(req.query.days, 15, 90);
       const report = await loadReport(prisma, { days });
       res.set('Cache-Control', 'no-store');
       res.set('Content-Disposition', `attachment; filename="lorren-auditoria-conversaciones-${days}-dias.json"`);
