@@ -6,6 +6,7 @@ import {
   requireMetaAds
 } from '../services/lorenV2Gate.js';
 import { metaAdsStatsRouter } from './metaAdsStats.js';
+import { conversationAuditRouter } from './conversationAudit.js';
 
 function renderStatisticsHub(req = {}) {
   const metaAdsLink = canSeeMetaAds(req)
@@ -13,6 +14,9 @@ function renderStatisticsHub(req = {}) {
     : '';
   const cvAnalysisLink = canSeeCvAnalysis(req)
     ? '<a href="/admin/estadisticas/cv-analysis">Análisis HV</a>'
+    : '';
+  const conversationAuditLink = req.userRole === 'dev'
+    ? '<a href="/admin/estadisticas/conversation-audit">Auditoría conversacional</a>'
     : '';
   const metaAdsCard = canSeeMetaAds(req)
     ? `<a href="/admin/estadisticas/campaigns" class="hub-card">
@@ -28,6 +32,13 @@ function renderStatisticsHub(req = {}) {
         <div class="hub-card-desc">Organiza candidatos según la vacante y el perfil que estás buscando.</div>
       </a>`
     : '';
+  const conversationAuditCard = req.userRole === 'dev'
+    ? `<a href="/admin/estadisticas/conversation-audit" class="hub-card">
+        <div class="hub-card-icon">🔎</div>
+        <div class="hub-card-title">Auditoría conversacional</div>
+        <div class="hub-card-desc">Revisa todas las conversaciones de un periodo, detecta conductas anómalas y descarga un diagnóstico anónimo.</div>
+      </a>`
+    : '';
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -38,7 +49,7 @@ function renderStatisticsHub(req = {}) {
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1d23; font-size: 14px; }
-    .navbar { background: #1e2d3d; padding: 0 24px; display: flex; align-items: center; gap: 8px; height: 52px; border-bottom: 1px solid #0f1a26; }
+    .navbar { background: #1e2d3d; padding: 0 24px; display: flex; align-items: center; gap: 8px; min-height: 52px; border-bottom: 1px solid #0f1a26; flex-wrap: wrap; }
     .navbar a { color: #94a3b8; text-decoration: none; font-size: 13px; font-weight: 500; padding: 6px 10px; border-radius: 6px; transition: all .15s; }
     .navbar a:hover, .navbar a.active { color: #fff; background: rgba(255,255,255,.08); }
     .navbar .sep { color: #334155; font-size: 16px; }
@@ -61,6 +72,7 @@ function renderStatisticsHub(req = {}) {
     <a href="/admin/estadisticas" class="active">Estadísticas</a>
     ${metaAdsLink}
     ${cvAnalysisLink}
+    ${conversationAuditLink}
     <span class="spacer"></span>
     <a href="/logout">Cerrar sesión</a>
   </nav>
@@ -70,6 +82,7 @@ function renderStatisticsHub(req = {}) {
     <div class="hub-grid">
       ${metaAdsCard}
       ${cvAnalysisCard}
+      ${conversationAuditCard}
     </div>
   </main>
 </body>
@@ -88,6 +101,7 @@ export function lorenV2Router(prisma, dependencies = {}) {
     res.send(renderStatisticsHub(req));
   });
 
+  router.use('/conversation-audit', conversationAuditRouter(prisma, dependencies));
   router.use(requireMetaAds, metaAdsStatsRouter(prisma, dependencies));
   return router;
 }
