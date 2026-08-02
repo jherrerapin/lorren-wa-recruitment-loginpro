@@ -461,6 +461,7 @@
       const detected = await detectOneFace(human, video, onStatus);
       if (!detected) {
         consecutiveActionFrames = 0;
+        accepted.length = 0;
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
@@ -469,23 +470,39 @@
       const actionReached = challenge.action === 'TURN_SIDE'
         ? turnedSide(detected.face) && Math.abs(geometry.yaw - baselineGeometry.yaw) >= 0.16
         : geometry.faceRatio >= closerTarget;
-      if (!actionReached || scores.realScore < MIN_REAL_SCORE) {
+      if (!actionReached || scores.realScore < MIN_REAL_SCORE || scores.liveScore < MIN_LIVE_SCORE) {
         consecutiveActionFrames = 0;
         accepted.length = 0;
         onStatus?.(scores.realScore < MIN_REAL_SCORE
           ? 'Mantén una imagen real y bien iluminada.'
-          : (challenge.action === 'TURN_SIDE' ? 'Gira un poco más el rostro.' : 'Acércate un poco más.'));
+          : (scores.liveScore < MIN_LIVE_SCORE
+              ? 'Realiza el movimiento de forma natural y continua.'
+              : (challenge.action === 'TURN_SIDE' ? 'Gira un poco más el rostro.' : 'Acércate un poco más.')));
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
+      }
+
+      let descriptor;
+      try {
+        descriptor = normalizeDescriptor(detected.face.embedding);
+      } catch {
+        consecutiveActionFrames = 0;
+        accepted.length = 0;
+        onStatus?.('Mantén el movimiento y la imagen estable.');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
 
       consecutiveActionFrames += 1;
-      accepted.push({ scores, geometry });
+      accepted.push({ scores, geometry, descriptor });
       if (consecutiveActionFrames >= REQUIRED_ACTION_FRAMES) {
         const selected = accepted.slice(-REQUIRED_ACTION_FRAMES);
         return {
           frames: selected.length,
           geometry: selected.at(-1).geometry,
+          descriptors: selected.map((frame) => frame.descriptor),
+          realScores: selected.map((frame) => frame.scores.realScore),
+          liveScores: selected.map((frame) => frame.scores.liveScore),
           realScoreMin: Math.min(...selected.map((frame) => frame.scores.realScore)),
           liveScoreMin: Math.min(...selected.map((frame) => frame.scores.liveScore)),
           durationMs: Math.round(performance.now() - actionStartedAt)
@@ -574,6 +591,9 @@
         baselineFaceRatio: baselineGeometry.faceRatio,
         actionFaceRatio: action.geometry.faceRatio,
         finalFaceRatio: finalGeometry.faceRatio,
+        actionDescriptors: action.descriptors,
+        actionRealScores: action.realScores,
+        actionLiveScores: action.liveScores,
         actionRealScoreMin: action.realScoreMin,
         actionLiveScoreMin: action.liveScoreMin
       },
