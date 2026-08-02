@@ -9,10 +9,10 @@ const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
 
-test('el cargador incluye instalación y preparación de sesión en todo Android', () => {
+test('el cargador incluye instalación, sesión y la versión biométrica endurecida', () => {
   assert.match(loaderSource, /worker-portal-install\.js/);
   assert.match(loaderSource, /worker-portal-session-handoff\.js/);
-  assert.match(loaderSource, /20260801-pwa-session-launch-v1/);
+  assert.match(loaderSource, /20260801-biometric-integrity-v2/);
   assert.match(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF = \/Android/);
   assert.doesNotMatch(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF[\s\S]*WhatsApp\|FBAN/);
 });
