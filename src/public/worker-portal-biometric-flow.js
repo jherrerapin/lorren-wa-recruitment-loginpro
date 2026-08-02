@@ -32,7 +32,7 @@
   if (!dialog || !resultBox || !submitButton) return;
 
   const MAX_AUTOMATIC_ATTEMPTS = 2;
-  const FLOW_RELEASE = '20260731-lifecycle-recovery';
+  const FLOW_RELEASE = '20260801-biometric-integrity-v2';
   const BACKEND_RECOVERY_ERRORS = new Set([
     'biometric_runtime_unavailable',
     'biometric_baseline_timeout',
@@ -55,7 +55,8 @@
     photoBlob: null,
     idempotencyKey: null,
     biometricChallenge: null,
-    biometricVerified: false
+    biometricVerified: false,
+    biometricValidUntil: null
   };
 
   const isBiometricMark = () => ['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'].includes(state.markType);
@@ -110,6 +111,12 @@
     }
   }
 
+  function clearVerification() {
+    state.biometricVerified = false;
+    state.biometricValidUntil = null;
+    state.biometricChallenge = null;
+  }
+
   function setStatus(message, tone = 'neutral') {
     resultBox.hidden = false;
     resultBox.className = `status mark-status ${tone === 'neutral' ? '' : tone}`.trim();
@@ -133,17 +140,19 @@
       camera_stream_muted: 'La cámara quedó pausada por el teléfono. Vuelve a intentarlo con la pantalla activa.',
       biometric_page_not_visible: 'Mantén esta pantalla visible durante la validación.',
       biometric_runtime_unavailable: 'El reconocimiento facial se reinició, pero no pudo quedar listo.',
-      biometric_enrollment_timeout: 'No se obtuvo una captura estable para registrar el rostro.',
+      biometric_enrollment_timeout: 'No se obtuvieron tres capturas válidas para registrar el rostro.',
       biometric_capture_timeout: 'No se obtuvo una captura estable dentro del tiempo disponible.',
-      biometric_baseline_timeout: 'No se logró confirmar la posición frontal inicial.',
-      biometric_challenge_timeout: 'No se confirmó el movimiento solicitado.',
-      biometric_final_timeout: 'No se logró confirmar el rostro al volver a mirar de frente.',
+      biometric_baseline_timeout: 'No se lograron obtener dos muestras frontales válidas.',
+      biometric_challenge_timeout: 'No se confirmó el movimiento durante varios fotogramas.',
+      biometric_final_timeout: 'No se lograron obtener las muestras finales al volver al centro.',
       biometric_challenge_not_completed: 'No se confirmó el movimiento solicitado.',
       biometric_descriptor_unavailable: 'No se pudieron leer correctamente los rasgos del rostro.',
-      biometric_descriptor_inconsistent: 'La imagen cambió demasiado durante la validación.',
-      biometric_verification_rejected: 'El rostro no coincide con el registrado.',
-      attendance_biometric_antispoof_low: 'No se confirmó un rostro real.',
-      attendance_biometric_liveness_low: 'No se confirmó el movimiento solicitado.',
+      biometric_descriptor_inconsistent: 'Las capturas del rostro no fueron consistentes.',
+      biometric_verification_rejected: 'No fue posible confirmar que sea el rostro registrado.',
+      attendance_biometric_antispoof_low: 'No se confirmó que la captura corresponda a un rostro real.',
+      attendance_biometric_liveness_low: 'No se confirmó vida facial en todas las muestras.',
+      attendance_biometric_samples_inconsistent: 'Las muestras cambiaron demasiado durante la validación.',
+      attendance_biometric_rate_limited: 'Se alcanzó el límite temporal de intentos. Espera antes de volver a intentar.',
       biometric_enrollment_required: 'Debes registrar nuevamente tu rostro antes de marcar.',
       portal_session_required: 'Tu sesión del portal venció.',
       assignment_not_available: 'La asignación ya no está disponible para marcar.',
@@ -153,10 +162,15 @@
     return messages[code] || 'No fue posible confirmar tu identidad.';
   }
 
+  function verificationStillValid() {
+    if (!state.biometricVerified || !state.biometricValidUntil) return false;
+    return new Date(state.biometricValidUntil).getTime() > Date.now() + 2_000;
+  }
+
   function updateSubmitState() {
     submitButton.disabled = !navigator.onLine
       || !state.locationEvidence
-      || (isBiometricMark() && (!state.biometricVerified || !state.photoBlob || !photoConsent?.checked));
+      || (isBiometricMark() && (!verificationStillValid() || !state.photoBlob || !photoConsent?.checked));
   }
 
   function setButtonsReady(ready) {
@@ -176,6 +190,7 @@
     const response = await fetch(`/operaciones/portal/biometria/${path}`, {
       method: 'POST',
       credentials: 'same-origin',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
         'X-Requested-With': 'worker-portal'
@@ -186,6 +201,7 @@
     if (!response.ok || !payload.ok) {
       const error = new Error(payload.error || 'biometric_request_failed');
       error.payload = payload;
+      error.retryAfterSeconds = Number(response.headers.get('Retry-After') || 0);
       throw error;
     }
     return payload;
@@ -237,7 +253,12 @@
         onStatus: (message) => { enrollmentStatus.textContent = message; }
       });
       await portalBiometricRequest('registrar', {
+        evidenceVersion: capture.evidenceVersion,
         descriptor: capture.descriptor,
+        sampleDescriptors: capture.sampleDescriptors,
+        sampleRealScores: capture.sampleRealScores,
+        sampleLiveScores: capture.sampleLiveScores,
+        captureDurationMs: capture.captureDurationMs,
         realScore: capture.realScore,
         liveScore: capture.liveScore,
         modelVersion: capture.modelVersion,
@@ -309,10 +330,15 @@
       assignmentId: state.assignmentId,
       markType: state.markType,
       idempotencyKey: state.idempotencyKey,
+      evidenceVersion: capture.evidenceVersion,
       challengeToken: state.biometricChallenge?.token,
       challengeAction: capture.challengeAction,
       challengeCompleted: capture.challengeCompleted,
+      challengeEvidence: capture.challengeEvidence,
       descriptor: capture.descriptor,
+      sampleDescriptors: capture.sampleDescriptors,
+      sampleRealScores: capture.sampleRealScores,
+      sampleLiveScores: capture.sampleLiveScores,
       realScore: capture.realScore,
       liveScore: capture.liveScore,
       modelVersion: capture.modelVersion,
@@ -355,6 +381,13 @@
       return;
     }
 
+    const retryAfterSeconds = Number(error?.retryAfterSeconds || 0);
+    if (code === 'attendance_biometric_rate_limited' && retryAfterSeconds > 0) {
+      setStatus(`Espera ${retryAfterSeconds} segundos antes de un nuevo intento.`, 'warning');
+      await new Promise((resolve) => window.setTimeout(resolve, Math.min(5_000, retryAfterSeconds * 1000)));
+      return;
+    }
+
     setStatus('Preparando un nuevo intento con la cámara…', 'warning');
     await new Promise((resolve) => window.setTimeout(resolve, 450));
   }
@@ -363,7 +396,7 @@
     if (localRunToken !== runToken || !dialog.open) throw new Error('biometric_flow_cancelled');
     stopCamera();
     clearPhoto();
-    state.biometricVerified = false;
+    clearVerification();
     updateSubmitState();
 
     setStatus(
@@ -396,14 +429,17 @@
     });
 
     if (localRunToken !== runToken || !dialog.open) throw new Error('biometric_flow_cancelled');
-    setStatus('Comparando con el rostro registrado…', 'neutral');
+    setStatus('Comparando las muestras con el rostro registrado…', 'neutral');
     const verification = await verifyBiometric(capture);
-    if (verification.verified !== true) throw new Error('biometric_verification_rejected');
+    if (verification.verified !== true || !verification.validUntil) {
+      throw new Error('biometric_verification_rejected');
+    }
 
     state.biometricVerified = true;
+    state.biometricValidUntil = verification.validUntil;
     setVerifiedPhoto(capture.photoBlob);
     setInstruction('Identidad verificada.');
-    setStatus('Identidad verificada. Ya puedes registrar la marcación.', 'ok');
+    setStatus('Identidad verificada. Registra la marcación ahora.', 'ok');
     submitButton.focus({ preventScroll: true });
   }
 
@@ -431,6 +467,7 @@
           lastError = error;
           stopCamera();
           if (errorCode(error) === 'biometric_flow_cancelled') return;
+          if (errorCode(error) === 'attendance_biometric_rate_limited') break;
           if (attempt < MAX_AUTOMATIC_ATTEMPTS) {
             await recoverAfterFailure(error, localRunToken);
             if (localRunToken !== runToken || !dialog.open) return;
@@ -438,7 +475,7 @@
         }
       }
 
-      state.biometricVerified = false;
+      clearVerification();
       clearPhoto();
       setStatus(`${publicErrorMessage(lastError)} Puedes intentar nuevamente.`, 'danger');
       retryBiometricButton.hidden = false;
@@ -464,8 +501,7 @@
 
     state.locationEvidence = null;
     state.idempotencyKey = null;
-    state.biometricChallenge = null;
-    state.biometricVerified = false;
+    clearVerification();
 
     if (photoConsent) {
       photoConsent.checked = false;
@@ -509,8 +545,11 @@
 
   async function submitMark() {
     if (!state.assignmentId || !state.locationEvidence || !navigator.onLine) return;
-    if (isBiometricMark() && (!state.biometricVerified || !state.photoBlob || !photoConsent?.checked)) {
-      setStatus('La identidad todavía no está verificada.', 'warning');
+    if (isBiometricMark() && (!verificationStillValid() || !state.photoBlob || !photoConsent?.checked)) {
+      clearVerification();
+      setStatus('La validación facial venció. Realízala nuevamente.', 'warning');
+      retryBiometricButton.hidden = false;
+      updateSubmitState();
       return;
     }
 
@@ -544,22 +583,31 @@
           outside_operation_range: 'Debes estar dentro del rango de la operación.',
           operation_geofence_required: 'La operación no tiene geocerca configurada.',
           location_accuracy_insufficient: 'La precisión del GPS no es suficiente.',
-          biometric_verification_required: 'La validación facial venció. Intenta nuevamente.',
+          biometric_verification_required: 'La validación facial venció o ya fue utilizada. Intenta nuevamente.',
           online_biometric_required: 'Necesitas conexión para marcar.',
           portal_session_required: 'Tu sesión venció.',
           departure_arrival_required: 'Primero registra la llegada.',
           departure_break_end_required: 'Finaliza el almuerzo antes de registrar la salida.'
         };
-        throw new Error(messages[payload.error] || 'No fue posible registrar la marcación.');
+        const error = new Error(messages[payload.error] || 'No fue posible registrar la marcación.');
+        error.code = payload.error;
+        throw error;
       }
 
       setStatus(payload.message || 'Marcación registrada.', 'ok');
+      clearVerification();
       stopCamera();
       window.setTimeout(() => window.location.reload(), 900);
     } catch (error) {
+      if (error?.code === 'biometric_verification_required') {
+        clearVerification();
+        clearPhoto();
+        retryBiometricButton.hidden = false;
+      }
       setStatus(error?.message || 'No fue posible registrar.', 'danger');
       submitButton.disabled = false;
       submitButton.textContent = `Registrar ${labelFor(state.markType)}`;
+      updateSubmitState();
     }
   }
 
@@ -570,6 +618,7 @@
     resumeTimer = null;
     stopCamera();
     clearPhoto();
+    clearVerification();
     closeModal(dialog);
   }
 
@@ -581,8 +630,7 @@
     clearPhoto();
     state.locationEvidence = null;
     state.idempotencyKey = null;
-    state.biometricChallenge = null;
-    state.biometricVerified = false;
+    clearVerification();
     if (locationStatus) locationStatus.textContent = 'La ubicación se actualizará al volver.';
     updateSubmitState();
     if (resumeVerificationPending) {
@@ -634,7 +682,7 @@
     if (!photoConsent.checked) {
       resumeVerificationPending = false;
       if (!verificationInProgress) {
-        state.biometricVerified = false;
+        clearVerification();
         clearPhoto();
         stopCamera();
         setStatus('Autoriza el uso de la cámara para iniciar automáticamente.', 'neutral');
