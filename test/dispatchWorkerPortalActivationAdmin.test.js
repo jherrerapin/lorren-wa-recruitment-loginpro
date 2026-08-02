@@ -209,7 +209,6 @@ test('POST autorizado genera el enlace sin filtrar el token crudo', async () => 
 
 test('la pantalla administrativa nunca renderiza registro facial', () => {
   const view = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
-  const hardening = fs.readFileSync('src/public/worker-portal-hardening.js', 'utf8');
   const copyListenerIndex = view.indexOf("copyButton?.addEventListener('click'");
   const clipboardIndex = view.indexOf('navigator.clipboard.writeText');
   assert.ok(copyListenerIndex >= 0 && clipboardIndex > copyListenerIndex);
@@ -217,7 +216,7 @@ test('la pantalla administrativa nunca renderiza registro facial', () => {
   assert.match(view, /Genera el enlace para activar el celular/);
   assert.doesNotMatch(view, /enroll-button|biometric-dialog|captureEnrollment/);
   assert.doesNotMatch(view, /Registrar rostro|Actualizar rostro/);
-  assert.doesNotMatch(hardening, /enroll-button|biometric-dialog/);
+  assert.equal(fs.existsSync('src/public/worker-portal-hardening.js'), false);
   assert.doesNotMatch(view, /window\.open\(|location\.href\s*=\s*activationUrl/);
 });
 
