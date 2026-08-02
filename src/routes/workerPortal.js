@@ -74,6 +74,14 @@ function setBiometricRetryAfter(res, error) {
   if (Number.isFinite(seconds) && seconds > 0) res.set('Retry-After', String(Math.ceil(seconds)));
 }
 
+function hasCurrentBiometricEnrollment(enrollment) {
+  return Boolean(
+    enrollment?.enrolled
+    && enrollment?.descriptor
+    && Number(enrollment.evidenceVersion) === WORKER_BIOMETRIC_EVIDENCE_VERSION
+  );
+}
+
 function verifiedBiometricMetadata(metadata, expected, now) {
   return isWorkerBiometricVerificationUsable(metadata, expected, now);
 }
@@ -379,8 +387,13 @@ export function workerPortalRouter(prisma, options = {}) {
       const portalSession = await resolvePortalSession(req, now);
       if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       const enrollment = await getEnrollmentFn(portalSession.workerId);
-      const enrolled = Boolean(enrollment?.enrolled && enrollment?.descriptor);
-      return res.status(200).json({ ok: true, enrolled, registrationRequired: !enrolled });
+      const enrolled = hasCurrentBiometricEnrollment(enrollment);
+      return res.status(200).json({
+        ok: true,
+        enrolled,
+        registrationRequired: !enrolled,
+        upgradeRequired: Boolean(enrollment?.enrolled && !enrolled)
+      });
     } catch (error) {
       console.error('[WORKER_PORTAL_BIOMETRIC_STATUS_FAILED]', {
         code: typeof error?.message === 'string' ? error.message : 'unknown'
@@ -396,7 +409,7 @@ export function workerPortalRouter(prisma, options = {}) {
       const portalSession = await resolvePortalSession(req, now);
       if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       const current = await getEnrollmentFn(portalSession.workerId);
-      if (current?.enrolled && current?.descriptor) {
+      if (hasCurrentBiometricEnrollment(current)) {
         return res.status(200).json({ ok: true, enrolled: true, alreadyEnrolled: true });
       }
       const result = await enrollBiometricFn({
@@ -418,7 +431,12 @@ export function workerPortalRouter(prisma, options = {}) {
         userAgent: normalizedString(req.get?.('user-agent'), 500)
       }, { now, env: options.env || process.env });
       await markLatestEnrollmentAsWorkerPortal(portalSession.workerId);
-      return res.status(201).json({ ok: true, enrolled: true, enrolledAt: result.enrolledAt });
+      return res.status(201).json({
+        ok: true,
+        enrolled: true,
+        upgraded: Boolean(current?.enrolled),
+        enrolledAt: result.enrolledAt
+      });
     } catch (error) {
       const [status, code] = biometricPublicError(error);
       setBiometricRetryAfter(res, error);
@@ -435,8 +453,8 @@ export function workerPortalRouter(prisma, options = {}) {
       const context = await requireBiometricAssignment(req, res, portalSession, now);
       if (!context) return;
       const enrollment = await getEnrollmentFn(portalSession.workerId);
-      if (!enrollment?.enrolled || !enrollment?.descriptor) {
-        return strictError(res, 409, 'biometric_enrollment_required', 'Primero completa el registro facial inicial.');
+      if (!hasCurrentBiometricEnrollment(enrollment)) {
+        return strictError(res, 409, 'biometric_enrollment_required', 'Debes renovar el registro facial antes de marcar.');
       }
       await assertAttemptAllowedFn({
         workerId: portalSession.workerId,
@@ -466,8 +484,8 @@ export function workerPortalRouter(prisma, options = {}) {
       const context = await requireBiometricAssignment(req, res, portalSession, now);
       if (!context) return;
       const enrollment = await getEnrollmentFn(portalSession.workerId);
-      if (!enrollment?.enrolled || !enrollment?.descriptor) {
-        return strictError(res, 409, 'biometric_enrollment_required', 'Primero completa el registro facial inicial.');
+      if (!hasCurrentBiometricEnrollment(enrollment)) {
+        return strictError(res, 409, 'biometric_enrollment_required', 'Debes renovar el registro facial antes de marcar.');
       }
       const assessment = await assessBiometricFn({
         workerId: portalSession.workerId,
