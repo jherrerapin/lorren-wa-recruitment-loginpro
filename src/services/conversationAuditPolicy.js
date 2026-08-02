@@ -32,7 +32,7 @@ const ISSUE_CATALOG = {
 const TOPIC_PATTERNS = {
   salary: /\b(salario|sueldo|pago|remuneraci[oó]n|cu[aá]nto pagan|valor del turno|auxilio)\b|\$\s?\d/i,
   schedule: /\b(horario|turno|jornada|entrada|salida|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|a\.?\s?m\.?|p\.?\s?m\.?)\b/i,
-  location: /\b(d[oó]nde|direcci[oó]n|ubicaci[oó]n|queda en|zona de trabajo|lugar de trabajo|entrevista)\b/i,
+  location: /\b(d[oó]nde|direcci[oó]n|ubicaci[oó]n|queda en|zona de trabajo|lugar de trabajo)\b/i,
   requirements: /\b(requisito|experiencia|estudio|t[eé]cnico|tecn[oó]logo|edad|perfil)\b/i,
   documents: /\b(documento|c[eé]dula|antecedentes|certificado|hoja de vida impresa|papeles)\b/i,
   benefits: /\b(beneficio|ruta|alimentaci[oó]n|bono|prestaciones|contrato)\b/i,
@@ -153,7 +153,7 @@ function textSimilarity(a, b) {
 
 function evidenceFromMessage(message, candidate) {
   return {
-    messageId: message.id,
+    messageId: hashLabel(message.id, 'msg'),
     at: toDate(message.createdAt)?.toISOString() || null,
     excerpt: redactConversationText(String(message.body || '').slice(0, 280), candidate)
   };
