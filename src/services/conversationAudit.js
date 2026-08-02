@@ -128,7 +128,9 @@ export function analyzeConversationSession(messages = [], options = {}) {
       addIssue(issues, buildIssue('UNNECESSARY_IDENTITY_DISCLOSURE', 'La identidad técnica del asistente no fue solicitada por el candidato.', message, candidate));
     }
 
-    const claimTopic = unsupportedClaim(body, candidate);
+    const claimTopic = !detectQuestionTopic(body) && !isDataRequest(body)
+      ? unsupportedClaim(body, candidate)
+      : null;
     if (claimTopic) {
       addIssue(issues, buildIssue('UNSUPPORTED_SENSITIVE_CLAIM', `La respuesta menciona ${claimTopic} sin respaldo suficiente en los campos autorizados de la vacante.`, message, candidate));
     }
@@ -159,7 +161,7 @@ export function analyzeConversationSession(messages = [], options = {}) {
 
   for (const [reply, count] of normalizedBotReplies.entries()) {
     if (count >= 3) {
-      addIssue(issues, buildIssue('LOOP_PATTERN', `La misma estructura de respuesta apareció ${count} veces: “${reply.slice(0, 90)}”.`, null, candidate));
+      addIssue(issues, buildIssue('LOOP_PATTERN', `La misma estructura de respuesta apareció ${count} veces: “${redactConversationText(reply.slice(0, 90), candidate)}”.`, null, candidate));
     }
   }
 
@@ -168,7 +170,7 @@ export function analyzeConversationSession(messages = [], options = {}) {
   if (classifyConversationActor(lastMessage) === 'candidate'
     && auditEnd - toDate(lastMessage.createdAt) >= RESPONSE_STALE_MS) {
     if (candidate.botPaused) {
-      addIssue(issues, buildIssue('MANUAL_REVIEW_PENDING', candidate.botPauseReason || 'El bot está pausado y la conversación espera atención humana.', lastMessage, candidate));
+      addIssue(issues, buildIssue('MANUAL_REVIEW_PENDING', redactConversationText(candidate.botPauseReason || '', candidate) || 'El bot está pausado y la conversación espera atención humana.', lastMessage, candidate));
     } else {
       addIssue(issues, buildIssue('UNANSWERED_INBOUND', 'El último mensaje del candidato no tiene una salida posterior registrada.', lastMessage, candidate));
     }
@@ -204,7 +206,7 @@ export function analyzeConversationSession(messages = [], options = {}) {
   const startedAt = toDate(messages[0].createdAt);
   const endedAt = toDate(lastMessage.createdAt);
   const transcript = messages.map((message) => ({
-    id: message.id,
+    id: hashLabel(message.id, 'msg'),
     at: toDate(message.createdAt)?.toISOString() || null,
     actor: classifyConversationActor(message),
     direction: message.direction,
@@ -238,7 +240,7 @@ export function analyzeConversationSession(messages = [], options = {}) {
       currentStep: candidate.currentStep || null,
       status: candidate.status || null,
       botPaused: Boolean(candidate.botPaused),
-      botPauseReason: candidate.botPaused ? (candidate.botPauseReason || null) : null,
+      botPauseReason: candidate.botPaused ? redactConversationText(candidate.botPauseReason || '', candidate) || null : null,
       activeBookings
     },
     sourceCounts,
