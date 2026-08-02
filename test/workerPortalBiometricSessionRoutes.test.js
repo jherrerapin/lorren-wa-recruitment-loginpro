@@ -9,6 +9,7 @@ import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../src/modules/dispatch-atten
 const NOW = new Date('2026-07-28T18:00:00.000Z');
 const SESSION_TOKEN = 'S'.repeat(43);
 const DESCRIPTOR = Array.from({ length: 64 }, (_, index) => index / 1000);
+const VALID_UNTIL = new Date(NOW.getTime() + 90_000).toISOString();
 
 async function withServer(options, callback) {
   const app = express();
@@ -24,7 +25,8 @@ async function withServer(options, callback) {
     }),
     loadAssignmentsFn: async () => [],
     registerArrivalFn: async () => ({ recorded: false, validation: { riskFlags: [] } }),
-    getEnrollmentFn: async () => ({ enrolled: true, descriptor: DESCRIPTOR }),
+    getEnrollmentFn: async () => ({ enrolled: true, descriptor: DESCRIPTOR, evidenceVersion: 2 }),
+    assertAttemptAllowedFn: async () => ({ allowed: true, consecutiveFailures: 0 }),
     loadBiometricAssignmentFn: async (workerId, assignmentId) => ({
       id: assignmentId,
       workerId,
@@ -51,7 +53,26 @@ function portalHeaders() {
   };
 }
 
-test('el desafío facial usa la cookie del portal y no una sesión administrativa', async () => {
+test('el estado exige enrolamiento v2 y solicita renovación de referencias anteriores', async () => {
+  await withServer({
+    getEnrollmentFn: async () => ({ enrolled: true, descriptor: DESCRIPTOR, evidenceVersion: 1 })
+  }, async (origin) => {
+    const response = await fetch(`${origin}/operaciones/portal/biometria/estado`, {
+      method: 'POST',
+      headers: portalHeaders(),
+      body: '{}'
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      enrolled: false,
+      registrationRequired: true,
+      upgradeRequired: true
+    });
+  });
+});
+
+test('el desafío facial usa la cookie del portal y un enrolamiento v2', async () => {
   let observedInput = null;
   await withServer({
     issueChallengeFn: (input) => {
@@ -81,12 +102,12 @@ test('el desafío facial usa la cookie del portal y no una sesión administrativ
   });
 });
 
-test('la verificación facial se registra desde la misma ruta protegida del portal', async () => {
+test('la verificación facial fuerza evidencia v2 y devuelve una vigencia corta', async () => {
   let observedInput = null;
   await withServer({
     assessBiometricFn: async (input) => {
       observedInput = input;
-      return { verified: true, decision: 'VERIFIED' };
+      return { verified: true, decision: 'VERIFIED', validUntil: VALID_UNTIL };
     }
   }, async (origin) => {
     const response = await fetch(`${origin}/operaciones/portal/biometria/verificar`, {
@@ -99,7 +120,11 @@ test('la verificación facial se registra desde la misma ruta protegida del port
         challengeToken: 'challenge-token',
         challengeAction: 'MOVE_CLOSER',
         challengeCompleted: true,
+        challengeEvidence: { kind: 'MODEL_AND_ACTIVE_CHALLENGE_V2' },
         descriptor: DESCRIPTOR,
+        sampleDescriptors: [DESCRIPTOR, DESCRIPTOR, DESCRIPTOR, DESCRIPTOR],
+        sampleRealScores: [0.9, 0.9, 0.9, 0.9],
+        sampleLiveScores: [0.9, 0.9, 0.9, 0.9],
         realScore: 0.9,
         liveScore: 0.9,
         modelVersion: 'human-3.3.6-faceres'
@@ -110,6 +135,7 @@ test('la verificación facial se registra desde la misma ruta protegida del port
       ok: true,
       decision: 'VERIFIED',
       verified: true,
+      validUntil: VALID_UNTIL,
       requiresReview: false
     });
   });
@@ -117,15 +143,21 @@ test('la verificación facial se registra desde la misma ruta protegida del port
   assert.equal(observedInput.assignmentId, 'assignment-1');
   assert.equal(observedInput.markType, 'DEPARTURE');
   assert.equal(observedInput.challengeCompleted, true);
+  assert.equal(observedInput.evidenceVersion, 2);
+  assert.equal(observedInput.sampleDescriptors.length, 4);
 });
 
-test('las llamadas heredadas del navegador se redirigen al alcance de la cookie del portal', () => {
-  const hardening = fs.readFileSync('src/public/worker-portal-hardening.js', 'utf8');
+test('el navegador y las rutas públicas usan directamente el flujo vigente', () => {
+  const flow = fs.readFileSync('src/public/worker-portal-biometric-flow.js', 'utf8');
   const route = fs.readFileSync('src/routes/workerPortal.js', 'utf8');
-  assert.match(hardening, /\/admin\/operaciones\/portal-activaciones\/biometria\/desafio/);
-  assert.match(hardening, /\/operaciones\/portal\/biometria\/desafio/);
-  assert.match(hardening, /rewriteBiometricInput/);
+  assert.match(flow, /\/operaciones\/portal\/biometria\/desafio/);
+  assert.match(flow, /portalBiometricRequest\('desafio'/);
+  assert.match(flow, /portalBiometricRequest\('verificar'/);
+  assert.match(flow, /challengeEvidence:\s*capture\.challengeEvidence/);
+  assert.match(route, /router\.post\('\/biometria\/estado'/);
   assert.match(route, /router\.post\('\/biometria\/desafio'/);
   assert.match(route, /router\.post\('\/biometria\/verificar'/);
   assert.match(route, /resolvePortalSession\(req, now\)/);
+  assert.match(route, /hasCurrentBiometricEnrollment/);
+  assert.equal(fs.existsSync('src/public/worker-portal-hardening.js'), false);
 });

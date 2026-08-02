@@ -7,15 +7,19 @@
   const HUMAN_SCRIPT_PATH = '/public/vendor/human/human.js';
   const HUMAN_MODEL_PATH = '/public/vendor/human/models/';
   const MODEL_VERSION = previousApi.MODEL_VERSION || 'human-3.3.6-faceres';
+  const EVIDENCE_VERSION = 2;
   const MIN_REAL_SCORE = 0.55;
   const MIN_LIVE_SCORE = 0.55;
   const DETECTION_INTERVAL_MS = 90;
   const ENROLLMENT_TIMEOUT_MS = 30_000;
-  const BASELINE_TIMEOUT_MS = 12_000;
-  const CHALLENGE_TIMEOUT_MS = 9_000;
-  const FINAL_TIMEOUT_MS = 12_000;
+  const BASELINE_TIMEOUT_MS = 14_000;
+  const CHALLENGE_TIMEOUT_MS = 10_000;
+  const FINAL_TIMEOUT_MS = 14_000;
   const CAMERA_READY_TIMEOUT_MS = 10_000;
   const RUNTIME_MAX_IDLE_MS = 10 * 60 * 1000;
+  const ENROLLMENT_SAMPLES = 3;
+  const VERIFICATION_STAGE_SAMPLES = 2;
+  const REQUIRED_ACTION_FRAMES = 3;
   const BACKENDS = Object.freeze(['webgl', 'wasm', 'cpu']);
   const activeStreams = new Set();
 
@@ -108,6 +112,18 @@
     };
   }
 
+  async function releaseHuman(instance) {
+    if (!instance) return;
+    const waitUntil = Date.now() + 2_000;
+    while (activeDetections > 0 && Date.now() < waitUntil) await sleep(50);
+    const models = Object.values(instance.models || {});
+    await Promise.allSettled(models.map(async (candidate) => {
+      const model = await Promise.resolve(candidate).catch(() => null);
+      try { model?.dispose?.(); } catch { /* Algunos backends administran sus tensores internamente. */ }
+    }));
+    try { instance.process?.tensor?.dispose?.(); } catch { /* No siempre existe tensor activo. */ }
+  }
+
   async function createHuman(backend) {
     const human = new window.Human.Human(humanConfig(backend));
     try {
@@ -118,18 +134,6 @@
       await releaseHuman(human);
       throw error;
     }
-  }
-
-  async function releaseHuman(instance) {
-    if (!instance) return;
-    const waitUntil = Date.now() + 2_000;
-    while (activeDetections > 0 && Date.now() < waitUntil) await sleep(50);
-    const models = Object.values(instance.models || {});
-    await Promise.allSettled(models.map(async (candidate) => {
-      const model = await Promise.resolve(candidate).catch(() => null);
-      try { model?.dispose?.(); } catch { /* El navegador puede haber descartado el backend. */ }
-    }));
-    try { instance.process?.tensor?.dispose?.(); } catch { /* No siempre existe tensor activo. */ }
   }
 
   function invalidateRuntime(reason = 'runtime-invalidated', options = {}) {
@@ -156,7 +160,6 @@
     const promise = (async () => {
       await loadHumanScript();
       if (!window.Human?.Human) throw new Error('biometric_runtime_unavailable');
-
       const failures = [];
       for (let offset = 0; offset < BACKENDS.length; offset += 1) {
         const candidateIndex = (backendIndex + offset) % BACKENDS.length;
@@ -225,6 +228,15 @@
     return finiteScore(face?.faceScore || face?.boxScore || face?.score);
   }
 
+  function faceGeometry(face, quality) {
+    const angle = face?.rotation?.angle;
+    return {
+      yaw: finiteScore(angle?.yaw),
+      pitch: finiteScore(angle?.pitch),
+      faceRatio: finiteScore(quality?.faceRatio)
+    };
+  }
+
   function faceQuality(face, video) {
     if (!face || !video?.videoWidth || !video?.videoHeight) {
       return { valid: false, message: 'Ubica tu rostro dentro del marco.' };
@@ -250,7 +262,7 @@
 
   function turnedSide(face) {
     const angle = face?.rotation?.angle;
-    return Boolean(angle && Math.abs(finiteScore(angle.yaw)) >= 0.18);
+    return Boolean(angle && Math.abs(finiteScore(angle.yaw)) >= 0.20);
   }
 
   function normalizeDescriptor(value) {
@@ -258,12 +270,12 @@
     if (descriptor.length < 64) throw new Error('biometric_descriptor_unavailable');
     const normalized = descriptor.map((entry) => Number(entry));
     if (normalized.some((entry) => !Number.isFinite(entry))) throw new Error('biometric_descriptor_unavailable');
-    return normalized;
+    return normalized.map((entry) => Math.round(entry * 1_000_000) / 1_000_000);
   }
 
   function normalizeVector(vector) {
     const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-    if (!Number.isFinite(norm) || norm === 0) return vector;
+    if (!Number.isFinite(norm) || norm === 0) throw new Error('biometric_descriptor_unavailable');
     return vector.map((value) => value / norm);
   }
 
@@ -341,14 +353,10 @@
     return { face, quality };
   }
 
-  async function collectStableFront(human, video, onStatus, deadline, samplesRequired, options = {}) {
-    const requireModelLiveness = options.requireModelLiveness !== false;
-    const timeoutError = options.timeoutError || 'biometric_capture_timeout';
-    const descriptors = [];
-    let bestReal = 0;
-    let bestLive = 0;
-    let latest = null;
+  async function collectStableFront(human, video, onStatus, deadline, samplesRequired, timeoutError) {
+    const samples = [];
     let consecutiveFront = 0;
+    let latest = null;
 
     while (Date.now() < deadline) {
       const detected = await detectOneFace(human, video, onStatus);
@@ -362,98 +370,234 @@
       latest = detected;
       consecutiveFront += 1;
       const scores = biometricScores(detected.face);
-      bestReal = Math.max(bestReal, scores.realScore);
-      bestLive = Math.max(bestLive, scores.liveScore);
-      try {
-        const descriptor = normalizeDescriptor(detected.face.embedding);
-        if (consecutiveFront >= 2) descriptors.push(descriptor);
-      } catch {
-        onStatus?.('Mantén el rostro quieto.');
-      }
-
-      if (bestReal < MIN_REAL_SCORE) {
+      if (scores.realScore < MIN_REAL_SCORE) {
+        consecutiveFront = 0;
         onStatus?.('Validando que sea un rostro real…');
-      } else if (requireModelLiveness && bestLive < MIN_LIVE_SCORE) {
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
+      }
+      if (scores.liveScore < MIN_LIVE_SCORE) {
+        consecutiveFront = 0;
         onStatus?.('Mueve ligeramente el rostro y vuelve al centro.');
-      } else if (descriptors.length < samplesRequired) {
-        onStatus?.('Rostro detectado. Mantén la posición.');
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
+      }
+      if (consecutiveFront < 2) {
+        onStatus?.('Mantén el rostro quieto.');
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
       }
 
-      const livenessReady = !requireModelLiveness || bestLive >= MIN_LIVE_SCORE;
-      if (bestReal >= MIN_REAL_SCORE && livenessReady && descriptors.length >= samplesRequired) {
-        return { latest, descriptors: descriptors.slice(-samplesRequired), realScore: bestReal, liveScore: bestLive };
+      try {
+        samples.push({
+          descriptor: normalizeDescriptor(detected.face.embedding),
+          realScore: scores.realScore,
+          liveScore: scores.liveScore,
+          geometry: faceGeometry(detected.face, detected.quality)
+        });
+      } catch {
+        onStatus?.('No se pudieron leer los rasgos. Mantén la posición.');
       }
-      await sleep(DETECTION_INTERVAL_MS);
+
+      if (samples.length >= samplesRequired) {
+        const selected = samples.slice(-samplesRequired);
+        return {
+          latest,
+          samples: selected,
+          descriptors: selected.map((sample) => sample.descriptor),
+          realScores: selected.map((sample) => sample.realScore),
+          liveScores: selected.map((sample) => sample.liveScore),
+          realScore: Math.min(...selected.map((sample) => sample.realScore)),
+          liveScore: Math.min(...selected.map((sample) => sample.liveScore))
+        };
+      }
+      onStatus?.(`Rostro válido · captura ${samples.length} de ${samplesRequired}.`);
+      await sleep(160);
     }
-    throw new Error(timeoutError);
+    throw new Error(timeoutError || 'biometric_capture_timeout');
   }
 
   async function captureEnrollment(options = {}) {
     const video = options.video;
     const onStatus = options.onStatus;
     const human = await humanInstance();
+    const startedAt = performance.now();
     const deadline = Date.now() + (options.timeoutMs || ENROLLMENT_TIMEOUT_MS);
     onStatus?.('Mira de frente y mantén el rostro dentro del marco.');
-    const stable = await collectStableFront(human, video, onStatus, deadline, 3, {
-      timeoutError: 'biometric_enrollment_timeout'
-    });
+    const stable = await collectStableFront(
+      human,
+      video,
+      onStatus,
+      deadline,
+      ENROLLMENT_SAMPLES,
+      'biometric_enrollment_timeout'
+    );
     const photoBlob = await capturePhoto(video);
     return {
+      evidenceVersion: EVIDENCE_VERSION,
       descriptor: averageDescriptors(stable.descriptors),
+      sampleDescriptors: stable.descriptors,
+      sampleRealScores: stable.realScores,
+      sampleLiveScores: stable.liveScores,
       realScore: stable.realScore,
       liveScore: stable.liveScore,
+      captureDurationMs: Math.round(performance.now() - startedAt),
       modelVersion: MODEL_VERSION,
       photoBlob
     };
+  }
+
+  async function captureActiveChallenge(human, video, challenge, baseline, onStatus, deadline) {
+    const actionStartedAt = performance.now();
+    const baselineGeometry = baseline.samples.at(-1).geometry;
+    const closerTarget = Math.min(0.82, baselineGeometry.faceRatio + 0.05);
+    let consecutiveActionFrames = 0;
+    const accepted = [];
+
+    if (challenge.action === 'TURN_SIDE') onStatus?.('Gira el rostro claramente hacia uno de los lados.');
+    else onStatus?.('Acerca un poco el rostro a la cámara.');
+
+    while (Date.now() < deadline) {
+      const detected = await detectOneFace(human, video, onStatus);
+      if (!detected) {
+        consecutiveActionFrames = 0;
+        accepted.length = 0;
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
+      }
+      const scores = biometricScores(detected.face);
+      const geometry = faceGeometry(detected.face, detected.quality);
+      const actionReached = challenge.action === 'TURN_SIDE'
+        ? turnedSide(detected.face) && Math.abs(geometry.yaw - baselineGeometry.yaw) >= 0.16
+        : geometry.faceRatio >= closerTarget;
+      if (!actionReached || scores.realScore < MIN_REAL_SCORE || scores.liveScore < MIN_LIVE_SCORE) {
+        consecutiveActionFrames = 0;
+        accepted.length = 0;
+        onStatus?.(scores.realScore < MIN_REAL_SCORE
+          ? 'Mantén una imagen real y bien iluminada.'
+          : (scores.liveScore < MIN_LIVE_SCORE
+              ? 'Realiza el movimiento de forma natural y continua.'
+              : (challenge.action === 'TURN_SIDE' ? 'Gira un poco más el rostro.' : 'Acércate un poco más.')));
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
+      }
+
+      let descriptor;
+      try {
+        descriptor = normalizeDescriptor(detected.face.embedding);
+      } catch {
+        consecutiveActionFrames = 0;
+        accepted.length = 0;
+        onStatus?.('Mantén el movimiento y la imagen estable.');
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
+      }
+
+      consecutiveActionFrames += 1;
+      accepted.push({ scores, geometry, descriptor });
+      if (consecutiveActionFrames >= REQUIRED_ACTION_FRAMES) {
+        const selected = accepted.slice(-REQUIRED_ACTION_FRAMES);
+        return {
+          frames: selected.length,
+          geometry: selected.at(-1).geometry,
+          descriptors: selected.map((frame) => frame.descriptor),
+          realScores: selected.map((frame) => frame.scores.realScore),
+          liveScores: selected.map((frame) => frame.scores.liveScore),
+          realScoreMin: Math.min(...selected.map((frame) => frame.scores.realScore)),
+          liveScoreMin: Math.min(...selected.map((frame) => frame.scores.liveScore)),
+          durationMs: Math.round(performance.now() - actionStartedAt)
+        };
+      }
+      onStatus?.('Mantén el movimiento un instante.');
+      await sleep(DETECTION_INTERVAL_MS);
+    }
+    throw new Error('biometric_challenge_timeout');
   }
 
   async function captureVerification(options = {}) {
     const video = options.video;
     const challenge = options.challenge || {};
     const onStatus = options.onStatus;
+    if (!['TURN_SIDE', 'MOVE_CLOSER'].includes(challenge.action)) {
+      throw new Error('biometric_challenge_not_completed');
+    }
     const human = await humanInstance();
+    const captureStartedAt = performance.now();
 
     onStatus?.('Mira de frente. La validación comenzará automáticamente.');
-    const baselineDeadline = Date.now() + (options.baselineTimeoutMs || BASELINE_TIMEOUT_MS);
-    const baseline = await collectStableFront(human, video, onStatus, baselineDeadline, 1, {
-      requireModelLiveness: false,
-      timeoutError: 'biometric_baseline_timeout'
-    });
-    const baselineRatio = baseline.latest.quality.faceRatio;
-    const closerTarget = Math.min(0.8, baselineRatio + 0.05);
-    const challengeDeadline = Date.now() + (options.challengeTimeoutMs || CHALLENGE_TIMEOUT_MS);
-    let completed = false;
+    const baselineStartedAt = performance.now();
+    const baseline = await collectStableFront(
+      human,
+      video,
+      onStatus,
+      Date.now() + (options.baselineTimeoutMs || BASELINE_TIMEOUT_MS),
+      VERIFICATION_STAGE_SAMPLES,
+      'biometric_baseline_timeout'
+    );
+    const baselineDurationMs = Math.round(performance.now() - baselineStartedAt);
 
-    if (challenge.action === 'TURN_SIDE') onStatus?.('Gira el rostro hacia tu hombro derecho.');
-    else onStatus?.('Acerca un poco el rostro a la cámara.');
-
-    while (Date.now() < challengeDeadline && !completed) {
-      const detected = await detectOneFace(human, video, onStatus);
-      if (detected) {
-        completed = challenge.action === 'TURN_SIDE'
-          ? turnedSide(detected.face)
-          : detected.quality.faceRatio >= closerTarget;
-      }
-      if (!completed) await sleep(DETECTION_INTERVAL_MS);
-    }
-    if (!completed) throw new Error('biometric_challenge_timeout');
+    const action = await captureActiveChallenge(
+      human,
+      video,
+      challenge,
+      baseline,
+      onStatus,
+      Date.now() + (options.challengeTimeoutMs || CHALLENGE_TIMEOUT_MS)
+    );
 
     onStatus?.('Movimiento confirmado. Vuelve a mirar de frente.');
-    const finalDeadline = Date.now() + (options.finalTimeoutMs || FINAL_TIMEOUT_MS);
-    const final = await collectStableFront(human, video, onStatus, finalDeadline, 1, {
-      requireModelLiveness: false,
-      timeoutError: 'biometric_final_timeout'
-    });
-    const modelLiveScore = Math.max(baseline.liveScore, final.liveScore);
+    const finalStartedAt = performance.now();
+    const final = await collectStableFront(
+      human,
+      video,
+      onStatus,
+      Date.now() + (options.finalTimeoutMs || FINAL_TIMEOUT_MS),
+      VERIFICATION_STAGE_SAMPLES,
+      'biometric_final_timeout'
+    );
+    const finalDurationMs = Math.round(performance.now() - finalStartedAt);
+
+    const allSamples = [...baseline.samples, ...final.samples];
+    const descriptors = allSamples.map((sample) => sample.descriptor);
+    const realScores = allSamples.map((sample) => sample.realScore);
+    const liveScores = allSamples.map((sample) => sample.liveScore);
+    const baselineGeometry = baseline.samples.at(-1).geometry;
+    const finalGeometry = final.samples.at(-1).geometry;
     const photoBlob = await capturePhoto(video);
+
     return {
-      descriptor: averageDescriptors([...baseline.descriptors, ...final.descriptors]),
-      realScore: Math.max(baseline.realScore, final.realScore),
-      liveScore: Math.max(modelLiveScore, MIN_LIVE_SCORE),
-      modelLiveScore,
-      livenessEvidence: 'ACTIVE_CHALLENGE',
+      evidenceVersion: EVIDENCE_VERSION,
+      descriptor: averageDescriptors(descriptors),
+      sampleDescriptors: descriptors,
+      sampleRealScores: realScores,
+      sampleLiveScores: liveScores,
+      realScore: Math.min(...realScores),
+      liveScore: Math.min(...liveScores),
       challengeAction: challenge.action,
       challengeCompleted: true,
+      challengeEvidence: {
+        kind: 'MODEL_AND_ACTIVE_CHALLENGE_V2',
+        action: challenge.action,
+        baselineFrames: baseline.samples.length,
+        actionFrames: action.frames,
+        finalFrames: final.samples.length,
+        captureDurationMs: Math.round(performance.now() - captureStartedAt),
+        challengeDurationMs: action.durationMs,
+        baselineDurationMs,
+        finalDurationMs,
+        baselineYaw: baselineGeometry.yaw,
+        actionYaw: action.geometry.yaw,
+        finalYaw: finalGeometry.yaw,
+        baselineFaceRatio: baselineGeometry.faceRatio,
+        actionFaceRatio: action.geometry.faceRatio,
+        finalFaceRatio: finalGeometry.faceRatio,
+        actionDescriptors: action.descriptors,
+        actionRealScores: action.realScores,
+        actionLiveScores: action.liveScores,
+        actionRealScoreMin: action.realScoreMin,
+        actionLiveScoreMin: action.liveScoreMin
+      },
+      livenessEvidence: 'MODEL_AND_ACTIVE_CHALLENGE_V2',
       modelVersion: MODEL_VERSION,
       photoBlob
     };
@@ -657,6 +801,7 @@
   window.LorrenWorkerBiometric = Object.freeze({
     ...previousApi,
     MODEL_VERSION,
+    EVIDENCE_VERSION,
     prepare,
     recover,
     invalidateRuntime,

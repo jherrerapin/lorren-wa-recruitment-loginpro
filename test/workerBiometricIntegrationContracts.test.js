@@ -1,112 +1,377 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {
+  WORKER_BIOMETRIC_EVIDENCE_VERSION,
+  WORKER_BIOMETRIC_MODEL_VERSION,
+  assertWorkerBiometricAttemptAllowed,
+  assessWorkerBiometric,
+  enrollWorkerBiometric,
+  getWorkerBiometricEnrollment,
+  isWorkerBiometricVerificationUsable,
+  issueWorkerBiometricChallenge
+} from '../src/services/workerBiometricService.js';
 
-const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-const packageLock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
-const browserLoader = fs.readFileSync('src/public/worker-biometric.js', 'utf8');
-const browser = fs.readFileSync('src/public/worker-biometric-core.js', 'utf8');
-const hardening = fs.readFileSync('src/public/worker-portal-hardening.js', 'utf8');
-const bridge = fs.readFileSync('src/public/vendor/human/human.js', 'utf8');
-const portal = fs.readFileSync('src/views/workerPortal.ejs', 'utf8');
-const activationView = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
-const verificationRoute = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
-const portalRoute = fs.readFileSync('src/routes/workerPortal.js', 'utf8');
-const service = fs.readFileSync('src/services/workerBiometricService.js', 'utf8');
-const migration = fs.readFileSync('prisma/migrations/20260728033000_enforce_worker_biometric_review/migration.sql', 'utf8');
+const ENV = { ATTENDANCE_BIOMETRIC_SECRET: 'b'.repeat(64) };
+const NOW = new Date('2026-08-01T23:00:00.000Z');
+const ASSIGNMENT_ID = 'assignment-1';
+const WORKER_ID = 'worker-1';
+const baseDescriptor = unitVector(Array.from({ length: 128 }, (_, index) => Math.sin(index + 1) / 9));
 
+function unitVector(vector) {
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return vector.map((value) => value / norm);
+}
 
-test('Human queda fuera del servidor y fijado en el puente CDN del navegador', () => {
-  assert.equal(packageJson.dependencies['@vladmandic/human'], undefined);
-  assert.equal(packageLock.packages[''].dependencies['@vladmandic/human'], undefined);
-  assert.doesNotMatch(packageJson.scripts.build, /prepare:human/);
-  assert.doesNotMatch(packageJson.scripts.start, /prepare:human/);
-  assert.match(browserLoader, /worker-biometric-core\.js/);
-  assert.match(browserLoader, /worker-portal-hardening\.js/);
-  assert.match(browser, /\/public\/vendor\/human\/human\.js/);
-  assert.match(browser, /\/public\/vendor\/human\/models\//);
-  assert.match(bridge, /HUMAN_VERSION = '3\.3\.6'/);
-  assert.match(bridge, /cdn\.jsdelivr\.net\/npm\/@vladmandic\/human@\$\{HUMAN_VERSION\}\/dist\/human\.js/);
-  assert.match(bridge, /modelBasePath: HUMAN_CDN_MODELS/);
-  assert.match(portalRoute, /https:\/\/cdn\.jsdelivr\.net/);
+function rotatedDescriptor(vector, angle) {
+  const base = unitVector(vector);
+  const seed = Array.from({ length: base.length }, (_, index) => Math.cos((index + 1) * 1.7));
+  const projection = seed.reduce((sum, value, index) => sum + value * base[index], 0);
+  const orthogonal = unitVector(seed.map((value, index) => value - projection * base[index]));
+  return base.map((value, index) => value * Math.cos(angle) + orthogonal[index] * Math.sin(angle));
+}
+
+function sampleSet(count, startAngle = 0.01) {
+  return Array.from({ length: count }, (_, index) => rotatedDescriptor(baseDescriptor, startAngle + index * 0.01));
+}
+
+function matchesWhere(event, where = {}) {
+  if (where.entityType && event.entityType !== where.entityType) return false;
+  if (where.entityLabel && event.entityLabel !== where.entityLabel) return false;
+  if (where.createdAt?.gte && new Date(event.createdAt).getTime() < new Date(where.createdAt.gte).getTime()) return false;
+  if (where.entityId) {
+    if (typeof where.entityId === 'string' && event.entityId !== where.entityId) return false;
+    if (where.entityId.in && !where.entityId.in.includes(event.entityId)) return false;
+    if (where.entityId.not && event.entityId === where.entityId.not) return false;
+  }
+  if (where.action) {
+    if (typeof where.action === 'string' && event.action !== where.action) return false;
+    if (where.action.in && !where.action.in.includes(event.action)) return false;
+  }
+  if (where.metadata?.path?.[0]) {
+    const key = where.metadata.path[0];
+    if (event.metadata?.[key] !== where.metadata.equals) return false;
+  }
+  return true;
+}
+
+function fakePrisma() {
+  const events = [];
+  let sequence = 0;
+  return {
+    events,
+    devAuditEvent: {
+      async findMany({ where = {}, select, take } = {}) {
+        let found = events
+          .filter((event) => matchesWhere(event, where))
+          .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+        if (take) found = found.slice(0, take);
+        if (!select) return found.map((event) => structuredClone(event));
+        return found.map((event) => Object.fromEntries(
+          Object.keys(select).filter((key) => select[key]).map((key) => [key, structuredClone(event[key])])
+        ));
+      },
+      async findFirst({ where = {} } = {}) {
+        const found = events
+          .filter((event) => matchesWhere(event, where))
+          .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0];
+        return found ? structuredClone(found) : null;
+      },
+      async create({ data }) {
+        const event = { id: `event-${++sequence}`, ...structuredClone(data) };
+        events.push(event);
+        return structuredClone(event);
+      },
+      async update({ where, data }) {
+        const event = events.find((candidate) => candidate.id === where.id);
+        assert.ok(event, `event ${where.id} must exist`);
+        Object.assign(event, structuredClone(data));
+        return structuredClone(event);
+      }
+    }
+  };
+}
+
+function strictEnrollmentInput(overrides = {}) {
+  return {
+    workerId: WORKER_ID,
+    workerLabel: 'Auxiliar de prueba',
+    actorUsername: 'worker-portal:worker-1',
+    actorRole: 'worker',
+    consentAccepted: true,
+    evidenceVersion: WORKER_BIOMETRIC_EVIDENCE_VERSION,
+    modelVersion: WORKER_BIOMETRIC_MODEL_VERSION,
+    sampleDescriptors: sampleSet(3),
+    sampleRealScores: [0.84, 0.86, 0.85],
+    sampleLiveScores: [0.79, 0.81, 0.8],
+    captureDurationMs: 1_800,
+    descriptor: Array(128).fill(99),
+    realScore: 1,
+    liveScore: 1,
+    ...overrides
+  };
+}
+
+function validChallengeEvidence(action, overrides = {}) {
+  return {
+    kind: 'MODEL_AND_ACTIVE_CHALLENGE_V2',
+    action,
+    baselineFrames: 2,
+    actionFrames: 3,
+    finalFrames: 2,
+    captureDurationMs: 2_600,
+    challengeDurationMs: 900,
+    baselineYaw: 0.02,
+    actionYaw: action === 'TURN_SIDE' ? 0.34 : 0.04,
+    finalYaw: 0.01,
+    baselineFaceRatio: 0.35,
+    actionFaceRatio: action === 'MOVE_CLOSER' ? 0.43 : 0.36,
+    finalFaceRatio: 0.36,
+    actionDescriptors: sampleSet(3, 0.055),
+    actionRealScores: [0.8, 0.82, 0.81],
+    actionLiveScores: [0.68, 0.7, 0.69],
+    actionRealScoreMin: 0.8,
+    actionLiveScoreMin: 0.68,
+    ...overrides
+  };
+}
+
+async function enrollStrict(prisma) {
+  return enrollWorkerBiometric(prisma, strictEnrollmentInput(), { now: NOW, env: ENV });
+}
+
+async function assessStrict(prisma, {
+  idempotencyKey = 'strict-mark-key-123456',
+  randomIndex = 0,
+  samples = sampleSet(4, 0.015),
+  realScores = [0.81, 0.82, 0.8, 0.83],
+  liveScores = [0.72, 0.74, 0.71, 0.73],
+  challengeEvidence,
+  now = new Date(NOW.getTime() + 5_000),
+  topLevelRealScore = 0.99,
+  topLevelLiveScore = 0.99
+} = {}) {
+  const challenge = issueWorkerBiometricChallenge({
+    workerId: WORKER_ID,
+    assignmentId: ASSIGNMENT_ID,
+    idempotencyKey,
+    markType: 'ARRIVAL'
+  }, { now: NOW, env: ENV, randomIndex });
+  return assessWorkerBiometric(prisma, {
+    workerId: WORKER_ID,
+    assignmentId: ASSIGNMENT_ID,
+    idempotencyKey,
+    markType: 'ARRIVAL',
+    evidenceVersion: WORKER_BIOMETRIC_EVIDENCE_VERSION,
+    challengeToken: challenge.token,
+    challengeAction: challenge.action,
+    challengeCompleted: true,
+    challengeEvidence: challengeEvidence || validChallengeEvidence(challenge.action),
+    sampleDescriptors: samples,
+    sampleRealScores: realScores,
+    sampleLiveScores: liveScores,
+    descriptor: Array(128).fill(99),
+    realScore: topLevelRealScore,
+    liveScore: topLevelLiveScore,
+    modelVersion: WORKER_BIOMETRIC_MODEL_VERSION
+  }, { now, env: ENV });
+}
+
+test('el enrolamiento estricto recalcula la plantilla desde tres muestras válidas', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const event = prisma.events.find((candidate) => candidate.action === 'BIOMETRIC_ENROLLED');
+  assert.equal(event.metadata.evidenceVersion, 2);
+  assert.equal(event.metadata.sampleCount, 3);
+  assert.equal(event.metadata.realScore, 0.84);
+  assert.equal(event.metadata.liveScore, 0.79);
+  assert.ok(event.metadata.minimumSampleSimilarity > 0.99);
+  assert.notEqual(event.metadata.descriptorHash, null);
+  assert.notEqual(event.metadata.captureHash, null);
+  const enrollment = await getWorkerBiometricEnrollment(prisma, WORKER_ID, { env: ENV });
+  assert.equal(enrollment.evidenceVersion, 2);
 });
 
-
-test('el celular ejecuta detección, vivacidad, anti-spoof y desafío activo', () => {
-  assert.match(browser, /face\.real/);
-  assert.match(browser, /face\.live/);
-  assert.match(browser, /face\.embedding/);
-  assert.match(browser, /rotation\?\.angle/);
-  assert.match(browser, /TURN_SIDE/);
-  assert.match(browser, /MOVE_CLOSER/);
-  assert.match(browser, /faces\.length !== 1/);
-  assert.match(browser, /createHuman\('webgl'\)/);
-  assert.match(browser, /createHuman\('cpu'\)/);
+test('ninguna puntuación declarada arriba puede ocultar una muestra con liveness bajo', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const assessment = await assessStrict(prisma, {
+    idempotencyKey: 'low-live-sample-12345',
+    liveScores: [0.72, 0.2, 0.71, 0.73],
+    topLevelLiveScore: 1
+  });
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_LIVENESS_LOW'));
 });
 
-
-test('el servidor cifra la plantilla y firma desafíos ligados a cada marcación', () => {
-  assert.match(service, /aes-256-gcm/);
-  assert.match(service, /createHmac\('sha256'/);
-  assert.match(service, /workerId,\s*assignmentId,\s*idempotencyKey,\s*markType/);
-  assert.match(service, /CHALLENGE_TTL_MS = 2 \* 60 \* 1000/);
-  assert.match(service, /timingSafeEqual/);
-  assert.match(service, /BIOMETRIC_DESCRIPTOR_REPLAY/);
-  assert.doesNotMatch(service, /metadata:\s*\{[^}]*descriptor:/s);
+test('el movimiento también exige liveness real en sus tres fotogramas', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const evidence = validChallengeEvidence('TURN_SIDE', {
+    actionLiveScores: [0.7, 0.1, 0.69]
+  });
+  const assessment = await assessStrict(prisma, {
+    idempotencyKey: 'low-action-live-12345',
+    challengeEvidence: evidence
+  });
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_LIVENESS_LOW'));
 });
 
-
-test('el primer acceso registra el rostro explícitamente desde la sesión del auxiliar', () => {
-  assert.match(portal, /id="enrollment-dialog"/);
-  assert.match(portal, /Registro facial inicial/);
-  assert.match(portal, /captureEnrollment/);
-  assert.match(portal, /portalBiometricRequest\('estado'\)/);
-  assert.match(portal, /portalBiometricRequest\('registrar'/);
-  assert.match(portalRoute, /router\.post\('\/biometria\/estado'/);
-  assert.match(portalRoute, /router\.post\('\/biometria\/registrar'/);
-  assert.match(portalRoute, /portalSession\.workerId/);
-  assert.match(portalRoute, /await enrollBiometricFn\(/);
-  assert.match(portalRoute, /actorSource: 'worker-portal'/);
-  assert.match(verificationRoute, /biometric_enrollment_required/);
-  assert.doesNotMatch(verificationRoute, /await enrollBiometricFn\(/);
+test('un desafío activo coherente y siete muestras consistentes producen verificación temporal', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const assessment = await assessStrict(prisma);
+  assert.equal(assessment.verified, true);
+  assert.equal(assessment.evidenceVersion, 2);
+  assert.equal(assessment.sampleCount, 4);
+  assert.equal(assessment.realScore, 0.8);
+  assert.equal(assessment.liveScore, 0.71);
+  assert.ok(assessment.minimumSampleSimilarity > 0.99);
+  assert.ok(assessment.actionIdentitySimilarity > 0.99);
+  assert.equal(assessment.challengeEvidence.actionDescriptors, undefined);
+  assert.equal(typeof assessment.challengeEvidence.actionCaptureHash, 'string');
+  assert.ok(new Date(assessment.validUntil) > new Date(assessment.assessedAt));
 });
 
-
-test('la captura biométrica solo acepta cámara en vivo', () => {
-  assert.match(portal, /Solo cámara en vivo/);
-  assert.doesNotMatch(portal, /type="file"/i);
-  assert.doesNotMatch(portal, /fallback-photo|file-fallback|capturePlainPhoto/);
-  assert.doesNotMatch(portal, /setPhoto\(file\)|files\?\.\[0\]/);
-  assert.doesNotMatch(portal, /quedará para revisión/i);
-  assert.doesNotMatch(activationView, /id="enroll-button"/);
-  assert.doesNotMatch(activationView, /id="biometric-dialog"/);
-  assert.doesNotMatch(activationView, /Registrar rostro|Actualizar rostro/);
-  assert.doesNotMatch(hardening, /enroll-button|biometric-dialog/);
+test('el servidor rechaza geometría que no demuestra el movimiento firmado', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const evidence = validChallengeEvidence('TURN_SIDE', { actionYaw: 0.08 });
+  const assessment = await assessStrict(prisma, {
+    idempotencyKey: 'bad-geometry-1234567',
+    challengeEvidence: evidence
+  });
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_CHALLENGE_EVIDENCE_INVALID'));
 });
 
-
-test('entrada y salida exigen una captura nueva, biometría verificada y geocerca', () => {
-  assert.match(portal, /navigator\.geolocation\.getCurrentPosition/);
-  assert.match(portal, /biometria\/desafio/);
-  assert.match(portal, /biometria\/verificar/);
-  assert.match(portal, /captureVerification/);
-  assert.match(portal, /biometricVerified = true/);
-  assert.match(portal, /if \(isBiometricMark\(\)\) form\.set\('selfie'/);
-  assert.match(portalRoute, /outside_operation_range/);
-  assert.match(portalRoute, /location_accuracy_insufficient/);
-  assert.match(portalRoute, /metadata\.decision === 'VERIFIED'/);
-  assert.match(portalRoute, /biometric_verification_required/);
-  assert.match(portalRoute, /prependRouteHandlers\(router, path, \[markUpload, strictMarkGuard\]\)/);
-  assert.match(hardening, /Primero completa correctamente la validación facial/);
+test('muestras faciales incompatibles no se promedian para fabricar una coincidencia', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const inconsistent = [
+    ...sampleSet(3, 0.01),
+    rotatedDescriptor(baseDescriptor, 1.2)
+  ];
+  const assessment = await assessStrict(prisma, {
+    idempotencyKey: 'inconsistent-samples-1',
+    samples: inconsistent
+  });
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_SAMPLES_INCONSISTENT'));
 });
 
+test('un enrolamiento legado exige renovación antes de una verificación v2', async () => {
+  const prisma = fakePrisma();
+  await enrollWorkerBiometric(prisma, {
+    workerId: WORKER_ID,
+    workerLabel: 'Auxiliar legado',
+    descriptor: baseDescriptor,
+    realScore: 0.9,
+    liveScore: 0.9,
+    consentAccepted: true,
+    actorUsername: 'legacy-admin',
+    actorRole: 'admin'
+  }, { now: NOW, env: ENV });
+  const enrollment = await getWorkerBiometricEnrollment(prisma, WORKER_ID, { env: ENV });
+  assert.equal(enrollment.evidenceVersion, 1);
+  const assessment = await assessStrict(prisma, { idempotencyKey: 'legacy-upgrade-12345' });
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_ENROLLMENT_UPGRADE_REQUIRED'));
+});
 
-test('PostgreSQL conserva una segunda barrera contra autovalidación biométrica', () => {
-  assert.match(migration, /DispatchAttendanceMark_enforce_biometric_review/);
-  assert.match(migration, /BIOMETRIC_ASSESSMENT_MISSING/);
-  assert.match(migration, /SET "decision" = 'REVIEW_REQUIRED'/);
-  assert.match(migration, /DispatchAttendanceSession_preserve_biometric_review/);
-  assert.match(migration, /NEW\."validationStatus" := 'REVIEW_REQUIRED'/);
-  assert.match(migration, /NEW\."arrivalValidatedAt" := NULL/);
-  assert.match(migration, /NEW\."departureValidatedAt" := NULL/);
+test('una secuencia completa reutilizada queda marcada como replay', async () => {
+  const prisma = fakePrisma();
+  await enrollStrict(prisma);
+  const samples = sampleSet(4, 0.015);
+  const evidence = validChallengeEvidence('TURN_SIDE');
+  const first = await assessStrict(prisma, {
+    idempotencyKey: 'fresh-capture-123456',
+    samples,
+    challengeEvidence: evidence
+  });
+  assert.equal(first.verified, true);
+  const replay = await assessStrict(prisma, {
+    idempotencyKey: 'replayed-capture-1234',
+    samples,
+    challengeEvidence: evidence,
+    now: new Date(NOW.getTime() + 12_000)
+  });
+  assert.equal(replay.verified, false);
+  assert.ok(replay.riskFlags.includes('BIOMETRIC_DESCRIPTOR_REPLAY'));
+});
+
+test('cinco fallos consecutivos imponen espera en el servidor', async () => {
+  const prisma = fakePrisma();
+  for (let index = 0; index < 5; index += 1) {
+    prisma.events.push({
+      id: `failure-${index}`,
+      entityType: 'DISPATCH_ATTENDANCE_BIOMETRIC',
+      entityId: `failed-key-${index}`,
+      entityLabel: ASSIGNMENT_ID,
+      action: 'BIOMETRIC_ASSESSED',
+      metadata: {
+        workerId: WORKER_ID,
+        verified: false,
+        decision: 'REVIEW_REQUIRED',
+        assessedAt: new Date(NOW.getTime() - index * 1_000).toISOString()
+      },
+      createdAt: new Date(NOW.getTime() - index * 1_000)
+    });
+  }
+  await assert.rejects(
+    () => assertWorkerBiometricAttemptAllowed(prisma, {
+      workerId: WORKER_ID,
+      assignmentId: ASSIGNMENT_ID
+    }, { now: NOW }),
+    (error) => error.message === 'attendance_biometric_rate_limited' && error.retryAfterSeconds >= 25
+  );
+});
+
+test('una verificación solo sirve para su contexto, dentro de su vigencia y una sola vez', () => {
+  const metadata = {
+    decision: 'VERIFIED',
+    verified: true,
+    evidenceVersion: 2,
+    modelVersion: WORKER_BIOMETRIC_MODEL_VERSION,
+    workerId: WORKER_ID,
+    assignmentId: ASSIGNMENT_ID,
+    markType: 'ARRIVAL',
+    idempotencyKey: 'usable-key-12345678',
+    validUntil: new Date(NOW.getTime() + 90_000).toISOString(),
+    consumedAt: null
+  };
+  const expected = {
+    workerId: WORKER_ID,
+    assignmentId: ASSIGNMENT_ID,
+    markType: 'ARRIVAL',
+    idempotencyKey: 'usable-key-12345678'
+  };
+  assert.equal(isWorkerBiometricVerificationUsable(metadata, expected, NOW), true);
+  assert.equal(isWorkerBiometricVerificationUsable({ ...metadata, consumedAt: NOW.toISOString() }, expected, NOW), false);
+  assert.equal(isWorkerBiometricVerificationUsable(metadata, expected, new Date(NOW.getTime() + 91_000)), false);
+  assert.equal(isWorkerBiometricVerificationUsable(metadata, { ...expected, markType: 'DEPARTURE' }, NOW), false);
+});
+
+test('los archivos del navegador envían evidencia completa y nunca elevan el liveness', () => {
+  const mobile = fs.readFileSync(new URL('../src/public/worker-biometric-mobile.js', import.meta.url), 'utf8');
+  const flow = fs.readFileSync(new URL('../src/public/worker-portal-biometric-flow.js', import.meta.url), 'utf8');
+  const loader = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
+  const route = fs.readFileSync(new URL('../src/routes/workerPortal.js', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(mobile, /Math\.max\(modelLiveScore,\s*MIN_LIVE_SCORE\)/);
+  assert.match(mobile, /sampleDescriptors:/);
+  assert.match(mobile, /sampleRealScores:/);
+  assert.match(mobile, /sampleLiveScores:/);
+  assert.match(mobile, /actionDescriptors:/);
+  assert.match(mobile, /actionLiveScores:/);
+  assert.match(mobile, /MODEL_AND_ACTIVE_CHALLENGE_V2/);
+  assert.match(mobile, /REQUIRED_ACTION_FRAMES = 3/);
+  assert.match(flow, /challengeEvidence:\s*capture\.challengeEvidence/);
+  assert.match(flow, /sampleDescriptors:\s*capture\.sampleDescriptors/);
+  assert.match(route, /evidenceVersion:\s*WORKER_BIOMETRIC_EVIDENCE_VERSION/);
+  assert.match(route, /hasCurrentBiometricEnrollment/);
+  assert.match(route, /validUntil:\s*assessment\.validUntil/);
+  assert.match(route, /consumeVerifiedAssessmentAfterSuccess/);
+  assert.match(loader, /20260801-biometric-integrity-v2/);
 });
