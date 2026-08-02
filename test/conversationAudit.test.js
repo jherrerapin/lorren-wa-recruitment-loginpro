@@ -138,3 +138,27 @@ test('aplica inconsistencias del estado actual solo a la sesión más reciente d
   assert.equal(report.conversations.length, 2);
   assert.equal(report.conversations.filter((item) => item.issues.some((issue) => issue.code === 'SCHEDULED_WITHOUT_BOOKING')).length, 1);
 });
+
+test('no marca como afirmación sensible una pregunta o solicitud de datos', () => {
+  const rows = [
+    message('1', 0, 'INBOUND', 'Hola'),
+    message('2', 1, 'OUTBOUND', '¿Qué horario prefieres para la entrevista?'),
+    message('3', 2, 'OUTBOUND', 'Por favor compárteme tu número de documento.')
+  ];
+  const result = analyzeConversationSession(rows, { now: new Date(Date.UTC(2026, 7, 1, 13, 0)) });
+  assert.equal(result.issues.some((issue) => issue.code === 'UNSUPPORTED_SENSITIVE_CLAIM'), false);
+});
+
+test('anonimiza identificadores de mensajes y motivos de pausa', () => {
+  const candidate = {
+    ...baseCandidate,
+    botPaused: true,
+    botPauseReason: 'Revisar a Carlos Perez, teléfono 3203998106'
+  };
+  const result = analyzeConversationSession([
+    message('raw-message-id', 0, 'INBOUND', 'Hola', {}, { candidate })
+  ], { now: new Date(Date.UTC(2026, 7, 1, 13, 0)) });
+  assert.notEqual(result.transcript[0].id, 'raw-message-id');
+  assert.doesNotMatch(result.finalState.botPauseReason || '', /Carlos|Perez|3203998106/i);
+  assert.doesNotMatch(JSON.stringify(result.issues), /raw-message-id|Carlos Perez|3203998106/i);
+});
