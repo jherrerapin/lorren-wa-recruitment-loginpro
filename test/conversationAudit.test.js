@@ -120,6 +120,7 @@ test('filtra mensajes internos del supervisor', () => {
   assert.equal(report.conversations[0].transcript.length, 2);
 });
 
+
 test('aplica inconsistencias del estado actual solo a la sesión más reciente del candidato', () => {
   const candidate = {
     id: 'candidate-state',
@@ -138,6 +139,7 @@ test('aplica inconsistencias del estado actual solo a la sesión más reciente d
   assert.equal(report.conversations.length, 2);
   assert.equal(report.conversations.filter((item) => item.issues.some((issue) => issue.code === 'SCHEDULED_WITHOUT_BOOKING')).length, 1);
 });
+
 
 test('no marca como afirmación sensible una pregunta o solicitud de datos', () => {
   const rows = [
