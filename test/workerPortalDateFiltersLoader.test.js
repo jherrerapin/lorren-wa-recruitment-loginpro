@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import ejs from 'ejs';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -18,6 +19,33 @@ test('la vista entrega los filtros aunque el JavaScript todavía no haya iniciad
   assert.match(portalView, /data-portal-preset="all"/);
   assert.match(portalView, /worker-biometric\.js\?v=20260803-worker-portal-runtime-v5/);
   assert.doesNotMatch(portalView, /20260730-mobile-camera-v3/);
+});
+
+test('la plantilla activa renderiza controles y estados sin errores de EJS', async () => {
+  const portalView = await read('src/views/workerPortal.ejs');
+  const html = ejs.render(portalView, {
+    mode: 'active',
+    nonce: 'test-nonce',
+    assignments: [{
+      id: 'assignment-1',
+      dateLabel: '3 de agosto de 2026',
+      clientName: 'Cliente de prueba',
+      timeLabel: '08:00 – 17:00',
+      operationPointName: 'Operación principal',
+      cityName: 'Bogotá',
+      address: 'Dirección de prueba',
+      arrivalReported: false,
+      departureReported: false,
+      breakActionType: null,
+      canRegisterArrival: true,
+      canRegisterDeparture: false
+    }]
+  });
+
+  assert.match(html, /Organizar asignaciones/);
+  assert.match(html, /data-portal-status="PENDING"/);
+  assert.match(html, /id="assignment-filter-result"/);
+  assert.match(html, />1 visibles</);
 });
 
 test('el entrypoint conserva agrupación y filtros con una sola cola offline', async () => {
