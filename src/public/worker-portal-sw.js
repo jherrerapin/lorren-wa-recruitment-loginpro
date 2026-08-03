@@ -8,7 +8,7 @@ const NETWORK_FIRST_ASSETS = new Set([
   '/public/worker-biometric-core.js',
   '/public/worker-biometric-mobile.js',
   '/public/worker-portal-biometric-flow.js',
-  '/public/worker-portal-offline-v2.js',
+  '/public/worker-portal-offline.js',
   '/public/worker-portal-offline-controller.js',
   '/public/worker-portal-install.js'
 ]);
@@ -19,7 +19,7 @@ const STATIC_ASSETS = [
   '/public/worker-biometric-core.js',
   '/public/worker-biometric-mobile.js',
   '/public/worker-portal-biometric-flow.js',
-  '/public/worker-portal-offline-v2.js',
+  '/public/worker-portal-offline.js',
   '/public/worker-portal-offline-controller.js',
   '/public/worker-portal-install.js'
 ];
