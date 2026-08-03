@@ -39,6 +39,14 @@ jobs:
           block = workflow[start:end]
           block = '\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines())
           exec(compile(block, 'embedded-biometric-patch', 'exec'))
+
+          integration_path = Path('test/workerBiometricIntegrationContracts.test.js')
+          integration = integration_path.read_text(encoding='utf-8')
+          old = "  assert.match(loader, /20260801-biometric-integrity-v2/);"
+          new = "  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\\s*=\\s*'20260803-worker-portal-runtime-v5'/);"
+          if integration.count(old) != 1:
+              raise SystemExit('Expected one stale biometric release assertion')
+          integration_path.write_text(integration.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Validate focused change
