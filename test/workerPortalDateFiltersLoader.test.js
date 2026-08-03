@@ -51,6 +51,7 @@ test('la plantilla activa renderiza controles y estados sin errores de EJS', asy
 test('el entrypoint conserva agrupación y filtros con una sola cola offline', async () => {
   const loader = await read('src/public/worker-biometric.js');
 
+  assert.match(loader, /20260803-worker-portal-runtime-v5/);
   assert.match(loader, /\/public\/worker-biometric-core\.js/);
   assert.match(loader, /\/public\/worker-biometric-mobile\.js/);
   assert.match(loader, /\/public\/worker-portal-biometric-flow\.js/);
@@ -58,7 +59,6 @@ test('el entrypoint conserva agrupación y filtros con una sola cola offline', a
   assert.doesNotMatch(loader, /worker-portal-offline-v2\.js/);
   assert.match(loader, /\/public\/worker-portal-offline-controller\.js/);
   assert.doesNotMatch(loader, /worker-portal-hardening\.js/);
-
   assert.match(loader, /assignment-date-from/);
   assert.match(loader, /assignment-date-to/);
   assert.match(loader, /assignment-status-filter/);
@@ -67,7 +67,7 @@ test('el entrypoint conserva agrupación y filtros con una sola cola offline', a
   assert.match(loader, /\['week', '7 días'\]/);
   assert.match(loader, /\['all', 'Todas'\]/);
   assert.match(loader, /function applyFilters\(\)/);
-  assert.match(loader, /setPreset\('upcoming'\)/);
+  assert.match(loader, /setPreset\('all'\)/);
 });
 
 test('los filtros reintentan la inicialización y reaccionan a cambios de jornada', async () => {

@@ -166,7 +166,7 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
         ['week', '7 días'],
         ['all', 'Todas']
       ].forEach(([value, label]) => {
-        const button = createElement('button', `portal-quick-filter${value === 'upcoming' ? ' active' : ''}`, label);
+        const button = createElement('button', `portal-quick-filter${value === 'all' ? ' active' : ''}`, label);
         button.type = 'button';
         button.dataset.portalPreset = value;
         quick.append(button);
@@ -347,7 +347,7 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
     });
 
     document.body.classList.add('portal-filters-ready');
-    setPreset('upcoming');
+    setPreset('all');
     return true;
   }
 

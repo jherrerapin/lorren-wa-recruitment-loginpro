@@ -65,6 +65,36 @@ test('lista asignaciones activas y permite llegada sin ventana temporal', async 
   assert.equal(assignments[0].workerId, undefined);
 });
 
+test('conserva una jornada finalizada aunque haya pasado más de un día', async () => {
+  const historicalDeparture = new Date('2026-06-01T22:00:00.000Z');
+  const prisma = prismaWithAssignments({
+    async findMany() {
+      return [assignmentFixture({
+        serviceRequest: {
+          serviceDate: new Date('2026-06-01T00:00:00.000Z'),
+          startTime: '08:30',
+          endTime: '17:00'
+        },
+        attendanceSession: sessionFixture({
+          arrivalReportedAt: new Date('2026-06-01T13:30:00.000Z'),
+          departureReportedAt: historicalDeparture,
+          attendanceStatus: 'COMPLETED',
+          workedMinutes: 450
+        })
+      })];
+    }
+  });
+
+  const assignments = await loadWorkerPortalAssignments(prisma, {
+    workerId: 'worker-1',
+    now: new Date('2026-07-22T13:00:00.000Z')
+  });
+
+  assert.equal(assignments.length, 1);
+  assert.equal(assignments[0].departureReportedAt, historicalDeparture.toISOString());
+  assert.equal(assignments[0].actionType, 'DONE');
+});
+
 test('la consulta puntual exige assignmentId y workerId', async () => {
   let observedWhere;
   const prisma = prismaWithAssignments({ async findFirst(query) { observedWhere = query.where; return assignmentFixture(); } });
