@@ -12,17 +12,17 @@ const biometricLoader = fs.readFileSync('src/public/worker-biometric.js', 'utf8'
 const adminLoader = fs.readFileSync('src/public/attendance-admin-runtime.js', 'utf8');
 
 
-test('la geocerca se valida antes de delegar la persistencia al núcleo', () => {
+test('la geocerca se compone explícitamente antes de la persistencia del núcleo', () => {
   assert.match(portalRoute, /calculateAttendanceDistanceMeters/);
   assert.match(portalRoute, /isAttendanceInsideGeofence\(distanceMeters, radiusMeters\) !== true/);
   assert.match(portalRoute, /operation_geofence_required/);
   assert.match(portalRoute, /location_accuracy_insufficient/);
   assert.match(portalRoute, /outside_operation_range/);
-  assert.match(portalRoute, /prependRouteHandlers\(router, path, \[markUpload, strictMarkGuard\]\)/);
-  assert.match(portalRoute, /target\.route\.stack\.unshift/);
-  const corePosition = portalRoute.indexOf('coreWorkerPortalRouter(prisma');
-  const guardInjectionPosition = portalRoute.lastIndexOf('prependRouteHandlers(router, path');
-  assert.ok(corePosition >= 0 && guardInjectionPosition > corePosition);
+  assert.match(portalRoute, /function strictMarkMiddleware\(req, res, next\)/);
+  assert.match(portalRoute, /markUpload\(req, res, \(error\) =>/);
+  assert.match(portalRoute, /return strictMarkGuard\(req, res, next\)/);
+  assert.match(portalRoute, /markUpload: strictMarkMiddleware/);
+  assert.doesNotMatch(portalRoute, /prependRouteHandlers|routeLayer|router\.stack|target\.route\.stack/);
 });
 
 
@@ -42,7 +42,7 @@ test('llegada, almuerzo y salida necesitan una evaluación facial v2 vigente y n
 });
 
 
-test('la inscripción v2 ocurre antes de marcar y usa la sesión del auxiliar', () => {
+test('la inscripción v2 ocurre solo en el portal y usa la sesión del auxiliar', () => {
   assert.match(portalRoute, /router\.post\('\/biometria\/estado'/);
   assert.match(portalRoute, /router\.post\('\/biometria\/registrar'/);
   assert.match(portalRoute, /await enrollBiometricFn\(/);
@@ -51,11 +51,11 @@ test('la inscripción v2 ocurre antes de marcar y usa la sesión del auxiliar', 
   assert.match(portalRoute, /sampleDescriptors: req\.body\?\.sampleDescriptors/);
   assert.match(portalRoute, /consentAccepted: req\.body\?\.consentAccepted === true/);
   assert.match(portalRoute, /actorSource: 'worker-portal'/);
+  assert.match(portalRoute, /biometric_enrollment_required/);
   assert.match(portalView, /Registro facial inicial/);
   assert.match(biometricFlow, /captureEnrollment/);
   assert.match(biometricFlow, /loadBiometricStatus/);
-  assert.match(biometricRoute, /biometric_enrollment_required/);
-  assert.doesNotMatch(biometricRoute, /await enrollBiometricFn\(/);
+  assert.doesNotMatch(biometricRoute, /biometric_enrollment_required|enrollBiometricFn|biometria\/registrar/);
 });
 
 
@@ -79,7 +79,7 @@ test('las vistas ya no dependen de JavaScript para retirar textos redundantes de
 });
 
 
-test('los cargadores conservan los núcleos y el controlador único', () => {
+test('los cargadores conservan únicamente los componentes vigentes', () => {
   assert.match(biometricLoader, /worker-biometric-core\.js/);
   assert.match(biometricLoader, /worker-biometric-mobile\.js/);
   assert.match(biometricLoader, /worker-portal-biometric-flow\.js/);
