@@ -373,5 +373,5 @@ test('los archivos del navegador envían evidencia completa y nunca elevan el li
   assert.match(route, /hasCurrentBiometricEnrollment/);
   assert.match(route, /validUntil:\s*assessment\.validUntil/);
   assert.match(route, /consumeVerifiedAssessmentAfterSuccess/);
-  assert.match(loader, /20260801-biometric-integrity-v2/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260803-worker-portal-runtime-v5'/);
 });
