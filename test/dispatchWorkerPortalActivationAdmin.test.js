@@ -83,11 +83,7 @@ function workerFixture(overrides = {}) {
 function buildRouter(options = {}) {
   return dispatchWorkerPortalActivationAdminRouter({}, {
     repository: {},
-    sessionRepository: {},
-    env: {
-      RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app',
-      ATTENDANCE_BIOMETRIC_SECRET: 'b'.repeat(64)
-    },
+    env: { RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app' },
     ttlMinutes: 30,
     nowFn: () => NOW,
     loadWorkersFn: async () => [workerFixture()],
@@ -220,19 +216,15 @@ test('la pantalla administrativa nunca renderiza registro facial', () => {
   assert.doesNotMatch(view, /window\.open\(|location\.href\s*=\s*activationUrl/);
 });
 
-test('las rutas administrativas conservan permisos y la verificación usa sesión del portal', () => {
+test('la administración usa un solo router y no conserva rutas biométricas del portal', () => {
   const bridgeSource = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const activationSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
-  const activationCoreSource = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdminCore.js', 'utf8');
 
   assert.match(bridgeSource, /'\/portal-activaciones',[\s\S]*dispatchWorkerPortalActivationAdminRouter\(prisma\)/);
-  assert.match(activationCoreSource, /router\.get\('\/', requireAttendancePermission/);
-  assert.match(activationCoreSource, /router\.post\('\/emitir', requireAttendancePermission, requireAdminJson/);
-  assert.match(activationCoreSource, /router\.post\('\/biometria\/revocar', requireAttendancePermission, requireAdminJson/);
-  assert.match(activationSource, /replacementRouter\.post\('\/biometria\/desafio', parsePortalCookie, requireWorkerPortalJson/);
-  assert.match(activationSource, /replacementRouter\.post\('\/biometria\/verificar', parsePortalCookie, requireWorkerPortalJson/);
-  assert.match(activationSource, /biometric_enrollment_moved_to_worker_portal/);
-  assert.match(activationSource, /resolvePortalRequestSession/);
-  assert.match(activationSource, /biometric_enrollment_required/);
-  assert.doesNotMatch(activationSource, /await enrollBiometricFn\(/);
+  assert.match(activationSource, /router\.get\('\/', requireAttendancePermission/);
+  assert.match(activationSource, /router\.post\('\/emitir', requireAttendancePermission, requireAdminJson/);
+  assert.match(activationSource, /'\/biometria\/revocar',[\s\S]*requireAttendancePermission/);
+  assert.doesNotMatch(activationSource, /biometria\/desafio|biometria\/verificar|biometria\/registrar/);
+  assert.doesNotMatch(activationSource, /replaceRouteHandlers|routeLayer|router\.stack/);
+  assert.equal(fs.existsSync('src/routes/dispatchWorkerPortalActivationAdminCore.js'), false);
 });
