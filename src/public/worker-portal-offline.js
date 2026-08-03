@@ -13,6 +13,8 @@
 
   let registration = null;
   let stateListener = null;
+  let fallbackRetryTimer = null;
+  let fallbackRetryAt = 0;
 
   function requestPromise(request) {
     return new Promise((resolve, reject) => {
@@ -151,6 +153,27 @@
     serviceWorkerTarget()?.postMessage(message);
   }
 
+  function clearFallbackRetry() {
+    if (fallbackRetryTimer !== null) window.clearTimeout(fallbackRetryTimer);
+    fallbackRetryTimer = null;
+    fallbackRetryAt = 0;
+  }
+
+  function scheduleFallbackRetry(delayMs) {
+    const delay = Math.max(0, Number(delayMs) || 0);
+    if (!navigator.onLine || delay <= 0) return;
+    const retryAt = Date.now() + delay;
+    if (fallbackRetryTimer !== null && fallbackRetryAt <= retryAt) return;
+    clearFallbackRetry();
+    fallbackRetryAt = retryAt;
+    fallbackRetryTimer = window.setTimeout(() => {
+      fallbackRetryTimer = null;
+      fallbackRetryAt = 0;
+      if (!navigator.onLine) return;
+      syncNow().catch(() => {});
+    }, delay);
+  }
+
   async function registerBackgroundSync() {
     const ready = registration || await navigator.serviceWorker?.ready;
     if (!ready) return false;
@@ -229,6 +252,9 @@
   function handleServiceWorkerMessage(event) {
     const message = event?.data;
     if (!message || typeof message !== 'object') return;
+    if (message.type === 'ARRIVAL_SYNC_RETRY' && Number(message.retryAfterMs) > 0) {
+      scheduleFallbackRetry(message.retryAfterMs);
+    }
     if ([
       'ARRIVAL_QUEUE_UPDATED',
       'ARRIVAL_SYNCED',
@@ -246,11 +272,15 @@
     await registerServiceWorker().catch(() => null);
     navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
     window.addEventListener('online', () => {
+      clearFallbackRetry();
       emitState();
       postToServiceWorker({ type: 'CACHE_PORTAL' });
       syncNow().catch(() => {});
     });
-    window.addEventListener('offline', () => emitState());
+    window.addEventListener('offline', () => {
+      clearFallbackRetry();
+      emitState();
+    });
     await emitState();
     if (navigator.onLine) await syncNow().catch(() => {});
     return getState();
