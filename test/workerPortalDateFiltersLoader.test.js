@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('el entrypoint conserva agrupación y filtros sin cargar el runtime legado', async () => {
+test('el entrypoint conserva agrupación y filtros con una sola cola offline', async () => {
   const [loader, portalView] = await Promise.all([
     read('src/public/worker-biometric.js'),
     read('src/views/workerPortal.ejs')
@@ -14,10 +14,9 @@ test('el entrypoint conserva agrupación y filtros sin cargar el runtime legado'
   assert.match(loader, /\/public\/worker-biometric-core\.js/);
   assert.match(loader, /\/public\/worker-biometric-mobile\.js/);
   assert.match(loader, /\/public\/worker-portal-biometric-flow\.js/);
-  assert.match(loader, /\/public\/worker-portal-offline-v2\.js/);
+  assert.match(loader, /\/public\/worker-portal-offline\.js/);
+  assert.doesNotMatch(loader, /worker-portal-offline-v2\.js/);
   assert.match(loader, /\/public\/worker-portal-offline-controller\.js/);
-  assert.doesNotMatch(loader, /worker-portal-offline\.js/);
-  assert.doesNotMatch(loader, /\/operaciones\/portal\/offline\.js/);
   assert.doesNotMatch(loader, /worker-portal-hardening\.js/);
 
   assert.match(loader, /assignment-date-from/);
