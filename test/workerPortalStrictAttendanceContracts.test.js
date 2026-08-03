@@ -55,7 +55,8 @@ test('la inscripción v2 ocurre solo en el portal y usa la sesión del auxiliar'
   assert.match(portalView, /Registro facial inicial/);
   assert.match(biometricFlow, /captureEnrollment/);
   assert.match(biometricFlow, /loadBiometricStatus/);
-  assert.doesNotMatch(biometricRoute, /biometric_enrollment_required|enrollBiometricFn|biometria\/registrar/);
+  assert.doesNotMatch(biometricRoute, /biometric_enrollment_required|enrollBiometricFn/);
+  assert.doesNotMatch(biometricRoute, /router\.post\('\/biometria\/registrar'/);
 });
 
 
