@@ -1,0 +1,33 @@
+name: Temporary PR validation
+
+on:
+  push:
+    branches:
+      - validation/offline-prs-20260803
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check modified JavaScript syntax
+        run: |
+          node --check src/public/worker-portal-biometric-flow.js
+          node --check src/public/worker-biometric.js
+          node --check src/public/worker-portal-session-handoff.js
+          node --check src/public/worker-biometric-core.js
+          node --check src/public/worker-portal-sw.js
+      - name: Run full test suite
+        run: npm test
