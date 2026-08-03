@@ -7,7 +7,7 @@ const bootstrap = fs.readFileSync('src/public/worker-biometric-core.js', 'utf8')
 const mobile = fs.readFileSync('src/public/worker-biometric-mobile.js', 'utf8');
 
 
-test('el bootstrap se carga antes del único motor y del controlador vigente', () => {
+test('el bootstrap solo publica la versión antes del único motor vigente', () => {
   const bootstrapPosition = loader.indexOf('worker-biometric-core.js');
   const enginePosition = loader.indexOf('worker-biometric-mobile.js');
   const flowPosition = loader.indexOf('worker-portal-biometric-flow.js');
@@ -16,8 +16,9 @@ test('el bootstrap se carga antes del único motor y del controlador vigente', (
   assert.ok(flowPosition > enginePosition);
   assert.doesNotMatch(loader, /worker-portal-hardening\.js/);
 
-  assert.match(bootstrap, /humanFaceSimilarity/);
-  assert.match(bootstrap, /installPortalResponseGuard/);
+  assert.match(bootstrap, /MODEL_VERSION = 'human-3\.3\.6-faceres'/);
+  assert.match(bootstrap, /Object\.freeze\(\{ MODEL_VERSION \}\)/);
+  assert.doesNotMatch(bootstrap, /humanFaceSimilarity|installPortalResponseGuard|window\.fetch|requiresReview/);
   assert.doesNotMatch(bootstrap, /function humanConfig|captureEnrollment|captureVerification|getUserMedia|human\.detect/);
   assert.match(mobile, /function humanConfig/);
   assert.match(mobile, /async function captureEnrollment/);
