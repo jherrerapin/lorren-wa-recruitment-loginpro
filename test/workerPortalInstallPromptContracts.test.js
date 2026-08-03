@@ -9,11 +9,11 @@ const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
 
-test('el cargador incluye instalación, sesión y la versión biométrica coherente', () => {
+test('el cargador incluye instalación, sesión y una versión coherente', () => {
   assert.match(loaderSource, /worker-portal-install\.js/);
   assert.match(loaderSource, /worker-portal-session-handoff\.js/);
-  assert.match(loaderSource, /20260803-biometric-cache-coherence-v3/);
-  assert.match(loaderSource, /lorren-worker-portal-shell-v9/);
+  assert.match(loaderSource, /20260803-worker-portal-runtime-v5/);
+  assert.match(loaderSource, /lorren-worker-portal-shell-v10/);
   assert.match(loaderSource, /PORTAL_SHELL_UPDATED/);
   assert.match(loaderSource, /registration\?\.update/);
   assert.match(loaderSource, /window\.location\.reload\(\)/);
@@ -84,21 +84,22 @@ test('la instalación no se ofrece dentro de la app ya instalada', () => {
 });
 
 
-test('el service worker elimina v8 y actualiza juntos todos los módulos biométricos', () => {
-  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v9/);
-  assert.doesNotMatch(serviceWorkerSource, /CACHE_NAME = 'lorren-worker-portal-shell-v8'/);
+test('el service worker elimina cachés anteriores y actualiza todos los módulos vigentes', () => {
+  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v10/);
+  assert.doesNotMatch(serviceWorkerSource, /CACHE_NAME = 'lorren-worker-portal-shell-v9'/);
   assert.match(serviceWorkerSource, /NETWORK_FIRST_ASSETS/);
   for (const path of [
     '/public/worker-biometric.js',
     '/public/worker-biometric-core.js',
     '/public/worker-biometric-mobile.js',
     '/public/worker-portal-biometric-flow.js',
-    '/public/worker-portal-offline-v2.js',
+    '/public/worker-portal-offline.js',
     '/public/worker-portal-offline-controller.js',
     '/public/worker-portal-install.js'
   ]) {
     assert.match(serviceWorkerSource, new RegExp(`'${path.replaceAll('/', '\\/').replaceAll('.', '\\.')}'`));
   }
+  assert.doesNotMatch(serviceWorkerSource, /worker-portal-offline-v2\.js/);
   assert.match(serviceWorkerSource, /networkFirstStatic/);
   assert.match(serviceWorkerSource, /fetch\(request, \{ cache: 'no-store' \}\)/);
   assert.match(serviceWorkerSource, /PORTAL_SHELL_UPDATED/);
