@@ -37,13 +37,7 @@ if (LOAD_WORKER_PORTAL_HANDOFF) {
 document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 
 (() => {
-  if (!/^\/operaciones\/portal\/?$/.test(window.location.pathname)) return;
-
-  const list = document.querySelector('.assignment-list');
-  if (!list || document.body.classList.contains('portal-filters-ready')) return;
-  const cards = Array.from(list.querySelectorAll(':scope > .assignment-card'));
-  if (!cards.length) return;
-
+  const PORTAL_PATH_PATTERN = /^\/operaciones\/portal\/?$/;
   const PORTAL_FILTER_STYLE = `
     body.portal-filters-ready main{width:min(100%,720px)}
     .portal-filter-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:0 0 14px;overflow:hidden;border:1px solid #dfe5e9;border-radius:16px;background:#dfe5e9}
@@ -75,6 +69,14 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
     return element;
   }
 
+  function ensureFilterStyle() {
+    if (document.querySelector('style[data-worker-portal-filters]')) return;
+    const style = createElement('style');
+    style.dataset.workerPortalFilters = 'true';
+    style.textContent = PORTAL_FILTER_STYLE;
+    document.head.append(style);
+  }
+
   function parseAssignmentDate(label) {
     const match = String(label || '').toLowerCase().match(/(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})/i);
     if (!match) return '';
@@ -102,176 +104,270 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
   function assignmentStatus(card) {
     if (card.classList.contains('completed')) return 'COMPLETED';
     if (card.querySelector('[data-mark-type="DEPARTURE"]')) return 'IN_PROGRESS';
-    return 'PENDING';
+    if (card.querySelector('[data-mark-type="BREAK_START"], [data-mark-type="BREAK_END"]')) return 'IN_PROGRESS';
+    if (card.querySelector('[data-mark-type="ARRIVAL"]')) return 'PENDING';
+    return ['PENDING', 'IN_PROGRESS', 'COMPLETED'].includes(card.dataset.portalStatus)
+      ? card.dataset.portalStatus
+      : 'PENDING';
   }
 
-  const items = cards.map((card) => {
-    const dateLabel = card.querySelector('.assignment-date')?.textContent.trim() || 'Fecha pendiente';
-    return {
-      card,
-      dateLabel,
-      dateKey: parseAssignmentDate(dateLabel),
-      status: assignmentStatus(card)
-    };
-  });
-
-  const style = createElement('style');
-  style.dataset.workerPortalFilters = 'true';
-  style.textContent = PORTAL_FILTER_STYLE;
-  document.head.append(style);
-  document.body.classList.add('portal-filters-ready');
-
-  const summary = createElement('section', 'portal-filter-summary');
-  summary.setAttribute('aria-label', 'Resumen de asignaciones');
-  [
-    ['Pendientes', items.filter((item) => item.status === 'PENDING').length],
-    ['En curso', items.filter((item) => item.status === 'IN_PROGRESS').length],
-    ['Finalizadas', items.filter((item) => item.status === 'COMPLETED').length]
-  ].forEach(([label, value]) => {
-    const stat = createElement('div');
-    stat.append(createElement('span', '', label), createElement('strong', '', String(value)));
-    summary.append(stat);
-  });
-  list.parentNode.insertBefore(summary, list);
-
-  const groups = new Map();
-  items.forEach((item) => {
-    const key = item.dateKey || item.dateLabel;
-    if (!groups.has(key)) groups.set(key, { key, label: item.dateLabel, items: [] });
-    groups.get(key).items.push(item);
-  });
-
-  const groupsContainer = createElement('section', 'portal-date-groups');
-  groupsContainer.id = 'portal-assignment-groups';
-  groupsContainer.setAttribute('aria-label', 'Asignaciones agrupadas por fecha');
-  groups.forEach((group) => {
-    const section = createElement('section', 'portal-date-group');
-    section.dataset.portalDateGroup = group.key;
-    const header = createElement('header', 'portal-date-header');
-    const title = createElement('div', 'portal-date-title');
-    title.append(createElement('span', 'portal-date-dot'), createElement('h2', '', group.label));
-    const count = createElement('span', 'portal-group-count', `${group.items.length} asignación${group.items.length === 1 ? '' : 'es'}`);
-    count.dataset.portalGroupCount = 'true';
-    header.append(title, count);
-    const dateList = createElement('div', 'portal-date-list');
-    group.items.forEach((item) => dateList.append(item.card));
-    section.append(header, dateList);
-    groupsContainer.append(section);
-  });
-  list.replaceWith(groupsContainer);
-
-  const panel = createElement('section', 'portal-filter-panel');
-  panel.setAttribute('aria-label', 'Filtros de asignaciones');
-  const head = createElement('div', 'portal-filter-head');
-  const heading = createElement('div');
-  heading.append(createElement('h2', '', 'Organizar asignaciones'), createElement('p', '', 'Filtra por periodo o estado.'));
-  const result = createElement('span', 'portal-filter-result', `${items.length} visibles`);
-  head.append(heading, result);
-
-  const quick = createElement('div', 'portal-quick-filters');
-  quick.setAttribute('role', 'group');
-  quick.setAttribute('aria-label', 'Periodos rápidos');
-  const presetButtons = [
-    ['today', 'Hoy'], ['upcoming', 'Próximas'], ['week', '7 días'], ['all', 'Todas']
-  ].map(([value, label]) => {
-    const button = createElement('button', `portal-quick-filter${value === 'upcoming' ? ' active' : ''}`, label);
-    button.type = 'button';
-    button.dataset.portalPreset = value;
-    quick.append(button);
-    return button;
-  });
-
-  const grid = createElement('div', 'portal-filter-grid');
-  const fromLabel = createElement('label', 'portal-filter-field', 'Desde');
-  const fromInput = createElement('input');
-  fromInput.type = 'date';
-  fromInput.id = 'assignment-date-from';
-  fromLabel.append(fromInput);
-  const toLabel = createElement('label', 'portal-filter-field', 'Hasta');
-  const toInput = createElement('input');
-  toInput.type = 'date';
-  toInput.id = 'assignment-date-to';
-  toLabel.append(toInput);
-  const statusLabel = createElement('label', 'portal-filter-field portal-status-filter', 'Estado');
-  const statusSelect = createElement('select');
-  statusSelect.id = 'assignment-status-filter';
-  [['', 'Todos los estados'], ['PENDING', 'Pendientes'], ['IN_PROGRESS', 'En curso'], ['COMPLETED', 'Finalizadas']]
-    .forEach(([value, label]) => {
-      const option = createElement('option', '', label);
-      option.value = value;
-      statusSelect.append(option);
-    });
-  statusLabel.append(statusSelect);
-  const clear = createElement('button', 'portal-clear-filter', 'Limpiar');
-  clear.type = 'button';
-  clear.id = 'clear-assignment-filters';
-  grid.append(fromLabel, toLabel, statusLabel, clear);
-  panel.append(head, quick, grid);
-  groupsContainer.parentNode.insertBefore(panel, groupsContainer);
-
-  const empty = createElement('section', 'empty-state portal-filtered-empty');
-  empty.hidden = true;
-  empty.append(
-    createElement('h2', '', 'No hay asignaciones en este filtro'),
-    createElement('p', '', 'Cambia el periodo o limpia los filtros para ver otras fechas.')
-  );
-  groupsContainer.parentNode.insertBefore(empty, groupsContainer.nextSibling);
-
-  function activatePreset(name) {
-    presetButtons.forEach((button) => button.classList.toggle('active', button.dataset.portalPreset === name));
-  }
-
-  function applyFilters() {
-    const from = fromInput.value;
-    const to = toInput.value;
-    const status = statusSelect.value;
-    const activePreset = presetButtons.find((button) => button.classList.contains('active'))?.dataset.portalPreset || '';
-    let visibleCount = 0;
-
-    items.forEach((item) => {
-      const matchesFrom = !from || !item.dateKey || item.dateKey >= from;
-      const matchesTo = !to || !item.dateKey || item.dateKey <= to;
-      const matchesStatus = !status || status === item.status;
-      const keepActiveJourney = activePreset === 'upcoming' && item.status === 'IN_PROGRESS';
-      const visible = (keepActiveJourney || (matchesFrom && matchesTo)) && matchesStatus;
-      item.card.hidden = !visible;
-      if (visible) visibleCount += 1;
-    });
-
-    Array.from(groupsContainer.querySelectorAll('.portal-date-group')).forEach((group) => {
-      const visibleCards = Array.from(group.querySelectorAll('.assignment-card')).filter((card) => !card.hidden);
-      group.hidden = visibleCards.length === 0;
-      const counter = group.querySelector('[data-portal-group-count]');
-      if (counter) counter.textContent = `${visibleCards.length} asignación${visibleCards.length === 1 ? '' : 'es'}`;
-    });
-
-    result.textContent = `${visibleCount} visible${visibleCount === 1 ? '' : 's'}`;
-    empty.hidden = visibleCount !== 0;
-  }
-
-  function setPreset(name) {
-    const today = bogotaDateKey();
-    if (name === 'today') {
-      fromInput.value = today;
-      toInput.value = today;
-    } else if (name === 'week') {
-      fromInput.value = today;
-      toInput.value = addDays(today, 6);
-    } else if (name === 'upcoming') {
-      fromInput.value = today;
-      toInput.value = '';
-    } else {
-      fromInput.value = '';
-      toInput.value = '';
+  function ensureSummary(parent, anchor, items) {
+    let summary = parent.querySelector('.portal-filter-summary');
+    if (!summary) {
+      summary = createElement('section', 'portal-filter-summary');
+      summary.setAttribute('aria-label', 'Resumen de asignaciones');
+      [
+        ['PENDING', 'Pendientes'],
+        ['IN_PROGRESS', 'En curso'],
+        ['COMPLETED', 'Finalizadas']
+      ].forEach(([status, label]) => {
+        const stat = createElement('div');
+        const value = createElement('strong', '', '0');
+        value.dataset.portalSummaryStatus = status;
+        stat.append(createElement('span', '', label), value);
+        summary.append(stat);
+      });
+      parent.insertBefore(summary, anchor);
     }
-    activatePreset(name);
-    applyFilters();
+    updateSummary(summary, items);
+    return summary;
   }
 
-  presetButtons.forEach((button) => button.addEventListener('click', () => setPreset(button.dataset.portalPreset)));
-  fromInput.addEventListener('change', () => { activatePreset(''); applyFilters(); });
-  toInput.addEventListener('change', () => { activatePreset(''); applyFilters(); });
-  statusSelect.addEventListener('change', applyFilters);
-  clear.addEventListener('click', () => { statusSelect.value = ''; setPreset('all'); });
-  setPreset('upcoming');
+  function updateSummary(summary, items) {
+    const counts = { PENDING: 0, IN_PROGRESS: 0, COMPLETED: 0 };
+    items.forEach((item) => {
+      item.status = assignmentStatus(item.card);
+      item.card.dataset.portalStatus = item.status;
+      counts[item.status] += 1;
+    });
+    summary.querySelectorAll('[data-portal-summary-status]').forEach((element) => {
+      element.textContent = String(counts[element.dataset.portalSummaryStatus] || 0);
+    });
+  }
+
+  function ensurePanel(parent, anchor, total) {
+    let panel = parent.querySelector('.portal-filter-panel');
+    if (!panel) {
+      panel = createElement('section', 'portal-filter-panel');
+      panel.setAttribute('aria-label', 'Filtros de asignaciones');
+      const head = createElement('div', 'portal-filter-head');
+      const heading = createElement('div');
+      heading.append(createElement('h2', '', 'Organizar asignaciones'), createElement('p', '', 'Filtra por periodo o estado.'));
+      const result = createElement('span', 'portal-filter-result', `${total} visibles`);
+      result.id = 'assignment-filter-result';
+      head.append(heading, result);
+
+      const quick = createElement('div', 'portal-quick-filters');
+      quick.setAttribute('role', 'group');
+      quick.setAttribute('aria-label', 'Periodos rápidos');
+      [
+        ['today', 'Hoy'],
+        ['upcoming', 'Próximas'],
+        ['week', '7 días'],
+        ['all', 'Todas']
+      ].forEach(([value, label]) => {
+        const button = createElement('button', `portal-quick-filter${value === 'upcoming' ? ' active' : ''}`, label);
+        button.type = 'button';
+        button.dataset.portalPreset = value;
+        quick.append(button);
+      });
+
+      const grid = createElement('div', 'portal-filter-grid');
+      const fromLabel = createElement('label', 'portal-filter-field', 'Desde');
+      const fromInput = createElement('input');
+      fromInput.type = 'date';
+      fromInput.id = 'assignment-date-from';
+      fromLabel.append(fromInput);
+      const toLabel = createElement('label', 'portal-filter-field', 'Hasta');
+      const toInput = createElement('input');
+      toInput.type = 'date';
+      toInput.id = 'assignment-date-to';
+      toLabel.append(toInput);
+      const statusLabel = createElement('label', 'portal-filter-field portal-status-filter', 'Estado');
+      const statusSelect = createElement('select');
+      statusSelect.id = 'assignment-status-filter';
+      [['', 'Todos los estados'], ['PENDING', 'Pendientes'], ['IN_PROGRESS', 'En curso'], ['COMPLETED', 'Finalizadas']]
+        .forEach(([value, label]) => {
+          const option = createElement('option', '', label);
+          option.value = value;
+          statusSelect.append(option);
+        });
+      statusLabel.append(statusSelect);
+      const clear = createElement('button', 'portal-clear-filter', 'Limpiar');
+      clear.type = 'button';
+      clear.id = 'clear-assignment-filters';
+      grid.append(fromLabel, toLabel, statusLabel, clear);
+      panel.append(head, quick, grid);
+      parent.insertBefore(panel, anchor);
+    }
+    return panel;
+  }
+
+  function ensureFilteredEmpty(parent, anchor) {
+    let empty = parent.querySelector('#portal-filtered-empty, .portal-filtered-empty');
+    if (!empty) {
+      empty = createElement('section', 'empty-state portal-filtered-empty');
+      empty.id = 'portal-filtered-empty';
+      empty.hidden = true;
+      empty.append(
+        createElement('h2', '', 'No hay asignaciones en este filtro'),
+        createElement('p', '', 'Cambia el periodo o limpia los filtros para ver otras fechas.')
+      );
+      parent.insertBefore(empty, anchor.nextSibling);
+    }
+    return empty;
+  }
+
+  function initializePortalFilters() {
+    if (!PORTAL_PATH_PATTERN.test(window.location.pathname)) return false;
+    if (document.body.classList.contains('portal-filters-ready')) return true;
+
+    const list = document.querySelector('.assignment-list');
+    if (!list || !list.parentElement) return false;
+    const cards = Array.from(list.children).filter((element) => element.classList?.contains('assignment-card'));
+    if (!cards.length) return false;
+
+    ensureFilterStyle();
+    const parent = list.parentElement;
+    const items = cards.map((card) => {
+      const dateLabel = card.querySelector('.assignment-date')?.textContent.trim() || 'Fecha pendiente';
+      const status = assignmentStatus(card);
+      card.dataset.portalStatus = status;
+      return { card, dateLabel, dateKey: parseAssignmentDate(dateLabel), status };
+    });
+
+    const summary = ensureSummary(parent, list, items);
+    const panel = ensurePanel(parent, list, items.length);
+    const fromInput = panel.querySelector('#assignment-date-from');
+    const toInput = panel.querySelector('#assignment-date-to');
+    const statusSelect = panel.querySelector('#assignment-status-filter');
+    const clear = panel.querySelector('#clear-assignment-filters');
+    const result = panel.querySelector('#assignment-filter-result, .portal-filter-result');
+    const presetButtons = Array.from(panel.querySelectorAll('[data-portal-preset]'));
+    if (!fromInput || !toInput || !statusSelect || !clear || !result || !presetButtons.length) return false;
+
+    const groups = new Map();
+    items.forEach((item) => {
+      const key = item.dateKey || item.dateLabel;
+      if (!groups.has(key)) groups.set(key, { key, label: item.dateLabel, items: [] });
+      groups.get(key).items.push(item);
+    });
+
+    const groupsContainer = createElement('section', 'portal-date-groups');
+    groupsContainer.id = 'portal-assignment-groups';
+    groupsContainer.setAttribute('aria-label', 'Asignaciones agrupadas por fecha');
+    groups.forEach((group) => {
+      const section = createElement('section', 'portal-date-group');
+      section.dataset.portalDateGroup = group.key;
+      const header = createElement('header', 'portal-date-header');
+      const title = createElement('div', 'portal-date-title');
+      title.append(createElement('span', 'portal-date-dot'), createElement('h2', '', group.label));
+      const count = createElement('span', 'portal-group-count', `${group.items.length} asignación${group.items.length === 1 ? '' : 'es'}`);
+      count.dataset.portalGroupCount = 'true';
+      header.append(title, count);
+      const dateList = createElement('div', 'portal-date-list');
+      group.items.forEach((item) => dateList.append(item.card));
+      section.append(header, dateList);
+      groupsContainer.append(section);
+    });
+    list.replaceWith(groupsContainer);
+
+    const empty = ensureFilteredEmpty(parent, groupsContainer);
+    let mutationTimer = null;
+
+    function activatePreset(name) {
+      presetButtons.forEach((button) => button.classList.toggle('active', button.dataset.portalPreset === name));
+    }
+
+    function applyFilters() {
+      const from = fromInput.value;
+      const to = toInput.value;
+      const status = statusSelect.value;
+      const activePreset = presetButtons.find((button) => button.classList.contains('active'))?.dataset.portalPreset || '';
+      let visibleCount = 0;
+
+      items.forEach((item) => {
+        item.status = assignmentStatus(item.card);
+        item.card.dataset.portalStatus = item.status;
+        const matchesFrom = !from || !item.dateKey || item.dateKey >= from;
+        const matchesTo = !to || !item.dateKey || item.dateKey <= to;
+        const matchesStatus = !status || status === item.status;
+        const keepActiveJourney = activePreset === 'upcoming' && item.status === 'IN_PROGRESS';
+        const visible = (keepActiveJourney || (matchesFrom && matchesTo)) && matchesStatus;
+        item.card.hidden = !visible;
+        if (visible) visibleCount += 1;
+      });
+
+      Array.from(groupsContainer.querySelectorAll('.portal-date-group')).forEach((group) => {
+        const visibleCards = Array.from(group.querySelectorAll('.assignment-card')).filter((card) => !card.hidden);
+        group.hidden = visibleCards.length === 0;
+        const counter = group.querySelector('[data-portal-group-count]');
+        if (counter) counter.textContent = `${visibleCards.length} asignación${visibleCards.length === 1 ? '' : 'es'}`;
+      });
+
+      updateSummary(summary, items);
+      result.textContent = `${visibleCount} visible${visibleCount === 1 ? '' : 's'}`;
+      empty.hidden = visibleCount !== 0;
+    }
+
+    function setPreset(name) {
+      const today = bogotaDateKey();
+      if (name === 'today') {
+        fromInput.value = today;
+        toInput.value = today;
+      } else if (name === 'week') {
+        fromInput.value = today;
+        toInput.value = addDays(today, 6);
+      } else if (name === 'upcoming') {
+        fromInput.value = today;
+        toInput.value = '';
+      } else {
+        fromInput.value = '';
+        toInput.value = '';
+      }
+      activatePreset(name);
+      applyFilters();
+    }
+
+    presetButtons.forEach((button) => button.addEventListener('click', () => setPreset(button.dataset.portalPreset)));
+    fromInput.addEventListener('change', () => { activatePreset(''); applyFilters(); });
+    toInput.addEventListener('change', () => { activatePreset(''); applyFilters(); });
+    statusSelect.addEventListener('change', applyFilters);
+    clear.addEventListener('click', () => { statusSelect.value = ''; setPreset('all'); });
+
+    const observer = new MutationObserver(() => {
+      window.clearTimeout(mutationTimer);
+      mutationTimer = window.setTimeout(applyFilters, 0);
+    });
+    observer.observe(groupsContainer, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class', 'data-mark-type']
+    });
+
+    document.body.classList.add('portal-filters-ready');
+    setPreset('upcoming');
+    return true;
+  }
+
+  function initializeWhenAvailable() {
+    if (initializePortalFilters()) return;
+    const root = document.querySelector('main') || document.body;
+    if (!root) return;
+    const observer = new MutationObserver(() => {
+      if (!initializePortalFilters()) return;
+      observer.disconnect();
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    window.setTimeout(() => observer.disconnect(), 10_000);
+  }
+
+  window.LorrenWorkerPortalFilters = Object.freeze({ initialize: initializePortalFilters });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeWhenAvailable, { once: true });
+  } else {
+    initializeWhenAvailable();
+  }
+  window.addEventListener('pageshow', initializeWhenAvailable);
 })();
