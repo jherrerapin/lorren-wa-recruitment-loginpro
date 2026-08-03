@@ -67,8 +67,23 @@ function requestDouble({ body = {}, cookies = {}, headers = {}, ip = '127.0.0.1'
   };
 }
 
+function findRouteLayer(router, path, method) {
+  const pending = [router];
+  const visited = new Set();
+  while (pending.length) {
+    const current = pending.shift();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+    for (const layer of current.stack || []) {
+      if (layer.route?.path === path && layer.route.methods?.[method]) return layer;
+      if (layer.handle?.stack) pending.push(layer.handle);
+    }
+  }
+  return null;
+}
+
 function routeHandler(router, path, method) {
-  const layer = router.stack.find((item) => item.route?.path === path && item.route.methods?.[method]);
+  const layer = findRouteLayer(router, path, method);
   assert.ok(layer, `route ${method.toUpperCase()} ${path} must exist`);
   return layer.route.stack.at(-1).handle;
 }

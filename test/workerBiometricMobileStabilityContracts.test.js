@@ -3,17 +3,26 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const loader = fs.readFileSync('src/public/worker-biometric.js', 'utf8');
+const bootstrap = fs.readFileSync('src/public/worker-biometric-core.js', 'utf8');
 const mobile = fs.readFileSync('src/public/worker-biometric-mobile.js', 'utf8');
 
 
-test('el estabilizador móvil se carga entre el núcleo y el controlador vigente', () => {
-  const core = loader.indexOf('worker-biometric-core.js');
-  const mobileLayer = loader.indexOf('worker-biometric-mobile.js');
-  const flow = loader.indexOf('worker-portal-biometric-flow.js');
-  assert.ok(core >= 0);
-  assert.ok(mobileLayer > core);
-  assert.ok(flow > mobileLayer);
+test('el bootstrap se carga antes del único motor y del controlador vigente', () => {
+  const bootstrapPosition = loader.indexOf('worker-biometric-core.js');
+  const enginePosition = loader.indexOf('worker-biometric-mobile.js');
+  const flowPosition = loader.indexOf('worker-portal-biometric-flow.js');
+  assert.ok(bootstrapPosition >= 0);
+  assert.ok(enginePosition > bootstrapPosition);
+  assert.ok(flowPosition > enginePosition);
   assert.doesNotMatch(loader, /worker-portal-hardening\.js/);
+
+  assert.match(bootstrap, /humanFaceSimilarity/);
+  assert.match(bootstrap, /installPortalResponseGuard/);
+  assert.doesNotMatch(bootstrap, /function humanConfig|captureEnrollment|captureVerification|getUserMedia|human\.detect/);
+  assert.match(mobile, /function humanConfig/);
+  assert.match(mobile, /async function captureEnrollment/);
+  assert.match(mobile, /async function captureVerification/);
+  assert.match(mobile, /navigator\.mediaDevices\.getUserMedia/);
 });
 
 
