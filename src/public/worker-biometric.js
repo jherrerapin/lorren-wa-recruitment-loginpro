@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260803-worker-portal-runtime-v5';
+const BIOMETRIC_ASSET_RELEASE = '20260803-worker-portal-runtime-v6';
 const BIOMETRIC_SHELL_CACHE = 'lorren-worker-portal-shell-v10';
 const BIOMETRIC_SHELL_RELOAD_KEY = `lorren-shell-reloaded:${BIOMETRIC_SHELL_CACHE}`;
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
@@ -166,7 +166,7 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
         ['week', '7 días'],
         ['all', 'Todas']
       ].forEach(([value, label]) => {
-        const button = createElement('button', `portal-quick-filter${value === 'upcoming' ? ' active' : ''}`, label);
+        const button = createElement('button', `portal-quick-filter${value === 'all' ? ' active' : ''}`, label);
         button.type = 'button';
         button.dataset.portalPreset = value;
         quick.append(button);
@@ -347,7 +347,7 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
     });
 
     document.body.classList.add('portal-filters-ready');
-    setPreset('upcoming');
+    setPreset('all');
     return true;
   }
 
