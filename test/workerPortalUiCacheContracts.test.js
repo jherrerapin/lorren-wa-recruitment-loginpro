@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const read = (path) => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const serviceWorker = read('src/public/worker-portal-sw.js');
+const offlineClient = read('src/public/worker-portal-offline.js');
 const loader = read('src/public/worker-biometric.js');
 const mobile = read('src/public/worker-biometric-mobile.js');
 const biometricFlow = read('src/public/worker-portal-biometric-flow.js');
@@ -40,4 +41,22 @@ test('la cola reprograma red, 408, 425, 429 y errores 5xx sin duplicar envíos',
   assert.match(serviceWorker, /return RETRYABLE_HTTP_STATUSES\.has\(status\) \|\| status >= 500/);
   assert.match(serviceWorker, /if \(throwOnRetry && shouldRetry\) throw new Error\('arrival_sync_retry_required'\)/);
   assert.match(serviceWorker, /idempotencyKey/);
+});
+
+test('401 y 403 conservan la marcación como sesión recuperable', () => {
+  assert.match(serviceWorker, /response\.status === 401 \|\| response\.status === 403/);
+  assert.doesNotMatch(serviceWorker, /status === 400 \|\| status === 403 \|\| status === 404/);
+  assert.match(serviceWorker, /state: 'SESSION_REQUIRED'/);
+});
+
+test('el fallback sin Background Sync programa un nuevo intento real', () => {
+  assert.match(offlineClient, /function scheduleFallbackRetry\(delayMs\)/);
+  assert.match(offlineClient, /fallbackRetryTimer/);
+  assert.match(offlineClient, /message\.type === 'ARRIVAL_SYNC_RETRY'/);
+  assert.match(offlineClient, /scheduleFallbackRetry\(message\.retryAfterMs\)/);
+});
+
+test('Retry-After no se adelanta y solo se limita por la vida de la cola', () => {
+  assert.match(serviceWorker, /MAX_RETRY_DELAY_MS = MAX_QUEUE_AGE_MS/);
+  assert.doesNotMatch(serviceWorker, /MAX_RETRY_DELAY_MS = 15 \* 60 \* 1000/);
 });
