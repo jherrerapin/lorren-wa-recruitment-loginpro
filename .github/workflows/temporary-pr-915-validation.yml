@@ -1,0 +1,30 @@
+name: Temporary PR 915 validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check modified JavaScript syntax
+        run: |
+          node --check src/public/worker-biometric.js
+          node --check src/public/worker-portal-session-handoff.js
+      - name: Run PR 915 regression tests
+        run: node --test test/workerPortalDateFiltersLoader.test.js test/workerPortalInstallPromptContracts.test.js test/workerPortalLegacyRedirect.test.js
