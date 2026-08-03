@@ -1,8 +1,30 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260801-biometric-integrity-v2';
+const BIOMETRIC_ASSET_RELEASE = '20260803-biometric-cache-coherence-v3';
+const BIOMETRIC_SHELL_CACHE = 'lorren-worker-portal-shell-v9';
+const BIOMETRIC_SHELL_RELOAD_KEY = `lorren-shell-reloaded:${BIOMETRIC_SHELL_CACHE}`;
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
 const LOAD_WORKER_PORTAL_HANDOFF = /Android/i.test(WORKER_PORTAL_USER_AGENT);
+
+window.LorrenBiometricAssetRelease = BIOMETRIC_ASSET_RELEASE;
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const message = event?.data;
+    if (
+      message?.type !== 'PORTAL_SHELL_UPDATED'
+      || message?.cacheName !== BIOMETRIC_SHELL_CACHE
+      || window.sessionStorage.getItem(BIOMETRIC_SHELL_RELOAD_KEY) === 'true'
+    ) return;
+
+    window.sessionStorage.setItem(BIOMETRIC_SHELL_RELOAD_KEY, 'true');
+    window.location.reload();
+  });
+
+  navigator.serviceWorker.getRegistration('/operaciones/portal')
+    .then((registration) => registration?.update?.())
+    .catch(() => {});
+}
 
 document.write(`<script src="/public/worker-biometric-core.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-biometric-mobile.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
