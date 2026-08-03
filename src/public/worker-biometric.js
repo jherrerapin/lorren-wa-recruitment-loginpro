@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260803-biometric-cache-coherence-v3';
+const BIOMETRIC_ASSET_RELEASE = '20260803-worker-portal-filters-v4';
 const BIOMETRIC_SHELL_CACHE = 'lorren-worker-portal-shell-v9';
 const BIOMETRIC_SHELL_RELOAD_KEY = `lorren-shell-reloaded:${BIOMETRIC_SHELL_CACHE}`;
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
@@ -29,7 +29,9 @@ if ('serviceWorker' in navigator) {
 document.write(`<script src="/public/worker-biometric-core.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-biometric-mobile.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-portal-biometric-flow.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
-document.write(`<script src="/operaciones/portal/offline.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
+// Este runtime contiene la presentación vigente del portal: agrupación y filtros por fecha/estado.
+// Se carga desde /public para evitar que una copia histórica de /operaciones/portal/offline.js oculte los filtros.
+document.write(`<script src="/public/worker-portal-offline.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-portal-offline-v2.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-portal-offline-controller.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 if (LOAD_WORKER_PORTAL_HANDOFF) {
