@@ -1,9 +1,9 @@
 name: Temporary PR validation
 
 on:
-  push:
+  pull_request:
     branches:
-      - validation/offline-prs-20260803
+      - main
 
 permissions:
   contents: read
