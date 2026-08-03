@@ -13,7 +13,9 @@ test('el portal carga un único motor móvil, controlador y versión vigente', a
   assert.ok(corePosition >= 0);
   assert.ok(mobilePosition > corePosition);
   assert.ok(flowPosition > mobilePosition);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260801-biometric-integrity-v2'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260803-biometric-cache-coherence-v3'/);
+  assert.match(loader, /BIOMETRIC_SHELL_CACHE\s*=\s*'lorren-worker-portal-shell-v9'/);
+  assert.match(loader, /navigator\.serviceWorker\.getRegistration\('\/operaciones\/portal'\)/);
   assert.doesNotMatch(loader, /worker-portal-hardening\.js/);
   assert.doesNotMatch(loader, /worker-biometric-camera-recovery\.js/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js/);
