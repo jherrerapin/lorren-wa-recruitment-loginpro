@@ -9,15 +9,16 @@ const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
 
-test('el cargador incluye instalación, sesión y una versión coherente', () => {
+test('el cargador incluye instalación, sesión y actualización sin duplicar el nombre de caché', () => {
   assert.match(loaderSource, /worker-portal-install\.js/);
   assert.match(loaderSource, /worker-portal-session-handoff\.js/);
   assert.match(loaderSource, /20260803-worker-portal-runtime-v5/);
-  assert.match(loaderSource, /lorren-worker-portal-shell-v11/);
   assert.match(loaderSource, /PORTAL_SHELL_UPDATED/);
+  assert.match(loaderSource, /message\.cacheName/);
   assert.match(loaderSource, /registration\?\.update/);
   assert.match(loaderSource, /window\.location\.reload\(\)/);
   assert.match(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF = \/Android/);
+  assert.doesNotMatch(loaderSource, /BIOMETRIC_SHELL_CACHE|lorren-worker-portal-shell-v\d+/);
   assert.doesNotMatch(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF[\s\S]*WhatsApp\|FBAN/);
 });
 
