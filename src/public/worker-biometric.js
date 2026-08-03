@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260803-worker-portal-runtime-v6';
+const BIOMETRIC_ASSET_RELEASE = '20260803-worker-portal-runtime-v5';
 const BIOMETRIC_SHELL_CACHE = 'lorren-worker-portal-shell-v10';
 const BIOMETRIC_SHELL_RELOAD_KEY = `lorren-shell-reloaded:${BIOMETRIC_SHELL_CACHE}`;
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
