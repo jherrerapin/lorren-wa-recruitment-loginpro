@@ -51,7 +51,7 @@ test('la plantilla activa renderiza controles y estados sin errores de EJS', asy
 test('el entrypoint conserva agrupación y filtros con una sola cola offline', async () => {
   const loader = await read('src/public/worker-biometric.js');
 
-  assert.match(loader, /20260803-worker-portal-runtime-v6/);
+  assert.match(loader, /20260803-worker-portal-runtime-v5/);
   assert.match(loader, /\/public\/worker-biometric-core\.js/);
   assert.match(loader, /\/public\/worker-biometric-mobile\.js/);
   assert.match(loader, /\/public\/worker-portal-biometric-flow\.js/);
