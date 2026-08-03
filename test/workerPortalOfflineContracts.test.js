@@ -6,7 +6,7 @@ const routeSource = fs.readFileSync(new URL('../src/routes/workerPortalCore.js',
 const strictRouteSource = fs.readFileSync(new URL('../src/routes/workerPortal.js', import.meta.url), 'utf8');
 const viewSource = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
-const offlineSource = fs.readFileSync(new URL('../src/public/worker-portal-offline-v2.js', import.meta.url), 'utf8');
+const offlineSource = fs.readFileSync(new URL('../src/public/worker-portal-offline.js', import.meta.url), 'utf8');
 const offlineControllerSource = fs.readFileSync(new URL('../src/public/worker-portal-offline-controller.js', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
@@ -29,14 +29,16 @@ test('el service worker se sirve con alcance explícito', () => {
 });
 
 
-test('el cargador incluye el runtime y controlador offline completos', () => {
-  assert.match(loaderSource, /worker-portal-offline-v2\.js/);
+test('el cargador incluye una sola cola offline y su controlador', () => {
+  assert.match(loaderSource, /worker-portal-offline\.js/);
+  assert.doesNotMatch(loaderSource, /worker-portal-offline-v2\.js/);
   assert.match(loaderSource, /worker-portal-offline-controller\.js/);
   assert.match(serviceWorkerSource, /'\/public\/worker-biometric\.js'/);
   assert.match(serviceWorkerSource, /'\/public\/worker-biometric-core\.js'/);
   assert.match(serviceWorkerSource, /'\/public\/worker-biometric-mobile\.js'/);
   assert.match(serviceWorkerSource, /'\/public\/worker-portal-biometric-flow\.js'/);
-  assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline-v2\.js'/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline\.js'/);
+  assert.doesNotMatch(serviceWorkerSource, /worker-portal-offline-v2\.js/);
   assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline-controller\.js'/);
 });
 
