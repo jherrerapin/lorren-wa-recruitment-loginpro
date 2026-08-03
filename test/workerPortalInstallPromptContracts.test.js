@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
+const bootstrapSource = fs.readFileSync(new URL('../src/public/worker-biometric-core.js', import.meta.url), 'utf8');
 const installSource = fs.readFileSync(new URL('../src/public/worker-portal-install.js', import.meta.url), 'utf8');
 const handoffSource = fs.readFileSync(new URL('../src/public/worker-portal-session-handoff.js', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
@@ -20,6 +21,7 @@ test('el cargador incluye instalación, sesión y actualización sin duplicar el
   assert.match(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF = \/Android/);
   assert.doesNotMatch(loaderSource, /BIOMETRIC_SHELL_CACHE|lorren-worker-portal-shell-v\d+/);
   assert.doesNotMatch(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF[\s\S]*WhatsApp\|FBAN/);
+  assert.doesNotMatch(bootstrapSource, /humanConfig|captureEnrollment|captureVerification|getUserMedia|human\.detect/);
 });
 
 
