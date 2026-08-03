@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const portalRoute = fs.readFileSync('src/routes/workerPortal.js', 'utf8');
+const portalCoreRoute = fs.readFileSync('src/routes/workerPortalCore.js', 'utf8');
 const biometricRoute = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
 const portalView = fs.readFileSync('src/views/workerPortal.ejs', 'utf8');
 const activationView = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
@@ -23,6 +24,21 @@ test('la geocerca se compone explícitamente antes de la persistencia del núcle
   assert.match(portalRoute, /return strictMarkGuard\(req, res, next\)/);
   assert.match(portalRoute, /markUpload: strictMarkMiddleware/);
   assert.doesNotMatch(portalRoute, /prependRouteHandlers|routeLayer|router\.stack|target\.route\.stack/);
+});
+
+
+test('el router base y la extensión pública no vuelven a definir las mismas rutas', () => {
+  assert.match(portalCoreRoute, /router\.post\('\/asignaciones\/:assignmentId\/llegada'/);
+  assert.match(portalCoreRoute, /router\.post\('\/asignaciones\/:assignmentId\/inicio-almuerzo'/);
+  assert.match(portalCoreRoute, /router\.post\('\/asignaciones\/:assignmentId\/fin-almuerzo'/);
+  assert.match(portalCoreRoute, /router\.post\('\/asignaciones\/:assignmentId\/salida'/);
+  assert.doesNotMatch(portalRoute, /router\.post\('\/asignaciones\/:assignmentId/);
+
+  assert.match(portalRoute, /router\.post\('\/biometria\/estado'/);
+  assert.match(portalRoute, /router\.post\('\/biometria\/registrar'/);
+  assert.match(portalRoute, /router\.post\('\/biometria\/desafio'/);
+  assert.match(portalRoute, /router\.post\('\/biometria\/verificar'/);
+  assert.doesNotMatch(portalCoreRoute, /router\.post\('\/biometria\//);
 });
 
 
