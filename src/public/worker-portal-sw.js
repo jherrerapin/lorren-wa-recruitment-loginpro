@@ -29,6 +29,9 @@ const QUEUE_STORE = 'arrivalQueue';
 const RECEIPT_STORE = 'arrivalReceipts';
 const SYNC_TAG = 'lorren-worker-arrivals';
 const MAX_QUEUE_AGE_MS = 72 * 60 * 60 * 1000;
+const DEFAULT_RETRY_DELAY_MS = 30 * 1000;
+const MAX_RETRY_DELAY_MS = 15 * 60 * 1000;
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429]);
 const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const MARK_ENDPOINTS = Object.freeze({
   ARRIVAL: 'llegada',
@@ -213,7 +216,7 @@ function buildMarkForm(record) {
 }
 
 function terminalRejection(status, error) {
-  if (status === 400 || status === 404) return true;
+  if (status === 400 || status === 403 || status === 404) return true;
   return status === 409 && [
     'arrival_already_registered',
     'arrival_window_not_open',
@@ -246,10 +249,29 @@ function isAlreadyRecorded(error) {
   ].includes(error);
 }
 
+function retryableHttpStatus(status) {
+  return RETRYABLE_HTTP_STATUSES.has(status) || status >= 500;
+}
+
+function retryDelayMs(response, now = Date.now()) {
+  const value = response.headers.get('Retry-After');
+  if (!value) return DEFAULT_RETRY_DELAY_MS;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(MAX_RETRY_DELAY_MS, Math.max(DEFAULT_RETRY_DELAY_MS, Math.ceil(seconds * 1000)));
+  }
+  const retryAt = Date.parse(value);
+  if (Number.isFinite(retryAt)) {
+    return Math.min(MAX_RETRY_DELAY_MS, Math.max(DEFAULT_RETRY_DELAY_MS, retryAt - now));
+  }
+  return DEFAULT_RETRY_DELAY_MS;
+}
+
 async function syncRecord(rawRecord) {
   const record = normalizeRecord(rawRecord);
+  const nowMs = Date.now();
   const queuedAt = new Date(record.queuedAt || 0).getTime();
-  if (!Number.isFinite(queuedAt) || Date.now() - queuedAt > MAX_QUEUE_AGE_MS) {
+  if (!Number.isFinite(queuedAt) || nowMs - queuedAt > MAX_QUEUE_AGE_MS) {
     await completeQueueRecord(record, {
       state: 'REJECTED',
       error: 'offline_capture_expired',
@@ -264,11 +286,17 @@ async function syncRecord(rawRecord) {
     return { retry: false, sessionRequired: false, blockAssignment: true };
   }
 
+  const retryNotBefore = new Date(record.retryNotBefore || 0).getTime();
+  if (Number.isFinite(retryNotBefore) && retryNotBefore > nowMs) {
+    return { retry: true, sessionRequired: false, blockAssignment: true };
+  }
+
   const inProgress = {
     ...record,
     state: 'SYNCING',
     attempts: Number(record.attempts || 0) + 1,
     updatedAt: new Date().toISOString(),
+    retryNotBefore: null,
     lastError: null
   };
   await putQueueRecord(inProgress);
@@ -289,9 +317,11 @@ async function syncRecord(rawRecord) {
       body: buildMarkForm(record)
     });
   } catch (error) {
+    const retryAfterMs = DEFAULT_RETRY_DELAY_MS;
     await putQueueRecord({
       ...inProgress,
       state: 'PENDING',
+      retryNotBefore: new Date(Date.now() + retryAfterMs).toISOString(),
       lastError: 'network_unavailable',
       updatedAt: new Date().toISOString()
     });
@@ -299,7 +329,8 @@ async function syncRecord(rawRecord) {
       type: 'ARRIVAL_SYNC_RETRY',
       assignmentId: record.assignmentId,
       markType: record.markType,
-      error: 'network_unavailable'
+      error: 'network_unavailable',
+      retryAfterMs
     });
     return { retry: true, sessionRequired: false, blockAssignment: true, error };
   }
@@ -359,9 +390,12 @@ async function syncRecord(rawRecord) {
     return { retry: false, sessionRequired: false, blockAssignment: !alreadyRecorded };
   }
 
+  const retry = retryableHttpStatus(response.status);
+  const retryAfterMs = retry ? retryDelayMs(response) : 0;
   await putQueueRecord({
     ...inProgress,
     state: 'PENDING',
+    retryNotBefore: retry ? new Date(Date.now() + retryAfterMs).toISOString() : null,
     lastError: payload.error || `http_${response.status}`,
     updatedAt: new Date().toISOString()
   });
@@ -369,9 +403,10 @@ async function syncRecord(rawRecord) {
     type: 'ARRIVAL_SYNC_RETRY',
     assignmentId: record.assignmentId,
     markType: record.markType,
-    error: payload.error || `http_${response.status}`
+    error: payload.error || `http_${response.status}`,
+    retryAfterMs
   });
-  return { retry: response.status >= 500, sessionRequired: false, blockAssignment: true };
+  return { retry, sessionRequired: false, blockAssignment: true };
 }
 
 async function syncQueue({ throwOnRetry = false } = {}) {
