@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const source = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
+const view = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 
 test('el portal organiza las asignaciones sin modificar los botones de marcación', () => {
   assert.match(source, /querySelector\('\.assignment-list'\)/);
   assert.match(source, /const cards = Array\.from/);
   assert.match(source, /assignmentStatus\(card\)/);
   assert.match(source, /data-mark-type="DEPARTURE"/);
-  assert.match(source, /portal-filter-summary/);
+  assert.match(source, /querySelector\('\.portal-filter-summary'\)/);
 });
 
 test('las asignaciones se agrupan visualmente por fecha', () => {
@@ -21,16 +22,17 @@ test('las asignaciones se agrupan visualmente por fecha', () => {
   assert.match(source, /data-portal-group-count/);
 });
 
-test('el portal incluye rango de fechas, estado y periodos rápidos', () => {
-  assert.match(source, /assignment-date-from/);
-  assert.match(source, /assignment-date-to/);
-  assert.match(source, /assignment-status-filter/);
-  assert.match(source, /\['today', 'Hoy'\]/);
-  assert.match(source, /\['upcoming', 'Próximas'\]/);
-  assert.match(source, /\['week', '7 días'\]/);
-  assert.match(source, /\['all', 'Todas'\]/);
+test('la vista define una sola vez el rango, estado y periodos rápidos', () => {
+  assert.match(view, /id="assignment-date-from"/);
+  assert.match(view, /id="assignment-date-to"/);
+  assert.match(view, /id="assignment-status-filter"/);
+  assert.match(view, /data-portal-preset="today"[^>]*>Hoy</);
+  assert.match(view, /data-portal-preset="upcoming"[^>]*>Próximas</);
+  assert.match(view, /data-portal-preset="week"[^>]*>7 días</);
+  assert.match(view, /data-portal-preset="all"[^>]*>Todas</);
   assert.match(source, /function applyFilters\(\)/);
-  assert.match(source, /setPreset\('upcoming'\)/);
+  assert.match(source, /setPreset\('all'\)/);
+  assert.doesNotMatch(source, /\['today', 'Hoy'\]|\['upcoming', 'Próximas'\]|\['week', '7 días'\]|\['all', 'Todas'\]/);
 });
 
 test('una jornada en curso permanece visible en próximas', () => {
