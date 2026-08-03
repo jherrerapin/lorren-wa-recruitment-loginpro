@@ -6,6 +6,7 @@ const routeSource = fs.readFileSync(new URL('../src/routes/workerPortalCore.js',
 const strictRouteSource = fs.readFileSync(new URL('../src/routes/workerPortal.js', import.meta.url), 'utf8');
 const viewSource = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
+const biometricFlowSource = fs.readFileSync(new URL('../src/public/worker-portal-biometric-flow.js', import.meta.url), 'utf8');
 const offlineSource = fs.readFileSync(new URL('../src/public/worker-portal-offline.js', import.meta.url), 'utf8');
 const offlineControllerSource = fs.readFileSync(new URL('../src/public/worker-portal-offline-controller.js', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
@@ -40,6 +41,26 @@ test('el cargador incluye una sola cola offline y su controlador', () => {
   assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline\.js'/);
   assert.doesNotMatch(serviceWorkerSource, /worker-portal-offline-v2\.js/);
   assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline-controller\.js'/);
+});
+
+
+test('perder internet no se interpreta como ausencia de registro facial', () => {
+  assert.match(biometricFlowSource, /async function loadBiometricStatus\(\) \{\s*if \(!navigator\.onLine\) \{\s*closeEnrollmentDialog\(\);\s*return;/s);
+  assert.match(biometricFlowSource, /window\.addEventListener\('offline', enterOfflineMode\)/);
+  assert.match(biometricFlowSource, /if \(navigator\.onLine\) loadBiometricStatus\(\);\s*else closeEnrollmentDialog\(\);/s);
+  assert.doesNotMatch(
+    biometricFlowSource,
+    /catch\s*\{[\s\S]*?showModal\(enrollmentDialog\)[\s\S]*?startEnrollmentButton\.disabled = true/
+  );
+});
+
+
+test('los botones regenerados por el modo offline conservan control online al reconectar', () => {
+  assert.match(biometricFlowSource, /function currentMarkButtons\(\)/);
+  assert.match(biometricFlowSource, /function markButtonFromEvent\(event\)/);
+  assert.match(biometricFlowSource, /document\.addEventListener\('click',[\s\S]*openMarkDialog\(button\)/);
+  assert.doesNotMatch(biometricFlowSource, /const markButtons =/);
+  assert.match(biometricFlowSource, /data-offline-disabled/);
 });
 
 

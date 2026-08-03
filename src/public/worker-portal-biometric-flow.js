@@ -4,7 +4,6 @@
   if (window.location.pathname !== '/operaciones/portal') return;
 
   const biometricApi = window.LorrenWorkerBiometric || null;
-  const markButtons = [...document.querySelectorAll('.mark-button[data-mark-type]')];
   const connectivityBar = document.getElementById('portal-connectivity');
   const connectivityTitle = document.getElementById('connectivity-title');
 
@@ -73,6 +72,16 @@
     DEPARTURE: 'salida'
   })[type] || 'marcación';
 
+  function currentMarkButtons() {
+    return [...document.querySelectorAll('.mark-button[data-mark-type]')];
+  }
+
+  function markButtonFromEvent(event) {
+    return event.target instanceof Element
+      ? event.target.closest('.mark-button[data-mark-type]')
+      : null;
+  }
+
   function newIdempotencyKey() {
     if (window.crypto?.randomUUID) return window.crypto.randomUUID();
     return `${String(state.markType || 'mark').toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
@@ -84,12 +93,23 @@
   }
 
   function closeModal(target) {
-    if (typeof target?.close === 'function') target.close();
-    else target?.removeAttribute('open');
+    if (!target) return;
+    if (target.hasAttribute?.('open') && typeof target.close === 'function') target.close();
+    else target.removeAttribute?.('open');
   }
 
   function stopStream(stream) {
     stream?.getTracks?.().forEach((track) => track.stop());
+  }
+
+  function closeEnrollmentDialog() {
+    stopStream(enrollmentStream);
+    enrollmentStream = null;
+    if (enrollmentVideo) {
+      enrollmentVideo.srcObject = null;
+      enrollmentVideo.hidden = true;
+    }
+    closeModal(enrollmentDialog);
   }
 
   function stopCamera() {
@@ -175,13 +195,14 @@
 
   function setButtonsReady(ready) {
     biometricReady = ready;
-    markButtons.forEach((button) => {
-      const serverDisabled = button.hasAttribute('data-server-disabled');
-      if (!serverDisabled) button.disabled = !ready;
+    currentMarkButtons().forEach((button) => {
+      const permanentlyDisabled = button.hasAttribute('data-server-disabled')
+        || button.hasAttribute('data-offline-disabled');
+      if (!permanentlyDisabled) button.disabled = !ready;
     });
   }
 
-  markButtons.forEach((button) => {
+  currentMarkButtons().forEach((button) => {
     if (button.disabled) button.setAttribute('data-server-disabled', 'true');
     button.disabled = true;
   });
@@ -208,27 +229,46 @@
   }
 
   async function loadBiometricStatus() {
+    if (!navigator.onLine) {
+      closeEnrollmentDialog();
+      return;
+    }
+
     try {
       const status = await portalBiometricRequest('estado');
+      if (!navigator.onLine) {
+        closeEnrollmentDialog();
+        return;
+      }
       if (status.enrolled) {
+        closeEnrollmentDialog();
         setButtonsReady(true);
         return;
       }
+
       setButtonsReady(false);
+      if (startEnrollmentButton) startEnrollmentButton.disabled = false;
+      if (enrollmentConsent) enrollmentConsent.disabled = false;
+      if (enrollmentStatus) {
+        enrollmentStatus.textContent = 'Autoriza el uso del rostro para comenzar.';
+        enrollmentStatus.className = 'status';
+      }
       showModal(enrollmentDialog);
       enrollmentConsent?.focus({ preventScroll: true });
     } catch {
       setButtonsReady(false);
-      if (enrollmentStatus) {
-        enrollmentStatus.textContent = 'No fue posible validar el registro facial. Recarga la página.';
-        enrollmentStatus.className = 'status danger';
+      closeEnrollmentDialog();
+      if (navigator.onLine && connectivityTitle) {
+        connectivityTitle.textContent = 'Con conexión · validación facial pendiente';
       }
-      showModal(enrollmentDialog);
-      if (startEnrollmentButton) startEnrollmentButton.disabled = true;
     }
   }
 
   async function enrollFace() {
+    if (!navigator.onLine) {
+      closeEnrollmentDialog();
+      return;
+    }
     if (!enrollmentConsent?.checked) {
       if (enrollmentStatus) {
         enrollmentStatus.textContent = 'Debes autorizar el registro facial.';
@@ -276,6 +316,10 @@
       enrollmentStream = null;
       enrollmentVideo.srcObject = null;
       enrollmentVideo.hidden = true;
+      if (!navigator.onLine) {
+        closeEnrollmentDialog();
+        return;
+      }
       enrollmentStatus.textContent = publicErrorMessage(error);
       enrollmentStatus.className = 'status danger';
       startEnrollmentButton.disabled = false;
@@ -527,7 +571,7 @@
   }
 
   function openMarkDialog(button) {
-    if (button.disabled || !biometricReady) return;
+    if (!navigator.onLine || button.disabled || !biometricReady) return;
     state.assignmentId = button.dataset.assignmentId;
     state.markType = button.dataset.markType;
     resetMarkDialog();
@@ -655,17 +699,22 @@
   }
 
   function resumeOpenVerification(_reason) {
-    biometricApi?.prepare?.().catch(() => {});
-    if (dialog.open) requestLocation(runToken);
-    scheduleResumeVerification();
+    if (navigator.onLine) biometricApi?.prepare?.().catch(() => {});
+    if (navigator.onLine && dialog.open) requestLocation(runToken);
+    if (navigator.onLine) scheduleResumeVerification();
   }
 
   function renderConnectivity() {
     const online = navigator.onLine;
     connectivityBar?.classList.toggle('offline', !online);
     if (connectivityTitle) connectivityTitle.textContent = online ? 'Con conexión' : 'Sin conexión';
-    if (!online) setButtonsReady(false);
-    else if (biometricReady) setButtonsReady(true);
+    if (online && biometricReady) setButtonsReady(true);
+  }
+
+  function enterOfflineMode() {
+    closeEnrollmentDialog();
+    if (dialog.open && dialog.dataset.flowState !== 'offline') closeMarkDialog();
+    renderConnectivity();
   }
 
   document.documentElement.dataset.lorrenBiometricFlow = FLOW_RELEASE;
@@ -673,9 +722,16 @@
   startEnrollmentButton?.addEventListener('click', enrollFace);
   enrollmentDialog?.addEventListener('cancel', (event) => event.preventDefault());
 
-  markButtons.forEach((button) => {
-    button.addEventListener('pointerdown', () => biometricApi?.prepare?.().catch(() => {}), { passive: true });
-    button.addEventListener('click', () => openMarkDialog(button));
+  document.addEventListener('pointerdown', (event) => {
+    if (!navigator.onLine) return;
+    const button = markButtonFromEvent(event);
+    if (!button || button.disabled) return;
+    biometricApi?.prepare?.().catch(() => {});
+  }, { passive: true });
+  document.addEventListener('click', (event) => {
+    if (!navigator.onLine) return;
+    const button = markButtonFromEvent(event);
+    if (button) openMarkDialog(button);
   });
 
   photoConsent?.addEventListener('change', () => {
@@ -717,8 +773,9 @@
     renderConnectivity();
     loadBiometricStatus();
   });
-  window.addEventListener('offline', renderConnectivity);
+  window.addEventListener('offline', enterOfflineMode);
 
   renderConnectivity();
-  loadBiometricStatus();
+  if (navigator.onLine) loadBiometricStatus();
+  else closeEnrollmentDialog();
 })();
