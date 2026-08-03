@@ -88,7 +88,8 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
       counts[item.status] += 1;
     });
     summary.querySelectorAll('[data-portal-summary-status]').forEach((element) => {
-      element.textContent = String(counts[element.dataset.portalSummaryStatus] || 0);
+      const nextValue = String(counts[element.dataset.portalSummaryStatus] || 0);
+      if (element.textContent !== nextValue) element.textContent = nextValue;
     });
   }
 
@@ -190,12 +191,14 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
         group.hidden = visibleCards.length === 0;
         const counter = group.querySelector('[data-portal-group-count]');
         if (counter) {
-          counter.textContent = `${visibleCards.length} asignación${visibleCards.length === 1 ? '' : 'es'}`;
+          const nextLabel = `${visibleCards.length} asignación${visibleCards.length === 1 ? '' : 'es'}`;
+          if (counter.textContent !== nextLabel) counter.textContent = nextLabel;
         }
       });
 
       updateSummary(summary, items);
-      result.textContent = `${visibleCount} visible${visibleCount === 1 ? '' : 's'}`;
+      const nextResult = `${visibleCount} visible${visibleCount === 1 ? '' : 's'}`;
+      if (result.textContent !== nextResult) result.textContent = nextResult;
       empty.hidden = visibleCount !== 0;
     }
 
@@ -230,11 +233,13 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
       window.clearTimeout(mutationTimer);
       mutationTimer = window.setTimeout(applyFilters, 0);
     });
-    observer.observe(groupsContainer, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ['class', 'data-mark-type']
+    items.forEach(({ card }) => {
+      observer.observe(card, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'data-mark-type']
+      });
     });
 
     document.body.classList.add('portal-filters-ready');
