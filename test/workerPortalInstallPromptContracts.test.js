@@ -13,7 +13,7 @@ test('el cargador incluye instalación, sesión y una versión coherente', () =>
   assert.match(loaderSource, /worker-portal-install\.js/);
   assert.match(loaderSource, /worker-portal-session-handoff\.js/);
   assert.match(loaderSource, /20260803-worker-portal-runtime-v5/);
-  assert.match(loaderSource, /lorren-worker-portal-shell-v10/);
+  assert.match(loaderSource, /lorren-worker-portal-shell-v11/);
   assert.match(loaderSource, /PORTAL_SHELL_UPDATED/);
   assert.match(loaderSource, /registration\?\.update/);
   assert.match(loaderSource, /window\.location\.reload\(\)/);
@@ -85,8 +85,8 @@ test('la instalación no se ofrece dentro de la app ya instalada', () => {
 
 
 test('el service worker elimina cachés anteriores y actualiza todos los módulos vigentes', () => {
-  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v10/);
-  assert.doesNotMatch(serviceWorkerSource, /CACHE_NAME = 'lorren-worker-portal-shell-v9'/);
+  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v11/);
+  assert.doesNotMatch(serviceWorkerSource, /CACHE_NAME = 'lorren-worker-portal-shell-v10'/);
   assert.match(serviceWorkerSource, /NETWORK_FIRST_ASSETS/);
   for (const path of [
     '/public/worker-biometric.js',
