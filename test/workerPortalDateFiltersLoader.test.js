@@ -70,7 +70,7 @@ test('el entrypoint conecta los controles existentes y conserva una sola cola of
   assert.doesNotMatch(loader, /PORTAL_FILTER_STYLE|ensureFilterStyle|ensureSummary|ensurePanel|Filtra por periodo o estado/);
 });
 
-test('los filtros reintentan la inicialización y reaccionan a cambios de jornada', async () => {
+test('los filtros reintentan la inicialización y observan solo las tarjetas de jornada', async () => {
   const loader = await read('src/public/worker-biometric.js');
 
   assert.match(loader, /function initializePortalFilters\(\)/);
@@ -78,5 +78,10 @@ test('los filtros reintentan la inicialización y reaccionan a cambios de jornad
   assert.match(loader, /DOMContentLoaded/);
   assert.match(loader, /window\.addEventListener\('pageshow'/);
   assert.match(loader, /MutationObserver/);
+  assert.match(loader, /items\.forEach\(\(\{ card \}\) => \{/);
+  assert.match(loader, /observer\.observe\(card, \{/);
+  assert.doesNotMatch(loader, /observer\.observe\(groupsContainer/);
   assert.match(loader, /attributeFilter: \['class', 'data-mark-type'\]/);
+  assert.match(loader, /if \(counter\.textContent !== nextLabel\)/);
+  assert.match(loader, /if \(result\.textContent !== nextResult\)/);
 });

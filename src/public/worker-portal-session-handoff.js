@@ -45,20 +45,31 @@
     if (!status) return;
     status.hidden = false;
     status.className = `portal-install-status${warning ? ' warning' : ''}`;
-    status.textContent = message;
+    if (status.textContent !== message) status.textContent = message;
   }
 
   function prepareInstallButtons() {
     if (!isAndroid() || handoffAlreadyCompleted()) return;
+    const inAppBrowser = isAndroidInAppBrowser();
     for (const id of INSTALL_BUTTON_IDS) {
       const button = document.getElementById(id);
       if (!button) continue;
-      button.disabled = false;
-      if (isAndroidInAppBrowser()) {
+      if (button.disabled) button.disabled = false;
+      if (inAppBrowser && button.textContent !== 'Abrir en Chrome y descargar') {
         button.textContent = 'Abrir en Chrome y descargar';
       }
-      button.dataset.installAction = 'session-handoff';
+      if (button.dataset.installAction !== 'session-handoff') {
+        button.dataset.installAction = 'session-handoff';
+      }
     }
+  }
+
+  function mutationAddsInstallButton(mutation) {
+    return [...mutation.addedNodes].some((node) => {
+      if (!(node instanceof Element)) return false;
+      if (INSTALL_BUTTON_IDS.has(node.id)) return true;
+      return [...node.querySelectorAll('button')].some((button) => INSTALL_BUTTON_IDS.has(button.id));
+    });
   }
 
   async function createSessionHandoff() {
@@ -131,7 +142,9 @@
   if (!isAndroid() || handoffAlreadyCompleted()) return;
 
   document.addEventListener('click', handleInstallClick, true);
-  const observer = new MutationObserver(prepareInstallButtons);
+  const observer = new MutationObserver((mutations) => {
+    if (mutations.some(mutationAddsInstallButton)) prepareInstallButtons();
+  });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   prepareInstallButtons();
 })();

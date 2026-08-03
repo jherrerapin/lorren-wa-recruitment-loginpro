@@ -72,6 +72,15 @@ test('el navegador interno transfiere esa sesión a Chrome', () => {
 });
 
 
+test('el observador de transferencia solo procesa controles nuevos y no se realimenta', () => {
+  assert.match(handoffSource, /function mutationAddsInstallButton\(mutation\)/);
+  assert.match(handoffSource, /mutations\.some\(mutationAddsInstallButton\)/);
+  assert.match(handoffSource, /button\.textContent !== 'Abrir en Chrome y descargar'/);
+  assert.match(handoffSource, /button\.dataset\.installAction !== 'session-handoff'/);
+  assert.doesNotMatch(handoffSource, /new MutationObserver\(prepareInstallButtons\)/);
+});
+
+
 test('iPhone conserva la instalación guiada por Safari', () => {
   assert.match(installSource, /iPad\|iPhone\|iPod/);
   assert.match(installSource, /Agregar a pantalla de inicio/);
