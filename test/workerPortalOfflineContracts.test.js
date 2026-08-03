@@ -87,7 +87,7 @@ test('el controlador permite continuar la secuencia completa sin conexión', () 
 
 
 test('la sincronización tiene Background Sync y respaldo por mensaje', () => {
-  assert.match(offlineSource, /registration\.sync\.register\(SYNC_TAG\)/);
+  assert.match(offlineSource, /await ready\.sync\.register\(SYNC_TAG\)/);
   assert.match(offlineSource, /SYNC_ARRIVALS/);
   assert.match(serviceWorkerSource, /self\.addEventListener\('sync'/);
   assert.match(serviceWorkerSource, /self\.addEventListener\('message'/);
