@@ -28,8 +28,7 @@
       ],
       "configurationPaths": [
         ".env.example",
-        ".github/workflows/ci.yml",
-        ".github/workflows/contextual-fallback-ci.yml"
+        ".github/workflows/ci.yml"
       ],
       "owner": "conversation-orchestration",
       "purpose": "Activa tres capas sobre el flujo determinístico: previsualización de campos, respuesta primaria del chat engine y delegación de preguntas de vacante. El camino determinístico continúa como fallback y autoridad para casos no cubiertos.",
@@ -62,8 +61,7 @@
       ],
       "configurationPaths": [
         ".env.example",
-        ".github/workflows/ci.yml",
-        ".github/workflows/contextual-fallback-ci.yml"
+        ".github/workflows/ci.yml"
       ],
       "owner": "conversation-understanding",
       "purpose": "Mantiene el extractor estructurado de Responses API como camino principal y conserva temporalmente el parser legacy como rollback.",
