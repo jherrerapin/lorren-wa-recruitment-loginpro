@@ -4,6 +4,8 @@
   const previousApi = window.LorrenWorkerBiometric;
   if (!previousApi) return;
 
+  const IS_ANDROID = /Android/i.test(window.navigator.userAgent || '');
+
   const HUMAN_SCRIPT_PATH = '/public/vendor/human/human.js';
   const HUMAN_MODEL_PATH = '/public/vendor/human/models/';
   const MODEL_VERSION = previousApi.MODEL_VERSION || 'human-3.3.6-faceres';
@@ -24,7 +26,7 @@
   const ENROLLMENT_SAMPLES = 3;
   const VERIFICATION_STAGE_SAMPLES = 2;
   const REQUIRED_ACTION_FRAMES = 3;
-  const BACKENDS = Object.freeze(['webgl', 'wasm', 'cpu']);
+  const BACKENDS = Object.freeze(IS_ANDROID ? ['cpu'] : ['webgl', 'wasm', 'cpu']);
   const activeStreams = new Set();
 
   let humanPromise = null;
@@ -100,7 +102,7 @@
       cacheSensitivity: 0,
       deallocate: true,
       debug: false,
-      async: true,
+      async: !IS_ANDROID,
       warmup: 'face',
       filter: { enabled: true, autoBrightness: true, equalization: true, flip: false },
       gesture: { enabled: false },
@@ -116,8 +118,8 @@
           skipFrames: 0,
           skipTime: 0
         },
-        mesh: { enabled: true, modelPath: 'facemesh.json' },
-        iris: { enabled: true, modelPath: 'iris.json' },
+        mesh: { enabled: !IS_ANDROID, modelPath: 'facemesh.json' },
+        iris: { enabled: !IS_ANDROID, modelPath: 'iris.json' },
         description: {
           enabled: true,
           modelPath: 'faceres.json',
@@ -611,15 +613,14 @@
     const video = options.video;
     const challenge = options.challenge || {};
     const onStatus = options.onStatus;
-    if (!['TURN_SIDE', 'MOVE_CLOSER'].includes(challenge.action)) {
+    if (!challenge.token || !['TURN_SIDE', 'MOVE_CLOSER'].includes(challenge.action)) {
       throw new Error('biometric_challenge_not_completed');
     }
+
     const human = await humanInstance();
     const captureStartedAt = performance.now();
-
-    onStatus?.('Mira de frente. La validación comenzará automáticamente.');
-    const baselineStartedAt = performance.now();
-    const baseline = await collectStableFront(
+    onStatus?.('Mira de frente y mantén el rostro dentro del marco.');
+    const stable = await collectStableFront(
       human,
       video,
       onStatus,
@@ -627,70 +628,26 @@
       VERIFICATION_STAGE_SAMPLES,
       'biometric_baseline_timeout'
     );
-    const baselineDurationMs = Math.round(performance.now() - baselineStartedAt);
-
-    const action = await captureActiveChallenge(
-      human,
-      video,
-      challenge,
-      baseline,
-      onStatus,
-      Date.now() + (options.challengeTimeoutMs || CHALLENGE_TIMEOUT_MS)
-    );
-
-    onStatus?.('Movimiento confirmado. Vuelve a mirar de frente.');
-    const finalStartedAt = performance.now();
-    const final = await collectStableFront(
-      human,
-      video,
-      onStatus,
-      Date.now() + (options.finalTimeoutMs || FINAL_TIMEOUT_MS),
-      VERIFICATION_STAGE_SAMPLES,
-      'biometric_final_timeout'
-    );
-    const finalDurationMs = Math.round(performance.now() - finalStartedAt);
-
-    const allSamples = [...baseline.samples, ...final.samples];
-    const descriptors = allSamples.map((sample) => sample.descriptor);
-    const realScores = allSamples.map((sample) => sample.realScore);
-    const liveScores = allSamples.map((sample) => sample.liveScore);
-    const baselineGeometry = baseline.samples.at(-1).geometry;
-    const finalGeometry = final.samples.at(-1).geometry;
     const photoBlob = await capturePhoto(video);
+    const captureDurationMs = Math.round(performance.now() - captureStartedAt);
 
     return {
       evidenceVersion: EVIDENCE_VERSION,
-      descriptor: averageDescriptors(descriptors),
-      sampleDescriptors: descriptors,
-      sampleRealScores: realScores,
-      sampleLiveScores: liveScores,
-      realScore: Math.min(...realScores),
-      liveScore: Math.min(...liveScores),
+      descriptor: averageDescriptors(stable.descriptors),
+      sampleDescriptors: stable.descriptors,
+      sampleRealScores: stable.realScores,
+      sampleLiveScores: stable.liveScores,
+      realScore: stable.realScore,
+      liveScore: stable.liveScore,
       challengeAction: challenge.action,
       challengeCompleted: true,
       challengeEvidence: {
-        kind: 'MODEL_AND_ACTIVE_CHALLENGE_V2',
+        kind: 'MODEL_PASSIVE_LIVENESS_V2',
         action: challenge.action,
-        baselineFrames: baseline.samples.length,
-        actionFrames: action.frames,
-        finalFrames: final.samples.length,
-        captureDurationMs: Math.round(performance.now() - captureStartedAt),
-        challengeDurationMs: action.durationMs,
-        baselineDurationMs,
-        finalDurationMs,
-        baselineYaw: baselineGeometry.yaw,
-        actionYaw: action.geometry.yaw,
-        finalYaw: finalGeometry.yaw,
-        baselineFaceRatio: baselineGeometry.faceRatio,
-        actionFaceRatio: action.geometry.faceRatio,
-        finalFaceRatio: finalGeometry.faceRatio,
-        actionDescriptors: action.descriptors,
-        actionRealScores: action.realScores,
-        actionLiveScores: action.liveScores,
-        actionRealScoreMin: action.realScoreMin,
-        actionLiveScoreMin: action.liveScoreMin
+        frames: stable.samples.length,
+        captureDurationMs
       },
-      livenessEvidence: 'MODEL_AND_ACTIVE_CHALLENGE_V2',
+      livenessEvidence: 'MODEL_PASSIVE_LIVENESS_V2',
       modelVersion: MODEL_VERSION,
       photoBlob
     };

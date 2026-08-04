@@ -31,7 +31,9 @@ const ACTION_SAMPLE_CONSISTENCY_THRESHOLD = 0.65;
 const ACTION_IDENTITY_THRESHOLD = 0.65;
 const ENROLLMENT_SAMPLE_COUNT = 3;
 const VERIFICATION_SAMPLE_COUNT = 4;
+const PASSIVE_VERIFICATION_SAMPLE_COUNT = 2;
 const ACTION_SAMPLE_COUNT = 3;
+const PASSIVE_CHALLENGE_KIND = 'MODEL_PASSIVE_LIVENESS_V2';
 const MIN_CHALLENGE_DURATION_MS = 200;
 const MAX_CHALLENGE_DURATION_MS = 12_000;
 const MIN_CAPTURE_DURATION_MS = 700;
@@ -464,6 +466,21 @@ function normalizeChallengeEvidence(value, expectedAction) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('attendance_biometric_challenge_evidence_invalid');
   }
+  if (value.kind === PASSIVE_CHALLENGE_KIND && value.action === expectedAction) {
+    return {
+      kind: value.kind,
+      action: value.action,
+      frames: finiteNumber(value.frames, 'attendance_biometric_passive_frames', {
+        min: PASSIVE_VERIFICATION_SAMPLE_COUNT,
+        max: 10
+      }),
+      captureDurationMs: finiteNumber(value.captureDurationMs, 'attendance_biometric_capture_duration', {
+        min: MIN_CAPTURE_DURATION_MS,
+        max: MAX_CAPTURE_DURATION_MS
+      })
+    };
+  }
+
   if (value.kind !== 'MODEL_AND_ACTIVE_CHALLENGE_V2' || value.action !== expectedAction) {
     throw new Error('attendance_biometric_challenge_evidence_invalid');
   }
@@ -700,31 +717,39 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
       if (normalizeString(input.modelVersion, 100) !== WORKER_BIOMETRIC_MODEL_VERSION) {
         throw new Error('attendance_biometric_model_version_invalid');
       }
-      const samples = validateStrictSamples(input, VERIFICATION_SAMPLE_COUNT, 'verification');
+      const verificationSampleCount = input.challengeEvidence?.kind === PASSIVE_CHALLENGE_KIND
+        ? PASSIVE_VERIFICATION_SAMPLE_COUNT
+        : VERIFICATION_SAMPLE_COUNT;
+      const samples = validateStrictSamples(input, verificationSampleCount, 'verification');
       descriptor = samples.descriptor;
       hash = descriptorHash(descriptor);
       realScore = samples.realScore;
       liveScore = samples.liveScore;
       minimumSampleSimilarityValue = samples.minimumSimilarity;
-      sampleCount = VERIFICATION_SAMPLE_COUNT;
+      sampleCount = verificationSampleCount;
       if (!challenge) throw new Error('attendance_biometric_challenge_invalid');
       challengeEvidence = normalizeChallengeEvidence(input.challengeEvidence, challenge.action);
-      const actionDescriptor = averageDescriptors(challengeEvidence.actionDescriptors);
-      actionIdentitySimilarity = humanFaceSimilarity(descriptor, actionDescriptor);
-      if (actionIdentitySimilarity < ACTION_IDENTITY_THRESHOLD) {
-        throw new Error('attendance_biometric_challenge_identity_inconsistent');
+      if (challengeEvidence.kind === PASSIVE_CHALLENGE_KIND) {
+        captureHash = descriptorSequenceHash(samples.descriptors);
+        publicChallengeEvidence = challengeEvidence;
+      } else {
+        const actionDescriptor = averageDescriptors(challengeEvidence.actionDescriptors);
+        actionIdentitySimilarity = humanFaceSimilarity(descriptor, actionDescriptor);
+        if (actionIdentitySimilarity < ACTION_IDENTITY_THRESHOLD) {
+          throw new Error('attendance_biometric_challenge_identity_inconsistent');
+        }
+        captureHash = descriptorSequenceHash([
+          ...samples.descriptors,
+          ...challengeEvidence.actionDescriptors
+        ]);
+        publicChallengeEvidence = {
+          ...challengeEvidence,
+          actionDescriptors: undefined,
+          actionCaptureHash: descriptorSequenceHash(challengeEvidence.actionDescriptors),
+          actionIdentitySimilarity
+        };
+        delete publicChallengeEvidence.actionDescriptors;
       }
-      captureHash = descriptorSequenceHash([
-        ...samples.descriptors,
-        ...challengeEvidence.actionDescriptors
-      ]);
-      publicChallengeEvidence = {
-        ...challengeEvidence,
-        actionDescriptors: undefined,
-        actionCaptureHash: descriptorSequenceHash(challengeEvidence.actionDescriptors),
-        actionIdentitySimilarity
-      };
-      delete publicChallengeEvidence.actionDescriptors;
     } catch (error) {
       const code = error?.message;
       if (code === 'attendance_biometric_antispoof_low') addFlag(flags, 'BIOMETRIC_ANTISPOOF_LOW', 50, state);

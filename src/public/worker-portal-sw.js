@@ -2,7 +2,7 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v13';
+const CACHE_NAME = 'lorren-worker-portal-shell-v14';
 const NETWORK_FIRST_ASSETS = new Set([
   '/public/worker-biometric.js',
   '/public/worker-biometric-core.js',

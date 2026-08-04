@@ -150,7 +150,7 @@ test('la verificación facial fuerza evidencia v2 y devuelve una vigencia corta'
 test('el navegador y las rutas públicas usan directamente el flujo vigente', () => {
   const flow = fs.readFileSync('src/public/worker-portal-biometric-flow.js', 'utf8');
   const route = fs.readFileSync('src/routes/workerPortal.js', 'utf8');
-  assert.match(flow, /\/operaciones\/portal\/biometria\/desafio/);
+  assert.match(flow, /fetch\(`\/operaciones\/portal\/biometria\/\$\{path\}`/);
   assert.match(flow, /portalBiometricRequest\('desafio'/);
   assert.match(flow, /portalBiometricRequest\('verificar'/);
   assert.match(flow, /challengeEvidence:\s*capture\.challengeEvidence/);

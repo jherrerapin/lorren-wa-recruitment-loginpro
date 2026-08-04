@@ -15,7 +15,7 @@ test('el portal carga un bootstrap mínimo, un único motor y el controlador vig
   assert.ok(bootstrapPosition >= 0);
   assert.ok(mobilePosition > bootstrapPosition);
   assert.ok(flowPosition > mobilePosition);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v7'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v8'/);
   assert.match(loader, /navigator\.serviceWorker\.getRegistration\('\/operaciones\/portal'\)/);
   assert.match(loader, /message\.cacheName/);
   assert.doesNotMatch(loader, /BIOMETRIC_SHELL_CACHE/);
@@ -69,7 +69,7 @@ test('marcar la autorización inicia el flujo y el segundo intento reconstruye r
 
   assert.match(flow, /photoConsent\?\.addEventListener\('change'/);
   assert.match(flow, /runAutomaticVerification\(\)/);
-  assert.match(flow, /const MAX_AUTOMATIC_ATTEMPTS = 2/);
+  assert.match(flow, /const MAX_AUTOMATIC_ATTEMPTS = 1/);
   assert.match(flow, /for \(let attempt = 1; attempt <= MAX_AUTOMATIC_ATTEMPTS; attempt \+= 1\)/);
   assert.match(flow, /await biometricApi\.recover\(\{ reason: code, rotateBackend: true \}\)/);
   assert.match(flow, /state\.idempotencyKey = newIdempotencyKey\(\)/);
@@ -116,7 +116,7 @@ test('Human se invalida al suspender la página y puede cambiar de backend', asy
 
   assert.match(mobile, /cacheSensitivity:\s*0/);
   assert.match(mobile, /deallocate:\s*true/);
-  assert.match(mobile, /const BACKENDS = Object\.freeze\(\['webgl', 'wasm', 'cpu'\]\)/);
+  assert.match(mobile, /const BACKENDS = Object\.freeze\(IS_ANDROID \? \['cpu'\] : \['webgl', 'wasm', 'cpu'\]\)/);
   assert.match(mobile, /const RUNTIME_MAX_IDLE_MS = 12 \* 60 \* 60 \* 1000/);
   assert.match(mobile, /invalidateRuntime\('runtime-idle'\)/);
   assert.match(mobile, /function invalidateRuntime/);
@@ -126,17 +126,17 @@ test('Human se invalida al suspender la página y puede cambiar de backend', asy
   assert.match(mobile, /document\.wasDiscarded/);
 });
 
-test('la verificación usa tiempos independientes y varias muestras por etapa', async () => {
+test('la verificación usa una etapa frontal corta con dos muestras', async () => {
   const mobile = await read('src/public/worker-biometric-mobile.js');
 
   assert.match(mobile, /const BASELINE_TIMEOUT_MS = 14_000/);
-  assert.match(mobile, /const CHALLENGE_TIMEOUT_MS = 10_000/);
-  assert.match(mobile, /const FINAL_TIMEOUT_MS = 14_000/);
   assert.match(mobile, /const VERIFICATION_STAGE_SAMPLES = 2/);
-  assert.match(mobile, /const REQUIRED_ACTION_FRAMES = 3/);
-  assert.match(mobile, /biometric_baseline_timeout/);
-  assert.match(mobile, /biometric_challenge_timeout/);
-  assert.match(mobile, /biometric_final_timeout/);
+  const start = mobile.indexOf('async function captureVerification');
+  const end = mobile.indexOf('function stopStream', start);
+  const verification = mobile.slice(start, end);
+  assert.match(verification, /biometric_baseline_timeout/);
+  assert.match(verification, /MODEL_PASSIVE_LIVENESS_V2/);
+  assert.doesNotMatch(verification, /captureActiveChallenge|biometric_final_timeout/);
 });
 
 test('cada muestra exige anti-spoof y liveness sin elevar puntuaciones', async () => {
@@ -147,7 +147,7 @@ test('cada muestra exige anti-spoof y liveness sin elevar puntuaciones', async (
   assert.match(mobile, /realScore:\s*Math\.min/);
   assert.match(mobile, /liveScore:\s*Math\.min/);
   assert.doesNotMatch(mobile, /Math\.max\(modelLiveScore,\s*MIN_LIVE_SCORE\)/);
-  assert.match(mobile, /MODEL_AND_ACTIVE_CHALLENGE_V2/);
+  assert.match(mobile, /MODEL_PASSIVE_LIVENESS_V2/);
 });
 
 test('el controlador pausa y reinicia cualquier verificación interrumpida', async () => {

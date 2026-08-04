@@ -39,6 +39,7 @@ function matchesWhere(event, where = {}) {
     if (where.action.in && !where.action.in.includes(event.action)) return false;
   }
   if (where.metadata?.path?.[0] === 'descriptorHash' && event.metadata?.descriptorHash !== where.metadata.equals) return false;
+  if (where.metadata?.path?.[0] === 'captureHash' && event.metadata?.captureHash !== where.metadata.equals) return false;
   return true;
 }
 
@@ -197,4 +198,64 @@ test('la similitud normalizada separa variación legítima e impostor', () => {
   assert.ok(humanFaceSimilarity(descriptor, nearImpostor) > 0.75);
   assert.ok(humanFaceSimilarity(descriptor, nearImpostor) < 0.85);
   assert.ok(humanFaceSimilarity(descriptor, descriptor.map((value) => value + 4)) < 0.1);
+});
+
+
+test('la identidad registrada se reconoce con dos muestras pasivas en cualquier marcación', async () => {
+  const prisma = fakePrisma();
+  const normalized = unitVector(descriptor);
+  await enrollWorkerBiometric(prisma, {
+    workerId: 'worker-1',
+    workerLabel: 'Auxiliar Prueba',
+    evidenceVersion: 2,
+    descriptor: normalized,
+    sampleDescriptors: [normalized, normalized, normalized],
+    sampleRealScores: [0.93, 0.92, 0.94],
+    sampleLiveScores: [0.91, 0.9, 0.92],
+    captureDurationMs: 1_200,
+    realScore: 0.92,
+    liveScore: 0.9,
+    modelVersion: 'human-3.3.6-faceres',
+    consentAccepted: true,
+    actorUsername: 'coordinador',
+    actorRole: 'admin'
+  }, { now: NOW, env: ENV });
+
+  for (const [index, markType] of ['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'].entries()) {
+    const idempotencyKey = `passive-${markType.toLowerCase()}-12345678`;
+    const challenge = issueWorkerBiometricChallenge({
+      workerId: 'worker-1', assignmentId: 'assignment-1', idempotencyKey, markType
+    }, { now: NOW, env: ENV, randomIndex: index % 2 });
+    const captured = unitVector(normalized.map((value, position) => (
+      position === index ? value + (index + 1) * 0.0005 : value
+    )));
+    const assessment = await assessWorkerBiometric(prisma, {
+      workerId: 'worker-1',
+      assignmentId: 'assignment-1',
+      idempotencyKey,
+      markType,
+      evidenceVersion: 2,
+      challengeToken: challenge.token,
+      challengeAction: challenge.action,
+      challengeCompleted: true,
+      challengeEvidence: {
+        kind: 'MODEL_PASSIVE_LIVENESS_V2',
+        action: challenge.action,
+        frames: 2,
+        captureDurationMs: 1_000
+      },
+      descriptor: captured,
+      sampleDescriptors: [captured, captured],
+      sampleRealScores: [0.93, 0.92],
+      sampleLiveScores: [0.91, 0.9],
+      realScore: 0.92,
+      liveScore: 0.9,
+      modelVersion: 'human-3.3.6-faceres'
+    }, { now: new Date(NOW.getTime() + 5_000 + index * 1_000), env: ENV });
+
+    assert.equal(assessment.decision, 'VERIFIED');
+    assert.equal(assessment.verified, true);
+    assert.equal(assessment.sampleCount, 2);
+    assert.equal(assessment.challengeEvidence.kind, 'MODEL_PASSIVE_LIVENESS_V2');
+  }
 });

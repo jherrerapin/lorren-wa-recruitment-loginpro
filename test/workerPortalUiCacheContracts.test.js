@@ -10,12 +10,12 @@ const mobile = read('src/public/worker-biometric-mobile.js');
 const biometricFlow = read('src/public/worker-portal-biometric-flow.js');
 
 test('la caché vigente usa los módulos actuales y no depende de archivos retirados', () => {
-  assert.match(serviceWorker, /CACHE_NAME\s*=\s*'lorren-worker-portal-shell-v13'/);
+  assert.match(serviceWorker, /CACHE_NAME\s*=\s*'lorren-worker-portal-shell-v14'/);
   assert.match(serviceWorker, /NETWORK_FIRST_ASSETS/);
   assert.match(serviceWorker, /cache\.addAll\(STATIC_ASSETS\)/);
   assert.match(serviceWorker, /name !== CACHE_NAME/);
   assert.match(serviceWorker, /Abre el portal una vez con conexión/);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v7'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v8'/);
   assert.match(loader, /worker-biometric-mobile\.js\?v=\$\{BIOMETRIC_ASSET_RELEASE\}/);
   assert.match(loader, /worker-portal-biometric-flow\.js\?v=\$\{BIOMETRIC_ASSET_RELEASE\}/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js|worker-portal-hardening\.js|worker-portal-offline-v2\.js/);
@@ -24,12 +24,12 @@ test('la caché vigente usa los módulos actuales y no depende de archivos retir
 test('la verificación vigente conserva liveness y anti-spoof por muestra', () => {
   assert.match(mobile, /scores\.realScore < MIN_REAL_SCORE/);
   assert.match(mobile, /scores\.liveScore < MIN_LIVE_SCORE/);
-  assert.match(mobile, /MODEL_AND_ACTIVE_CHALLENGE_V2/);
+  assert.match(mobile, /MODEL_PASSIVE_LIVENESS_V2/);
   assert.match(mobile, /faces\.length !== 1/);
   assert.match(mobile, /const REQUIRED_ACTION_FRAMES = 3/);
   assert.doesNotMatch(mobile, /requireModelLiveness:\s*false/);
   assert.doesNotMatch(mobile, /Math\.max\(modelLiveScore,\s*MIN_LIVE_SCORE\)/);
-  assert.match(biometricFlow, /MAX_AUTOMATIC_ATTEMPTS = 2/);
+  assert.match(biometricFlow, /MAX_AUTOMATIC_ATTEMPTS = 1/);
 });
 
 test('la cola reprograma red, 408, 425, 429 y errores 5xx sin duplicar envíos', () => {
