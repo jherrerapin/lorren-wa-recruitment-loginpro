@@ -421,7 +421,7 @@ El corpus de regresión debe demostrar, como mínimo:
 - hoja de vida antes y después del consentimiento;
 - solo postulación;
 - postulación más entrevista;
-- horario a menos de seis horas rechazado;
+- horario con seis horas o menos de anticipación rechazado;
 - siguiente horario válido;
 - reprogramación;
 - intervención humana;
