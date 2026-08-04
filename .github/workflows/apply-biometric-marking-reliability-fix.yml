@@ -39,6 +39,16 @@ jobs:
               raise SystemExit(f'Expected two rate-limit script anchors, found {script.count(ambiguous)}')
           script = script.replace(ambiguous, precise, 2)
           exec(compile(script, 'biometric-reliability-patch', 'exec'))
+          replace_once(
+              'test/workerBiometricAccessibilityContracts.test.js',
+              "BIOMETRIC_ASSET_RELEASE\\s*=\\s*'20260803-worker-portal-runtime-v5'",
+              "BIOMETRIC_ASSET_RELEASE\\s*=\\s*'20260804-worker-portal-biometric-v6'"
+          )
+          replace_once(
+              'test/workerBiometricAccessibilityContracts.test.js',
+              "const RUNTIME_MAX_IDLE_MS = 10 \\* 60 \\* 1000",
+              "const RUNTIME_MAX_IDLE_MS = 12 \\* 60 \\* 60 \\* 1000"
+          )
           PY
 
       - name: Validate JavaScript syntax
@@ -85,6 +95,7 @@ jobs:
             src/routes/workerPortal.js \
             test/workerBiometricIntegrationContracts.test.js \
             test/workerBiometricMarkingReliabilityContracts.test.js \
+            test/workerBiometricAccessibilityContracts.test.js \
             test/workerPortalUiCacheContracts.test.js \
             .github/workflows/apply-biometric-marking-reliability-fix.yml \
             .github/workflows/run-biometric-marking-reliability-fix.yml \
