@@ -57,11 +57,14 @@ jobs:
       - name: Validate biometric service contracts
         run: node --test test/workerBiometricService.test.js
 
-      - name: Validate mobile biometric contracts
-        run: |
-          node --test test/workerBiometricMobileStabilityContracts.test.js
-          node --test test/workerBiometricResumeContracts.test.js
-          node --test test/workerBiometricAccessibilityContracts.test.js
+      - name: Validate mobile stability contracts
+        run: node --test test/workerBiometricMobileStabilityContracts.test.js
+
+      - name: Validate biometric resume contracts
+        run: node --test test/workerBiometricResumeContracts.test.js
+
+      - name: Validate biometric accessibility contracts
+        run: node --test test/workerBiometricAccessibilityContracts.test.js
 
       - name: Validate worker portal cache contracts
         run: node --test test/workerPortalUiCacheContracts.test.js
