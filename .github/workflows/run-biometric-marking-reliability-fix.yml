@@ -69,3 +69,5 @@ jobs:
             .github/workflows/run-biometric-marking-reliability-fix.yml
           git commit -m "fix: estabilizar marcación y reconocimiento facial"
           git push origin HEAD:fix/biometric-marking-reliability
+
+# Trigger PR validation from the main-only temporary runner.
