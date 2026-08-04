@@ -1,8 +1,9 @@
 name: CI
 
-# Pausado temporalmente para controlar el consumo mensual de GitHub Actions.
-# Se conserva la ejecución manual desde la pestaña Actions.
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -104,79 +105,112 @@ jobs:
       - name: Run candidate state authority regressions
         run: node --test test/candidateStateService.test.js test/candidateAdminPauseStateService.test.js test/candidateWhatsAppOpenStateService.test.js test/candidateManualOutboundStateService.test.js test/candidateSupervisorReviewStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminCandidatePauseAuthority.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/adminSupervisorCandidateStateAuthority.test.js test/adminBotPause.test.js
 
-      - name: Validate candidate progress authority inventory
-        run: node --test test/candidateProgressAuthority.test.js
+      - name: Run candidate progress authority regressions
+        run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/candidateNoInterestStateService.test.js test/candidateRequirementRejectionStateService.test.js test/candidateExplicitPauseStateService.test.js test/candidateConsentStepStateService.test.js test/candidateVacancyFirstGateStateService.test.js test/candidateSilentProfileCaptureStateService.test.js test/consentStateService.test.js test/dataConsentGateConsentStepAuthority.test.js test/webhookVacancyFirstGateAuthority.test.js test/webhookSilentProfileCaptureAuthority.test.js test/turnOrchestratorContracts.test.js test/conversationEngineNoInterestAuthority.test.js test/conversationEngineRequirementRejectionAuthority.test.js test/conversationEngineExplicitPauseAuthority.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
+
+      # Complete the evidence set even when a blocking focal command fails.
+      # Each command still contributes its own failure to the final job result.
+      - name: Run contextual fallback regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/contextualReply.test.js test/contextualReplyRobustness.test.js test/contextualReplyLogging.test.js test/hardeningP0.test.js test/p9CvOnlyPdfDocx.test.js test/replySimilarityPolicy.test.js test/responsePolicyRemoval.test.js
+
+      - name: Run admin session contract
+        if: ${{ !cancelled() }}
+        run: node --test test/adminSession.test.js
 
       - name: Run interview booking authority regressions
+        if: ${{ !cancelled() }}
         run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js test/interviewBookingAdminStateService.test.js test/interviewBookingDeletionStateService.test.js test/adminInterviewBookingAuthority.test.js test/chatEngineInterviewBookingAuthority.test.js test/webhookInterviewBookingAuthority.test.js
 
       - name: Run supervisor coordination regressions
+        if: ${{ !cancelled() }}
         run: node --test test/adminSupervisor.test.js
 
       - name: Run admin manual outbound regressions
+        if: ${{ !cancelled() }}
         run: node --test test/manualOutboundDeliveryService.test.js test/manualOutboundDeliveryReconciliation.test.js test/adminManualOutboundDeliveryAuthority.test.js test/adminManualOutbound.test.js
 
       - name: Run dispatch WhatsApp runtime regressions
+        if: ${{ !cancelled() }}
         run: node --test test/dispatchWhatsappRuntimeContracts.test.js
 
       - name: Run webhook message authority regressions
+        if: ${{ !cancelled() }}
         run: node --test test/webhookMessageAuthority.test.js test/webhookInboundMessageAuthority.test.js test/webhookIdempotency.test.js test/webhookPersistence.test.js test/turnOrchestratorContracts.test.js
 
       - name: Run reminder regressions
+        if: ${{ !cancelled() }}
         run: node --test test/reminder.test.js test/interviewBookingReminderStateService.test.js
 
       - name: Run interview booking transition policy regressions
+        if: ${{ !cancelled() }}
         run: node --test test/interviewBookingTransitionPolicy.test.js
 
       - name: Validate conversation replay fixtures
+        if: ${{ !cancelled() }}
         run: node --test test/conversationReplayFixtures.test.js
 
       - name: Run conversation interpretation replay
+        if: ${{ !cancelled() }}
         run: node --test test/conversationReplayInterpretation.test.js
 
       - name: Run conversation planning replay
+        if: ${{ !cancelled() }}
         run: node --test test/conversationReplayPlanning.test.js
 
       - name: Run consent and attachment edge replay
+        if: ${{ !cancelled() }}
         run: node --test test/conversationReplayConsentAttachmentEdges.test.js
 
       - name: Run integral replay for interest without consent
+        if: ${{ !cancelled() }}
         env:
           REPLAY_FIXTURE_ID: consent-interest-is-not-consent-v1
         run: node --test test/conversationReplayIntegral.test.js
 
       - name: Run integral replay for vacancy question
+        if: ${{ !cancelled() }}
         env:
           REPLAY_FIXTURE_ID: context-question-during-data-collection-v1
         run: node --test test/conversationReplayIntegral.test.js
 
       - name: Run integral replay for candidate correction
+        if: ${{ !cancelled() }}
         env:
           REPLAY_FIXTURE_ID: context-correction-during-data-collection-v1
         run: node --test test/conversationReplayIntegral.test.js
 
       - name: Run integral replay for consent acceptance
+        if: ${{ !cancelled() }}
         env:
           REPLAY_FIXTURE_ID: consent-explicit-acceptance-v1
         run: node --test test/conversationReplayIntegral.test.js
 
       - name: Run integral replay for consent rejection
+        if: ${{ !cancelled() }}
         env:
           REPLAY_FIXTURE_ID: consent-explicit-rejection-v1
         run: node --test test/conversationReplayIntegral.test.js
 
       - name: Run integral replay for pre-consent document
+        if: ${{ !cancelled() }}
         env:
           REPLAY_FIXTURE_ID: attachment-document-before-consent-v1
         run: node --test test/conversationReplayIntegral.test.js
 
       - name: Run conversation recovery replay
+        if: ${{ !cancelled() }}
         run: node --test test/conversationReplayRecovery.test.js
+
+      - name: Run production edge replay
+        if: ${{ !cancelled() }}
+        run: node --test test/conversationReplayProductionEdges.test.js
 
       # The suite currently has unstable legacy failures tracked in issue #386.
       # It remains mandatory to execute and report, but it is not a blocking
       # regression gate until its exact baseline is deterministic.
       - name: Run automated tests and publish debt report
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set +e
