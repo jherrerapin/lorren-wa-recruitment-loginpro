@@ -1,0 +1,75 @@
+name: Apply biometric detection watchdog
+
+on:
+  pull_request:
+    branches:
+      - automation/biometric-detection-watchdog-runner
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.head_ref == 'fix/biometric-detection-watchdog-ui' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out functional branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Load exact correction
+        run: |
+          git fetch origin automation/biometric-detection-watchdog-runner
+          git show origin/automation/biometric-detection-watchdog-runner:.github/scripts/apply-biometric-detection-watchdog.py > /tmp/apply-biometric-detection-watchdog.py
+
+      - name: Apply correction
+        run: |
+          python3 /tmp/apply-biometric-detection-watchdog.py
+          rm -f .github/biometric-detection-watchdog-trigger.txt
+
+      - name: Validate JavaScript syntax
+        run: |
+          node --check src/public/worker-biometric-mobile.js
+          node --check src/public/worker-portal-biometric-flow.js
+          node --check src/public/worker-biometric.js
+          node --check src/public/worker-portal-sw.js
+
+      - name: Validate biometric and portal contracts
+        run: |
+          node --test \
+            test/workerBiometricDetectionWatchdogContracts.test.js \
+            test/workerBiometricAccessibilityContracts.test.js \
+            test/workerBiometricMobileStabilityContracts.test.js \
+            test/workerBiometricResumeContracts.test.js \
+            test/workerBiometricMarkingReliabilityContracts.test.js \
+            test/workerPortalUiCacheContracts.test.js \
+            test/workerBiometricIntegrationContracts.test.js
+          git diff --check
+
+      - name: Commit validated correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/public/worker-biometric-mobile.js \
+            src/public/worker-portal-biometric-flow.js \
+            src/public/worker-biometric.js \
+            src/public/worker-portal-sw.js \
+            src/views/workerPortal.ejs \
+            test/workerBiometricAccessibilityContracts.test.js \
+            test/workerBiometricDetectionWatchdogContracts.test.js \
+            test/workerBiometricIntegrationContracts.test.js \
+            test/workerBiometricMarkingReliabilityContracts.test.js \
+            test/workerPortalUiCacheContracts.test.js \
+            .github/biometric-detection-watchdog-trigger.txt
+          git commit -m "fix: evitar bloqueo indefinido del reconocimiento facial"
+          git push origin HEAD:${{ github.head_ref }}
