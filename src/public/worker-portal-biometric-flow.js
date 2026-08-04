@@ -31,11 +31,12 @@
   if (!dialog || !resultBox || !submitButton) return;
 
   const MAX_AUTOMATIC_ATTEMPTS = 2;
-  const FLOW_RELEASE = '20260804-biometric-marking-reliability-v3';
+  const FLOW_RELEASE = '20260804-biometric-detection-watchdog-v4';
   const AUTOMATIC_RETRY_ERRORS = new Set([
     'camera_stream_unavailable',
     'camera_stream_muted',
     'biometric_runtime_unavailable',
+    'biometric_detection_timeout',
     'biometric_capture_timeout',
     'biometric_baseline_timeout',
     'biometric_challenge_timeout',
@@ -43,6 +44,7 @@
   ]);
   const BACKEND_RECOVERY_ERRORS = new Set([
     'biometric_runtime_unavailable',
+    'biometric_detection_timeout',
     'biometric_baseline_timeout',
     'biometric_final_timeout'
   ]);
@@ -172,6 +174,7 @@
       camera_stream_muted: 'La cámara quedó pausada por el teléfono. Vuelve a intentarlo con la pantalla activa.',
       biometric_page_not_visible: 'Mantén esta pantalla visible durante la validación.',
       biometric_runtime_unavailable: 'El reconocimiento facial se reinició, pero no pudo quedar listo.',
+      biometric_detection_timeout: 'El análisis facial se demoró demasiado y fue reiniciado.',
       biometric_enrollment_timeout: 'No se obtuvieron tres capturas válidas para registrar el rostro.',
       biometric_capture_timeout: 'No se obtuvo una captura estable dentro del tiempo disponible.',
       biometric_baseline_timeout: 'No se lograron obtener dos muestras frontales válidas.',
@@ -524,7 +527,7 @@
       attemptNumber === 1 ? 'Preparando reconocimiento facial…' : 'Reintentando recuperación técnica…',
       'neutral'
     );
-    setInstruction('Mira de frente. La validación comenzará automáticamente.');
+    setInstruction('Abriendo cámara y preparando el análisis facial…');
     if (retryBiometricButton) {
       retryBiometricButton.disabled = false;
       retryBiometricButton.textContent = 'Intentar nuevamente';

@@ -56,6 +56,6 @@ test('el límite se separa por tipo de marcación en cliente y servidor', () => 
 });
 
 test('la aplicación instalada recibe una versión nueva del motor y de la caché', () => {
-  assert.match(loader, /20260804-worker-portal-biometric-v6/);
-  assert.match(serviceWorker, /lorren-worker-portal-shell-v12/);
+  assert.match(loader, /20260804-worker-portal-biometric-v7/);
+  assert.match(serviceWorker, /lorren-worker-portal-shell-v13/);
 });
