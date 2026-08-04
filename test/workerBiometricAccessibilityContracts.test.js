@@ -15,7 +15,7 @@ test('el portal carga un bootstrap mínimo, un único motor y el controlador vig
   assert.ok(bootstrapPosition >= 0);
   assert.ok(mobilePosition > bootstrapPosition);
   assert.ok(flowPosition > mobilePosition);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260803-worker-portal-runtime-v5'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v6'/);
   assert.match(loader, /navigator\.serviceWorker\.getRegistration\('\/operaciones\/portal'\)/);
   assert.match(loader, /message\.cacheName/);
   assert.doesNotMatch(loader, /BIOMETRIC_SHELL_CACHE/);
@@ -115,7 +115,7 @@ test('Human se invalida al suspender la página y puede cambiar de backend', asy
   assert.match(mobile, /cacheSensitivity:\s*0/);
   assert.match(mobile, /deallocate:\s*true/);
   assert.match(mobile, /const BACKENDS = Object\.freeze\(\['webgl', 'wasm', 'cpu'\]\)/);
-  assert.match(mobile, /const RUNTIME_MAX_IDLE_MS = 10 \* 60 \* 1000/);
+  assert.match(mobile, /const RUNTIME_MAX_IDLE_MS = 12 \* 60 \* 60 \* 1000/);
   assert.match(mobile, /invalidateRuntime\('runtime-idle'\)/);
   assert.match(mobile, /function invalidateRuntime/);
   assert.match(mobile, /async function recover/);

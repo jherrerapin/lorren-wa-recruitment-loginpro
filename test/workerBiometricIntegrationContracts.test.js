@@ -373,5 +373,42 @@ test('los archivos del navegador envían evidencia completa y nunca elevan el li
   assert.match(route, /hasCurrentBiometricEnrollment/);
   assert.match(route, /validUntil:\s*assessment\.validUntil/);
   assert.match(route, /consumeVerifiedAssessmentAfterSuccess/);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260803-worker-portal-runtime-v5'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v6'/);
+});
+
+test('los fallos de una etapa no bloquean otra marcación de la jornada', async () => {
+  const prisma = fakePrisma();
+  for (let index = 0; index < 5; index += 1) {
+    prisma.events.push({
+      id: `break-failure-${index}`,
+      entityType: 'DISPATCH_ATTENDANCE_BIOMETRIC',
+      entityId: `break-failed-key-${index}`,
+      entityLabel: ASSIGNMENT_ID,
+      action: 'BIOMETRIC_ASSESSED',
+      metadata: {
+        workerId: WORKER_ID,
+        markType: 'BREAK_END',
+        verified: false,
+        decision: 'REVIEW_REQUIRED',
+        assessedAt: new Date(NOW.getTime() - index * 1_000).toISOString()
+      },
+      createdAt: new Date(NOW.getTime() - index * 1_000)
+    });
+  }
+
+  const departure = await assertWorkerBiometricAttemptAllowed(prisma, {
+    workerId: WORKER_ID,
+    assignmentId: ASSIGNMENT_ID,
+    markType: 'DEPARTURE'
+  }, { now: NOW });
+  assert.equal(departure.allowed, true);
+
+  await assert.rejects(
+    () => assertWorkerBiometricAttemptAllowed(prisma, {
+      workerId: WORKER_ID,
+      assignmentId: ASSIGNMENT_ID,
+      markType: 'BREAK_END'
+    }, { now: NOW }),
+    (error) => error.message === 'attendance_biometric_rate_limited'
+  );
 });

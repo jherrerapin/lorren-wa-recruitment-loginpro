@@ -31,7 +31,16 @@
   if (!dialog || !resultBox || !submitButton) return;
 
   const MAX_AUTOMATIC_ATTEMPTS = 2;
-  const FLOW_RELEASE = '20260801-biometric-integrity-v2';
+  const FLOW_RELEASE = '20260804-biometric-marking-reliability-v3';
+  const AUTOMATIC_RETRY_ERRORS = new Set([
+    'camera_stream_unavailable',
+    'camera_stream_muted',
+    'biometric_runtime_unavailable',
+    'biometric_capture_timeout',
+    'biometric_baseline_timeout',
+    'biometric_challenge_timeout',
+    'biometric_final_timeout'
+  ]);
   const BACKEND_RECOVERY_ERRORS = new Set([
     'biometric_runtime_unavailable',
     'biometric_baseline_timeout',
@@ -46,6 +55,9 @@
   let verificationInProgress = false;
   let resumeVerificationPending = false;
   let resumeTimer = null;
+  let rateLimitTimer = null;
+  let rateLimitUntil = 0;
+  let rateLimitContext = '';
 
   const state = {
     assignmentId: null,
@@ -180,6 +192,71 @@
       biometric_challenge_failed: 'No fue posible iniciar la validación facial.'
     };
     return messages[code] || 'No fue posible confirmar tu identidad.';
+  }
+
+  function currentRateLimitContext() {
+    return state.assignmentId && state.markType ? `${state.assignmentId}:${state.markType}` : '';
+  }
+
+  function clearRateLimitTimer() {
+    if (rateLimitTimer) window.clearInterval(rateLimitTimer);
+    rateLimitTimer = null;
+  }
+
+  function activeRateLimitSeconds() {
+    if (!rateLimitUntil || rateLimitContext !== currentRateLimitContext()) return 0;
+    return Math.max(0, Math.ceil((rateLimitUntil - Date.now()) / 1000));
+  }
+
+  function renderRateLimitCountdown() {
+    const seconds = activeRateLimitSeconds();
+    if (seconds <= 0) {
+      clearRateLimitTimer();
+      rateLimitUntil = 0;
+      rateLimitContext = '';
+      if (retryBiometricButton) {
+        retryBiometricButton.hidden = false;
+        retryBiometricButton.disabled = false;
+        retryBiometricButton.textContent = 'Intentar nuevamente';
+      }
+      if (dialog.open) {
+        setInstruction('Mira de frente.');
+        setStatus('Ya puedes intentar nuevamente.', 'warning');
+      }
+      return false;
+    }
+
+    if (retryBiometricButton) {
+      retryBiometricButton.hidden = false;
+      retryBiometricButton.disabled = true;
+      retryBiometricButton.textContent = `Reintentar en ${seconds} s`;
+    }
+    if (dialog.open) {
+      if (biometricInstruction) {
+        biometricInstruction.textContent = 'La cámara se reanudará cuando termine la espera.';
+      }
+      setStatus(`Se alcanzó el límite temporal. Podrás volver a intentar en ${seconds} segundos.`, 'danger');
+    }
+    return true;
+  }
+
+  function startRateLimitCountdown() {
+    clearRateLimitTimer();
+    if (!renderRateLimitCountdown()) return false;
+    rateLimitTimer = window.setInterval(renderRateLimitCountdown, 1000);
+    return true;
+  }
+
+  function beginRateLimitCooldown(secondsValue) {
+    const seconds = Math.max(1, Math.ceil(Number(secondsValue) || 30));
+    const context = currentRateLimitContext();
+    const previousUntil = rateLimitContext === context ? rateLimitUntil : 0;
+    rateLimitContext = context;
+    rateLimitUntil = Math.max(previousUntil, Date.now() + seconds * 1000);
+    stopCamera();
+    clearPhoto();
+    clearVerification();
+    startRateLimitCountdown();
   }
 
   function verificationStillValid() {
@@ -444,14 +521,18 @@
     updateSubmitState();
 
     setStatus(
-      attemptNumber === 1 ? 'Preparando reconocimiento facial…' : 'Segundo intento automático…',
+      attemptNumber === 1 ? 'Preparando reconocimiento facial…' : 'Reintentando recuperación técnica…',
       'neutral'
     );
+    setInstruction('Mira de frente. La validación comenzará automáticamente.');
+    if (retryBiometricButton) {
+      retryBiometricButton.disabled = false;
+      retryBiometricButton.textContent = 'Intentar nuevamente';
+    }
 
     if (!biometricApi || !navigator.onLine) throw new Error('camera_unavailable');
-    await biometricApi.prepare?.();
-
     const challenge = await requestBiometricChallenge();
+    await biometricApi.prepare?.();
     const stream = await biometricApi.startCamera(cameraVideo);
 
     if (localRunToken !== runToken || !dialog.open) {
@@ -489,6 +570,10 @@
 
   async function runAutomaticVerification() {
     if (verificationInProgress || !dialog.open || !isBiometricMark()) return;
+    if (activeRateLimitSeconds() > 0) {
+      startRateLimitCountdown();
+      return;
+    }
     if (!photoConsent?.checked) {
       setStatus('Autoriza el uso de la cámara para comenzar.', 'warning');
       photoConsent?.focus({ preventScroll: true });
@@ -510,8 +595,13 @@
         } catch (error) {
           lastError = error;
           stopCamera();
-          if (errorCode(error) === 'biometric_flow_cancelled') return;
-          if (errorCode(error) === 'attendance_biometric_rate_limited') break;
+          const code = errorCode(error);
+          if (code === 'biometric_flow_cancelled') return;
+          if (code === 'attendance_biometric_rate_limited') {
+            beginRateLimitCooldown(error?.retryAfterSeconds);
+            return;
+          }
+          if (!AUTOMATIC_RETRY_ERRORS.has(code)) break;
           if (attempt < MAX_AUTOMATIC_ATTEMPTS) {
             await recoverAfterFailure(error, localRunToken);
             if (localRunToken !== runToken || !dialog.open) return;
@@ -521,9 +611,17 @@
 
       clearVerification();
       clearPhoto();
-      setStatus(`${publicErrorMessage(lastError)} Puedes intentar nuevamente.`, 'danger');
-      retryBiometricButton.hidden = false;
-      retryBiometricButton.focus({ preventScroll: true });
+      const code = errorCode(lastError);
+      const message = code === 'biometric_verification_rejected'
+        ? 'No se confirmó la identidad en este intento. Mira de frente, usa buena iluminación y vuelve a intentarlo.'
+        : `${publicErrorMessage(lastError)} Puedes intentar nuevamente.`;
+      setStatus(message, 'danger');
+      if (retryBiometricButton) {
+        retryBiometricButton.hidden = false;
+        retryBiometricButton.disabled = false;
+        retryBiometricButton.textContent = 'Intentar nuevamente';
+        retryBiometricButton.focus({ preventScroll: true });
+      }
     } finally {
       verificationInProgress = false;
       if (localRunToken === runToken && dialog.open) {
@@ -558,6 +656,8 @@
     cameraStep.hidden = !isBiometricMark();
     photoConsentWrap.hidden = !isBiometricMark();
     retryBiometricButton.hidden = true;
+    retryBiometricButton.disabled = false;
+    retryBiometricButton.textContent = 'Intentar nuevamente';
     submitButton.disabled = true;
     title.textContent = `Confirmar ${labelFor(state.markType)}`;
     submitButton.textContent = `Registrar ${labelFor(state.markType)}`;
@@ -579,10 +679,12 @@
     const localRunToken = runToken;
     requestLocation(localRunToken);
 
-    if (isBiometricMark()) {
+    const rateLimited = activeRateLimitSeconds() > 0;
+    if (rateLimited) startRateLimitCountdown();
+    if (isBiometricMark() && !rateLimited) {
       biometricApi?.prepare?.().catch(() => {});
       window.setTimeout(() => photoConsent?.focus({ preventScroll: true }), 0);
-    } else {
+    } else if (!isBiometricMark()) {
       updateSubmitState();
     }
   }
@@ -660,6 +762,7 @@
     resumeVerificationPending = false;
     if (resumeTimer) window.clearTimeout(resumeTimer);
     resumeTimer = null;
+    clearRateLimitTimer();
     stopCamera();
     clearPhoto();
     clearVerification();
@@ -746,10 +849,20 @@
       }
       return;
     }
+    if (activeRateLimitSeconds() > 0) {
+      startRateLimitCountdown();
+      return;
+    }
     runAutomaticVerification();
   });
 
-  retryBiometricButton?.addEventListener('click', runAutomaticVerification);
+  retryBiometricButton?.addEventListener('click', () => {
+    if (activeRateLimitSeconds() > 0) {
+      startRateLimitCountdown();
+      return;
+    }
+    runAutomaticVerification();
+  });
   submitButton.addEventListener('click', submitMark);
   closeMarkButton?.addEventListener('click', closeMarkDialog);
   cancelMarkButton?.addEventListener('click', closeMarkDialog);

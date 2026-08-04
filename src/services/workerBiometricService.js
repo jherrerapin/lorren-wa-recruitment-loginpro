@@ -19,7 +19,7 @@ export const WORKER_BIOMETRIC_ACTION = Object.freeze({
 });
 export const WORKER_BIOMETRIC_CHALLENGE_ACTIONS = Object.freeze(['TURN_SIDE', 'MOVE_CLOSER']);
 
-const CHALLENGE_TTL_MS = 2 * 60 * 1000;
+const CHALLENGE_TTL_MS = 3 * 60 * 1000;
 const VERIFICATION_TTL_MS = 90 * 1000;
 const MIN_DESCRIPTOR_LENGTH = 64;
 const MAX_DESCRIPTOR_LENGTH = 2048;
@@ -580,8 +580,9 @@ function assessmentTime(event) {
 export async function assertWorkerBiometricAttemptAllowed(prisma, input = {}, options = {}) {
   const workerId = normalizeString(input.workerId, 120);
   const assignmentId = normalizeString(input.assignmentId, 120);
+  const markType = normalizeString(input.markType, 40)?.toUpperCase() || null;
   const now = options.now || new Date();
-  if (!workerId || !assignmentId || !validDate(now)) {
+  if (!workerId || !assignmentId || !validDate(now) || (markType && !BIOMETRIC_MARK_TYPES.has(markType))) {
     throw new Error('attendance_biometric_rate_limit_input_invalid');
   }
   const since = new Date(now.getTime() - RATE_LIMIT_WINDOW_MS);
@@ -596,7 +597,10 @@ export async function assertWorkerBiometricAttemptAllowed(prisma, input = {}, op
     take: 25
   });
   const relevant = events
-    .filter((event) => String(event?.metadata?.workerId || '') === workerId)
+    .filter((event) => (
+      String(event?.metadata?.workerId || '') === workerId
+      && (!markType || String(event?.metadata?.markType || '') === markType)
+    ))
     .sort((left, right) => (assessmentTime(right)?.getTime() || 0) - (assessmentTime(left)?.getTime() || 0));
 
   let consecutiveFailures = 0;
@@ -654,7 +658,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
   });
   if (existing?.metadata) return existing.metadata;
 
-  await assertWorkerBiometricAttemptAllowed(prisma, { workerId, assignmentId }, { now });
+  await assertWorkerBiometricAttemptAllowed(prisma, { workerId, assignmentId, markType }, { now });
 
   const flags = [];
   const state = { score: 0 };
