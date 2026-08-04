@@ -363,17 +363,17 @@ test('los archivos del navegador envían evidencia completa y nunca elevan el li
   assert.match(mobile, /sampleDescriptors:/);
   assert.match(mobile, /sampleRealScores:/);
   assert.match(mobile, /sampleLiveScores:/);
-  assert.match(mobile, /actionDescriptors:/);
-  assert.match(mobile, /actionLiveScores:/);
-  assert.match(mobile, /MODEL_AND_ACTIVE_CHALLENGE_V2/);
-  assert.match(mobile, /REQUIRED_ACTION_FRAMES = 3/);
+  assert.doesNotMatch(mobile, /actionDescriptors:/);
+  assert.doesNotMatch(mobile, /actionLiveScores:/);
+  assert.match(mobile, /MODEL_PASSIVE_LIVENESS_V2/);
+  assert.match(mobile, /VERIFICATION_STAGE_SAMPLES = 2/);
   assert.match(flow, /challengeEvidence:\s*capture\.challengeEvidence/);
   assert.match(flow, /sampleDescriptors:\s*capture\.sampleDescriptors/);
   assert.match(route, /evidenceVersion:\s*WORKER_BIOMETRIC_EVIDENCE_VERSION/);
   assert.match(route, /hasCurrentBiometricEnrollment/);
   assert.match(route, /validUntil:\s*assessment\.validUntil/);
   assert.match(route, /consumeVerifiedAssessmentAfterSuccess/);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v7'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v8'/);
 });
 
 test('los fallos de una etapa no bloquean otra marcación de la jornada', async () => {

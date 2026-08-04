@@ -27,7 +27,7 @@ test('la interfaz muestra una sola instrucción amplia y mantiene el progreso ac
 });
 
 test('la aplicación instalada recibe el motor y la caché corregidos', () => {
-  assert.match(loader, /20260804-worker-portal-biometric-v7/);
-  assert.match(serviceWorker, /lorren-worker-portal-shell-v13/);
-  assert.match(view, /worker-biometric\.js\?v=20260804-worker-portal-biometric-v7/);
+  assert.match(loader, /20260804-worker-portal-biometric-v8/);
+  assert.match(serviceWorker, /lorren-worker-portal-shell-v14/);
+  assert.match(view, /worker-biometric\.js\?v=20260804-worker-portal-biometric-v8/);
 });

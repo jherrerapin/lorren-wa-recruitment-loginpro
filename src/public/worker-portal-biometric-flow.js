@@ -30,8 +30,8 @@
 
   if (!dialog || !resultBox || !submitButton) return;
 
-  const MAX_AUTOMATIC_ATTEMPTS = 2;
-  const FLOW_RELEASE = '20260804-biometric-detection-watchdog-v4';
+  const MAX_AUTOMATIC_ATTEMPTS = 1;
+  const FLOW_RELEASE = '20260804-biometric-simple-recognition-v5';
   const AUTOMATIC_RETRY_ERRORS = new Set([
     'camera_stream_unavailable',
     'camera_stream_muted',

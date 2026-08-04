@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260804-worker-portal-biometric-v7';
+const BIOMETRIC_ASSET_RELEASE = '20260804-worker-portal-biometric-v8';
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
 const LOAD_WORKER_PORTAL_HANDOFF = /Android/i.test(WORKER_PORTAL_USER_AGENT);
 
