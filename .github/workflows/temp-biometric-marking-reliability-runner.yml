@@ -13,7 +13,7 @@ jobs:
   patch-and-validate:
     if: github.head_ref == 'fix/biometric-marking-reliability' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout source branch
         uses: actions/checkout@v4
@@ -26,37 +26,26 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Apply focused reliability patch
-        run: python .github/scripts/temp_apply_biometric_reliability.py
+      - name: Apply bounded grace fix
+        run: python .github/scripts/temp_finalize_biometric_reliability.py
 
-      - name: Validate biometric and portal contracts
+      - name: Validate final biometric contracts
         shell: bash
         run: |
           node --check src/public/worker-biometric-mobile.js
-          node --check src/public/worker-portal-biometric-flow.js
-          node --check src/services/workerBiometricService.js
-          node --check src/routes/workerPortal.js
-          node --test test/worker*Biometric*.test.js test/workerPortalUiCacheContracts.test.js
+          node --test test/workerBiometricMarkingReliabilityContracts.test.js
+          node --test test/workerBiometricMobileStabilityContracts.test.js
+          node --test test/workerBiometricIntegrationContracts.test.js
+          node --test test/workerBiometricAccessibilityContracts.test.js
 
-      - name: Commit validated fix
+      - name: Commit final validated fix
         shell: bash
         run: |
-          rm .github/workflows/apply-biometric-marking-reliability-fix.yml
-          rm .github/workflows/run-biometric-marking-reliability-fix.yml
-          rm .github/scripts/temp_apply_biometric_reliability.py
+          rm .github/scripts/temp_finalize_biometric_reliability.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/public/worker-biometric-mobile.js \
-            src/public/worker-portal-biometric-flow.js \
-            src/public/worker-biometric.js \
-            src/public/worker-portal-sw.js \
-            src/services/workerBiometricService.js \
-            src/routes/workerPortal.js \
-            test/workerBiometricIntegrationContracts.test.js \
             test/workerBiometricMarkingReliabilityContracts.test.js \
-            test/workerPortalUiCacheContracts.test.js \
-            .github/workflows/apply-biometric-marking-reliability-fix.yml \
-            .github/workflows/run-biometric-marking-reliability-fix.yml \
-            .github/scripts/temp_apply_biometric_reliability.py
-          git commit -m "fix: estabilizar marcación y reconocimiento facial"
+            .github/scripts/temp_finalize_biometric_reliability.py
+          git commit -m "fix: acotar prórroga de captura facial"
           git push origin HEAD:${{ github.head_ref }}
