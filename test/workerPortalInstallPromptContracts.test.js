@@ -3,18 +3,25 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
+const bootstrapSource = fs.readFileSync(new URL('../src/public/worker-biometric-core.js', import.meta.url), 'utf8');
 const installSource = fs.readFileSync(new URL('../src/public/worker-portal-install.js', import.meta.url), 'utf8');
 const handoffSource = fs.readFileSync(new URL('../src/public/worker-portal-session-handoff.js', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
 
-test('el cargador incluye instalación, sesión y la versión biométrica endurecida', () => {
+test('el cargador incluye instalación, sesión y actualización sin duplicar el nombre de caché', () => {
   assert.match(loaderSource, /worker-portal-install\.js/);
   assert.match(loaderSource, /worker-portal-session-handoff\.js/);
-  assert.match(loaderSource, /20260801-biometric-integrity-v2/);
+  assert.match(loaderSource, /20260803-worker-portal-runtime-v5/);
+  assert.match(loaderSource, /PORTAL_SHELL_UPDATED/);
+  assert.match(loaderSource, /message\.cacheName/);
+  assert.match(loaderSource, /registration\?\.update/);
+  assert.match(loaderSource, /window\.location\.reload\(\)/);
   assert.match(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF = \/Android/);
+  assert.doesNotMatch(loaderSource, /BIOMETRIC_SHELL_CACHE|lorren-worker-portal-shell-v\d+/);
   assert.doesNotMatch(loaderSource, /LOAD_WORKER_PORTAL_HANDOFF[\s\S]*WhatsApp\|FBAN/);
+  assert.doesNotMatch(bootstrapSource, /humanConfig|captureEnrollment|captureVerification|getUserMedia|human\.detect/);
 });
 
 
@@ -65,6 +72,15 @@ test('el navegador interno transfiere esa sesión a Chrome', () => {
 });
 
 
+test('el observador de transferencia solo procesa controles nuevos y no se realimenta', () => {
+  assert.match(handoffSource, /function mutationAddsInstallButton\(mutation\)/);
+  assert.match(handoffSource, /mutations\.some\(mutationAddsInstallButton\)/);
+  assert.match(handoffSource, /button\.textContent !== 'Abrir en Chrome y descargar'/);
+  assert.match(handoffSource, /button\.dataset\.installAction !== 'session-handoff'/);
+  assert.doesNotMatch(handoffSource, /new MutationObserver\(prepareInstallButtons\)/);
+});
+
+
 test('iPhone conserva la instalación guiada por Safari', () => {
   assert.match(installSource, /iPad\|iPhone\|iPod/);
   assert.match(installSource, /Agregar a pantalla de inicio/);
@@ -80,12 +96,24 @@ test('la instalación no se ofrece dentro de la app ya instalada', () => {
 });
 
 
-test('el service worker elimina la caché antigua y conserva el módulo de instalación', () => {
-  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v8/);
-  assert.match(serviceWorkerSource, /'\/public\/worker-portal-install\.js'/);
+test('el service worker elimina cachés anteriores y actualiza todos los módulos vigentes', () => {
+  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v11/);
+  assert.doesNotMatch(serviceWorkerSource, /CACHE_NAME = 'lorren-worker-portal-shell-v10'/);
   assert.match(serviceWorkerSource, /NETWORK_FIRST_ASSETS/);
+  for (const path of [
+    '/public/worker-biometric.js',
+    '/public/worker-biometric-core.js',
+    '/public/worker-biometric-mobile.js',
+    '/public/worker-portal-biometric-flow.js',
+    '/public/worker-portal-offline.js',
+    '/public/worker-portal-offline-controller.js',
+    '/public/worker-portal-install.js'
+  ]) {
+    assert.match(serviceWorkerSource, new RegExp(`'${path.replaceAll('/', '\\/').replaceAll('.', '\\.')}'`));
+  }
+  assert.doesNotMatch(serviceWorkerSource, /worker-portal-offline-v2\.js/);
   assert.match(serviceWorkerSource, /networkFirstStatic/);
-  assert.match(serviceWorkerSource, /cache: 'no-store'/);
+  assert.match(serviceWorkerSource, /fetch\(request, \{ cache: 'no-store' \}\)/);
   assert.match(serviceWorkerSource, /PORTAL_SHELL_UPDATED/);
 });
 

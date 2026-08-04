@@ -16,7 +16,8 @@
   const CHALLENGE_TIMEOUT_MS = 10_000;
   const FINAL_TIMEOUT_MS = 14_000;
   const CAMERA_READY_TIMEOUT_MS = 10_000;
-  const RUNTIME_MAX_IDLE_MS = 10 * 60 * 1000;
+  const RUNTIME_PREPARE_TIMEOUT_MS = 30_000;
+  const RUNTIME_MAX_IDLE_MS = 12 * 60 * 60 * 1000;
   const ENROLLMENT_SAMPLES = 3;
   const VERIFICATION_STAGE_SAMPLES = 2;
   const REQUIRED_ACTION_FRAMES = 3;
@@ -36,6 +37,28 @@
 
   function sleep(milliseconds) {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  }
+
+  function withTimeout(promise, timeoutMs, errorCode) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(errorCode));
+      }, timeoutMs);
+      Promise.resolve(promise).then((value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(value);
+      }, (error) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        reject(error);
+      });
+    });
   }
 
   function loadHumanScript() {
@@ -196,8 +219,48 @@
     }
   }
 
+  function dialogIsOpen(target) {
+    return Boolean(target && (target.open === true || target.hasAttribute?.('open')));
+  }
+
+  function activePreparationVideo() {
+    const markDialog = document.getElementById('mark-dialog');
+    if (dialogIsOpen(markDialog)) return document.getElementById('camera-video');
+    const enrollmentDialog = document.getElementById('enrollment-dialog');
+    if (dialogIsOpen(enrollmentDialog)) return document.getElementById('enrollment-video');
+    return null;
+  }
+
+  function liveStreamFor(video) {
+    const stream = video?.srcObject;
+    const track = stream?.getVideoTracks?.()[0];
+    return track
+      && track.readyState === 'live'
+      && track.enabled === true
+      && track.muted !== true
+      ? stream
+      : null;
+  }
+
   async function prepare() {
-    const human = await humanInstance();
+    const video = activePreparationVideo();
+    if (video && !liveStreamFor(video)) await startCamera(video);
+
+    let human;
+    try {
+      human = await withTimeout(
+        humanInstance(),
+        RUNTIME_PREPARE_TIMEOUT_MS,
+        'biometric_runtime_unavailable'
+      );
+    } catch (cause) {
+      if (cause?.message === 'biometric_page_not_visible') throw cause;
+      await invalidateRuntime('prepare-failed');
+      const error = new Error('biometric_runtime_unavailable');
+      error.cause = cause;
+      throw error;
+    }
+
     return {
       ready: true,
       backend: human.tf?.getBackend?.() || human.config?.backend || BACKENDS[backendIndex]
@@ -756,6 +819,11 @@
   async function startCamera(video) {
     if (!video || !navigator.mediaDevices?.getUserMedia) throw new Error('camera_unavailable');
     if (document.visibilityState === 'hidden') throw new Error('biometric_page_not_visible');
+    const currentStream = liveStreamFor(video);
+    if (currentStream) {
+      video.hidden = false;
+      return currentStream;
+    }
     stopAllStreams();
     resetVideo(video);
     const attempts = [
@@ -782,19 +850,25 @@
     throw lastError || new Error('camera_stream_unavailable');
   }
 
-  function suspendForLifecycle(reason) {
+  function suspendStreamsForLifecycle(reason) {
     stopAllStreams();
-    invalidateRuntime(reason);
+    runtimeReason = String(reason || 'lifecycle-suspended');
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') suspendForLifecycle('document-hidden');
+    if (document.visibilityState === 'hidden') suspendStreamsForLifecycle('document-hidden');
   }, { capture: true });
-  document.addEventListener('freeze', () => suspendForLifecycle('document-frozen'), { capture: true });
-  document.addEventListener('resume', () => invalidateRuntime('document-resumed'), { capture: true });
-  window.addEventListener('pagehide', () => suspendForLifecycle('page-hidden'), { capture: true });
+  document.addEventListener('freeze', () => {
+    stopAllStreams();
+    invalidateRuntime('document-frozen');
+  }, { capture: true });
+  document.addEventListener('resume', () => {
+    runtimeReason = 'document-resumed';
+  }, { capture: true });
+  window.addEventListener('pagehide', () => suspendStreamsForLifecycle('page-hidden'), { capture: true });
   window.addEventListener('pageshow', (event) => {
-    if (event.persisted || document.wasDiscarded) invalidateRuntime('page-restored');
+    if (document.wasDiscarded) invalidateRuntime('page-discarded');
+    else if (event.persisted) runtimeReason = 'page-restored';
   }, { capture: true });
   if (document.wasDiscarded) invalidateRuntime('page-discarded');
 

@@ -4,20 +4,29 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('el portal carga un único motor móvil, controlador y versión vigente', async () => {
+test('el portal carga un bootstrap mínimo, un único motor y el controlador vigente', async () => {
   const loader = await read('src/public/worker-biometric.js');
-  const corePosition = loader.indexOf('/public/worker-biometric-core.js');
+  const bootstrap = await read('src/public/worker-biometric-core.js');
+  const mobile = await read('src/public/worker-biometric-mobile.js');
+  const bootstrapPosition = loader.indexOf('/public/worker-biometric-core.js');
   const mobilePosition = loader.indexOf('/public/worker-biometric-mobile.js');
   const flowPosition = loader.indexOf('/public/worker-portal-biometric-flow.js');
 
-  assert.ok(corePosition >= 0);
-  assert.ok(mobilePosition > corePosition);
+  assert.ok(bootstrapPosition >= 0);
+  assert.ok(mobilePosition > bootstrapPosition);
   assert.ok(flowPosition > mobilePosition);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260801-biometric-integrity-v2'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260803-worker-portal-runtime-v5'/);
+  assert.match(loader, /navigator\.serviceWorker\.getRegistration\('\/operaciones\/portal'\)/);
+  assert.match(loader, /message\.cacheName/);
+  assert.doesNotMatch(loader, /BIOMETRIC_SHELL_CACHE/);
   assert.doesNotMatch(loader, /worker-portal-hardening\.js/);
   assert.doesNotMatch(loader, /worker-biometric-camera-recovery\.js/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js/);
-  assert.match(loader, /\/operaciones\/portal\/offline\.js/);
+  assert.match(loader, /\/public\/worker-portal-offline\.js/);
+  assert.doesNotMatch(bootstrap, /function humanConfig|captureEnrollment|captureVerification|getUserMedia|human\.detect/);
+  assert.match(mobile, /function humanConfig/);
+  assert.match(mobile, /captureEnrollment/);
+  assert.match(mobile, /captureVerification/);
   await assert.rejects(read('src/public/worker-portal-hardening.js'));
 });
 

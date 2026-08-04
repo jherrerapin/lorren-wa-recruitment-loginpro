@@ -2,20 +2,24 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v8';
+const CACHE_NAME = 'lorren-worker-portal-shell-v11';
 const NETWORK_FIRST_ASSETS = new Set([
   '/public/worker-biometric.js',
+  '/public/worker-biometric-core.js',
+  '/public/worker-biometric-mobile.js',
+  '/public/worker-portal-biometric-flow.js',
+  '/public/worker-portal-offline.js',
+  '/public/worker-portal-offline-controller.js',
   '/public/worker-portal-install.js'
 ]);
 const STATIC_ASSETS = [
-  '/operaciones/portal/offline.js',
   '/operaciones/portal/manifest.webmanifest',
   '/operaciones/portal/icon.svg',
   '/public/worker-biometric.js',
   '/public/worker-biometric-core.js',
   '/public/worker-biometric-mobile.js',
   '/public/worker-portal-biometric-flow.js',
-  '/public/worker-portal-offline-v2.js',
+  '/public/worker-portal-offline.js',
   '/public/worker-portal-offline-controller.js',
   '/public/worker-portal-install.js'
 ];
@@ -25,6 +29,9 @@ const QUEUE_STORE = 'arrivalQueue';
 const RECEIPT_STORE = 'arrivalReceipts';
 const SYNC_TAG = 'lorren-worker-arrivals';
 const MAX_QUEUE_AGE_MS = 72 * 60 * 60 * 1000;
+const DEFAULT_RETRY_DELAY_MS = 30 * 1000;
+const MAX_RETRY_DELAY_MS = MAX_QUEUE_AGE_MS;
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429]);
 const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const MARK_ENDPOINTS = Object.freeze({
   ARRIVAL: 'llegada',
@@ -242,10 +249,29 @@ function isAlreadyRecorded(error) {
   ].includes(error);
 }
 
+function retryableHttpStatus(status) {
+  return RETRYABLE_HTTP_STATUSES.has(status) || status >= 500;
+}
+
+function retryDelayMs(response, now = Date.now()) {
+  const value = response.headers.get('Retry-After');
+  if (!value) return DEFAULT_RETRY_DELAY_MS;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(MAX_RETRY_DELAY_MS, Math.max(DEFAULT_RETRY_DELAY_MS, Math.ceil(seconds * 1000)));
+  }
+  const retryAt = Date.parse(value);
+  if (Number.isFinite(retryAt)) {
+    return Math.min(MAX_RETRY_DELAY_MS, Math.max(DEFAULT_RETRY_DELAY_MS, retryAt - now));
+  }
+  return DEFAULT_RETRY_DELAY_MS;
+}
+
 async function syncRecord(rawRecord) {
   const record = normalizeRecord(rawRecord);
+  const nowMs = Date.now();
   const queuedAt = new Date(record.queuedAt || 0).getTime();
-  if (!Number.isFinite(queuedAt) || Date.now() - queuedAt > MAX_QUEUE_AGE_MS) {
+  if (!Number.isFinite(queuedAt) || nowMs - queuedAt > MAX_QUEUE_AGE_MS) {
     await completeQueueRecord(record, {
       state: 'REJECTED',
       error: 'offline_capture_expired',
@@ -260,11 +286,25 @@ async function syncRecord(rawRecord) {
     return { retry: false, sessionRequired: false, blockAssignment: true };
   }
 
+  const retryNotBefore = new Date(record.retryNotBefore || 0).getTime();
+  if (Number.isFinite(retryNotBefore) && retryNotBefore > nowMs) {
+    const retryAfterMs = retryNotBefore - nowMs;
+    await notifyClients({
+      type: 'ARRIVAL_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      markType: record.markType,
+      error: record.lastError || 'retry_deferred',
+      retryAfterMs
+    });
+    return { retry: true, retryAfterMs, sessionRequired: false, blockAssignment: true };
+  }
+
   const inProgress = {
     ...record,
     state: 'SYNCING',
     attempts: Number(record.attempts || 0) + 1,
     updatedAt: new Date().toISOString(),
+    retryNotBefore: null,
     lastError: null
   };
   await putQueueRecord(inProgress);
@@ -285,9 +325,11 @@ async function syncRecord(rawRecord) {
       body: buildMarkForm(record)
     });
   } catch (error) {
+    const retryAfterMs = DEFAULT_RETRY_DELAY_MS;
     await putQueueRecord({
       ...inProgress,
       state: 'PENDING',
+      retryNotBefore: new Date(Date.now() + retryAfterMs).toISOString(),
       lastError: 'network_unavailable',
       updatedAt: new Date().toISOString()
     });
@@ -295,9 +337,10 @@ async function syncRecord(rawRecord) {
       type: 'ARRIVAL_SYNC_RETRY',
       assignmentId: record.assignmentId,
       markType: record.markType,
-      error: 'network_unavailable'
+      error: 'network_unavailable',
+      retryAfterMs
     });
-    return { retry: true, sessionRequired: false, blockAssignment: true, error };
+    return { retry: true, retryAfterMs, sessionRequired: false, blockAssignment: true, error };
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -321,10 +364,11 @@ async function syncRecord(rawRecord) {
     return { retry: false, sessionRequired: false, blockAssignment: false };
   }
 
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     await putQueueRecord({
       ...inProgress,
       state: 'SESSION_REQUIRED',
+      retryNotBefore: null,
       lastError: payload.error || 'portal_session_required',
       updatedAt: new Date().toISOString()
     });
@@ -332,7 +376,8 @@ async function syncRecord(rawRecord) {
       type: 'ARRIVAL_SYNC_RETRY',
       assignmentId: record.assignmentId,
       markType: record.markType,
-      error: 'portal_session_required'
+      error: 'portal_session_required',
+      retryAfterMs: 0
     });
     return { retry: false, sessionRequired: true, blockAssignment: true };
   }
@@ -355,9 +400,12 @@ async function syncRecord(rawRecord) {
     return { retry: false, sessionRequired: false, blockAssignment: !alreadyRecorded };
   }
 
+  const retry = retryableHttpStatus(response.status);
+  const retryAfterMs = retry ? retryDelayMs(response) : 0;
   await putQueueRecord({
     ...inProgress,
     state: 'PENDING',
+    retryNotBefore: retry ? new Date(Date.now() + retryAfterMs).toISOString() : null,
     lastError: payload.error || `http_${response.status}`,
     updatedAt: new Date().toISOString()
   });
@@ -365,9 +413,10 @@ async function syncRecord(rawRecord) {
     type: 'ARRIVAL_SYNC_RETRY',
     assignmentId: record.assignmentId,
     markType: record.markType,
-    error: payload.error || `http_${response.status}`
+    error: payload.error || `http_${response.status}`,
+    retryAfterMs
   });
-  return { retry: response.status >= 500, sessionRequired: false, blockAssignment: true };
+  return { retry, retryAfterMs, sessionRequired: false, blockAssignment: true };
 }
 
 async function syncQueue({ throwOnRetry = false } = {}) {

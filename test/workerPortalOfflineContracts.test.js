@@ -6,7 +6,8 @@ const routeSource = fs.readFileSync(new URL('../src/routes/workerPortalCore.js',
 const strictRouteSource = fs.readFileSync(new URL('../src/routes/workerPortal.js', import.meta.url), 'utf8');
 const viewSource = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
-const offlineSource = fs.readFileSync(new URL('../src/public/worker-portal-offline-v2.js', import.meta.url), 'utf8');
+const biometricFlowSource = fs.readFileSync(new URL('../src/public/worker-portal-biometric-flow.js', import.meta.url), 'utf8');
+const offlineSource = fs.readFileSync(new URL('../src/public/worker-portal-offline.js', import.meta.url), 'utf8');
 const offlineControllerSource = fs.readFileSync(new URL('../src/public/worker-portal-offline-controller.js', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
@@ -29,15 +30,37 @@ test('el service worker se sirve con alcance explícito', () => {
 });
 
 
-test('el cargador incluye el runtime y controlador offline completos', () => {
-  assert.match(loaderSource, /worker-portal-offline-v2\.js/);
+test('el cargador incluye una sola cola offline y su controlador', () => {
+  assert.match(loaderSource, /worker-portal-offline\.js/);
+  assert.doesNotMatch(loaderSource, /worker-portal-offline-v2\.js/);
   assert.match(loaderSource, /worker-portal-offline-controller\.js/);
   assert.match(serviceWorkerSource, /'\/public\/worker-biometric\.js'/);
   assert.match(serviceWorkerSource, /'\/public\/worker-biometric-core\.js'/);
   assert.match(serviceWorkerSource, /'\/public\/worker-biometric-mobile\.js'/);
   assert.match(serviceWorkerSource, /'\/public\/worker-portal-biometric-flow\.js'/);
-  assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline-v2\.js'/);
+  assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline\.js'/);
+  assert.doesNotMatch(serviceWorkerSource, /worker-portal-offline-v2\.js/);
   assert.match(serviceWorkerSource, /'\/public\/worker-portal-offline-controller\.js'/);
+});
+
+
+test('perder internet no se interpreta como ausencia de registro facial', () => {
+  assert.match(biometricFlowSource, /async function loadBiometricStatus\(\) \{\s*if \(!navigator\.onLine\) \{\s*closeEnrollmentDialog\(\);\s*return;/s);
+  assert.match(biometricFlowSource, /window\.addEventListener\('offline', enterOfflineMode\)/);
+  assert.match(biometricFlowSource, /if \(navigator\.onLine\) loadBiometricStatus\(\);\s*else closeEnrollmentDialog\(\);/s);
+  assert.doesNotMatch(
+    biometricFlowSource,
+    /catch\s*\{[\s\S]*?showModal\(enrollmentDialog\)[\s\S]*?startEnrollmentButton\.disabled = true/
+  );
+});
+
+
+test('los botones regenerados por el modo offline conservan control online al reconectar', () => {
+  assert.match(biometricFlowSource, /function currentMarkButtons\(\)/);
+  assert.match(biometricFlowSource, /function markButtonFromEvent\(event\)/);
+  assert.match(biometricFlowSource, /document\.addEventListener\('click',[\s\S]*openMarkDialog\(button\)/);
+  assert.doesNotMatch(biometricFlowSource, /const markButtons =/);
+  assert.match(biometricFlowSource, /data-offline-disabled/);
 });
 
 
@@ -85,7 +108,7 @@ test('el controlador permite continuar la secuencia completa sin conexión', () 
 
 
 test('la sincronización tiene Background Sync y respaldo por mensaje', () => {
-  assert.match(offlineSource, /registration\.sync\.register\(SYNC_TAG\)/);
+  assert.match(offlineSource, /await ready\.sync\.register\(SYNC_TAG\)/);
   assert.match(offlineSource, /SYNC_ARRIVALS/);
   assert.match(serviceWorkerSource, /self\.addEventListener\('sync'/);
   assert.match(serviceWorkerSource, /self\.addEventListener\('message'/);

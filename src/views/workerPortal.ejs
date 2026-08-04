@@ -29,6 +29,33 @@
     .connectivity-dot { width: 10px; height: 10px; border-radius: 999px; background: #176c36; box-shadow: 0 0 0 4px #eaf8ef; flex: 0 0 auto; }
     .connectivity-bar.offline { background: #fff9e9; border-color: #efd89a; }
     .connectivity-bar.offline .connectivity-dot { background: #a66d00; box-shadow: 0 0 0 4px #fff0bd; }
+    .portal-filter-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 0 14px; overflow: hidden; border: 1px solid #dfe5e9; border-radius: 16px; background: #dfe5e9; }
+    .portal-filter-summary div { padding: 13px 8px; background: #fff; text-align: center; }
+    .portal-filter-summary span { display: block; color: #71808c; font-size: 11px; font-weight: 750; text-transform: uppercase; }
+    .portal-filter-summary strong { display: block; margin-top: 4px; color: #23313d; font-size: 19px; }
+    .portal-filter-panel { margin: 0 0 18px; padding: 16px; border: 1px solid #dfe5e9; border-radius: 18px; background: #fff; box-shadow: 0 10px 28px rgba(23, 33, 43, .06); }
+    .portal-filter-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .portal-filter-head h2 { font-size: 17px; }
+    .portal-filter-head p { margin-top: 3px; font-size: 12px; }
+    .portal-filter-result { color: #176c36; font-size: 12px; font-weight: 850; white-space: nowrap; }
+    .portal-quick-filters { display: flex; gap: 7px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+    .portal-quick-filters::-webkit-scrollbar { display: none; }
+    .portal-quick-filter { flex: 0 0 auto; padding: 8px 11px; border: 1px solid #d5dde2; border-radius: 999px; background: #fff; color: #4b5965; font-size: 12px; font-weight: 800; cursor: pointer; }
+    .portal-quick-filter.active { border-color: #176c36; background: #eaf8ef; color: #176c36; }
+    .portal-filter-grid { display: grid; grid-template-columns: 1fr 1fr 1.15fr auto; gap: 9px; align-items: end; }
+    .portal-filter-field { display: grid; gap: 5px; color: #687682; font-size: 11px; font-weight: 750; }
+    .portal-filter-field input, .portal-filter-field select { width: 100%; min-height: 42px; border: 1px solid #d7dee3; border-radius: 11px; padding: 9px 10px; background: #fff; color: #263645; }
+    .portal-clear-filter { min-height: 42px; border: 0; border-radius: 11px; padding: 9px 12px; background: #edf1f3; color: #42515d; font-weight: 800; cursor: pointer; }
+    .portal-date-groups { display: grid; gap: 20px; }
+    .portal-date-group { display: grid; gap: 10px; }
+    .portal-date-group[hidden], .assignment-card[hidden] { display: none; }
+    .portal-date-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 3px; }
+    .portal-date-title { display: flex; align-items: center; gap: 10px; }
+    .portal-date-dot { width: 9px; height: 9px; border-radius: 50%; background: #176c36; box-shadow: 0 0 0 5px rgba(23, 108, 54, .11); }
+    .portal-date-title h2 { font-size: 16px; text-transform: capitalize; }
+    .portal-group-count { color: #788590; font-size: 12px; font-weight: 750; }
+    .portal-date-list { display: grid; gap: 10px; }
+    .portal-filtered-empty { margin-top: 8px; }
     .assignment-list { display: grid; gap: 14px; }
     .assignment-card { padding: 18px; }
     .assignment-card.completed { border-color: #9dd4af; background: #fbfffc; }
@@ -106,6 +133,11 @@
       #enrollment-dialog .face-stage { width: 100%; max-width: none; }
     }
 
+    @media (max-width: 620px) {
+      .portal-filter-grid { grid-template-columns: 1fr 1fr; }
+      .portal-status-filter, .portal-clear-filter { grid-column: 1 / -1; }
+    }
+
     @media (max-width: 420px) {
       body { padding-left: 12px; padding-right: 12px; }
       .detail-row { grid-template-columns: 86px 1fr; }
@@ -154,6 +186,9 @@
       </section>
     <% } else if (mode === 'active') { %>
       <% const portalAssignments = Array.isArray(assignments) ? assignments : []; %>
+      <% const pendingAssignments = portalAssignments.filter((assignment) => !assignment.arrivalReported && !assignment.departureReported).length; %>
+      <% const inProgressAssignments = portalAssignments.filter((assignment) => assignment.arrivalReported && !assignment.departureReported).length; %>
+      <% const completedAssignments = portalAssignments.filter((assignment) => assignment.departureReported).length; %>
       <header class="portal-header">
         <div><p class="brand">Lórren · Portal del Auxiliar</p><h1>Mi jornada</h1></div>
         <span class="session-chip">Dispositivo verificado</span>
@@ -164,9 +199,41 @@
       </section>
 
       <% if (portalAssignments.length) { %>
+        <section class="portal-filter-summary" aria-label="Resumen de asignaciones">
+          <div><span>Pendientes</span><strong data-portal-summary-status="PENDING"><%= pendingAssignments %></strong></div>
+          <div><span>En curso</span><strong data-portal-summary-status="IN_PROGRESS"><%= inProgressAssignments %></strong></div>
+          <div><span>Finalizadas</span><strong data-portal-summary-status="COMPLETED"><%= completedAssignments %></strong></div>
+        </section>
+
+        <section class="portal-filter-panel" aria-label="Filtros de asignaciones">
+          <div class="portal-filter-head">
+            <div><h2>Organizar asignaciones</h2><p>Filtra por periodo o estado.</p></div>
+            <span id="assignment-filter-result" class="portal-filter-result"><%= portalAssignments.length %> visibles</span>
+          </div>
+          <div class="portal-quick-filters" role="group" aria-label="Periodos rápidos">
+            <button type="button" class="portal-quick-filter" data-portal-preset="today">Hoy</button>
+            <button type="button" class="portal-quick-filter active" data-portal-preset="upcoming">Próximas</button>
+            <button type="button" class="portal-quick-filter" data-portal-preset="week">7 días</button>
+            <button type="button" class="portal-quick-filter" data-portal-preset="all">Todas</button>
+          </div>
+          <div class="portal-filter-grid">
+            <label class="portal-filter-field">Desde<input type="date" id="assignment-date-from"></label>
+            <label class="portal-filter-field">Hasta<input type="date" id="assignment-date-to"></label>
+            <label class="portal-filter-field portal-status-filter">Estado
+              <select id="assignment-status-filter">
+                <option value="">Todos los estados</option>
+                <option value="PENDING">Pendientes</option>
+                <option value="IN_PROGRESS">En curso</option>
+                <option value="COMPLETED">Finalizadas</option>
+              </select>
+            </label>
+            <button type="button" class="portal-clear-filter" id="clear-assignment-filters">Limpiar</button>
+          </div>
+        </section>
+
         <section class="assignment-list" aria-label="Asignaciones activas">
           <% portalAssignments.forEach((assignment) => { %>
-            <article class="assignment-card <%= assignment.departureReported ? 'completed' : '' %>" data-assignment-card="<%= assignment.id %>">
+            <article class="assignment-card <%= assignment.departureReported ? 'completed' : '' %>" data-assignment-card="<%= assignment.id %>" data-portal-status="<%= assignment.departureReported ? 'COMPLETED' : assignment.arrivalReported ? 'IN_PROGRESS' : 'PENDING' %>">
               <p class="assignment-date"><%= assignment.dateLabel %></p>
               <h2><%= assignment.clientName %></h2>
               <p class="assignment-time"><%= assignment.timeLabel %></p>
@@ -189,6 +256,10 @@
               </div>
             </article>
           <% }); %>
+        </section>
+        <section id="portal-filtered-empty" class="empty-state portal-filtered-empty" hidden>
+          <h2>No hay asignaciones en este filtro</h2>
+          <p>Cambia el periodo o limpia los filtros para ver otras fechas.</p>
         </section>
       <% } else { %>
         <section class="empty-state"><h2>No tienes asignaciones activas</h2></section>
@@ -245,7 +316,7 @@
         </div>
       </dialog>
 
-      <script src="/public/worker-biometric.js?v=20260730-mobile-camera-v3"></script>
+      <script src="/public/worker-biometric.js?v=20260803-worker-portal-runtime-v5"></script>
     <% } else if (mode === 'unavailable') { %>
       <section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Portal temporalmente no disponible</h1><div class="status warning">Intenta nuevamente en unos minutos</div></section>
     <% } else { %>

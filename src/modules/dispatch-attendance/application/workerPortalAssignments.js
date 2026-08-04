@@ -9,7 +9,6 @@ import {
   formatDispatchMinutes
 } from '../domain/attendanceWorkdayPolicy.js';
 
-const PORTAL_COMPLETED_WINDOW_MS = 24 * 60 * 60 * 1000;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 
 function requireNonEmptyString(value, label) {
@@ -259,15 +258,6 @@ function buildPortalAssignment(assignment) {
   };
 }
 
-function isPortalRelevant(assignment, now) {
-  if (!assignment.departureReported) return true;
-  const departureAt = assignment.departureReportedAt
-    ? new Date(assignment.departureReportedAt).getTime()
-    : Number.NaN;
-  return Number.isFinite(departureAt)
-    && departureAt >= now.getTime() - PORTAL_COMPLETED_WINDOW_MS;
-}
-
 function assignmentInclude() {
   return {
     attendanceSession: {
@@ -285,7 +275,7 @@ function assignmentInclude() {
 export async function loadWorkerPortalAssignments(prisma, input = {}) {
   requireAssignmentReader(prisma, 'findMany');
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
-  const now = input.now === undefined ? new Date() : requireDate(input.now, 'worker_portal_now');
+  if (input.now !== undefined) requireDate(input.now, 'worker_portal_now');
   const records = await prisma.dispatchAssignment.findMany({
     where: {
       workerId,
@@ -296,7 +286,6 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
 
   return records
     .map((record) => buildPortalAssignment(record))
-    .filter((record) => isPortalRelevant(record, now))
     .sort((left, right) => {
       const leftTime = left.expectedStartAt ? new Date(left.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
       const rightTime = right.expectedStartAt ? new Date(right.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;

@@ -30,12 +30,6 @@ const HUMAN_CDN_ORIGIN = 'https://cdn.jsdelivr.net';
 const WORKER_PORTAL_REQUEST_HEADER = 'worker-portal';
 const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
 const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
-const STRICT_MARK_PATHS = [
-  '/asignaciones/:assignmentId/llegada',
-  '/asignaciones/:assignmentId/inicio-almuerzo',
-  '/asignaciones/:assignmentId/fin-almuerzo',
-  '/asignaciones/:assignmentId/salida'
-];
 const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 
 function markTypeFromPath(pathname = '') {
@@ -109,18 +103,6 @@ function installBiometricCspBridge(_req, res, next) {
     return originalSet(field, value);
   };
   return next();
-}
-
-function routeLayer(router, path, method = 'post') {
-  return router.stack.find((layer) => layer.route?.path === path && layer.route.methods?.[method]);
-}
-
-function prependRouteHandlers(router, path, handlers) {
-  const target = routeLayer(router, path);
-  if (!target) throw new Error(`worker_portal_strict_route_missing:${path}`);
-  const temporary = express.Router();
-  temporary.post(path, ...handlers);
-  target.route.stack.unshift(...temporary.stack[0].route.stack);
 }
 
 function usesInjectedAttendanceCore(options = {}) {
@@ -362,23 +344,26 @@ export function workerPortalRouter(prisma, options = {}) {
     }
   }
 
-  const router = coreWorkerPortalRouter(prisma, injectedCore ? {
+  function strictMarkMiddleware(req, res, next) {
+    return markUpload(req, res, (error) => {
+      if (error) return next(error);
+      return strictMarkGuard(req, res, next);
+    });
+  }
+
+  const coreRouter = coreWorkerPortalRouter(prisma, injectedCore ? {
     ...options,
     repository: getRepository()
   } : {
     ...options,
     repository: getRepository(),
-    markUpload: (_req, _res, next) => next(),
+    markUpload: strictMarkMiddleware,
     arrivalUpload: undefined
   });
 
-  const cspRouter = express.Router();
-  cspRouter.use(installBiometricCspBridge);
-  router.stack.unshift(...cspRouter.stack);
-
-  if (!injectedCore) {
-    STRICT_MARK_PATHS.forEach((path) => prependRouteHandlers(router, path, [markUpload, strictMarkGuard]));
-  }
+  const router = express.Router();
+  router.use(installBiometricCspBridge);
+  router.use(coreRouter);
 
   router.post('/biometria/estado', biometricJson, async (req, res) => {
     if (!requirePortalRequest(req, res)) return;
