@@ -16,12 +16,20 @@ import { captureConsentedProfileData } from '../src/services/consentProfileCaptu
 import { getSupervisorPhone } from '../src/services/adminSupervisor.js';
 
 test('el gate no intercepta mensajes del supervisor', () => {
-  const decision = evaluateConsentBoundary(
-    { dataConsentStatus: 'PENDING', currentStep: 'COLLECTING_DATA' },
-    { from: getSupervisorPhone(), type: 'text', text: { body: 'Debe llevar copia de la cédula' } }
-  );
+  const previousSupervisorPhone = process.env.ADMIN_WHATSAPP_NUMBER;
+  process.env.ADMIN_WHATSAPP_NUMBER = '+57 300 000 0001';
 
-  assert.deepEqual(decision, { block: false, reason: 'supervisor_message' });
+  try {
+    const decision = evaluateConsentBoundary(
+      { dataConsentStatus: 'PENDING', currentStep: 'COLLECTING_DATA' },
+      { from: getSupervisorPhone(), type: 'text', text: { body: 'TEST-SUPERVISOR-INSTRUCTION' } }
+    );
+
+    assert.deepEqual(decision, { block: false, reason: 'supervisor_message' });
+  } finally {
+    if (previousSupervisorPhone === undefined) delete process.env.ADMIN_WHATSAPP_NUMBER;
+    else process.env.ADMIN_WHATSAPP_NUMBER = previousSupervisorPhone;
+  }
 });
 
 test('interés o nombre de un cargo no se confunden con datos personales en MENU', () => {
