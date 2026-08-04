@@ -32,6 +32,9 @@ test('el límite temporal muestra cuenta regresiva y bloquea el botón hasta ven
 test('la segunda muestra recibe tiempo adicional sin reducir liveness ni anti-spoof', () => {
   assert.match(mobile, /SAMPLE_COMPLETION_GRACE_MS = 12_000/);
   assert.match(mobile, /ACTION_COMPLETION_GRACE_MS = 8_000/);
+  assert.match(mobile, /let sampleGraceGranted = false/);
+  assert.match(mobile, /samples\.length < samplesRequired && !sampleGraceGranted/);
+  assert.match(mobile, /sampleGraceGranted = true/);
   assert.match(mobile, /activeDeadline = Math\.max\(activeDeadline, Date\.now\(\) \+ SAMPLE_COMPLETION_GRACE_MS\)/);
   assert.match(mobile, /scores\.realScore < MIN_REAL_SCORE/);
   assert.match(mobile, /scores\.liveScore < MIN_LIVE_SCORE/);

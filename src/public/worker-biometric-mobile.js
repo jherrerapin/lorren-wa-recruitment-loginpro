@@ -429,6 +429,7 @@
     let consecutiveFront = 0;
     let latest = null;
     let activeDeadline = deadline;
+    let sampleGraceGranted = false;
 
     while (Date.now() < activeDeadline) {
       const detected = await detectOneFace(human, video, onStatus);
@@ -471,7 +472,8 @@
         onStatus?.('No se pudieron leer los rasgos. Mantén la posición.');
       }
 
-      if (samples.length > 0 && samples.length < samplesRequired) {
+      if (samples.length > 0 && samples.length < samplesRequired && !sampleGraceGranted) {
+        sampleGraceGranted = true;
         activeDeadline = Math.max(activeDeadline, Date.now() + SAMPLE_COMPLETION_GRACE_MS);
       }
 
