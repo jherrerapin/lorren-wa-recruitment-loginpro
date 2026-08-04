@@ -373,7 +373,7 @@ test('los archivos del navegador envían evidencia completa y nunca elevan el li
   assert.match(route, /hasCurrentBiometricEnrollment/);
   assert.match(route, /validUntil:\s*assessment\.validUntil/);
   assert.match(route, /consumeVerifiedAssessmentAfterSuccess/);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v6'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v7'/);
 });
 
 test('los fallos de una etapa no bloquean otra marcación de la jornada', async () => {

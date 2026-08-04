@@ -11,6 +11,7 @@
   const MIN_REAL_SCORE = 0.55;
   const MIN_LIVE_SCORE = 0.55;
   const DETECTION_INTERVAL_MS = 90;
+  const DETECTION_TIMEOUT_MS = 8_000;
   const SAMPLE_COMPLETION_GRACE_MS = 12_000;
   const ACTION_COMPLETION_GRACE_MS = 8_000;
   const ENROLLMENT_TIMEOUT_MS = 30_000;
@@ -400,11 +401,19 @@
     let result;
     activeDetections += 1;
     try {
-      result = await human.detect(video);
+      onStatus?.('Analizando tu rostro. Mantén la posición dentro del marco.');
+      result = await withTimeout(
+        human.detect(video),
+        DETECTION_TIMEOUT_MS,
+        'biometric_detection_timeout'
+      );
       runtimeLastUsedAt = Date.now();
     } catch (cause) {
-      invalidateRuntime('detect-failed');
-      const error = new Error('biometric_runtime_unavailable');
+      const code = cause?.message === 'biometric_detection_timeout'
+        ? 'biometric_detection_timeout'
+        : 'biometric_runtime_unavailable';
+      invalidateRuntime(code === 'biometric_detection_timeout' ? 'detect-timeout' : 'detect-failed');
+      const error = new Error(code);
       error.cause = cause;
       throw error;
     } finally {

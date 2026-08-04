@@ -15,7 +15,7 @@ test('el portal carga un bootstrap mínimo, un único motor y el controlador vig
   assert.ok(bootstrapPosition >= 0);
   assert.ok(mobilePosition > bootstrapPosition);
   assert.ok(flowPosition > mobilePosition);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v6'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v7'/);
   assert.match(loader, /navigator\.serviceWorker\.getRegistration\('\/operaciones\/portal'\)/);
   assert.match(loader, /message\.cacheName/);
   assert.doesNotMatch(loader, /BIOMETRIC_SHELL_CACHE/);
@@ -45,6 +45,8 @@ test('la autorización aparece antes del estado, la cámara y la ubicación', as
   assert.doesNotMatch(view, /id="retry-photo"/);
   assert.match(view, /id="retry-biometric" hidden>Intentar nuevamente/);
   assert.match(view, /aria-live="assertive"/);
+  assert.match(view, /id="biometric-instruction"[^>]*hidden[^>]*aria-hidden="true"/);
+  assert.match(view, /#biometric-instruction\s*\{\s*display:\s*none/);
 });
 
 test('la ventana móvil mantiene autorización, estado, cámara y acciones sin desplazamiento', async () => {
