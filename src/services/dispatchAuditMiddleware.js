@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
 
@@ -7,6 +8,7 @@ const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 const DEV_TEST_ASSIGNMENT_STATUSES = new Set(['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED']);
 const GUARDED_PRISMA_CLIENTS = new WeakSet();
+const AUDIT_FINGERPRINT_CONTEXT = 'lorren-dispatch-audit-v1';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -14,16 +16,42 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
-function safeJson(value) {
-  if (!value || typeof value !== 'object') return value || null;
-  try {
-    return JSON.parse(JSON.stringify(value, (_key, item) => {
-      if (typeof item === 'string' && item.length > 500) return `${item.slice(0, 500)}...`;
-      return item;
-    }));
-  } catch (_error) {
-    return { error: 'unserializable_payload' };
+function auditFingerprint(value, namespace = 'entity') {
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+  const digest = createHash('sha256')
+    .update(AUDIT_FINGERPRINT_CONTEXT, 'utf8')
+    .update('\0', 'utf8')
+    .update(namespace, 'utf8')
+    .update('\0', 'utf8')
+    .update(normalized, 'utf8')
+    .digest('hex')
+    .slice(0, 24);
+  return `audit-${digest}`;
+}
+
+function sanitizeFallbackRoute(pathname = '') {
+  const path = String(pathname || '').split('?')[0];
+  if (!path) return null;
+  return path
+    .split('/')
+    .map((segment) => {
+      if (!segment) return segment;
+      if (/^[a-f0-9]{32,}$/i.test(segment)) return ':token';
+      if (/^\d+$/.test(segment)) return ':id';
+      if (/^[A-Za-z0-9_-]{20,}$/.test(segment)) return ':id';
+      return segment;
+    })
+    .join('/');
+}
+
+function normalizedRouteName(req) {
+  const routePath = typeof req.route?.path === 'string' ? req.route.path : null;
+  if (routePath) {
+    const baseUrl = normalizeString(req.baseUrl) || '';
+    return `${baseUrl}${routePath}`.replace(/\/{2,}/g, '/') || '/';
   }
+  return sanitizeFallbackRoute(req.path || req.originalUrl);
 }
 
 function inferAction(req) {
@@ -63,7 +91,7 @@ function targetFor(req) {
     || normalizeString(req.body?.context?.serviceRequestId)
     || normalizeString(req.body?.serviceRequestId)
     || normalizeString(req.body?.workerId)
-    || req.path
+    || normalizedRouteName(req)
     || 'dispatch';
 }
 
@@ -286,24 +314,22 @@ function installPayrollHtmlBridge(req, res) {
 }
 
 export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
+  const routeName = normalizedRouteName(req);
+  const statusCode = Number(res.statusCode || 0);
   return {
     entityType: 'DISPATCH',
-    entityId: targetFor(req),
-    entityLabel: normalizeString(req.path),
+    entityId: auditFingerprint(targetFor(req), 'target'),
+    entityLabel: routeName,
     action: inferAction(req),
-    actorUsername: actorUsername(req),
+    actorUsername: auditFingerprint(actorUsername(req), 'actor'),
     actorRole: normalizeString(req.session?.userRole || req.userRole),
     actorSource: actorSource(req),
-    userAgent: normalizeString(req.get('user-agent')),
     method: req.method || null,
-    path: req.originalUrl || req.path || null,
+    path: routeName,
     metadata: {
-      statusCode: res.statusCode,
-      durationMs: Date.now() - startedAt,
-      body: safeJson(req.body),
-      params: safeJson(req.params),
-      query: safeJson(req.query),
-      referer: normalizeString(req.get('referer'))
+      statusCode,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      operationResult: statusCode >= 200 && statusCode < 400 ? 'SUCCESS' : 'FAILURE'
     }
   };
 }
