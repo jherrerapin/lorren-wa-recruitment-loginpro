@@ -31,7 +31,13 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+
           script = Path('.github/scripts/temp_apply_biometric_reliability.py').read_text(encoding='utf-8')
+          ambiguous = "    \"\"\"  const workerId = normalizeString(input.workerId, 120);\n  const assignmentId = normalizeString(input.assignmentId, 120);"
+          precise = "    \"\"\"export async function assertWorkerBiometricAttemptAllowed(prisma, input = {}, options = {}) {\n  const workerId = normalizeString(input.workerId, 120);\n  const assignmentId = normalizeString(input.assignmentId, 120);"
+          if script.count(ambiguous) != 2:
+              raise SystemExit(f'Expected two rate-limit script anchors, found {script.count(ambiguous)}')
+          script = script.replace(ambiguous, precise, 2)
           exec(compile(script, 'biometric-reliability-patch', 'exec'))
           PY
 
