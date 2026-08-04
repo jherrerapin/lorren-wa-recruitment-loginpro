@@ -67,6 +67,8 @@ Advertencias:
 
 ## Fuentes de verdad
 
+Antes de modificar cualquier archivo del núcleo conversacional de reclutamiento, es obligatorio leer completamente `lorren_comportamiento_completo.md` y el issue maestro #901. Esta lectura debe realizarse antes de proponer el plan o editar código. Si el contrato todavía no existe en `main`, debe revisarse en el PR #902; no se debe cambiar el núcleo conversacional sin haberlo leído.
+
 Antes de modificar comportamiento, revisar en este orden:
 
 1. Issue y criterios de aceptación de la tarea.
