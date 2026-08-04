@@ -117,7 +117,19 @@ test('active WhatsApp engine keeps persistent Railway auth, LID mapping and rest
   const source = readSource('src/services/dispatchWhatsappWebServiceV6.js');
   const schema = readSource('prisma/schema.prisma');
   assert.match(source, /RAILWAY_VOLUME_MOUNT_PATH/);
-  assert.match(source, /new WhatsappLocalAuth\(\{ clientId: 'dispatch', dataPath \}\)/);
+  const runtimeLines = source.split('\n').map((line) => line.trim());
+  assert.equal(
+    runtimeLines.filter((line) => line === "const RUNTIME_CLIENT_ID = IS_DEV_TEST_RUNTIME ? 'dispatch-dev-test' : 'dispatch';").length,
+    1
+  );
+  assert.equal(
+    runtimeLines.filter((line) => line === "const RUNTIME_AUTH_DIRECTORY = IS_DEV_TEST_RUNTIME ? 'dispatch-wweb-auth-test' : 'dispatch-wweb-auth';").length,
+    1
+  );
+  assert.equal(
+    runtimeLines.filter((line) => line === 'authStrategy: new WhatsappLocalAuth({ clientId: RUNTIME_CLIENT_ID, dataPath }),').length,
+    1
+  );
   assert.match(source, /getContactLidAndPhone/);
   assert.match(source, /const pendingConfirmationByChatId = new Map\(\)/);
   assert.match(source, /prisma\.dispatchWhatsappConfirmation\.createMany/);
