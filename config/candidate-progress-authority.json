@@ -158,6 +158,22 @@
       "notes": "Proyecta el paso en estadísticas; no decide ni persiste transiciones."
     },
     {
+      "path": "src/services/conversationAudit.js",
+      "role": "read_only_projection",
+      "trackedFields": [
+        "currentStep"
+      ],
+      "notes": "Proyecta el paso vigente en diagnósticos de auditoría conversacional; no importa Prisma ni persiste progreso."
+    },
+    {
+      "path": "src/services/vacancyDashboardSearchExpansion.js",
+      "role": "read_only_projection",
+      "trackedFields": [
+        "currentStep"
+      ],
+      "notes": "Selecciona currentStep para completar resultados visibles del dashboard; solo consulta Candidate con findMany y no persiste progreso."
+    },
+    {
       "path": "src/services/reminder.js",
       "role": "read_only_support",
       "trackedFields": [
