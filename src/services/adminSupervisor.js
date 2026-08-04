@@ -13,19 +13,44 @@ import {
 import { completeSupervisorReviewAfterDelivery } from './candidateStateService.js';
 import { OPENAI_SUPERVISOR_REPLY_MODEL } from './openAiModelConfig.js';
 
-const DEFAULT_SUPERVISOR_PHONE = '3052982551';
+export const SUPERVISOR_PHONE_ENV = 'ADMIN_WHATSAPP_NUMBER';
+const SUPERVISOR_PHONE_PATTERN = /^\+?[\d\s().-]+$/;
+const MIN_SUPERVISOR_PHONE_DIGITS = 10;
+const MAX_SUPERVISOR_PHONE_DIGITS = 15;
 const WINDOW_WARNING_AFTER_MS = 23 * 60 * 60 * 1000;
 const WINDOW_CLOSED_AFTER_MS = 24 * 60 * 60 * 1000;
 const DOT_COOLDOWN_MS = 60 * 60 * 1000;
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const SUPERVISOR_REPLY_MODEL = OPENAI_SUPERVISOR_REPLY_MODEL;
 
-export function getSupervisorPhone() {
-  return String(process.env.ADMIN_WHATSAPP_NUMBER || process.env.FORWARD_MEDIA_TO || DEFAULT_SUPERVISOR_PHONE).replace(/\D/g, '');
+function normalizeSupervisorPhone(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || !SUPERVISOR_PHONE_PATTERN.test(raw)) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < MIN_SUPERVISOR_PHONE_DIGITS || digits.length > MAX_SUPERVISOR_PHONE_DIGITS) return null;
+  return digits;
 }
 
-export function isSupervisorPhone(phone = '') {
-  return String(phone || '').replace(/\D/g, '') === getSupervisorPhone();
+function reportSupervisorRecipientUnavailable() {
+  console.error('[ADMIN_SUPERVISOR_RECIPIENT_UNAVAILABLE]', {
+    requiredVariable: SUPERVISOR_PHONE_ENV
+  });
+}
+
+function requireSupervisorPhone(env = process.env) {
+  const supervisorPhone = getSupervisorPhone(env);
+  if (!supervisorPhone) reportSupervisorRecipientUnavailable();
+  return supervisorPhone;
+}
+
+export function getSupervisorPhone(env = process.env) {
+  return normalizeSupervisorPhone(env?.[SUPERVISOR_PHONE_ENV]);
+}
+
+export function isSupervisorPhone(phone = '', env = process.env) {
+  const supervisorPhone = getSupervisorPhone(env);
+  if (!supervisorPhone) return false;
+  return normalizeSupervisorPhone(phone) === supervisorPhone;
 }
 
 function includesAny(value = '', terms = []) {
@@ -61,8 +86,7 @@ export function localizeManualReviewReason(reason = '', reviewType = 'question',
   return 'Se requiere apoyo del equipo para responder con precisión al candidato.';
 }
 
-async function getOrCreateSupervisorCandidate(prisma) {
-  const supervisorPhone = getSupervisorPhone();
+async function getOrCreateSupervisorCandidate(prisma, supervisorPhone) {
   return prisma.candidate.upsert({
     where: { phone: supervisorPhone },
     update: {},
@@ -70,8 +94,8 @@ async function getOrCreateSupervisorCandidate(prisma) {
   });
 }
 
-async function saveSupervisorThreadOutbound(prisma, body, rawPayload = {}) {
-  const supervisor = await getOrCreateSupervisorCandidate(prisma);
+async function saveSupervisorThreadOutbound(prisma, supervisorPhone, body, rawPayload = {}) {
+  const supervisor = await getOrCreateSupervisorCandidate(prisma, supervisorPhone);
   return saveSupervisorOutbound(prisma, supervisor.id, body, rawPayload);
 }
 
@@ -165,16 +189,15 @@ async function saveSupervisorOutbound(prisma, candidateId, body, rawPayload = {}
       target: 'admin_supervisor',
       visibility: 'internal',
       neverSendToCandidate: true,
-      language: 'es-CO',
-      supervisorPhone: getSupervisorPhone(),
-      body
+      language: 'es-CO'
     }
   });
   return result.message;
 }
 
 export async function ensureSupervisorWindowOpen(prisma, { now = new Date() } = {}) {
-  const supervisorPhone = getSupervisorPhone();
+  const supervisorPhone = requireSupervisorPhone();
+  if (!supervisorPhone) return false;
   const supervisor = await prisma?.candidate?.findUnique?.({ where: { phone: supervisorPhone } });
   if (!supervisor?.id || !supervisor.lastInboundAt) return false;
 
@@ -199,7 +222,8 @@ export async function ensureSupervisorWindowOpen(prisma, { now = new Date() } = 
 }
 
 export async function notifySupervisorManualReview(prisma, candidate, { reason = 'Intervención humana requerida', inboundText = '', reviewType = 'question', extra = {} } = {}) {
-  const supervisorPhone = getSupervisorPhone();
+  const supervisorPhone = requireSupervisorPhone();
+  if (!supervisorPhone) return { sent: false, reason: 'supervisor_recipient_unavailable' };
   const publicReason = localizeManualReviewReason(reason, reviewType, extra);
   const scheduledInterview = await hasScheduledInterview(prisma, candidate);
   const body = [
@@ -212,7 +236,7 @@ export async function notifySupervisorManualReview(prisma, candidate, { reason =
   ].filter(Boolean).join('\n');
 
   await sendTextMessage(supervisorPhone, body);
-  await saveSupervisorThreadOutbound(prisma, body, {
+  await saveSupervisorThreadOutbound(prisma, supervisorPhone, body, {
     ...extra,
     source: 'admin_manual_review_request',
     manualReviewType: reviewType,
@@ -224,10 +248,12 @@ export async function notifySupervisorManualReview(prisma, candidate, { reason =
     hasScheduledInterview: scheduledInterview,
     resolved: false
   });
+  return { sent: true };
 }
 
 export async function notifySupervisorAttachment(prisma, candidate, { mediaType, media = {}, caption = '', sequence = null, total = null } = {}) {
-  const supervisorPhone = getSupervisorPhone();
+  const supervisorPhone = requireSupervisorPhone();
+  if (!supervisorPhone) return { sent: false, reason: 'supervisor_recipient_unavailable' };
   const scheduledInterview = await hasScheduledInterview(prisma, candidate);
   const position = sequence ? ` ${sequence}${total ? `/${total}` : ''}` : '';
   const typeLabel = mediaType === 'document' ? 'Documento' : (mediaType === 'audio' ? 'Audio' : (mediaType === 'image' ? 'Foto' : 'Adjunto'));
@@ -240,7 +266,7 @@ export async function notifySupervisorAttachment(prisma, candidate, { mediaType,
     displayCaption ? `Archivo: ${displayCaption}` : null
   ].filter(Boolean).join('\n');
   await sendTextMessage(supervisorPhone, body);
-  await saveSupervisorThreadOutbound(prisma, body, {
+  await saveSupervisorThreadOutbound(prisma, supervisorPhone, body, {
     source: 'admin_attachment_forward_notice',
     candidateId: candidate.id,
     candidatePhone: candidate.phone,
@@ -257,6 +283,7 @@ export async function notifySupervisorAttachment(prisma, candidate, { mediaType,
   } else if (mediaType === 'audio' && media?.id) {
     await sendAudioMessage(supervisorPhone, { id: media.id });
   }
+  return { sent: true };
 }
 
 async function findPendingManualRequest(prisma) {
@@ -523,9 +550,10 @@ async function addSupervisorKnowledge(prisma, candidate, content, tags = 'admin_
 }
 
 export async function handleSupervisorInbound(prisma, message = {}) {
-  const supervisorPhone = getSupervisorPhone();
+  const supervisorPhone = requireSupervisorPhone();
+  if (!supervisorPhone) return { handled: false, action: 'supervisor_recipient_unavailable' };
   const body = String(message?.text?.body || '').trim();
-  const supervisor = await getOrCreateSupervisorCandidate(prisma);
+  const supervisor = await getOrCreateSupervisorCandidate(prisma, supervisorPhone);
 
   await persistInboundConversationMessage(prisma, {
     candidateId: supervisor.id,
@@ -619,7 +647,6 @@ export async function handleSupervisorInbound(prisma, message = {}) {
     body: candidateReply,
     rawPayload: {
       source: 'admin_supervisor_answer',
-      supervisorPhone,
       originalSupervisorInstruction: body,
       aiModel: candidateReplyResult?.model || null,
       aiFallbackUsed: Boolean(candidateReplyResult?.fallbackUsed),
