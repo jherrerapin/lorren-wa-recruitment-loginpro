@@ -443,7 +443,8 @@ export function workerPortalRouter(prisma, options = {}) {
       }
       await assertAttemptAllowedFn({
         workerId: portalSession.workerId,
-        assignmentId: context.assignmentId
+        assignmentId: context.assignmentId,
+        markType: context.markType
       }, { now });
       const challenge = issueChallengeFn({
         workerId: portalSession.workerId,

@@ -11,6 +11,8 @@
   const MIN_REAL_SCORE = 0.55;
   const MIN_LIVE_SCORE = 0.55;
   const DETECTION_INTERVAL_MS = 90;
+  const SAMPLE_COMPLETION_GRACE_MS = 12_000;
+  const ACTION_COMPLETION_GRACE_MS = 8_000;
   const ENROLLMENT_TIMEOUT_MS = 30_000;
   const BASELINE_TIMEOUT_MS = 14_000;
   const CHALLENGE_TIMEOUT_MS = 10_000;
@@ -225,9 +227,15 @@
 
   function activePreparationVideo() {
     const markDialog = document.getElementById('mark-dialog');
-    if (dialogIsOpen(markDialog)) return document.getElementById('camera-video');
+    const markConsent = document.getElementById('photo-consent');
+    if (dialogIsOpen(markDialog) && markConsent?.checked === true) {
+      return document.getElementById('camera-video');
+    }
     const enrollmentDialog = document.getElementById('enrollment-dialog');
-    if (dialogIsOpen(enrollmentDialog)) return document.getElementById('enrollment-video');
+    const enrollmentConsent = document.getElementById('enrollment-consent');
+    if (dialogIsOpen(enrollmentDialog) && enrollmentConsent?.checked === true) {
+      return document.getElementById('enrollment-video');
+    }
     return null;
   }
 
@@ -420,8 +428,10 @@
     const samples = [];
     let consecutiveFront = 0;
     let latest = null;
+    let activeDeadline = deadline;
+    let sampleGraceGranted = false;
 
-    while (Date.now() < deadline) {
+    while (Date.now() < activeDeadline) {
       const detected = await detectOneFace(human, video, onStatus);
       if (!detected || !frontFacing(detected.face)) {
         consecutiveFront = 0;
@@ -462,6 +472,11 @@
         onStatus?.('No se pudieron leer los rasgos. Mantén la posición.');
       }
 
+      if (samples.length > 0 && samples.length < samplesRequired && !sampleGraceGranted) {
+        sampleGraceGranted = true;
+        activeDeadline = Math.max(activeDeadline, Date.now() + SAMPLE_COMPLETION_GRACE_MS);
+      }
+
       if (samples.length >= samplesRequired) {
         const selected = samples.slice(-samplesRequired);
         return {
@@ -474,7 +489,7 @@
           liveScore: Math.min(...selected.map((sample) => sample.liveScore))
         };
       }
-      onStatus?.(`Rostro válido · captura ${samples.length} de ${samplesRequired}.`);
+      onStatus?.(`Rostro válido · captura ${samples.length} de ${samplesRequired}. Mantén la posición.`);
       await sleep(160);
     }
     throw new Error(timeoutError || 'biometric_capture_timeout');
@@ -516,11 +531,13 @@
     const closerTarget = Math.min(0.82, baselineGeometry.faceRatio + 0.05);
     let consecutiveActionFrames = 0;
     const accepted = [];
+    let activeDeadline = deadline;
+    let actionGraceGranted = false;
 
     if (challenge.action === 'TURN_SIDE') onStatus?.('Gira el rostro claramente hacia uno de los lados.');
     else onStatus?.('Acerca un poco el rostro a la cámara.');
 
-    while (Date.now() < deadline) {
+    while (Date.now() < activeDeadline) {
       const detected = await detectOneFace(human, video, onStatus);
       if (!detected) {
         consecutiveActionFrames = 0;
@@ -558,6 +575,10 @@
 
       consecutiveActionFrames += 1;
       accepted.push({ scores, geometry, descriptor });
+      if (consecutiveActionFrames === 1 && !actionGraceGranted) {
+        actionGraceGranted = true;
+        activeDeadline = Math.max(activeDeadline, Date.now() + ACTION_COMPLETION_GRACE_MS);
+      }
       if (consecutiveActionFrames >= REQUIRED_ACTION_FRAMES) {
         const selected = accepted.slice(-REQUIRED_ACTION_FRAMES);
         return {

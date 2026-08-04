@@ -10,12 +10,12 @@ const mobile = read('src/public/worker-biometric-mobile.js');
 const biometricFlow = read('src/public/worker-portal-biometric-flow.js');
 
 test('la caché vigente usa los módulos actuales y no depende de archivos retirados', () => {
-  assert.match(serviceWorker, /CACHE_NAME\s*=\s*'lorren-worker-portal-shell-v11'/);
+  assert.match(serviceWorker, /CACHE_NAME\s*=\s*'lorren-worker-portal-shell-v12'/);
   assert.match(serviceWorker, /NETWORK_FIRST_ASSETS/);
   assert.match(serviceWorker, /cache\.addAll\(STATIC_ASSETS\)/);
   assert.match(serviceWorker, /name !== CACHE_NAME/);
   assert.match(serviceWorker, /Abre el portal una vez con conexión/);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260803-worker-portal-runtime-v5'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260804-worker-portal-biometric-v6'/);
   assert.match(loader, /worker-biometric-mobile\.js\?v=\$\{BIOMETRIC_ASSET_RELEASE\}/);
   assert.match(loader, /worker-portal-biometric-flow\.js\?v=\$\{BIOMETRIC_ASSET_RELEASE\}/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js|worker-portal-hardening\.js|worker-portal-offline-v2\.js/);
