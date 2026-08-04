@@ -1,0 +1,1 @@
+apply biometric detection watchdog and unified instruction
