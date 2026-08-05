@@ -222,7 +222,7 @@ ${hiddenInputs}
         <input id="applicantDateTo" type="date" name="dateTo" value="${escapeHtml(dateRange.dateTo)}" />
       </div>
       <button type="submit" class="export-btn" style="cursor:pointer;">Filtrar fechas</button>
-      <a href="${escapeHtml(clearHref)}" class="export-btn">Quitar fechas</a>
+      <a href="${escapeHtml(clearHref)}" class="export-btn" data-clear-applicant-dates>Quitar fechas</a>
       <span class="filter-note">${escapeHtml(activeNote)}</span>
     </form>
   </section>`;
@@ -250,6 +250,39 @@ function buildApplicantLinkScript(dateRange) {
       const query = url.searchParams.toString();
       return url.pathname + (query ? '?' + query : '') + (url.hash || '');
     }
+
+    function ensureHiddenRangeInput(form, name, value) {
+      const existing = form.querySelector('input[name="' + name + '"]');
+      if (!value) {
+        if (existing && existing.type === 'hidden') existing.remove();
+        return;
+      }
+      if (existing) {
+        existing.value = value;
+        return;
+      }
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    }
+
+    document.querySelectorAll('form[method="get"], form[method="GET"]').forEach((form) => {
+      if (form.closest('.applicant-date-range')) return;
+      const action = new URL(form.getAttribute('action') || window.location.href, window.location.origin);
+      if (action.pathname !== '/admin') return;
+      ensureHiddenRangeInput(form, 'dateFrom', applicantDateRange.dateFrom);
+      ensureHiddenRangeInput(form, 'dateTo', applicantDateRange.dateTo);
+    });
+
+    document.querySelectorAll('a[href]').forEach((anchor) => {
+      if (anchor.hasAttribute('data-clear-applicant-dates')) return;
+      const url = new URL(anchor.getAttribute('href'), window.location.origin);
+      if (url.pathname !== '/admin' && url.pathname !== '/admin/export') return;
+      applyDateRange(url);
+      anchor.setAttribute('href', relativeHref(url));
+    });
 
     document.querySelectorAll('[data-vacancy-panel]').forEach((panel) => {
       const vacancyId = panel.getAttribute('data-vacancy-panel');
