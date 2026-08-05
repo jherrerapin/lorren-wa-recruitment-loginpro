@@ -291,48 +291,45 @@ function buildCurrentInboundEvidence(field, value, rule, fragment) {
   };
 }
 
-function resolveExplicitNameEvidence(raw, parsed) {
+function resolveExplicitNameEvidence(raw) {
   const match = String(raw || '').match(/\b(?:me llamo|mi nombre(?: completo)?(?: es)?|nombre(?: completo)?\s*[:\-])\s+([^.;\n]{3,100})/i);
-  const captured = trimEvidenceFragment(match?.[1] || '');
-  const proposed = parsed?.fullName || captured;
-  if (!proposed || !hasExplicitNameEvidence(raw, proposed)) return null;
-  const normalized = normalizeCandidateFields({ fullName: proposed }).fullName || proposed;
-  return buildCurrentInboundEvidence('fullName', normalized, 'EXPLICIT_NAME_INTRODUCTION', match?.[0] || raw);
+  if (!match) return null;
+  const captured = trimEvidenceFragment(match[1]);
+  if (!captured || NON_NAME_INTRODUCTION_PATTERN.test(normalize(captured))) return null;
+  const normalized = normalizeCandidateFields({ fullName: captured }).fullName || captured;
+  return buildCurrentInboundEvidence('fullName', normalized, 'EXPLICIT_NAME_INTRODUCTION', match[0]);
 }
 
-function resolveExplicitDocumentEvidence(raw, parsed) {
-  const match = String(raw || '').match(/\b(?:mi\s+)?(?:cedula|cédula|c\.?\s*c\.?|documento(?:\s+de\s+identidad)?|numero\s+de\s+documento|número\s+de\s+documento)\s*(?:es|:|-)??\s*([A-Z0-9][A-Z0-9.\-\s]{4,40})/i);
+function resolveExplicitDocumentEvidence(raw) {
+  const match = String(raw || '').match(/\b(?:mi\s+)?(?:cedula|cédula|c\.?\s*c\.?|documento(?:\s+de\s+identidad)?|numero\s+de\s+documento|número\s+de\s+documento)\s*(?:es|:|-)?\s*([A-Z0-9][A-Z0-9.\-\s]{4,40})/i);
   const captured = trimEvidenceFragment(match?.[1] || '');
   if (!captured || !/\d/.test(captured)) return null;
-  const proposed = parsed?.documentNumber || captured.replace(/[.\s]/g, '');
-  return buildCurrentInboundEvidence('documentNumber', proposed, 'EXPLICIT_DOCUMENT_LABEL', match?.[0] || raw);
+  const value = captured.replace(/[.\s]/g, '');
+  return buildCurrentInboundEvidence('documentNumber', value, 'EXPLICIT_DOCUMENT_LABEL', match[0]);
 }
 
-function resolveExplicitAgeEvidence(raw, parsed) {
+function resolveExplicitAgeEvidence(raw) {
   const match = String(raw || '').match(/\b(?:tengo\s+|edad\s*(?:es|:|-)?\s*)(\d{1,3})\s*(?:años|anos)?\b/i);
   if (!match) return null;
-  const age = Number.parseInt(parsed?.age ?? match[1], 10);
+  const age = Number.parseInt(match[1], 10);
   if (!Number.isInteger(age) || age < 14 || age > 100) return null;
   return buildCurrentInboundEvidence('age', age, 'EXPLICIT_AGE_EXPRESSION', match[0]);
 }
 
-function resolveExplicitResidenceEvidence(raw, parsed) {
+function resolveExplicitResidenceEvidence(raw) {
   const match = String(raw || '').match(/\b(?:vivo|resido|mi\s+barrio(?:\s+es)?|mi\s+localidad(?:\s+es)?|mi\s+residencia(?:\s+es)?|barrio\s*[:\-]|localidad\s*[:\-]|residencia\s*[:\-])\s+(?:en\s+)?([^.;\n]{2,100})/i);
   const captured = trimEvidenceFragment(match?.[1] || '');
   if (!captured) return null;
-  const normalized = normalizeCandidateFields({
-    neighborhood: parsed?.neighborhood || captured,
-    locality: parsed?.locality
-  });
+  const normalized = normalizeCandidateFields({ neighborhood: captured });
   const field = normalized.locality ? 'locality' : 'neighborhood';
   const value = normalized[field] || captured;
-  return buildCurrentInboundEvidence(field, value, 'EXPLICIT_RESIDENCE_EXPRESSION', match?.[0] || raw);
+  return buildCurrentInboundEvidence(field, value, 'EXPLICIT_RESIDENCE_EXPRESSION', match[0]);
 }
 
-function resolveExplicitTransportEvidence(raw, parsed) {
+function resolveExplicitTransportEvidence(raw) {
   const match = String(raw || '').match(/\b(?:mi\s+(?:medio\s+de\s+)?transporte(?:\s+es)?|me\s+movilizo\s+en|me\s+desplazo\s+en|transporte\s*[:\-])\s+(moto|motocicleta|carro|automovil|automóvil|bicicleta|bici|bus|buseta|transporte\s+publico|transporte\s+público)\b/i);
   if (!match) return null;
-  const normalized = normalizeCandidateFields({ transportMode: parsed?.transportMode || match[1] });
+  const normalized = normalizeCandidateFields({ transportMode: match[1] });
   const value = normalized.transportMode || match[1];
   return buildCurrentInboundEvidence('transportMode', value, 'EXPLICIT_TRANSPORT_EXPRESSION', match[0]);
 }
@@ -347,11 +344,11 @@ export function evaluateProfileDataEvidence(text = '', options = {}) {
     ...(options?.parsedFields || {})
   });
   const evidence = [
-    resolveExplicitNameEvidence(raw, parsedFields),
-    resolveExplicitDocumentEvidence(raw, parsedFields),
-    resolveExplicitAgeEvidence(raw, parsedFields),
-    resolveExplicitResidenceEvidence(raw, parsedFields),
-    resolveExplicitTransportEvidence(raw, parsedFields)
+    resolveExplicitNameEvidence(raw),
+    resolveExplicitDocumentEvidence(raw),
+    resolveExplicitAgeEvidence(raw),
+    resolveExplicitResidenceEvidence(raw),
+    resolveExplicitTransportEvidence(raw)
   ].filter(Boolean);
 
   return {
