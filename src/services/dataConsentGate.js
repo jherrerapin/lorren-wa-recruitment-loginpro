@@ -49,6 +49,7 @@ const PROTECTED_STEPS = new Set([
   ConversationStep.SCHEDULED
 ]);
 
+const NAME_TOKEN_PATTERN = /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/;
 const NON_NAME_INTRODUCTION_PATTERN = /\b(mujer|hombre|femenin[ao]|masculin[ao]|candidat[ao]|interesad[ao]|auxiliar|operari[ao]|coordinador[ao]?|lider|bodega|cargue|descargue|servicios?|generales?|vacante|cargo|aplicar|postularme?)\b/;
 const CONSENT_SUBJECT_PATTERN = /\b(tratamiento|datos|dato personal|datos personales|hoja de vida|hv|documentos?|consentimiento|autorizacion)\b/;
 const OFFER_SUBJECT_PATTERN = /\b(vacante|oferta|cargo|trabajo|empleo|postulacion|entrevista)\b/;
@@ -259,20 +260,6 @@ function inboundText(message = {}) {
   return '';
 }
 
-function hasExplicitNameEvidence(text = '', fullName = '') {
-  const raw = String(text || '');
-  if (/\b(me llamo|mi nombre(?: completo)?(?: es)?|nombre(?: completo)?\s*[:\-])\b/i.test(raw)) return true;
-
-  const normalizedText = normalize(raw);
-  const normalizedName = normalize(fullName);
-  if (!normalizedName) return false;
-
-  const tokens = normalizedName.split(' ').filter(Boolean);
-  if (tokens.length < 2 || tokens.length > 6 || NON_NAME_INTRODUCTION_PATTERN.test(normalizedName)) return false;
-
-  return normalizedText === normalizedName || normalizedText.startsWith(`soy ${normalizedName}`);
-}
-
 function trimEvidenceFragment(value = '') {
   return String(value || '')
     .split(/[.;\n]/, 1)[0]
@@ -291,13 +278,60 @@ function buildCurrentInboundEvidence(field, value, rule, fragment) {
   };
 }
 
+function isPlausibleFullName(value = '') {
+  const normalized = normalize(value);
+  if (!normalized || NON_NAME_INTRODUCTION_PATTERN.test(normalized)) return false;
+  const tokens = String(value || '').trim().split(/\s+/).filter(Boolean);
+  return tokens.length >= 2
+    && tokens.length <= 6
+    && tokens.every((token) => NAME_TOKEN_PATTERN.test(token));
+}
+
+function normalizeExplicitFullName(value = '') {
+  const captured = trimEvidenceFragment(value);
+  if (!isPlausibleFullName(captured)) return null;
+  return normalizeCandidateFields({ fullName: captured }).fullName || captured;
+}
+
 function resolveExplicitNameEvidence(raw) {
-  const match = String(raw || '').match(/\b(?:me llamo|mi nombre(?: completo)?(?: es)?|nombre(?: completo)?\s*[:\-])\s+([^.;\n]{3,100})/i);
-  if (!match) return null;
-  const captured = trimEvidenceFragment(match[1]);
-  if (!captured || NON_NAME_INTRODUCTION_PATTERN.test(normalize(captured))) return null;
-  const normalized = normalizeCandidateFields({ fullName: captured }).fullName || captured;
-  return buildCurrentInboundEvidence('fullName', normalized, 'EXPLICIT_NAME_INTRODUCTION', match[0]);
+  const text = String(raw || '').trim();
+  const labelled = text.match(/\b(?:me llamo|mi nombre(?: completo)?(?: es)?|nombre(?: completo)?\s*[:\-])\s+([^.;\n]{3,100})/i);
+  if (labelled) {
+    const value = normalizeExplicitFullName(labelled[1]);
+    return value
+      ? buildCurrentInboundEvidence('fullName', value, 'EXPLICIT_NAME_INTRODUCTION', labelled[0])
+      : null;
+  }
+
+  const natural = text.match(/^soy\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'.-]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]+){1,5})(?=\s*,|$)/i);
+  if (!natural) return null;
+  const value = normalizeExplicitFullName(natural[1]);
+  return value
+    ? buildCurrentInboundEvidence('fullName', value, 'EXPLICIT_SOY_NAME_INTRODUCTION', natural[0])
+    : null;
+}
+
+function resolveContextualStandaloneNameEvidence(raw, candidate = {}) {
+  if (!candidate?.vacancyId) return null;
+  const text = String(raw || '').trim();
+  if (!text || text.includes('?') || /[,.;:\n]/.test(text)) return null;
+  const value = normalizeExplicitFullName(text);
+  return value
+    ? buildCurrentInboundEvidence('fullName', value, 'CONTEXTUAL_STANDALONE_FULL_NAME', text)
+    : null;
+}
+
+function resolveExplicitGenderEvidence(raw) {
+  const text = String(raw || '');
+  if (/\b(?:soy|me considero|me identifico como)\s+(?:un|una)?\s*(?:mujer|femenina)\b/i.test(text)
+    || /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:mujer|femenino|femenina)\b/i.test(text)) {
+    return buildCurrentInboundEvidence('gender', 'FEMALE', 'EXPLICIT_GENDER_DECLARATION', text);
+  }
+  if (/\b(?:soy|me considero|me identifico como)\s+(?:un|una)?\s*(?:hombre|masculino)\b/i.test(text)
+    || /\b(?:sexo|genero|género)\s*(?:es|:)?\s*(?:hombre|masculino|masculina)\b/i.test(text)) {
+    return buildCurrentInboundEvidence('gender', 'MALE', 'EXPLICIT_GENDER_DECLARATION', text);
+  }
+  return null;
 }
 
 function resolveExplicitDocumentEvidence(raw) {
@@ -343,12 +377,14 @@ export function evaluateProfileDataEvidence(text = '', options = {}) {
     ...localParsed,
     ...(options?.parsedFields || {})
   });
+  const explicitName = resolveExplicitNameEvidence(raw);
   const evidence = [
-    resolveExplicitNameEvidence(raw),
+    explicitName || resolveContextualStandaloneNameEvidence(raw, options?.candidate),
     resolveExplicitDocumentEvidence(raw),
     resolveExplicitAgeEvidence(raw),
     resolveExplicitResidenceEvidence(raw),
-    resolveExplicitTransportEvidence(raw)
+    resolveExplicitTransportEvidence(raw),
+    resolveExplicitGenderEvidence(raw)
   ].filter(Boolean);
 
   return {
@@ -358,8 +394,8 @@ export function evaluateProfileDataEvidence(text = '', options = {}) {
   };
 }
 
-function containsProfileData(text = '') {
-  return evaluateProfileDataEvidence(text).containsProfileData;
+function containsProfileData(text = '', options = {}) {
+  return evaluateProfileDataEvidence(text, options).containsProfileData;
 }
 
 function isPreConsentCaptureMode(mode = '') {
@@ -449,7 +485,7 @@ export function evaluateConsentBoundary(candidate = {}, message = {}, options = 
   if (isPreConsentCaptureMode(candidate?.botResumeMode)) return { block: true, reason: 'capture_mode_without_consent' };
   if (isProtectedAttachment(message)) return { block: true, reason: 'attachment_before_consent' };
   if (PROTECTED_STEPS.has(candidate?.currentStep)) return { block: true, reason: 'protected_step_without_consent' };
-  const profileDataDecision = options.profileDataDecision || evaluateProfileDataEvidence(body);
+  const profileDataDecision = options.profileDataDecision || evaluateProfileDataEvidence(body, { candidate });
   if (profileDataDecision.containsProfileData) return { block: true, reason: 'profile_data_before_consent' };
   if (shouldRequestConsentForTurn(candidate, body).allowed) {
     return { block: true, reason: 'candidate_wants_to_continue' };
@@ -796,7 +832,7 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vacan
     !hasVacancy
     && boundaryReason === 'protected_step_without_consent'
     && !isProtectedAttachment(message)
-    && !containsProfileData(inboundText(message))
+    && !containsProfileData(inboundText(message), { candidate })
   );
   if (passRecoveredVacancyContext) return false;
 
@@ -1069,7 +1105,7 @@ export function dataConsentGateMiddleware(prisma) {
           continue;
         }
 
-        const profileDataDecision = evaluateProfileDataEvidence(body);
+        const profileDataDecision = evaluateProfileDataEvidence(body, { candidate });
         const boundary = evaluateConsentBoundary(candidate, message, { profileDataDecision });
         if (boundary.block && await handleConsentDecision(
           prisma,
