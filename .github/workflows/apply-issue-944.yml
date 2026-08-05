@@ -1,0 +1,69 @@
+name: Apply issue 944 vacancy registration order
+
+on:
+  pull_request:
+    branches:
+      - automation/944-vacancy-registration-order-runner
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/944-vacancy-registration-order-date-filter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/placeholder
+      NODE_ENV: test
+    steps:
+      - name: Check out functional branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/944-vacancy-registration-order-date-filter
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Load exact correction
+        run: |
+          git fetch origin automation/944-vacancy-registration-order-runner
+          git show origin/automation/944-vacancy-registration-order-runner:.github/scripts/apply-issue-944.py > /tmp/apply-issue-944.py
+
+      - name: Apply exact correction
+        run: python3 /tmp/apply-issue-944.py
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate Prisma and syntax
+        run: |
+          npx prisma validate
+          npm run prisma:generate
+          node --check src/services/vacancyCandidateRegistrationPolicy.js
+          node --check src/services/vacancyDashboardSearchExpansion.js
+          node --check src/routes/admin.js
+          node --check test/vacancyCandidateRegistrationPolicy.test.js
+
+      - name: Run focused regressions
+        run: |
+          node --test test/vacancyCandidateRegistrationPolicy.test.js
+          node --test test/vacancyDashboardSearchExpansion.test.js
+          git diff --check
+
+      - name: Commit validated correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/admin.js src/views/list.ejs src/services/vacancyDashboardSearchExpansion.js src/services/vacancyCandidateRegistrationPolicy.js test/vacancyCandidateRegistrationPolicy.test.js
+          git commit -m "fix: ordenar postulados y filtrar por registro (#944)"
+          git push origin HEAD:fix/944-vacancy-registration-order-date-filter
