@@ -1,8 +1,15 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import axios from 'axios';
 import { dataConsentGateMiddleware } from '../src/services/dataConsentGate.js';
 import { findInboundConversationMessage } from '../src/services/conversationMessageRepository.js';
 import { HUMAN_PAUSE_REPLAYS } from './conversation-replay/humanPauseReplay.js';
+
+const originalAxiosPost = axios.post;
+after(() => {
+  axios.post = originalAxiosPost;
+});
 
 function webhookPayload(message) {
   return {
@@ -34,6 +41,8 @@ function buildReplayPrisma(replay, options = {}) {
     lastResumeData: null
   };
 
+  axios.post = async () => ({ data: { messages: [{ id: 'TEST-OUTBOUND-PAUSE' }] } });
+
   const prisma = {
     candidate: {
       upsert: async () => structuredClone(candidate),
@@ -57,6 +66,7 @@ function buildReplayPrisma(replay, options = {}) {
         ? { id: `message-${where.waMessageId}`, waMessageId: where.waMessageId, respondedAt: null, createdAt: new Date() }
         : null,
       createMany: async ({ data }) => {
+        if (options.inboundPersistenceError) throw new Error('TEST-INBOUND-PERSISTENCE-ERROR');
         const waMessageId = data[0]?.waMessageId;
         if (persistedInboundIds.has(waMessageId)) return { count: 0 };
         persistedInboundIds.add(waMessageId);
@@ -129,27 +139,26 @@ test('A3 replay: un inbound conocido no ignora la pausa humana ni vuelve a pedir
   assert.equal(finalCandidate.botResumeMode, replay.expected.botResumeMode);
 });
 
-test('A3 replay: un inbound nuevo reanuda desde el contexto vigente y pasa una sola vez al router', async () => {
+test('A3 replay: un inbound nuevo reanudable llega intacto al router sin levantar la pausa en el gate', async () => {
   const replay = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
   const result = await executeReplay(replay);
   const finalCandidate = result.getCandidate();
 
-  assert.equal(result.nextCalls, replay.expected.nextCalls);
-  assert.deepEqual(result.statuses, replay.expected.statuses);
-  assert.equal(result.metrics.resumeUpdates, replay.expected.resumeUpdates);
-  assert.equal(result.metrics.outboundMessages, replay.expected.outboundMessages);
-  assert.equal(result.payloadMessageCount, replay.expected.payloadMessageCount);
-  assert.equal(finalCandidate.botPaused, replay.expected.botPaused);
-  assert.equal(finalCandidate.botResumeMode, replay.expected.botResumeMode);
+  assert.equal(result.nextCalls, 1);
+  assert.deepEqual(result.statuses, []);
+  assert.equal(result.metrics.resumeUpdates, 0);
+  assert.equal(result.metrics.outboundMessages, 0);
+  assert.equal(result.metrics.inboundMessages, 0);
+  assert.equal(result.payloadMessageCount, 1);
+  assert.equal(finalCandidate.botPaused, true);
+  assert.equal(finalCandidate.botResumeMode, replay.candidate.botResumeMode);
   assert.deepEqual(
     Object.fromEntries(Object.keys(replay.expected.preserved).map((field) => [field, finalCandidate[field]])),
     replay.expected.preserved
   );
-  assert.equal(result.metrics.lastResumeData.reminderState, 'CANCELLED');
-  assert.equal(result.metrics.lastResumeData.reminderScheduledFor, null);
 });
 
-test('A3: una pausa no reanudable bloquea el gate de consentimiento y delega al router sin responder', async () => {
+test('A3: una pausa no reanudable llega al router sin respuesta ni mutación previa', async () => {
   const base = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
   const replay = structuredClone(base);
   replay.candidate.botResumeMode = 'manual_outbound_sending';
@@ -167,18 +176,86 @@ test('A3: una pausa no reanudable bloquea el gate de consentimiento y delega al 
   assert.equal(finalCandidate.botResumeMode, 'manual_outbound_sending');
 });
 
-test('A3: un conflicto al reanudar no genera respuesta y conserva el inbound para la autoridad del router', async () => {
+test('A3: un conflicto concurrente no puede ocurrir en el gate porque la reanudación pertenece al router', async () => {
   const replay = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
   const result = await executeReplay(replay, { resumeConflict: true });
   const finalCandidate = result.getCandidate();
 
   assert.equal(result.nextCalls, 1);
   assert.deepEqual(result.statuses, []);
-  assert.equal(result.metrics.resumeUpdates, 1);
+  assert.equal(result.metrics.resumeUpdates, 0);
   assert.equal(result.metrics.outboundMessages, 0);
   assert.equal(result.payloadMessageCount, 1);
   assert.equal(finalCandidate.botPaused, true);
   assert.equal(finalCandidate.botResumeMode, 'manual_resume_dashboard');
+});
+
+test('A3: un documento previo al consentimiento se adquiere sin descargar, responder ni levantar la pausa', async () => {
+  const base = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
+  const replay = structuredClone(base);
+  replay.candidate.dataConsentStatus = 'PENDING';
+  replay.candidate.currentStep = 'GREETING_SENT';
+  replay.inbound = {
+    id: 'TEST-WAMID-PAUSED-PRECONSENT-DOCUMENT',
+    from: replay.candidate.phone,
+    type: 'document',
+    document: {
+      id: 'TEST-MEDIA-PAUSED-PRECONSENT',
+      filename: 'TEST-HOJA-DE-VIDA.pdf',
+      mime_type: 'application/pdf'
+    }
+  };
+
+  const result = await executeReplay(replay);
+  const finalCandidate = result.getCandidate();
+
+  assert.equal(result.nextCalls, 0);
+  assert.deepEqual(result.statuses, [200]);
+  assert.equal(result.metrics.resumeUpdates, 0);
+  assert.equal(result.metrics.inboundMessages, 1);
+  assert.equal(result.metrics.outboundMessages, 0);
+  assert.equal(result.payloadMessageCount, 0);
+  assert.equal(finalCandidate.botPaused, true);
+  assert.equal(finalCandidate.botResumeMode, replay.candidate.botResumeMode);
+});
+
+test('A3: un error al adquirir un adjunto pausado no levanta la pausa ni genera respuesta automática', async () => {
+  const base = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
+  const replay = structuredClone(base);
+  replay.candidate.dataConsentStatus = 'PENDING';
+  replay.inbound = {
+    id: 'TEST-WAMID-PAUSED-PERSISTENCE-ERROR',
+    from: replay.candidate.phone,
+    type: 'document',
+    document: {
+      id: 'TEST-MEDIA-PERSISTENCE-ERROR',
+      filename: 'TEST-HOJA-DE-VIDA-ERROR.pdf',
+      mime_type: 'application/pdf'
+    }
+  };
+
+  const result = await executeReplay(replay, { inboundPersistenceError: true });
+  const finalCandidate = result.getCandidate();
+
+  assert.equal(result.nextCalls, 0);
+  assert.deepEqual(result.statuses, [200]);
+  assert.equal(result.metrics.resumeUpdates, 0);
+  assert.equal(result.metrics.inboundMessages, 0);
+  assert.equal(result.metrics.outboundMessages, 0);
+  assert.equal(finalCandidate.botPaused, true);
+});
+
+test('A3: el router conserva rate limit y persistencia antes de la única reanudación canónica', () => {
+  const source = readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
+  const routeStart = source.indexOf("router.post('/', async");
+  const rateLimit = source.indexOf('if (!checkRateLimit(from)) continue;', routeStart);
+  const persistText = source.indexOf('const inbound = await saveInboundMessage', rateLimit);
+  const resumeText = source.indexOf('freshCandidate = await prepareCandidateForInboundAutomation', persistText);
+
+  assert.ok(routeStart >= 0);
+  assert.ok(rateLimit > routeStart);
+  assert.ok(persistText > rateLimit);
+  assert.ok(resumeText > persistText);
 });
 
 test('A3: la consulta canónica de inbound usa candidato, dirección y waMessageId', async () => {
