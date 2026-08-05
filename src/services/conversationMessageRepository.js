@@ -56,6 +56,14 @@ function validateInboundContract(prisma) {
   );
 }
 
+function validateInboundReadContract(prisma) {
+  return Boolean(
+    prisma
+    && prisma.message
+    && typeof prisma.message.findFirst === 'function'
+  );
+}
+
 function validateOutboundContract(prisma) {
   return Boolean(
     prisma
@@ -149,6 +157,30 @@ export async function persistInboundConversationMessage(prisma, input = {}) {
     count: result.count,
     data
   };
+}
+
+export async function findInboundConversationMessage(prisma, input = {}) {
+  if (!validateInboundReadContract(prisma)) {
+    throw new Error('inbound_message_read_prisma_contract_invalid');
+  }
+
+  const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
+  const waMessageId = requireNonEmptyString(input.waMessageId, 'wa_message_id');
+  const message = await prisma.message.findFirst({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND,
+      waMessageId
+    },
+    select: {
+      id: true,
+      waMessageId: true,
+      respondedAt: true,
+      createdAt: true
+    }
+  });
+
+  return { found: Boolean(message), message };
 }
 
 export async function persistOutboundConversationMessage(prisma, input = {}) {
