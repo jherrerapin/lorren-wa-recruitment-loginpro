@@ -284,6 +284,23 @@ function buildApplicantLinkScript(dateRange) {
       anchor.setAttribute('href', relativeHref(url));
     });
 
+    const activeStatus = new URLSearchParams(window.location.search).get('status');
+    if (activeStatus && activeStatus !== 'inbox') {
+      const legacyTable = document.querySelector('#legacy-candidates-table');
+      if (legacyTable) {
+        const firstHeader = legacyTable.querySelector('thead th');
+        if (firstHeader) firstHeader.textContent = 'Fecha de registro';
+        legacyTable.querySelectorAll('tbody tr').forEach((row) => {
+          const registrationMeta = Array.from(row.querySelectorAll('.candidate-dev-meta'))
+            .find((element) => String(element.textContent || '').trim().startsWith('Fecha de registro:'));
+          if (!registrationMeta || !row.cells || !row.cells[0]) return;
+          row.cells[0].textContent = String(registrationMeta.textContent || '')
+            .replace(/^Fecha de registro:\s*/, '')
+            .trim();
+        });
+      }
+    }
+
     document.querySelectorAll('[data-vacancy-panel]').forEach((panel) => {
       const vacancyId = panel.getAttribute('data-vacancy-panel');
       if (!vacancyId) return;
