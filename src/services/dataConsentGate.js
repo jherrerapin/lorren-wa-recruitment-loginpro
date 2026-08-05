@@ -751,6 +751,14 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
       cvResendRequired: true
     });
     await prisma.candidate.update({ where: { id: candidate.id }, data: { botResumeMode } });
+    const claimed = await saveInboundConsentEvidence(
+      prisma,
+      candidate.id,
+      message,
+      body,
+      context.pending ? 'PENDING_ATTACHMENT' : 'PROMPTED_WITH_ATTACHMENT'
+    );
+    if (!claimed || context.pending) return true;
     const reply = `${PRE_CONSENT_ATTACHMENT_REPLY}\n\n${CONSENT_PROMPT}`;
     await sendAndStore(prisma, candidate.id, from, reply, 'pre_consent_attachment_rejected', {
       reason: boundaryReason,
@@ -763,7 +771,8 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
   const questionReply = buildConsentQuestionReply(body) || buildVacancyQuestionReply(vacancy, body);
 
   if (shouldRecordConsentRejection(body, { consentPromptPending: context.pending })) {
-    await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
+    const claimed = await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
+    if (!claimed) return true;
     const consentResult = await recordConsent(prisma, req, candidate, 'REVOKED');
     if (consentResult.conflict) {
       console.warn('[CONSENT_STEP_CONFLICT]', {
@@ -779,7 +788,8 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
   }
 
   if (context.pending && shouldRecordConsentAcceptance(body, { consentPromptPending: true })) {
-    await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'ACCEPTED');
+    const claimed = await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'ACCEPTED');
+    if (!claimed) return true;
     const resumeContext = await resolveConsentResumeContext(prisma, context.resumeMode);
     const consentResult = await recordConsent(prisma, req, candidate, 'ACCEPTED', resumeContext.resumeUpdate);
     if (consentResult.conflict) {
@@ -830,6 +840,23 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     return true;
   }
 
+  if (context.pending) {
+    const claimed = await saveInboundConsentEvidence(
+      prisma,
+      candidate.id,
+      message,
+      body,
+      questionReply ? 'PENDING_QUESTION' : 'PENDING_NO_REPLY'
+    );
+    if (!claimed || !questionReply) return true;
+    const reply = [questionReply, CONSENT_CLARIFIER_REPLY].filter(Boolean).join('\n\n');
+    await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_pending_question', {
+      resumedMode: context.resumeMode,
+      cvResendRequired: context.cvResendRequired
+    });
+    return true;
+  }
+
   if (!consentEligible) {
     return handleConsentPrerequisite(prisma, candidate, message, from, vacancy, boundaryReason);
   }
@@ -839,9 +866,10 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     cvResendRequired: context.cvResendRequired
   });
   await prisma.candidate.update({ where: { id: candidate.id }, data: { botResumeMode } });
-  const consentReply = context.pending ? CONSENT_CLARIFIER_REPLY : CONSENT_PROMPT;
+  const claimed = await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'PROMPTED');
+  if (!claimed) return true;
   const preface = boundaryReason === 'profile_data_before_consent' ? PRE_CONSENT_DATA_REPLY : null;
-  const reply = [questionReply, preface, consentReply].filter(Boolean).join('\n\n');
+  const reply = [questionReply, preface, CONSENT_PROMPT].filter(Boolean).join('\n\n');
   await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_prompt', {
     reason: boundaryReason,
     resumeMode: context.resumeMode,
