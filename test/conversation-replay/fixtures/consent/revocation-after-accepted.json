@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "id": "consent-revocation-after-accepted-conv-007-v1",
+  "title": "CONV-007 seudonimizada: una revocación posterior a ACCEPTED detiene la postulación",
+  "tenantContext": {
+    "tenantId": "tenant-loginpro-test",
+    "channelId": "channel-whatsapp-loginpro-test",
+    "provider": "META_WHATSAPP"
+  },
+  "policyContext": {
+    "conversationPolicyVersion": "conversation-policy-test-v1",
+    "vacancyPolicyVersion": "vacancy-policy-test-v1",
+    "consentVersion": "lorren-v2-2026-07-v3"
+  },
+  "executionContext": {
+    "now": "2026-08-03T15:30:00.000Z"
+  },
+  "providerStubs": {
+    "aiResult": {
+      "status": "ok",
+      "intent": "reject_data_consent",
+      "parsedFields": {},
+      "extraction": {
+        "turnType": "CORRECTION",
+        "fieldEvidence": {},
+        "conflicts": []
+      }
+    }
+  },
+  "initialState": {
+    "candidate": {
+      "candidateId": "candidate-replay-conv-007",
+      "status": "NUEVO",
+      "currentStep": "COLLECTING_DATA",
+      "dataConsentStatus": "ACCEPTED",
+      "dataConsentVersion": "lorren-v2-2026-07-v3",
+      "dataConsentText": "Autorización de prueba previamente aceptada",
+      "dataConsentSource": "WHATSAPP_CANDIDATE",
+      "dataConsentAcceptedAt": "2026-08-03T15:20:00.000Z",
+      "dataConsentRevokedAt": null,
+      "dataConsentRecordedBy": "candidate_whatsapp",
+      "lastInboundAt": "2026-08-03T15:25:00.000Z",
+      "botResumeMode": null,
+      "vacancyId": "vacancy-replay-conv-007"
+    },
+    "vacancy": {
+      "vacancyId": "vacancy-replay-conv-007",
+      "isActive": true,
+      "acceptingApplications": true,
+      "city": "Ciudad de prueba",
+      "title": "Cargo operativo de prueba"
+    }
+  },
+  "history": [
+    {
+      "direction": "OUTBOUND",
+      "body": "Gracias, tu autorización quedó registrada. Para continuar solo falta conocer tu experiencia."
+    }
+  ],
+  "inbound": {
+    "messageId": "replay-conv-007-revocation-001",
+    "type": "text",
+    "body": "Quiero retirar mi autorización y eliminar mi información. No deseo continuar."
+  },
+  "expected": {
+    "interpretation": {
+      "intent": "REJECT_DATA_CONSENT",
+      "additionalIntents": [],
+      "consentDecision": "REVOKED",
+      "providedFields": {}
+    },
+    "plan": {
+      "actions": [
+        {
+          "type": "RECORD_DATA_CONSENT",
+          "data": {
+            "status": "REVOKED",
+            "version": "lorren-v2-2026-07-v3",
+            "candidateUpdate": {
+              "dataConsentStatus": "REVOKED",
+              "dataConsentVersion": "lorren-v2-2026-07-v3",
+              "dataConsentText": "Autorizo a LoginPro a tratar mis datos personales, hoja de vida y documentos enviados por WhatsApp para gestionar mi postulación, validar información, contactarme y conservar la trazabilidad del proceso. Entiendo que puedo solicitar consulta, actualización, corrección o revocatoria de esta autorización.",
+              "dataConsentSource": "WHATSAPP_CANDIDATE",
+              "dataConsentAcceptedAt": null,
+              "dataConsentRevokedAt": "2026-08-03T15:30:00.000Z",
+              "dataConsentRecordedBy": "candidate_whatsapp",
+              "currentStep": "DONE",
+              "status": "NUEVO",
+              "botResumeMode": null,
+              "lastInboundAt": "2026-08-03T15:30:00.000Z"
+            },
+            "event": {
+              "status": "REVOKED",
+              "version": "lorren-v2-2026-07-v3",
+              "text": "Autorizo a LoginPro a tratar mis datos personales, hoja de vida y documentos enviados por WhatsApp para gestionar mi postulación, validar información, contactarme y conservar la trazabilidad del proceso. Entiendo que puedo solicitar consulta, actualización, corrección o revocatoria de esta autorización.",
+              "source": "WHATSAPP_CANDIDATE",
+              "actorUsername": "candidate_whatsapp",
+              "note": "Revocatoria registrada por respuesta de WhatsApp."
+            }
+          }
+        },
+        {
+          "type": "STOP_APPLICATION"
+        }
+      ],
+      "allowedWrites": [
+        "candidate.dataConsentStatus",
+        "candidate.dataConsentVersion",
+        "candidate.dataConsentText",
+        "candidate.dataConsentSource",
+        "candidate.dataConsentAcceptedAt",
+        "candidate.dataConsentRevokedAt",
+        "candidate.dataConsentRecordedBy",
+        "candidate.currentStep",
+        "candidate.status",
+        "candidate.botResumeMode",
+        "candidate.lastInboundAt",
+        "consentEvent.create",
+        "candidate.lastOutboundAt",
+        "message.outbound"
+      ],
+      "forbiddenWrites": [
+        "candidate.fullName",
+        "candidate.documentNumber",
+        "candidate.experienceSummary",
+        "candidate.cvData",
+        "candidate.cvStorageKey"
+      ],
+      "nextStep": "DONE"
+    },
+    "response": {
+      "requiredFacts": [
+        "Debe confirmar que no continuará la postulación",
+        "Debe indicar que no procesará los datos por este medio"
+      ],
+      "forbiddenClaims": [
+        "La autorización sigue aceptada",
+        "Debe continuar entregando experiencia",
+        "Debe enviar la hoja de vida"
+      ],
+      "requiredText": [
+        "No continuaré con la postulación",
+        "ni procesaré tus datos"
+      ],
+      "forbiddenText": [
+        "seguimos con tu postulación",
+        "cuéntame tu experiencia",
+        "envía tu hoja de vida"
+      ]
+    },
+    "finalState": {
+      "dataConsentStatus": "REVOKED",
+      "dataConsentVersion": "lorren-v2-2026-07-v3",
+      "dataConsentAcceptedAt": null,
+      "dataConsentRevokedAt": "2026-08-03T15:30:00.000Z",
+      "currentStep": "DONE",
+      "status": "NUEVO",
+      "botResumeMode": null
+    }
+  }
+}
