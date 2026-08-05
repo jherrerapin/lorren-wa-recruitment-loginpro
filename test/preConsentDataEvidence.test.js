@@ -41,7 +41,7 @@ function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}
 
   axios.post = async (_url, payload) => {
     outbound.push(payload?.text?.body || '');
-    return { data: { messages: [{ id: 'TEST-OUTBOUND-DATA-EVIDENCE' }] };
+    return { data: { messages: [{ id: 'TEST-OUTBOUND-DATA-EVIDENCE' }] } };
   };
 
   const prisma = {
