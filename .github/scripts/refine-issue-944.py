@@ -54,8 +54,8 @@ test_source = test_path.read_text(encoding='utf-8')
 test_source = replace_once(
     test_source,
     "import assert from 'node:assert/strict';\n",
-    "import assert from 'node:assert/strict';\nimport fs from 'node:fs';\n",
-    'import de contratos fuente'
+    "import assert from 'node:assert/strict';\nimport fs from 'node:fs';\nimport ejs from 'ejs';\n",
+    'imports de contratos fuente y plantilla'
 )
 source_contract = r'''
 
@@ -80,6 +80,11 @@ test('ver todos combina la vacante solicitada con el alcance autorizado y conser
     /params\.set\('vacancyId', vacancyId\);[\s\S]*params\.set\('dateFrom', range\.dateFrom\)/
   );
 });
+
+test('la plantilla administrativa compila después de agregar los filtros de fecha', () => {
+  const viewSource = fs.readFileSync('src/views/list.ejs', 'utf8');
+  assert.doesNotThrow(() => ejs.compile(viewSource, { filename: 'src/views/list.ejs' }));
+});
 '''
-test_source = test_source.rstrip() + source_contract + '\n'
+test_source = (test_source.rstrip() + source_contract).rstrip() + '\n'
 test_path.write_text(test_source, encoding='utf-8')
