@@ -77,7 +77,10 @@ async function runMiddleware(harness, message) {
   await middleware(req, res, () => {
     observed.nextCalls += 1;
   });
-  return observed;
+  return {
+    ...observed,
+    remainingMessages: req.body.entry[0].changes[0].value.messages.length
+  };
 }
 
 test('un interés explícito recupera una etapa heredada adelantada sin volver a pedir datos', async () => {
@@ -122,7 +125,7 @@ test('un interés explícito recupera una etapa heredada adelantada sin volver a
   assert.equal(finalCandidate.botResumeMode, 'awaiting_data_consent');
 });
 
-test('una etapa protegida sin vacante vuelve a identificación y deja pasar el siguiente dato de vacante', async () => {
+test('una etapa protegida sin vacante se recupera y conserva el mismo mensaje para el resolvedor', async () => {
   const candidate = {
     id: 'TEST-CANDIDATE-RECOVERY-VACANCY',
     phone: 'TEST-PHONE-RECOVERY-VACANCY',
@@ -143,10 +146,9 @@ test('una etapa protegida sin vacante vuelve a identificación y deja pasar el s
   const observed = await runMiddleware(harness, message);
   const finalCandidate = harness.getCandidate();
 
-  assert.equal(observed.nextCalls, 0);
-  assert.equal(harness.sentBodies.length, 1);
-  assert.match(harness.sentBodies[0], /ciudad y el cargo o vacante/i);
-  assert.doesNotMatch(harness.sentBodies[0], /Autorizo a LoginPro|si autorizas/i);
+  assert.equal(observed.nextCalls, 1);
+  assert.equal(observed.remainingMessages, 1);
+  assert.equal(harness.sentBodies.length, 0);
   assert.equal(finalCandidate.currentStep, 'GREETING_SENT');
   assert.equal(finalCandidate.botResumeMode, null);
 
