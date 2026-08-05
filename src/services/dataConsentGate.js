@@ -50,6 +50,7 @@ const PROTECTED_STEPS = new Set([
 ]);
 
 const NAME_TOKEN_PATTERN = /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/;
+const STANDALONE_NAME_CONNECTORS = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
 const NON_NAME_INTRODUCTION_PATTERN = /\b(mujer|hombre|femenin[ao]|masculin[ao]|candidat[ao]|interesad[ao]|auxiliar|operari[ao]|coordinador[ao]?|lider|bodega|cargue|descargue|servicios?|generales?|vacante|cargo|aplicar|postularme?)\b/;
 const CONSENT_SUBJECT_PATTERN = /\b(tratamiento|datos|dato personal|datos personales|hoja de vida|hv|documentos?|consentimiento|autorizacion)\b/;
 const OFFER_SUBJECT_PATTERN = /\b(vacante|oferta|cargo|trabajo|empleo|postulacion|entrevista)\b/;
@@ -287,6 +288,16 @@ function isPlausibleFullName(value = '') {
     && tokens.every((token) => NAME_TOKEN_PATTERN.test(token));
 }
 
+function hasStandaloneNameCapitalization(value = '') {
+  const tokens = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return false;
+  return tokens.every((token) => {
+    const normalizedToken = normalize(token);
+    if (STANDALONE_NAME_CONNECTORS.has(normalizedToken)) return true;
+    return /^[A-ZÁÉÍÓÚÑ]/.test(token);
+  });
+}
+
 function normalizeExplicitFullName(value = '') {
   const captured = trimEvidenceFragment(value);
   if (!isPlausibleFullName(captured)) return null;
@@ -315,6 +326,7 @@ function resolveContextualStandaloneNameEvidence(raw, candidate = {}) {
   if (!candidate?.vacancyId) return null;
   const text = String(raw || '').trim();
   if (!text || text.includes('?') || /[,.;:\n]/.test(text)) return null;
+  if (!hasStandaloneNameCapitalization(text)) return null;
   const value = normalizeExplicitFullName(text);
   return value
     ? buildCurrentInboundEvidence('fullName', value, 'CONTEXTUAL_STANDALONE_FULL_NAME', text)
