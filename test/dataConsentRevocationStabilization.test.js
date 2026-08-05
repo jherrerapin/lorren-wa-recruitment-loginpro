@@ -1,6 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
+import './dataConsentHumanPauseReplay.test.js';
 import {
   dataConsentGateMiddleware,
   evaluateConsentBoundary
