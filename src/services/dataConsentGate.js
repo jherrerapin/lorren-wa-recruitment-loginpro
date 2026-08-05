@@ -10,8 +10,6 @@ import { analyzeConversationTurn } from './conversationIntent.js';
 import { captureConsentedProfileData } from './consentProfileCapture.js';
 import { buildConsentQuestionReply } from './consentFaq.js';
 import { isSupervisorPhone } from './adminSupervisor.js';
-import { shouldResumeAutomationOnInbound } from './botAutomationPolicy.js';
-import { resumeCandidateAutomationOnInbound } from './candidateStateService.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
 import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
 import { cancelReminderOnInbound } from './reminder.js';
@@ -908,7 +906,7 @@ async function notifyConsentGateFailure(messages = []) {
 
 async function preparePausedCandidateForConsentGate(prisma, candidate = {}, message = {}) {
   if (!candidate?.botPaused) {
-    return { candidate, blocked: false, consume: false, reason: 'automation_not_paused' };
+    return { candidate, blocked: false, consume: false, defer: false, reason: 'automation_not_paused' };
   }
 
   const waMessageId = String(message?.id || '').trim();
@@ -918,32 +916,38 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mess
       waMessageId
     });
     if (existing.found) {
-      return { candidate, blocked: true, consume: true, reason: 'paused_inbound_retry' };
+      return { candidate, blocked: true, consume: true, defer: false, reason: 'paused_inbound_retry' };
     }
   }
 
-  if (!waMessageId || !shouldResumeAutomationOnInbound(candidate)) {
-    return { candidate, blocked: true, consume: false, reason: 'automation_pause_not_resumable_here' };
+  if (isProtectedAttachment(message) && !isConsentAlreadyAccepted(candidate)) {
+    try {
+      await saveInboundConsentEvidence(
+        prisma,
+        candidate.id,
+        message,
+        inboundText(message),
+        'PAUSED_PRECONSENT_ATTACHMENT'
+      );
+    } catch (error) {
+      console.warn('[PAUSED_PRECONSENT_ATTACHMENT_PERSISTENCE_ERROR]', safeErrorDetails(error));
+    }
+    return {
+      candidate,
+      blocked: true,
+      consume: true,
+      defer: false,
+      reason: 'paused_preconsent_attachment_consumed'
+    };
   }
 
-  const transition = await resumeCandidateAutomationOnInbound(prisma, {
-    candidateId: candidate.id,
-    expected: {
-      botPaused: candidate.botPaused,
-      botPausedAt: candidate.botPausedAt ?? null,
-      botPausedBy: candidate.botPausedBy ?? null,
-      botPauseReason: candidate.botPauseReason ?? null,
-      botResumeMode: candidate.botResumeMode ?? null
-    },
-    now: new Date()
-  });
-
-  const resumedCandidate = transition.candidate || candidate;
-  if (transition.count !== 1 || resumedCandidate.botPaused) {
-    return { candidate: resumedCandidate, blocked: true, consume: false, reason: 'automation_resume_conflict' };
-  }
-
-  return { candidate: resumedCandidate, blocked: false, consume: false, reason: 'automation_resumed_on_new_inbound' };
+  return {
+    candidate,
+    blocked: false,
+    consume: false,
+    defer: true,
+    reason: 'paused_inbound_deferred_to_router'
+  };
 }
 
 export function dataConsentGateMiddleware(prisma) {
@@ -986,6 +990,7 @@ export function dataConsentGateMiddleware(prisma) {
           if (pauseDecision.consume) handledMessages.push(message);
           continue;
         }
+        if (pauseDecision.defer) continue;
 
         if (isAwaitingCampaignVacancyConfirmation(candidate)) {
           if (await handleCampaignVacancyConfirmation(prisma, candidate, message, from, body)) handledMessages.push(message);
