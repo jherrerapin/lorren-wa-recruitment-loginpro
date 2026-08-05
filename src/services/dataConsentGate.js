@@ -13,6 +13,8 @@ import { isSupervisorPhone } from './adminSupervisor.js';
 import { shouldResumeAutomationOnInbound } from './botAutomationPolicy.js';
 import { resumeCandidateAutomationOnInbound } from './candidateStateService.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
+import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
+import { cancelReminderOnInbound } from './reminder.js';
 import {
   findInboundConversationMessage,
   persistInboundConversationMessage,
@@ -129,13 +131,26 @@ function startsWithExplicitConsentRejection(text = '') {
   return /^(no autorizo|no consiento|no doy mi consentimiento|no doy consentimiento|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito|no acepto|no estoy de acuerdo|rechazo|revoco)\b/.test(normalize(text));
 }
 
+function isConsentRightsQuestion(text = '') {
+  const raw = String(text || '').trim();
+  const normalized = normalize(raw);
+  if (!normalized) return false;
+  if (startsWithExplicitConsentRejection(normalized)) return false;
+  if (/^(solicito|pido|exijo|quiero que|deseo que|por favor)\b/.test(normalized)) return false;
+  if (/^(eliminen|elimine|borren|borre|supriman|suprima|cancelen|cancele|detengan|detenga|paren|pare|revoquen|revoque|retiren|retire)\b/.test(normalized)) return false;
+  return raw.includes('?') || /^(como|como puedo|puedo|podria|que debo|cual es|donde)\b/.test(normalized);
+}
+
 function isExplicitConsentRevocation(text = '') {
   const normalized = normalize(text);
-  if (!normalized) return false;
+  if (!normalized || isConsentRightsQuestion(text)) return false;
+  if (startsWithExplicitConsentRejection(normalized) && referencesConsentSubject(normalized)) return true;
   return hasAny(normalized, [
-    /\b(cancelar|detener|parar)\b.*\b(postulacion|proceso|tratamiento|datos)\b/,
-    /\b(eliminar|borrar|suprimir)\b.*\b(datos|informacion|registro)\b/,
-    /\b(revocar|revoco|retiro|retirar)\b.*\b(autorizacion|consentimiento|datos)\b/
+    /\b(cancelar|cancelen|cancele|detener|detengan|detenga|parar|paren|pare)\b.*\b(postulacion|proceso|tratamiento|datos)\b/,
+    /\b(eliminar|eliminen|elimine|borrar|borren|borre|suprimir|supriman|suprima)\b.*\b(datos|informacion|registro)\b/,
+    /\b(revocar|revoco|revoquen|revoque|retiro|retirar|retiren|retire)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/,
+    /\b(solicito|pido|exijo|quiero|deseo)\b.*\b(revocatoria|revocacion|revocar|retirar|eliminar|borrar|suprimir|cancelar|detener)\b.*\b(autorizacion|consentimiento|tratamiento|datos|informacion|registro|proceso|postulacion)\b/,
+    /\b(revocatoria|revocacion)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/
   ]);
 }
 
@@ -368,7 +383,9 @@ export function parseConsentPendingMode(mode = '') {
 export function evaluateConsentBoundary(candidate = {}, message = {}) {
   if (isSupervisorPhone(message?.from || '')) return { block: false, reason: 'supervisor_message' };
   const body = inboundText(message);
-  if (isExplicitConsentRevocation(body)) return { block: true, reason: 'explicit_consent_revocation' };
+  const withdrawalRequested = isExplicitConsentRevocation(body)
+    || (isConsentAlreadyAccepted(candidate) && hasExplicitConsentRejection(body));
+  if (withdrawalRequested) return { block: true, reason: 'explicit_consent_revocation' };
   if (isConsentAlreadyAccepted(candidate)) return { block: false, reason: 'consent_already_accepted' };
   if (candidate?.dataConsentStatus === 'REVOKED') return { block: true, reason: 'consent_revoked' };
   if (parseConsentPendingMode(candidate?.botResumeMode).pending) return { block: true, reason: 'consent_pending' };
@@ -783,6 +800,8 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
       });
       return true;
     }
+    await cancelReminderOnInbound(prisma, candidate.id);
+    await cancelActiveInterviewBookings(prisma, { candidateId: candidate.id });
     await sendAndStore(prisma, candidate.id, from, CONSENT_REVOKED_REPLY, 'data_consent_revoked');
     return true;
   }
@@ -944,18 +963,27 @@ export function dataConsentGateMiddleware(prisma) {
           update: {},
           create: { phone: from }
         });
+        const body = inboundText(message);
+        const withdrawalRequested = isExplicitConsentRevocation(body)
+          || (candidate?.dataConsentStatus === 'ACCEPTED' && hasExplicitConsentRejection(body));
+
+        if (candidate?.dataConsentStatus === 'REVOKED' && withdrawalRequested) {
+          await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
+          handledMessages.push(message);
+          continue;
+        }
+
+        if (withdrawalRequested) {
+          if (await handleConsentDecision(prisma, req, candidate, message, from, body, 'explicit_consent_revocation')) {
+            handledMessages.push(message);
+          }
+          continue;
+        }
+
         const pauseDecision = await preparePausedCandidateForConsentGate(prisma, candidate, message);
         candidate = pauseDecision.candidate || candidate;
         if (pauseDecision.blocked) {
           if (pauseDecision.consume) handledMessages.push(message);
-          continue;
-        }
-
-        const body = inboundText(message);
-
-        if (candidate?.dataConsentStatus === 'REVOKED' && isExplicitConsentRevocation(body)) {
-          await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
-          handledMessages.push(message);
           continue;
         }
 
