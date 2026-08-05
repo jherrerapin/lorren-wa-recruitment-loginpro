@@ -2,6 +2,11 @@ import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { buildCandidateAccessWhere, getAccessContext } from './appUsers.js';
 import { getCandidateResidenceValue } from './candidateData.js';
+import {
+  applyVacancyCandidateRegistrationPolicy,
+  buildVacancyRegistrationCandidateWhere,
+  normalizeVacancyRegistrationDateFilters
+} from './vacancyCandidateRegistrationPolicy.js';
 
 const RENDER_PATCH_FLAG = Symbol.for('lorren.completeVacancyCandidateSearch');
 const VACANCY_LIST_FIELDS = [
@@ -198,13 +203,17 @@ export function mergeVacancySearchResults(viewModel = {}, searches = {}, candida
         vacancy[targetField] = [candidate, ...(vacancy[targetField] || [])];
         alreadyDisplayed.add(candidate.id);
       }
+      applyVacancyCandidateRegistrationPolicy(
+        vacancy,
+        options.registrationFiltersByVacancyId?.[String(vacancy.id)] || {}
+      );
     }
   }
 
   return viewModel;
 }
 
-async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds) {
+async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds, registrationFiltersByVacancyId = {}) {
   const activeVacancyIds = Object.entries(searches)
     .filter(([vacancyId, search]) => search?.text && visibleVacancyIds.has(String(vacancyId)))
     .map(([vacancyId]) => vacancyId);
@@ -215,7 +224,12 @@ async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds) 
     where: {
       AND: [
         buildCandidateAccessWhere(accessContext),
-        { vacancyId: { in: activeVacancyIds } }
+        {
+          OR: activeVacancyIds.map((vacancyId) => buildVacancyRegistrationCandidateWhere(
+            vacancyId,
+            registrationFiltersByVacancyId[String(vacancyId)] || {}
+          ))
+        }
       ]
     },
     orderBy: { createdAt: 'desc' },
@@ -262,6 +276,7 @@ async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds) 
 
 export async function expandVacancySearchCandidates(viewModel = {}, query = {}, req = {}) {
   const searches = normalizeVacancyDashboardSearches(query);
+  const registrationFiltersByVacancyId = normalizeVacancyRegistrationDateFilters(query);
   if (!Object.values(searches).some((search) => search?.text)) return viewModel;
 
   const visibleVacancyIds = new Set();
@@ -270,8 +285,16 @@ export async function expandVacancySearchCandidates(viewModel = {}, query = {}, 
   }
 
   const accessContext = getRequestAccessContext(req);
-  const candidates = await loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds);
-  return mergeVacancySearchResults(viewModel, searches, candidates, { isDev: accessContext.isDev });
+  const candidates = await loadAuthorizedSearchCandidates(
+    req,
+    searches,
+    visibleVacancyIds,
+    registrationFiltersByVacancyId
+  );
+  return mergeVacancySearchResults(viewModel, searches, candidates, {
+    isDev: accessContext.isDev,
+    registrationFiltersByVacancyId
+  });
 }
 
 export function installVacancyDashboardSearchExpansion() {

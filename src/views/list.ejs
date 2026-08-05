@@ -525,6 +525,7 @@
 <%
   const isLegacyMode = typeof mode === 'undefined' || mode === 'legacy';
   const vacancyFilterFields = ['transportMode', 'neighborhood', 'locality'];
+  const vacancyRegistrationDateFields = ['dateFrom', 'dateTo'];
   const vacancyFilterLabels = {
     transportMode: 'Medio de transporte',
     neighborhood: 'Barrio',
@@ -568,6 +569,9 @@
   ['neighborhood', 'locality', 'transportMode'].forEach((key) => {
     if (adminFilters && adminFilters[key]) legacyParams.set(key, adminFilters[key]);
   });
+  if (legacyVacancyId) legacyParams.set('vacancyId', legacyVacancyId);
+  if (candidateRegistrationRange?.dateFrom) legacyParams.set('dateFrom', candidateRegistrationRange.dateFrom);
+  if (candidateRegistrationRange?.dateTo) legacyParams.set('dateTo', candidateRegistrationRange.dateTo);
   const currentLegacyPath = '/admin' + (legacyParams.toString() ? '?' + legacyParams.toString() : '');
   function appendVacancyFilters(params, excludedVacancyId = null) {
     if (!vacancyFiltersById) return;
@@ -586,13 +590,31 @@
       if (search.text) params.set('vs_' + vacancyId + '_text', search.text);
     }
   }
+  function appendVacancyRegistrationFilters(params, excludedVacancyId = null) {
+    if (!vacancyRegistrationFiltersById) return;
+    for (const [vacancyId, range] of Object.entries(vacancyRegistrationFiltersById)) {
+      if (!range || vacancyId === excludedVacancyId) continue;
+      if (range.dateFrom) params.set('vr_' + vacancyId + '_dateFrom', range.dateFrom);
+      if (range.dateTo) params.set('vr_' + vacancyId + '_dateTo', range.dateTo);
+    }
+  }
   const dashboardParams = new URLSearchParams();
   if (activeCity) dashboardParams.set('city', activeCity);
   if (selectedDate) dashboardParams.set('date', selectedDate);
   appendVacancyFilters(dashboardParams);
   appendVacancySearches(dashboardParams);
+  appendVacancyRegistrationFilters(dashboardParams);
   const currentDashboardPath = '/admin' + (dashboardParams.toString() ? '?' + dashboardParams.toString() : '');
   const currentAdminReturnPath = isLegacyMode ? currentLegacyPath : currentDashboardPath;
+
+  function vacancyAllCandidatesHref(vacancyId, scope, range = {}) {
+    const params = new URLSearchParams();
+    params.set('status', scope);
+    params.set('vacancyId', vacancyId);
+    if (range.dateFrom) params.set('dateFrom', range.dateFrom);
+    if (range.dateTo) params.set('dateTo', range.dateTo);
+    return '/admin?' + params.toString();
+  }
 
   function candidateWhatsappHref(candidate) {
     return '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(currentAdminReturnPath);
@@ -740,6 +762,9 @@
       if (adminFilters?.neighborhood) tabParams.set('neighborhood', adminFilters.neighborhood);
       if (adminFilters?.locality) tabParams.set('locality', adminFilters.locality);
       if (adminFilters?.transportMode) tabParams.set('transportMode', adminFilters.transportMode);
+      if (legacyVacancyId) tabParams.set('vacancyId', legacyVacancyId);
+      if (candidateRegistrationRange?.dateFrom) tabParams.set('dateFrom', candidateRegistrationRange.dateFrom);
+      if (candidateRegistrationRange?.dateTo) tabParams.set('dateTo', candidateRegistrationRange.dateTo);
     %>
       <a href="/admin?<%= tabParams.toString() %>" style="border:1px solid var(--border);background:<%= activeStatusScope===tab.scope ? 'var(--navy)' : 'var(--surface)' %>;color:<%= activeStatusScope===tab.scope ? '#fff' : 'var(--navy)' %>;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;text-decoration:none;"><%= tab.label %></a>
     <% } %>
@@ -750,6 +775,13 @@
     <% if (adminFilters?.neighborhood) { %><input type="hidden" name="neighborhood" value="<%= adminFilters.neighborhood %>" /><% } %>
     <% if (adminFilters?.locality) { %><input type="hidden" name="locality" value="<%= adminFilters.locality %>" /><% } %>
     <% if (adminFilters?.transportMode) { %><input type="hidden" name="transportMode" value="<%= adminFilters.transportMode %>" /><% } %>
+    <% if (legacyVacancyId) { %><input type="hidden" name="vacancyId" value="<%= legacyVacancyId %>" /><% } %>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Registrados desde
+      <input type="date" name="dateFrom" value="<%= candidateRegistrationRange?.dateFrom || '' %>" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;" />
+    </label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Registrados hasta
+      <input type="date" name="dateTo" value="<%= candidateRegistrationRange?.dateTo || '' %>" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;" />
+    </label>
     <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Buscar por
       <select name="searchField" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:150px;">
         <option value="document" <%= (candidateSearch?.field || 'document') === 'document' ? 'selected' : '' %>>Documento</option>
@@ -760,7 +792,7 @@
       <input type="text" name="searchText" value="<%= candidateSearch?.text || '' %>" placeholder="Escribe el número a buscar" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:220px;" />
     </label>
     <button type="submit" class="export-btn" style="cursor:pointer;">Buscar</button>
-    <a href="/admin?status=<%= activeStatusScope || 'all' %>" class="export-btn">Limpiar búsqueda</a>
+    <a href="/admin?status=<%= activeStatusScope || 'all' %><%= legacyVacancyId ? '&vacancyId=' + encodeURIComponent(legacyVacancyId) : '' %><%= candidateRegistrationRange?.dateFrom ? '&dateFrom=' + encodeURIComponent(candidateRegistrationRange.dateFrom) : '' %><%= candidateRegistrationRange?.dateTo ? '&dateTo=' + encodeURIComponent(candidateRegistrationRange.dateTo) : '' %>" class="export-btn">Limpiar búsqueda</a>
   </form>
 
   <% if (showRecruiterFilters) { %>
@@ -768,6 +800,9 @@
       <input type="hidden" name="status" value="<%= activeStatusScope %>" />
       <% if (candidateSearch?.field) { %><input type="hidden" name="searchField" value="<%= candidateSearch.field %>" /><% } %>
       <% if (candidateSearch?.text) { %><input type="hidden" name="searchText" value="<%= candidateSearch.text %>" /><% } %>
+      <% if (legacyVacancyId) { %><input type="hidden" name="vacancyId" value="<%= legacyVacancyId %>" /><% } %>
+      <% if (candidateRegistrationRange?.dateFrom) { %><input type="hidden" name="dateFrom" value="<%= candidateRegistrationRange.dateFrom %>" /><% } %>
+      <% if (candidateRegistrationRange?.dateTo) { %><input type="hidden" name="dateTo" value="<%= candidateRegistrationRange.dateTo %>" /><% } %>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-muted);font-weight:600;">Barrio
         <input type="text" name="neighborhood" value="<%= adminFilters?.neighborhood || '' %>" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;min-width:170px;" />
       </label>
@@ -927,6 +962,11 @@
       <% } if (search?.text) { %>
         <input type="hidden" name="vs_<%= vacancyId %>_text" value="<%= search.text %>" />
       <% } } } %>
+      <% if (vacancyRegistrationFiltersById) { for (const [vacancyId, range] of Object.entries(vacancyRegistrationFiltersById)) { if (range?.dateFrom) { %>
+        <input type="hidden" name="vr_<%= vacancyId %>_dateFrom" value="<%= range.dateFrom %>" />
+      <% } if (range?.dateTo) { %>
+        <input type="hidden" name="vr_<%= vacancyId %>_dateTo" value="<%= range.dateTo %>" />
+      <% } } } %>
       <div class="date-strip">
         <label for="datePicker">📅 Fecha entrevistas:</label>
         <input
@@ -944,6 +984,7 @@
             if (todayStr) todayParams.set('date', todayStr);
             appendVacancyFilters(todayParams);
             appendVacancySearches(todayParams);
+            appendVacancyRegistrationFilters(todayParams);
           %>
           <a href="/admin?<%= todayParams.toString() %>" class="btn-today">Hoy</a>
         <% } else { %>
@@ -1074,6 +1115,7 @@
         let modeBadgeText  = isDashboardReview ? 'Revisión de HV · bot pausado' : (isClosed ? 'Cerrada' : (isScheduling ? 'Agendando entrevistas' : 'Solo recepción de HV'));
         const currentVacancyFilters = (vacancyFiltersById && vacancyFiltersById[v.id]) || {};
         const currentVacancySearch = (vacancySearchById && vacancySearchById[v.id]) || { field: 'document', text: '' };
+        const currentVacancyRegistrationRange = (vacancyRegistrationFiltersById && vacancyRegistrationFiltersById[v.id]) || { dateFrom: '', dateTo: '' };
         const currentVacancyFilterFields = getVacancyFilterFields(v);
         const vacancyFilterSourceCandidates = [
           ...v.registeredNoBooking,
@@ -1109,18 +1151,28 @@
         ));
         const vacancyFiltersActive = vacancyFilterFields.some((field) => currentVacancyFilters[field]);
         const vacancySearchActive = Boolean(currentVacancySearch.text);
+        const vacancyRegistrationRangeActive = Boolean(currentVacancyRegistrationRange.dateFrom || currentVacancyRegistrationRange.dateTo);
         const clearVacancyFilterParams = new URLSearchParams();
         if (activeCity) clearVacancyFilterParams.set('city', activeCity);
         if (selectedDate) clearVacancyFilterParams.set('date', selectedDate);
         appendVacancyFilters(clearVacancyFilterParams, v.id);
         appendVacancySearches(clearVacancyFilterParams);
+        appendVacancyRegistrationFilters(clearVacancyFilterParams);
         const clearVacancyFilterHref = '/admin' + (clearVacancyFilterParams.toString() ? '?' + clearVacancyFilterParams.toString() : '');
         const clearVacancySearchParams = new URLSearchParams();
         if (activeCity) clearVacancySearchParams.set('city', activeCity);
         if (selectedDate) clearVacancySearchParams.set('date', selectedDate);
         appendVacancyFilters(clearVacancySearchParams);
         appendVacancySearches(clearVacancySearchParams, v.id);
+        appendVacancyRegistrationFilters(clearVacancySearchParams);
         const clearVacancySearchHref = '/admin' + (clearVacancySearchParams.toString() ? '?' + clearVacancySearchParams.toString() : '');
+        const clearVacancyRegistrationParams = new URLSearchParams();
+        if (activeCity) clearVacancyRegistrationParams.set('city', activeCity);
+        if (selectedDate) clearVacancyRegistrationParams.set('date', selectedDate);
+        appendVacancyFilters(clearVacancyRegistrationParams);
+        appendVacancySearches(clearVacancyRegistrationParams);
+        appendVacancyRegistrationFilters(clearVacancyRegistrationParams, v.id);
+        const clearVacancyRegistrationHref = '/admin' + (clearVacancyRegistrationParams.toString() ? '?' + clearVacancyRegistrationParams.toString() : '');
       %>
 
       <div class="vacancy-card vacancy-panel" id="vacancy-<%= v.id %>" role="tabpanel" data-vacancy-panel="<%= v.id %>">
@@ -1148,6 +1200,11 @@
           <% } if (search?.text) { %>
             <input type="hidden" name="vs_<%= vacancyId %>_text" value="<%= search.text %>" />
           <% } } } } %>
+          <% if (vacancyRegistrationFiltersById) { for (const [vacancyId, range] of Object.entries(vacancyRegistrationFiltersById)) { if (range?.dateFrom) { %>
+            <input type="hidden" name="vr_<%= vacancyId %>_dateFrom" value="<%= range.dateFrom %>" />
+          <% } if (range?.dateTo) { %>
+            <input type="hidden" name="vr_<%= vacancyId %>_dateTo" value="<%= range.dateTo %>" />
+          <% } } } %>
           <div class="filter-field">
             <label for="vacancySearchField_<%= v.id %>">Buscar por</label>
             <select id="vacancySearchField_<%= v.id %>" name="vs_<%= v.id %>_field">
@@ -1177,6 +1234,11 @@
           <% } if (search?.text) { %>
             <input type="hidden" name="vs_<%= vacancyId %>_text" value="<%= search.text %>" />
           <% } } } %>
+          <% if (vacancyRegistrationFiltersById) { for (const [vacancyId, range] of Object.entries(vacancyRegistrationFiltersById)) { if (vacancyId !== v.id) { if (range?.dateFrom) { %>
+            <input type="hidden" name="vr_<%= vacancyId %>_dateFrom" value="<%= range.dateFrom %>" />
+          <% } if (range?.dateTo) { %>
+            <input type="hidden" name="vr_<%= vacancyId %>_dateTo" value="<%= range.dateTo %>" />
+          <% } } } } %>
           <% for (const field of currentVacancyFilterFields) { %>
             <% const fieldOptions = buildVacancyFilterOptions(vacancyFilterSourceCandidates, field, v); %>
             <% if (fieldOptions.length > 0) { %>
@@ -1191,10 +1253,19 @@
             </div>
             <% } %>
           <% } %>
+          <div class="filter-field">
+            <label for="vacancyRegistrationFrom_<%= v.id %>">Registrados desde</label>
+            <input id="vacancyRegistrationFrom_<%= v.id %>" type="date" name="vr_<%= v.id %>_dateFrom" value="<%= currentVacancyRegistrationRange.dateFrom || '' %>" />
+          </div>
+          <div class="filter-field">
+            <label for="vacancyRegistrationTo_<%= v.id %>">Registrados hasta</label>
+            <input id="vacancyRegistrationTo_<%= v.id %>" type="date" name="vr_<%= v.id %>_dateTo" value="<%= currentVacancyRegistrationRange.dateTo || '' %>" />
+          </div>
           <button type="submit" class="export-btn" style="cursor:pointer;">Aplicar filtros</button>
-          <a href="<%= clearVacancyFilterHref %>#vacancy-<%= v.id %>" class="export-btn">Quitar filtros</a>
-          <% if (vacancyFiltersActive) { %>
-            <span class="filter-note">Filtro activo en esta vacante.</span>
+          <a href="<%= clearVacancyFilterHref %>#vacancy-<%= v.id %>" class="export-btn">Quitar filtros operativos</a>
+          <a href="<%= clearVacancyRegistrationHref %>#vacancy-<%= v.id %>" class="export-btn">Quitar fechas</a>
+          <% if (vacancyFiltersActive || vacancyRegistrationRangeActive) { %>
+            <span class="filter-note">Filtros activos en esta vacante.</span>
           <% } %>
         </form>
 
@@ -1305,7 +1376,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (filteredRegisteredNoBooking.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredRegisteredNoBooking.length - 20 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredRegisteredNoBooking.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredRegisteredNoBooking.length - 20 %> más — <a href="<%= vacancyAllCandidatesHref(v.id, 'registered', currentVacancyRegistrationRange) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>
@@ -1362,7 +1433,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (filteredCompleteWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 20 %> más — <a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredCompleteWithoutCv.length > 20) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 20 %> más — <a href="<%= vacancyAllCandidatesHref(v.id, 'missing_cv_complete', currentVacancyRegistrationRange) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>
@@ -1416,7 +1487,7 @@
                     </div>
                   </div>
                 <% } %>
-                <% if (filteredRegisteredComplete.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredRegisteredComplete.length - 25 %> más — <a href="/admin?status=registered" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+                <% if (filteredRegisteredComplete.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredRegisteredComplete.length - 25 %> más — <a href="<%= vacancyAllCandidatesHref(v.id, 'registered', currentVacancyRegistrationRange) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
               </div>
             <% } %>
           </div>
@@ -1474,7 +1545,7 @@
                   </div>
                 </div>
               <% } %>
-              <% if (filteredCompleteWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 25 %> más — <a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
+              <% if (filteredCompleteWithoutCv.length > 25) { %><div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">+ <%= filteredCompleteWithoutCv.length - 25 %> más — <a href="<%= vacancyAllCandidatesHref(v.id, 'missing_cv_complete', currentVacancyRegistrationRange) %>" style="color:var(--teal);font-weight:600;">ver todos</a></div><% } %>
             </div>
           </div>
           <% } %>

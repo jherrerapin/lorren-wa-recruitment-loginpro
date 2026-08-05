@@ -26,6 +26,13 @@ import {
   isOperationallyRegistered,
   normalizeCandidateStatusForUI
 } from '../services/candidateExport.js';
+import {
+  applyVacancyCandidateRegistrationPolicy,
+  buildCandidateRegistrationCreatedAtWhere,
+  compareCandidatesByRegistrationDesc,
+  normalizeCandidateRegistrationRange,
+  normalizeVacancyRegistrationDateFilters
+} from '../services/vacancyCandidateRegistrationPolicy.js';
 import { sendTextMessage } from '../services/whatsapp.js';
 import {
   deliverManualOutboundText,
@@ -1170,6 +1177,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
   const accessContext = options.accessContext || getAccessContext({ userRole: options.role });
   const isDev = accessContext.isDev;
   const candidateFilters = options.candidateFilters || null;
+  const registrationFiltersByVacancyId = options.registrationFiltersByVacancyId || {};
   const shouldFilterCandidates = accessContext.isAdmin
     && candidateFilters
     && Object.values(candidateFilters).some(Boolean);
@@ -1327,15 +1335,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
         !shouldFilterCandidates || applyRecruiterCandidateFilters([booking.candidate], candidateFilters).length > 0
       ));
 
-    if (isDev) {
-      registeredNoBooking.sort(compareCandidatesByRecentInbound);
-      registeredComplete.sort(compareCandidatesByRecentInbound);
-      completeWithoutCv.sort(compareCandidatesByRecentInbound);
-      approvedCandidates.sort(compareCandidatesByRecentInbound);
-      contractedCandidates.sort(compareCandidatesByRecentInbound);
-    }
-
-    const enriched = {
+    const enriched = applyVacancyCandidateRegistrationPolicy({
       ...v,
       bookingsToday: filteredBookingsToday,
       registeredNoBooking,
@@ -1343,7 +1343,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
       completeWithoutCv,
       approvedCandidates,
       contractedCandidates
-    };
+    }, registrationFiltersByVacancyId[String(v.id)] || {});
 
     citiesMap.get(city).push(enriched);
   }
@@ -1585,6 +1585,10 @@ export function adminRouter(prisma) {
     const vacancyFiltersById = normalizeVacancyDashboardFilters(req.query);
     const candidateSearch = normalizeCandidateSearch(req.query);
     const vacancySearchById = normalizeVacancySearches(req.query);
+    const vacancyRegistrationFiltersById = normalizeVacancyRegistrationDateFilters(req.query);
+    const legacyVacancyId = normalizeString(req.query.vacancyId);
+    const candidateRegistrationRange = normalizeCandidateRegistrationRange(req.query);
+    const legacyCreatedAtWhere = buildCandidateRegistrationCreatedAtWhere(candidateRegistrationRange);
     const botChatCount = await loadBotChatCount(prisma);
     const canUseLegacyScope = requestedStatus
       && ADMIN_STATUS_SCOPES.has(requestedStatus)
@@ -1592,7 +1596,11 @@ export function adminRouter(prisma) {
 
     if (canUseLegacyScope) {
       const legacyQuery = {
-        where: buildCandidateAccessWhere(accessContext),
+        where: {
+          ...buildCandidateAccessWhere(accessContext),
+          ...(legacyVacancyId ? { vacancyId: legacyVacancyId } : {}),
+          ...(legacyCreatedAtWhere ? { createdAt: legacyCreatedAtWhere } : {})
+        },
         orderBy: { createdAt: 'desc' },
         select: {
           id: true,
@@ -1626,7 +1634,7 @@ export function adminRouter(prisma) {
       };
       if (requestedStatus === 'inbox' && req.userRole === 'dev') {
         legacyQuery.where = {
-          ...buildCandidateAccessWhere(accessContext),
+          ...legacyQuery.where,
           lastInboundAt: { not: null }
         };
         legacyQuery.orderBy = [{ lastInboundAt: 'desc' }, { createdAt: 'desc' }];
@@ -1647,7 +1655,11 @@ export function adminRouter(prisma) {
       if (candidateSearch.text) {
         candidates = candidates.filter((candidate) => candidateMatchesSearch(candidate, candidateSearch));
       }
-      candidates.sort(compareCandidatesByRecentInbound);
+      if (requestedStatus === 'inbox' && req.userRole === 'dev') {
+        candidates.sort(compareCandidatesByRecentInbound);
+      } else {
+        candidates.sort(compareCandidatesByRegistrationDesc);
+      }
       return res.render('list', {
         mode: 'legacy', candidates, formatDateTimeCO, role: req.userRole,
         canAccessDispatch: Boolean(req.canAccessDispatch),
@@ -1663,7 +1675,10 @@ export function adminRouter(prisma) {
         candidateSearch,
         botChatCount,
         vacancyFiltersById: {},
-        vacancySearchById: {}
+        vacancySearchById: {},
+        vacancyRegistrationFiltersById: {},
+        legacyVacancyId,
+        candidateRegistrationRange
       });
     }
 
@@ -1671,7 +1686,8 @@ export function adminRouter(prisma) {
     const selectedDate = isValidDateString(rawDate) ? rawDate : todayCO();
     const { cities, legacyCandidates, manualReviewCandidates } = await buildDashboardData(prisma, selectedDate, {
       role: req.userRole,
-      accessContext
+      accessContext,
+      registrationFiltersByVacancyId: vacancyRegistrationFiltersById
     });
 
     const rawCity = normalizeString(req.query.city);
@@ -1692,7 +1708,10 @@ export function adminRouter(prisma) {
       adminFilters,
       candidateSearch: null,
       vacancyFiltersById,
-      vacancySearchById
+      vacancySearchById,
+      vacancyRegistrationFiltersById,
+      legacyVacancyId: null,
+      candidateRegistrationRange: { dateFrom: '', dateTo: '' }
     });
   });
 
