@@ -309,6 +309,8 @@ function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMes
   const explicitProfileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
     && /\b(perfil|hoja de vida|hv|datos|registro|registrada|registrado)\b/.test(normalized);
 
+  // Una pregunta o una solicitud de información tiene prioridad conversacional.
+  // "Me interesa" expresa interés en la vacante, no autoriza por sí solo guardar el perfil.
   if (turn.question || turn.vacancyInformationRequest) {
     return { accepted: false, passiveAck: false, reason: 'information_request_before_future_profile_decision', lastReplyKind };
   }
