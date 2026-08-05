@@ -1,4 +1,4 @@
-name: Apply issue 944 vacancy registration order
+name: Refine issue 944 vacancy registration order
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  apply:
+  refine:
     if: github.head_ref == 'fix/944-vacancy-registration-order-date-filter' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -28,16 +28,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Load exact correction
+      - name: Load refinement
         run: |
           git fetch origin automation/944-vacancy-registration-order-runner
-          git show origin/automation/944-vacancy-registration-order-runner:.github/scripts/apply-issue-944.py > /tmp/apply-issue-944.py
-          git show origin/automation/944-vacancy-registration-order-runner:.github/scripts/consolidate-issue-944-tests.py > /tmp/consolidate-issue-944-tests.py
+          git show origin/automation/944-vacancy-registration-order-runner:.github/scripts/refine-issue-944.py > /tmp/refine-issue-944.py
 
-      - name: Apply exact correction
-        run: |
-          python3 /tmp/apply-issue-944.py
-          python3 /tmp/consolidate-issue-944-tests.py
+      - name: Apply refinement
+        run: python3 /tmp/refine-issue-944.py
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
@@ -62,13 +59,13 @@ jobs:
           node --test test/vacancyDashboardSearchExpansion.test.js
           git diff --check
 
-      - name: Create and verify canonical commit
+      - name: Create and verify refined commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "fix: ordenar postulados y filtrar por registro (#944)"
+          git commit -m "fix: preservar rango y alcance de vacante (#944)"
           git fetch origin main
           mapfile -t files < <(git diff --name-only origin/main...HEAD | sort)
           printf '%s\n' "${files[@]}"
@@ -78,7 +75,6 @@ jobs:
           test "${files[2]}" = "src/services/vacancyDashboardSearchExpansion.js"
           test "${files[3]}" = "src/views/list.ejs"
           test "${files[4]}" = "test/vacancyDashboardSearchExpansion.test.js"
-          test ! -e test/vacancyCandidateRegistrationPolicy.test.js
 
-      - name: Push validated correction
+      - name: Push refined correction
         run: git push origin HEAD:fix/944-vacancy-registration-order-date-filter
