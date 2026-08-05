@@ -125,7 +125,7 @@ test('construye condiciones de búsqueda por vacante y rango de registro', () =>
 });
 '''
 
-test_source = test_source.rstrip() + extra_tests + '\n'
+test_source = (test_source.rstrip() + extra_tests).rstrip() + '\n'
 test_path.write_text(test_source, encoding='utf-8')
 
 separate_test = Path('test/vacancyCandidateRegistrationPolicy.test.js')
