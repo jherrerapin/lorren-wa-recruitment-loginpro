@@ -219,7 +219,7 @@ test('A3: un documento previo al consentimiento se adquiere sin descargar, respo
   assert.equal(finalCandidate.botResumeMode, replay.candidate.botResumeMode);
 });
 
-test('A3: un error al adquirir un adjunto pausado no levanta la pausa ni genera respuesta automática', async () => {
+test('A3: un error al adquirir un adjunto pausado exige reintento sin levantar la pausa ni llegar al router', async () => {
   const base = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
   const replay = structuredClone(base);
   replay.candidate.dataConsentStatus = 'PENDING';
@@ -238,11 +238,13 @@ test('A3: un error al adquirir un adjunto pausado no levanta la pausa ni genera 
   const finalCandidate = result.getCandidate();
 
   assert.equal(result.nextCalls, 0);
-  assert.deepEqual(result.statuses, [200]);
+  assert.deepEqual(result.statuses, [503]);
   assert.equal(result.metrics.resumeUpdates, 0);
   assert.equal(result.metrics.inboundMessages, 0);
   assert.equal(result.metrics.outboundMessages, 0);
+  assert.equal(result.payloadMessageCount, 1);
   assert.equal(finalCandidate.botPaused, true);
+  assert.equal(finalCandidate.botResumeMode, replay.candidate.botResumeMode);
 });
 
 test('A3: el router conserva rate limit y persistencia antes de la única reanudación canónica', () => {
