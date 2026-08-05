@@ -201,10 +201,23 @@ test('confirm_booking sin acceptedOfferedSlot explícito queda bloqueado aunque 
   assert.match(guard.reasons.join('|'), /candidate_did_not_accept_offered_slot/);
 });
 
-test('guard rail: confirm_booking con documentType faltante, candidata femenina o sin slot queda bloqueado', () => {
+test('A2: schedulingGuard aplica los mismos criterios neutrales a candidatos MALE y FEMALE', () => {
+  const results = [Gender.MALE, Gender.FEMALE].map((gender) => evaluateSchedulingGuard({
+    candidate: candidate({ gender }),
+    vacancy: activeBogota(),
+    nextSlot,
+    actionType: 'confirm_booking',
+    acceptedOfferedSlot: true
+  }));
+
+  assert.deepEqual(results[1].reasons, results[0].reasons);
+  assert.equal(results[0].allowed, true);
+  assert.equal(results[1].allowed, true);
+});
+
+test('guard rail: confirm_booking con documentType faltante o sin slot queda bloqueado', () => {
   for (const [label, candidatePatch, slot, expected] of [
     ['documentType', { documentType: null }, nextSlot, /missing_fields:documentType/],
-    ['female', { gender: Gender.FEMALE }, nextSlot, /female_candidate/],
     ['slot', {}, null, /missing_valid_slot/]
   ]) {
     const guard = evaluateSchedulingGuard({
