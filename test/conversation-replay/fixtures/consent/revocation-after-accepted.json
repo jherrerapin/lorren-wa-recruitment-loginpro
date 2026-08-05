@@ -58,7 +58,7 @@
     }
   ],
   "inbound": {
-    "messageId": "replay-conv-007-revocation-001",
+    "messageId": "test-replay-conv-007-revocation-001",
     "type": "text",
     "body": "Quiero retirar mi autorización y eliminar mi información. No deseo continuar."
   },
