@@ -9,8 +9,11 @@ import {
 import { captureConsentedProfileData } from './consentProfileCapture.js';
 import { buildConsentQuestionReply } from './consentFaq.js';
 import { isSupervisorPhone } from './adminSupervisor.js';
+import { shouldResumeAutomationOnInbound } from './botAutomationPolicy.js';
+import { resumeCandidateAutomationOnInbound } from './candidateStateService.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
 import {
+  findInboundConversationMessage,
   persistInboundConversationMessage,
   persistOutboundConversationMessage
 } from './conversationMessageRepository.js';
@@ -772,6 +775,46 @@ async function notifyConsentGateFailure(messages = []) {
   await Promise.allSettled(recipients.map((to) => sendTextMessage(to, CONSENT_GATE_ERROR_REPLY)));
 }
 
+async function preparePausedCandidateForConsentGate(prisma, candidate = {}, message = {}) {
+  if (!candidate?.botPaused) {
+    return { candidate, blocked: false, consume: false, reason: 'automation_not_paused' };
+  }
+
+  const waMessageId = String(message?.id || '').trim();
+  if (waMessageId) {
+    const existing = await findInboundConversationMessage(prisma, {
+      candidateId: candidate.id,
+      waMessageId
+    });
+    if (existing.found) {
+      return { candidate, blocked: true, consume: true, reason: 'paused_inbound_retry' };
+    }
+  }
+
+  if (!waMessageId || !shouldResumeAutomationOnInbound(candidate)) {
+    return { candidate, blocked: true, consume: false, reason: 'automation_pause_not_resumable_here' };
+  }
+
+  const transition = await resumeCandidateAutomationOnInbound(prisma, {
+    candidateId: candidate.id,
+    expected: {
+      botPaused: candidate.botPaused,
+      botPausedAt: candidate.botPausedAt ?? null,
+      botPausedBy: candidate.botPausedBy ?? null,
+      botPauseReason: candidate.botPauseReason ?? null,
+      botResumeMode: candidate.botResumeMode ?? null
+    },
+    now: new Date()
+  });
+
+  const resumedCandidate = transition.candidate || candidate;
+  if (transition.count !== 1 || resumedCandidate.botPaused) {
+    return { candidate: resumedCandidate, blocked: true, consume: false, reason: 'automation_resume_conflict' };
+  }
+
+  return { candidate: resumedCandidate, blocked: false, consume: false, reason: 'automation_resumed_on_new_inbound' };
+}
+
 export function dataConsentGateMiddleware(prisma) {
   return async (req, res, next) => {
     const messages = extractMessages(req.body);
@@ -784,11 +827,18 @@ export function dataConsentGateMiddleware(prisma) {
         const from = message?.from;
         if (!from || isSupervisorPhone(from)) continue;
 
-        const candidate = await prisma.candidate.upsert({
+        let candidate = await prisma.candidate.upsert({
           where: { phone: from },
           update: {},
           create: { phone: from }
         });
+        const pauseDecision = await preparePausedCandidateForConsentGate(prisma, candidate, message);
+        candidate = pauseDecision.candidate || candidate;
+        if (pauseDecision.blocked) {
+          if (pauseDecision.consume) handledMessages.push(message);
+          continue;
+        }
+
         const body = inboundText(message);
 
         if (candidate?.dataConsentStatus === 'REVOKED' && isExplicitConsentRevocation(body)) {
