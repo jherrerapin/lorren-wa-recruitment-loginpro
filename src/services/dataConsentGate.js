@@ -131,25 +131,38 @@ function startsWithExplicitConsentRejection(text = '') {
   return /^(no autorizo|no consiento|no doy mi consentimiento|no doy consentimiento|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito|no acepto|no estoy de acuerdo|rechazo|revoco)\b/.test(normalize(text));
 }
 
-function isConsentRightsQuestion(text = '') {
-  const raw = String(text || '').trim();
-  const normalized = normalize(raw);
+function stripConsentCourtesyPrefix(text = '') {
+  return normalize(text).replace(/^(?:por favor|porfa)\s+/, '');
+}
+
+function isDirectConsentWithdrawal(text = '') {
+  const normalized = stripConsentCourtesyPrefix(text);
   if (!normalized) return false;
-  if (startsWithExplicitConsentRejection(normalized)) return false;
-  if (/^(solicito|pido|exijo|quiero que|deseo que|por favor)\b/.test(normalized)) return false;
-  if (/^(eliminen|elimine|borren|borre|supriman|suprima|cancelen|cancele|detengan|detenga|paren|pare|revoquen|revoque|retiren|retire)\b/.test(normalized)) return false;
-  return raw.includes('?') || /^(como|como puedo|puedo|podria|que debo|cual es|donde)\b/.test(normalized);
+  if (startsWithExplicitConsentRejection(normalized) && referencesConsentSubject(normalized)) return true;
+  return hasAny(normalized, [
+    /^(?:eliminen|elimine|borren|borre|supriman|suprima)\b.*\b(datos|informacion|registro)\b/,
+    /^(?:revoquen|revoque|retiren|retire|revoco|retiro)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/,
+    /^(?:solicito|pido|exijo|quiero|deseo)\b.*\b(revocatoria|revocacion|revocar|retirar|eliminar|borrar|suprimir|cancelar|detener)\b.*\b(autorizacion|consentimiento|tratamiento|datos|informacion|registro|proceso|postulacion)\b/,
+    /^(?:cancelen|cancele|detengan|detenga|paren|pare)\b.*\b(postulacion|proceso|tratamiento|datos)\b/
+  ]);
+}
+
+function isConsentRightsQuestion(text = '') {
+  const normalized = stripConsentCourtesyPrefix(text);
+  if (!normalized || isDirectConsentWithdrawal(normalized)) return false;
+  const questionLead = /^(?:como|como puedo|puedo|podria|que debo|que tengo que|cual es|donde)\b/.test(normalized);
+  const futureRightsContext = /\b(?:si mas adelante|mas adelante|despues|en el futuro)\b/.test(normalized);
+  return questionLead || (String(text || '').includes('?') && futureRightsContext);
 }
 
 function isExplicitConsentRevocation(text = '') {
-  const normalized = normalize(text);
+  const normalized = stripConsentCourtesyPrefix(text);
   if (!normalized || isConsentRightsQuestion(text)) return false;
-  if (startsWithExplicitConsentRejection(normalized) && referencesConsentSubject(normalized)) return true;
+  if (isDirectConsentWithdrawal(normalized)) return true;
   return hasAny(normalized, [
     /\b(cancelar|cancelen|cancele|detener|detengan|detenga|parar|paren|pare)\b.*\b(postulacion|proceso|tratamiento|datos)\b/,
     /\b(eliminar|eliminen|elimine|borrar|borren|borre|suprimir|supriman|suprima)\b.*\b(datos|informacion|registro)\b/,
     /\b(revocar|revoco|revoquen|revoque|retiro|retirar|retiren|retire)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/,
-    /\b(solicito|pido|exijo|quiero|deseo)\b.*\b(revocatoria|revocacion|revocar|retirar|eliminar|borrar|suprimir|cancelar|detener)\b.*\b(autorizacion|consentimiento|tratamiento|datos|informacion|registro|proceso|postulacion)\b/,
     /\b(revocatoria|revocacion)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/
   ]);
 }
@@ -383,8 +396,7 @@ export function parseConsentPendingMode(mode = '') {
 export function evaluateConsentBoundary(candidate = {}, message = {}) {
   if (isSupervisorPhone(message?.from || '')) return { block: false, reason: 'supervisor_message' };
   const body = inboundText(message);
-  const withdrawalRequested = isExplicitConsentRevocation(body)
-    || (isConsentAlreadyAccepted(candidate) && hasExplicitConsentRejection(body));
+  const withdrawalRequested = isExplicitConsentRevocation(body);
   if (withdrawalRequested) return { block: true, reason: 'explicit_consent_revocation' };
   if (isConsentAlreadyAccepted(candidate)) return { block: false, reason: 'consent_already_accepted' };
   if (candidate?.dataConsentStatus === 'REVOKED') return { block: true, reason: 'consent_revoked' };
@@ -964,8 +976,7 @@ export function dataConsentGateMiddleware(prisma) {
           create: { phone: from }
         });
         const body = inboundText(message);
-        const withdrawalRequested = isExplicitConsentRevocation(body)
-          || (candidate?.dataConsentStatus === 'ACCEPTED' && hasExplicitConsentRejection(body));
+        const withdrawalRequested = isExplicitConsentRevocation(body);
 
         if (candidate?.dataConsentStatus === 'REVOKED' && withdrawalRequested) {
           await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
