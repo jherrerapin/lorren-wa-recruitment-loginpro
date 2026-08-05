@@ -1,5 +1,6 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
+import { APPLICATION_INTEREST_PENDING_MODE } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 
@@ -88,6 +89,27 @@ function buildActiveDataPrompt(candidate = {}, vacancy = null) {
   if (labels.length) return `Perfecto, continuamos con esta vacante. Para avanzar, compárteme ${labels.join(', ')}.`;
   if (!hasValidCv(candidate)) return 'Perfecto, continuamos con esta vacante. Envíame tu hoja de vida como archivo PDF, DOC o DOCX.';
   return 'Perfecto, ya tengo la información principal. Continuo con el siguiente paso del proceso.';
+}
+
+function requiresConsentBeforeCollection(candidate = {}) {
+  return String(candidate?.dataConsentStatus || '') === 'PENDING';
+}
+
+function buildAwaitingApplicationInterestUpdates(vacancyId) {
+  return {
+    vacancyId,
+    currentStep: GREETING_SENT,
+    botResumeMode: APPLICATION_INTEREST_PENDING_MODE,
+    reminderScheduledFor: null,
+    reminderState: 'SKIPPED'
+  };
+}
+
+function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText);
+  const city = vacancyCity(vacancy);
+  const confirmation = answer || `Encontré la vacante de ${vacancyTitle(vacancy)}${city ? ` en ${city}` : ''}.`;
+  return `${confirmation} ¿Deseas postularte y continuar con este proceso?`;
 }
 
 function missingDataPrompt(candidate = {}, vacancy = null) {
@@ -287,8 +309,6 @@ function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMes
   const explicitProfileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
     && /\b(perfil|hoja de vida|hv|datos|registro|registrada|registrado)\b/.test(normalized);
 
-  // Una pregunta o una solicitud de información tiene prioridad conversacional.
-  // "Me interesa" expresa interés en la vacante, no autoriza por sí solo guardar el perfil.
   if (turn.question || turn.vacancyInformationRequest) {
     return { accepted: false, passiveAck: false, reason: 'information_request_before_future_profile_decision', lastReplyKind };
   }
@@ -690,6 +710,18 @@ export async function resolveVacancyFirstGate({
   });
 
   if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
+    if (requiresConsentBeforeCollection(candidate)) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
+        replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
+        vacancyId: resolution.vacancy.id,
+        vacancy: resolution.vacancy,
+        candidateUpdates: buildAwaitingApplicationInterestUpdates(resolution.vacancy.id),
+        reply: buildActiveVacancyInterestReply(resolution.vacancy, inboundText),
+        resolution
+      };
+    }
     return { action: VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE, reason: 'ACTIVE_VACANCY_RESOLVED', vacancyId: resolution.vacancy.id, vacancy: resolution.vacancy, resolution };
   }
 
