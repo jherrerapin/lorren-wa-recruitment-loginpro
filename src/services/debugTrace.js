@@ -163,8 +163,8 @@ export function isSuspiciousFullName(value = '') {
     /\b(calle|cl|carrera|cra|kr|avenida|av|autopista|diagonal|transversal|tv)\b/,
     /^(?:administrador(?:a)?|auxiliar|operari[oa]|coordinador(?:a)?|jefe|lider|ingenier[oa]|tecnic[oa]|tecnolog[oa]|profesional|abogad[oa]|soldado|militar)(?:\s+(?:logistic[oa]|administrativ[oa]|operativ[oa]|comercial|de\s+[a-záéíóúñ]+))?$/,
     /^(?:muy\s+)?(?:enfocad[oa]|responsable|puntual|proactiv[oa]|comprometid[oa]|dispuest[oa]|atent[oa])(?:\s+(?:y|e)\s+(?:responsable|puntual|proactiv[oa]|comprometid[oa]|dispuest[oa]|atent[oa]))?$/,
-    /^(para\s+(el|la)\b|de\s+[a-záéíóúñ]+$)/,
-    /\b(restriccion(?:es)?\s+medica(?:s)?|sin\s+restriccion(?:es)?(\s+medica(?:s)?)?)\b/
+    /^(?:para\s+(?:el|la)\b|de\s+[a-záéíóúñ]+$)/,
+    /\b(restriccion(?:es)?\s+medica(?:s)?|sin\s+restriccion(?:es)?(?:\s+medica(?:s)?)?)\b/
   ];
   if (explicitNonNamePatterns.some((pattern) => pattern.test(normalized))) return true;
 
@@ -226,6 +226,16 @@ function normalizeComparableValue(field, value) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function isResidenceAliasedToName(field, value, parsedData = {}, candidate = {}) {
+  if (!['neighborhood', 'locality'].includes(field)) return false;
+  const residence = normalizeComparableValue(field, value);
+  if (!residence) return false;
+  return [parsedData.fullName, candidate.fullName]
+    .map((name) => normalizeComparableValue('fullName', name))
+    .filter(Boolean)
+    .some((name) => name === residence);
 }
 
 function isEquivalentFieldValue(field, currentValue, nextValue) {
@@ -320,6 +330,10 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
       decisions.rejectedFields.push('fullName');
       decisions.suspiciousFullNameRejected = true;
       decisions.rejectedNameReason = fieldSource ? `suspicious_${fieldSource}` : 'suspicious_name_pattern';
+      continue;
+    }
+    if (isResidenceAliasedToName(field, value, parsedData, candidate)) {
+      decisions.rejectedFields.push(field);
       continue;
     }
 
