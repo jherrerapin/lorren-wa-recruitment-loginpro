@@ -29,6 +29,10 @@ import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
 import { getOpenAiModelConfig } from './services/openAiModelConfig.js';
 import { createAdminLogoutHandler, createAdminSessionMiddleware } from './services/adminSession.js';
+import {
+  enhanceAdminApplicantListView,
+  injectAdminApplicantControls
+} from './services/adminApplicantListing.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -401,19 +405,35 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   const originalRender = res.render.bind(res);
   res.render = (view, locals = {}, callback) => {
-    originalRender(view, locals, (error, html) => {
-      if (error) {
+    const preparedLocals = view === 'list'
+      ? enhanceAdminApplicantListView(prisma, req, locals)
+      : Promise.resolve(locals);
+
+    preparedLocals
+      .then((resolvedLocals) => {
+        originalRender(view, resolvedLocals, (error, html) => {
+          if (error) {
+            if (typeof callback === 'function') return callback(error);
+            return next(error);
+          }
+          const shouldInjectDispatchScripts = view === 'operacionesAsignacionesConfirmacion' && typeof html === 'string';
+          const htmlWithDispatchScripts = shouldInjectDispatchScripts
+            ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script><script src="/public/assignment-template-sync.js"></script></body>')
+            : html;
+          const htmlWithApplicantControls = view === 'list'
+            ? injectAdminApplicantControls(htmlWithDispatchScripts, req)
+            : htmlWithDispatchScripts;
+          const output = injectLorenV2NavbarLink(htmlWithApplicantControls, req);
+          if (typeof callback === 'function') return callback(null, output);
+          return res.send(output);
+        });
+      })
+      .catch((error) => {
         if (typeof callback === 'function') return callback(error);
         return next(error);
-      }
-      const shouldInjectDispatchScripts = view === 'operacionesAsignacionesConfirmacion' && typeof html === 'string';
-      const htmlWithDispatchScripts = shouldInjectDispatchScripts
-        ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script><script src="/public/assignment-template-sync.js"></script></body>')
-        : html;
-      const output = injectLorenV2NavbarLink(htmlWithDispatchScripts, req);
-      if (typeof callback === 'function') return callback(null, output);
-      return res.send(output);
-    });
+      });
+
+    return res;
   };
   next();
 });
