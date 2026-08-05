@@ -695,9 +695,7 @@ function getConsentContext(candidate = {}) {
 function buildConsentPrerequisiteReply(candidate = {}, vacancy = null, boundaryReason = '') {
   const preface = boundaryReason === 'attachment_before_consent'
     ? PRE_CONSENT_ATTACHMENT_REPLY
-    : (boundaryReason === 'profile_data_before_consent' || boundaryReason === 'protected_step_without_consent'
-      ? PRE_CONSENT_DATA_REPLY
-      : null);
+    : (boundaryReason === 'profile_data_before_consent' ? PRE_CONSENT_DATA_REPLY : null);
   const next = candidate?.vacancyId || vacancy
     ? APPLICATION_INTEREST_REQUIRED_REPLY
     : VACANCY_NOT_CONFIRMED_REPLY;
@@ -718,6 +716,15 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vacan
   if (Object.keys(update).length) {
     await prisma.candidate.update({ where: { id: candidate.id }, data: update });
   }
+
+  const passRecoveredVacancyContext = Boolean(
+    !hasVacancy
+    && boundaryReason === 'protected_step_without_consent'
+    && !isProtectedAttachment(message)
+    && !containsProfileData(inboundText(message))
+  );
+  if (passRecoveredVacancyContext) return false;
+
   const reply = buildConsentPrerequisiteReply(candidate, vacancy, boundaryReason);
   await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_prerequisite', {
     reason: boundaryReason,
