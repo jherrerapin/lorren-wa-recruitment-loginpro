@@ -37,10 +37,9 @@ function inboundText(fixture) {
 
 function resolveConsentDecision(fixture, text) {
   const candidate = fixture.initialState.candidate;
-  if (candidate.dataConsentStatus === 'ACCEPTED') return null;
-
   const consentPromptPending = parseConsentPendingMode(candidate.botResumeMode).pending;
   if (shouldRecordConsentRejection(text, { consentPromptPending })) return 'REVOKED';
+  if (candidate.dataConsentStatus === 'ACCEPTED') return null;
   if (shouldRecordConsentAcceptance(text, { consentPromptPending })) return 'ACCEPTED';
   return null;
 }
