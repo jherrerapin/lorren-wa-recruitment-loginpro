@@ -10,6 +10,8 @@ import { analyzeConversationTurn } from './conversationIntent.js';
 import { captureConsentedProfileData } from './consentProfileCapture.js';
 import { buildConsentQuestionReply } from './consentFaq.js';
 import { isSupervisorPhone } from './adminSupervisor.js';
+import { shouldResumeAutomationOnInbound } from './botAutomationPolicy.js';
+import { resumeCandidateAutomationOnInbound } from './candidateStateService.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
 import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
 import { cancelReminderOnInbound } from './reminder.js';
@@ -129,25 +131,38 @@ function startsWithExplicitConsentRejection(text = '') {
   return /^(no autorizo|no consiento|no doy mi consentimiento|no doy consentimiento|no doy autorizacion|no doy permiso|no deseo autorizar|no quiero autorizar|no permito|no acepto|no estoy de acuerdo|rechazo|revoco)\b/.test(normalize(text));
 }
 
-function isConsentRightsQuestion(text = '') {
-  const raw = String(text || '').trim();
-  const normalized = normalize(raw);
+function stripConsentCourtesyPrefix(text = '') {
+  return normalize(text).replace(/^(?:por favor|porfa)\s+/, '');
+}
+
+function isDirectConsentWithdrawal(text = '') {
+  const normalized = stripConsentCourtesyPrefix(text);
   if (!normalized) return false;
-  if (startsWithExplicitConsentRejection(normalized)) return false;
-  if (/^(solicito|pido|exijo|quiero que|deseo que|por favor)\b/.test(normalized)) return false;
-  if (/^(eliminen|elimine|borren|borre|supriman|suprima|cancelen|cancele|detengan|detenga|paren|pare|revoquen|revoque|retiren|retire)\b/.test(normalized)) return false;
-  return raw.includes('?') || /^(como|como puedo|puedo|podria|que debo|cual es|donde)\b/.test(normalized);
+  if (startsWithExplicitConsentRejection(normalized) && referencesConsentSubject(normalized)) return true;
+  return hasAny(normalized, [
+    /^(?:eliminen|elimine|borren|borre|supriman|suprima)\b.*\b(datos|informacion|registro)\b/,
+    /^(?:revoquen|revoque|retiren|retire|revoco|retiro)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/,
+    /^(?:solicito|pido|exijo|quiero|deseo)\b.*\b(revocatoria|revocacion|revocar|retirar|eliminar|borrar|suprimir|cancelar|detener)\b.*\b(autorizacion|consentimiento|tratamiento|datos|informacion|registro|proceso|postulacion)\b/,
+    /^(?:cancelen|cancele|detengan|detenga|paren|pare)\b.*\b(postulacion|proceso|tratamiento|datos)\b/
+  ]);
+}
+
+function isConsentRightsQuestion(text = '') {
+  const normalized = stripConsentCourtesyPrefix(text);
+  if (!normalized || isDirectConsentWithdrawal(normalized)) return false;
+  const questionLead = /^(?:como|como puedo|puedo|podria|que debo|que tengo que|cual es|donde)\b/.test(normalized);
+  const futureRightsContext = /\b(?:si mas adelante|mas adelante|despues|en el futuro)\b/.test(normalized);
+  return questionLead || (String(text || '').includes('?') && futureRightsContext);
 }
 
 function isExplicitConsentRevocation(text = '') {
-  const normalized = normalize(text);
+  const normalized = stripConsentCourtesyPrefix(text);
   if (!normalized || isConsentRightsQuestion(text)) return false;
-  if (startsWithExplicitConsentRejection(normalized) && referencesConsentSubject(normalized)) return true;
+  if (isDirectConsentWithdrawal(normalized)) return true;
   return hasAny(normalized, [
     /\b(cancelar|cancelen|cancele|detener|detengan|detenga|parar|paren|pare)\b.*\b(postulacion|proceso|tratamiento|datos)\b/,
     /\b(eliminar|eliminen|elimine|borrar|borren|borre|suprimir|supriman|suprima)\b.*\b(datos|informacion|registro)\b/,
     /\b(revocar|revoco|revoquen|revoque|retiro|retirar|retiren|retire)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/,
-    /\b(solicito|pido|exijo|quiero|deseo)\b.*\b(revocatoria|revocacion|revocar|retirar|eliminar|borrar|suprimir|cancelar|detener)\b.*\b(autorizacion|consentimiento|tratamiento|datos|informacion|registro|proceso|postulacion)\b/,
     /\b(revocatoria|revocacion)\b.*\b(autorizacion|consentimiento|tratamiento|datos)\b/
   ]);
 }
@@ -381,8 +396,7 @@ export function parseConsentPendingMode(mode = '') {
 export function evaluateConsentBoundary(candidate = {}, message = {}) {
   if (isSupervisorPhone(message?.from || '')) return { block: false, reason: 'supervisor_message' };
   const body = inboundText(message);
-  const withdrawalRequested = isExplicitConsentRevocation(body)
-    || (isConsentAlreadyAccepted(candidate) && hasExplicitConsentRejection(body));
+  const withdrawalRequested = isExplicitConsentRevocation(body);
   if (withdrawalRequested) return { block: true, reason: 'explicit_consent_revocation' };
   if (isConsentAlreadyAccepted(candidate)) return { block: false, reason: 'consent_already_accepted' };
   if (candidate?.dataConsentStatus === 'REVOKED') return { block: true, reason: 'consent_revoked' };
@@ -906,7 +920,7 @@ async function notifyConsentGateFailure(messages = []) {
 
 async function preparePausedCandidateForConsentGate(prisma, candidate = {}, message = {}) {
   if (!candidate?.botPaused) {
-    return { candidate, blocked: false, consume: false, defer: false, reason: 'automation_not_paused' };
+    return { candidate, blocked: false, consume: false, reason: 'automation_not_paused' };
   }
 
   const waMessageId = String(message?.id || '').trim();
@@ -916,38 +930,32 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mess
       waMessageId
     });
     if (existing.found) {
-      return { candidate, blocked: true, consume: true, defer: false, reason: 'paused_inbound_retry' };
+      return { candidate, blocked: true, consume: true, reason: 'paused_inbound_retry' };
     }
   }
 
-  if (isProtectedAttachment(message) && !isConsentAlreadyAccepted(candidate)) {
-    try {
-      await saveInboundConsentEvidence(
-        prisma,
-        candidate.id,
-        message,
-        inboundText(message),
-        'PAUSED_PRECONSENT_ATTACHMENT'
-      );
-    } catch (error) {
-      console.warn('[PAUSED_PRECONSENT_ATTACHMENT_PERSISTENCE_ERROR]', safeErrorDetails(error));
-    }
-    return {
-      candidate,
-      blocked: true,
-      consume: true,
-      defer: false,
-      reason: 'paused_preconsent_attachment_consumed'
-    };
+  if (!waMessageId || !shouldResumeAutomationOnInbound(candidate)) {
+    return { candidate, blocked: true, consume: false, reason: 'automation_pause_not_resumable_here' };
   }
 
-  return {
-    candidate,
-    blocked: false,
-    consume: false,
-    defer: true,
-    reason: 'paused_inbound_deferred_to_router'
-  };
+  const transition = await resumeCandidateAutomationOnInbound(prisma, {
+    candidateId: candidate.id,
+    expected: {
+      botPaused: candidate.botPaused,
+      botPausedAt: candidate.botPausedAt ?? null,
+      botPausedBy: candidate.botPausedBy ?? null,
+      botPauseReason: candidate.botPauseReason ?? null,
+      botResumeMode: candidate.botResumeMode ?? null
+    },
+    now: new Date()
+  });
+
+  const resumedCandidate = transition.candidate || candidate;
+  if (transition.count !== 1 || resumedCandidate.botPaused) {
+    return { candidate: resumedCandidate, blocked: true, consume: false, reason: 'automation_resume_conflict' };
+  }
+
+  return { candidate: resumedCandidate, blocked: false, consume: false, reason: 'automation_resumed_on_new_inbound' };
 }
 
 export function dataConsentGateMiddleware(prisma) {
@@ -968,8 +976,7 @@ export function dataConsentGateMiddleware(prisma) {
           create: { phone: from }
         });
         const body = inboundText(message);
-        const withdrawalRequested = isExplicitConsentRevocation(body)
-          || (candidate?.dataConsentStatus === 'ACCEPTED' && hasExplicitConsentRejection(body));
+        const withdrawalRequested = isExplicitConsentRevocation(body);
 
         if (candidate?.dataConsentStatus === 'REVOKED' && withdrawalRequested) {
           await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
@@ -990,7 +997,6 @@ export function dataConsentGateMiddleware(prisma) {
           if (pauseDecision.consume) handledMessages.push(message);
           continue;
         }
-        if (pauseDecision.defer) continue;
 
         if (isAwaitingCampaignVacancyConfirmation(candidate)) {
           if (await handleCampaignVacancyConfirmation(prisma, candidate, message, from, body)) handledMessages.push(message);
