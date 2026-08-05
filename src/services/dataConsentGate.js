@@ -323,7 +323,6 @@ export function shouldRequestConsentForTurn(candidate = {}, text = '') {
   const futureProfilePending = PRE_CONSENT_OFFER_TO_CAPTURE_MODE.has(mode);
   const activeVacancyReady = Boolean(
     candidate?.vacancyId
-    && candidate?.currentStep === ConversationStep.GREETING_SENT
     && !isAwaitingCampaignVacancyConfirmation(candidate)
   );
 
@@ -710,7 +709,9 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vacan
   const nextMode = hasVacancy
     ? (isProtectedAttachment(message) ? PRE_CONSENT_CV_RESEND_MODE : APPLICATION_INTEREST_PENDING_MODE)
     : null;
-  const nextStep = hasVacancy ? ConversationStep.GREETING_SENT : candidate.currentStep;
+  const nextStep = hasVacancy || PROTECTED_STEPS.has(candidate.currentStep)
+    ? ConversationStep.GREETING_SENT
+    : candidate.currentStep;
   const update = {};
   if (candidate.currentStep !== nextStep) update.currentStep = nextStep;
   if (String(candidate.botResumeMode || '') !== String(nextMode || '')) update.botResumeMode = nextMode;
