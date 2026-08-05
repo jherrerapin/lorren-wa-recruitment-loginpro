@@ -41,7 +41,7 @@ function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}
 
   axios.post = async (_url, payload) => {
     outbound.push(payload?.text?.body || '');
-    return { data: { messages: [{ id: 'TEST-OUTBOUND-DATA-EVIDENCE' }] } };
+    return { data: { messages: [{ id: 'TEST-OUTBOUND-DATA-EVIDENCE' }] };
   };
 
   const prisma = {
@@ -99,14 +99,19 @@ async function runMiddleware(harness, body, id = 'TEST-WAMID-DATA-EVIDENCE') {
 
 test('las 18 apariciones completas solo afirman datos cuando existe evidencia explícita del inbound actual', () => {
   const complete = PRE_CONSENT_DATA_EVIDENCE_REPLAYS.filter((item) => item.sourceConversation.startsWith('CONV-'));
+  const candidateContext = {
+    dataConsentStatus: 'PENDING',
+    currentStep: 'GREETING_SENT',
+    vacancyId: 'TEST-VACANCY-DATA-EVIDENCE'
+  };
   assert.equal(complete.length, 18);
 
   for (const replay of complete) {
-    const result = evaluateProfileDataEvidence(replay.body);
+    const result = evaluateProfileDataEvidence(replay.body, { candidate: candidateContext });
     assert.equal(result.containsProfileData, false, replay.id);
     assert.deepEqual(result.evidence, [], replay.id);
     assert.notEqual(
-      evaluateConsentBoundary({ dataConsentStatus: 'PENDING', currentStep: 'GREETING_SENT' }, textMessage(replay.body)).reason,
+      evaluateConsentBoundary(candidateContext, textMessage(replay.body)).reason,
       'profile_data_before_consent',
       replay.id
     );
