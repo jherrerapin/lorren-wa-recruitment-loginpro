@@ -1052,6 +1052,7 @@
         cityUrlParams.set('date', selectedDate);
         appendVacancyFilters(cityUrlParams);
         appendVacancySearches(cityUrlParams);
+        appendVacancyRegistrationFilters(cityUrlParams);
         const cityUrl = '/admin?' + cityUrlParams.toString();
       %>
       <a href="<%= cityUrl %>" class="city-tab <%= activeCity === city.name ? 'active' : '' %>" role="tab" aria-selected="<%= activeCity === city.name ? 'true' : 'false' %>">

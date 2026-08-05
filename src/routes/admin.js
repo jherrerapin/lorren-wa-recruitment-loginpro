@@ -1597,9 +1597,11 @@ export function adminRouter(prisma) {
     if (canUseLegacyScope) {
       const legacyQuery = {
         where: {
-          ...buildCandidateAccessWhere(accessContext),
-          ...(legacyVacancyId ? { vacancyId: legacyVacancyId } : {}),
-          ...(legacyCreatedAtWhere ? { createdAt: legacyCreatedAtWhere } : {})
+          AND: [
+            buildCandidateAccessWhere(accessContext),
+            ...(legacyVacancyId ? [{ vacancyId: legacyVacancyId }] : []),
+            ...(legacyCreatedAtWhere ? [{ createdAt: legacyCreatedAtWhere }] : [])
+          ]
         },
         orderBy: { createdAt: 'desc' },
         select: {

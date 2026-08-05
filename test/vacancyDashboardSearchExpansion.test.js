@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import ejs from 'ejs';
 import {
   candidateMatchesVacancyDashboardSearch,
   isCandidateVisibleForVacancySearch,
@@ -248,4 +250,31 @@ test('construye condiciones de búsqueda por vacante y rango de registro', () =>
   assert.equal(where.vacancyId, 'vacancy-1');
   assert.equal(where.createdAt.gte.toISOString(), '2026-07-01T05:00:00.000Z');
   assert.equal(where.createdAt.lte.toISOString(), '2026-08-01T04:59:59.999Z');
+});
+
+test('ver todos combina la vacante solicitada con el alcance autorizado y conserva fechas entre ciudades', () => {
+  const adminSource = fs.readFileSync('src/routes/admin.js', 'utf8');
+  const viewSource = fs.readFileSync('src/views/list.ejs', 'utf8');
+
+  assert.match(
+    adminSource,
+    /AND:\s*\[\s*buildCandidateAccessWhere\(accessContext\),\s*\.\.\.\(legacyVacancyId \? \[\{ vacancyId: legacyVacancyId \}\] : \[\]\)/
+  );
+  assert.doesNotMatch(
+    adminSource,
+    /\.\.\.buildCandidateAccessWhere\(accessContext\),\s*\.\.\.\(legacyVacancyId \? \{ vacancyId: legacyVacancyId \}/
+  );
+  assert.match(
+    viewSource,
+    /appendVacancySearches\(cityUrlParams\);\s*appendVacancyRegistrationFilters\(cityUrlParams\);/
+  );
+  assert.match(
+    viewSource,
+    /params\.set\('vacancyId', vacancyId\);[\s\S]*params\.set\('dateFrom', range\.dateFrom\)/
+  );
+});
+
+test('la plantilla administrativa compila después de agregar los filtros de fecha', () => {
+  const viewSource = fs.readFileSync('src/views/list.ejs', 'utf8');
+  assert.doesNotThrow(() => ejs.compile(viewSource, { filename: 'src/views/list.ejs' }));
 });
