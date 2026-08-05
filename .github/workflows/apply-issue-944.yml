@@ -62,9 +62,15 @@ jobs:
           node --test test/vacancyDashboardSearchExpansion.test.js
           git diff --check
 
-      - name: Verify canonical diff
+      - name: Create and verify canonical commit
         run: |
-          mapfile -t files < <(git diff --name-only | sort)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: ordenar postulados y filtrar por registro (#944)"
+          git fetch origin main
+          mapfile -t files < <(git diff --name-only origin/main...HEAD | sort)
           printf '%s\n' "${files[@]}"
           test "${#files[@]}" -eq 5
           test "${files[0]}" = "src/routes/admin.js"
@@ -72,11 +78,7 @@ jobs:
           test "${files[2]}" = "src/services/vacancyDashboardSearchExpansion.js"
           test "${files[3]}" = "src/views/list.ejs"
           test "${files[4]}" = "test/vacancyDashboardSearchExpansion.test.js"
+          test ! -e test/vacancyCandidateRegistrationPolicy.test.js
 
-      - name: Commit validated correction
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix: ordenar postulados y filtrar por registro (#944)"
-          git push origin HEAD:fix/944-vacancy-registration-order-date-filter
+      - name: Push validated correction
+        run: git push origin HEAD:fix/944-vacancy-registration-order-date-filter
