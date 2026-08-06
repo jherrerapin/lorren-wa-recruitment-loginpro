@@ -1,12 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  candidateMatchesApplicantDateRange,
   candidateMatchesVacancyDashboardSearch,
+  compareCandidatesByRegisteredAtDesc,
+  enhanceLegacyApplicantList,
+  injectAdminApplicantControls,
+  isCandidateVisibleForVacancySearch,
   mergeVacancySearchResults,
-  normalizeVacancyDashboardSearches
+  normalizeApplicantDateRange,
+  normalizeVacancyDashboardSearches,
+  sanitizeVacancyDashboardVisibility
 } from '../src/services/vacancyDashboardSearchExpansion.js';
 
-function candidate(overrides = {}) {
+function completeCandidate(overrides = {}) {
   return {
     id: 'candidate-complete',
     vacancyId: 'vacancy-1',
@@ -32,7 +39,7 @@ function candidate(overrides = {}) {
   };
 }
 
-function dashboardVacancy(overrides = {}) {
+function vacancyModel(overrides = {}) {
   return {
     id: 'vacancy-1',
     schedulingEnabled: true,
@@ -46,6 +53,16 @@ function dashboardVacancy(overrides = {}) {
     contractedCandidates: [],
     ...overrides
   };
+}
+
+function vacancyCandidateIds(vacancy) {
+  return [
+    ...vacancy.registeredNoBooking,
+    ...vacancy.registeredComplete,
+    ...vacancy.completeWithoutCv,
+    ...vacancy.approvedCandidates,
+    ...vacancy.contractedCandidates
+  ].map((candidate) => candidate.id);
 }
 
 test('normaliza búsquedas independientes por vacante', () => {
@@ -63,111 +80,211 @@ test('normaliza búsquedas independientes por vacante', () => {
 });
 
 test('busca por documento y celular normalizando formatos y prefijo 57', () => {
-  const record = candidate();
+  const candidate = completeCandidate();
 
-  assert.equal(candidateMatchesVacancyDashboardSearch(record, {
+  assert.equal(candidateMatchesVacancyDashboardSearch(candidate, {
     field: 'document',
     text: '1023456'
   }), true);
-  assert.equal(candidateMatchesVacancyDashboardSearch(record, {
+  assert.equal(candidateMatchesVacancyDashboardSearch(candidate, {
     field: 'phone',
     text: '320-123-4567'
   }), true);
-  assert.equal(candidateMatchesVacancyDashboardSearch(record, {
+  assert.equal(candidateMatchesVacancyDashboardSearch(candidate, {
     field: 'phone',
     text: '3100000000'
   }), false);
 });
 
-test('incluye candidatos de toda la vacante aunque no tengan hoja de vida o datos completos', () => {
-  const withoutCv = candidate({
-    id: 'candidate-without-cv',
-    fullName: null,
-    documentNumber: '777123456',
-    age: null,
-    neighborhood: null,
-    locality: null,
-    medicalRestrictions: null,
-    transportMode: null,
+test('reclutadores solo ven datos operativos completos, con o sin HV', () => {
+  const completeWithCv = completeCandidate();
+  const completeWithoutCv = completeCandidate({
     cvStorageKey: null,
     cvOriginalName: null,
     cvMimeType: null
   });
-  const viewModel = {
-    cities: [{ name: 'Ibagué', vacancies: [dashboardVacancy()] }]
-  };
+  const incomplete = completeCandidate({ transportMode: null });
 
-  mergeVacancySearchResults(
-    viewModel,
-    { 'vacancy-1': { field: 'document', text: '777123456' } },
-    [withoutCv]
-  );
-
-  assert.equal(viewModel.cities[0].vacancies[0].registeredNoBooking[0].id, 'candidate-without-cv');
+  assert.equal(isCandidateVisibleForVacancySearch(completeWithCv, { isDev: false }), true);
+  assert.equal(isCandidateVisibleForVacancySearch(completeWithoutCv, { isDev: false }), true);
+  assert.equal(isCandidateVisibleForVacancySearch(incomplete, { isDev: false }), false);
+  assert.equal(isCandidateVisibleForVacancySearch(incomplete, { isDev: true }), true);
 });
 
-test('agrega una coincidencia omitida del resumen y conserva los registros existentes', () => {
-  const unrelated = candidate({
-    id: 'candidate-unrelated',
-    documentNumber: '999999999'
+test('separa completos con HV y completos pendientes de HV, y elimina incompletos', () => {
+  const recentWithCv = completeCandidate({
+    id: 'recent-with-cv',
+    createdAt: new Date('2026-07-05T12:00:00.000Z')
   });
-  const hiddenBySummary = candidate({
-    id: 'candidate-other-date',
-    documentNumber: '1023456789'
+  const oldWithCv = completeCandidate({
+    id: 'old-with-cv',
+    createdAt: new Date('2026-07-01T12:00:00.000Z')
   });
-  const existingWithoutCv = candidate({
-    id: 'candidate-without-cv',
-    documentNumber: '1023456000',
+  const withoutCv = completeCandidate({
+    id: 'without-cv',
     cvStorageKey: null,
     cvOriginalName: null,
-    cvMimeType: null
+    cvMimeType: null,
+    createdAt: new Date('2026-07-04T12:00:00.000Z')
   });
-  const viewModel = {
+  const incomplete = completeCandidate({
+    id: 'incomplete',
+    medicalRestrictions: null
+  });
+  const approved = completeCandidate({
+    id: 'approved',
+    status: 'APROBADO',
+    createdAt: new Date('2026-07-03T12:00:00.000Z')
+  });
+
+  const model = {
     cities: [{
       name: 'Ibagué',
-      vacancies: [dashboardVacancy({
-        registeredNoBooking: [unrelated],
-        completeWithoutCv: [existingWithoutCv]
+      vacancies: [vacancyModel({
+        registeredNoBooking: [oldWithCv, withoutCv, recentWithCv],
+        approvedCandidates: [incomplete, approved]
       })]
     }]
   };
 
-  mergeVacancySearchResults(
-    viewModel,
-    { 'vacancy-1': { field: 'document', text: '1023456' } },
-    [hiddenBySummary, existingWithoutCv]
-  );
+  sanitizeVacancyDashboardVisibility(model, { isDev: false });
+  const vacancy = model.cities[0].vacancies[0];
 
-  const vacancy = viewModel.cities[0].vacancies[0];
   assert.deepEqual(
-    vacancy.registeredNoBooking.map((entry) => entry.id),
-    ['candidate-other-date', 'candidate-unrelated']
+    vacancy.registeredNoBooking.map((candidate) => candidate.id),
+    ['recent-with-cv', 'old-with-cv']
   );
-  assert.equal(vacancy.completeWithoutCv.some((entry) => entry.id === 'candidate-without-cv'), true);
+  assert.deepEqual(
+    vacancy.completeWithoutCv.map((candidate) => candidate.id),
+    ['without-cv']
+  );
+  assert.deepEqual(
+    vacancy.approvedCandidates.map((candidate) => candidate.id),
+    ['approved']
+  );
 });
 
-test('mantiene aprobados y contratados en su sección real al recuperarlos', () => {
-  const approved = candidate({
-    id: 'candidate-approved',
-    documentNumber: '555000111',
-    status: 'APROBADO'
+test('la búsqueda recupera toda la vacante sin mostrar incompletos y conserva cada sección', () => {
+  const completeHidden = completeCandidate({
+    id: 'complete-hidden',
+    documentNumber: '1023456789',
+    createdAt: new Date('2026-07-06T12:00:00.000Z')
   });
-  const contracted = candidate({
-    id: 'candidate-contracted',
-    documentNumber: '555000222',
-    status: 'CONTRATADO'
+  const pendingHvHidden = completeCandidate({
+    id: 'pending-hv-hidden',
+    documentNumber: '1023456000',
+    cvStorageKey: null,
+    cvOriginalName: null,
+    cvMimeType: null,
+    createdAt: new Date('2026-07-05T12:00:00.000Z')
   });
-  const viewModel = {
-    cities: [{ name: 'Ibagué', vacancies: [dashboardVacancy()] }]
+  const incompleteHidden = completeCandidate({
+    id: 'incomplete-hidden',
+    documentNumber: '1023456111',
+    fullName: null
+  });
+  const existing = completeCandidate({
+    id: 'existing',
+    documentNumber: '999999999',
+    createdAt: new Date('2026-07-01T12:00:00.000Z')
+  });
+  const model = {
+    cities: [{
+      name: 'Ibagué',
+      vacancies: [vacancyModel({ registeredNoBooking: [existing] })]
+    }]
   };
 
   mergeVacancySearchResults(
-    viewModel,
-    { 'vacancy-1': { field: 'document', text: '555000' } },
-    [approved, contracted]
+    model,
+    { 'vacancy-1': { field: 'document', text: '1023456' } },
+    [completeHidden, pendingHvHidden, incompleteHidden],
+    { isDev: false }
   );
 
-  const vacancy = viewModel.cities[0].vacancies[0];
-  assert.equal(vacancy.approvedCandidates[0].id, 'candidate-approved');
-  assert.equal(vacancy.contractedCandidates[0].id, 'candidate-contracted');
+  const vacancy = model.cities[0].vacancies[0];
+  assert.deepEqual(
+    vacancy.registeredNoBooking.map((candidate) => candidate.id),
+    ['complete-hidden', 'existing']
+  );
+  assert.deepEqual(
+    vacancy.completeWithoutCv.map((candidate) => candidate.id),
+    ['pending-hv-hidden']
+  );
+  assert.equal(vacancyCandidateIds(vacancy).includes('incomplete-hidden'), false);
+});
+
+test('el rango de fechas usa días de Colombia y valida rangos invertidos', () => {
+  const range = normalizeApplicantDateRange({
+    dateFrom: '2026-07-10',
+    dateTo: '2026-07-10'
+  });
+  assert.equal(range.isActive, true);
+  assert.equal(candidateMatchesApplicantDateRange(
+    completeCandidate({ createdAt: new Date('2026-07-10T05:00:00.000Z') }),
+    range
+  ), true);
+  assert.equal(candidateMatchesApplicantDateRange(
+    completeCandidate({ createdAt: new Date('2026-07-11T04:59:59.999Z') }),
+    range
+  ), true);
+  assert.equal(candidateMatchesApplicantDateRange(
+    completeCandidate({ createdAt: new Date('2026-07-11T05:00:00.000Z') }),
+    range
+  ), false);
+
+  const invalid = normalizeApplicantDateRange({
+    dateFrom: '2026-07-12',
+    dateTo: '2026-07-10'
+  });
+  assert.equal(invalid.isActive, false);
+  assert.match(invalid.error, /fecha inicial/i);
+});
+
+test('Ver todos filtra incompletos y ordena por fecha de registro descendente', async () => {
+  const viewModel = {
+    mode: 'legacy',
+    candidates: [
+      completeCandidate({
+        id: 'older',
+        createdAt: new Date('2026-07-01T12:00:00.000Z')
+      }),
+      completeCandidate({
+        id: 'incomplete',
+        transportMode: null,
+        createdAt: new Date('2026-07-09T12:00:00.000Z')
+      }),
+      completeCandidate({
+        id: 'newer',
+        cvStorageKey: null,
+        cvOriginalName: null,
+        cvMimeType: null,
+        createdAt: new Date('2026-07-08T12:00:00.000Z')
+      })
+    ]
+  };
+
+  await enhanceLegacyApplicantList(viewModel, {}, {
+    userRole: 'admin',
+    userAccessScope: 'ALL'
+  });
+
+  assert.deepEqual(viewModel.candidates.map((candidate) => candidate.id), ['newer', 'older']);
+  assert.equal(compareCandidatesByRegisteredAtDesc(viewModel.candidates[0], viewModel.candidates[1]) < 0, true);
+});
+
+test('inyecta inmediatamente el filtro de fechas y corrige enlaces Ver todos por vacante', () => {
+  const html = '<html><body><div class="page"><div data-vacancy-panel="vacancy-1"><a href="/admin?status=registered">ver todos</a></div></div></body></html>';
+  const output = injectAdminApplicantControls(html, {
+    query: { status: 'registered', vacancyId: 'vacancy-1' }
+  }, {
+    mode: 'legacy',
+    applicantDateRange: normalizeApplicantDateRange({})
+  });
+
+  assert.match(output, /Postulados desde/);
+  assert.match(output, /Postulados hasta/);
+  assert.match(output, /Ordenados del registro más reciente al más antiguo/);
+  assert.match(output, /data-vacancy-panel/);
+  assert.match(output, /vacancyId/);
 });
