@@ -37,6 +37,54 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  conversational-release-candidate:
+    name: Validate conversational release candidate
+    needs: state-authority
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Run integral conversational release candidate
+        run: >-
+          node --test
+          test/conversationalReleaseCandidatePreConsent.test.js
+          test/preConsentDataEvidence.test.js
+          test/dataConsentRevocationStabilization.test.js
+          test/dataConsentHumanPauseReplay.test.js
+          test/conversationReplayConsentAttachmentEdges.test.js
+          test/conversationReplayRecovery.test.js
+          test/conversationReplayProductionEdges.test.js
+          test/conversationHarness.test.js
+
   validate:
     name: Validate application
     needs: state-authority
@@ -258,6 +306,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "Automated tests: total=$tests_count pass=$pass_count fail=$fail_count exit=$test_exit"
+
+          if [ "$fail_count" -gt 71 ]; then
+            echo "::error::Automated test failures increased above the conversational release baseline of 71."
+            grep -E '^not ok [0-9]+ - ' test-output.log || true
+            exit 1
+          fi
 
           if [ "$fail_count" -gt 0 ]; then
             echo "::warning::$fail_count legacy test failures remain. They are tracked in issue #386 and are not yet a blocking gate."
