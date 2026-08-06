@@ -1,3 +1,4 @@
+import '../services/relocateAdminDateRangeToCvAnalysis.js';
 import express from 'express';
 import { canSeeMetaAds, requireCvAnalysis } from '../services/lorenV2Gate.js';
 import {
@@ -8,9 +9,14 @@ import {
 import {
   analyzeCandidateCv,
   parseCvAnalysisEvidence,
-  reviewVacancyCandidates,
   safeErrorMessage
 } from '../services/cvIntelligence.js';
+import {
+  buildCvReviewCandidateWhere,
+  cvReviewDateRangeLabel,
+  normalizeCvReviewDateRange,
+  reviewVacancyCandidates
+} from '../services/cvReviewCoordinator.js';
 import {
   createCvReviewExportSnapshot,
   CV_REVIEW_EXPORT_GROUPS,
@@ -39,11 +45,13 @@ function normalizeString(value) {
 
 function formatDate(value) {
   if (!value) return 'Sin fecha';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Sin fecha';
   return new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone: 'America/Bogota'
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function hasCv(candidate = {}) {
@@ -77,12 +85,13 @@ function renderLayout({ title, body, req = {} }) {
     h2 { font-size:18px; margin:0 0 12px; color:var(--navy); }
     h3 { font-size:15px; margin:0 0 8px; color:var(--navy); }
     p { color:var(--muted); line-height:1.55; margin:6px 0; }
-    .setup { display:grid; grid-template-columns:minmax(240px,.7fr) minmax(360px,1.3fr); gap:14px; align-items:end; }
+    .setup { display:grid; grid-template-columns:minmax(220px,.8fr) minmax(145px,.45fr) minmax(145px,.45fr) minmax(340px,1.3fr); gap:14px; align-items:end; }
     label { display:flex; flex-direction:column; gap:7px; color:#344054; font-size:13px; font-weight:800; }
-    select,textarea { width:100%; border:1px solid #cfd4dc; border-radius:9px; padding:10px 11px; color:#172033; background:#fff; font:inherit; }
-    select { min-height:44px; }
+    select,textarea,input[type="date"] { width:100%; border:1px solid #cfd4dc; border-radius:9px; padding:10px 11px; color:#172033; background:#fff; font:inherit; }
+    select,input[type="date"] { min-height:44px; }
     textarea { min-height:116px; resize:vertical; line-height:1.45; }
     .hint { color:var(--muted); font-size:12px; font-weight:500; }
+    .date-note { grid-column:1 / 4; color:var(--muted); font-size:12px; line-height:1.45; }
     .actions { display:flex; justify-content:flex-end; margin-top:13px; gap:8px; flex-wrap:wrap; }
     .btn { display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:9px; padding:10px 14px; background:var(--green); color:#fff; font-size:13px; font-weight:800; cursor:pointer; text-decoration:none; }
     .btn.secondary { color:#344054; background:#fff; border:1px solid #cfd4dc; }
@@ -110,7 +119,7 @@ function renderLayout({ title, body, req = {} }) {
     .muted { color:var(--muted); font-size:12px; }
     .criteria { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
     .criterion { border:1px solid var(--border); border-radius:10px; padding:9px 11px; background:#f8fafc; max-width:360px; }
-    .criterion strong { font-size:12px; color:var(--navy); }.criterion p { font-size:11px; margin:4px 0 0; }
+    .criterion strong { display:block; font-size:12px; color:var(--navy); margin-top:5px; }.criterion p { font-size:11px; margin:4px 0 0; }
     .group { margin-top:20px; }
     .group-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
     .result-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
@@ -127,12 +136,13 @@ function renderLayout({ title, body, req = {} }) {
     .registered-item span { display:block; color:var(--muted); font-size:10px; margin-bottom:2px; }
     .registered-item strong { display:block; color:var(--navy); font-size:12px; line-height:1.35; }
     .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:11px; }
-    table { width:100%; border-collapse:collapse; font-size:13px; min-width:760px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; min-width:820px; }
     th { text-align:left; color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.05em; background:#f9fafb; }
     th,td { padding:10px; border-bottom:1px solid #eaecef; vertical-align:top; }
     tr:last-child td { border-bottom:0; }
     .empty { text-align:center; color:var(--muted); padding:28px 14px; }
-    @media(max-width:760px) { .page{padding:15px 10px 40px}.setup{grid-template-columns:1fr}.actions .btn{width:100%}.navbar{padding:0 10px;gap:12px}.result-grid{grid-template-columns:1fr}.group-head{align-items:flex-start;flex-direction:column} }
+    @media(max-width:980px) { .setup{grid-template-columns:1fr 1fr}.setup label:first-child,.setup label:last-of-type{grid-column:1 / -1}.date-note{grid-column:1 / -1} }
+    @media(max-width:760px) { .page{padding:15px 10px 40px}.setup{grid-template-columns:1fr}.setup label,.setup label:first-child,.setup label:last-of-type{grid-column:1}.actions .btn{width:100%}.navbar{padding:0 10px;gap:12px}.result-grid{grid-template-columns:1fr}.group-head{align-items:flex-start;flex-direction:column} }
   </style>
 </head>
 <body>
@@ -173,9 +183,9 @@ function renderVacancyOptions(vacancies = [], selectedId = '') {
   }).join('');
 }
 
-function renderProfileForm(vacancies, { vacancyId = '', desiredProfile = '' } = {}) {
+function renderProfileForm(vacancies, { vacancyId = '', desiredProfile = '', dateFrom = '', dateTo = '' } = {}) {
   return `<section class="card">
-    <h2>1. Elige la vacante y cuéntanos qué buscas</h2>
+    <h2>1. Elige la vacante, el periodo y cuéntanos qué buscas</h2>
     <form method="post" action="/admin/estadisticas/cv-analysis/run">
       <div class="setup">
         <label>Vacante
@@ -183,31 +193,41 @@ function renderProfileForm(vacancies, { vacancyId = '', desiredProfile = '' } = 
             <option value="">Selecciona una vacante</option>
             ${renderVacancyOptions(vacancies, vacancyId)}
           </select>
-          <span class="hint">Solo se revisarán las personas registradas en esta vacante que tengan hoja de vida.</span>
+          <span class="hint">Solo se revisan candidatos elegibles de esta vacante que tengan hoja de vida.</span>
+        </label>
+        <label>Postulados desde
+          <input type="date" name="dateFrom" value="${escapeHtml(dateFrom)}">
+          <span class="hint">Fecha de registro inicial.</span>
+        </label>
+        <label>Postulados hasta
+          <input type="date" name="dateTo" value="${escapeHtml(dateTo)}">
+          <span class="hint">Incluye el día completo en Colombia.</span>
         </label>
         <label>Perfil que necesitas
           <textarea name="desiredProfile" maxlength="4000" required placeholder="Ejemplo: Busco una persona con al menos un año manejando inventarios, que haya usado Excel y tenga experiencia recibiendo mercancía. Es deseable que conozca SAP.">${escapeHtml(desiredProfile)}</textarea>
-          <span class="hint">Escríbelo con tus palabras. El sistema mostrará cómo entendió tu solicitud antes de presentar resultados.</span>
+          <span class="hint">La vacante sigue siendo la base; este texto la complementa o prioriza sin inventar requisitos.</span>
         </label>
+        <div class="date-note">El rango se aplica a la <strong>fecha de registro del candidato</strong>, antes de leer documentos o consumir OpenAI. Si dejas ambas fechas vacías se revisarán todos los candidatos elegibles, hasta el límite operativo.</div>
       </div>
-      <div class="actions"><button class="btn" type="submit">Revisar hojas de vida</button></div>
+      <div class="actions"><button class="btn" type="submit">Revisar hojas de vida del periodo</button></div>
     </form>
   </section>`;
 }
 
-function renderCandidateTable(candidates = [], vacancyId = '') {
+function renderCandidateTable(candidates = [], vacancyId = '', dateRange = {}) {
   if (!vacancyId) return '<section class="card"><div class="empty">Selecciona una vacante para ver sus hojas de vida.</div></section>';
-  if (!candidates.length) return '<section class="card"><div class="empty">Esta vacante todavía no tiene candidatos con hoja de vida.</div></section>';
+  if (!candidates.length) return `<section class="card"><div class="empty">No hay candidatos elegibles con hoja de vida entre los ${escapeHtml(cvReviewDateRangeLabel(dateRange))}.</div></section>`;
   const rows = candidates.map((candidate) => `<tr>
     <td><strong>${escapeHtml(candidate.fullName || 'Sin nombre')}</strong><br><span class="muted">${escapeHtml(candidate.phone || '')}</span></td>
+    <td>${formatDate(candidate.createdAt)}</td>
     <td>${statusBadge(candidate)}</td>
     <td>${latestAnalysis(candidate) ? formatDate(latestAnalysis(candidate).analysedAt) : 'Sin análisis'}</td>
     <td><a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}">Ver candidato</a></td>
   </tr>`).join('');
   return `<section class="card">
-    <h2>Hojas de vida disponibles</h2>
-    <p>Al iniciar la revisión se reutilizarán los análisis completos, se procesarán los documentos pendientes y se combinarán con los datos del registro.</p>
-    <div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Lectura</th><th>Último análisis</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <h2>Hojas de vida disponibles en el periodo</h2>
+    <p>Se encontraron ${candidates.length} perfiles entre los ${escapeHtml(cvReviewDateRangeLabel(dateRange))}. Se muestran primero los registros más recientes.</p>
+    <div class="table-wrap"><table><thead><tr><th>Candidato</th><th>Fecha de registro</th><th>Lectura</th><th>Último análisis</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   </section>`;
 }
 
@@ -236,6 +256,7 @@ function renderRegisteredData(candidate = {}) {
     .map(normalizeString)
     .find(Boolean);
   const items = [
+    ['Fecha de registro', formatDate(candidate?.createdAt)],
     ['Medio de transporte', candidate?.transportMode],
     ['Residencia', residence]
   ].filter(([, value]) => normalizeString(value));
@@ -269,7 +290,7 @@ function renderResultCard(result, kind, { isDev = false } = {}) {
     : '';
   return `<article class="result ${kind}">
     <div class="result-top">
-      <div><h3>${escapeHtml(candidate.fullName || 'Candidato sin nombre')}</h3></div>
+      <div><h3>${escapeHtml(candidate.fullName || 'Candidato sin nombre')}</h3><span class="muted">Registrado: ${escapeHtml(formatDate(candidate.createdAt))}</span></div>
       ${match ? `<div class="score">${Math.round(match.score)}%</div>` : '<span class="badge error">Manual</span>'}
     </div>
     <span class="badge ${kind === 'strong' ? 'ok' : kind === 'manual' ? 'error' : 'warn'}" style="margin-top:10px">${labels[kind]}</span>
@@ -277,6 +298,7 @@ function renderResultCard(result, kind, { isDev = false } = {}) {
     ${renderRegisteredData(candidate)}
     ${renderStringList('Por qué puede servir', match?.reasons)}
     ${renderStringList('Evidencia encontrada (HV o registro)', match?.evidence)}
+    ${renderStringList('Puntos por confirmar', match?.gaps)}
     <div class="result-actions">
       <a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}">Ver candidato</a>
       <a class="btn secondary small" href="/admin/candidates/${escapeHtml(candidate.id)}/cv">Descargar HV</a>
@@ -316,12 +338,12 @@ function renderTechnicalDiagnostics(review, { isDev = false } = {}) {
 
 function renderReviewResults(review, reviewToken = '', { isDev = false } = {}) {
   if (!review?.ok) return '';
-  if (!review.stats.total) return '<section class="card"><div class="empty">No hay hojas de vida para revisar en esta vacante.</div></section>';
+  if (!review.stats.total) return `<section class="card"><div class="empty">No hay hojas de vida para revisar entre los ${escapeHtml(cvReviewDateRangeLabel(review.dateRange))}.</div></section>`;
   const groups = review.groups;
-  return `${review.truncated ? '<div class="alert warn">Se revisaron las 120 hojas de vida más recientes. Usa una vacante o periodo más específico si necesitas abarcar más registros.</div>' : ''}
+  return `${review.truncated ? '<div class="alert warn">Se revisaron las 120 hojas de vida más recientes dentro del rango seleccionado. Reduce el periodo si necesitas abarcar otro bloque.</div>' : ''}
     <section class="card">
       <div class="group-head">
-        <div><h2>3. Resultado de la revisión</h2><p>El orden combina la hoja de vida con el medio de transporte y la residencia registrados. No cambia el estado de ningún candidato ni toma decisiones por el coordinador.</p></div>
+        <div><h2>3. Resultado de la revisión</h2><p>Se analizaron ${escapeHtml(cvReviewDateRangeLabel(review.dateRange))}, ordenados por fecha de registro. El porcentaje y la categoría usan los mismos límites para evitar contradicciones. No cambia el estado de ningún candidato.</p></div>
         ${renderExportForm(reviewToken, 'all', 'Descargar Excel completo', false)}
       </div>
       <div class="grid">
@@ -334,7 +356,7 @@ function renderReviewResults(review, reviewToken = '', { isDev = false } = {}) {
     </section>
     ${renderResultGroup('Coincidencia alta', 'Empieza por aquí: la hoja de vida y/o el registro contienen evidencia clara de varios puntos importantes.', groups.strong, 'strong', reviewToken, { isDev })}
     ${renderResultGroup('Pueden encajar', 'Hay señales relacionadas y conviene una revisión humana antes de decidir.', groups.possible, 'possible', reviewToken, { isDev })}
-    ${renderResultGroup('Poca evidencia para el perfil', 'La hoja de vida y los datos registrados muestran poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low', reviewToken, { isDev })}
+    ${renderResultGroup('Poca evidencia para el perfil', 'La información revisada muestra poca relación con el perfil escrito. Esto no significa rechazo.', groups.low, 'low', reviewToken, { isDev })}
     ${renderResultGroup('Revisión manual', 'No fue posible leer o comparar el documento con suficiente claridad. Descárgalo para revisarlo directamente.', groups.manual, 'manual', reviewToken, { isDev })}
     ${renderTechnicalDiagnostics(review, { isDev })}`;
 }
@@ -346,7 +368,9 @@ function errorMessage(reason = '', { isDev = false } = {}) {
     profile_too_short: 'Cuéntanos un poco más sobre la experiencia o conocimientos que buscas.',
     ai_not_configured: 'El análisis inteligente no está disponible en este momento.',
     profile_analysis_failed: 'No fue posible entender el perfil en este momento. Intenta nuevamente.',
-    match_analysis_failed: 'Las hojas de vida se procesaron, pero no fue posible completar la comparación en este momento.'
+    match_analysis_failed: 'Las hojas de vida se procesaron, pero no fue posible completar la comparación en este momento.',
+    date_range_invalid: 'Ingresa fechas válidas para filtrar las hojas de vida.',
+    date_range_inverted: 'La fecha inicial no puede ser posterior a la fecha final.'
   };
   const message = messages[reason] || 'No fue posible completar la revisión.';
   return isDev && reason ? `${message} [${reason}]` : message;
@@ -360,23 +384,15 @@ async function loadVacancies(prisma, accessContext = {}) {
   });
 }
 
-async function loadCandidates(prisma, vacancyId, accessContext = {}) {
-  if (!vacancyId) return [];
+async function loadCandidates(prisma, vacancyId, accessContext = {}, dateRange = {}) {
+  if (!vacancyId || !dateRange.ok) return [];
   return prisma.candidate.findMany({
-    where: {
-      AND: [
-        buildCandidateAccessWhere(accessContext),
-        { vacancyId },
-        {
-          OR: [
-            { cvStorageKey: { not: null } },
-            { cvData: { not: null } },
-            { cvOriginalName: { not: null } }
-          ]
-        }
-      ]
-    },
-    orderBy: { updatedAt: 'desc' },
+    where: buildCvReviewCandidateWhere({
+      vacancyId,
+      accessWhere: buildCandidateAccessWhere(accessContext),
+      dateRange
+    }),
+    orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     take: 300,
     include: {
       vacancy: { select: { id: true, title: true, city: true } },
@@ -385,19 +401,20 @@ async function loadCandidates(prisma, vacancyId, accessContext = {}) {
   });
 }
 
-function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desiredProfile = '', review = null, reviewToken = '', message = '', error = '', showCandidates = true }) {
+function renderPage({ req = {}, vacancies, candidates = [], vacancyId = '', desiredProfile = '', dateFrom = '', dateTo = '', dateRange = null, review = null, reviewToken = '', message = '', error = '', showCandidates = true }) {
   const accessContext = getAccessContext(req);
   const isDev = Boolean(accessContext?.isDev);
+  const resolvedRange = dateRange || normalizeCvReviewDateRange({ dateFrom, dateTo });
   const body = `${message ? `<div class="alert">${escapeHtml(message)}</div>` : ''}
     ${error ? `<div class="alert error">${escapeHtml(error)}</div>` : ''}
     <section class="card hero">
       <h1>Encuentra las hojas de vida que vale la pena revisar primero</h1>
-      <p>Elige una vacante, describe el perfil con tus palabras y Lórren combinará la hoja de vida con los datos registrados para organizar los resultados. Los archivos difíciles de leer quedarán separados para revisión manual.</p>
+      <p>Elige una vacante y un rango de fecha de registro. Lórren analizará únicamente las hojas de vida de ese periodo y las comparará semánticamente con la vacante y el perfil solicitado.</p>
     </section>
-    ${renderProfileForm(vacancies, { vacancyId, desiredProfile })}
+    ${renderProfileForm(vacancies, { vacancyId, desiredProfile, dateFrom: resolvedRange.dateFrom, dateTo: resolvedRange.dateTo })}
     ${review
       ? `${renderCriteria(review.interpretedProfile)}${renderReviewResults(review, reviewToken, { isDev })}`
-      : showCandidates ? renderCandidateTable(candidates, vacancyId) : ''}`;
+      : showCandidates ? renderCandidateTable(candidates, vacancyId, resolvedRange) : ''}`;
   return renderLayout({ title: 'Análisis de hojas de vida — Lórren', body, req });
 }
 
@@ -411,29 +428,36 @@ export function lorenV2CvAnalysisRouter(prisma) {
 
   router.get('/', async (req, res) => {
     const vacancyId = normalizeString(req.query.vacancyId) || '';
+    const dateRange = normalizeCvReviewDateRange(req.query);
     const accessContext = getAccessContext(req);
     const [vacancies, candidates] = await Promise.all([
       loadVacancies(prisma, accessContext),
-      loadCandidates(prisma, vacancyId, accessContext)
+      loadCandidates(prisma, vacancyId, accessContext, dateRange)
     ]);
     res.send(renderPage({
       req,
       vacancies,
       candidates,
       vacancyId,
+      dateRange,
+      error: dateRange.ok ? '' : errorMessage(dateRange.reason, { isDev: Boolean(accessContext?.isDev) }),
       message: normalizeString(req.query.message) || ''
     }));
   });
 
   router.get('/json', async (req, res) => {
     const vacancyId = normalizeString(req.query.vacancyId) || '';
-    const candidates = await loadCandidates(prisma, vacancyId, getAccessContext(req));
-    res.json({ ok: true, vacancyId, candidates });
+    const dateRange = normalizeCvReviewDateRange(req.query);
+    if (!dateRange.ok) return res.status(400).json({ ok: false, reason: dateRange.reason });
+    const candidates = await loadCandidates(prisma, vacancyId, getAccessContext(req), dateRange);
+    return res.json({ ok: true, vacancyId, dateRange, candidates });
   });
 
   router.post('/run', async (req, res) => {
     const vacancyId = normalizeString(req.body?.vacancyId) || '';
     const desiredProfile = normalizeString(req.body?.desiredProfile)?.slice(0, 4000) || '';
+    const dateFrom = normalizeString(req.body?.dateFrom) || '';
+    const dateTo = normalizeString(req.body?.dateTo) || '';
     const accessContext = getAccessContext(req);
     let vacancies = [];
     try {
@@ -444,11 +468,13 @@ export function lorenV2CvAnalysisRouter(prisma) {
           vacancies,
           vacancyId: '',
           desiredProfile,
+          dateFrom,
+          dateTo,
           error: 'No tienes acceso a la vacante seleccionada.',
           showCandidates: false
         }));
       }
-      const review = await reviewVacancyCandidates(prisma, { vacancyId, desiredProfile });
+      const review = await reviewVacancyCandidates(prisma, { vacancyId, desiredProfile, dateFrom, dateTo });
 
       if (!review.ok) {
         return res.status(400).send(renderPage({
@@ -456,6 +482,9 @@ export function lorenV2CvAnalysisRouter(prisma) {
           vacancies,
           vacancyId,
           desiredProfile,
+          dateFrom,
+          dateTo,
+          dateRange: review.dateRange,
           error: errorMessage(review.reason, { isDev: Boolean(accessContext?.isDev) }),
           showCandidates: false
         }));
@@ -465,7 +494,7 @@ export function lorenV2CvAnalysisRouter(prisma) {
       const reviewToken = ownerKey
         ? storeCvReviewExportSnapshot(createCvReviewExportSnapshot(review), { ownerKey })
         : '';
-      return res.send(renderPage({ req, vacancies, vacancyId, desiredProfile, review, reviewToken }));
+      return res.send(renderPage({ req, vacancies, vacancyId, desiredProfile, dateRange: review.dateRange, review, reviewToken }));
     } catch (error) {
       console.error('[CV_REVIEW_ERROR]', { vacancyId, error: safeErrorMessage(error) });
       return res.status(500).send(renderPage({
@@ -473,6 +502,8 @@ export function lorenV2CvAnalysisRouter(prisma) {
         vacancies,
         vacancyId,
         desiredProfile,
+        dateFrom,
+        dateTo,
         error: 'No fue posible revisar las hojas de vida en este momento. Intenta nuevamente; si el problema continúa, informa al administrador.',
         showCandidates: false
       }));
