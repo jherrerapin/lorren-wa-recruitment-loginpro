@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { CandidateStatus, ConversationStep, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 import { buildCandidateDataCollectionMessage } from './readinessGuard.js';
@@ -13,10 +14,12 @@ import { recordCandidateDataConsent } from './consentStateService.js';
 import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
 import { cancelReminderOnInbound } from './reminder.js';
 import {
+  compareAndSwapConversationMessagePayload,
   findInboundConversationMessage,
-  mergeConversationMessagePayload,
+  findRecentOutboundConversationDelivery,
   persistInboundConversationMessage,
-  persistOutboundConversationMessage
+  persistOutboundConversationMessage,
+  updateOutboundConversationDelivery
 } from './conversationMessageRepository.js';
 
 export const DATA_CONSENT_VERSION = 'lorren-v2-2026-07-v3';
@@ -317,7 +320,7 @@ function resolveExplicitNameEvidence(raw) {
 
   const natural = text.match(/^soy\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'.-]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]+){1,5})(?=\s*,|$)/i);
   if (!natural) return null;
-  if (!hasStandaloneNameCapitalization(natural[1])) return null;
+  if (looksLikeOccupationalOrDescriptivePhrase(natural[1])) return null;
   const value = normalizeExplicitFullName(natural[1]);
   return value
     ? buildCurrentInboundEvidence('fullName', value, 'EXPLICIT_SOY_NAME_INTRODUCTION', natural[0])
@@ -330,13 +333,18 @@ function looksLikeOccupationalOrDescriptivePhrase(value = '') {
     .split(/\s+/)
     .map((token) => normalize(token))
     .filter((token) => token && !STANDALONE_NAME_CONNECTORS.has(token));
-  if (!contentTokens.length) return false;
+  if (contentTokens.length < 2) return false;
+  if (contentTokens[0] === 'muy') return true;
 
-  // Criterio morfosintáctico: los nombres de oficio suelen usar un sustantivo agente
-  // como núcleo y uno o más modificadores. No depende de enumerar cargos concretos.
   const head = contentTokens[0];
-  return contentTokens.length >= 2
-    && /(?:dor|dora|ista|logo|loga|ario|aria|ero|era|ante|ente)$/.test(head);
+  const modifiers = contentTokens.slice(1);
+  const occupationalHead = /(?:dor|dora|ista|logo|loga|ario|aria|ero|era|ante|ente)$/.test(head);
+  const descriptiveHead = /(?:able|ible|ado|ada|ido|ida|oso|osa|ivo|iva)$/.test(head);
+  const qualifyingModifier = modifiers.some((token) => (
+    /(?:ico|ica|icos|icas|ivo|iva|ivos|ivas|al|ales|ario|aria|arios|arias|ero|era|eros|eras|ista|istas|ante|antes|ente|entes|ado|ada|ados|adas|ido|ida|idos|idas)$/.test(token)
+  ));
+
+  return (occupationalHead || descriptiveHead) && qualifyingModifier;
 }
 
 function resolveContextualStandaloneNameEvidence(raw, candidate = {}) {
@@ -380,7 +388,7 @@ function isPlausibleDocumentNumber(value = '') {
 
 function resolveExplicitDocumentEvidence(raw) {
   const text = String(raw || '').trim();
-  const labelled = text.match(/\b(?:mi\s+)?(?:cedula|cédula|c\.?\s*c\.?|documento(?:\s+de\s+identidad)?|numero\s+de\s+documento|número\s+de\s+documento)\b\s*(?:es\b|:|-)\s*([A-Z0-9][A-Z0-9.\-\s]{4,40})/i);
+  const labelled = text.match(/\b(?:mi\s+)?(?:cedula|cédula|c\.?\s*c\.?|documento(?:\s+de\s+identidad)?|numero\s+de\s+documento|número\s+de\s+documento)\b(?:(?:\s+es\b|\s*[:\-])\s*|\s+)([A-Z0-9][A-Z0-9.\-\s]{4,40})/i);
   const labelledValue = trimEvidenceFragment(labelled?.[1] || '');
   if (labelledValue && isPlausibleDocumentNumber(labelledValue)) {
     return buildCurrentInboundEvidence(
@@ -404,6 +412,18 @@ function resolveExplicitDocumentEvidence(raw) {
 
 function resolveExplicitMedicalEvidence(raw) {
   const text = String(raw || '');
+  const labelled = text.match(/\b(?:restricci[oó]n(?:es)?|condici[oó]n(?:es)?|limitaci[oó]n(?:es)?)\s+m[eé]dicas?\s*[:\-]\s*([^.;\n]{2,100})/i);
+  if (labelled) {
+    const fragment = trimEvidenceFragment(labelled[0]);
+    const normalized = normalizeCandidateFields({ medicalRestrictions: fragment });
+    return buildCurrentInboundEvidence(
+      'medicalRestrictions',
+      normalized.medicalRestrictions || fragment,
+      'EXPLICIT_MEDICAL_LABEL_VALUE_BOUNDARY',
+      fragment
+    );
+  }
+
   const match = text.match(/\b(?:(?:tengo|presento|cuento\s+con|mi)\s+(?:una\s+|ninguna\s+)?|sin\s+)(?:restricci[oó]n(?:es)?\s+m[eé]dicas?|condici[oó]n(?:es)?\s+m[eé]dicas?|limitaci[oó]n(?:es)?\s+m[eé]dicas?)\b/i);
   if (!match) return null;
   const fragment = match[0];
@@ -421,18 +441,32 @@ function resolveExplicitExperienceEvidence(raw) {
   const quantified = text.match(/\b(?:tengo|cuento\s+con|poseo)\s+(\d{1,2})\s+(a[nñ]os?|meses?)\s+de\s+experiencia(?:\s+en\s+([^.;\n]{2,80}))?/i);
   const labelled = text.match(/\bexperiencia\s*:\s*(\d{1,2})\s+(a[nñ]os?|meses?)(?:\s+en\s+([^.;\n]{2,80}))?/i);
   const match = quantified || labelled;
-  if (!match) return [];
-  const fragment = trimEvidenceFragment(match[0]);
-  const duration = `${match[1]} ${match[2]}`;
-  const area = trimEvidenceFragment(match[3] || fragment);
+  if (match) {
+    const fragment = trimEvidenceFragment(match[0]);
+    const duration = `${match[1]} ${match[2]}`;
+    const area = trimEvidenceFragment(match[3] || fragment);
+    const normalized = normalizeCandidateFields({
+      experienceInfo: area,
+      experienceTime: duration,
+      experienceSummary: fragment
+    });
+    return [
+      buildCurrentInboundEvidence('experienceInfo', normalized.experienceInfo || area, 'EXPLICIT_EXPERIENCE_EXPRESSION', fragment),
+      buildCurrentInboundEvidence('experienceTime', normalized.experienceTime || duration, 'EXPLICIT_EXPERIENCE_DURATION', fragment),
+      buildCurrentInboundEvidence('experienceSummary', normalized.experienceSummary || fragment, 'EXPLICIT_EXPERIENCE_SUMMARY', fragment)
+    ];
+  }
+
+  const declaration = text.match(/\b((?:no\s+)?(?:tengo|cuento\s+con|poseo)\s+experiencia(?:\s+en\s+([^.;\n]{2,80}))?)/i);
+  if (!declaration) return [];
+  const fragment = trimEvidenceFragment(declaration[1]);
+  const area = trimEvidenceFragment(declaration[2] || fragment);
   const normalized = normalizeCandidateFields({
     experienceInfo: area,
-    experienceTime: duration,
     experienceSummary: fragment
   });
   return [
-    buildCurrentInboundEvidence('experienceInfo', normalized.experienceInfo || area, 'EXPLICIT_EXPERIENCE_EXPRESSION', fragment),
-    buildCurrentInboundEvidence('experienceTime', normalized.experienceTime || duration, 'EXPLICIT_EXPERIENCE_DURATION', fragment),
+    buildCurrentInboundEvidence('experienceInfo', normalized.experienceInfo || area, 'EXPLICIT_EXPERIENCE_DECLARATION', fragment),
     buildCurrentInboundEvidence('experienceSummary', normalized.experienceSummary || fragment, 'EXPLICIT_EXPERIENCE_SUMMARY', fragment)
   ];
 }
@@ -668,6 +702,53 @@ async function saveInboundConsentEvidence(prisma, candidateId, message, body, de
   return result.created;
 }
 
+function normalizeMessagePayload(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+async function acquirePendingPreConsentTurn(prisma, messageRow, decision) {
+  const messageId = String(messageRow?.id || '').trim();
+  if (!messageId) return { claimed: false, recovering: false, messageId: null, decision };
+
+  const pendingRawPayload = normalizeMessagePayload(messageRow.rawPayload);
+  const processing = normalizeMessagePayload(pendingRawPayload.consentGateProcessing);
+  const state = String(processing.state || '').toUpperCase();
+  const existingDecision = String(processing.decision || '');
+  if (state !== 'PENDING' || (existingDecision && existingDecision !== decision)) {
+    return { claimed: false, recovering: false, messageId, decision };
+  }
+
+  const token = randomUUID();
+  const processingRawPayload = {
+    ...pendingRawPayload,
+    consentGateProcessing: {
+      ...processing,
+      state: 'PROCESSING',
+      decision,
+      token,
+      startedAt: new Date().toISOString()
+    }
+  };
+  const claimResult = await compareAndSwapConversationMessagePayload(prisma, {
+    messageId,
+    expectedRawPayload: pendingRawPayload,
+    rawPayload: processingRawPayload
+  });
+  if (!claimResult.updated) {
+    return { claimed: false, recovering: false, messageId, decision };
+  }
+
+  return {
+    claimed: true,
+    recovering: true,
+    messageId,
+    decision,
+    token,
+    pendingRawPayload,
+    processingRawPayload
+  };
+}
+
 async function claimPreConsentTurn(prisma, candidateId, message, decision) {
   const waMessageId = String(message?.id || '').trim();
   if (!waMessageId) {
@@ -675,61 +756,158 @@ async function claimPreConsentTurn(prisma, candidateId, message, decision) {
     return { claimed: created, recovering: false, messageId: null, decision };
   }
 
-  const existing = await findInboundConversationMessage(prisma, { candidateId, waMessageId });
-  if (existing.found) {
-    const state = consentGateProcessingState(existing.message);
-    const existingDecision = String(existing.message?.rawPayload?.consentGateProcessing?.decision || '');
-    if (state === 'PENDING' && (!existingDecision || existingDecision === decision)) {
-      return {
-        claimed: true,
-        recovering: true,
-        messageId: existing.message?.id || null,
-        decision
-      };
+  let existing = await findInboundConversationMessage(prisma, { candidateId, waMessageId });
+  if (!existing.found) {
+    try {
+      await persistInboundConversationMessage(prisma, {
+        candidateId,
+        waMessageId,
+        messageType: inboundMessageType(message),
+        body: '[REDACTED_PRECONSENT]',
+        rawPayload: {
+          source: 'data_consent_gate',
+          consentVersion: DATA_CONSENT_VERSION,
+          consentDecision: decision,
+          waMessageId,
+          consentGateProcessing: { state: 'PENDING', decision }
+        }
+      });
+      existing = await findInboundConversationMessage(prisma, { candidateId, waMessageId });
+    } catch (error) {
+      throw retryableConsentGateError(error);
     }
-    return { claimed: false, recovering: false, messageId: existing.message?.id || null, decision };
   }
 
-  try {
-    const result = await persistInboundConversationMessage(prisma, {
-      candidateId,
-      waMessageId,
-      messageType: inboundMessageType(message),
-      body: '[REDACTED_PRECONSENT]',
-      rawPayload: {
-        source: 'data_consent_gate',
-        consentVersion: DATA_CONSENT_VERSION,
-        consentDecision: decision,
-        waMessageId,
-        consentGateProcessing: { state: 'PENDING', decision }
-      }
-    });
-    if (!result.created) return { claimed: false, recovering: false, messageId: null, decision };
-    const persisted = await findInboundConversationMessage(prisma, { candidateId, waMessageId });
-    return {
-      claimed: true,
-      recovering: false,
-      messageId: persisted.message?.id || null,
-      decision
-    };
-  } catch (error) {
-    throw retryableConsentGateError(error);
+  if (!existing.found) {
+    throw retryableConsentGateError(new Error('consent_gate_claim_not_persisted'));
   }
+  return acquirePendingPreConsentTurn(prisma, existing.message, decision);
 }
 
 async function completePreConsentTurn(prisma, claim) {
   if (!claim?.claimed || !claim.messageId) return;
-  if (typeof prisma?.message?.findUnique !== 'function' || typeof prisma?.message?.update !== 'function') return;
-  await mergeConversationMessagePayload(prisma, {
+  if (!claim.processingRawPayload) {
+    throw retryableConsentGateError(new Error('consent_gate_processing_payload_missing'));
+  }
+  const processing = normalizeMessagePayload(claim.processingRawPayload.consentGateProcessing);
+  const completedRawPayload = {
+    ...claim.processingRawPayload,
+    consentGateProcessing: {
+      ...processing,
+      state: 'COMPLETED',
+      completedAt: new Date().toISOString()
+    }
+  };
+  const result = await compareAndSwapConversationMessagePayload(prisma, {
     messageId: claim.messageId,
-    patch: {
-      consentGateProcessing: {
-        state: 'COMPLETED',
-        decision: claim.decision,
-        completedAt: new Date().toISOString()
+    expectedRawPayload: claim.processingRawPayload,
+    rawPayload: completedRawPayload
+  });
+  if (!result.updated) {
+    throw retryableConsentGateError(new Error('consent_gate_claim_completion_conflict'));
+  }
+  claim.processingRawPayload = completedRawPayload;
+}
+
+async function releasePreConsentTurn(prisma, claim) {
+  if (!claim?.claimed || !claim.messageId || !claim.processingRawPayload) return false;
+  const originalProcessing = normalizeMessagePayload(claim.pendingRawPayload?.consentGateProcessing);
+  const pendingRawPayload = {
+    ...normalizeMessagePayload(claim.pendingRawPayload),
+    consentGateProcessing: {
+      ...originalProcessing,
+      state: 'PENDING',
+      decision: claim.decision,
+      recoveredAt: new Date().toISOString()
+    }
+  };
+  const result = await compareAndSwapConversationMessagePayload(prisma, {
+    messageId: claim.messageId,
+    expectedRawPayload: claim.processingRawPayload,
+    rawPayload: pendingRawPayload
+  });
+  if (result.updated) claim.processingRawPayload = pendingRawPayload;
+  return result.updated;
+}
+
+function preConsentOutboundDedupeKey(candidateId, claim, source) {
+  return createHash('sha256')
+    .update([candidateId, claim?.messageId || 'no-message-id', claim?.decision || '', source].join(':'))
+    .digest('hex');
+}
+
+async function sendClaimedAndStore(prisma, candidateId, to, body, source, claim, extraPayload = {}) {
+  if (!claim?.messageId) {
+    await sendAndStore(prisma, candidateId, to, body, source, extraPayload);
+    return { suppressed: false, messageId: null };
+  }
+
+  const dedupeKey = preConsentOutboundDedupeKey(candidateId, claim, source);
+  const existing = await findRecentOutboundConversationDelivery(prisma, {
+    candidateId,
+    body,
+    dedupeKey,
+    createdSince: new Date(0)
+  });
+  if (existing.found) {
+    return { suppressed: true, messageId: existing.message?.id || null };
+  }
+
+  const startedAt = new Date();
+  const intent = await persistOutboundConversationMessage(prisma, {
+    candidateId,
+    messageType: MessageType.TEXT,
+    body,
+    rawPayload: {
+      source,
+      body,
+      consentVersion: DATA_CONSENT_VERSION,
+      ...extraPayload,
+      delivery: {
+        state: 'SENDING',
+        provider: 'META_WHATSAPP',
+        startedAt: startedAt.toISOString(),
+        updatedAt: startedAt.toISOString(),
+        dedupeKey,
+        retryPolicy: 'MANUAL_REVIEW_ONLY'
       }
     }
   });
+
+  let providerResponse;
+  try {
+    providerResponse = await sendTextMessage(to, body);
+  } catch (error) {
+    try {
+      await updateOutboundConversationDelivery(prisma, {
+        messageId: intent.message.id,
+        state: 'FAILED',
+        occurredAt: new Date(),
+        lastError: safeErrorDetails(error).message
+      });
+    } catch (persistenceError) {
+      console.warn('[CONSENT_GATE_PROVIDER_FAILURE_PERSISTENCE]', safeErrorDetails(persistenceError));
+    }
+    throw retryableConsentGateError(error);
+  }
+
+  const providerMessageId = providerResponse?.messages?.[0]?.id || null;
+  try {
+    await prisma.candidate.update({
+      where: { id: candidateId },
+      data: { lastOutboundAt: new Date() }
+    });
+    await updateOutboundConversationDelivery(prisma, {
+      messageId: intent.message.id,
+      state: 'SENT',
+      occurredAt: new Date(),
+      providerMessageId
+    });
+  } catch (error) {
+    throw retryableConsentGateError(error);
+  }
+
+  return { suppressed: false, messageId: intent.message.id };
 }
 
 function summarizeProfileDataEvidence(evidence = []) {
@@ -1015,32 +1193,52 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vacan
   }
 
   try {
-  const update = {};
-  if (candidate.currentStep !== nextStep) update.currentStep = nextStep;
-  if (String(candidate.botResumeMode || '') !== String(nextMode || '')) update.botResumeMode = nextMode;
-  if (Object.keys(update).length) {
-    await prisma.candidate.update({ where: { id: candidate.id }, data: update });
-  }
+    const update = {};
+    if (candidate.currentStep !== nextStep) update.currentStep = nextStep;
+    if (String(candidate.botResumeMode || '') !== String(nextMode || '')) update.botResumeMode = nextMode;
+    if (Object.keys(update).length) {
+      await prisma.candidate.update({ where: { id: candidate.id }, data: update });
+    }
 
-  const passRecoveredVacancyContext = Boolean(
-    !hasVacancy
-    && boundaryReason === 'protected_step_without_consent'
-    && !isProtectedAttachment(message)
-    && !containsProfileData(inboundText(message), { candidate })
-  );
-  if (passRecoveredVacancyContext) return false;
+    const passRecoveredVacancyContext = Boolean(
+      !hasVacancy
+      && boundaryReason === 'protected_step_without_consent'
+      && !isProtectedAttachment(message)
+      && !containsProfileData(inboundText(message), { candidate })
+    );
+    if (passRecoveredVacancyContext) return false;
 
-  const reply = buildConsentPrerequisiteReply(candidate, vacancy, boundaryReason);
-  await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_prerequisite', {
-    reason: boundaryReason,
-    vacancyId: vacancy?.id || candidate?.vacancyId || null,
-    nextMode,
-    ...(profileDataEvidence.length ? { profileDataEvidence: summarizeProfileDataEvidence(profileDataEvidence) } : {})
-  });
-  await completePreConsentTurn(prisma, claim);
-  return true;
+    const reply = buildConsentPrerequisiteReply(candidate, vacancy, boundaryReason);
+    const outboundPayload = {
+      reason: boundaryReason,
+      vacancyId: vacancy?.id || candidate?.vacancyId || null,
+      nextMode,
+      ...(profileDataEvidence.length ? { profileDataEvidence: summarizeProfileDataEvidence(profileDataEvidence) } : {})
+    };
+    if (claim?.claimed) {
+      await sendClaimedAndStore(
+        prisma,
+        candidate.id,
+        from,
+        reply,
+        'data_consent_prerequisite',
+        claim,
+        outboundPayload
+      );
+    } else {
+      await sendAndStore(prisma, candidate.id, from, reply, 'data_consent_prerequisite', outboundPayload);
+    }
+    await completePreConsentTurn(prisma, claim);
+    return true;
   } catch (error) {
-    if (claim?.claimed) throw retryableConsentGateError(error);
+    if (claim?.claimed) {
+      try {
+        await releasePreConsentTurn(prisma, claim);
+      } catch (releaseError) {
+        console.warn('[CONSENT_GATE_CLAIM_RELEASE_ERROR]', safeErrorDetails(releaseError));
+      }
+      throw retryableConsentGateError(error);
+    }
     throw error;
   }
 }
@@ -1223,16 +1421,24 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mess
   const protectedBeforeConsent = !isConsentAlreadyAccepted(candidate)
     && (isProtectedAttachment(message) || profileDataDecision.containsProfileData);
   if (protectedBeforeConsent) {
+    let claim = null;
     try {
       const decision = isProtectedAttachment(message)
         ? 'PAUSED_PRECONSENT_ATTACHMENT'
         : 'PAUSED_PRECONSENT_PROFILE_DATA';
-      const claim = await claimPreConsentTurn(prisma, candidate.id, message, decision);
+      claim = await claimPreConsentTurn(prisma, candidate.id, message, decision);
       if (!claim.claimed && existingMessage) {
         return { candidate, blocked: true, consume: true, defer: false, retry: false, reason: 'paused_inbound_retry' };
       }
       await completePreConsentTurn(prisma, claim);
     } catch (error) {
+      if (claim?.claimed) {
+        try {
+          await releasePreConsentTurn(prisma, claim);
+        } catch (releaseError) {
+          console.warn('[PAUSED_PRECONSENT_CLAIM_RELEASE_ERROR]', safeErrorDetails(releaseError));
+        }
+      }
       console.warn('[PAUSED_PRECONSENT_ATTACHMENT_PERSISTENCE_ERROR]', safeErrorDetails(error));
       return {
         candidate,
