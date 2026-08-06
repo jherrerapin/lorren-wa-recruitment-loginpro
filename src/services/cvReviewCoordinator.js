@@ -116,8 +116,6 @@ function mergeCandidateReviewWhere(originalWhere = {}, dateRange = {}) {
 }
 
 function prismaScopedToRegistrationRange(prisma, dateRange) {
-  if (!dateRange.createdAtWhere) return prisma;
-
   const candidateDelegate = prisma.candidate;
   const scopedCandidateDelegate = new Proxy(candidateDelegate, {
     get(target, property) {
