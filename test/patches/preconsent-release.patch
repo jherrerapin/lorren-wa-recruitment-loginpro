@@ -2,7 +2,7 @@ diff --git a/src/services/dataConsentGate.js b/src/services/dataConsentGate.js
 index 80a7e4d..0000000 100644
 --- a/src/services/dataConsentGate.js
 +++ b/src/services/dataConsentGate.js
-@@ -15,6 +15,7 @@ import { cancelReminderOnInbound } from './reminder.js';
+@@ -15,5 +15,6 @@ import { cancelReminderOnInbound } from './reminder.js';
  import {
    findInboundConversationMessage,
 +  mergeConversationMessagePayload,
@@ -17,7 +17,7 @@ index 80a7e4d..0000000 100644
    const value = normalizeExplicitFullName(natural[1]);
    return value
      ? buildCurrentInboundEvidence('fullName', value, 'EXPLICIT_SOY_NAME_INTRODUCTION', natural[0])
-@@ -303,14 +305,10 @@ function resolveExplicitNameEvidence(raw) {
+@@ -303,12 +305,9 @@ function resolveExplicitNameEvidence(raw) {
  }
  
  function resolveContextualStandaloneNameEvidence(raw, candidate = {}) {
@@ -35,7 +35,7 @@ index 80a7e4d..0000000 100644
 +  void candidate;
 +  return null;
  }
-@@ -337,11 +335,84 @@ function resolveExplicitGenderEvidence(raw) {
+@@ -337,10 +335,73 @@ function resolveExplicitGenderEvidence(raw) {
    return null;
  }
  
@@ -114,7 +114,7 @@ index 80a7e4d..0000000 100644
 +    buildCurrentInboundEvidence('experienceSummary', normalized.experienceSummary || fragment, 'EXPLICIT_EXPERIENCE_SUMMARY', fragment)
 +  ];
  }
-@@ -384,6 +455,8 @@ export function evaluateProfileDataEvidence(text = '', options = {}) {
+@@ -384,4 +455,6 @@ export function evaluateProfileDataEvidence(text = '', options = {}) {
      resolveExplicitResidenceEvidence(raw),
      resolveExplicitTransportEvidence(raw),
 -    resolveExplicitGenderEvidence(raw)
@@ -122,7 +122,7 @@ index 80a7e4d..0000000 100644
 +    resolveExplicitMedicalEvidence(raw),
 +    ...resolveExplicitExperienceEvidence(raw)
    ].filter(Boolean);
-@@ -550,9 +623,103 @@ function inboundMessageType(message = {}) {
+@@ -550,13 +623,28 @@ function inboundMessageType(message = {}) {
    return MessageType.UNKNOWN;
  }
  
@@ -152,7 +152,7 @@ index 80a7e4d..0000000 100644
      rawPayload: {
        source: 'data_consent_gate',
        consentVersion: DATA_CONSENT_VERSION,
-@@ -562,6 +729,84 @@ async function saveInboundConsentEvidence(prisma, candidateId, message, body, d
+@@ -562,4 +729,77 @@ async function saveInboundConsentEvidence(prisma, candidateId, message, body, d
    return result.created;
  }
  
@@ -230,7 +230,7 @@ index 80a7e4d..0000000 100644
 +}
 +
  async function saveOutboundConsentGateMessage(prisma, candidateId, body, source, extraPayload = {}) {
-@@ -786,6 +1031,16 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vaca
+@@ -786,6 +1031,15 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vaca
    const nextStep = hasVacancy || PROTECTED_STEPS.has(candidate.currentStep)
      ? ConversationStep.GREETING_SENT
      : candidate.currentStep;
@@ -246,7 +246,7 @@ index 80a7e4d..0000000 100644
    const update = {};
    if (candidate.currentStep !== nextStep) update.currentStep = nextStep;
    if (String(candidate.botResumeMode || '') !== String(nextMode || '')) update.botResumeMode = nextMode;
-@@ -805,12 +1060,18 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vaca
+@@ -805,11 +1060,16 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vaca
    if (passRecoveredVacancyContext) return false;
  
    const reply = buildConsentPrerequisiteReply(candidate, vacancy, boundaryReason);
@@ -264,14 +264,14 @@ index 80a7e4d..0000000 100644
 +    throw error;
 +  }
  }
-@@ -939,7 +1200,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
+@@ -939,5 +1200,5 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
      reason: boundaryReason,
      resumeMode: context.resumeMode,
      cvResendRequired: context.cvResendRequired,
 -    ...(profileDataEvidence.length ? { profileDataEvidence } : {})
 +    ...(profileDataEvidence.length ? { profileDataEvidence: summarizeProfileDataEvidence(profileDataEvidence) } : {})
    });
-@@ -975,16 +1236,33 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mes
+@@ -975,23 +1236,29 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mes
    const waMessageId = String(message?.id || '').trim();
 +  let existingMessage = null;
    if (waMessageId) {
@@ -310,7 +310,7 @@ index 80a7e4d..0000000 100644
      } catch (error) {
        console.warn('[PAUSED_PRECONSENT_ATTACHMENT_PERSISTENCE_ERROR]', safeErrorDetails(error));
        return {
-@@ -1002,7 +1280,9 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mes
+@@ -1002,5 +1280,7 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mes
        consume: true,
        defer: false,
        retry: false,
