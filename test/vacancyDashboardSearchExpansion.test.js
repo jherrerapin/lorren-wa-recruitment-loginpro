@@ -2,12 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   candidateMatchesVacancyDashboardSearch,
-  isCandidateVisibleForVacancySearch,
   mergeVacancySearchResults,
   normalizeVacancyDashboardSearches
 } from '../src/services/vacancyDashboardSearchExpansion.js';
 
-function completeCandidate(overrides = {}) {
+function candidate(overrides = {}) {
   return {
     id: 'candidate-complete',
     vacancyId: 'vacancy-1',
@@ -33,6 +32,22 @@ function completeCandidate(overrides = {}) {
   };
 }
 
+function dashboardVacancy(overrides = {}) {
+  return {
+    id: 'vacancy-1',
+    schedulingEnabled: true,
+    acceptingApplications: true,
+    dashboardReviewEnabled: false,
+    bookingsToday: [],
+    registeredNoBooking: [],
+    registeredComplete: [],
+    completeWithoutCv: [],
+    approvedCandidates: [],
+    contractedCandidates: [],
+    ...overrides
+  };
+}
+
 test('normaliza búsquedas independientes por vacante', () => {
   const result = normalizeVacancyDashboardSearches({
     'vs_vacancy-1_field': 'phone',
@@ -48,43 +63,59 @@ test('normaliza búsquedas independientes por vacante', () => {
 });
 
 test('busca por documento y celular normalizando formatos y prefijo 57', () => {
-  const candidate = completeCandidate();
+  const record = candidate();
 
-  assert.equal(candidateMatchesVacancyDashboardSearch(candidate, {
+  assert.equal(candidateMatchesVacancyDashboardSearch(record, {
     field: 'document',
     text: '1023456'
   }), true);
-  assert.equal(candidateMatchesVacancyDashboardSearch(candidate, {
+  assert.equal(candidateMatchesVacancyDashboardSearch(record, {
     field: 'phone',
     text: '320-123-4567'
   }), true);
-  assert.equal(candidateMatchesVacancyDashboardSearch(candidate, {
+  assert.equal(candidateMatchesVacancyDashboardSearch(record, {
     field: 'phone',
     text: '3100000000'
   }), false);
 });
 
-test('un reclutador solo puede obtener registros completos con hoja de vida', () => {
-  const complete = completeCandidate();
-  const withoutCv = completeCandidate({ cvStorageKey: null, cvOriginalName: null, cvMimeType: null });
-  const withoutResidence = completeCandidate({ neighborhood: null, locality: null, zone: null });
+test('incluye candidatos de toda la vacante aunque no tengan hoja de vida o datos completos', () => {
+  const withoutCv = candidate({
+    id: 'candidate-without-cv',
+    fullName: null,
+    documentNumber: '777123456',
+    age: null,
+    neighborhood: null,
+    locality: null,
+    medicalRestrictions: null,
+    transportMode: null,
+    cvStorageKey: null,
+    cvOriginalName: null,
+    cvMimeType: null
+  });
+  const viewModel = {
+    cities: [{ name: 'Ibagué', vacancies: [dashboardVacancy()] }]
+  };
 
-  assert.equal(isCandidateVisibleForVacancySearch(complete, { isDev: false }), true);
-  assert.equal(isCandidateVisibleForVacancySearch(withoutCv, { isDev: false }), false);
-  assert.equal(isCandidateVisibleForVacancySearch(withoutResidence, { isDev: false }), false);
-  assert.equal(isCandidateVisibleForVacancySearch(withoutCv, { isDev: true }), true);
+  mergeVacancySearchResults(
+    viewModel,
+    { 'vacancy-1': { field: 'document', text: '777123456' } },
+    [withoutCv]
+  );
+
+  assert.equal(viewModel.cities[0].vacancies[0].registeredNoBooking[0].id, 'candidate-without-cv');
 });
 
-test('agrega una coincidencia omitida del resumen y conserva candidatos no relacionados', () => {
-  const unrelated = completeCandidate({
+test('agrega una coincidencia omitida del resumen y conserva los registros existentes', () => {
+  const unrelated = candidate({
     id: 'candidate-unrelated',
     documentNumber: '999999999'
   });
-  const hiddenBySummary = completeCandidate({
+  const hiddenBySummary = candidate({
     id: 'candidate-other-date',
     documentNumber: '1023456789'
   });
-  const unauthorizedMatch = completeCandidate({
+  const existingWithoutCv = candidate({
     id: 'candidate-without-cv',
     documentNumber: '1023456000',
     cvStorageKey: null,
@@ -94,65 +125,49 @@ test('agrega una coincidencia omitida del resumen y conserva candidatos no relac
   const viewModel = {
     cities: [{
       name: 'Ibagué',
-      vacancies: [{
-        id: 'vacancy-1',
-        schedulingEnabled: true,
-        acceptingApplications: true,
-        dashboardReviewEnabled: false,
-        bookingsToday: [],
+      vacancies: [dashboardVacancy({
         registeredNoBooking: [unrelated],
-        registeredComplete: [],
-        completeWithoutCv: [unauthorizedMatch],
-        approvedCandidates: [],
-        contractedCandidates: []
-      }]
-    }]
-  };
-  const searches = {
-    'vacancy-1': { field: 'document', text: '1023456' }
-  };
-
-  mergeVacancySearchResults(viewModel, searches, [hiddenBySummary, unauthorizedMatch], { isDev: false });
-
-  const vacancy = viewModel.cities[0].vacancies[0];
-  assert.deepEqual(
-    vacancy.registeredNoBooking.map((candidate) => candidate.id),
-    ['candidate-other-date', 'candidate-unrelated']
-  );
-  assert.equal(vacancy.completeWithoutCv.some((candidate) => candidate.id === 'candidate-without-cv'), false);
-});
-
-test('DEV puede recuperar un registro incompleto omitido del resumen', () => {
-  const incomplete = completeCandidate({
-    id: 'candidate-incomplete',
-    fullName: null,
-    cvStorageKey: null,
-    documentNumber: '777123456'
-  });
-  const viewModel = {
-    cities: [{
-      name: 'Ibagué',
-      vacancies: [{
-        id: 'vacancy-1',
-        schedulingEnabled: true,
-        acceptingApplications: true,
-        dashboardReviewEnabled: false,
-        bookingsToday: [],
-        registeredNoBooking: [],
-        registeredComplete: [],
-        completeWithoutCv: [],
-        approvedCandidates: [],
-        contractedCandidates: []
-      }]
+        completeWithoutCv: [existingWithoutCv]
+      })]
     }]
   };
 
   mergeVacancySearchResults(
     viewModel,
-    { 'vacancy-1': { field: 'document', text: '777123456' } },
-    [incomplete],
-    { isDev: true }
+    { 'vacancy-1': { field: 'document', text: '1023456' } },
+    [hiddenBySummary, existingWithoutCv]
   );
 
-  assert.equal(viewModel.cities[0].vacancies[0].registeredNoBooking[0].id, 'candidate-incomplete');
+  const vacancy = viewModel.cities[0].vacancies[0];
+  assert.deepEqual(
+    vacancy.registeredNoBooking.map((entry) => entry.id),
+    ['candidate-other-date', 'candidate-unrelated']
+  );
+  assert.equal(vacancy.completeWithoutCv.some((entry) => entry.id === 'candidate-without-cv'), true);
+});
+
+test('mantiene aprobados y contratados en su sección real al recuperarlos', () => {
+  const approved = candidate({
+    id: 'candidate-approved',
+    documentNumber: '555000111',
+    status: 'APROBADO'
+  });
+  const contracted = candidate({
+    id: 'candidate-contracted',
+    documentNumber: '555000222',
+    status: 'CONTRATADO'
+  });
+  const viewModel = {
+    cities: [{ name: 'Ibagué', vacancies: [dashboardVacancy()] }]
+  };
+
+  mergeVacancySearchResults(
+    viewModel,
+    { 'vacancy-1': { field: 'document', text: '555000' } },
+    [approved, contracted]
+  );
+
+  const vacancy = viewModel.cities[0].vacancies[0];
+  assert.equal(vacancy.approvedCandidates[0].id, 'candidate-approved');
+  assert.equal(vacancy.contractedCandidates[0].id, 'candidate-contracted');
 });
