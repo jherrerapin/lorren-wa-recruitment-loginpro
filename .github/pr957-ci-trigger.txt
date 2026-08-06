@@ -1,1 +1,0 @@
-Temporary PR synchronization trigger. This file is deleted in the next commit.
