@@ -67,6 +67,12 @@ export async function captureConsentedProfileData({
     return { candidate, capturedFields: [], reason: 'candidate_not_ready' };
   }
 
+  // Esta es la última frontera antes de persistir campos protegidos. El gate
+  // puede interpretar el turno, pero nunca es la única protección de escritura.
+  if (candidate?.dataConsentStatus !== 'ACCEPTED') {
+    return { candidate, capturedFields: [], reason: 'consent_not_accepted' };
+  }
+
   const consentMessageText = String(currentText || '').trim();
   if (!consentMessageText) {
     return { candidate, capturedFields: [], reason: 'no_consented_message_data' };

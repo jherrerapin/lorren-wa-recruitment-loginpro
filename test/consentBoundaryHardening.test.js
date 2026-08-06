@@ -228,7 +228,7 @@ test('si una HV fue descartada antes de autorizar se solicita reenviarla solo en
 });
 
 test('la captura admite varios prefijos naturales antes de autorizar', async () => {
-  const candidate = { id: 'candidate-1', documentType: null, documentNumber: null };
+  const candidate = { id: 'candidate-1', dataConsentStatus: 'ACCEPTED', documentType: null, documentNumber: null };
   let persisted = null;
   const prisma = {
     candidate: {
