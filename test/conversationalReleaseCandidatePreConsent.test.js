@@ -298,7 +298,7 @@ test('TEST-RC-PRECONSENT-IDEMPOTENCY: el mismo webhook produce una sola adquisic
   assert.equal(acquisitionFailure.inboundRows.length, 1);
   assert.equal(acquisitionFailure.providerOutbound.length, 1);
 
-  const transitionFailure = buildHarness({ failCandidateUpdateTimes: 1 });
+  const transitionFailure = buildHarness({ failCandidateUpdateTimes: 1, candidateOverrides: { botResumeMode: null } });
   const transitionFirst = await runMiddleware(transitionFailure, 'Mi cédula es TEST-100000001', 'TEST-RC-TRANSITION-RECOVERY');
   assert.deepEqual(transitionFirst.statuses, [503]);
   assert.equal(transitionFailure.inboundRows.length, 1);

@@ -111,6 +111,7 @@ test('un lote conserva los mensajes no manejados cuando otro quedó en consentim
 test('después de autorizar solo procesa datos incluidos en el mismo mensaje de autorización', async () => {
   const candidate = {
     id: 'candidate-1',
+    dataConsentStatus: 'ACCEPTED',
     documentType: null,
     documentNumber: null
   };
@@ -142,7 +143,7 @@ test('después de autorizar solo procesa datos incluidos en el mismo mensaje de 
 });
 
 test('los mensajes anteriores al consentimiento no se recuperan después de una aceptación sin datos', async () => {
-  const candidate = { id: 'candidate-2', fullName: null };
+  const candidate = { id: 'candidate-2', dataConsentStatus: 'ACCEPTED', fullName: null };
   let updateCalled = false;
   const prisma = {
     message: {

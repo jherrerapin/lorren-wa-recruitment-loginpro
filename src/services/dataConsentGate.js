@@ -14,6 +14,7 @@ import { cancelActiveInterviewBookings } from './interviewBookingStateService.js
 import { cancelReminderOnInbound } from './reminder.js';
 import {
   findInboundConversationMessage,
+  mergeConversationMessagePayload,
   persistInboundConversationMessage,
   persistOutboundConversationMessage
 } from './conversationMessageRepository.js';
@@ -316,10 +317,26 @@ function resolveExplicitNameEvidence(raw) {
 
   const natural = text.match(/^soy\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'.-]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]+){1,5})(?=\s*,|$)/i);
   if (!natural) return null;
+  if (!hasStandaloneNameCapitalization(natural[1])) return null;
   const value = normalizeExplicitFullName(natural[1]);
   return value
     ? buildCurrentInboundEvidence('fullName', value, 'EXPLICIT_SOY_NAME_INTRODUCTION', natural[0])
     : null;
+}
+
+function looksLikeOccupationalOrDescriptivePhrase(value = '') {
+  const contentTokens = String(value || '')
+    .trim()
+    .split(/\s+/)
+    .map((token) => normalize(token))
+    .filter((token) => token && !STANDALONE_NAME_CONNECTORS.has(token));
+  if (!contentTokens.length) return false;
+
+  // Criterio morfosintáctico: los nombres de oficio suelen usar un sustantivo agente
+  // como núcleo y uno o más modificadores. No depende de enumerar cargos concretos.
+  const head = contentTokens[0];
+  return contentTokens.length >= 2
+    && /(?:dor|dora|ista|logo|loga|ario|aria|ero|era|ante|ente)$/.test(head);
 }
 
 function resolveContextualStandaloneNameEvidence(raw, candidate = {}) {
@@ -327,6 +344,7 @@ function resolveContextualStandaloneNameEvidence(raw, candidate = {}) {
   const text = String(raw || '').trim();
   if (!text || text.includes('?') || /[,.;:\n]/.test(text)) return null;
   if (!hasStandaloneNameCapitalization(text)) return null;
+  if (looksLikeOccupationalOrDescriptivePhrase(text)) return null;
   const value = normalizeExplicitFullName(text);
   return value
     ? buildCurrentInboundEvidence('fullName', value, 'CONTEXTUAL_STANDALONE_FULL_NAME', text)
@@ -346,12 +364,77 @@ function resolveExplicitGenderEvidence(raw) {
   return null;
 }
 
+function normalizeDocumentCandidate(value = '') {
+  return String(value || '').trim().replace(/[.\s]/g, '').replace(/-+/g, '-');
+}
+
+function isPlausibleDocumentNumber(value = '') {
+  const compact = normalizeDocumentCandidate(value);
+  const digits = compact.replace(/\D/g, '');
+  return compact.length >= 6
+    && compact.length <= 24
+    && digits.length >= 6
+    && digits.length <= 12
+    && /^[A-Z0-9-]+$/i.test(compact);
+}
+
 function resolveExplicitDocumentEvidence(raw) {
-  const match = String(raw || '').match(/\b(?:mi\s+)?(?:cedula|cédula|c\.?\s*c\.?|documento(?:\s+de\s+identidad)?|numero\s+de\s+documento|número\s+de\s+documento)\s*(?:es|:|-)?\s*([A-Z0-9][A-Z0-9.\-\s]{4,40})/i);
-  const captured = trimEvidenceFragment(match?.[1] || '');
-  if (!captured || !/\d/.test(captured)) return null;
-  const value = captured.replace(/[.\s]/g, '');
-  return buildCurrentInboundEvidence('documentNumber', value, 'EXPLICIT_DOCUMENT_LABEL', match[0]);
+  const text = String(raw || '').trim();
+  const labelled = text.match(/\b(?:mi\s+)?(?:cedula|cédula|c\.?\s*c\.?|documento(?:\s+de\s+identidad)?|numero\s+de\s+documento|número\s+de\s+documento)\b\s*(?:es\b|:|-)\s*([A-Z0-9][A-Z0-9.\-\s]{4,40})/i);
+  const labelledValue = trimEvidenceFragment(labelled?.[1] || '');
+  if (labelledValue && isPlausibleDocumentNumber(labelledValue)) {
+    return buildCurrentInboundEvidence(
+      'documentNumber',
+      normalizeDocumentCandidate(labelledValue),
+      'EXPLICIT_DOCUMENT_LABEL_VALUE_BOUNDARY',
+      labelled[0]
+    );
+  }
+
+  const standalone = text.match(/^\s*([0-9][0-9.\-\s]{5,20})\s*$/);
+  const standaloneValue = standalone?.[1] || '';
+  if (!isPlausibleDocumentNumber(standaloneValue)) return null;
+  return buildCurrentInboundEvidence(
+    'documentNumber',
+    normalizeDocumentCandidate(standaloneValue),
+    'STANDALONE_PLAUSIBLE_DOCUMENT_NUMBER',
+    standalone[0].trim()
+  );
+}
+
+function resolveExplicitMedicalEvidence(raw) {
+  const text = String(raw || '');
+  const match = text.match(/\b(?:(?:tengo|presento|cuento\s+con|mi)\s+(?:una\s+|ninguna\s+)?|sin\s+)(?:restricci[oó]n(?:es)?\s+m[eé]dicas?|condici[oó]n(?:es)?\s+m[eé]dicas?|limitaci[oó]n(?:es)?\s+m[eé]dicas?)\b/i);
+  if (!match) return null;
+  const fragment = match[0];
+  const normalized = normalizeCandidateFields({ medicalRestrictions: fragment });
+  return buildCurrentInboundEvidence(
+    'medicalRestrictions',
+    normalized.medicalRestrictions || fragment,
+    'EXPLICIT_MEDICAL_RESTRICTION_EXPRESSION',
+    fragment
+  );
+}
+
+function resolveExplicitExperienceEvidence(raw) {
+  const text = String(raw || '');
+  const quantified = text.match(/\b(?:tengo|cuento\s+con|poseo)\s+(\d{1,2})\s+(a[nñ]os?|meses?)\s+de\s+experiencia(?:\s+en\s+([^.;\n]{2,80}))?/i);
+  const labelled = text.match(/\bexperiencia\s*:\s*(\d{1,2})\s+(a[nñ]os?|meses?)(?:\s+en\s+([^.;\n]{2,80}))?/i);
+  const match = quantified || labelled;
+  if (!match) return [];
+  const fragment = trimEvidenceFragment(match[0]);
+  const duration = `${match[1]} ${match[2]}`;
+  const area = trimEvidenceFragment(match[3] || fragment);
+  const normalized = normalizeCandidateFields({
+    experienceInfo: area,
+    experienceTime: duration,
+    experienceSummary: fragment
+  });
+  return [
+    buildCurrentInboundEvidence('experienceInfo', normalized.experienceInfo || area, 'EXPLICIT_EXPERIENCE_EXPRESSION', fragment),
+    buildCurrentInboundEvidence('experienceTime', normalized.experienceTime || duration, 'EXPLICIT_EXPERIENCE_DURATION', fragment),
+    buildCurrentInboundEvidence('experienceSummary', normalized.experienceSummary || fragment, 'EXPLICIT_EXPERIENCE_SUMMARY', fragment)
+  ];
 }
 
 function resolveExplicitAgeEvidence(raw) {
@@ -396,7 +479,9 @@ export function evaluateProfileDataEvidence(text = '', options = {}) {
     resolveExplicitAgeEvidence(raw),
     resolveExplicitResidenceEvidence(raw),
     resolveExplicitTransportEvidence(raw),
-    resolveExplicitGenderEvidence(raw)
+    resolveExplicitGenderEvidence(raw),
+    resolveExplicitMedicalEvidence(raw),
+    ...resolveExplicitExperienceEvidence(raw)
   ].filter(Boolean);
 
   return {
@@ -551,13 +636,28 @@ function inboundMessageType(message = {}) {
   return MessageType.UNKNOWN;
 }
 
+function redactedConsentEvidenceBody(decision = '') {
+  if (decision === 'ACCEPTED') return '[CONSENT_ACCEPTED]';
+  if (decision === 'REVOKED') return '[CONSENT_REVOKED]';
+  return '[REDACTED_PRECONSENT]';
+}
+
+function consentGateProcessingState(message = {}) {
+  return String(message?.rawPayload?.consentGateProcessing?.state || '').toUpperCase();
+}
+
+function retryableConsentGateError(error) {
+  if (error && typeof error === 'object') error.code = 'CONSENT_GATE_RETRYABLE';
+  return error;
+}
+
 async function saveInboundConsentEvidence(prisma, candidateId, message, body, decision) {
   const waMessageId = message?.id || null;
   const result = await persistInboundConversationMessage(prisma, {
     candidateId,
     waMessageId,
     messageType: inboundMessageType(message),
-    body,
+    body: redactedConsentEvidenceBody(decision),
     rawPayload: {
       source: 'data_consent_gate',
       consentVersion: DATA_CONSENT_VERSION,
@@ -566,6 +666,79 @@ async function saveInboundConsentEvidence(prisma, candidateId, message, body, de
     }
   });
   return result.created;
+}
+
+async function claimPreConsentTurn(prisma, candidateId, message, decision) {
+  const waMessageId = String(message?.id || '').trim();
+  if (!waMessageId) {
+    const created = await saveInboundConsentEvidence(prisma, candidateId, message, '', decision);
+    return { claimed: created, recovering: false, messageId: null, decision };
+  }
+
+  const existing = await findInboundConversationMessage(prisma, { candidateId, waMessageId });
+  if (existing.found) {
+    const state = consentGateProcessingState(existing.message);
+    const existingDecision = String(existing.message?.rawPayload?.consentGateProcessing?.decision || '');
+    if (state === 'PENDING' && (!existingDecision || existingDecision === decision)) {
+      return {
+        claimed: true,
+        recovering: true,
+        messageId: existing.message?.id || null,
+        decision
+      };
+    }
+    return { claimed: false, recovering: false, messageId: existing.message?.id || null, decision };
+  }
+
+  try {
+    const result = await persistInboundConversationMessage(prisma, {
+      candidateId,
+      waMessageId,
+      messageType: inboundMessageType(message),
+      body: '[REDACTED_PRECONSENT]',
+      rawPayload: {
+        source: 'data_consent_gate',
+        consentVersion: DATA_CONSENT_VERSION,
+        consentDecision: decision,
+        waMessageId,
+        consentGateProcessing: { state: 'PENDING', decision }
+      }
+    });
+    if (!result.created) return { claimed: false, recovering: false, messageId: null, decision };
+    const persisted = await findInboundConversationMessage(prisma, { candidateId, waMessageId });
+    return {
+      claimed: true,
+      recovering: false,
+      messageId: persisted.message?.id || null,
+      decision
+    };
+  } catch (error) {
+    throw retryableConsentGateError(error);
+  }
+}
+
+async function completePreConsentTurn(prisma, claim) {
+  if (!claim?.claimed || !claim.messageId) return;
+  if (typeof prisma?.message?.findUnique !== 'function' || typeof prisma?.message?.update !== 'function') return;
+  await mergeConversationMessagePayload(prisma, {
+    messageId: claim.messageId,
+    patch: {
+      consentGateProcessing: {
+        state: 'COMPLETED',
+        decision: claim.decision,
+        completedAt: new Date().toISOString()
+      }
+    }
+  });
+}
+
+function summarizeProfileDataEvidence(evidence = []) {
+  return evidence.map((item) => ({
+    field: item.field,
+    source: item.source,
+    rule: item.rule,
+    confidence: item.confidence
+  }));
 }
 
 async function saveOutboundConsentGateMessage(prisma, candidateId, body, source, extraPayload = {}) {
@@ -833,6 +1006,15 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vacan
   const nextStep = hasVacancy || PROTECTED_STEPS.has(candidate.currentStep)
     ? ConversationStep.GREETING_SENT
     : candidate.currentStep;
+  const shouldClaim = boundaryReason === 'profile_data_before_consent'
+    || boundaryReason === 'attachment_before_consent';
+  let claim = null;
+  if (shouldClaim) {
+    claim = await claimPreConsentTurn(prisma, candidate.id, message, `PREREQUISITE_${boundaryReason}`);
+    if (!claim.claimed) return true;
+  }
+
+  try {
   const update = {};
   if (candidate.currentStep !== nextStep) update.currentStep = nextStep;
   if (String(candidate.botResumeMode || '') !== String(nextMode || '')) update.botResumeMode = nextMode;
@@ -853,9 +1035,14 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vacan
     reason: boundaryReason,
     vacancyId: vacancy?.id || candidate?.vacancyId || null,
     nextMode,
-    ...(profileDataEvidence.length ? { profileDataEvidence } : {})
+    ...(profileDataEvidence.length ? { profileDataEvidence: summarizeProfileDataEvidence(profileDataEvidence) } : {})
   });
+  await completePreConsentTurn(prisma, claim);
   return true;
+  } catch (error) {
+    if (claim?.claimed) throw retryableConsentGateError(error);
+    throw error;
+  }
 }
 
 async function handleConsentDecision(prisma, req, candidate, message, from, body, boundaryReason, profileDataEvidence = []) {
@@ -1000,7 +1187,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     reason: boundaryReason,
     resumeMode: context.resumeMode,
     cvResendRequired: context.cvResendRequired,
-    ...(profileDataEvidence.length ? { profileDataEvidence } : {})
+    ...(profileDataEvidence.length ? { profileDataEvidence: summarizeProfileDataEvidence(profileDataEvidence) } : {})
   });
   return true;
 }
@@ -1020,25 +1207,31 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mess
   }
 
   const waMessageId = String(message?.id || '').trim();
+  let existingMessage = null;
   if (waMessageId) {
     const existing = await findInboundConversationMessage(prisma, {
       candidateId: candidate.id,
       waMessageId
     });
-    if (existing.found) {
+    existingMessage = existing.message || null;
+    if (existing.found && consentGateProcessingState(existing.message) !== 'PENDING') {
       return { candidate, blocked: true, consume: true, defer: false, retry: false, reason: 'paused_inbound_retry' };
     }
   }
 
-  if (isProtectedAttachment(message) && !isConsentAlreadyAccepted(candidate)) {
+  const profileDataDecision = evaluateProfileDataEvidence(inboundText(message), { candidate });
+  const protectedBeforeConsent = !isConsentAlreadyAccepted(candidate)
+    && (isProtectedAttachment(message) || profileDataDecision.containsProfileData);
+  if (protectedBeforeConsent) {
     try {
-      await saveInboundConsentEvidence(
-        prisma,
-        candidate.id,
-        message,
-        inboundText(message),
-        'PAUSED_PRECONSENT_ATTACHMENT'
-      );
+      const decision = isProtectedAttachment(message)
+        ? 'PAUSED_PRECONSENT_ATTACHMENT'
+        : 'PAUSED_PRECONSENT_PROFILE_DATA';
+      const claim = await claimPreConsentTurn(prisma, candidate.id, message, decision);
+      if (!claim.claimed && existingMessage) {
+        return { candidate, blocked: true, consume: true, defer: false, retry: false, reason: 'paused_inbound_retry' };
+      }
+      await completePreConsentTurn(prisma, claim);
     } catch (error) {
       console.warn('[PAUSED_PRECONSENT_ATTACHMENT_PERSISTENCE_ERROR]', safeErrorDetails(error));
       return {
@@ -1056,7 +1249,9 @@ async function preparePausedCandidateForConsentGate(prisma, candidate = {}, mess
       consume: true,
       defer: false,
       retry: false,
-      reason: 'paused_preconsent_attachment_consumed'
+      reason: isProtectedAttachment(message)
+        ? 'paused_preconsent_attachment_consumed'
+        : 'paused_preconsent_profile_data_consumed'
     };
   }
 
@@ -1138,6 +1333,7 @@ export function dataConsentGateMiddleware(prisma) {
       return res.sendStatus(200);
     } catch (error) {
       console.warn('[DATA_CONSENT_GATE_ERROR]', safeErrorDetails(error));
+      if (error?.code === 'CONSENT_GATE_RETRYABLE') return res.sendStatus(503);
       await notifyConsentGateFailure(messages);
       return res.sendStatus(200);
     }
