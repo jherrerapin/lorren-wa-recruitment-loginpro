@@ -1,7 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { buildCandidateAccessWhere, getAccessContext } from './appUsers.js';
-import { getCandidateResidenceValue } from './candidateData.js';
 
 const RENDER_PATCH_FLAG = Symbol.for('lorren.completeVacancyCandidateSearch');
 const VACANCY_LIST_FIELDS = [
@@ -72,20 +71,6 @@ export function candidateMatchesVacancyDashboardSearch(candidate = {}, search = 
   return Boolean(candidateValue) && candidateValue.includes(queryValue);
 }
 
-export function isCandidateVisibleForVacancySearch(candidate = {}, { isDev = false } = {}) {
-  if (isDev) return true;
-
-  return hasValue(candidate.fullName)
-    && hasValue(candidate.documentType)
-    && hasValue(candidate.documentNumber)
-    && candidate.age !== null
-    && candidate.age !== undefined
-    && hasValue(getCandidateResidenceValue(candidate, candidate.vacancy))
-    && hasValue(candidate.medicalRestrictions)
-    && hasValue(candidate.transportMode)
-    && candidateHasCv(candidate);
-}
-
 function candidateHasUnreadInbound(candidate = {}) {
   const inboundTime = timeValue(candidate.lastInboundAt);
   if (!inboundTime) return false;
@@ -145,26 +130,6 @@ function displayedCandidateIds(vacancy = {}) {
   return ids;
 }
 
-function candidateMatchesAndIsVisible(candidate, search, options) {
-  return candidateMatchesVacancyDashboardSearch(candidate, search)
-    && isCandidateVisibleForVacancySearch(candidate, options);
-}
-
-function removeUnauthorizedMatches(vacancy, search, options) {
-  if (options.isDev) return;
-
-  for (const field of VACANCY_LIST_FIELDS) {
-    vacancy[field] = (vacancy[field] || []).filter((candidate) => (
-      !candidateMatchesVacancyDashboardSearch(candidate, search)
-      || isCandidateVisibleForVacancySearch(candidate, options)
-    ));
-  }
-  vacancy.bookingsToday = (vacancy.bookingsToday || []).filter((booking) => (
-    !candidateMatchesVacancyDashboardSearch(booking?.candidate, search)
-    || isCandidateVisibleForVacancySearch(booking?.candidate, options)
-  ));
-}
-
 function resolveSearchResultTarget(vacancy = {}, candidate = {}) {
   if (candidate.status === 'CONTRATADO') return 'contractedCandidates';
   if (candidate.status === 'APROBADO') return 'approvedCandidates';
@@ -173,24 +138,27 @@ function resolveSearchResultTarget(vacancy = {}, candidate = {}) {
   return 'approvedCandidates';
 }
 
-export function mergeVacancySearchResults(viewModel = {}, searches = {}, candidates = [], options = {}) {
+export function mergeVacancySearchResults(viewModel = {}, searches = {}, candidates = []) {
   const resultsByVacancyId = new Map();
+
   for (const candidate of candidates) {
-    const search = searches[String(candidate.vacancyId)];
-    if (!search || !candidateMatchesAndIsVisible(candidate, search, options)) continue;
-    const current = resultsByVacancyId.get(String(candidate.vacancyId)) || [];
+    const vacancyId = String(candidate.vacancyId || '');
+    const search = searches[vacancyId];
+    if (!search || !candidateMatchesVacancyDashboardSearch(candidate, search)) continue;
+
+    const current = resultsByVacancyId.get(vacancyId) || [];
     current.push(decorateSearchCandidate(candidate));
-    resultsByVacancyId.set(String(candidate.vacancyId), current);
+    resultsByVacancyId.set(vacancyId, current);
   }
 
   for (const city of viewModel.cities || []) {
     for (const vacancy of city.vacancies || []) {
-      const search = searches[String(vacancy.id)];
+      const vacancyId = String(vacancy.id);
+      const search = searches[vacancyId];
       if (!search?.text) continue;
 
-      removeUnauthorizedMatches(vacancy, search, options);
       const alreadyDisplayed = displayedCandidateIds(vacancy);
-      const searchResults = resultsByVacancyId.get(String(vacancy.id)) || [];
+      const searchResults = resultsByVacancyId.get(vacancyId) || [];
 
       for (const candidate of searchResults) {
         if (alreadyDisplayed.has(candidate.id)) continue;
@@ -269,9 +237,8 @@ export async function expandVacancySearchCandidates(viewModel = {}, query = {}, 
     for (const vacancy of city.vacancies || []) visibleVacancyIds.add(String(vacancy.id));
   }
 
-  const accessContext = getRequestAccessContext(req);
   const candidates = await loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds);
-  return mergeVacancySearchResults(viewModel, searches, candidates, { isDev: accessContext.isDev });
+  return mergeVacancySearchResults(viewModel, searches, candidates);
 }
 
 export function installVacancyDashboardSearchExpansion() {
@@ -296,7 +263,11 @@ export function installVacancyDashboardSearchExpansion() {
     expandVacancySearchCandidates(options, response.req?.query || {}, response.req)
       .then(() => originalRender.call(response, view, options, callback))
       .catch((error) => {
-        console.error('[vacancy_dashboard_search]', error?.message || error);
+        console.error('[vacancy_dashboard_search]', {
+          message: error?.message || String(error),
+          code: error?.code || null,
+          path: response.req?.originalUrl || response.req?.url || '/admin'
+        });
         originalRender.call(response, view, options, callback);
       });
 
