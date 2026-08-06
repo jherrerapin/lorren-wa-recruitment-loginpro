@@ -1,0 +1,69 @@
+diff --git a/src/services/dataConsentGate.js b/src/services/dataConsentGate.js
+index 3004417..b11018c 100644
+--- a/src/services/dataConsentGate.js
++++ b/src/services/dataConsentGate.js
+@@ -324,12 +324,31 @@ function resolveExplicitNameEvidence(raw) {
+     : null;
+ }
+ 
++function looksLikeOccupationalOrDescriptivePhrase(value = '') {
++  const contentTokens = String(value || '')
++    .trim()
++    .split(/\s+/)
++    .map((token) => normalize(token))
++    .filter((token) => token && !STANDALONE_NAME_CONNECTORS.has(token));
++  if (!contentTokens.length) return false;
++
++  // Criterio morfosintáctico: los nombres de oficio suelen usar un sustantivo agente
++  // como núcleo y uno o más modificadores. No depende de enumerar cargos concretos.
++  const head = contentTokens[0];
++  return contentTokens.length >= 2
++    && /(?:dor|dora|ista|logo|loga|ario|aria|ero|era|ante|ente)$/.test(head);
++}
++
+ function resolveContextualStandaloneNameEvidence(raw, candidate = {}) {
+-  // Sin una presentación nominal explícita, una frase capitalizada puede ser
+-  // un cargo, profesión o rasgo. La etapa/vacante no convierte esa frase en nombre.
+-  void raw;
+-  void candidate;
+-  return null;
++  if (!candidate?.vacancyId) return null;
++  const text = String(raw || '').trim();
++  if (!text || text.includes('?') || /[,.;:\n]/.test(text)) return null;
++  if (!hasStandaloneNameCapitalization(text)) return null;
++  if (looksLikeOccupationalOrDescriptivePhrase(text)) return null;
++  const value = normalizeExplicitFullName(text);
++  return value
++    ? buildCurrentInboundEvidence('fullName', value, 'CONTEXTUAL_STANDALONE_FULL_NAME', text)
++    : null;
+ }
+ 
+ function resolveExplicitGenderEvidence(raw) {
+@@ -399,10 +418,12 @@ function resolveExplicitMedicalEvidence(raw) {
+ 
+ function resolveExplicitExperienceEvidence(raw) {
+   const text = String(raw || '');
+-  const match = text.match(/\b(?:tengo|cuento\s+con|poseo|experiencia\s*:)\s+(?:(\d{1,2})\s+(a[nñ]os?|meses?)\s+de\s+)?experiencia(?:\s+en\s+([^.;\n]{2,80}))?/i);
++  const quantified = text.match(/\b(?:tengo|cuento\s+con|poseo)\s+(\d{1,2})\s+(a[nñ]os?|meses?)\s+de\s+experiencia(?:\s+en\s+([^.;\n]{2,80}))?/i);
++  const labelled = text.match(/\bexperiencia\s*:\s*(\d{1,2})\s+(a[nñ]os?|meses?)(?:\s+en\s+([^.;\n]{2,80}))?/i);
++  const match = quantified || labelled;
+   if (!match) return [];
+   const fragment = trimEvidenceFragment(match[0]);
+-  const duration = match[1] && match[2] ? `${match[1]} ${match[2]}` : fragment;
++  const duration = `${match[1]} ${match[2]}`;
+   const area = trimEvidenceFragment(match[3] || fragment);
+   const normalized = normalizeCandidateFields({
+     experienceInfo: area,
+diff --git a/test/conversationalReleaseCandidatePreConsent.test.js b/test/conversationalReleaseCandidatePreConsent.test.js
+index 4eb257b..202e9c7 100644
+--- a/test/conversationalReleaseCandidatePreConsent.test.js
++++ b/test/conversationalReleaseCandidatePreConsent.test.js
+@@ -298,7 +298,7 @@ test('TEST-RC-PRECONSENT-IDEMPOTENCY: el mismo webhook produce una sola adquisic
+   assert.equal(acquisitionFailure.inboundRows.length, 1);
+   assert.equal(acquisitionFailure.providerOutbound.length, 1);
+ 
+-  const transitionFailure = buildHarness({ failCandidateUpdateTimes: 1 });
++  const transitionFailure = buildHarness({ failCandidateUpdateTimes: 1, candidateOverrides: { botResumeMode: null } });
+   const transitionFirst = await runMiddleware(transitionFailure, 'Mi cédula es TEST-100000001', 'TEST-RC-TRANSITION-RECOVERY');
+   assert.deepEqual(transitionFirst.statuses, [503]);
+   assert.equal(transitionFailure.inboundRows.length, 1);

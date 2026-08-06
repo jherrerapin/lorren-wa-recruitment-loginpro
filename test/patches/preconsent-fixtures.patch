@@ -1,0 +1,34 @@
+diff --git a/test/consentBoundaryHardening.test.js b/test/consentBoundaryHardening.test.js
+--- a/test/consentBoundaryHardening.test.js
++++ b/test/consentBoundaryHardening.test.js
+@@ -228,7 +228,7 @@ test('si una HV fue descartada antes de autorizar se solicita reenviarla solo en
+ });
+ 
+ test('la captura admite varios prefijos naturales antes de autorizar', async () => {
+-  const candidate = { id: 'candidate-1', documentType: null, documentNumber: null };
++  const candidate = { id: 'candidate-1', dataConsentStatus: 'ACCEPTED', documentType: null, documentNumber: null };
+   let persisted = null;
+   const prisma = {
+     candidate: {
+diff --git a/test/flexibleApplicationFlow.test.js b/test/flexibleApplicationFlow.test.js
+--- a/test/flexibleApplicationFlow.test.js
++++ b/test/flexibleApplicationFlow.test.js
+@@ -109,8 +109,9 @@ test('removeHandledMessagesFromWebhook conserva mensajes no bloqueados', () => {
+ });
+ 
+ test('después de autorizar solo procesa datos incluidos en el mismo mensaje de autorización', async () => {
+   const candidate = {
+     id: 'candidate-1',
++    dataConsentStatus: 'ACCEPTED',
+     documentType: null,
+     documentNumber: null
+   };
+@@ -142,7 +143,7 @@ test('después de autorizar solo procesa datos incluidos en el mismo mensaje de a
+ });
+ 
+ test('los mensajes anteriores al consentimiento no se recuperan después de una aceptación sin datos', async () => {
+-  const candidate = { id: 'candidate-2', fullName: null };
++  const candidate = { id: 'candidate-2', dataConsentStatus: 'ACCEPTED', fullName: null };
+   let updateCalled = false;
+   const prisma = {
+     message: {

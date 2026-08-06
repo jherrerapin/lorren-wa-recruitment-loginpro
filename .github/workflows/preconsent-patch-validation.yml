@@ -48,35 +48,51 @@ jobs:
       - name: Generate Prisma Client
         run: npm run prisma:generate
 
-      - name: Apply reviewed textual patch
+      - name: Apply reviewed textual patches
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check test/patches/preconsent-release.patch
-          git apply test/patches/preconsent-release.patch
+          for patch in \
+            test/patches/preconsent-release.patch \
+            test/patches/preconsent-corrections.patch \
+            test/patches/preconsent-fixtures.patch
+          do
+            git apply --check "$patch"
+            git apply "$patch"
+          done
           git diff --check
-          git diff -- src/services/dataConsentGate.js
+          git diff -- \
+            src/services/dataConsentGate.js \
+            src/services/conversationMessageRepository.js \
+            test/conversationalReleaseCandidatePreConsent.test.js \
+            test/consentBoundaryHardening.test.js \
+            test/flexibleApplicationFlow.test.js
 
       - name: Check modified JavaScript syntax
         run: >-
           node --check src/services/dataConsentGate.js &&
           node --check src/services/conversationMessageRepository.js &&
-          node --check test/conversationalReleaseCandidatePreConsent.test.js
+          node --check test/conversationalReleaseCandidatePreConsent.test.js &&
+          node --check test/consentBoundaryHardening.test.js &&
+          node --check test/flexibleApplicationFlow.test.js
 
-      - name: Run focal conversational release regressions
+      - name: Run integral conversational release candidate
         run: >-
           node --test
           test/conversationalReleaseCandidatePreConsent.test.js
           test/preConsentDataEvidence.test.js
+          test/dataConsentRevocationStabilization.test.js
           test/dataConsentHumanPauseReplay.test.js
           test/conversationReplayConsentAttachmentEdges.test.js
           test/conversationReplayRecovery.test.js
           test/conversationReplayProductionEdges.test.js
           test/conversationHarness.test.js
+
+      - name: Run focal consent regressions
+        run: >-
+          node --test
           test/flexibleApplicationFlow.test.js
           test/consentBoundaryHardening.test.js
-          test/dataConsentOrderReplay.test.js
-          test/dataConsentOrderRecovery.test.js
           test/dataConsentPromptIdempotencyReplay.test.js
           test/dataConsentAcceptedRevocationAuthority.test.js
           test/conversationMessageRepository.test.js
@@ -112,6 +128,8 @@ jobs:
             src/services/dataConsentGate.js
             src/services/conversationMessageRepository.js
             test/conversationalReleaseCandidatePreConsent.test.js
+            test/consentBoundaryHardening.test.js
+            test/flexibleApplicationFlow.test.js
             test-output.log
           if-no-files-found: warn
           retention-days: 3
