@@ -17,7 +17,12 @@ function textMessage(body, id = 'TEST-RC-WAMID') {
   return { id, from: 'TEST-RC-PHONE', type: 'text', text: { body } };
 }
 
-function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}) {
+function buildHarness({
+  candidateOverrides = {},
+  persistedInboundIds = [],
+  failInboundCreateTimes = 0,
+  failCandidateUpdateTimes = 0
+} = {}) {
   let candidate = {
     id: 'TEST-RC-CANDIDATE',
     phone: 'TEST-RC-PHONE',
@@ -29,6 +34,8 @@ function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}
     botPaused: false,
     ...candidateOverrides
   };
+  let inboundCreateFailuresRemaining = failInboundCreateTimes;
+  let candidateUpdateFailuresRemaining = failCandidateUpdateTimes;
   const inboundIds = new Set(persistedInboundIds);
   const inboundRows = [];
   const outboundRows = [];
@@ -45,6 +52,10 @@ function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}
       upsert: async () => structuredClone(candidate),
       findUnique: async () => structuredClone(candidate),
       update: async ({ data }) => {
+        if (candidateUpdateFailuresRemaining > 0) {
+          candidateUpdateFailuresRemaining -= 1;
+          throw new Error('TEST-RC-CANDIDATE-UPDATE-FAILURE');
+        }
         candidateUpdates.push(structuredClone(data));
         candidate = { ...candidate, ...structuredClone(data) };
         return structuredClone(candidate);
@@ -52,19 +63,45 @@ function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}
       updateMany: async () => ({ count: 1 })
     },
     message: {
-      findFirst: async ({ where }) => inboundIds.has(where.waMessageId)
-        ? { id: `TEST-${where.waMessageId}`, waMessageId: where.waMessageId }
-        : null,
+      findFirst: async ({ where }) => {
+        const row = inboundRows.find((item) => item.waMessageId === where.waMessageId);
+        if (row) return structuredClone(row);
+        return inboundIds.has(where.waMessageId)
+          ? {
+              id: `TEST-${where.waMessageId}`,
+              waMessageId: where.waMessageId,
+              rawPayload: {
+                source: 'data_consent_gate',
+                consentGateProcessing: { state: 'COMPLETED' }
+              }
+            }
+          : null;
+      },
       createMany: async ({ data }) => {
-        const row = structuredClone(data[0]);
+        if (inboundCreateFailuresRemaining > 0) {
+          inboundCreateFailuresRemaining -= 1;
+          throw new Error('TEST-RC-INBOUND-CREATE-FAILURE');
+        }
+        const row = { id: `TEST-${data[0]?.waMessageId}`, ...structuredClone(data[0]) };
         if (inboundIds.has(row.waMessageId)) return { count: 0 };
         inboundIds.add(row.waMessageId);
         inboundRows.push(row);
         return { count: 1 };
       },
       create: async ({ data }) => {
-        outboundRows.push(structuredClone(data));
-        return { id: 'TEST-RC-OUTBOUND-ROW', ...data };
+        const row = { id: `TEST-RC-OUTBOUND-ROW-${outboundRows.length + 1}`, ...structuredClone(data) };
+        outboundRows.push(row);
+        return structuredClone(row);
+      },
+      findUnique: async ({ where }) => {
+        const row = [...inboundRows, ...outboundRows].find((item) => item.id === where.id);
+        return row ? { rawPayload: structuredClone(row.rawPayload) } : null;
+      },
+      update: async ({ where, data }) => {
+        const row = [...inboundRows, ...outboundRows].find((item) => item.id === where.id);
+        if (!row) throw new Error('TEST-RC-MESSAGE-NOT-FOUND');
+        Object.assign(row, structuredClone(data));
+        return structuredClone(row);
       }
     },
     vacancy: {
@@ -120,29 +157,59 @@ for (const [id, body, expectedFields] of positiveEvidenceCases) {
     }
     for (const evidence of result.evidence) {
       assert.equal(evidence.source, 'CURRENT_INBOUND_EXPLICIT');
+      assert.ok(evidence.value !== undefined && evidence.value !== null && String(evidence.value).trim());
+      assert.ok(evidence.rule);
       assert.ok(evidence.fragment);
+      assert.ok(body.includes(evidence.fragment), `${id}: el fragmento debe existir en el inbound actual`);
     }
   });
 }
 
 test('TEST-RC-DOCUMENT-QUESTION: una pregunta sobre documentos no contiene documento personal', () => {
-  const result = evaluateProfileDataEvidence('¿Qué documentos son 2 copias?', {
-    candidate: { vacancyId: 'TEST-RC-VACANCY', currentStep: 'GREETING_SENT' }
-  });
-  assert.equal(result.containsProfileData, false);
-  assert.deepEqual(result.evidence, []);
+  const cases = [
+    ['¿Qué documentos son 2 copias?', false],
+    ['¿Qué documentos piden?', false],
+    ['¿Son 2 copias del documento?', false],
+    ['¿El documento debe estar ampliado al 150?', false],
+    ['Tengo 2 copias', false],
+    ['Documento: 1012345678', true],
+    ['Mi cédula es 1012345678', true],
+    ['1012345678', true]
+  ];
+
+  for (const [body, expected] of cases) {
+    const result = evaluateProfileDataEvidence(body, {
+      candidate: { vacancyId: 'TEST-RC-VACANCY', currentStep: 'GREETING_SENT' }
+    });
+    assert.equal(result.evidence.some((item) => item.field === 'documentNumber'), expected, body);
+  }
 });
 
 test('TEST-RC-NAME-STRUCTURE: profesión larga y rasgos consecutivos no son nombre', () => {
   for (const body of [
     'Administrador Logístico de Operaciones',
     'Responsable puntual comprometido organizado',
-    'Trabajo como coordinador de despachos y almacenamiento'
+    'Trabajo como coordinador de despachos y almacenamiento',
+    'Soy administrador logístico de operaciones',
+    'Soy administrador logístico retirado',
+    'Soy responsable puntual',
+    'Soy muy enfocado responsable'
   ]) {
     const result = evaluateProfileDataEvidence(body, {
       candidate: { vacancyId: 'TEST-RC-VACANCY', currentStep: 'GREETING_SENT' }
     });
     assert.equal(result.evidence.some((item) => item.field === 'fullName'), false, body);
+  }
+
+  for (const body of [
+    'Me llamo Andrés Felipe Gómez',
+    'Soy Andrés Felipe Gómez',
+    'Nombre: María del Pilar Rojas'
+  ]) {
+    const result = evaluateProfileDataEvidence(body, {
+      candidate: { vacancyId: 'TEST-RC-VACANCY', currentStep: 'GREETING_SENT' }
+    });
+    assert.equal(result.evidence.some((item) => item.field === 'fullName'), true, body);
   }
 });
 
@@ -191,6 +258,8 @@ test('TEST-RC-PAUSED-DATA: un dato personal durante pausa se adquiere sin reanud
   assert.equal(observed.nextCalls, 0);
   assert.deepEqual(observed.statuses, [200]);
   assert.equal(harness.inboundRows.length, 1);
+  assert.equal(harness.inboundRows[0].body, '[REDACTED_PRECONSENT]');
+  assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
   assert.equal(harness.providerOutbound.length, 0);
   assert.equal(harness.outboundRows.length, 0);
   assert.equal(harness.getCandidate().botPaused, true);
@@ -205,8 +274,9 @@ test('TEST-RC-PRECONSENT-RAW: deduplicar no persiste texto personal crudo', asyn
   assert.deepEqual(observed.statuses, [200]);
   assert.equal(harness.inboundRows.length, 1);
   assert.equal(harness.inboundRows[0].waMessageId, 'TEST-RC-RAW-BODY');
-  assert.ok(harness.inboundRows[0].body === null || harness.inboundRows[0].body === '[REDACTED_PRECONSENT]');
+  assert.equal(harness.inboundRows[0].body, '[REDACTED_PRECONSENT]');
   assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
+  assert.equal(harness.inboundRows[0].rawPayload?.consentGateProcessing?.state, 'COMPLETED');
   assert.equal(harness.providerOutbound.length, 1);
 });
 
@@ -219,4 +289,24 @@ test('TEST-RC-PRECONSENT-IDEMPOTENCY: el mismo webhook produce una sola adquisic
   assert.deepEqual(retry.statuses, [200]);
   assert.equal(harness.inboundRows.length, 1);
   assert.equal(harness.providerOutbound.length, 1);
+
+  const acquisitionFailure = buildHarness({ failInboundCreateTimes: 1 });
+  const acquisitionFirst = await runMiddleware(acquisitionFailure, 'Mi cédula es TEST-100000001', 'TEST-RC-ACQUIRE-RECOVERY');
+  const acquisitionRetry = await runMiddleware(acquisitionFailure, 'Mi cédula es TEST-100000001', 'TEST-RC-ACQUIRE-RECOVERY');
+  assert.deepEqual(acquisitionFirst.statuses, [503]);
+  assert.deepEqual(acquisitionRetry.statuses, [200]);
+  assert.equal(acquisitionFailure.inboundRows.length, 1);
+  assert.equal(acquisitionFailure.providerOutbound.length, 1);
+
+  const transitionFailure = buildHarness({ failCandidateUpdateTimes: 1 });
+  const transitionFirst = await runMiddleware(transitionFailure, 'Mi cédula es TEST-100000001', 'TEST-RC-TRANSITION-RECOVERY');
+  assert.deepEqual(transitionFirst.statuses, [503]);
+  assert.equal(transitionFailure.inboundRows.length, 1);
+  assert.equal(transitionFailure.providerOutbound.length, 0);
+  assert.equal(transitionFailure.inboundRows[0].rawPayload?.consentGateProcessing?.state, 'PENDING');
+  const transitionRetry = await runMiddleware(transitionFailure, 'Mi cédula es TEST-100000001', 'TEST-RC-TRANSITION-RECOVERY');
+  assert.deepEqual(transitionRetry.statuses, [200]);
+  assert.equal(transitionFailure.inboundRows.length, 1);
+  assert.equal(transitionFailure.providerOutbound.length, 1);
+  assert.equal(transitionFailure.inboundRows[0].rawPayload?.consentGateProcessing?.state, 'COMPLETED');
 });

@@ -175,6 +175,9 @@ export async function findInboundConversationMessage(prisma, input = {}) {
     select: {
       id: true,
       waMessageId: true,
+      messageType: true,
+      body: true,
+      rawPayload: true,
       respondedAt: true,
       createdAt: true
     }

@@ -1,0 +1,117 @@
+name: Preconsent Patch Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preconsent-patch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-preconsent-patch:
+    name: Validate preconsent textual patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply reviewed textual patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check test/patches/preconsent-release.patch
+          git apply test/patches/preconsent-release.patch
+          git diff --check
+          git diff -- src/services/dataConsentGate.js
+
+      - name: Check modified JavaScript syntax
+        run: >-
+          node --check src/services/dataConsentGate.js &&
+          node --check src/services/conversationMessageRepository.js &&
+          node --check test/conversationalReleaseCandidatePreConsent.test.js
+
+      - name: Run focal conversational release regressions
+        run: >-
+          node --test
+          test/conversationalReleaseCandidatePreConsent.test.js
+          test/preConsentDataEvidence.test.js
+          test/dataConsentHumanPauseReplay.test.js
+          test/conversationReplayConsentAttachmentEdges.test.js
+          test/conversationReplayRecovery.test.js
+          test/conversationReplayProductionEdges.test.js
+          test/conversationHarness.test.js
+          test/flexibleApplicationFlow.test.js
+          test/consentBoundaryHardening.test.js
+          test/dataConsentOrderReplay.test.js
+          test/dataConsentOrderRecovery.test.js
+          test/dataConsentPromptIdempotencyReplay.test.js
+          test/dataConsentAcceptedRevocationAuthority.test.js
+          test/conversationMessageRepository.test.js
+
+      - name: Run full suite against exact baseline
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          npm test > test-output.log 2>&1
+          test_exit=$?
+          set -e
+          tests_count=$(awk '/^# tests [0-9]+$/ { value = $3 } END { print value }' test-output.log)
+          pass_count=$(awk '/^# pass [0-9]+$/ { value = $3 } END { print value }' test-output.log)
+          fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' test-output.log)
+          echo "Patched suite: total=$tests_count pass=$pass_count fail=$fail_count exit=$test_exit"
+          if ! [[ "$tests_count" =~ ^[0-9]+$ ]] || ! [[ "$fail_count" =~ ^[0-9]+$ ]]; then
+            tail -n 120 test-output.log
+            exit 1
+          fi
+          if [ "$fail_count" -gt 71 ]; then
+            grep -E '^not ok [0-9]+ - ' test-output.log || true
+            exit 1
+          fi
+          grep -E '^not ok [0-9]+ - ' test-output.log || true
+
+      - name: Upload patched source and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: preconsent-patched-source
+          path: |
+            src/services/dataConsentGate.js
+            src/services/conversationMessageRepository.js
+            test/conversationalReleaseCandidatePreConsent.test.js
+            test-output.log
+          if-no-files-found: warn
+          retention-days: 3
