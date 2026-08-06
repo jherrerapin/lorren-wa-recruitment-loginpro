@@ -1,6 +1,7 @@
 import express from 'express';
 import { enhanceCvAnalysisExportSelection } from './services/cvAnalysisExportUi.js';
 import { ensureGlobalFavicon } from './services/htmlFavicon.js';
+import { removeRecruiterTechnicalCopy } from './services/recruiterFacingCopy.js';
 
 const PATCH_MARK = Symbol.for('lorren.globalFaviconPatched');
 
@@ -16,7 +17,9 @@ if (!express.response[PATCH_MARK]) {
 
   express.response.send = function sendWithGlobalHtmlEnhancements(body) {
     const output = typeof body === 'string'
-      ? enhanceCvAnalysisExportSelection(ensureGlobalFavicon(body))
+      ? removeRecruiterTechnicalCopy(
+        enhanceCvAnalysisExportSelection(ensureGlobalFavicon(body))
+      )
       : body;
     return originalSend.call(this, output);
   };
