@@ -87,6 +87,14 @@ function validatePayloadMergeContract(prisma) {
   );
 }
 
+function validatePayloadCompareAndSwapContract(prisma) {
+  return Boolean(
+    prisma
+    && prisma.message
+    && typeof prisma.message.updateMany === 'function'
+  );
+}
+
 function validateOutboundDeliveryReadContract(prisma) {
   return Boolean(
     prisma
@@ -355,6 +363,30 @@ export async function mergeConversationMessagePayload(prisma, input = {}) {
   return {
     updated: true,
     message,
+    messageId,
+    rawPayload
+  };
+}
+
+export async function compareAndSwapConversationMessagePayload(prisma, input = {}) {
+  if (!validatePayloadCompareAndSwapContract(prisma)) {
+    throw new Error('message_payload_compare_and_swap_prisma_contract_invalid');
+  }
+
+  const messageId = requireNonEmptyString(input.messageId, 'message_id');
+  const expectedRawPayload = requireJsonObject(input.expectedRawPayload, 'expected_raw_payload');
+  const rawPayload = requireJsonObject(input.rawPayload, 'raw_payload');
+  const result = await prisma.message.updateMany({
+    where: {
+      id: messageId,
+      rawPayload: { equals: expectedRawPayload }
+    },
+    data: { rawPayload }
+  });
+
+  return {
+    updated: result.count === 1,
+    count: result.count,
     messageId,
     rawPayload
   };
