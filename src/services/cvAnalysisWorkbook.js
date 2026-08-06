@@ -46,6 +46,7 @@ const RESULT_COLUMNS = [
   { header: 'Número de celular', key: 'phone', width: 20 },
   { header: 'Tipo de documento', key: 'documentType', width: 18 },
   { header: 'Número de documento', key: 'documentNumber', width: 21 },
+  { header: 'Fecha de registro', key: 'createdAt', width: 21 },
   { header: 'Experiencia', key: 'experience', width: 52 },
   { header: 'Estudios', key: 'education', width: 44 },
   { header: 'Análisis de contenido', key: 'analysis', width: 48 },
@@ -76,6 +77,21 @@ function normalizePhoneForWhatsapp(value = '') {
 export function buildWhatsappWebUrl(phone = '') {
   const digits = normalizePhoneForWhatsapp(phone);
   return digits ? `https://web.whatsapp.com/send?phone=${digits}` : null;
+}
+
+function formatDateTimeCO(value) {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date);
 }
 
 function candidateAnalysisText(result = {}) {
@@ -124,7 +140,8 @@ function exportCandidate(candidate = {}) {
     fullName: compact(candidate.fullName) || 'Sin nombre',
     phone: compact(candidate.phone),
     documentType: compact(candidate.documentType),
-    documentNumber: compact(candidate.documentNumber)
+    documentNumber: compact(candidate.documentNumber),
+    createdAt: candidate.createdAt ? new Date(candidate.createdAt).toISOString() : ''
   };
 }
 
@@ -147,6 +164,14 @@ function exportResult(result = {}) {
   };
 }
 
+function exportDateRange(dateRange = {}) {
+  return {
+    dateFrom: compact(dateRange.dateFrom),
+    dateTo: compact(dateRange.dateTo),
+    isActive: Boolean(dateRange.isActive)
+  };
+}
+
 export function createCvReviewExportSnapshot(review = {}) {
   const groups = {};
   for (const key of EXPORT_GROUP_KEYS) {
@@ -160,6 +185,7 @@ export function createCvReviewExportSnapshot(review = {}) {
       id: compact(review.vacancy?.id),
       title: compact(review.vacancy?.title) || 'Vacante sin nombre'
     },
+    dateRange: exportDateRange(review.dateRange),
     groups,
     generatedAt: new Date().toISOString()
   };
@@ -198,6 +224,7 @@ function addResultSheet(workbook, snapshot, groupKey) {
       phone: candidate.phone,
       documentType: candidate.documentType,
       documentNumber: candidate.documentNumber,
+      createdAt: formatDateTimeCO(candidate.createdAt),
       experience: result.analysis?.experience || '',
       education: result.analysis?.education || '',
       analysis: candidateAnalysisText(result),
@@ -275,11 +302,21 @@ function slug(value = '') {
     .slice(0, 48) || 'vacante';
 }
 
+export function cvReviewPeriodFilenamePart(dateRange = {}) {
+  const from = compact(dateRange.dateFrom);
+  const to = compact(dateRange.dateTo);
+  if (from && to) return `${from}-a-${to}`;
+  if (from) return `desde-${from}`;
+  if (to) return `hasta-${to}`;
+  return 'sin-rango';
+}
+
 export async function sendCvAnalysisWorkbook(res, snapshot, { group = 'all' } = {}) {
   const normalizedGroup = normalizeGroupSelection(group);
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: normalizedGroup });
   const selectionSlug = normalizedGroup === 'all' ? 'todos' : normalizedGroup.replace(/,/g, '-');
-  const filename = `candidatos-${slug(snapshot.vacancy?.title)}-${selectionSlug}.xlsx`;
+  const periodSlug = cvReviewPeriodFilenamePart(snapshot.dateRange);
+  const filename = `candidatos-${slug(snapshot.vacancy?.title)}-${periodSlug}-${selectionSlug}.xlsx`;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   await workbook.xlsx.write(res);
