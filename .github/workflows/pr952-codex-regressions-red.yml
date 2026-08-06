@@ -1,0 +1,41 @@
+name: Reproduce PR 952 Codex review findings
+
+on:
+  push:
+    branches:
+      - release/901-conversational-candidate-preconsent
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr952-codex-regressions-red
+  cancel-in-progress: true
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact head without marketplace actions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Verify Node and install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          npm ci
+
+      - name: Run Codex review regressions
+        run: node --test test/preConsentCodexReviewRegressions.test.js
