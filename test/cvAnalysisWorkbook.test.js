@@ -5,6 +5,7 @@ import {
   buildCvAnalysisWorkbook,
   buildWhatsappWebUrl,
   createCvReviewExportSnapshot,
+  cvReviewPeriodFilenamePart,
   CV_REVIEW_EXPORT_GROUPS
 } from '../src/services/cvAnalysisWorkbook.js';
 
@@ -25,6 +26,7 @@ function sampleReview() {
     phone: '300 123 4567',
     documentType: 'CC',
     documentNumber: '1234567890',
+    createdAt: new Date('2026-07-15T14:30:00.000Z'),
     locality: 'Engativá',
     transportMode: 'Moto',
     cvOriginalName: 'maria-prueba.pdf',
@@ -92,6 +94,7 @@ function sampleReview() {
   return {
     ok: true,
     vacancy: { id: 'vacancy-excel', title: 'Líder de operación', city: 'Medellín' },
+    dateRange: { dateFrom: '2026-07-01', dateTo: '2026-07-31', isActive: true },
     desiredProfile: 'Busco liderazgo operativo, inventarios y Excel.',
     interpretedProfile: {
       summary: 'Liderazgo operativo con experiencia en inventarios.',
@@ -119,7 +122,7 @@ test('normaliza celulares colombianos y construye enlace clicable a WhatsApp Web
   assert.equal(buildWhatsappWebUrl(''), null);
 });
 
-test('la instantánea conserva la experiencia y los estudios extraídos de la hoja de vida', () => {
+test('la instantánea conserva fecha de registro, periodo, experiencia y estudios', () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const result = snapshot.groups.strong[0];
   const candidate = result.candidate;
@@ -127,6 +130,12 @@ test('la instantánea conserva la experiencia y los estudios extraídos de la ho
   assert.equal(candidate.fullName, 'María de Prueba');
   assert.equal(candidate.documentType, 'CC');
   assert.equal(candidate.documentNumber, '1234567890');
+  assert.equal(candidate.createdAt, '2026-07-15T14:30:00.000Z');
+  assert.deepEqual(snapshot.dateRange, {
+    dateFrom: '2026-07-01',
+    dateTo: '2026-07-31',
+    isActive: true
+  });
   assert.equal(result.analysis.experience, 'Dos años liderando personal operativo y controlando inventarios.');
   assert.equal(result.analysis.education, 'Tecnóloga en Gestión Logística.');
   assert.equal(Object.hasOwn(candidate, 'cvData'), false);
@@ -146,7 +155,7 @@ test('usa el detalle de cargos cuando la hoja de vida no trae resumen de experie
   assert.match(snapshot.groups.possible[0].analysis.experience, /Recepción de mercancía; Apoyo de inventarios/);
 });
 
-test('el Excel agrega experiencia y estudios sin recuperar campos retirados', async () => {
+test('el Excel agrega fecha, experiencia y estudios sin recuperar campos retirados', async () => {
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: 'all' });
 
@@ -164,6 +173,7 @@ test('el Excel agrega experiencia y estudios sin recuperar campos retirados', as
     'Número de celular',
     'Tipo de documento',
     'Número de documento',
+    'Fecha de registro',
     'Experiencia',
     'Estudios',
     'Análisis de contenido',
@@ -177,6 +187,7 @@ test('el Excel agrega experiencia y estudios sin recuperar campos retirados', as
   assert.equal(row.getCell('fullName').value, 'María de Prueba');
   assert.equal(row.getCell('documentType').value, 'CC');
   assert.equal(row.getCell('documentNumber').value, '1234567890');
+  assert.match(row.getCell('createdAt').value, /15\/07\/2026/);
   assert.equal(row.getCell('experience').value, 'Dos años liderando personal operativo y controlando inventarios.');
   assert.equal(row.getCell('education').value, 'Tecnóloga en Gestión Logística.');
   assert.equal(row.getCell('score').value, 91);
@@ -214,4 +225,12 @@ test('la descarga de una sección no agrega resumen ni otras clasificaciones', (
   const snapshot = createCvReviewExportSnapshot(sampleReview());
   const workbook = buildCvAnalysisWorkbook(snapshot, { group: 'low' });
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Poca evidencia']);
+});
+
+test('el nombre del archivo identifica el rango aplicado', () => {
+  assert.equal(
+    cvReviewPeriodFilenamePart({ dateFrom: '2026-07-01', dateTo: '2026-07-31' }),
+    '2026-07-01-a-2026-07-31'
+  );
+  assert.equal(cvReviewPeriodFilenamePart({}), 'sin-rango');
 });
