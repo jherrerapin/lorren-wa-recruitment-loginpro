@@ -97,7 +97,7 @@ export async function captureConsentedProfileData({
   }
 
   if (typeof prisma?.candidate?.updateMany !== 'function'
-      || typeof prisma?.candidate?.findUnique !== 'function') {
+    || typeof prisma?.candidate?.findUnique !== 'function') {
     return { candidate, capturedFields: [], reason: 'candidate_not_ready' };
   }
 
