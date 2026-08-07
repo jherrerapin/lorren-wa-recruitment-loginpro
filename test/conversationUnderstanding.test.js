@@ -129,3 +129,99 @@ test('campos exclusivos del preview no cambian la intención base del turno', as
   assert.equal(result.turnInterpretation.intent, 'unknown');
   assert.equal(result.intent, 'unknown');
 });
+
+test('conserva la descripción de experiencia que el parser local ya extrajo', async () => {
+  const text = 'He trabajado como coordinador operativo liderando equipos de logística y transporte.';
+  const result = await conversationUnderstanding(text, {
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['experiencia (si o no)', 'tiempo de experiencia (1 año o mas)', 'en qué tiene experiencia']
+    }
+  });
+
+  assert.equal(result.candidateFields.experienceInfo, 'Sí');
+  assert.equal(result.candidateFields.experienceSummary, text);
+});
+
+test('caso auditado: si. 60 personas responde experiencia pendiente sin depender del modelo', async () => {
+  const result = await conversationUnderstanding('si. 60 personas', {
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['experiencia (si o no)', 'tiempo de experiencia (1 año o mas)', 'en qué tiene experiencia']
+    },
+    aiResult: {
+      status: 'disabled',
+      intent: 'unknown',
+      parsedFields: {},
+      extraction: { turnType: 'CONFIRMATION', fieldEvidence: {} },
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+    },
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      fallbackIntent: 'continue_application',
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.turnInterpretation.fields.experienceInfo, 'Sí');
+});
+
+test('respuesta negativa corta solo se convierte en experiencia cuando ese campo está pendiente', async () => {
+  const result = await conversationUnderstanding('no', {
+    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['experiencia (si o no)'] },
+    aiResult: {
+      status: 'disabled',
+      intent: 'unknown',
+      parsedFields: {},
+      extraction: { turnType: 'CONFIRMATION', fieldEvidence: {} }
+    },
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.turnInterpretation.fields.experienceInfo, 'No');
+});
+
+test('respuesta contextual breve conserva también la duración declarada', async () => {
+  const result = await conversationUnderstanding('sí, 2 años', {
+    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['experiencia (si o no)', 'tiempo de experiencia (1 año o mas)'] },
+    aiResult: {
+      status: 'disabled',
+      intent: 'unknown',
+      parsedFields: {},
+      extraction: { turnType: 'CONFIRMATION', fieldEvidence: {} }
+    },
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.turnInterpretation.fields.experienceInfo, 'Sí');
+  assert.equal(result.turnInterpretation.fields.experienceTime, '2 años');
+});
+
+test('un sí genérico fuera de contexto no se inventa como experiencia', async () => {
+  const result = await conversationUnderstanding('sí', {
+    context: { currentStep: 'GREETING_SENT', pendingFields: ['nombre completo'] },
+    aiResult: {
+      status: 'disabled',
+      intent: 'confirm_interest',
+      parsedFields: {},
+      extraction: { turnType: 'CONFIRMATION', fieldEvidence: {} }
+    },
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.turnInterpretation.fields.experienceInfo, undefined);
+});
