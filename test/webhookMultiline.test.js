@@ -25,7 +25,7 @@ test('resumen consolidado sanitiza documento y edad', () => {
   assert.doesNotMatch(summary, /1099887766/);
 });
 
-test('la ventana multilinea usa 90 segundos para consolidar antes de razonar', () => {
+test('la ventana multilinea usa 3 segundos por defecto antes de razonar', () => {
   const previousEnv = process.env.NODE_ENV;
   const previousReasoning = process.env.LORREN_REASONING_WINDOW_MS;
   const previousMultiline = process.env.MULTILINE_SILENCE_WINDOW_MS;
@@ -45,8 +45,8 @@ test('la ventana multilinea usa 90 segundos para consolidar antes de razonar', (
       text: 'Si estoy interesado, que datos te doy?'
     });
 
-    assert.equal(earlyWindow, 90000);
-    assert.equal(resolvedWindow, 90000);
+    assert.equal(earlyWindow, 3000);
+    assert.equal(resolvedWindow, 3000);
   } finally {
     process.env.NODE_ENV = previousEnv;
     if (previousReasoning === undefined) delete process.env.LORREN_REASONING_WINDOW_MS;
@@ -56,13 +56,16 @@ test('la ventana multilinea usa 90 segundos para consolidar antes de razonar', (
   }
 });
 
-test('la ventana de razonamiento se puede configurar y queda acotada a 90 segundos', () => {
+test('la ventana de razonamiento configurable queda acotada entre 1 y 10 segundos', () => {
   const previousEnv = process.env.NODE_ENV;
   const previousReasoning = process.env.LORREN_REASONING_WINDOW_MS;
   process.env.NODE_ENV = 'development';
-  process.env.LORREN_REASONING_WINDOW_MS = '120000';
   try {
-    assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 90000);
+    process.env.LORREN_REASONING_WINDOW_MS = '120000';
+    assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 10000);
+
+    process.env.LORREN_REASONING_WINDOW_MS = '200';
+    assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 1000);
   } finally {
     process.env.NODE_ENV = previousEnv;
     if (previousReasoning === undefined) delete process.env.LORREN_REASONING_WINDOW_MS;
