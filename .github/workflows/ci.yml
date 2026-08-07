@@ -254,27 +254,62 @@ jobs:
         if: ${{ !cancelled() }}
         run: node --test test/conversationReplayProductionEdges.test.js
 
-      # The suite currently has unstable legacy failures tracked in issue #386.
-      # It remains mandatory to execute and report, but it is not a blocking
-      # regression gate until its exact baseline is deterministic.
-      - name: Run automated tests and publish debt report
+      # The full suite still contains inherited legacy debt tracked in issue #386.
+      # Capture the current result first, then compare its exact failing identities
+      # against the pull request base instead of trusting a numeric ceiling.
+      - name: Capture current automated test debt
         if: ${{ !cancelled() }}
         shell: bash
         run: |
           set +e
-          npm test > test-output.log 2>&1
+          npm test > current-test-output.log 2>&1
           test_exit=$?
           set -e
+          echo "$test_exit" > current-test-exit.txt
 
-          tests_count=$(awk '/^# tests [0-9]+$/ { value = $3 } END { print value }' test-output.log)
-          pass_count=$(awk '/^# pass [0-9]+$/ { value = $3 } END { print value }' test-output.log)
-          fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' test-output.log)
-          cancelled_count=$(awk '/^# cancelled [0-9]+$/ { value = $3 } END { print value }' test-output.log)
-          skipped_count=$(awk '/^# skipped [0-9]+$/ { value = $3 } END { print value }' test-output.log)
+      - name: Check out base for legacy failure identity baseline
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          path: .ci-baseline
+          persist-credentials: false
+
+      - name: Compare automated test failure identities
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          (
+            cd .ci-baseline
+            npm ci
+            npm run prisma:generate
+            set +e
+            npm test > "$GITHUB_WORKSPACE/legacy-test-output.log" 2>&1
+            legacy_test_exit=$?
+            set -e
+            echo "$legacy_test_exit" > "$GITHUB_WORKSPACE/legacy-test-exit.txt"
+          )
+
+          test_exit=$(cat current-test-exit.txt)
+          legacy_test_exit=$(cat legacy-test-exit.txt)
+          tests_count=$(awk '/^# tests [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          pass_count=$(awk '/^# pass [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          cancelled_count=$(awk '/^# cancelled [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          skipped_count=$(awk '/^# skipped [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          legacy_fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' legacy-test-output.log)
 
           if ! [[ "$tests_count" =~ ^[0-9]+$ ]] || ! [[ "$fail_count" =~ ^[0-9]+$ ]]; then
-            echo "::error::The automated test command did not produce a valid TAP summary."
-            tail -n 120 test-output.log
+            echo "::error::The current automated test command did not produce a valid TAP summary."
+            tail -n 120 current-test-output.log
+            exit 1
+          fi
+
+          if ! [[ "$legacy_fail_count" =~ ^[0-9]+$ ]]; then
+            echo "::error::The base-branch automated test command did not produce a valid TAP summary."
+            tail -n 120 legacy-test-output.log
             exit 1
           fi
 
@@ -282,10 +317,28 @@ jobs:
           cancelled_count="${cancelled_count:-0}"
           skipped_count="${skipped_count:-0}"
 
+          extract_failure_identities() {
+            local source_file="$1"
+            local target_file="$2"
+            grep -E '^[[:space:]]*not ok [0-9]+ - ' "$source_file" \
+              | sed -E 's/^[[:space:]]*not ok [0-9]+ - //' \
+              | sed -E 's/[[:space:]]+#.*$//' \
+              | sed -E 's/[[:space:]]+$//' \
+              | LC_ALL=C sort > "$target_file" || true
+          }
+
+          extract_failure_identities legacy-test-output.log legacy_test_failures.txt
+          extract_failure_identities current-test-output.log current_test_failures.txt
+          comm -23 current_test_failures.txt legacy_test_failures.txt > unexpected_failures.txt
+
+          legacy_identity_count=$(wc -l < legacy_test_failures.txt | tr -d ' ')
+          current_identity_count=$(wc -l < current_test_failures.txt | tr -d ' ')
+          unexpected_failure_count=$(wc -l < unexpected_failures.txt | tr -d ' ')
+
           {
             echo "## Automated test debt report"
             echo
-            echo "This report is temporarily non-blocking while the unstable legacy baseline is investigated in issue #386."
+            echo "The full suite is gated by exact inherited failure identities from the pull request base."
             echo
             echo "| Metric | Result |"
             echo "| --- | ---: |"
@@ -294,35 +347,39 @@ jobs:
             echo "| Failed | $fail_count |"
             echo "| Cancelled | $cancelled_count |"
             echo "| Skipped | $skipped_count |"
-            echo "| Process exit code | $test_exit |"
+            echo "| Current process exit code | $test_exit |"
+            echo "| Base process exit code | $legacy_test_exit |"
+            echo "| Base failing identities | $legacy_identity_count |"
+            echo "| Current failing identities | $current_identity_count |"
+            echo "| Unexpected failing identities | $unexpected_failure_count |"
             echo
             echo "<details>"
-            echo "<summary>Failing top-level tests</summary>"
+            echo "<summary>Unexpected failing identities</summary>"
             echo
             echo '```text'
-            grep -E '^not ok [0-9]+ - ' test-output.log || true
+            cat unexpected_failures.txt
             echo '```'
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "Automated tests: total=$tests_count pass=$pass_count fail=$fail_count exit=$test_exit"
+          echo "Base legacy failures: fail=$legacy_fail_count identities=$legacy_identity_count exit=$legacy_test_exit"
 
-          if [ "$fail_count" -gt 71 ]; then
-            echo "::error::Automated test failures increased above the conversational release baseline of 71."
-            grep -E '^not ok [0-9]+ - ' test-output.log || true
+          if [ -s unexpected_failures.txt ]; then
+            echo "::error::The full suite introduced failing identities that are not present on the pull request base."
+            cat unexpected_failures.txt
+            exit 1
+          fi
+
+          if [ "$test_exit" -ne 0 ] && [ "$fail_count" -eq 0 ]; then
+            echo "::error::The current test command exited with code $test_exit without reporting test failures."
+            tail -n 120 current-test-output.log
             exit 1
           fi
 
           if [ "$fail_count" -gt 0 ]; then
-            echo "::warning::$fail_count legacy test failures remain. They are tracked in issue #386 and are not yet a blocking gate."
-            grep -E '^not ok [0-9]+ - ' test-output.log || true
+            echo "::warning::$fail_count test failures remain, but every failing identity is inherited from the pull request base."
             exit 0
-          fi
-
-          if [ "$test_exit" -ne 0 ]; then
-            echo "::error::The test command exited with code $test_exit without reporting test failures."
-            tail -n 120 test-output.log
-            exit 1
           fi
 
           echo "All automated tests passed."
