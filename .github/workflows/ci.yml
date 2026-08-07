@@ -329,7 +329,7 @@ jobs:
 
           extract_failure_identities legacy-test-output.log legacy_test_failures.txt
           extract_failure_identities current-test-output.log current_test_failures.txt
-          comm -23 current_test_failures.txt legacy_test_failures.txt > unexpected_failures.txt
+          LC_ALL=C comm -23 current_test_failures.txt legacy_test_failures.txt > unexpected_failures.txt
 
           legacy_identity_count=$(wc -l < legacy_test_failures.txt | tr -d ' ')
           current_identity_count=$(wc -l < current_test_failures.txt | tr -d ' ')
