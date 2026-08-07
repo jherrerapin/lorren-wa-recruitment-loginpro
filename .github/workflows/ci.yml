@@ -324,7 +324,7 @@ jobs:
               | sed -E 's/^[[:space:]]*not ok [0-9]+ - //' \
               | sed -E 's/[[:space:]]+#.*$//' \
               | sed -E 's/[[:space:]]+$//' \
-              | LC_ALL=C sort > "$target_file" || true
+              | LC_ALL=C sort -u > "$target_file" || true
           }
 
           extract_failure_identities legacy-test-output.log legacy_test_failures.txt
