@@ -21,7 +21,7 @@ export const PRE_CONSENT_DATA_EVIDENCE_REPLAYS = Object.freeze([
   { id: 'required-city-question', sourceConversation: 'SYNTHETIC', body: '¿La vacante es en Bogotá?', expectedFields: [] },
   { id: 'required-role-interest', sourceConversation: 'SYNTHETIC', body: 'Estoy interesado en auxiliar de bodega', expectedFields: [] },
   { id: 'required-profession', sourceConversation: 'SYNTHETIC', body: 'Trabajo en logística', expectedFields: [] },
-  { id: 'required-experience', sourceConversation: 'SYNTHETIC', body: 'Tengo experiencia como operario', expectedFields: [] },
+  { id: 'required-experience', sourceConversation: 'SYNTHETIC', body: 'Tengo experiencia como operario', expectedFields: ['experienceInfo', 'experienceSummary'] },
   { id: 'required-city-staffing', sourceConversation: 'SYNTHETIC', body: '¿Necesitan personal en Neiva?', expectedFields: [] },
   { id: 'ambiguous-role', sourceConversation: 'SYNTHETIC', body: 'Soy auxiliar de bodega', expectedFields: [] },
   { id: 'ambiguous-city', sourceConversation: 'SYNTHETIC', body: 'Bogotá', expectedFields: [] },
