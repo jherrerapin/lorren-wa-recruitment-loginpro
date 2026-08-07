@@ -594,7 +594,7 @@ function detectRobustExperienceTime(text = '') {
 function detectExperienceSummary(text = '') {
   const compact = normalizeLooseText(text);
   if (!compact) return null;
-  if (!/\b(experien|trabaj|labor|cargo|coordin|operaci|despach|empaque|turnos?|personal)\b/.test(compact)) return null;
+  if (!/\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/.test(compact)) return null;
   const cleaned = String(text || '')
     .replace(/\s+/g, ' ')
     .trim()
