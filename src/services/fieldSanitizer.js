@@ -28,7 +28,8 @@ const ALL_SANITIZED_FIELDS = [
   'transportMode',
   'medicalRestrictions',
   'experienceInfo',
-  'experienceTime'
+  'experienceTime',
+  'experienceSummary'
 ];
 
 function minFieldConfidence() {
@@ -99,7 +100,7 @@ function fieldWasPending(field, context = {}) {
     return pending.some((item) => /\b(genero|sexo|mujer|hombre)\b/.test(item));
   }
 
-  if (field === 'experienceInfo' || field === 'experienceTime') {
+  if (field === 'experienceInfo' || field === 'experienceTime' || field === 'experienceSummary') {
     return pending.some((item) => /\b(experiencia|tiempo de experiencia|trabajado|laborado)\b/.test(item));
   }
 
@@ -121,7 +122,8 @@ function lastQuestionAskedForField(field, context = {}) {
     transportMode: /\b(transporte|moto|bicicleta|bici|carro|bus)\b/,
     medicalRestrictions: /\b(restriccion|restricciones|medica|salud)\b/,
     experienceInfo: /\b(experiencia|trabajado|laborado)\b/,
-    experienceTime: /\b(experiencia|tiempo|meses|anos)\b/
+    experienceTime: /\b(experiencia|tiempo|meses|anos)\b/,
+    experienceSummary: /\b(experiencia|cargos?|funciones?|areas?|trabajado|laborado|desempenado)\b/
   };
 
   return fieldPatterns[field]?.test(question) || false;
@@ -171,6 +173,38 @@ function hasExplicitPositiveExperienceEvidence(text = '') {
   return explicitExperience || durationWithWorkContext || operationalResponsibility;
 }
 
+function isExperienceContext(context = {}) {
+  return fieldWasPending('experienceInfo', context)
+    || fieldWasPending('experienceTime', context)
+    || fieldWasPending('experienceSummary', context)
+    || lastQuestionAskedForField('experienceInfo', context)
+    || lastQuestionAskedForField('experienceTime', context)
+    || lastQuestionAskedForField('experienceSummary', context);
+}
+
+function inferContextualExperienceFields(text = '', context = {}) {
+  if (!isExperienceContext(context)) return {};
+  const normalized = normalizeText(text);
+  if (!normalized) return {};
+
+  if (/^(?:no|nop|negativo)(?:\s+(?:gracias|senor|senora))?$/.test(normalized)) {
+    return { experienceInfo: 'No' };
+  }
+
+  const affirmative = normalized.match(/^(?:si|sii|sip)(?:\s+(\d+)\s+(personas?|anos?|meses?|semanas?))?$/);
+  if (!affirmative) return {};
+
+  const inferred = { experienceInfo: 'Sí' };
+  if (affirmative[1] && /^(?:anos?|meses?|semanas?)$/.test(affirmative[2] || '')) {
+    const amount = Number.parseInt(affirmative[1], 10);
+    const unit = affirmative[2];
+    if (/^anos?$/.test(unit)) inferred.experienceTime = `${amount} ${amount === 1 ? 'año' : 'años'}`;
+    if (/^meses?$/.test(unit)) inferred.experienceTime = `${amount} ${amount === 1 ? 'mes' : 'meses'}`;
+    if (/^semanas?$/.test(unit)) inferred.experienceTime = `${amount} ${amount === 1 ? 'semana' : 'semanas'}`;
+  }
+  return inferred;
+}
+
 function sanitizeExperienceInfo(value, evidence, text, context = {}, turnType = null) {
   const normalizedValue = normalizeText(value);
   const isPositive = ['si', 'sii', 'sip'].includes(normalizedValue);
@@ -180,7 +214,7 @@ function sanitizeExperienceInfo(value, evidence, text, context = {}, turnType = 
   const fieldContext = fieldWasPending('experienceInfo', context)
     || lastQuestionAskedForField('experienceInfo', context);
   const normalizedText = normalizeText(text);
-  const shortAnswer = /^(?:si|sii|sip|no)$/.test(normalizedText);
+  const shortAnswer = /^(?:si|sii|sip|no)(?:\s+\d+\s+(?:personas?|anos?|meses?|semanas?))?$/.test(normalizedText);
   const explicitNo = hasExplicitNoExperienceEvidence(text);
   const explicitYes = hasExplicitPositiveExperienceEvidence(text);
 
@@ -261,7 +295,7 @@ function hasAgeEvidence(text = '') {
 }
 
 function hasExperienceEvidence(text = '') {
-  return /\b(experien|trabaj|labor|cargo|oficio)\b/.test(normalizeText(text));
+  return /\b(experien|trabaj|labor|cargo|oficio|coordin|operacion|logistic|personal)\b/.test(normalizeText(text));
 }
 
 function hasNameEvidenceCue(text = '') {
@@ -437,9 +471,29 @@ function sanitizeAge(value, text, context = {}) {
   return { ok: true, value: age };
 }
 
+function sanitizeExperienceSummary(value, evidence, text, context = {}, turnType = null) {
+  const raw = String(value || '').replace(/\s+/g, ' ').trim();
+  if (raw.length < 8) return { ok: false, reason: 'experience_summary_too_short' };
+
+  const fieldContext = fieldWasPending('experienceSummary', context)
+    || lastQuestionAskedForField('experienceSummary', context);
+  const explicitExperience = hasExperienceEvidence(text) || hasExplicitPositiveExperienceEvidence(text);
+  const usableEvidence = evidenceIsUsable('experienceSummary', evidence, { allowLocalParser: true });
+
+  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !explicitExperience) {
+    return { ok: false, reason: 'conversational_turn_without_experience_summary_evidence' };
+  }
+  if (!fieldContext && !explicitExperience && !usableEvidence) {
+    return { ok: false, reason: 'missing_experience_summary_evidence' };
+  }
+
+  return { ok: true, value: raw.slice(0, 280) };
+}
+
 function evaluateField(field, value, evidence, text, context, turnType) {
   if (!hasValue(value)) return { ok: false, reason: 'empty' };
   if (field === 'experienceInfo') return sanitizeExperienceInfo(value, evidence, text, context, turnType);
+  if (field === 'experienceSummary') return sanitizeExperienceSummary(value, evidence, text, context, turnType);
   if (isStringCandidateValue(value) && looksLikeNonDataText(value)) return { ok: false, reason: 'non_data_text' };
 
   if (field === 'fullName') return sanitizeFullName(value, evidence, text, context, turnType);
@@ -463,12 +517,24 @@ export function sanitizeCandidateFieldsForConversation({
   const sanitizedEvidence = {};
   const rejectedFields = [];
   const compactFields = compactObject(fields);
+  const candidateEvidence = { ...evidence };
+  const contextualExperience = inferContextualExperienceFields(text, context);
+
+  for (const [field, value] of Object.entries(contextualExperience)) {
+    if (Object.hasOwn(compactFields, field) || !hasValue(value)) continue;
+    compactFields[field] = value;
+    candidateEvidence[field] = {
+      snippet: String(text || '').slice(0, 180),
+      confidence: 0.95,
+      source: 'conversation_context'
+    };
+  }
 
   for (const field of ALL_SANITIZED_FIELDS) {
     if (!Object.hasOwn(compactFields, field)) continue;
 
     const originalValue = compactFields[field];
-    const result = evaluateField(field, originalValue, evidence, text, context, turnType);
+    const result = evaluateField(field, originalValue, candidateEvidence, text, context, turnType);
 
     if (!result.ok) {
       if (CORE_IDENTITY_FIELDS.has(field) || RESIDENCE_FIELDS.has(field) || field === 'gender') {
@@ -478,7 +544,7 @@ export function sanitizeCandidateFieldsForConversation({
     }
 
     sanitizedFields[field] = result.value ?? originalValue;
-    sanitizedEvidence[field] = evidence?.[field] || { snippet: String(text || '').slice(0, 180), confidence: 0.7, source: 'local_parser' };
+    sanitizedEvidence[field] = candidateEvidence?.[field] || { snippet: String(text || '').slice(0, 180), confidence: 0.7, source: 'local_parser' };
   }
 
   return { fields: sanitizedFields, evidence: sanitizedEvidence, rejectedFields };
