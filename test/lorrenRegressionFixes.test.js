@@ -42,6 +42,12 @@ const BODEGA_VACANCY = {
   updatedAt: new Date('2026-05-29T10:00:00.000Z')
 };
 
+const EXPERIENCE_VACANCY = {
+  ...BODEGA_VACANCY,
+  id: 'vac-bodega-bogota-experience',
+  experienceRequired: 'YES'
+};
+
 function candidate(overrides = {}) {
   return {
     id: 'candidate-1',
@@ -213,6 +219,48 @@ test('guard de estado evita pedir HV cuando ya hay hoja de vida válida', async 
   assert.deepEqual(guarded.blockedReasons, ['resolved_cv_requested_again']);
   assert.match(guarded.text, /hoja de vida/i);
   assert.doesNotMatch(guarded.text, /env[ií]ame tu hoja de vida como archivo/i);
+});
+
+test('guard de estado evita volver a pedir datos requeridos que ya están persistidos', async () => {
+  const prisma = createMockPrisma({
+    candidates: [candidate({
+      vacancyId: EXPERIENCE_VACANCY.id,
+      fullName: 'Persona Prueba',
+      documentType: 'CC',
+      documentNumber: '10000001',
+      age: 31,
+      locality: 'Suba',
+      medicalRestrictions: 'Sin restricciones médicas',
+      transportMode: 'Moto',
+      experienceInfo: 'Sí',
+      experienceTime: '2 años',
+      experienceSummary: 'Cargue, descargue y bodega'
+    })],
+    vacancies: [EXPERIENCE_VACANCY],
+    operations: [OP_BOG]
+  });
+
+  const guarded = await guardReplyWithConversationState(
+    prisma,
+    'candidate-1',
+    'Para continuar necesito que me compartas tu nombre completo, número de documento, edad, restricciones médicas y medio de transporte. También dime si tienes experiencia, cuánto tiempo de experiencia tienes y en qué tienes experiencia.',
+    { source: 'bot_flow' }
+  );
+
+  assert.equal(guarded.blocked, true);
+  assert.deepEqual(guarded.blockedReasons, [
+    'resolved_full_name_requested_again',
+    'resolved_document_number_requested_again',
+    'resolved_age_requested_again',
+    'resolved_medical_restrictions_requested_again',
+    'resolved_transport_mode_requested_again',
+    'resolved_experience_info_requested_again',
+    'resolved_experience_time_requested_again',
+    'resolved_experience_summary_requested_again'
+  ]);
+  assert.match(guarded.text, /Ya tengo registrado/i);
+  assert.match(guarded.text, /hoja de vida/i);
+  assert.doesNotMatch(guarded.text, /nombre completo|número de documento|edad|restricciones médicas|medio de transporte|cuánto tiempo de experiencia|en qué tienes experiencia/i);
 });
 
 test('conserva una localidad explícita de Bogotá aunque no esté en alias estáticos', () => {
