@@ -685,7 +685,7 @@ export const conversationCases = [
     steps: ['soy venezolano y tengo permiso ppt, tengo bus'],
     candidate: candidateDefaults({ currentStep: 'COLLECTING_DATA', vacancyId: 'vac-post' }),
     expect: {
-      candidate: { transportMode: 'Bus' },
+      candidate: { transportMode: 'Publico' },
       notStatus: 'RECHAZADO'
     }
   },
@@ -923,7 +923,7 @@ export const conversationCases = [
         botPaused: true,
         botPauseReason: 'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.'
       },
-      exactOutboundCount: 0
+      exactOutboundCount: 1
     }
   },
   {

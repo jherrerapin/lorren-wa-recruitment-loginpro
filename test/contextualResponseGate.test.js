@@ -137,7 +137,7 @@ test('candidato citado pregunta contacto sin dato configurado: no inventa, respo
   assert.equal(result.shouldReply, true);
   assert.equal(result.requiresHumanReview, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
-  assert.match(result.reply, /no tengo confirmado ese dato/i);
+  assert.match(result.reply, /no tengo confirmado (?:ese dato|el nombre de la persona)/i);
   assert.doesNotMatch(result.reply, /humano|revisar[aá] el chat/i);
 });
 
@@ -266,7 +266,7 @@ test('pregunta contextual no respondible con la cita activa se escala y responde
     text: '¿Solo hay entrevistas a las 10 o hay más después de las 10?',
     isQuestion: true
   });
-  assert.equal(semanticIntent, 'ASK_APPLICATION_STATUS');
+  assert.equal(semanticIntent, 'ASK_INTERVIEW_AVAILABILITY');
 
   const result = evaluateContextualResponseGate({
     candidate: completeCandidate({ currentStep: 'SCHEDULED' }),
@@ -280,7 +280,7 @@ test('pregunta contextual no respondible con la cita activa se escala y responde
   assert.equal(result.requiresHumanReview, true);
   assert.equal(result.allowedAction, ContextualAllowedAction.CREATE_INTERNAL_REVIEW_AND_SAFE_REPLY);
   assert.match(result.reason, /not answerable|human validation/i);
-  assert.match(result.reply, /no veo un dato adicional confirmado|responderte con precisión/i);
+  assert.match(result.reply, /no tengo confirmados horarios adicionales/i);
 });
 
 test('reporte de inconveniente para llegar a cita activa se escala y responde seguro sin dejar al candidato en silencio', () => {

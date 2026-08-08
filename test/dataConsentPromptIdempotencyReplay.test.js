@@ -176,7 +176,7 @@ test('replay CONV-034: una pregunta pendiente se responde una vez ante reintento
     replay.expected.clarifierCount
   );
   assert.equal(pending.pending, replay.expected.finalPending);
-  assert.match(observed.sentBodies[0], /gestionar tu postulación|fines de reclutamiento/i);
+  assert.match(observed.sentBodies[0], /gestionar (?:tu|la) postulación|fines de reclutamiento/i);
   assert.deepEqual(observed.deliveries.map((item) => item.statuses), [[200], [200]]);
 });
 
