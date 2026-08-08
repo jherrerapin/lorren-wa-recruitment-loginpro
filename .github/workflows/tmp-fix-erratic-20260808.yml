@@ -24,6 +24,40 @@ jobs:
           cache: npm
       - run: npm ci
       - run: python3 scripts/tmp_fix_erratic_aug8.py
+      - name: Ajustar parser sin romper casos existentes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/services/candidateData.js')
+          text = p.read_text()
+          old = r"  const hasShortAffirmativeContext = /\bsi(?:\s+tengo)?\b/.test(compact) && /\bmas\s+de\b/.test(compact);"
+          new = r"  const hasShortAffirmativeContext = /\bsi\s+tengo\b/.test(compact) || (/\bsi\b/.test(compact) && /\bmas\s+de\b/.test(compact));"
+          if old not in text:
+              raise SystemExit('No se encontró contexto afirmativo parcheado')
+          text = text.replace(old, new, 1)
+
+          marker = r"  const durationRegex = /\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/gi;"
+          direct = r"""  const wordDurationWithExperience = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\s+de\s+experiencia\b/i);
+          if (wordDurationWithExperience?.[1]) return normalizeExperienceDuration(wordDurationWithExperience[1]);
+
+""" + marker
+          if marker not in text:
+              raise SystemExit('No se encontró durationRegex')
+          text = text.replace(marker, direct, 1)
+          p.write_text(text)
+
+          p = Path('src/services/vacancyFirstGate.js')
+          text = p.read_text()
+          old = """    && (currentTurn.vacancyInformationRequest || currentTurn.question)
+            && currentTurn.primaryIntent !== 'change_intent') {"""
+          new = """    && (currentTurn.vacancyInformationRequest || currentTurn.question)
+            && !currentTurn.interest
+            && currentTurn.primaryIntent !== 'change_intent') {"""
+          if old not in text:
+              raise SystemExit('No se encontró guard de preguntas')
+          p.write_text(text.replace(old, new, 1))
+          PY
       - run: node --check src/services/candidateData.js
       - run: node --check src/services/vacancyFirstGate.js
       - run: node --check src/services/reminderPolicy.js
