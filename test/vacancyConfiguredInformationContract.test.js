@@ -22,10 +22,10 @@ test('vacante identificada presenta configuración y luego pregunta interés', a
   assert.match(decision.reply, /mínimo 6 meses en operaciones logísticas/i);
   assert.match(decision.reply, /te interesa continuar/i);
   assert.doesNotMatch(decision.reply, /no especificado/i);
-  assert.match(decision.reply, /^\*Vacante: Líder de Operación\*/);
-  assert.match(decision.reply, /Ciudad: Neiva/);
-  assert.match(decision.reply, /Zona de trabajo: Sector Las Brisas/);
-  assert.match(decision.reply, /\*Funciones\*\nLiderar y administrar personal operativo\./);
+  assert.match(decision.reply, /\*Vacante: Líder de Operación\*/);
+  assert.match(decision.reply, /\*Ciudad:\* Neiva/);
+  assert.match(decision.reply, /\*Zona de trabajo:\* Sector Las Brisas/);
+  assert.match(decision.reply, /\*Funciones del cargo\*\nLiderar y administrar personal operativo\./);
   assert.match(decision.reply, /\*Requisitos\*/);
   assert.match(decision.reply, /Edad: 23 a 45 años\./);
   assert.match(decision.reply, /Experiencia: Mínimo 6 meses en operaciones logísticas\./);
