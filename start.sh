@@ -3,9 +3,9 @@ set -e
 
 echo "[START] Running prisma migrate deploy..."
 npx prisma migrate deploy
-echo "[START] Migrations done. Starting server and worker..."
+echo "[START] Migrations done. Starting server bootstrap and worker..."
 
-node src/server.js &
+node src/bootstrap.js &
 SERVER_PID=$!
 
 node src/workers/jobWorker.js &
