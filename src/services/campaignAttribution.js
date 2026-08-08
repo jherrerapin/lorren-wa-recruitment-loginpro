@@ -76,6 +76,11 @@ function referralIdentityTokens(message = {}) {
   ].map(normalizeCampaignCode)).filter((token) => token.length >= 3);
 }
 
+function referralCampaignNameToken(message = {}) {
+  const referral = extractReferralFromInboundMessage(message) || {};
+  return normalizeAttributionToken(referral.campaign_name);
+}
+
 function referralDescriptiveTokens(message = {}) {
   const referral = extractReferralFromInboundMessage(message) || {};
   return compactUnique([
@@ -101,9 +106,13 @@ function scoreCampaignForReferral(campaign = {}, message = {}) {
     return { campaign, score: 9900, mode: 'objective_id_exact' };
   }
 
-  // Si Meta entregó IDs objetivos, no se permite degradar a nombres, notas ni
-  // similitud textual. Un ID desconocido debe conservarse para trazabilidad y
-  // dejar que Lórren pregunte ciudad/cargo en lugar de inventar una asociación.
+  // Si Meta entregó IDs nuevos que todavía no están registrados internamente,
+  // solo aceptamos una segunda señal inequívoca: campaign_name exactamente igual
+  // al nombre interno de la campaña. No se degrada a ad_name, notas ni similitud.
+  const metaCampaignName = referralCampaignNameToken(message);
+  if (identityTokens.length && campaignName && metaCampaignName === campaignName) {
+    return { campaign, score: 8500, mode: 'campaign_name_exact_with_objective_metadata' };
+  }
   if (identityTokens.length) return { campaign, score: 0, mode: null };
 
   if (campaignCode && descriptiveTokens.includes(campaignCode)) {

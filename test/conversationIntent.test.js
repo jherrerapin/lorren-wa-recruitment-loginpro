@@ -294,7 +294,7 @@ test('pregunta sobre vacante inactiva se responde antes de retomar la oferta de 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'VACANCY_NOT_ACTIVE');
   assert.match(decision.reply, /apoyar el cargue, descargue y organización de mercancía/i);
-  assert.match(decision.reply, /requisitos registrados/i);
+  assert.match(decision.reply, /\*Requisitos\*/i);
   assert.match(decision.reply, /no está activa para recibir postulaciones/i);
   assert.match(decision.reply, /futuras aperturas/i);
   assert.equal(decision.candidateUpdates.botResumeMode, PAUSED_VACANCY_OFFER_MODE);

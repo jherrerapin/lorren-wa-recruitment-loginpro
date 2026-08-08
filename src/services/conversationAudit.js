@@ -93,8 +93,9 @@ export function analyzeConversationSession(messages = [], options = {}) {
         const topic = detectQuestionTopic(body);
         const nextActor = actors[nextOutboundIndex];
         const nextReply = String(messages[nextOutboundIndex].body || '');
-        if (topic && nextActor === 'bot' && !responseAddressesTopic(nextReply, topic) && isDataRequest(nextReply)) {
-          addIssue(issues, buildIssue('QUESTION_NOT_ANSWERED', `La pregunta sobre ${topic} fue seguida por una solicitud de datos sin respuesta clara.`, messages[nextOutboundIndex], candidate));
+        if (topic && nextActor === 'bot' && !responseAddressesTopic(nextReply, topic)
+          && (topic !== 'general' || isDataRequest(nextReply))) {
+          addIssue(issues, buildIssue('QUESTION_NOT_ANSWERED', `La pregunta sobre ${topic} no fue respondida antes de continuar el flujo.`, messages[nextOutboundIndex], candidate));
         }
       }
       continue;
@@ -112,12 +113,48 @@ export function analyzeConversationSession(messages = [], options = {}) {
       addIssue(issues, buildIssue('BOT_OVER_HUMAN', 'Se detectó una salida automática después de un mensaje humano y antes de una nueva respuesta del candidato.', message, candidate));
     }
 
+    const messageAt = toDate(message.createdAt);
+    const consentAcceptedAt = toDate(candidate.dataConsentAcceptedAt);
+    if (isDataRequest(body) && (!consentAcceptedAt || (messageAt && messageAt < consentAcceptedAt))) {
+      addIssue(issues, buildIssue(
+        'CONSENT_SEQUENCE_BROKEN',
+        'El bot solicitó datos personales antes de que existiera una autorización aceptada para ese momento.',
+        message,
+        candidate
+      ));
+    }
+
+    const replyKind = String(payload.replyKind || '').toUpperCase();
+    const configuredVacancyInfo = Boolean(
+    candidate?.vacancy?.roleDescription
+    || candidate?.vacancy?.requirements
+    || candidate?.vacancy?.conditions
+    || candidate?.vacancy?.operationAddress
+    || candidate?.vacancy?.requiredDocuments
+    || Number.isInteger(candidate?.vacancy?.minAge)
+    || Number.isInteger(candidate?.vacancy?.maxAge)
+    || ['YES', 'NO'].includes(String(candidate?.vacancy?.experienceRequired || '').toUpperCase())
+  );
+  if (replyKind === 'ACTIVE_VACANCY_INTEREST_PROMPT'
+    && configuredVacancyInfo
+    && !/\b(requisitos?|condiciones?|zona de operaci[oó]n|zona de trabajo|funciones?|el cargo consiste|documentaci[oó]n para el proceso|documentos? registrados?|rango de edad|edad m[ií]nima|edad m[aá]xima|edad configurada|experiencia requerida|se requiere experiencia|no se requiere experiencia)\b/i.test(body)) {
+      addIssue(issues, buildIssue(
+        'VACANCY_INFO_SKIPPED',
+        'La vacante quedó identificada, pero el mensaje pasó a preguntar por interés sin compartir la información configurada.',
+        message,
+        candidate
+      ));
+    }
+
     if (startsWithGreeting(body)) {
       greetingCount += 1;
       if (greetingCount > 1) addIssue(issues, buildIssue('REPEATED_GREETING', 'El bot volvió a saludar dentro de la misma sesión.', message, candidate));
     }
 
-    if (sentenceCount(body) > 3 || body.length > 700) {
+    const isStructuredVacancyPresentation = replyKind === 'ACTIVE_VACANCY_INTEREST_PROMPT'
+      || (replyKind === 'DATA_CONSENT_PROMPT' && /^\s*\*Vacante:/i.test(body));
+    const maximumLength = isStructuredVacancyPresentation ? 1400 : 700;
+    if ((!isStructuredVacancyPresentation && sentenceCount(body) > 3) || body.length > maximumLength) {
       addIssue(issues, buildIssue('EXCESSIVE_LENGTH', `La respuesta tiene ${sentenceCount(body)} oraciones y ${body.length} caracteres.`, message, candidate));
     }
     if (hasMarkdownList(body)) addIssue(issues, buildIssue('MARKDOWN_OR_LIST', 'La respuesta usa viñetas o numeración.', message, candidate));
@@ -268,7 +305,9 @@ function buildRecommendations(issueCounts) {
     SCHEDULED_WITHOUT_BOOKING: 'Hacer atómica la transición a SCHEDULED con la creación o validación de la reserva.',
     PREMATURE_DONE: 'Impedir DONE cuando la agenda está habilitada y no existe reserva ni pausa justificada.',
     CV_RECEIVED_BUT_STUCK: 'Reconciliar ASK_CV inmediatamente después de persistir una hoja de vida válida.',
-    UNANSWERED_INBOUND: 'Revisar silencios no intencionales, errores de envío y ramas que terminan sin reply.'
+    UNANSWERED_INBOUND: 'Revisar silencios no intencionales, errores de envío y ramas que terminan sin reply.',
+    VACANCY_INFO_SKIPPED: 'Entregar la información configurada de la vacante antes de solicitar confirmación de interés.',
+    CONSENT_SEQUENCE_BROKEN: 'Bloquear cualquier solicitud de datos personales hasta que exista autorización aceptada para ese momento.'
   };
   return Object.entries(issueCounts)
     .filter(([code, count]) => count > 0 && mapping[code])

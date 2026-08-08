@@ -87,7 +87,7 @@ test('metadata confiable gana sobre texto ambiguo y queda trazada como fuente pr
     vacancyHints: { trustedVacancyId: 'vac-meta-ibague' }
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.vacancyId, 'vac-meta-ibague');
   assert.equal(decision.resolution.reason, 'matched_trusted_active_vacancy');
   assert.equal(decision.resolution.source, 'metadata_config');
@@ -101,7 +101,7 @@ test('sin metadata confiable usa inferencia textual existente marcada como fallb
     vacancies: [active]
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.vacancyId, 'vac-text-fallback');
   assert.equal(decision.resolution.reason, 'matched_active_vacancy');
   assert.equal(decision.resolution.source, 'text_inference_fallback');
@@ -150,7 +150,7 @@ test('A: MENU + Ibagué + cargo claro resuelve y asigna vacante activa sin bloqu
     vacancies: [active]
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.vacancyId, 'vac-post');
   assert.equal(decision.resolution.reason, 'matched_active_vacancy');
 });
@@ -163,7 +163,7 @@ test('ibague-greeting: etapa inicial con saludo y cargo deja resolver vacante ac
     vacancies: [active]
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.vacancyId, 'vac-ibague-greeting');
   assert.equal(decision.resolution.reason, 'matched_active_vacancy');
 });
@@ -204,7 +204,7 @@ test('saludo inicial pide ciudad y vacante con tono natural', async () => {
   assertNoPublicityOrPhoto(decision.reply);
 });
 
-test('C: GREETING_SENT + Bogotá con vacantes activas pero cargo ambiguo pide localidad y cargo sin catálogo', async () => {
+test('C: GREETING_SENT + Bogotá con vacantes activas pide cargo sin recolectar residencia antes del consentimiento', async () => {
   const activeBogota = vacancy({
     id: 'vac-bog-active',
     title: 'Auxiliar de Bodega Bogota',
@@ -220,7 +220,7 @@ test('C: GREETING_SENT + Bogotá con vacantes activas pero cargo ambiguo pide lo
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS');
-  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);
   assert.match(decision.reply, /cargo|vacante/i);
   assertNoPersonalDataRequest(decision.reply);
   assertNoPublicityOrPhoto(decision.reply);
@@ -268,7 +268,7 @@ test('Bogotá auxiliar de bodega conserva cargo detectado y no vuelve a pedir ca
   assert.equal(decision.resolution.city, 'Bogota');
   assert.equal(decision.resolution.roleHint, 'auxiliar bodega');
   assert.match(decision.reply, /ya tengo la ciudad y el cargo/i);
-  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);
   assert.doesNotMatch(decision.reply, /qué cargo|que cargo|cargo o vacante buscas/i);
 });
 
@@ -308,7 +308,7 @@ test('Bogotá posterior no pierde el cargo ya dado en el turno anterior', async 
   assert.equal(decision.reason, 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS');
   assert.equal(decision.resolution.city, 'Bogota');
   assert.equal(decision.resolution.roleHint, 'auxiliar bodega');
-  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);
   assert.doesNotMatch(decision.reply, /qué cargo|que cargo|cargo o vacante buscas/i);
 });
 
@@ -325,7 +325,7 @@ test('D: ciudad + cargo resuelven vacante activa en Neiva', async () => {
     vacancies: [activeNeiva]
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.vacancyId, 'vac-neiva-cargue');
   assert.equal(decision.resolution.reason, 'matched_active_vacancy');
 });
@@ -561,10 +561,11 @@ test('vacante activa asignada responde requisitos antes de entrar a recolección
   });
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
-  assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_ENTER_DATA');
-  assert.match(decision.reply, /requisitos registrados/i);
-  assert.match(decision.reply, /para avanzar, compárteme/i);
-  assert.ok(decision.reply.indexOf('requisitos registrados') < decision.reply.indexOf('Para avanzar'));
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT');
+  assert.match(decision.reply, /Los requisitos para .* son:/i);
+  assert.match(decision.reply, /autorización|autorizas/i);
+  assert.doesNotMatch(decision.reply, /para avanzar, compárteme/i);
+  assert.ok(decision.reply.indexOf('requisitos registrados') < decision.reply.search(/autorización|autorizas/i));
 });
 
 test('reconoce me encuentro interesado como confirmación activa de vacante asignada', async () => {
@@ -577,6 +578,7 @@ test('reconoce me encuentro interesado como confirmación activa de vacante asig
   });
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
-  assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_ENTER_DATA');
-  assert.match(decision.reply, /para avanzar, compárteme/i);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT');
+  assert.match(decision.reply, /autorización|autorizas/i);
+  assert.doesNotMatch(decision.reply, /para avanzar, compárteme/i);
 });

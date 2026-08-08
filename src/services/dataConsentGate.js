@@ -13,6 +13,7 @@ import { isSupervisorPhone } from './adminSupervisor.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
 import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
 import { cancelReminderOnInbound } from './reminder.js';
+import { buildProfessionalVacancyPresentation, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 import {
   compareAndSwapConversationMessagePayload,
   findInboundConversationMessage,
@@ -100,7 +101,7 @@ function startsWithExplicitConsent(text = '') {
 }
 
 function startsWithExplicitVacancyConfirmation(text = '') {
-  return /^(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
+  return /^(si|sii|sip|claro|correcto|exacto|esa es|esa si|esta si|esa misma|si esa|si esta|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
 }
 
 function referencesConsentSubject(text = '') {
@@ -218,12 +219,12 @@ export function shouldRecordConsentRejection(text = '', { consentPromptPending =
   return true;
 }
 
-function isAffirmativeVacancyConfirmation(text = '') {
+export function isAffirmativeVacancyConfirmation(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
   if (isQuestionLike(text) && !startsWithExplicitVacancyConfirmation(normalized)) return false;
   return hasAny(normalized, [
-    /\b(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|dale|ok|listo)\b/,
+    /\b(si|sii|sip|claro|correcto|exacto|esa es|esa si|esta si|esa misma|si esa|si esta|si es|de acuerdo|dale|ok|listo)\b/,
     /\b(confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/
   ]);
 }
@@ -573,6 +574,10 @@ export function shouldRequestConsentForTurn(candidate = {}, text = '') {
     turn,
     mode
   };
+}
+
+export function buildDataConsentPromptReply() {
+  return CONSENT_PROMPT;
 }
 
 export function buildConsentPendingMode({ resumeMode = null, cvResendRequired = false } = {}) {
@@ -964,16 +969,8 @@ function buildVacancyConfirmationPrompt(vacancy = {}) {
   return `Hola, soy Lórren, asistente de selección de LoginPro. ¿Escribes por la vacante de ${vacancyTitle(vacancy)}${place}? Puedes confirmarme de forma natural o decirme el cargo correcto.`;
 }
 
-function buildVacancyInfoReply(vacancy = {}) {
-  const city = vacancyCity(vacancy);
-  const parts = [`Perfecto, te comparto la información registrada de ${vacancyTitle(vacancy)}${city ? ` en ${city}` : ''}.`];
-  if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
-  if (vacancy.operationAddress) parts.push(`Zona de operación: ${vacancy.operationAddress}.`);
-  if (vacancy.requirements) parts.push(`Requisitos: ${vacancy.requirements}.`);
-  if (vacancy.conditions) parts.push(`Condiciones: ${vacancy.conditions}.`);
-  if (vacancy.requiredDocuments) parts.push(`Documentos para el proceso: ${vacancy.requiredDocuments}.`);
-  parts.push('¿Te interesa continuar con esta postulación?');
-  return parts.join('\n\n');
+function buildVacancyInfoReply(vacancy = {}, { includeInterestPrompt = true } = {}) {
+  return buildProfessionalVacancyPresentation(vacancy, { includeInterestPrompt });
 }
 
 export function buildVacancyQuestionReply(vacancy = {}, text = '') {
@@ -981,36 +978,57 @@ export function buildVacancyQuestionReply(vacancy = {}, text = '') {
   const normalized = normalize(text);
   const lead = `Sobre la vacante de ${vacancyTitle(vacancy)}`;
 
+  if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
+  const operationName = String(vacancy?.operation?.name || '').trim();
+  return operationName
+    ? `El proceso de selección lo gestiona LoginPro Service. La operación asociada a esta vacante es ${operationName}.`
+    : 'El proceso de selección lo gestiona LoginPro Service.';
+}
+
   if (/\b(salario|sueldo|pago|cuanto pagan|cuanto es)\b/.test(normalized)) {
-    return vacancy.conditions
-      ? `${lead}, las condiciones registradas son: ${vacancy.conditions}.`
-      : 'No tengo un salario registrado para esta vacante.';
+    return cleanConfiguredFragment(vacancy.conditions)
+      ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
+      : 'La información disponible de esta vacante no especifica el salario.';
   }
   if (/\b(horario|turno|jornada|contrato|prestacion|beneficio|condicion)\b/.test(normalized)) {
-    return vacancy.conditions
-      ? `${lead}, las condiciones registradas son: ${vacancy.conditions}.`
-      : 'No tengo esas condiciones registradas para esta vacante.';
+    return cleanConfiguredFragment(vacancy.conditions)
+      ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
+      : 'La información disponible de esta vacante no especifica ese detalle.';
   }
-  if (/\b(requisito|perfil|edad|experiencia|estudio|formacion|documento|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
-    const parts = [];
-    if (vacancy.requirements) parts.push(vacancy.requirements);
-    if (vacancy.requiredDocuments && /\bdocumento\b/.test(normalized)) parts.push(`Documentos: ${vacancy.requiredDocuments}`);
-    return parts.length
-      ? `${lead}, los requisitos registrados son: ${parts.join('. ')}.`
-      : 'No tengo ese requisito registrado para esta vacante.';
-  }
+  if (/\b(edad|rango de edad)\b/.test(normalized)) {
+  const ageRequirement = getConfiguredAgeRequirementText(vacancy);
+  return ageRequirement
+    ? `${lead}, ${ageRequirement}.`
+    : 'La información disponible de esta vacante no especifica un rango de edad.';
+}
+if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
+  const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
+  if (experienceRequirement) return `${lead}, ${experienceRequirement}.`;
+  return vacancy.requirements && /\bexperiencia\b/i.test(vacancy.requirements)
+    ? `${lead}, los requisitos son: ${vacancy.requirements}.`
+    : 'La información disponible de esta vacante no especifica un requisito adicional de experiencia.';
+}
+if (/\b(requisito|perfil|estudio|formacion|documento|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+  const parts = [];
+  if (vacancy.requirements) parts.push(vacancy.requirements);
+  if (cleanConfiguredFragment(vacancy.requiredDocuments) && /\bdocumento\b/.test(normalized)) parts.push(`Documentos: ${cleanConfiguredFragment(vacancy.requiredDocuments)}`);
+  return parts.length
+    ? `${lead}, los requisitos son: ${parts.join('. ')}.`
+    : 'Ese requisito no aparece en la información disponible de esta vacante.';
+}
+
   if (/\b(funcion|funciones|labor|hacer|cargo|rol|consiste|tarea|tareas|responsabilidad|responsabilidades)\b/.test(normalized)) {
-    return vacancy.roleDescription
-      ? `${lead}, el cargo consiste en ${vacancy.roleDescription}.`
-      : `El cargo registrado es ${vacancyTitle(vacancy)}, pero no tengo una descripción adicional.`;
+    return cleanConfiguredFragment(vacancy.roleDescription)
+      ? `${lead}, las funciones del cargo son: ${cleanConfiguredFragment(vacancy.roleDescription)}.`
+      : `El cargo es ${vacancyTitle(vacancy)}, pero no tengo una descripción adicional.`;
   }
   if (/\b(donde|direccion|ubicacion|zona|sector|queda)\b/.test(normalized)) {
     const location = vacancyLocation(vacancy);
     return location
-      ? `${lead}, la ubicación registrada es ${location}.`
-      : 'No tengo una ubicación específica registrada para esta vacante.';
+      ? `${lead}, el lugar de trabajo es: ${location}.`
+      : 'La información disponible de esta vacante no incluye una ubicación más específica.';
   }
-  return 'No tengo ese dato registrado en la vacante. Puedo continuar con la información disponible.';
+  return 'Ese detalle no aparece en la información disponible de esta vacante.';
 }
 
 export function buildConsentAcceptedReply(candidate = {}, vacancy = null, options = {}) {
@@ -1129,6 +1147,23 @@ async function handleCampaignVacancyConfirmation(prisma, candidate, message, fro
   const questionReply = buildVacancyQuestionReply(vacancy, body);
   if (isAffirmativeVacancyConfirmation(body)) {
     const cvResendRequired = candidate.botResumeMode === CAMPAIGN_CONFIRMATION_CV_MODE;
+    const explicitApplicationInterest = Boolean(analyzeConversationTurn(body).interest);
+    if (explicitApplicationInterest) {
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          currentStep: ConversationStep.GREETING_SENT,
+          botResumeMode: buildConsentPendingMode({ cvResendRequired })
+        }
+      });
+      const reply = [
+        questionReply,
+        buildVacancyInfoReply(vacancy, { includeInterestPrompt: false }),
+        buildDataConsentPromptReply()
+      ].filter(Boolean).join('\n\n');
+      await sendAndStore(prisma, candidate.id, from, reply, 'campaign_vacancy_confirmed_interest', { vacancyId: vacancy.id, cvResendRequired });
+      return true;
+    }
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {

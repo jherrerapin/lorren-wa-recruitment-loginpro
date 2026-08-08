@@ -16,6 +16,8 @@ const ISSUE_CATALOG = {
   DELIVERY_FAILURE: ['Mensaje saliente con entrega fallida o incierta', 'high'],
   UNANSWERED_INBOUND: ['Mensaje del candidato sin respuesta posterior', 'high'],
   QUESTION_NOT_ANSWERED: ['Pregunta del candidato no atendida antes de retomar el formulario', 'high'],
+  VACANCY_INFO_SKIPPED: ['Vacante identificada sin entregar su información', 'high'],
+  CONSENT_SEQUENCE_BROKEN: ['Solicitud de datos antes de la autorización de tratamiento', 'critical'],
   UNSUPPORTED_SENSITIVE_CLAIM: ['Respuesta con información sensible no respaldada por la vacante', 'high'],
   REPEATED_DATA_REQUEST: ['El bot volvió a pedir un dato ya entregado', 'medium'],
   DUPLICATE_REPLY: ['Respuesta del bot repetida o casi idéntica', 'medium'],
@@ -37,7 +39,8 @@ const TOPIC_PATTERNS = {
   documents: /\b(documento|c[eé]dula|antecedentes|certificado|hoja de vida impresa|papeles)\b/i,
   benefits: /\b(beneficio|ruta|alimentaci[oó]n|bono|prestaciones|contrato)\b/i,
   identity: /\b(quien eres|qui[eé]n eres|eres un bot|eres una ia|c[oó]mo te llamas|tu nombre)\b/i,
-  availability: /\b(hay vacante|vacante disponible|siguen contratando|a[uú]n est[aá] disponible|est[aá] abierta)\b/i
+  availability: /\b(hay vacante|vacante disponible|siguen contratando|a[uú]n est[aá] disponible|est[aá] abierta)\b/i,
+  company: /\b(empresa|compa[nñ][ií]a|cliente|qui[eé]n contrata|para qu[eé] empresa|operaci[oó]n)\b/i
 };
 
 const REQUEST_PATTERNS = {

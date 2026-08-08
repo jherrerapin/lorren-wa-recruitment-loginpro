@@ -14,6 +14,7 @@ function candidate(overrides = {}) {
     lastReminderAt: null,
     lastInboundAt: new Date('2026-06-03T12:00:00-05:00'),
     botPaused: false,
+    dataConsentStatus: 'ACCEPTED',
     ...overrides
   };
 }
@@ -40,4 +41,13 @@ test('bloquea recordatorio cuando espera aceptación de alternativa abierta', ()
 
 test('bloquea recordatorio cuando espera prevalidación de alternativa especializada', () => {
   assert.equal(canScheduleReminderPolicy(candidate({ botResumeMode: 'alternative_vacancy_prequalification:vac-lider-ibague' })), false);
+});
+
+
+test('no programa recordatorio mientras espera consentimiento', () => {
+  assert.equal(canScheduleReminderPolicy(candidate({ currentStep: 'COLLECTING_DATA', dataConsentStatus: 'PENDING' })), false);
+});
+
+test('no programa recordatorio desde GREETING_SENT aunque exista consentimiento', () => {
+  assert.equal(canScheduleReminderPolicy(candidate({ currentStep: 'GREETING_SENT', dataConsentStatus: 'ACCEPTED' })), false);
 });

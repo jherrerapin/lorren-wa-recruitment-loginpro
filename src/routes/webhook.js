@@ -537,9 +537,9 @@ function isSchedulingConfirmationIntent(text = '') {
 function isSchedulingRescheduleIntent(text = '') {
   return isSchedulingOfferDecline(text, { allowShortNo: false });
 }
-function isApplicationFollowUpQuestion(text = '') {
+export function isApplicationFollowUpQuestion(text = '') {
   const n = normalizeComparableText(text);
-  return /\b(me postule|me postule para|me habia postulado|quisiera saber que ha pasado|que ha pasado con mi postulacion|como va mi postulacion|estado de mi postulacion|qued[eo] en que|si hay novedad)\b/.test(n);
+  return /\b(me postule|me postule para|me habia postulado|quisiera saber que ha pasado|quiero saber (?:sobre|de) mi (?:proceso|postulacion)|quisiera saber (?:sobre|de) mi (?:proceso|postulacion)|que ha pasado con mi (?:proceso|postulacion)|que paso con mi (?:proceso|postulacion)|como va mi (?:proceso|postulacion)|estado de mi (?:proceso|postulacion)|hay novedades? (?:de|sobre) mi (?:proceso|postulacion)|qued[eo] en que|si hay novedad)\b/.test(n);
 }
 
 function getPrimaryEngineAction(actions = []) {
@@ -2088,7 +2088,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
       reason: vacancyFirstGateDecision.reason,
-      replyKind: vacancyFirstGateDecision.replyKind
+      replyKind: vacancyFirstGateDecision.replyKind,
+      safetyVacancy: currentVacancy || vacancyFirstGateDecision.vacancy || null
     });
   }
 

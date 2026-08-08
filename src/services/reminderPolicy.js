@@ -5,7 +5,6 @@ export const INTERVIEW_KEEPALIVE_THRESHOLD_MS = Number.parseInt(
 ) || (2 * 60 * 60 * 1000);
 
 const REMINDER_ELIGIBLE_STEPS = new Set([
-  'GREETING_SENT',
   'COLLECTING_DATA',
   'CONFIRMING_DATA',
   'ASK_CV',
@@ -55,6 +54,7 @@ export function isWithinWhatsappWindow(lastInboundAt) {
 export function canScheduleReminderPolicy(candidate) {
   if (!candidate) return false;
   if (candidate.botPaused) return false;
+  if (String(candidate.dataConsentStatus || '') !== 'ACCEPTED') return false;
   if (candidate.status === 'RECHAZADO') return false;
   if (candidate.currentStep === 'DONE') return false;
   if (PROCESS_REMINDER_BLOCKED_RESUME_MODES.has(getResumeModeKey(candidate.botResumeMode))) return false;
