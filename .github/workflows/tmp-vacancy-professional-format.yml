@@ -41,6 +41,12 @@ jobs:
                   raise SystemExit(f'{label}: expected 1 match, got {count}')
               return text.replace(old, new, 1)
 
+          def regex_replace_once(text, pattern, replacement, label):
+              updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {count}')
+              return updated
+
           p = Path('src/services/vacancyFirstGate.js')
           text = p.read_text(encoding='utf-8')
           text = replace_once(
@@ -93,57 +99,44 @@ jobs:
               address ? `Zona de trabajo: ${address}` : null
             ].filter(Boolean);
 
-            if (roleDescription) {
-              sections.push(`*Funciones*\n${ensureProfessionalSentence(roleDescription)}`);
-            }
+            if (roleDescription) sections.push(`*Funciones*\n${ensureProfessionalSentence(roleDescription)}`);
 
             const requirementLines = [
               requirements ? ensureProfessionalSentence(requirements) : '',
               buildAgeOverviewLine(vacancy, requirements),
               buildExperienceOverviewLine(vacancy, requirements)
             ].filter(Boolean);
-            if (requirementLines.length) {
-              sections.push(`*Requisitos*\n${requirementLines.join('\n')}`);
-            }
+            if (requirementLines.length) sections.push(`*Requisitos*\n${requirementLines.join('\n')}`);
+            if (conditions) sections.push(`*Condiciones*\n${ensureProfessionalSentence(conditions)}`);
+            if (documents) sections.push(`*Documentación para el proceso*\n${ensureProfessionalSentence(documents)}`);
 
-            if (conditions) {
-              sections.push(`*Condiciones*\n${ensureProfessionalSentence(conditions)}`);
-            }
-            if (documents) {
-              sections.push(`*Documentación para el proceso*\n${ensureProfessionalSentence(documents)}`);
-            }
-
-            if (sections.length <= (city || address ? 3 : 1)) {
-              sections.push('No hay información adicional cargada para esta vacante.');
-            }
+            const hasDetails = Boolean(roleDescription || requirements || conditions || documents
+              || Number.isInteger(vacancy?.minAge) || Number.isInteger(vacancy?.maxAge)
+              || ['YES', 'NO'].includes(String(vacancy?.experienceRequired || '').trim().toUpperCase()));
+            if (!hasDetails) sections.push('No hay información adicional cargada para esta vacante.');
 
             return sections.join('\n\n');
           }
 
           function buildActiveVacancyInterestReply'''
-          text, count = re.subn(
+          text = regex_replace_once(
+              text,
               r"function buildVacancyOverview\(vacancy = \{\}\) \{.*?\n\}\n\nfunction buildActiveVacancyInterestReply",
               overview,
-              text,
-              count=1,
-              flags=re.S
+              'buildVacancyOverview replacement'
           )
-          if count != 1:
-              raise SystemExit(f'buildVacancyOverview replacement: expected 1 match, got {count}')
-
           text = replace_once(
               text,
               "  return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;",
               "  return `${answer}\\n\\nSi deseas continuar con la postulación, confírmame y seguimos con el proceso.`;",
               'interest closing format'
           )
-
-          generic_pattern = r"\n  const facts = \[\];\n  if \(roleDescription\) facts\.push\(`El cargo consiste en \$\{roleDescription\}\." \
-                            r".*?\n\}\n\nfunction buildInactiveVacancyReply"
-          generic_replacement = "\n  return buildVacancyOverview(vacancy);\n}\n\nfunction buildInactiveVacancyReply"
-          text, count = re.subn(generic_pattern, generic_replacement, text, count=1, flags=re.S)
-          if count != 1:
-              raise SystemExit(f'generic vacancy answer replacement: expected 1 match, got {count}')
+          text = regex_replace_once(
+              text,
+              r"\n  const facts = \[\];\n  if \(roleDescription\) facts\.push\(`El cargo consiste en \$\{roleDescription\}\.\`\);.*?\n\}\n\nfunction buildInactiveVacancyReply",
+              "\n  return buildVacancyOverview(vacancy);\n}\n\nfunction buildInactiveVacancyReply",
+              'generic vacancy answer replacement'
+          )
           p.write_text(text, encoding='utf-8')
 
           p = Path('src/services/conversationAudit.js')
@@ -179,29 +172,21 @@ jobs:
               currentStep: 'GREETING_SENT',
               status: 'NUEVO',
               vacancy: {
-                title: 'Líder de Operación',
-                city: 'Neiva',
+                title: 'Líder de Operación', city: 'Neiva',
                 roleDescription: 'Liderar y administrar personal operativo',
                 requirements: 'Técnico o tecnólogo en logística',
                 conditions: 'Turnos rotativos y prestaciones de ley',
-                operationAddress: 'Sector Las Brisas',
-                minAge: 23,
-                maxAge: 45,
-                experienceRequired: 'YES',
-                experienceTimeText: 'mínimo 6 meses'
+                operationAddress: 'Sector Las Brisas', minAge: 23, maxAge: 45,
+                experienceRequired: 'YES', experienceTimeText: 'mínimo 6 meses'
               }
             };
             const messages = [{
-              id: 'out-1',
-              candidateId: candidate.id,
-              direction: 'OUTBOUND',
-              messageType: 'TEXT',
+              id: 'out-1', candidateId: candidate.id, direction: 'OUTBOUND', messageType: 'TEXT',
               createdAt: new Date('2026-08-08T15:00:00Z'),
               body: '*Vacante: Líder de Operación*\n\nCiudad: Neiva\n\nZona de trabajo: Sector Las Brisas\n\n*Funciones*\nLiderar y administrar personal operativo.\n\n*Requisitos*\nTécnico o tecnólogo en logística.\nEdad: 23 a 45 años.\nExperiencia: Mínimo 6 meses.\n\n*Condiciones*\nTurnos rotativos y prestaciones de ley.\n\nSi deseas continuar con la postulación, confírmame y seguimos con el proceso.',
               rawPayload: { source: 'vacancy_first_gate', replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT' },
               candidate
             }];
-
             const result = analyzeConversationSession(messages, { now: new Date('2026-08-08T15:01:00Z'), checkCurrentState: false });
             const codes = new Set(result.issues.map((issue) => issue.code));
             assert.equal(codes.has('EXCESSIVE_LENGTH'), false);
