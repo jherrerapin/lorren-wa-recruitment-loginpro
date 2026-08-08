@@ -137,7 +137,7 @@ export function analyzeConversationSession(messages = [], options = {}) {
   );
   if (replyKind === 'ACTIVE_VACANCY_INTEREST_PROMPT'
     && configuredVacancyInfo
-    && !/\b(requisitos?|condiciones?|zona de operaci[oó]n|el cargo consiste|documentos? registrados?|rango de edad|edad m[ií]nima|edad m[aá]xima|edad configurada|experiencia requerida|se requiere experiencia|no se requiere experiencia)\b/i.test(body)) {
+    && !/\b(requisitos?|condiciones?|zona de operaci[oó]n|zona de trabajo|funciones?|el cargo consiste|documentaci[oó]n para el proceso|documentos? registrados?|rango de edad|edad m[ií]nima|edad m[aá]xima|edad configurada|experiencia requerida|se requiere experiencia|no se requiere experiencia)\b/i.test(body)) {
       addIssue(issues, buildIssue(
         'VACANCY_INFO_SKIPPED',
         'La vacante quedó identificada, pero el mensaje pasó a preguntar por interés sin compartir la información configurada.',
@@ -151,7 +151,10 @@ export function analyzeConversationSession(messages = [], options = {}) {
       if (greetingCount > 1) addIssue(issues, buildIssue('REPEATED_GREETING', 'El bot volvió a saludar dentro de la misma sesión.', message, candidate));
     }
 
-    if (sentenceCount(body) > 3 || body.length > 700) {
+    const isStructuredVacancyPresentation = replyKind === 'ACTIVE_VACANCY_INTEREST_PROMPT'
+      || (replyKind === 'DATA_CONSENT_PROMPT' && /^\s*\*Vacante:/i.test(body));
+    const maximumLength = isStructuredVacancyPresentation ? 1400 : 700;
+    if ((!isStructuredVacancyPresentation && sentenceCount(body) > 3) || body.length > maximumLength) {
       addIssue(issues, buildIssue('EXCESSIVE_LENGTH', `La respuesta tiene ${sentenceCount(body)} oraciones y ${body.length} caracteres.`, message, candidate));
     }
     if (hasMarkdownList(body)) addIssue(issues, buildIssue('MARKDOWN_OR_LIST', 'La respuesta usa viñetas o numeración.', message, candidate));

@@ -3,7 +3,7 @@ import { analyzeConversationTurn } from './conversationIntent.js';
 import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
-import { cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';
+import { cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -106,32 +106,71 @@ function buildAwaitingApplicationInterestUpdates(vacancyId) {
   };
 }
 
+function ensureProfessionalSentence(value = '') {
+  const clean = cleanConfiguredFragment(value);
+  return clean ? `${clean}.` : '';
+}
+
+function buildAgeOverviewLine(vacancy = {}, requirements = '') {
+  if (/\bedad\b|\b\d{1,2}\s*(?:a|-)\s*\d{1,2}\s*a[nñ]os?\b/i.test(requirements)) return '';
+  const minAge = Number.isInteger(vacancy?.minAge) ? vacancy.minAge : null;
+  const maxAge = Number.isInteger(vacancy?.maxAge) ? vacancy.maxAge : null;
+  if (minAge !== null && maxAge !== null) {
+    return minAge === maxAge ? `Edad: ${minAge} años.` : `Edad: ${minAge} a ${maxAge} años.`;
+  }
+  if (minAge !== null) return `Edad mínima: ${minAge} años.`;
+  if (maxAge !== null) return `Edad máxima: ${maxAge} años.`;
+  return '';
+}
+
+function buildExperienceOverviewLine(vacancy = {}, requirements = '') {
+  if (/\bexperiencia\b/i.test(requirements)) return '';
+  const mode = String(vacancy?.experienceRequired || '').trim().toUpperCase();
+  const time = cleanConfiguredFragment(vacancy?.experienceTimeText);
+  if (mode === 'YES') {
+    if (time) return `Experiencia: ${time.charAt(0).toUpperCase()}${time.slice(1)}.`;
+    return 'Experiencia: Requerida.';
+  }
+  if (mode === 'NO') return 'Experiencia: No requerida.';
+  return '';
+}
+
 function buildVacancyOverview(vacancy = {}) {
   const city = vacancyCity(vacancy);
-  const location = city ? ` en ${city}` : '';
   const title = vacancyTitle(vacancy);
-  const facts = [];
   const roleDescription = cleanConfiguredFragment(vacancy?.roleDescription);
   const requirements = cleanConfiguredFragment(vacancy?.requirements);
   const conditions = cleanConfiguredFragment(vacancy?.conditions);
   const address = cleanConfiguredFragment(vacancy?.operationAddress);
   const documents = cleanConfiguredFragment(vacancy?.requiredDocuments);
+  const sections = [
+    `*Vacante: ${title}*`,
+    city ? `Ciudad: ${city}` : null,
+    address ? `Zona de trabajo: ${address}` : null
+  ].filter(Boolean);
 
-  if (roleDescription) facts.push(`El cargo consiste en ${roleDescription}.`);
-  if (address) facts.push(`La zona de operación registrada es ${address}.`);
-  if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);
-  facts.push(...getConfiguredPublicRequirementSentences(vacancy, requirements));
-  if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);
-  if (documents) facts.push(`Los documentos registrados para el proceso son: ${documents}.`);
+  if (roleDescription) sections.push(`*Funciones*\n${ensureProfessionalSentence(roleDescription)}`);
 
-  return facts.length
-    ? `Te comparto la información de ${title}${location}. ${facts.join(' ')}`
-    : `Encontré la vacante de ${title}${location}, pero no tiene información adicional cargada.`;
+  const requirementLines = [
+    requirements ? ensureProfessionalSentence(requirements) : '',
+    buildAgeOverviewLine(vacancy, requirements),
+    buildExperienceOverviewLine(vacancy, requirements)
+  ].filter(Boolean);
+  if (requirementLines.length) sections.push(`*Requisitos*\n${requirementLines.join('\n')}`);
+  if (conditions) sections.push(`*Condiciones*\n${ensureProfessionalSentence(conditions)}`);
+  if (documents) sections.push(`*Documentación para el proceso*\n${ensureProfessionalSentence(documents)}`);
+
+  const hasDetails = Boolean(roleDescription || requirements || conditions || documents
+    || Number.isInteger(vacancy?.minAge) || Number.isInteger(vacancy?.maxAge)
+    || ['YES', 'NO'].includes(String(vacancy?.experienceRequired || '').trim().toUpperCase()));
+  if (!hasDetails) sections.push('No hay información adicional cargada para esta vacante.');
+
+  return sections.join('\n\n');
 }
 
 function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
   const answer = buildVacancyInformationAnswer(vacancy, inboundText) || buildVacancyOverview(vacancy);
-  return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;
+  return `${answer}\n\n¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.`;
 }
 
 function missingDataPrompt(candidate = {}, vacancy = null) {
@@ -229,17 +268,7 @@ if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehi
       : `No tengo una zona más detallada registrada para ${title}${location}.`;
   }
 
-  const facts = [];
-  if (roleDescription) facts.push(`El cargo consiste en ${roleDescription}.`);
-  if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);
-  facts.push(...getConfiguredPublicRequirementSentences(vacancy, requirements));
-  if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);
-  if (address) facts.push(`La zona de operación registrada es ${address}.`);
-  if (documents) facts.push(`Los documentos registrados para el proceso son: ${documents}.`);
-
-  return facts.length
-    ? `Claro. Sobre ${title}${location}: ${facts.join(' ')}`
-    : `Tengo identificada la convocatoria de ${title}${location}, pero no hay información adicional cargada.`;
+  return buildVacancyOverview(vacancy);
 }
 
 function buildInactiveVacancyReply(vacancy = null, city = null, inboundText = '') {
