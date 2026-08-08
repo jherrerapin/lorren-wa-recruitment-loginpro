@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeConversationSession } from '../src/services/conversationAudit.js';
 
-test('la ficha estructurada de vacante no se audita como respuesta excesiva', () => {
+test('la ficha estructurada de vacante conserva el formato profesional sin falsas alertas', () => {
   const candidate = {
     id: 'candidate-format',
     currentStep: 'GREETING_SENT',
@@ -27,4 +27,5 @@ test('la ficha estructurada de vacante no se audita como respuesta excesiva', ()
   const codes = new Set(result.issues.map((issue) => issue.code));
   assert.equal(codes.has('EXCESSIVE_LENGTH'), false);
   assert.equal(codes.has('VACANCY_INFO_SKIPPED'), false);
+  assert.equal(codes.has('MARKDOWN_OR_LIST'), false);
 });
