@@ -1,0 +1,115 @@
+name: tmp-align-ideal-recruitment-flow-v3
+on:
+  push:
+    branches:
+      - fix/production-ad-flow-20260808
+permissions:
+  contents: write
+jobs:
+  align-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/production-ad-flow-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Execute validated patch with robust webhook locator
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+          source = Path('.github/workflows/tmp-align-ideal-recruitment-flow-v2.yml').read_text(encoding='utf-8')
+          m = re.search(r"      - name: Apply runtime and contract alignment\n        run: \|\n(?P<body>.*?)\n      - run: npm ci", source, re.S)
+          if not m:
+              raise SystemExit('could not extract v2 patch body')
+          body = textwrap.dedent(m.group('body'))
+          start = body.index("# webhook: pass the resolved vacancy")
+          end = body.index("# vacancyFirstGate:", start)
+          robust = '''# webhook: pass the resolved vacancy to reply safety for normal gate replies.\np='src/routes/webhook.js'; t=read(p)\nblock_start=t.index("if (vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY) {")\nblock_end=t.index("if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT)", block_start)\nsegment=t[block_start:block_end]\nneedle="replyKind: vacancyFirstGateDecision.replyKind"\nif segment.count(needle) != 1:\n    raise SystemExit(f'gate reply safety locator expected 1, got {segment.count(needle)}')\nsegment=segment.replace(needle, needle + ",\\n      safetyVacancy: currentVacancy || vacancyFirstGateDecision.vacancy || null", 1)\nt=t[:block_start]+segment+t[block_end:]\nwrite(p,t)\n\n'''
+          body = body[:start] + robust + body[end:]
+          exec(compile(body, '<extracted-patch>', 'exec'), {})
+          PY
+      - run: npm ci
+      - run: npm run prisma:generate
+      - name: Focused regression suite
+        run: |
+          node --test \
+            test/activeVacancyQuestionIntake.test.js \
+            test/conversation-harness.test.js \
+            test/webhookMultiline.test.js \
+            test/vacancyBeforeConsentReplay.test.js \
+            test/vacancyCorrectionPriority.test.js \
+            test/leaderVacancyResolution.test.js \
+            test/productionPaidAdFlowRegressions.test.js \
+            test/dataConsentPromptIdempotencyReplay.test.js \
+            test/conversationalReleaseCandidatePreConsent.test.js
+      - name: Capture current full suite
+        shell: bash
+        run: |
+          set +e
+          npm test > current.log 2>&1
+          set -e
+      - uses: actions/checkout@v5
+        with:
+          ref: ed754a71254393ad9de57c4551a65b4fc731fbfd
+          path: .baseline
+      - name: Capture base full suite
+        shell: bash
+        run: |
+          cd .baseline
+          npm ci
+          npm run prisma:generate
+          set +e
+          npm test > "$GITHUB_WORKSPACE/base.log" 2>&1
+          set -e
+      - name: Compare exact failure identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          extract() {
+            awk '
+              function emit_pending(){if(pending!=""&&!container)print pending;pending="";container=0}
+              /^[[:space:]]*not ok [0-9]+ - /{emit_pending();x=$0;sub(/^[[:space:]]*not ok [0-9]+ - /,"",x);sub(/[[:space:]]+#.*$/,"",x);sub(/[[:space:]]+$/,"",x);pending=x;next}
+              pending!=""&&/^[[:space:]]*failureType:[[:space:]].*subtestsFailed/{container=1;next}
+              END{emit_pending()}
+            ' "$1" | LC_ALL=C sort -u > "$2"
+          }
+          extract base.log base.failures
+          extract current.log current.failures
+          LC_ALL=C comm -23 current.failures base.failures > unexpected.failures
+          echo '=== CURRENT ==='; grep -E '^# (tests|pass|fail|cancelled|skipped) ' current.log | tail -n 5 || true
+          echo '=== BASE ==='; grep -E '^# (tests|pass|fail|cancelled|skipped) ' base.log | tail -n 5 || true
+          echo '=== UNEXPECTED ==='; cat unexpected.failures || true
+          if [ -s unexpected.failures ]; then
+            while IFS= read -r id; do [ -z "$id" ] && continue; echo "--- $id ---"; grep -F -B 6 -A 24 -- "$id" current.log | head -n 60 || true; done < unexpected.failures
+            exit 1
+          fi
+      - name: Commit validated changes and cleanup
+        run: |
+          rm -rf .baseline current.log base.log base.failures current.failures unexpected.failures
+          rm -f .github/workflows/tmp-failure-identity-diagnostic.yml
+          rm -f .github/workflows/tmp-align-ideal-recruitment-flow.yml
+          rm -f .github/workflows/tmp-align-ideal-recruitment-flow-v2.yml
+          rm -f .github/workflows/tmp-align-ideal-recruitment-flow-v3.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: alinear flujo de pauta con consentimiento y contexto de vacante"
+          git push origin HEAD:fix/production-ad-flow-20260808
