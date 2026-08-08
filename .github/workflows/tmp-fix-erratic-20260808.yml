@@ -1,0 +1,194 @@
+name: tmp-fix-erratic-20260808
+
+on:
+  push:
+    branches:
+      - fix/production-ad-flow-20260808
+    paths:
+      - .github/workflows/tmp-fix-erratic-20260808.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/production-ad-flow-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Aplicar correcciones de estado, recordatorios y latencia
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"No se encontró patrón: {label}")
+              text = text.replace(old, new, 1)
+              p.write_text(text)
+
+          replace_once(
+              'src/services/reminderPolicy.js',
+              "const REMINDER_ELIGIBLE_STEPS = new Set([\n  'GREETING_SENT',\n  'COLLECTING_DATA',",
+              "const REMINDER_ELIGIBLE_STEPS = new Set([\n  'COLLECTING_DATA',",
+              'reminder eligible greeting'
+          )
+          replace_once(
+              'src/services/reminderPolicy.js',
+              "  if (candidate.botPaused) return false;\n  if (candidate.status === 'RECHAZADO') return false;",
+              "  if (candidate.botPaused) return false;\n  if (String(candidate.dataConsentStatus || '') !== 'ACCEPTED') return false;\n  if (candidate.status === 'RECHAZADO') return false;",
+              'reminder consent guard'
+          )
+
+          replace_once(
+              'src/routes/webhook.js',
+              "  if (Number.isFinite(configuredDelay) && configuredDelay >= 0) return configuredDelay;",
+              "  if (Number.isFinite(configuredDelay) && configuredDelay >= 0) return Math.min(configuredDelay, 5000);",
+              'hard cap send delay'
+          )
+
+          p = Path('src/services/vacancyFirstGate.js')
+          text = p.read_text()
+          old = """function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText);
+  return [
+    answer,
+    buildProfessionalVacancyPresentation(vacancy, { includeInterestPrompt: true })
+  ].filter(Boolean).join('\\n\\n');
+}"""
+          new = """function buildActiveVacancyInterestReply(vacancy = {}) {
+  return buildProfessionalVacancyPresentation(vacancy, { includeInterestPrompt: true });
+}"""
+          if old not in text:
+              raise SystemExit('No se encontró patrón: single vacancy presentation')
+          text = text.replace(old, new, 1)
+
+          old_confirm = "if (currentStep === GREETING_SENT && currentVacancy && intent.affirmative) {"
+          new_confirm = "if (currentStep === GREETING_SENT && currentVacancy && botResumeMode === APPLICATION_INTEREST_PENDING_MODE && intent.affirmative) {"
+          if old_confirm not in text:
+              raise SystemExit('No se encontró patrón: interest authority')
+          text = text.replace(old_confirm, new_confirm, 1)
+
+          pattern = re.compile(
+              r"    if \(requiresConsentBeforeCollection\(candidate\)\) \{\n"
+              r"      const initialTurn = analyzeConversationTurn\(inboundText\);\n"
+              r"      if \(initialTurn\.interest\) \{.*?\n"
+              r"      \}\n"
+              r"      return \{\n"
+              r"        action: VacancyFirstGateAction\.REPLY,\n"
+              r"        reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',",
+              re.S
+          )
+          replacement = """    if (requiresConsentBeforeCollection(candidate)) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',"""
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'No se pudo retirar salto directo a consentimiento: {count}')
+          p.write_text(text)
+
+          test_path = Path('test/erraticBehaviorAug8Regression.test.js')
+          test_path.write_text(r'''import test from 'node:test';
+import assert from 'node:assert/strict';
+import { canScheduleReminderPolicy } from '../src/services/reminderPolicy.js';
+import { VacancyFirstGateAction, resolveVacancyFirstGate } from '../src/services/vacancyFirstGate.js';
+
+const vacancy = {
+  id: 'vac-neiva',
+  title: 'Líder de Operación',
+  role: 'Líder de Operación',
+  roleDescription: 'Liderar y administrar equipos de trabajo.',
+  city: 'Neiva',
+  operationAddress: 'Sector Las Brisas',
+  requirements: 'Técnico o tecnólogo en Logística o afines.',
+  conditions: 'Turnos rotativos.',
+  isActive: true,
+  acceptingApplications: true,
+  operation: { id: 'op-neiva', name: 'Operación Neiva', city: { id: 'city-neiva', name: 'Neiva' } }
+};
+
+function baseCandidate(overrides = {}) {
+  return {
+    id: 'cand-aug8',
+    status: 'NUEVO',
+    currentStep: 'MENU',
+    vacancyId: null,
+    vacancy: null,
+    botPaused: false,
+    botResumeMode: null,
+    reminderState: 'NONE',
+    reminderScheduledFor: null,
+    lastReminderAt: null,
+    lastInboundAt: new Date('2026-08-08T20:00:00Z'),
+    dataConsentStatus: 'PENDING',
+    ...overrides
+  };
+}
+
+test('no programa recordatorio en saludo ni antes del consentimiento', () => {
+  assert.equal(canScheduleReminderPolicy(baseCandidate({ currentStep: 'GREETING_SENT' })), false);
+  assert.equal(canScheduleReminderPolicy(baseCandidate({ currentStep: 'COLLECTING_DATA' })), false);
+  assert.equal(canScheduleReminderPolicy(baseCandidate({ currentStep: 'COLLECTING_DATA', dataConsentStatus: 'ACCEPTED' })), true);
+});
+
+test('primer mensaje con interés no salta directo al consentimiento', async () => {
+  const candidate = baseCandidate();
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate,
+    currentVacancy: null,
+    currentStep: 'MENU',
+    inboundText: 'Hola, quiero más información y me interesa Líder de Operación en Neiva',
+    recentMessages: [],
+    vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
+  });
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.replyKind, 'ACTIVE_VACANCY_INTEREST_PROMPT');
+  assert.equal(decision.candidateUpdates.botResumeMode, 'awaiting_application_interest');
+  assert.match(decision.reply, /\*Vacante: Líder de Operación\*/i);
+  assert.match(decision.reply, /¿Te interesa continuar con esta vacante\?/i);
+  assert.doesNotMatch(decision.reply, /autorizo a LoginPro|tratamiento de datos/i);
+});
+
+test('solo una confirmación posterior al resumen habilita el consentimiento', async () => {
+  const candidate = baseCandidate({ currentStep: 'GREETING_SENT', vacancyId: vacancy.id, vacancy, botResumeMode: 'awaiting_application_interest' });
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate,
+    currentVacancy: vacancy,
+    currentStep: 'GREETING_SENT',
+    inboundText: 'Sí, quiero continuar',
+    recentMessages: [],
+    vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
+  });
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
+  assert.match(decision.reply, /autorización|autorizo/i);
+  assert.doesNotMatch(decision.reply, /compárteme nombre|número de documento|restricciones médicas/i);
+});
+''')
+      - name: Verificar sintaxis y regresiones
+        run: |
+          node --check src/services/reminderPolicy.js
+          node --check src/routes/webhook.js
+          node --check src/services/vacancyFirstGate.js
+          node --test test/erraticBehaviorAug8Regression.test.js test/vacancyFirstGate.test.js test/productionPaidAdFlowRegressions.test.js test/dataConsentOrderRecovery.test.js test/conversationIntent.test.js
+      - name: Commit de corrección y limpieza del workflow temporal
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-fix-erratic-20260808.yml
+          git add src/services/reminderPolicy.js src/routes/webhook.js src/services/vacancyFirstGate.js test/erraticBehaviorAug8Regression.test.js
+          git commit -m "fix(conversation): corregir regresiones erráticas del 8 de agosto"
+          git push origin HEAD:fix/production-ad-flow-20260808
