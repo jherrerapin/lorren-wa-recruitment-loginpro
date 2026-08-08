@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { resolveVacancyFirstGate, VacancyFirstGateAction } from '../src/services/vacancyFirstGate.js';
 import { isAffirmativeVacancyConfirmation, APPLICATION_INTEREST_PENDING_MODE, DATA_CONSENT_PENDING_MODE } from '../src/services/dataConsentGate.js';
 import { isApplicationFollowUpQuestion } from '../src/routes/webhook.js';
@@ -110,4 +111,34 @@ test('latencia: configuración heredada de 60s queda limitada a máximo 20s', ()
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
     if (previousReasoning === undefined) delete process.env.LORREN_REASONING_WINDOW_MS; else process.env.LORREN_REASONING_WINDOW_MS = previousReasoning;
   }
+});
+
+
+test('producción: interés explícito al resolver vacante pasa directamente a consentimiento', async () => {
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: candidate(),
+    currentVacancy: null,
+    inboundText: 'Quiero postularme a Líder de Operación en Neiva',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [],
+    vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
+  });
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT');
+  assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
+  assert.match(decision.reply, /Vacante: Líder de Operación/i);
+  assert.match(decision.reply, /Antes de recibir o guardar datos personales/i);
+  assert.doesNotMatch(decision.reply, /¿Te interesa continuar con esta vacante\?/i);
+});
+
+test('defensa: vacancy-first entrega contexto de vacante al filtro de seguridad', () => {
+  const source = readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
+  assert.match(source, /replyKind: vacancyFirstGateDecision\.replyKind,[\s\S]{0,180}safetyVacancy: currentVacancy \|\| vacancyFirstGateDecision\.vacancy \|\| null/);
+});
+
+test('Meta: confirmación con interés explícito prepara consentimiento y no repite interés', () => {
+  const source = readFileSync(new URL('../src/services/dataConsentGate.js', import.meta.url), 'utf8');
+  assert.match(source, /explicitApplicationInterest = Boolean\(analyzeConversationTurn\(body\)\.interest\)/);
+  assert.match(source, /campaign_vacancy_confirmed_interest/);
+  assert.match(source, /buildVacancyInfoReply\(vacancy, \{ includeInterestPrompt: false \}\)/);
 });

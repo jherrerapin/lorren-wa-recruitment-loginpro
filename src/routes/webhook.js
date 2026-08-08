@@ -2088,7 +2088,8 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
       reason: vacancyFirstGateDecision.reason,
-      replyKind: vacancyFirstGateDecision.replyKind
+      replyKind: vacancyFirstGateDecision.replyKind,
+      safetyVacancy: currentVacancy || vacancyFirstGateDecision.vacancy || null
     });
   }
 

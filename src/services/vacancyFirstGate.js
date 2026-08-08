@@ -111,8 +111,11 @@ function buildVacancyOverview(vacancy = {}) {
 }
 
 function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
-  const answer = buildVacancyInformationAnswer(vacancy, inboundText) || buildVacancyOverview(vacancy);
-  return `${answer}\n\n¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.`;
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText);
+  return [
+    answer,
+    buildProfessionalVacancyPresentation(vacancy, { includeInterestPrompt: true })
+  ].filter(Boolean).join('\n\n');
 }
 
 function missingDataPrompt(candidate = {}, vacancy = null) {
@@ -755,6 +758,30 @@ export async function resolveVacancyFirstGate({
 
   if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
     if (requiresConsentBeforeCollection(candidate)) {
+      const initialTurn = analyzeConversationTurn(inboundText);
+      if (initialTurn.interest) {
+        const informationAnswer = buildVacancyInformationAnswer(resolution.vacancy, inboundText);
+        return {
+          action: VacancyFirstGateAction.REPLY,
+          reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
+          replyKind: 'DATA_CONSENT_PROMPT',
+          vacancyId: resolution.vacancy.id,
+          vacancy: resolution.vacancy,
+          candidateUpdates: {
+            vacancyId: resolution.vacancy.id,
+            currentStep: GREETING_SENT,
+            botResumeMode: buildConsentPendingMode(),
+            reminderScheduledFor: null,
+            reminderState: 'SKIPPED'
+          },
+          reply: [
+            informationAnswer,
+            buildProfessionalVacancyPresentation(resolution.vacancy),
+            buildDataConsentPromptReply()
+          ].filter(Boolean).join('\n\n'),
+          resolution
+        };
+      }
       return {
         action: VacancyFirstGateAction.REPLY,
         reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',

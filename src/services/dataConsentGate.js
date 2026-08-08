@@ -969,8 +969,8 @@ function buildVacancyConfirmationPrompt(vacancy = {}) {
   return `Hola, soy Lórren, asistente de selección de LoginPro. ¿Escribes por la vacante de ${vacancyTitle(vacancy)}${place}? Puedes confirmarme de forma natural o decirme el cargo correcto.`;
 }
 
-function buildVacancyInfoReply(vacancy = {}) {
-  return buildProfessionalVacancyPresentation(vacancy, { includeInterestPrompt: true });
+function buildVacancyInfoReply(vacancy = {}, { includeInterestPrompt = true } = {}) {
+  return buildProfessionalVacancyPresentation(vacancy, { includeInterestPrompt });
 }
 
 export function buildVacancyQuestionReply(vacancy = {}, text = '') {
@@ -1147,6 +1147,23 @@ async function handleCampaignVacancyConfirmation(prisma, candidate, message, fro
   const questionReply = buildVacancyQuestionReply(vacancy, body);
   if (isAffirmativeVacancyConfirmation(body)) {
     const cvResendRequired = candidate.botResumeMode === CAMPAIGN_CONFIRMATION_CV_MODE;
+    const explicitApplicationInterest = Boolean(analyzeConversationTurn(body).interest);
+    if (explicitApplicationInterest) {
+      await prisma.candidate.update({
+        where: { id: candidate.id },
+        data: {
+          currentStep: ConversationStep.GREETING_SENT,
+          botResumeMode: buildConsentPendingMode({ cvResendRequired })
+        }
+      });
+      const reply = [
+        questionReply,
+        buildVacancyInfoReply(vacancy, { includeInterestPrompt: false }),
+        buildDataConsentPromptReply()
+      ].filter(Boolean).join('\n\n');
+      await sendAndStore(prisma, candidate.id, from, reply, 'campaign_vacancy_confirmed_interest', { vacancyId: vacancy.id, cvResendRequired });
+      return true;
+    }
     await prisma.candidate.update({
       where: { id: candidate.id },
       data: {
