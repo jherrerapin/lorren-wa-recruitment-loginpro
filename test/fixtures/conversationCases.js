@@ -658,9 +658,9 @@ export const conversationCases = [
     id: 'human-intervention-pauses-bot',
     steps: ['si me interesa'],
     preMessages: [
-      { direction: 'OUTBOUND', body: 'Hola, te escribe un humano del equipo.', rawPayload: {}, createdAt: new Date('2026-04-07T09:59:00.000Z') }
+      { direction: 'OUTBOUND', body: 'Hola, te escribe un humano del equipo.', rawPayload: { source: 'admin_outbound', actor: 'RECRUITER', sourceCategory: 'MANUAL_AUTHORIZED' }, createdAt: new Date('2026-04-07T09:59:00.000Z') }
     ],
-    candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post' }),
+    candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post', botPaused: true, botPausedAt: new Date('2026-04-07T09:59:00.000Z'), botPausedBy: 'recruiter', botPauseReason: 'Conversacion tomada manualmente desde dashboard', botResumeMode: 'manual_resume_dashboard', reminderState: ReminderState.CANCELLED }),
     expect: {
       candidate: { botPaused: true },
       exactOutboundCount: 0
@@ -946,6 +946,15 @@ export const conversationCases = [
       lastInboundAt: new Date()
     }),
     interviewSlots: schedulingSlots,
+    interviewBookings: [{
+      id: 'booking-scheduled-question',
+      candidateId: 'candidate-1',
+      vacancyId: 'vac-sched',
+      slotId: 'slot-1',
+      scheduledAt: new Date(Date.now() + 8 * 60 * 60 * 1000),
+      status: 'SCHEDULED',
+      reminderWindowClosed: false
+    }],
     expect: {
       candidate: { botPaused: false },
       lastReplyIncludes: ['direccion de entrevista', 'Calle 80 # 10-20'],

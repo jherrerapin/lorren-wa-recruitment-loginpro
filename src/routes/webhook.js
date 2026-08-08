@@ -2321,7 +2321,12 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     && !isDocumentValidationQuestion(cleanText)
   );
 
-  if ((resolvedIntent === 'faq' || isFAQ(cleanText)) && candidate.currentStep !== ConversationStep.DONE) {
+  if (
+    (resolvedIntent === 'faq' || isFAQ(cleanText))
+    && candidate.currentStep !== ConversationStep.DONE
+    && !isSchedulingConfirmationIntent(cleanText)
+    && !isSchedulingRescheduleIntent(cleanText)
+  ) {
     if (currentVacancy) return replyWithVacancyContext(candidate, currentVacancy);
     return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });
   }

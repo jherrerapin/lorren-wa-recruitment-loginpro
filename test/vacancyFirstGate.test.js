@@ -550,3 +550,20 @@ test('vacante inactiva explícita en Siberia persiste candidateUpdates.vacancyId
   assert.equal(decision.vacancyId, undefined);
   assert.equal(decision.resolution.reason, 'matched_inactive_vacancy');
 });
+
+test('vacante activa asignada responde requisitos antes de entrar a recolección cuando hay interés explícito', async () => {
+  const active = vacancy({ id: 'vac-question-interest' });
+  const decision = await decide({
+    text: '¿Qué requisitos tiene la vacante? Sí me interesa',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT, vacancyId: active.id },
+    vacancies: [active],
+    currentVacancy: active
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_ENTER_DATA');
+  assert.match(decision.reply, /requisitos registrados/i);
+  assert.match(decision.reply, /para avanzar, compárteme/i);
+  assert.ok(decision.reply.indexOf('requisitos registrados') < decision.reply.indexOf('Para avanzar'));
+});
+

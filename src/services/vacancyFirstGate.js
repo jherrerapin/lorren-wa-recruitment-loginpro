@@ -675,6 +675,8 @@ export async function resolveVacancyFirstGate({
 
     const intent = detectAffirmationIntent(inboundText);
     if (currentStep === GREETING_SENT && currentVacancy && intent.affirmative) {
+      const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
+      const dataPrompt = buildActiveDataPrompt(candidate, currentVacancy);
       return {
         action: VacancyFirstGateAction.REPLY,
         reason: 'ACTIVE_VACANCY_CONFIRMED_ENTER_DATA',
@@ -682,7 +684,7 @@ export async function resolveVacancyFirstGate({
         vacancyId: currentVacancy.id || candidate.vacancyId,
         vacancy: currentVacancy,
         candidateUpdates: buildCollectingDataUpdates(currentVacancy.id || candidate.vacancyId),
-        reply: buildActiveDataPrompt(candidate, currentVacancy)
+        reply: [informationAnswer, dataPrompt].filter(Boolean).join('\n\n')
       };
     }
 

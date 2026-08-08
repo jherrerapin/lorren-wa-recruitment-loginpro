@@ -235,7 +235,7 @@ export const CONSENT_ORDER_REPLAYS = Object.freeze([
       reason: 'consent_pending',
       outboundCount: 1,
       nextCalls: 0,
-      includesInOrder: ['gestionar tu postulación', 'Para continuar necesito saber si autorizas'],
+      includesInOrder: ['gestionar la postulación', 'Para continuar necesito saber si autorizas'],
       finalResumeMode: 'awaiting_data_consent'
     }
   },
