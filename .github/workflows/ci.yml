@@ -320,11 +320,35 @@ jobs:
           extract_failure_identities() {
             local source_file="$1"
             local target_file="$2"
-            grep -E '^[[:space:]]*not ok [0-9]+ - ' "$source_file" \
-              | sed -E 's/^[[:space:]]*not ok [0-9]+ - //' \
-              | sed -E 's/[[:space:]]+#.*$//' \
-              | sed -E 's/[[:space:]]+$//' \
-              | LC_ALL=C sort -u > "$target_file" || true
+            awk '
+              function emit_pending() {
+                if (pending != "" && !is_subtest_container) {
+                  print pending
+                }
+                pending = ""
+                is_subtest_container = 0
+              }
+
+              /^[[:space:]]*not ok [0-9]+ - / {
+                emit_pending()
+                identity = $0
+                sub(/^[[:space:]]*not ok [0-9]+ - /, "", identity)
+                sub(/[[:space:]]+#.*$/, "", identity)
+                sub(/[[:space:]]+$/, "", identity)
+                pending = identity
+                next
+              }
+
+              pending != "" && /^[[:space:]]*failureType:[[:space:]].*subtestsFailed/ {
+                is_subtest_container = 1
+                next
+              }
+
+              END {
+                emit_pending()
+              }
+            ' "$source_file" \
+              | LC_ALL=C sort -u > "$target_file"
           }
 
           extract_failure_identities legacy-test-output.log legacy_test_failures.txt
