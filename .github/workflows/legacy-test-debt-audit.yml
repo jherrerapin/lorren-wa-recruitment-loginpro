@@ -112,3 +112,26 @@ jobs:
             cat inherited-identities.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run candidate-facing conversation debt in isolation
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+
+          echo "=== conversation-harness.test.js ==="
+          node --test test/conversation-harness.test.js
+          harness_exit=$?
+          echo "ISOLATED_CONVERSATION_HARNESS_EXIT=$harness_exit"
+
+          echo "=== conversationEngineParity.test.js ==="
+          node --test test/conversationEngineParity.test.js
+          parity_exit=$?
+          echo "ISOLATED_CONVERSATION_PARITY_EXIT=$parity_exit"
+
+          echo "=== dataConsentOrderReplay.test.js ==="
+          node --test test/dataConsentOrderReplay.test.js
+          consent_exit=$?
+          echo "ISOLATED_CONSENT_ORDER_REPLAY_EXIT=$consent_exit"
+
+          exit 0
