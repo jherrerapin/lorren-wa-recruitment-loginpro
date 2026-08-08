@@ -57,6 +57,33 @@ jobs:
           node --check src/services/vacancyFirstGate.js &&
           node --check src/routes/webhook.js
 
+      - name: Trace no-slot scheduling route
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          process.env.NODE_ENV = 'test';
+          process.env.OPENAI_API_KEY = 'test-openai-key';
+          process.env.USE_CONVERSATION_ENGINE = 'false';
+          process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
+          process.env.META_ACCESS_TOKEN = 'meta-access-token';
+          process.env.LORREN_SEND_DELAY_MS = '0';
+          const { conversationParityCases } = await import('./test/fixtures/conversationParityCases.js');
+          const { runConversationCase } = await import('./test/helpers/conversationHarness.js');
+          const { processText } = await import('./src/routes/webhook.js');
+          const { createDebugTrace } = await import('./src/services/debugTrace.js');
+          const scenario = conversationParityCases.find((item) => item.id === 'parity-no-available-slots');
+          const result = await runConversationCase(scenario, {
+            processText,
+            createDebugTrace,
+            assertExpectations: false,
+            openAiCalls: [],
+            recognizeCurrentEnginePrompt: true
+          });
+          console.log('NO_SLOT_CANDIDATE=' + JSON.stringify(result.candidate));
+          console.log('NO_SLOT_OUTBOUND=' + JSON.stringify(result.outbound));
+          console.log('NO_SLOT_TRACES=' + JSON.stringify(result.debugTraces));
+          NODE
+
       - name: Validate repaired focal behavior
         run: >-
           node --test
