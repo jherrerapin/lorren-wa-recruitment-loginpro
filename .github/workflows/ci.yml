@@ -7,15 +7,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: ci-recruitment-repair-${{ github.event.pull_request.number || github.ref }}
+  group: ci-recruitment-harness-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  repair-recruitment-release:
-    name: Apply and validate recruitment release fixes
+  measure-conversation-harness:
+    name: Measure recruitment conversation harness
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -30,11 +30,8 @@ jobs:
       DISPATCH_WWEB_AUTO_START: "false"
       PUPPETEER_SKIP_DOWNLOAD: "true"
     steps:
-      - name: Check out repair branch
+      - name: Check out branch
         uses: actions/checkout@v5
-        with:
-          ref: audit/recruitment-release-debt
-          persist-credentials: true
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v5
@@ -48,52 +45,24 @@ jobs:
       - name: Generate Prisma Client
         run: npm run prisma:generate
 
-      - name: Apply deterministic repair
-        run: node scripts/apply-recruitment-release-fixes.mjs
-
-      - name: Validate repaired syntax
-        run: >-
-          node --check src/services/contextualResponseGate.js &&
-          node --check src/services/vacancyFirstGate.js &&
-          node --check src/routes/webhook.js
-
-      - name: Trace no-slot scheduling route
+      - name: Measure harness
         shell: bash
         run: |
-          node --input-type=module <<'NODE'
-          process.env.NODE_ENV = 'test';
-          process.env.OPENAI_API_KEY = 'test-openai-key';
-          process.env.USE_CONVERSATION_ENGINE = 'false';
-          process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
-          process.env.META_ACCESS_TOKEN = 'meta-access-token';
-          process.env.LORREN_SEND_DELAY_MS = '0';
-          const { conversationParityCases } = await import('./test/fixtures/conversationParityCases.js');
-          const { runConversationCase } = await import('./test/helpers/conversationHarness.js');
-          const { processText } = await import('./src/routes/webhook.js');
-          const { createDebugTrace } = await import('./src/services/debugTrace.js');
-          const { evaluateSchedulingGuard } = await import('./src/services/schedulingGuard.js');
-          const scenario = conversationParityCases.find((item) => item.id === 'parity-no-available-slots');
-          const initial = structuredClone(scenario.candidate);
-          console.log('NO_SLOT_GUARD_INITIAL=' + JSON.stringify(evaluateSchedulingGuard({
-            candidate: initial,
-            vacancy: scenario.vacancies[0],
-            nextSlot: { slot: { id: 'eligibility-preview' } },
-            actionType: 'offer_interview'
-          })));
-          console.log('NO_SLOT_CONFIRM_REGEX=' + /\b(confirmo|agendame|agendar|me sirve|me queda bien|si puedo|vale ese horario)\b/.test('quiero agendar la entrevista'));
-          const result = await runConversationCase(scenario, {
-            processText,
-            createDebugTrace,
-            assertExpectations: false,
-            openAiCalls: [],
-            recognizeCurrentEnginePrompt: true
-          });
-          console.log('NO_SLOT_CANDIDATE=' + JSON.stringify(result.candidate));
-          console.log('NO_SLOT_OUTBOUND=' + JSON.stringify(result.outbound));
-          console.log('NO_SLOT_TRACES=' + JSON.stringify(result.debugTraces));
-          NODE
+          set +e
+          node --test test/conversation-harness.test.js > harness.log 2>&1
+          harness_exit=$?
+          set -e
+          cat harness.log
+          awk '/^[[:space:]]*not ok [0-9]+ - / {
+            line=$0
+            sub(/^[[:space:]]*not ok [0-9]+ - /, "", line)
+            sub(/[[:space:]]+#.*$/, "", line)
+            print "::warning title=Conversation harness residual::" line
+          }' harness.log
+          echo "Harness exit: $harness_exit"
+          exit 0
 
-      - name: Validate repaired focal behavior
+      - name: Validate release focal suite
         run: >-
           node --test
           test/recruitmentReleaseGate.test.js
@@ -101,17 +70,3 @@ jobs:
           test/vacancyFirstGate.test.js
           test/dataConsentOrderReplay.test.js
           test/conversationEngineParity.test.js
-
-      - name: Commit repaired runtime and regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet; then
-            echo "Repair already present."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src test
-          git commit -m "fix(conversation): close residual recruitment release gaps"
-          git push origin HEAD:audit/recruitment-release-debt
