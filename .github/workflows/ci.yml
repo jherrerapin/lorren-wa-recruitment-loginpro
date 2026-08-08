@@ -71,7 +71,16 @@ jobs:
           const { runConversationCase } = await import('./test/helpers/conversationHarness.js');
           const { processText } = await import('./src/routes/webhook.js');
           const { createDebugTrace } = await import('./src/services/debugTrace.js');
+          const { evaluateSchedulingGuard } = await import('./src/services/schedulingGuard.js');
           const scenario = conversationParityCases.find((item) => item.id === 'parity-no-available-slots');
+          const initial = structuredClone(scenario.candidate);
+          console.log('NO_SLOT_GUARD_INITIAL=' + JSON.stringify(evaluateSchedulingGuard({
+            candidate: initial,
+            vacancy: scenario.vacancies[0],
+            nextSlot: { slot: { id: 'eligibility-preview' } },
+            actionType: 'offer_interview'
+          })));
+          console.log('NO_SLOT_CONFIRM_REGEX=' + /\b(confirmo|agendame|agendar|me sirve|me queda bien|si puedo|vale ese horario)\b/.test('quiero agendar la entrevista'));
           const result = await runConversationCase(scenario, {
             processText,
             createDebugTrace,
