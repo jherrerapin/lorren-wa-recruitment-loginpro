@@ -9,7 +9,7 @@ def replace_once(path, old, new, label):
     p.write_text(text.replace(old, new, 1))
 
 
-# Parser: "cuatro" no puede convertirse en 3 y "sí, más de 4 años" debe conservarse.
+# 1) Parser de experiencia observado en conversaciones reales del 8 de agosto.
 replace_once(
     'src/services/candidateData.js',
     'un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 3, cinco: 5,',
@@ -19,11 +19,20 @@ replace_once(
 replace_once(
     'src/services/candidateData.js',
     r"  const hasShortAffirmativeContext = /\bsi\s+tengo\s+/.test(compact);",
-    r"  const hasShortAffirmativeContext = /\bsi(?:\s+tengo)?\b/.test(compact) && /\bmas\s+de\b/.test(compact);",
+    r"  const hasShortAffirmativeContext = /\bsi\s+tengo\b/.test(compact) || (/\bsi\b/.test(compact) && /\bmas\s+de\b/.test(compact));",
     'experiencia corta afirmativa'
 )
+replace_once(
+    'src/services/candidateData.js',
+    r"  const durationRegex = /\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/gi;",
+    r"""  const wordDurationWithExperience = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\s+de\s+experiencia\b/i);
+  if (wordDurationWithExperience?.[1]) return normalizeExperienceDuration(wordDurationWithExperience[1]);
 
-# Frontera para consultas comerciales y prioridad de preguntas de vacante.
+  const durationRegex = /\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/gi;""",
+    'duración de experiencia en palabras'
+)
+
+# 2) Consultas comerciales no deben entrar en el FSM de candidatos.
 p = Path('src/services/vacancyFirstGate.js')
 text = p.read_text()
 marker = """function requiresConsentBeforeCollection(candidate = {}) {
@@ -33,9 +42,9 @@ marker = """function requiresConsentBeforeCollection(candidate = {}) {
 insertion = marker + """
 function isLikelyCommercialInquiry(text = '') {
   const normalized = normalizeResolverText(text);
-  const hasBusinessIdentity = /\\b(tengo una empresa|tenemos una empresa|somos una empresa|mi empresa|ofrecemos|prestamos servicios|proveedor|propuesta comercial|alianza comercial)\\b/.test(normalized);
-  const hasServiceContext = /\\b(ultima milla|servicios?|operamos|cobertura|distribucion|transporte|logistica|descargue|cargue)\\b/.test(normalized);
-  const hasCandidateIntent = /\\b(postular|postulacion|vacante|empleo|buscar trabajo|busco trabajo|cargo|hoja de vida|hv)\\b/.test(normalized);
+  const hasBusinessIdentity = /\b(tengo una empresa|tenemos una empresa|somos una empresa|mi empresa|ofrecemos|prestamos servicios|proveedor|propuesta comercial|alianza comercial)\b/.test(normalized);
+  const hasServiceContext = /\b(ultima milla|servicios?|operamos|cobertura|distribucion|transporte|logistica|descargue|cargue)\b/.test(normalized);
+  const hasCandidateIntent = /\b(postular|postulacion|vacante|empleo|buscar trabajo|busco trabajo|cargo|hoja de vida|hv)\b/.test(normalized);
   return hasBusinessIdentity && hasServiceContext && !hasCandidateIntent;
 }
 """
@@ -62,6 +71,7 @@ if attachment_block not in text:
     raise SystemExit('No se encontró patrón: attachment guard')
 text = text.replace(attachment_block, commercial_block, 1)
 
+# 3) Una pregunta de la vacante actual se responde antes de reinterpretarla como cambio de vacante.
 assigned_marker = """  const assignedVacancyChangeDecision = await evaluateAssignedVacancyChange({
     prisma,
     candidate,
@@ -74,6 +84,7 @@ assigned_marker = """  const assignedVacancyChangeDecision = await evaluateAssig
 question_guard = """  const currentTurn = analyzeConversationTurn(inboundText, { currentStep });
   if (currentVacancy && isOpenVacancy(currentVacancy)
     && (currentTurn.vacancyInformationRequest || currentTurn.question)
+    && !currentTurn.interest
     && currentTurn.primaryIntent !== 'change_intent') {
     const informationReply = buildVacancyInformationAnswer(currentVacancy, inboundText);
     if (informationReply) {
@@ -94,7 +105,7 @@ if assigned_marker not in text:
 text = text.replace(assigned_marker, question_guard, 1)
 p.write_text(text)
 
-# Reminder tests: after the policy change, only accepted consent is eligible.
+# 4) Pruebas de recordatorio: la política ya exige consentimiento aceptado.
 p = Path('test/reminderPolicy.test.js')
 text = p.read_text()
 if "dataConsentStatus: 'ACCEPTED'" not in text:
@@ -103,7 +114,8 @@ if "dataConsentStatus: 'ACCEPTED'" not in text:
         "    botPaused: false,\n    dataConsentStatus: 'ACCEPTED',\n    ...overrides",
         1
     )
-text += """
+if "no programa recordatorio mientras espera consentimiento" not in text:
+    text += """
 
 test('no programa recordatorio mientras espera consentimiento', () => {
   assert.equal(canScheduleReminderPolicy(candidate({ currentStep: 'COLLECTING_DATA', dataConsentStatus: 'PENDING' })), false);
@@ -115,7 +127,7 @@ test('no programa recordatorio desde GREETING_SENT aunque exista consentimiento'
 """
 p.write_text(text)
 
-# Regresiones exactas de las conversaciones del 8 de agosto.
+# 5) Regresiones exactas de conversaciones del 8 de agosto.
 Path('test/erraticBehaviorAug8Regression.test.js').write_text(r'''import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
