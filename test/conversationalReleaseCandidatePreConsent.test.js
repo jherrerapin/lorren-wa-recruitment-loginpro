@@ -89,13 +89,44 @@ function buildHarness({
         return { count: 1 };
       },
       create: async ({ data }) => {
-        const row = { id: `TEST-RC-OUTBOUND-ROW-${outboundRows.length + 1}`, ...structuredClone(data) };
+        const row = {
+          id: `TEST-RC-OUTBOUND-ROW-${outboundRows.length + 1}`,
+          createdAt: new Date(),
+          ...structuredClone(data)
+        };
         outboundRows.push(row);
         return structuredClone(row);
+      },
+      findMany: async ({ where = {}, orderBy, take } = {}) => {
+        let rows = outboundRows.filter((item) => {
+          if (where.candidateId && item.candidateId !== where.candidateId) return false;
+          if (where.direction && item.direction !== where.direction) return false;
+          if (where.body !== undefined && item.body !== where.body) return false;
+          if (where.createdAt?.gte && new Date(item.createdAt) < new Date(where.createdAt.gte)) return false;
+          return true;
+        });
+        if (orderBy?.createdAt === 'desc') {
+          rows = rows.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+        }
+        if (take) rows = rows.slice(0, take);
+        return structuredClone(rows);
       },
       findUnique: async ({ where }) => {
         const row = [...inboundRows, ...outboundRows].find((item) => item.id === where.id);
         return row ? { rawPayload: structuredClone(row.rawPayload) } : null;
+      },
+      updateMany: async ({ where = {}, data = {} }) => {
+        const row = [...inboundRows, ...outboundRows].find((item) => {
+          if (where.id && item.id !== where.id) return false;
+          if (where.rawPayload?.equals !== undefined
+              && JSON.stringify(item.rawPayload) !== JSON.stringify(where.rawPayload.equals)) {
+            return false;
+          }
+          return true;
+        });
+        if (!row) return { count: 0 };
+        Object.assign(row, structuredClone(data));
+        return { count: 1 };
       },
       update: async ({ where, data }) => {
         const row = [...inboundRows, ...outboundRows].find((item) => item.id === where.id);

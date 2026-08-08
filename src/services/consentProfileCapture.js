@@ -63,7 +63,7 @@ export async function captureConsentedProfileData({
   vacancy = null,
   currentText = ''
 } = {}) {
-  if (!prisma?.candidate?.update || !candidate?.id) {
+  if (!candidate?.id) {
     return { candidate, capturedFields: [], reason: 'candidate_not_ready' };
   }
 
@@ -96,13 +96,32 @@ export async function captureConsentedProfileData({
     return { candidate, capturedFields: [], reason: 'no_new_profile_data' };
   }
 
-  const updatedCandidate = await prisma.candidate.update({
-    where: { id: candidate.id },
+  if (typeof prisma?.candidate?.updateMany !== 'function'
+    || typeof prisma?.candidate?.findUnique !== 'function') {
+    return { candidate, capturedFields: [], reason: 'candidate_not_ready' };
+  }
+
+  const writeResult = await prisma.candidate.updateMany({
+    where: {
+      id: candidate.id,
+      dataConsentStatus: 'ACCEPTED'
+    },
     data: update
   });
+  const canonicalCandidate = await prisma.candidate.findUnique({
+    where: { id: candidate.id }
+  });
+
+  if (writeResult.count !== 1) {
+    return {
+      candidate: canonicalCandidate || candidate,
+      capturedFields: [],
+      reason: 'consent_changed_before_write'
+    };
+  }
 
   return {
-    candidate: updatedCandidate,
+    candidate: canonicalCandidate || { ...candidate, ...update },
     capturedFields: Object.keys(update),
     reason: 'profile_data_captured_from_consent_message'
   };

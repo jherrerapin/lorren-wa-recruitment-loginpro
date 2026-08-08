@@ -123,10 +123,17 @@ test('después de autorizar solo procesa datos incluidos en el mismo mensaje de 
       }
     },
     candidate: {
-      update: async ({ data }) => {
+      updateMany: async ({ where, data }) => {
+        assert.equal(where.id, candidate.id);
+        assert.equal(where.dataConsentStatus, 'ACCEPTED');
         persisted = data;
-        return { ...candidate, ...data, dataConsentStatus: 'ACCEPTED' };
-      }
+        return { count: 1 };
+      },
+      findUnique: async () => ({
+        ...candidate,
+        ...persisted,
+        dataConsentStatus: 'ACCEPTED'
+      })
     }
   };
 

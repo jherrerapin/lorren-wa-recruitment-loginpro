@@ -232,10 +232,13 @@ test('la captura admite varios prefijos naturales antes de autorizar', async () 
   let persisted = null;
   const prisma = {
     candidate: {
-      update: async ({ data }) => {
+      updateMany: async ({ where, data }) => {
+        assert.equal(where.id, candidate.id);
+        assert.equal(where.dataConsentStatus, 'ACCEPTED');
         persisted = data;
-        return { ...candidate, ...data };
-      }
+        return { count: 1 };
+      },
+      findUnique: async () => ({ ...candidate, ...persisted })
     }
   };
 

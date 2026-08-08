@@ -29,6 +29,8 @@ function createHarness(replay) {
   const sentBodies = [];
   const outboundRecords = [];
   const candidateUpdates = [];
+  const messageRows = [];
+  let messageSequence = 0;
   const vacancy = {
     id: 'vacancy-consent-order',
     title: 'Líder de Operación',
@@ -49,6 +51,9 @@ function createHarness(replay) {
     return { data: { messages: [{ id: 'TEST-OUTBOUND-ID' }] } };
   };
 
+  const cloneRow = (row) => row ? structuredClone(row) : null;
+  const samePayload = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
   const prisma = {
     candidate: {
       upsert: async () => structuredClone(candidate),
@@ -68,11 +73,66 @@ function createHarness(replay) {
       findUnique: async ({ where }) => where.id === vacancy.id ? structuredClone(vacancy) : null
     },
     message: {
-      findFirst: async () => null,
-      createMany: async () => ({ count: 1 }),
+      findFirst: async ({ where }) => cloneRow(messageRows.find((row) => (
+        row.candidateId === where.candidateId
+        && row.direction === where.direction
+        && row.waMessageId === where.waMessageId
+      ))),
+      findMany: async ({ where, take }) => messageRows
+        .filter((row) => (
+          row.candidateId === where.candidateId
+          && row.direction === where.direction
+          && row.body === where.body
+          && row.createdAt >= where.createdAt.gte
+        ))
+        .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+        .slice(0, take)
+        .map(cloneRow),
+      findUnique: async ({ where }) => cloneRow(messageRows.find((row) => row.id === where.id)),
+      createMany: async ({ data }) => {
+        let count = 0;
+        for (const input of data) {
+          const duplicate = messageRows.some((row) => (
+            row.candidateId === input.candidateId
+            && row.direction === input.direction
+            && row.waMessageId === input.waMessageId
+          ));
+          if (duplicate) continue;
+          messageSequence += 1;
+          messageRows.push({
+            id: `TEST-MESSAGE-${messageSequence}`,
+            ...structuredClone(input),
+            createdAt: new Date()
+          });
+          count += 1;
+        }
+        return { count };
+      },
       create: async ({ data }) => {
-        outboundRecords.push(structuredClone(data));
-        return { id: `TEST-OUTBOUND-${outboundRecords.length}`, ...structuredClone(data) };
+        messageSequence += 1;
+        const row = {
+          id: `TEST-OUTBOUND-${messageSequence}`,
+          ...structuredClone(data),
+          createdAt: new Date()
+        };
+        messageRows.push(row);
+        outboundRecords.push(cloneRow(row));
+        return cloneRow(row);
+      },
+      update: async ({ where, data }) => {
+        const index = messageRows.findIndex((row) => row.id === where.id);
+        if (index < 0) throw new Error('message_not_found');
+        messageRows[index] = { ...messageRows[index], ...structuredClone(data) };
+        return cloneRow(messageRows[index]);
+      },
+      updateMany: async ({ where, data }) => {
+        const index = messageRows.findIndex((row) => (
+          row.id === where.id
+          && samePayload(row.rawPayload, where.rawPayload?.equals)
+        ));
+        if (index < 0) return { count: 0 };
+        messageRows[index] = { ...messageRows[index], ...structuredClone(data) };
+        return { count: 1 };
       }
     }
   };
