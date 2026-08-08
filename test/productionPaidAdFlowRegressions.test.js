@@ -6,6 +6,7 @@ import { isApplicationFollowUpQuestion } from '../src/routes/webhook.js';
 import { resolveCampaignForReferral } from '../src/services/campaignAttribution.js';
 import { getMultilineWindowMs } from '../src/services/multiline.js';
 
+// Regresiones derivadas de conversaciones reales de pauta observadas el 8 de agosto de 2026.
 const vacancy = {
   id: 'vac-neiva-leader',
   title: 'Líder de Operación',
