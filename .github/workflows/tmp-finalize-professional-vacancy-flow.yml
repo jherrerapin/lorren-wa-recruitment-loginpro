@@ -30,9 +30,7 @@ jobs:
           node-version: "20"
           cache: npm
       - name: Apply patch
-        run: |
-          python3 scripts/tmp_finalize_professional_vacancy_flow.py
-          python3 scripts/tmp_align_professional_vacancy_tests.py
+        run: python3 scripts/tmp_finalize_professional_vacancy_flow_v2.py
       - name: Install dependencies
         run: |
           npm ci
@@ -47,8 +45,7 @@ jobs:
       - name: Commit validated changes and cleanup
         run: |
           rm .github/workflows/tmp-finalize-professional-vacancy-flow.yml
-          rm scripts/tmp_finalize_professional_vacancy_flow.py
-          rm scripts/tmp_align_professional_vacancy_tests.py
+          rm scripts/tmp_finalize_professional_vacancy_flow_v2.py
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"
