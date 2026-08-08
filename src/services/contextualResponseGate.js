@@ -240,7 +240,7 @@ export function inferContextualSemanticIntent({
     if (/\b(quien|persona|contacto|preguntar|recibe|recepcion)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_CONTACT_PERSON';
     if (/\b(hora|horario|cuando|fecha|dia)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_TIME';
 
-    if (/\b(como\s+va|estado\s+de|alguna\s+novedad|hay\s+novedad|mi\s+proceso|mi\s+postulacion|cuando\s+me\s+llaman|me\s+van\s+a\s+llamar|sigue\s+registrad[oa])\b/.test(normalized)) {
+    if (/\b(como\s+va|estado\s+de|alguna\s+novedad|hay\s+novedad|mi\s+proceso|mi\s+postulacion|me\s+habia\s+postulado|me\s+postule|que\s+ha\s+pasado|cuando\s+me\s+llaman|me\s+van\s+a\s+llamar|sigue\s+registrad[oa])\b/.test(normalized)) {
       return 'ASK_APPLICATION_STATUS';
     }
 
@@ -269,7 +269,8 @@ export function evaluateContextualResponseGate({
   const realPendingAction = hasPendingAction ?? Boolean(
     !vacancyAssigned
     || resolvedReadiness.missingFields?.length
-    || (!resolvedReadiness.hasValidCv && candidate.currentStep === 'ASK_CV')
+    || candidate.currentStep === 'CONFIRMING_DATA'
+    || candidate.currentStep === 'ASK_CV'
     || candidate.currentStep === 'SCHEDULING'
   );
 
@@ -382,7 +383,17 @@ export function evaluateContextualResponseGate({
         responsePurpose: ContextualResponsePurpose.NONE
       });
     }
-    if (['ASK_APPLICATION_STATUS', 'ASK_VACANCY_INFORMATION', 'PROVIDE_EXTRA_DATA', 'UNCLEAR', 'UNCLASSIFIED_APPOINTMENT_QUESTION'].includes(semanticIntent)) {
+    if (semanticIntent === 'ASK_APPLICATION_STATUS') {
+      return decision({
+        shouldReply: true,
+        allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,
+        reason: 'Candidate main flow is complete and asked for application status; answer from the persisted process state without reopening collection.',
+        responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,
+        reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking }),
+        metadata: { postCompletionContext: true }
+      });
+    }
+    if (['ASK_VACANCY_INFORMATION', 'PROVIDE_EXTRA_DATA', 'UNCLEAR', 'UNCLASSIFIED_APPOINTMENT_QUESTION'].includes(semanticIntent)) {
       return decision({
         shouldReply: true,
         allowedAction: ContextualAllowedAction.CONTINUE_FLOW,

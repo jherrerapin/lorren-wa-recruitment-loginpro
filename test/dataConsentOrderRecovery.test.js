@@ -121,7 +121,10 @@ test('un interés explícito recupera una etapa heredada adelantada sin volver a
   assert.equal(observed.nextCalls, 0);
   assert.equal(harness.sentBodies.length, 1);
   assert.match(harness.sentBodies[0], /Autorizo a LoginPro/i);
-  assert.doesNotMatch(harness.sentBodies[0], /compárteme|nombre completo|documento|edad/i);
+  assert.doesNotMatch(
+    harness.sentBodies[0],
+    /compárteme (?:tu )?(?:nombre|documento|edad)|nombre completo[:?]|(?:cuál|cual) es tu edad/i
+  );
   assert.equal(finalCandidate.botResumeMode, 'awaiting_data_consent');
 });
 

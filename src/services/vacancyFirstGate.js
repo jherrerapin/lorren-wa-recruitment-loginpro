@@ -256,7 +256,7 @@ function detectAffirmationIntent(text = '') {
   const tokens = new Set(normalized.split(' ').filter(Boolean));
   const hasActiveConfirmation = tokens.has('confirmo')
     || tokens.has('acepto')
-    || /\b(de acuerdo|claro que si|si confirmo|dale|hagale|listo|me interesa|continuar|quiero continuar|esta es la vacante|es la vacante)\b/.test(normalized)
+    || /\b(de acuerdo|claro que si|si confirmo|dale|hagale|listo|me interesa|me encuentro interesad[oa]|estoy interesad[oa]|continuar|quiero continuar|esta es la vacante|es la vacante)\b/.test(normalized)
     || (/\bsi\b/.test(normalized) && !/\bpero\b/.test(normalized));
   const passiveAck = /^(a\s*)?(bueno|ok|okay|entiendo|vale|gracias|listo gracias|perfecto gracias)$/.test(normalized)
     || (/\b(entendido|comprendo)\b/.test(normalized) && !hasActiveConfirmation);
@@ -675,6 +675,8 @@ export async function resolveVacancyFirstGate({
 
     const intent = detectAffirmationIntent(inboundText);
     if (currentStep === GREETING_SENT && currentVacancy && intent.affirmative) {
+      const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
+      const dataPrompt = buildActiveDataPrompt(candidate, currentVacancy);
       return {
         action: VacancyFirstGateAction.REPLY,
         reason: 'ACTIVE_VACANCY_CONFIRMED_ENTER_DATA',
@@ -682,7 +684,7 @@ export async function resolveVacancyFirstGate({
         vacancyId: currentVacancy.id || candidate.vacancyId,
         vacancy: currentVacancy,
         candidateUpdates: buildCollectingDataUpdates(currentVacancy.id || candidate.vacancyId),
-        reply: buildActiveDataPrompt(candidate, currentVacancy)
+        reply: [informationAnswer, dataPrompt].filter(Boolean).join('\n\n')
       };
     }
 

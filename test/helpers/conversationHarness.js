@@ -68,9 +68,15 @@ function buildPrismaForCase(conversationCase) {
   });
 }
 
+function candidateVisibleReplies(candidate, whatsappMock) {
+  const phone = String(candidate?.phone || '').trim();
+  return whatsappMock.sentMessages.filter((message) => String(message?.to || '').trim() === phone);
+}
+
 function assertCaseExpectations(conversationCase, prisma, whatsappMock) {
   const candidate = prisma.state.candidates[0];
-  const lastReply = whatsappMock.sentMessages.at(-1)?.body || '';
+  const candidateReplies = candidateVisibleReplies(candidate, whatsappMock);
+  const lastReply = candidateReplies.at(-1)?.body || '';
   if (conversationCase.expect?.candidate) {
     for (const [field, value] of Object.entries(conversationCase.expect.candidate)) {
       assert.deepEqual(candidate[field], value, `${conversationCase.id}: ${field} no coincide`);
@@ -96,7 +102,7 @@ function assertCaseExpectations(conversationCase, prisma, whatsappMock) {
     assert.doesNotMatch(text, pattern, `${conversationCase.id}: la respuesta final no deberia contener "${fragment}"`);
   }
   if (conversationCase.expect?.exactOutboundCount !== undefined) {
-    assert.equal(whatsappMock.sentMessages.length, conversationCase.expect.exactOutboundCount, `${conversationCase.id}: cantidad de salidas inesperada`);
+    assert.equal(candidateReplies.length, conversationCase.expect.exactOutboundCount, `${conversationCase.id}: cantidad de salidas al candidato inesperada`);
   }
   if (conversationCase.expect?.bookingCount !== undefined) {
     assert.equal(prisma.state.interviewBookings.length, conversationCase.expect.bookingCount, `${conversationCase.id}: cantidad de bookings inesperada`);
@@ -159,7 +165,7 @@ export function buildParitySnapshot({ caseId, mode, result }) {
       reminderWindowClosed: Boolean(booking.reminderWindowClosed)
     })),
     outbound: {
-      count: result.outbound?.length || 0,
+      count: candidateVisibleReplies(candidate, { sentMessages: result.outbound || [] }).length,
       sources: uniqueSorted(outboundMessages.map((message) => message?.rawPayload?.source)),
       payloadKeys
     },

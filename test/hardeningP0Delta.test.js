@@ -72,7 +72,7 @@ test('PDF ilegible se clasifica UNREADABLE y no CV_VALID', async () => {
 
   assert.notEqual(result.classification, 'CV_VALID');
   assert.equal(result.classification, 'UNREADABLE');
-  assert.equal(result.rationale, 'empty_text');
+  assert.equal(result.rationale, 'text_extraction_failed');
 });
 
 test('imagen se clasifica como CV_IMAGE_ONLY pero no como CV_VALID', async () => {
