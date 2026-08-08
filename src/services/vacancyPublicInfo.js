@@ -110,7 +110,7 @@ export function buildProfessionalVacancyPresentation(vacancy = {}, { includeInte
   );
   if (!hasDetails) sections.push('La vacante está activa para recibir postulaciones.');
 
-  const parts = ['Te comparto la información de la vacante:', sections.join('\n\n')];
+  const parts = ['A continuación encontrarás la información de la vacante:', sections.join('\n\n')];
   if (includeInterestPrompt) {
     parts.push('¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.');
   }
