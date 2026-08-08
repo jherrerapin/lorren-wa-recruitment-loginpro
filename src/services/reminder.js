@@ -97,6 +97,9 @@ export function buildReminderText(candidate = {}) {
   }
 
   if (!missingParts.length) {
+    if (candidate.currentStep === 'SCHEDULING') {
+      return 'Hola, te escribo para recordarte que tu proceso sigue activo. Ya recibimos tus datos y tu hoja de vida; solo falta definir y confirmar el horario de tu entrevista.';
+    }
     return 'Hola, te escribo para recordarte que tu proceso sigue abierto. Si necesitas apoyo para continuar, aquí quedo atento.';
   }
 

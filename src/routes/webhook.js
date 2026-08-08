@@ -47,7 +47,7 @@ import { isFeatureEnabled } from '../services/featureFlags.js';
 import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
 import { createBooking, formatInterviewDate, getNextAvailableSlot, getNextAvailableSlotAfter, getInterviewReminderAt, hydrateOfferedSlot } from '../services/interviewScheduler.js';
-import { detectInterviewIntent } from '../services/interviewLifecycle.js';
+import { detectInterviewIntent, isSchedulingOfferDecline } from '../services/interviewLifecycle.js';
 import { applyInterviewReminderResponse } from '../services/interviewBookingStateService.js';
 import {
   buildInterviewAttendanceConfirmedReply,
@@ -535,8 +535,7 @@ function isSchedulingConfirmationIntent(text = '') {
 }
 
 function isSchedulingRescheduleIntent(text = '') {
-  const n = normalizeComparableText(text);
-  return /\b(otro horario|otra hora|otro dia|otro dia|reagend|cambiar horario|no puedo|no me queda|no me sirve|mas tarde|mas temprano|otra opcion)\b/.test(n);
+  return isSchedulingOfferDecline(text, { allowShortNo: false });
 }
 function isApplicationFollowUpQuestion(text = '') {
   const n = normalizeComparableText(text);
@@ -694,7 +693,7 @@ async function resolveInterviewSlotContext(prisma, candidate, vacancy, inboundTe
   const pendingOffer = await loadPendingInterviewOffer(prisma, candidate.id);
 
   if (pendingOffer) {
-    if (wantsAlternative) {
+    if (wantsAlternative || isSchedulingOfferDecline(inboundText)) {
       const alternative = await getNextAvailableSlotAfter(prisma, vacancy.id, lastInboundAt, pendingOffer);
       if (!alternative?.slot) return alternative;
       return {
