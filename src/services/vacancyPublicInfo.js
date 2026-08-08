@@ -80,6 +80,7 @@ function professionalExperienceLine(vacancy = {}, requirements = '') {
   return '';
 }
 
+// Fuente única para la ficha pública de vacante usada en los distintos puntos de entrada conversacionales.
 export function buildProfessionalVacancyPresentation(vacancy = {}, { includeInterestPrompt = false } = {}) {
   const title = publicVacancyTitle(vacancy);
   const city = publicVacancyCity(vacancy);
