@@ -96,6 +96,17 @@ function requiresConsentBeforeCollection(candidate = {}) {
   return String(candidate?.dataConsentStatus || '') !== 'ACCEPTED';
 }
 
+function isLikelyCommercialInquiry(text = '') {
+  const normalized = normalizeResolverText(text);
+  const businessPhrases = ['tengo una empresa', 'tenemos una empresa', 'somos una empresa', 'mi empresa', 'ofrecemos', 'prestamos servicios', 'proveedor', 'propuesta comercial', 'alianza comercial'];
+  const servicePhrases = ['ultima milla', 'servicio', 'operamos', 'cobertura', 'distribucion', 'transporte', 'logistica', 'descargue', 'cargue'];
+  const candidatePhrases = ['postular', 'postulacion', 'vacante', 'empleo', 'buscar trabajo', 'busco trabajo', 'hoja de vida', ' hv '];
+  const hasBusinessIdentity = businessPhrases.some((phrase) => normalized.includes(phrase));
+  const hasServiceContext = servicePhrases.some((phrase) => normalized.includes(phrase));
+  const hasCandidateIntent = candidatePhrases.some((phrase) => normalized.includes(phrase));
+  return hasBusinessIdentity && hasServiceContext && !hasCandidateIntent;
+}
+
 function buildAwaitingApplicationInterestUpdates(vacancyId) {
   return {
     vacancyId,
@@ -645,6 +656,16 @@ export async function resolveVacancyFirstGate({
     return { action: VacancyFirstGateAction.SUPPRESS_REPLY, reason: 'RECENT_ATTACHMENT_GUIDANCE_ALREADY_SENT' };
   }
 
+  if (requiresConsentBeforeCollection(candidate) && START_OR_INTAKE_STEPS.has(currentStep) && isLikelyCommercialInquiry(inboundText)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'COMMERCIAL_INQUIRY_OUTSIDE_RECRUITMENT_FLOW',
+      replyKind: 'COMMERCIAL_INQUIRY_BOUNDARY',
+      candidateUpdates: { reminderScheduledFor: null, reminderState: 'SKIPPED' },
+      reply: 'Este canal automatizado está enfocado en procesos de selección. Tu mensaje parece corresponder a una propuesta comercial, por lo que no voy a solicitarte datos ni hoja de vida como candidato.'
+    };
+  }
+
   const alternativeAcceptanceDecision = await evaluateAlternativeAcceptance({ prisma, candidate, inboundText, vacancyHints });
   if (alternativeAcceptanceDecision) return alternativeAcceptanceDecision;
 
@@ -666,6 +687,24 @@ export async function resolveVacancyFirstGate({
 
   if (isRegisteredCompleteWithoutVacancy(candidate, effectiveReadiness)) {
     return { action: VacancyFirstGateAction.REPLY, reason: 'REGISTERED_COMPLETE_WITHOUT_VACANCY', replyKind: 'REGISTERED_PROFILE_CONTEXT', reply: buildRegisteredWithoutVacancyReply(candidate) };
+  }
+
+  const currentTurn = analyzeConversationTurn(inboundText, { currentStep });
+  if (currentVacancy && isOpenVacancy(currentVacancy)
+    && (currentTurn.vacancyInformationRequest || currentTurn.question)
+    && !currentTurn.interest
+    && currentTurn.primaryIntent !== 'change_intent') {
+    const informationReply = buildVacancyInformationAnswer(currentVacancy, inboundText);
+    if (informationReply) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ACTIVE_VACANCY_INFORMATION_ANSWER',
+        replyKind: 'VACANCY_INFORMATION_ANSWER',
+        vacancyId: currentVacancy.id || candidate?.vacancyId,
+        vacancy: currentVacancy,
+        reply: informationReply
+      };
+    }
   }
 
   const assignedVacancyChangeDecision = await evaluateAssignedVacancyChange({

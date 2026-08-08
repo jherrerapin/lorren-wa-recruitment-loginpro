@@ -404,7 +404,7 @@ function normalizeExperienceTime(value = '') {
   if (!raw) return null;
 
   const wordToNum = {
-    un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 3, cinco: 5,
+    un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
     seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11,
     doce: 12, trece: 13, catorce: 14, quince: 15
   };
@@ -557,9 +557,12 @@ function detectRobustExperienceTime(text = '') {
     }
   }
 
+  const wordDurationWithExperience = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\s+de\s+experiencia\b/i);
+  if (wordDurationWithExperience?.[1]) return normalizeExperienceDuration(wordDurationWithExperience[1]);
+
   const durationRegex = /\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/gi;
   const hasGlobalWorkContext = /\b(experien|trabaj|labor|cargo|oficio|operaci|logistic|personal|coordin|turno)\b/.test(compact);
-  const hasShortAffirmativeContext = /\bsi\s+tengo\s+/.test(compact);
+  const hasShortAffirmativeContext = /\bsi\s+tengo\b/.test(compact) || (/\bsi\b/.test(compact) && /\bmas\s+de\b/.test(compact));
   let bestDuration = null;
   let bestScore = -1;
 
