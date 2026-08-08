@@ -128,7 +128,7 @@ jobs:
           text = replace_once(
               text,
               "  return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;",
-              "  return `${answer}\\n\\nSi deseas continuar con la postulación, confírmame y seguimos con el proceso.`;",
+              "  return `${answer}\\n\\n¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.`;",
               'interest closing format'
           )
           text = regex_replace_once(
@@ -158,7 +158,7 @@ jobs:
           p = Path('test/vacancyConfiguredInformationContract.test.js')
           text = p.read_text(encoding='utf-8')
           marker = "  assert.doesNotMatch(decision.reply, /no especificado/i);\n});"
-          addition = "  assert.doesNotMatch(decision.reply, /no especificado/i);\n  assert.match(decision.reply, /^\\*Vacante: Líder de Operación\\*/);\n  assert.match(decision.reply, /Ciudad: Neiva/);\n  assert.match(decision.reply, /Zona de trabajo: Sector Las Brisas/);\n  assert.match(decision.reply, /\\*Funciones\\*\\nLiderar y administrar personal operativo\\./);\n  assert.match(decision.reply, /\\*Requisitos\\*/);\n  assert.match(decision.reply, /Edad: 23 a 45 años\\./);\n  assert.match(decision.reply, /Experiencia: Mínimo 6 meses en operaciones logísticas\\./);\n  assert.match(decision.reply, /\\*Condiciones\\*/);\n  assert.match(decision.reply, /\\n\\nSi deseas continuar con la postulación/);\n});"
+          addition = "  assert.doesNotMatch(decision.reply, /no especificado/i);\n  assert.match(decision.reply, /^\\*Vacante: Líder de Operación\\*/);\n  assert.match(decision.reply, /Ciudad: Neiva/);\n  assert.match(decision.reply, /Zona de trabajo: Sector Las Brisas/);\n  assert.match(decision.reply, /\\*Funciones\\*\\nLiderar y administrar personal operativo\\./);\n  assert.match(decision.reply, /\\*Requisitos\\*/);\n  assert.match(decision.reply, /Edad: 23 a 45 años\\./);\n  assert.match(decision.reply, /Experiencia: Mínimo 6 meses en operaciones logísticas\\./);\n  assert.match(decision.reply, /\\*Condiciones\\*/);\n  assert.match(decision.reply, /\\n\\n¿Te interesa continuar con esta vacante\\?/);\n});"
           text = replace_once(text, marker, addition, 'vacancy formatting assertions')
           p.write_text(text, encoding='utf-8')
 
@@ -183,7 +183,7 @@ jobs:
             const messages = [{
               id: 'out-1', candidateId: candidate.id, direction: 'OUTBOUND', messageType: 'TEXT',
               createdAt: new Date('2026-08-08T15:00:00Z'),
-              body: '*Vacante: Líder de Operación*\n\nCiudad: Neiva\n\nZona de trabajo: Sector Las Brisas\n\n*Funciones*\nLiderar y administrar personal operativo.\n\n*Requisitos*\nTécnico o tecnólogo en logística.\nEdad: 23 a 45 años.\nExperiencia: Mínimo 6 meses.\n\n*Condiciones*\nTurnos rotativos y prestaciones de ley.\n\nSi deseas continuar con la postulación, confírmame y seguimos con el proceso.',
+              body: '*Vacante: Líder de Operación*\n\nCiudad: Neiva\n\nZona de trabajo: Sector Las Brisas\n\n*Funciones*\nLiderar y administrar personal operativo.\n\n*Requisitos*\nTécnico o tecnólogo en logística.\nEdad: 23 a 45 años.\nExperiencia: Mínimo 6 meses.\n\n*Condiciones*\nTurnos rotativos y prestaciones de ley.\n\n¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.',
               rawPayload: { source: 'vacancy_first_gate', replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT' },
               candidate
             }];
