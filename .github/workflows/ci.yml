@@ -7,15 +7,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: ci-recruitment-harness-${{ github.event.pull_request.number || github.ref }}
+  group: ci-recruitment-final-alignment-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  measure-conversation-harness:
-    name: Measure recruitment conversation harness
+  finalize-conversation-harness:
+    name: Finalize recruitment conversation harness
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -30,8 +30,11 @@ jobs:
       DISPATCH_WWEB_AUTO_START: "false"
       PUPPETEER_SKIP_DOWNLOAD: "true"
     steps:
-      - name: Check out branch
+      - name: Check out repair branch
         uses: actions/checkout@v5
+        with:
+          ref: audit/recruitment-release-debt
+          persist-credentials: true
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v5
@@ -45,24 +48,18 @@ jobs:
       - name: Generate Prisma Client
         run: npm run prisma:generate
 
-      - name: Measure harness
-        shell: bash
-        run: |
-          set +e
-          node --test test/conversation-harness.test.js > harness.log 2>&1
-          harness_exit=$?
-          set -e
-          cat harness.log
-          awk '/^[[:space:]]*not ok [0-9]+ - / {
-            line=$0
-            sub(/^[[:space:]]*not ok [0-9]+ - /, "", line)
-            sub(/[[:space:]]+#.*$/, "", line)
-            print "::warning title=Conversation harness residual::" line
-          }' harness.log
-          echo "Harness exit: $harness_exit"
-          exit 0
+      - name: Apply final canonical alignment
+        run: node scripts/apply-final-harness-alignment.mjs
 
-      - name: Validate release focal suite
+      - name: Validate syntax
+        run: >-
+          node --check src/routes/webhook.js &&
+          node --check src/services/vacancyFirstGate.js
+
+      - name: Require conversation harness green
+        run: node --test test/conversation-harness.test.js
+
+      - name: Require recruitment focal suite green
         run: >-
           node --test
           test/recruitmentReleaseGate.test.js
@@ -70,3 +67,19 @@ jobs:
           test/vacancyFirstGate.test.js
           test/dataConsentOrderReplay.test.js
           test/conversationEngineParity.test.js
+          test/adminBotPause.test.js
+          test/aiFirstRecruitmentGuards.test.js
+
+      - name: Commit validated alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Final alignment already present."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src test
+          git commit -m "test(conversation): align release harness with canonical behavior"
+          git push origin HEAD:audit/recruitment-release-debt
