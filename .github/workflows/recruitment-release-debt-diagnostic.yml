@@ -92,3 +92,13 @@ jobs:
 
           echo "Original npm test exit: $test_exit"
           exit 0
+
+      - name: Upload debt evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: recruitment-release-debt-evidence
+          path: |
+            full-test-output.log
+            failure-identities.txt
+          if-no-files-found: error
+          retention-days: 3
