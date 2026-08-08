@@ -390,6 +390,9 @@ jobs:
           echo "Base legacy failures: fail=$legacy_fail_count identities=$legacy_identity_count exit=$legacy_test_exit"
 
           if [ -s unexpected_failures.txt ]; then
+            while IFS= read -r unexpected_failure; do
+              echo "::error::Unexpected failing identity: $unexpected_failure"
+            done < unexpected_failures.txt
             echo "::error::The full suite introduced failing identities that are not present on the pull request base."
             cat unexpected_failures.txt
             exit 1
