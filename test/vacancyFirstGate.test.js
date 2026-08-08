@@ -567,3 +567,16 @@ test('vacante activa asignada responde requisitos antes de entrar a recolección
   assert.ok(decision.reply.indexOf('requisitos registrados') < decision.reply.indexOf('Para avanzar'));
 });
 
+test('reconoce me encuentro interesado como confirmación activa de vacante asignada', async () => {
+  const active = vacancy({ id: 'vac-natural-interest' });
+  const decision = await decide({
+    text: 'Me encuentro interesado en la vacante',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT, vacancyId: active.id },
+    vacancies: [active],
+    currentVacancy: active
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_ENTER_DATA');
+  assert.match(decision.reply, /para avanzar, compárteme/i);
+});

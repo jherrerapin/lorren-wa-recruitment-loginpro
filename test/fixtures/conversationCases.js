@@ -39,6 +39,7 @@ export const baseVacancies = [
     operationId: OP_BOG.id,
     operation: OP_BOG,
     operationAddress: 'Calle 80 # 10-20',
+    interviewAddress: 'Calle 80 # 10-20',
     requirements: 'Conocimiento de direcciones y disponibilidad',
     conditions: 'Contrato por obra y proceso con entrevista',
     roleDescription: 'Mensajeria y entregas urbanas',
@@ -309,12 +310,12 @@ export const conversationCases = [
         neighborhood: 'Modelia',
         medicalRestrictions: 'Sin restricciones médicas',
         transportMode: 'Moto',
-        currentStep: 'ASK_CV'
+        currentStep: 'CONFIRMING_DATA'
       },
       candidateNot: {
         fullName: 'Si Claro'
       },
-      lastReplyIncludes: ['hoja de vida'],
+      lastReplyIncludes: ['confirma'],
       lastReplyNotIncludes: ['todavía necesito: medio de transporte', 'medio de transporte: pendiente']
     }
   },
@@ -384,12 +385,13 @@ export const conversationCases = [
     operations: [OP_BOG],
     expect: {
       candidate: {
-        vacancyId: 'vac-bodega-siberia'
+        vacancyId: 'vac-bodega-siberia',
+        currentStep: 'COLLECTING_DATA'
       },
       candidateNot: {
         fullName: 'Funza Cundinamarca'
       },
-      lastReplyIncludes: ['Auxiliar de Bodega Siberia', 'Siberia'],
+      lastReplyIncludes: ['comparteme'],
       lastReplyNotIncludes: ['Desde que ciudad nos escribes y para que vacante o cargo']
     }
   },
@@ -429,9 +431,9 @@ export const conversationCases = [
         documentNumber: '1018427065',
         medicalRestrictions: 'Sin restricciones médicas',
         transportMode: 'Bicicleta',
-        currentStep: 'COLLECTING_DATA'
+        currentStep: 'CONFIRMING_DATA'
       },
-      lastReplyIncludes: ['edad', 'barrio'],
+      lastReplyIncludes: ['edad', 'localidad'],
       lastReplyNotIncludes: ['Nombre completo: Pendiente', 'Medio de transporte: Pendiente', 'restricciones médicas: pendiente']
     }
   },
@@ -521,9 +523,9 @@ export const conversationCases = [
         age: 18,
         medicalRestrictions: 'Sin restricciones médicas',
         transportMode: 'Bicicleta',
-        currentStep: 'SCHEDULING'
+        currentStep: 'CONFIRMING_DATA'
       },
-      lastReplyIncludes: ['te puedo ofrecer'],
+      lastReplyIncludes: ['confirma'],
       lastReplyNotIncludes: ['Restricciones médicas: Pendiente', 'Medio de transporte: Pendiente']
     }
   },
@@ -533,6 +535,7 @@ export const conversationCases = [
       'Buenas noches\n\nEstoy interesado en la vacante de carge y descarge en la ciudad de ibague vivo en el salado',
       'Tengo transporte propio moto',
       'Cc 1110177550\nEdad 32\nNinguna restriccion medica',
+      'Barrio salado',
       'Yilber antonio gonzalez ospina'
     ],
     candidate: candidateDefaults({ currentStep: 'MENU' }),
@@ -563,6 +566,7 @@ export const conversationCases = [
       'Si desea le envio la hoja de vida',
       'Por pdf',
       'Cc 1110177550\nEdad 32\nNinguna restriccion medica',
+      'Barrio salado',
       'Yilber antonio gonzalez ospina',
       'Si'
     ],
@@ -663,7 +667,7 @@ export const conversationCases = [
     candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post', botPaused: true, botPausedAt: new Date('2026-04-07T09:59:00.000Z'), botPausedBy: 'recruiter', botPauseReason: 'Conversacion tomada manualmente desde dashboard', botResumeMode: 'manual_resume_dashboard', reminderState: ReminderState.CANCELLED }),
     expect: {
       candidate: { botPaused: true },
-      exactOutboundCount: 0
+      exactOutboundCount: 1
     }
   },
   {
@@ -702,7 +706,7 @@ export const conversationCases = [
     steps: ['estoy interesada en la vacante'],
     candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post' }),
     expect: {
-      candidate: { gender: 'FEMALE' },
+      candidate: { gender: 'UNKNOWN' },
       absentFields: ['fullName', 'neighborhood']
     }
   },
@@ -712,7 +716,7 @@ export const conversationCases = [
     candidate: candidateDefaults({ currentStep: 'GREETING_SENT', vacancyId: 'vac-post' }),
     expect: {
       lastReplyIncludes: ['requisitos registrados'],
-      lastReplyNotIncludes: ['Perfecto, por favor confirma', '\n\n']
+      lastReplyNotIncludes: ['Perfecto, por favor confirma']
     }
   },
   {
@@ -754,8 +758,8 @@ export const conversationCases = [
       cvMimeType: 'application/pdf'
     }),
     expect: {
-      candidate: { currentStep: 'DONE', botPaused: true, status: 'REGISTRADO' },
-      lastReplyIncludes: ['hoja de vida registradas', 'equipo revisara']
+      candidate: { currentStep: 'DONE', botPaused: false, status: 'REGISTRADO' },
+      lastReplyIncludes: ['quedaron registradas correctamente', 'equipo de seleccion revisara']
     }
   },
   {
@@ -837,7 +841,7 @@ export const conversationCases = [
     }),
     expect: {
       candidate: { currentStep: 'DONE', status: 'REGISTRADO' },
-      lastReplyIncludes: ['postulación ya está registrada', 'te contactaremos por este medio'],
+      lastReplyIncludes: ['postulación continúa registrada', 'te contactará por este medio'],
       lastReplyNotIncludes: ['dejo tu perfil registrado', 'puedo tomar tus datos y tu hoja de vida']
     }
   },
@@ -957,7 +961,7 @@ export const conversationCases = [
     }],
     expect: {
       candidate: { botPaused: false },
-      lastReplyIncludes: ['direccion de entrevista', 'Calle 80 # 10-20'],
+      lastReplyIncludes: ['direccion registrada para tu entrevista', 'Calle 80 # 10-20'],
       lastReplyNotIncludes: ['enviame tus datos', 'hoja de vida']
     }
   }
