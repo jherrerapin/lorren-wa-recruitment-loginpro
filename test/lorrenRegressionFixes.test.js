@@ -61,7 +61,7 @@ function candidate(overrides = {}) {
     cvData: null,
     cvOriginalName: null,
     cvMimeType: null,
-    reminderState: 'PENDING',
+    reminderState: 'NONE',
     reminderScheduledFor: null,
     botPaused: false,
     botPausedAt: null,
