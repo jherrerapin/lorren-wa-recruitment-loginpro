@@ -1,0 +1,339 @@
+name: tmp-align-ideal-recruitment-flow
+on:
+  push:
+    branches:
+      - fix/production-ad-flow-20260808
+permissions:
+  contents: write
+jobs:
+  align-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/production-ad-flow-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Apply ideal-flow alignment
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def load(path): return Path(path).read_text(encoding='utf-8')
+          def save(path, text): Path(path).write_text(text, encoding='utf-8')
+          def once(text, old, new, label):
+              n = text.count(old)
+              if n != 1: raise SystemExit(f'{label}: expected 1 match, got {n}')
+              return text.replace(old, new, 1)
+
+          # 1) Runtime: vacancy-first replies must carry the actual vacancy into reply safety.
+          path = 'src/routes/webhook.js'
+          text = load(path)
+          old = """    return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
+              body: vacancyFirstGateDecision.reply,
+              source: 'vacancy_first_gate',
+              reason: vacancyFirstGateDecision.reason,
+              replyKind: vacancyFirstGateDecision.replyKind
+            });"""
+          new = """    return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
+              body: vacancyFirstGateDecision.reply,
+              source: 'vacancy_first_gate',
+              reason: vacancyFirstGateDecision.reason,
+              replyKind: vacancyFirstGateDecision.replyKind,
+              safetyVacancy: currentVacancy || vacancyFirstGateDecision.vacancy || null
+            });"""
+          text = once(text, old, new, 'vacancy gate safety context')
+          save(path, text)
+
+          # 2) Runtime: if interest is already explicit while resolving the vacancy,
+          # show the vacancy information and then request consent instead of asking interest twice.
+          path = 'src/services/vacancyFirstGate.js'
+          text = load(path)
+          old = """function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
+            const answer = buildVacancyInformationAnswer(vacancy, inboundText) || buildVacancyOverview(vacancy);
+            return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;
+          }"""
+          new = """function buildActiveVacancyInformationReply(vacancy = {}, inboundText = '') {
+            return buildVacancyInformationAnswer(vacancy, inboundText) || buildVacancyOverview(vacancy);
+          }
+
+          function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
+            const answer = buildActiveVacancyInformationReply(vacancy, inboundText);
+            return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;
+          }"""
+          text = once(text, old, new, 'vacancy info helper')
+          old = """  if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
+            if (requiresConsentBeforeCollection(candidate)) {
+              return {
+                action: VacancyFirstGateAction.REPLY,
+                reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
+                replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
+                vacancyId: resolution.vacancy.id,
+                vacancy: resolution.vacancy,
+                candidateUpdates: buildAwaitingApplicationInterestUpdates(resolution.vacancy.id),
+                reply: buildActiveVacancyInterestReply(resolution.vacancy, inboundText),
+                resolution
+              };
+            }
+            return { action: VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE, reason: 'ACTIVE_VACANCY_RESOLVED', vacancyId: resolution.vacancy.id, vacancy: resolution.vacancy, resolution };
+          }"""
+          new = """  if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
+            if (requiresConsentBeforeCollection(candidate)) {
+              const resolvedTurn = analyzeConversationTurn(inboundText, { currentStep });
+              if (resolvedTurn.interest) {
+                return {
+                  action: VacancyFirstGateAction.REPLY,
+                  reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
+                  replyKind: 'DATA_CONSENT_PROMPT',
+                  vacancyId: resolution.vacancy.id,
+                  vacancy: resolution.vacancy,
+                  candidateUpdates: {
+                    vacancyId: resolution.vacancy.id,
+                    currentStep: GREETING_SENT,
+                    botResumeMode: buildConsentPendingMode(),
+                    reminderScheduledFor: null,
+                    reminderState: 'SKIPPED'
+                  },
+                  reply: [
+                    buildActiveVacancyInformationReply(resolution.vacancy, inboundText),
+                    buildDataConsentPromptReply()
+                  ].filter(Boolean).join('\\n\\n'),
+                  resolution
+                };
+              }
+              return {
+                action: VacancyFirstGateAction.REPLY,
+                reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
+                replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
+                vacancyId: resolution.vacancy.id,
+                vacancy: resolution.vacancy,
+                candidateUpdates: buildAwaitingApplicationInterestUpdates(resolution.vacancy.id),
+                reply: buildActiveVacancyInterestReply(resolution.vacancy, inboundText),
+                resolution
+              };
+            }
+            return { action: VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE, reason: 'ACTIVE_VACANCY_RESOLVED', vacancyId: resolution.vacancy.id, vacancy: resolution.vacancy, resolution };
+          }"""
+          text = once(text, old, new, 'explicit interest at vacancy resolution')
+          save(path, text)
+
+          # 3) Meta confirmation path: same flexible behavior + company question.
+          path = 'src/services/dataConsentGate.js'
+          text = load(path)
+          old = """function buildVacancyInfoReply(vacancy = {}) {
+            const city = vacancyCity(vacancy);
+            const parts = [`Perfecto, te comparto la información registrada de ${vacancyTitle(vacancy)}${city ? ` en ${city}` : ''}.`];
+            if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
+            if (vacancy.operationAddress) parts.push(`Zona de operación: ${vacancy.operationAddress}.`);
+            if (vacancy.requirements) parts.push(`Requisitos: ${vacancy.requirements}.`);
+            if (vacancy.conditions) parts.push(`Condiciones: ${vacancy.conditions}.`);
+            if (vacancy.requiredDocuments) parts.push(`Documentos para el proceso: ${vacancy.requiredDocuments}.`);
+            parts.push('¿Te interesa continuar con esta postulación?');
+            return parts.join('\\n\\n');
+          }"""
+          new = """function buildVacancyInfoReply(vacancy = {}, { askInterest = true } = {}) {
+            const city = vacancyCity(vacancy);
+            const parts = [`Perfecto, te comparto la información registrada de ${vacancyTitle(vacancy)}${city ? ` en ${city}` : ''}.`];
+            if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
+            if (vacancy.operationAddress) parts.push(`Zona de operación: ${vacancy.operationAddress}.`);
+            if (vacancy.requirements) parts.push(`Requisitos: ${vacancy.requirements}.`);
+            if (vacancy.conditions) parts.push(`Condiciones: ${vacancy.conditions}.`);
+            if (vacancy.requiredDocuments) parts.push(`Documentos para el proceso: ${vacancy.requiredDocuments}.`);
+            if (askInterest) parts.push('¿Te interesa continuar con esta postulación?');
+            return parts.join('\\n\\n');
+          }"""
+          text = once(text, old, new, 'campaign vacancy info options')
+          marker = """  if (/\\b(salario|sueldo|pago|cuanto pagan|cuanto es)\\b/.test(normalized)) {"""
+          branch = """  if (/\\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\\b/.test(normalized)) {
+            const operationName = String(vacancy?.operation?.name || '').trim();
+            const operationPart = operationName ? ` La operación registrada para esta vacante es ${operationName}.` : '';
+            return `El proceso de selección lo gestiona LoginPro.${operationPart}`;
+          }
+          """ + marker
+          text = once(text, marker, branch, 'company question during campaign confirmation')
+          old = """  if (isAffirmativeVacancyConfirmation(body)) {
+            const cvResendRequired = candidate.botResumeMode === CAMPAIGN_CONFIRMATION_CV_MODE;
+            await prisma.candidate.update({
+              where: { id: candidate.id },
+              data: {
+                currentStep: ConversationStep.GREETING_SENT,
+                botResumeMode: cvResendRequired ? PRE_CONSENT_CV_RESEND_MODE : APPLICATION_INTEREST_PENDING_MODE
+              }
+            });
+            const reply = [questionReply, buildVacancyInfoReply(vacancy)].filter(Boolean).join('\\n\\n');
+            await sendAndStore(prisma, candidate.id, from, reply, 'campaign_vacancy_confirmed', { vacancyId: vacancy.id, cvResendRequired });
+            return true;
+          }"""
+          new = """  if (isAffirmativeVacancyConfirmation(body)) {
+            const cvResendRequired = candidate.botResumeMode === CAMPAIGN_CONFIRMATION_CV_MODE;
+            const turn = analyzeConversationTurn(body, { currentStep: candidate.currentStep });
+            const interestAlreadyExplicit = Boolean(turn.interest);
+            const nextMode = interestAlreadyExplicit
+              ? buildConsentPendingMode({ cvResendRequired })
+              : (cvResendRequired ? PRE_CONSENT_CV_RESEND_MODE : APPLICATION_INTEREST_PENDING_MODE);
+            await prisma.candidate.update({
+              where: { id: candidate.id },
+              data: {
+                currentStep: ConversationStep.GREETING_SENT,
+                botResumeMode: nextMode
+              }
+            });
+            const reply = interestAlreadyExplicit
+              ? [questionReply, buildVacancyInfoReply(vacancy, { askInterest: false }), CONSENT_PROMPT].filter(Boolean).join('\\n\\n')
+              : [questionReply, buildVacancyInfoReply(vacancy)].filter(Boolean).join('\\n\\n');
+            await sendAndStore(prisma, candidate.id, from, reply, interestAlreadyExplicit ? 'campaign_vacancy_confirmed_interest_consent' : 'campaign_vacancy_confirmed', { vacancyId: vacancy.id, cvResendRequired });
+            return true;
+          }"""
+          text = once(text, old, new, 'campaign explicit interest to consent')
+          save(path, text)
+
+          # 4) Update direct intake tests to the privacy boundary.
+          path = 'test/activeVacancyQuestionIntake.test.js'
+          text = load(path)
+          text = text.replace("test('interés explícito y pregunta responde primero y entra a recolección'", "test('interés explícito y pregunta responde primero y solicita consentimiento'")
+          text = once(text, "assert.equal(result.candidate.currentStep, 'COLLECTING_DATA');\n  assert.match(result.reply, /condiciones registradas/i);\n  assert.match(result.reply, /comp[aá]rteme/i);", "assert.equal(result.candidate.currentStep, 'GREETING_SENT');\n  assert.match(String(result.candidate.botResumeMode), /^awaiting_data_consent/);\n  assert.match(result.reply, /condiciones registradas/i);\n  assert.match(result.reply, /autorización|autorizas|tratamiento de datos/i);\n  assert.doesNotMatch(result.reply, /comp[aá]rteme/i);", 'question+interest test')
+          text = once(text, "assert.match(result.reply, /condiciones registradas/i);\n  assert.doesNotMatch(result.reply, /comp[aá]rteme/i);", "assert.match(result.reply, /condiciones registradas/i);\n  assert.match(result.reply, /Contrato por obra y proceso con entrevista/i);\n  assert.doesNotMatch(result.reply, /no tengo una condición registrada/i);\n  assert.doesNotMatch(result.reply, /comp[aá]rteme/i);", 'informative question test')
+          save(path, text)
+
+          # 5) Conversation harness fixtures: interest no longer jumps to data collection.
+          path = 'test/fixtures/conversationCases.js'
+          text = load(path)
+          text = once(text,
+              "candidate: { vacancyId: 'vac-sched', currentStep: 'COLLECTING_DATA' },\n      lastReplyIncludes: ['condiciones registradas', 'comparteme'],",
+              "candidate: { vacancyId: 'vac-sched', currentStep: 'GREETING_SENT' },\n      lastReplyIncludes: ['condiciones registradas', 'autoriz'],",
+              'answer question fixture')
+          text = once(text,
+              "vacancyId: 'vac-bodega-siberia',\n        currentStep: 'COLLECTING_DATA'",
+              "vacancyId: 'vac-bodega-siberia',\n        currentStep: 'GREETING_SENT'",
+              'funza fixture step')
+          text = once(text,
+              "lastReplyIncludes: ['comparteme'],\n      lastReplyNotIncludes: ['Desde que ciudad nos escribes y para que vacante o cargo']",
+              "lastReplyIncludes: ['Auxiliar de Bodega Siberia', 'autoriz'],\n      lastReplyNotIncludes: ['comparteme', 'Desde que ciudad nos escribes y para que vacante o cargo']",
+              'funza fixture reply')
+          save(path, text)
+
+          # 6) Multiline tests follow the production latency contract.
+          path = 'test/webhookMultiline.test.js'
+          text = load(path)
+          text = text.replace("test('la ventana multilinea usa 90 segundos para consolidar antes de razonar'", "test('la ventana multilinea usa 8 segundos por defecto antes de razonar'")
+          text = text.replace('assert.equal(earlyWindow, 90000);\n    assert.equal(resolvedWindow, 90000);', 'assert.equal(earlyWindow, 8000);\n    assert.equal(resolvedWindow, 8000);')
+          text = text.replace("test('la ventana de razonamiento se puede configurar y queda acotada a 90 segundos'", "test('la ventana de razonamiento se puede configurar y queda acotada a 20 segundos'")
+          text = text.replace("assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 90000);", "assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 20000);")
+          save(path, text)
+
+          # 7) Vacancy/consent replays: distinguish info-only from already-explicit interest.
+          path = 'test/conversation-replay/vacancyConsentOrderReplay.js'
+          text = load(path)
+          text = text.replace("includes: ['condiciones registradas', '¿Deseas postularte y continuar con este proceso?']", "includes: ['condiciones registradas', 'te interesa continuar']")
+          text = text.replace("includes: ['requisitos registrados', '¿Deseas postularte y continuar con este proceso?']", "includes: ['requisitos registrados', 'te interesa continuar']")
+          old = """      reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
+                replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
+                includes: ['Encontré la vacante', '¿Deseas postularte y continuar con este proceso?'],
+                excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida', 'Autorizo a LoginPro'],
+                currentStep: 'GREETING_SENT',
+                botResumeMode: 'awaiting_application_interest'"""
+          new = """      reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
+                replyKind: 'DATA_CONSENT_PROMPT',
+                includes: ['información', 'Autorizo a LoginPro'],
+                excludes: ['nombre completo', 'edad', 'transporte', 'hoja de vida'],
+                currentStep: 'GREETING_SENT',
+                botResumeMode: 'awaiting_data_consent'"""
+          text = once(text, old, new, 'explicit-interest replay')
+          save(path, text)
+
+          # 8) Resolution tests should assert selection + information, not old continue action.
+          path = 'test/vacancyCorrectionPriority.test.js'
+          text = load(path)
+          text = text.replace('assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);', 'assert.equal(decision.action, VacancyFirstGateAction.REPLY);')
+          text = text.replace("assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED');", "assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');")
+          text = text.replace("assert.equal(decision.vacancyId, medellinLeader.id);\n});", "assert.equal(decision.vacancyId, medellinLeader.id);\n  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');\n  assert.match(decision.reply, /te interesa continuar/i);\n});", 1)
+          save(path, text)
+
+          path = 'test/leaderVacancyResolution.test.js'
+          text = load(path)
+          text = text.replace('assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);', 'assert.equal(decision.action, VacancyFirstGateAction.REPLY);', 3)
+          # add common contract after each target vacancy assertion when not already nearby
+          text = text.replace("assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);\n  assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');", "assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);\n  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');\n  assert.match(decision.reply, /te interesa continuar/i);\n  assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');", 2)
+          text = text.replace("assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);\n  assert.notEqual(decision.vacancyId, ibagueAuxVacancy.id);", "assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);\n  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');\n  assert.match(decision.reply, /te interesa continuar/i);\n  assert.notEqual(decision.vacancyId, ibagueAuxVacancy.id);", 1)
+          save(path, text)
+          PY
+      - run: npm ci
+      - run: npm run prisma:generate
+      - name: Focused regression suite
+        run: |
+          node --test \
+            test/activeVacancyQuestionIntake.test.js \
+            test/conversation-harness.test.js \
+            test/webhookMultiline.test.js \
+            test/vacancyBeforeConsentReplay.test.js \
+            test/vacancyCorrectionPriority.test.js \
+            test/leaderVacancyResolution.test.js \
+            test/productionPaidAdFlowRegressions.test.js \
+            test/dataConsentPromptIdempotencyReplay.test.js \
+            test/conversationalReleaseCandidatePreConsent.test.js
+      - name: Current full suite
+        shell: bash
+        run: |
+          set +e
+          npm test > current.log 2>&1
+          echo $? > current.exit
+          set -e
+      - uses: actions/checkout@v5
+        with:
+          ref: ed754a71254393ad9de57c4551a65b4fc731fbfd
+          path: .baseline
+      - name: Base full suite
+        shell: bash
+        run: |
+          cd .baseline
+          npm ci
+          npm run prisma:generate
+          set +e
+          npm test > "$GITHUB_WORKSPACE/base.log" 2>&1
+          set -e
+      - name: Compare exact failure identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          extract() {
+            awk '
+              function emit_pending() { if (pending != "" && !is_subtest_container) print pending; pending=""; is_subtest_container=0 }
+              /^[[:space:]]*not ok [0-9]+ - / { emit_pending(); identity=$0; sub(/^[[:space:]]*not ok [0-9]+ - /,"",identity); sub(/[[:space:]]+#.*$/,"",identity); sub(/[[:space:]]+$/,"",identity); pending=identity; next }
+              pending != "" && /^[[:space:]]*failureType:[[:space:]].*subtestsFailed/ { is_subtest_container=1; next }
+              END { emit_pending() }
+            ' "$1" | LC_ALL=C sort -u > "$2"
+          }
+          extract base.log base.failures
+          extract current.log current.failures
+          LC_ALL=C comm -23 current.failures base.failures > unexpected.failures
+          echo 'Unexpected identities:'
+          cat unexpected.failures || true
+          echo 'Current summary:'
+          grep -E '^# (tests|pass|fail|cancelled|skipped) ' current.log | tail -n 5 || true
+          test ! -s unexpected.failures
+      - name: Commit validated alignment and remove temporary workflows
+        run: |
+          rm -f .github/workflows/tmp-failure-identity-diagnostic.yml
+          rm -f .github/workflows/tmp-align-ideal-recruitment-flow.yml
+          rm -rf .baseline current.log current.exit base.log base.failures current.failures unexpected.failures
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: alinear flujo de pauta con consentimiento y contexto de vacante"
+          git push origin HEAD:fix/production-ad-flow-20260808
