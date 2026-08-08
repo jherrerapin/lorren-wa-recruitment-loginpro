@@ -44,7 +44,6 @@ export function getConfiguredPublicRequirementSentences(vacancy = {}, requiremen
   return facts;
 }
 
-
 function publicVacancyCity(vacancy = {}) {
   return vacancy?.operation?.city?.name || vacancy?.city || '';
 }
@@ -89,13 +88,11 @@ export function buildProfessionalVacancyPresentation(vacancy = {}, { includeInte
   const conditions = cleanConfiguredFragment(vacancy?.conditions);
   const address = cleanConfiguredFragment(vacancy?.operationAddress);
   const documents = cleanConfiguredFragment(vacancy?.requiredDocuments);
-  const sections = [
-    `*Vacante: ${title}*`,
-    city ? `Ciudad: ${city}` : null,
-    address ? `Zona de trabajo: ${address}` : null
-  ].filter(Boolean);
 
-  if (roleDescription) sections.push(`*Funciones*\n${professionalSentence(roleDescription)}`);
+  const sections = [`*Vacante: ${title}*`];
+  if (city) sections.push(`*Ciudad:* ${city}`);
+  if (address) sections.push(`*Zona de trabajo:* ${address}`);
+  if (roleDescription) sections.push(`*Funciones del cargo*\n${professionalSentence(roleDescription)}`);
 
   const requirementLines = [
     requirements ? professionalSentence(requirements) : '',
@@ -107,11 +104,15 @@ export function buildProfessionalVacancyPresentation(vacancy = {}, { includeInte
   if (documents) sections.push(`*Documentación para el proceso*\n${professionalSentence(documents)}`);
 
   const hasDetails = Boolean(
-    roleDescription || requirements || conditions || documents
+    roleDescription || requirements || conditions || address || documents
     || Number.isInteger(vacancy?.minAge) || Number.isInteger(vacancy?.maxAge)
     || ['YES', 'NO'].includes(String(vacancy?.experienceRequired || '').trim().toUpperCase())
   );
-  if (!hasDetails) sections.push('La información disponible no incluye detalles adicionales para esta vacante.');
-  if (includeInterestPrompt) sections.push('¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.');
-  return sections.join('\n\n');
+  if (!hasDetails) sections.push('La vacante está activa para recibir postulaciones.');
+
+  const parts = ['Te comparto la información de la vacante:', sections.join('\n\n')];
+  if (includeInterestPrompt) {
+    parts.push('¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.');
+  }
+  return parts.join('\n\n');
 }
