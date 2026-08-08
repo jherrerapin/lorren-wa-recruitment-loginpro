@@ -100,7 +100,7 @@ function startsWithExplicitConsent(text = '') {
 }
 
 function startsWithExplicitVacancyConfirmation(text = '') {
-  return /^(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
+  return /^(si|sii|sip|claro|correcto|exacto|esa es|esa si|esta si|esa misma|si esa|si esta|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
 }
 
 function referencesConsentSubject(text = '') {
@@ -218,12 +218,12 @@ export function shouldRecordConsentRejection(text = '', { consentPromptPending =
   return true;
 }
 
-function isAffirmativeVacancyConfirmation(text = '') {
+export function isAffirmativeVacancyConfirmation(text = '') {
   const normalized = normalize(text);
   if (!normalized) return false;
   if (isQuestionLike(text) && !startsWithExplicitVacancyConfirmation(normalized)) return false;
   return hasAny(normalized, [
-    /\b(si|sii|sip|claro|correcto|exacto|esa es|si es|de acuerdo|dale|ok|listo)\b/,
+    /\b(si|sii|sip|claro|correcto|exacto|esa es|esa si|esta si|esa misma|si esa|si esta|si es|de acuerdo|dale|ok|listo)\b/,
     /\b(confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/
   ]);
 }
@@ -573,6 +573,10 @@ export function shouldRequestConsentForTurn(candidate = {}, text = '') {
     turn,
     mode
   };
+}
+
+export function buildDataConsentPromptReply() {
+  return CONSENT_PROMPT;
 }
 
 export function buildConsentPendingMode({ resumeMode = null, cvResendRequired = false } = {}) {

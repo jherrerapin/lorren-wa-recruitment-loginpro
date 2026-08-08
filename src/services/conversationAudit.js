@@ -93,8 +93,9 @@ export function analyzeConversationSession(messages = [], options = {}) {
         const topic = detectQuestionTopic(body);
         const nextActor = actors[nextOutboundIndex];
         const nextReply = String(messages[nextOutboundIndex].body || '');
-        if (topic && nextActor === 'bot' && !responseAddressesTopic(nextReply, topic) && isDataRequest(nextReply)) {
-          addIssue(issues, buildIssue('QUESTION_NOT_ANSWERED', `La pregunta sobre ${topic} fue seguida por una solicitud de datos sin respuesta clara.`, messages[nextOutboundIndex], candidate));
+        if (topic && nextActor === 'bot' && !responseAddressesTopic(nextReply, topic)
+          && (topic !== 'general' || isDataRequest(nextReply))) {
+          addIssue(issues, buildIssue('QUESTION_NOT_ANSWERED', `La pregunta sobre ${topic} no fue respondida antes de continuar el flujo.`, messages[nextOutboundIndex], candidate));
         }
       }
       continue;
@@ -110,6 +111,37 @@ export function analyzeConversationSession(messages = [], options = {}) {
 
     if (awaitingInboundAfterHuman) {
       addIssue(issues, buildIssue('BOT_OVER_HUMAN', 'Se detectó una salida automática después de un mensaje humano y antes de una nueva respuesta del candidato.', message, candidate));
+    }
+
+    const messageAt = toDate(message.createdAt);
+    const consentAcceptedAt = toDate(candidate.dataConsentAcceptedAt);
+    if (isDataRequest(body) && (!consentAcceptedAt || (messageAt && messageAt < consentAcceptedAt))) {
+      addIssue(issues, buildIssue(
+        'CONSENT_SEQUENCE_BROKEN',
+        'El bot solicitó datos personales antes de que existiera una autorización aceptada para ese momento.',
+        message,
+        candidate
+      ));
+    }
+
+    const replyKind = String(payload.replyKind || '').toUpperCase();
+    const configuredVacancyInfo = Boolean(
+      candidate?.vacancy?.roleDescription
+      || candidate?.vacancy?.requirements
+      || candidate?.vacancy?.conditions
+      || candidate?.vacancy?.operationAddress
+      || candidate?.vacancy?.requiredDocuments
+    );
+    if (replyKind === 'ACTIVE_VACANCY_INTEREST_PROMPT'
+      && configuredVacancyInfo
+      && /^\s*encontr[eé]\s+la\s+vacante\b/i.test(body)
+      && !/\b(requisitos?|condiciones?|zona de operaci[oó]n|el cargo consiste|documentos? registrados?)\b/i.test(body)) {
+      addIssue(issues, buildIssue(
+        'VACANCY_INFO_SKIPPED',
+        'La vacante quedó identificada, pero el mensaje pasó a preguntar por interés sin compartir la información configurada.',
+        message,
+        candidate
+      ));
     }
 
     if (startsWithGreeting(body)) {
@@ -268,7 +300,9 @@ function buildRecommendations(issueCounts) {
     SCHEDULED_WITHOUT_BOOKING: 'Hacer atómica la transición a SCHEDULED con la creación o validación de la reserva.',
     PREMATURE_DONE: 'Impedir DONE cuando la agenda está habilitada y no existe reserva ni pausa justificada.',
     CV_RECEIVED_BUT_STUCK: 'Reconciliar ASK_CV inmediatamente después de persistir una hoja de vida válida.',
-    UNANSWERED_INBOUND: 'Revisar silencios no intencionales, errores de envío y ramas que terminan sin reply.'
+    UNANSWERED_INBOUND: 'Revisar silencios no intencionales, errores de envío y ramas que terminan sin reply.',
+    VACANCY_INFO_SKIPPED: 'Entregar la información configurada de la vacante antes de solicitar confirmación de interés.',
+    CONSENT_SEQUENCE_BROKEN: 'Bloquear cualquier solicitud de datos personales hasta que exista autorización aceptada para ese momento.'
   };
   return Object.entries(issueCounts)
     .filter(([code, count]) => count > 0 && mapping[code])

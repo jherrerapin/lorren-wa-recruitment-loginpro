@@ -189,11 +189,14 @@ test('metadata confiable conserva autoridad frente a texto ambiguo contradictori
     vacancyHints: { trustedVacancyId: trusted.id, trustedVacancy: trusted }
   });
 
-  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
   assert.equal(decision.vacancyId, trusted.id);
   assert.equal(decision.resolution.reason, 'matched_trusted_active_vacancy');
   assert.equal(decision.resolution.source, 'metadata_config');
   assert.equal(decision.resolution.fallback, false);
+  assert.match(decision.reply, /Auxiliar de cargue y descargue Neiva/i);
+  assert.match(decision.reply, /te interesa continuar/i);
 });
 
 test('el compositor no duplica un seguimiento que la respuesta generada ya contiene', () => {

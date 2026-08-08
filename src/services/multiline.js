@@ -1,8 +1,8 @@
 import { buildAdContextSystemHint } from './adContext.js';
 
-const DEFAULT_REASONING_WINDOW_MS = 90000;
-const MIN_REASONING_WINDOW_MS = 12000;
-const MAX_REASONING_WINDOW_MS = 90000;
+const DEFAULT_REASONING_WINDOW_MS = 8000;
+const MIN_REASONING_WINDOW_MS = 3000;
+const MAX_REASONING_WINDOW_MS = 20000;
 
 function normalizeText(text = '') {
   return String(text || '').trim();

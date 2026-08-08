@@ -1,6 +1,6 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
-import { APPLICATION_INTEREST_PENDING_MODE } from './dataConsentGate.js';
+import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 
@@ -92,7 +92,7 @@ function buildActiveDataPrompt(candidate = {}, vacancy = null) {
 }
 
 function requiresConsentBeforeCollection(candidate = {}) {
-  return String(candidate?.dataConsentStatus || '') === 'PENDING';
+  return String(candidate?.dataConsentStatus || '') !== 'ACCEPTED';
 }
 
 function buildAwaitingApplicationInterestUpdates(vacancyId) {
@@ -105,11 +105,31 @@ function buildAwaitingApplicationInterestUpdates(vacancyId) {
   };
 }
 
-function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
-  const answer = buildVacancyInformationAnswer(vacancy, inboundText);
+function buildVacancyOverview(vacancy = {}) {
   const city = vacancyCity(vacancy);
-  const confirmation = answer || `Encontré la vacante de ${vacancyTitle(vacancy)}${city ? ` en ${city}` : ''}.`;
-  return `${confirmation} ¿Deseas postularte y continuar con este proceso?`;
+  const location = city ? ` en ${city}` : '';
+  const title = vacancyTitle(vacancy);
+  const facts = [];
+  const roleDescription = String(vacancy?.roleDescription || '').trim();
+  const requirements = String(vacancy?.requirements || '').trim();
+  const conditions = String(vacancy?.conditions || '').trim();
+  const address = String(vacancy?.operationAddress || '').trim();
+  const documents = String(vacancy?.requiredDocuments || '').trim();
+
+  if (roleDescription) facts.push(`El cargo consiste en ${roleDescription}.`);
+  if (address) facts.push(`La zona de operación registrada es ${address}.`);
+  if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);
+  if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);
+  if (documents) facts.push(`Los documentos registrados para el proceso son: ${documents}.`);
+
+  return facts.length
+    ? `Te comparto la información de ${title}${location}. ${facts.join(' ')}`
+    : `Encontré la vacante de ${title}${location}, pero no tiene información adicional cargada.`;
+}
+
+function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText) || buildVacancyOverview(vacancy);
+  return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;
 }
 
 function missingDataPrompt(candidate = {}, vacancy = null) {
@@ -124,14 +144,22 @@ function buildNoActiveVacanciesReply(city = null) {
   return `En este momento no tengo vacantes activas${location}. Si quieres, puedo dejar tu perfil registrado para futuras aperturas compatibles; solo lo hago si me confirmas que deseas ese registro.`;
 }
 
-function buildNeedRoleForCityReply(city = null, roleHint = null) {
+function buildNeedRoleForCityReply(city = null, roleHint = null, inboundText = '') {
+  const normalized = normalizeResolverText(inboundText);
+  const asksCompany = /\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized);
+  const companyAnswer = asksCompany
+    ? 'El proceso de selección lo gestiona LoginPro Service. Para decirte la empresa u operación exacta registrada necesito identificar primero la vacante.'
+    : '';
   const hasRoleHint = Boolean(String(roleHint || '').trim());
   if (hasRoleHint) {
-    if (isBogotaCity(city)) return 'Gracias, ya tengo la ciudad y el cargo de interés. ¿En qué localidad vives?';
-    return 'Gracias, ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?';
+    const next = isBogotaCity(city)
+      ? 'Ya tengo la ciudad y el cargo de interés. ¿En qué localidad vives?'
+      : 'Ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?';
+    return [companyAnswer, next].filter(Boolean).join(' ');
   }
   const localityPart = isBogotaCity(city) ? ' y en qué localidad estás' : '';
-  return `Gracias por contarme desde dónde escribes. ¿Para qué vacante o cargo estás interesado${localityPart}?`;
+  const next = `¿Para qué vacante o cargo estás interesado${localityPart}?`;
+  return [companyAnswer || 'Gracias por contarme desde dónde escribes.', next].join(' ');
 }
 
 function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
@@ -148,6 +176,12 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   const conditions = String(vacancy?.conditions || '').trim();
   const address = String(vacancy?.operationAddress || '').trim();
   const documents = String(vacancy?.requiredDocuments || '').trim();
+
+  if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
+    const operationName = String(vacancy?.operation?.name || '').trim();
+    const operationPart = operationName ? ` La operación registrada para esta vacante es ${operationName}.` : '';
+    return `El proceso de selección lo gestiona LoginPro Service.${operationPart}`;
+  }
 
   if (/\b(funcion|funciones|labor|labores|hace|hacer|haria|toca|consiste|responsabilidad|responsabilidades)\b/.test(normalized)) {
     return roleDescription
@@ -675,6 +709,24 @@ export async function resolveVacancyFirstGate({
 
     const intent = detectAffirmationIntent(inboundText);
     if (currentStep === GREETING_SENT && currentVacancy && intent.affirmative) {
+      if (requiresConsentBeforeCollection(candidate)) {
+        const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
+        return {
+          action: VacancyFirstGateAction.REPLY,
+          reason: 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT',
+          replyKind: 'DATA_CONSENT_PROMPT',
+          vacancyId: currentVacancy.id || candidate.vacancyId,
+          vacancy: currentVacancy,
+          candidateUpdates: {
+            vacancyId: currentVacancy.id || candidate.vacancyId,
+            currentStep: GREETING_SENT,
+            botResumeMode: buildConsentPendingMode(),
+            reminderScheduledFor: null,
+            reminderState: 'SKIPPED'
+          },
+          reply: [informationAnswer, buildDataConsentPromptReply()].filter(Boolean).join('\n\n')
+        };
+      }
       const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
       const dataPrompt = buildActiveDataPrompt(candidate, currentVacancy);
       return {
@@ -777,7 +829,7 @@ export async function resolveVacancyFirstGate({
       reason: 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS',
       replyKind: 'ASK_CITY_LOCALITY_AND_ROLE',
       candidateUpdates: { currentStep: GREETING_SENT },
-      reply: buildNeedRoleForCityReply(resolution.city, resolution.roleHint),
+      reply: buildNeedRoleForCityReply(resolution.city, resolution.roleHint, inboundText),
       resolution
     }, { recentMessages, inboundText, city: resolution.city, currentStep });
   }
