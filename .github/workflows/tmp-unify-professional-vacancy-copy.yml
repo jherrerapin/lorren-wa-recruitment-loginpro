@@ -29,6 +29,18 @@ jobs:
         with:
           node-version: "20"
           cache: npm
+      - name: Adjust temporary patch runner
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/tmp_unify_professional_vacancy_copy.py')
+          text = path.read_text(encoding='utf-8')
+          old = "    t = replace_once(t, old, new, f'vacancy first wording {index}')"
+          new = "    t = t.replace(old, new) if index == 6 else replace_once(t, old, new, f'vacancy first wording {index}')"
+          if text.count(old) != 1:
+              raise SystemExit('temporary runner replacement target not unique')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Apply professional vacancy patch
         run: python3 scripts/tmp_unify_professional_vacancy_copy.py
       - name: Install dependencies
