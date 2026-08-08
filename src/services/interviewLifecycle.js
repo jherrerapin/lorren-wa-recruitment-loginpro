@@ -102,6 +102,13 @@ export function classifyLocalInterviewIntent(text = '') {
   };
 }
 
+export function isSchedulingOfferDecline(text = '', { allowShortNo = true } = {}) {
+  const n = normalize(text);
+  if (!n) return false;
+  if (allowShortNo && /^(no|nop+|negativo|no gracias)$/.test(n)) return true;
+  return /\b(otro horario|otra hora|otro dia|otra fecha|reagend[a-z]*|reprogram[a-z]*|cambiar horario|no puedo|no me queda|no me sirve|mas tarde|mas temprano|otra opcion)\b/.test(n);
+}
+
 export function shouldStopInterviewAutomation(booking, now = new Date()) {
   if (!booking) return true;
   if (CLOSED_BOOKING_STATUSES.has(booking.status)) return true;

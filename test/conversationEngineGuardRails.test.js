@@ -844,7 +844,8 @@ test('prompt del engine define a Lorren como reclutadora de LoginPro Service y n
     else process.env.OPENAI_API_KEY = originalKey;
   }
 
-  assert.match(systemPrompt, /Sos Lórren, reclutadora de LoginPro Service/i);
+  assert.match(systemPrompt, /Eres Lórren, reclutadora de LoginPro Service/i);
+  assert.match(systemPrompt, /Usa tuteo colombiano natural y evita el voseo/i);
   assert.match(systemPrompt, /cargo, salario, horarios, beneficios, requisitos, direccion, condiciones y documentacion de entrevista/i);
   assert.match(systemPrompt, /Si el dato no esta registrado en la vacante asignada, dilo claramente y no lo inventes/i);
 });

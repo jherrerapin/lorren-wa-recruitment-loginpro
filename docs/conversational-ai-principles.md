@@ -15,5 +15,5 @@ Este ajuste sigue prácticas oficiales de diseño y mejora continua de asistente
 4. Si no hay una respuesta útil, el motor puede no responder y dejar que el flujo avance sin insistencia robotizada.
 5. Se bloquea explícitamente la frase quemada “Ya tengo la información principal; voy a revisar el siguiente paso del proceso”.
 6. Los recordatorios de proceso pendiente deben ser contextuales: pedir solo los datos o la HV que falten, sin reiniciar el flujo ni sonar como formulario.
-7. El recordatorio de entrevista se envía 40 minutos antes; respuestas breves como “sí”, “claro” o “listo” se interpretan como confirmación solo cuando existe contexto de recordatorio/entrevista activa.
+7. El recordatorio de entrevista se envía 1 hora antes; respuestas breves como “sí”, “claro” o “listo” se interpretan como confirmación solo cuando existe contexto de recordatorio/entrevista activa.
 8. Si faltan 5 minutos para la entrevista y el candidato no respondió al recordatorio, la entrevista pasa a `NO_RESPONSE`; si respondió, se interpreta la intención (confirma, cancela o solicita reagendar).

@@ -9,7 +9,7 @@ import {
  * interviewScheduler.js
  *
  * Reglas de negocio:
- *  1. Solo se ofrecen slots con al menos MIN_HOURS_ADVANCE horas de anticipacion.
+ *  1. Solo se ofrecen slots con mas de MIN_HOURS_ADVANCE horas de anticipacion.
  *  2. El scheduler usa hora Colombia de forma consistente para resolver dias y horas.
  *  3. Si el candidato rechaza un horario, se ofrece el siguiente slot valido.
  *  4. El recordatorio operativo de entrevista esta previsto 1 hora antes.
@@ -174,7 +174,7 @@ export async function listOfferableSlots(
 ) {
   const available = await getAvailableSlots(prisma, vacancyId, now);
   return available
-    .filter((entry) => ((entry.date.getTime() - now.getTime()) / 3600000) >= minHoursAdvance)
+    .filter((entry) => ((entry.date.getTime() - now.getTime()) / 3600000) > minHoursAdvance)
     .map((entry, index) => enrichOfferSlot(entry, lastInboundAt, now, index));
 }
 
