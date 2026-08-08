@@ -126,16 +126,18 @@ export function analyzeConversationSession(messages = [], options = {}) {
 
     const replyKind = String(payload.replyKind || '').toUpperCase();
     const configuredVacancyInfo = Boolean(
-      candidate?.vacancy?.roleDescription
-      || candidate?.vacancy?.requirements
-      || candidate?.vacancy?.conditions
-      || candidate?.vacancy?.operationAddress
-      || candidate?.vacancy?.requiredDocuments
-    );
-    if (replyKind === 'ACTIVE_VACANCY_INTEREST_PROMPT'
-      && configuredVacancyInfo
-      && /^\s*encontr[eé]\s+la\s+vacante\b/i.test(body)
-      && !/\b(requisitos?|condiciones?|zona de operaci[oó]n|el cargo consiste|documentos? registrados?)\b/i.test(body)) {
+    candidate?.vacancy?.roleDescription
+    || candidate?.vacancy?.requirements
+    || candidate?.vacancy?.conditions
+    || candidate?.vacancy?.operationAddress
+    || candidate?.vacancy?.requiredDocuments
+    || Number.isInteger(candidate?.vacancy?.minAge)
+    || Number.isInteger(candidate?.vacancy?.maxAge)
+    || ['YES', 'NO'].includes(String(candidate?.vacancy?.experienceRequired || '').toUpperCase())
+  );
+  if (replyKind === 'ACTIVE_VACANCY_INTEREST_PROMPT'
+    && configuredVacancyInfo
+    && !/\b(requisitos?|condiciones?|zona de operaci[oó]n|el cargo consiste|documentos? registrados?|rango de edad|edad m[ií]nima|edad m[aá]xima|edad configurada|experiencia requerida|se requiere experiencia|no se requiere experiencia)\b/i.test(body)) {
       addIssue(issues, buildIssue(
         'VACANCY_INFO_SKIPPED',
         'La vacante quedó identificada, pero el mensaje pasó a preguntar por interés sin compartir la información configurada.',

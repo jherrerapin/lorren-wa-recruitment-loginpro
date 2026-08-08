@@ -86,3 +86,28 @@ test('auditor: pregunta por empresa seguida de otra pregunta de flujo queda como
   ], { now: new Date(Date.UTC(2026, 7, 8, 13, 22)), checkCurrentState: false });
   assert.equal(codes(result).has('QUESTION_NOT_ANSWERED'), true);
 });
+
+
+test('auditor: considera edad y experiencia estructuradas como información configurada de vacante', () => {
+  const cand = candidate({
+    dataConsentAcceptedAt: new Date(Date.UTC(2026, 7, 8, 13, 0)),
+    vacancy: { id: 'vac-structured-only', title: 'Auxiliar Logístico', city: 'Bogotá', minAge: 20, maxAge: 45, experienceRequired: 'YES', experienceTimeText: 'mínimo 6 meses', schedulingEnabled: false }
+  });
+  const result = analyzeConversationSession([
+    message('1', 20, 'INBOUND', 'Auxiliar logístico Bogotá', {}, cand),
+    message('2', 21, 'OUTBOUND', 'Encontré la vacante de Auxiliar Logístico en Bogotá. ¿Te interesa continuar?', { source: 'vacancy_first_gate', replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT' }, cand)
+  ], { now: new Date(Date.UTC(2026, 7, 8, 13, 22)), checkCurrentState: false });
+  assert.equal(codes(result).has('VACANCY_INFO_SKIPPED'), true);
+});
+
+test('auditor: reconoce rango de edad estructurado cuando sí fue presentado', () => {
+  const cand = candidate({
+    dataConsentAcceptedAt: new Date(Date.UTC(2026, 7, 8, 13, 0)),
+    vacancy: { id: 'vac-age-presented', title: 'Auxiliar Logístico', city: 'Bogotá', minAge: 20, maxAge: 45, schedulingEnabled: false }
+  });
+  const result = analyzeConversationSession([
+    message('1', 20, 'INBOUND', 'Auxiliar logístico Bogotá', {}, cand),
+    message('2', 21, 'OUTBOUND', 'Te comparto la información de Auxiliar Logístico en Bogotá. El rango de edad configurado es de 20 a 45 años. Si te interesa continuar, confírmame.', { source: 'vacancy_first_gate', replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT' }, cand)
+  ], { now: new Date(Date.UTC(2026, 7, 8, 13, 22)), checkCurrentState: false });
+  assert.equal(codes(result).has('VACANCY_INFO_SKIPPED'), false);
+});
