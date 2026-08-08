@@ -34,8 +34,8 @@ patch(
 
 patch(
   'src/routes/webhook.js',
-  "    const body = 'Quedó registrado tu interés en entrevista. En este momento no tengo un horario válido para ofrecerte, así que el equipo de selección te contactará por este medio.';\n    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });",
-  "    await pauseInterviewFlow(prisma, candidate.id, 'missing_valid_slot: no hay un horario válido disponible para ofrecer');\n    const body = 'Quedó registrado tu interés en entrevista. En este momento no tengo un horario válido para ofrecerte, así que el equipo de selección te contactará por este medio.';\n    return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });"
+  "  if ((resolvedIntent === 'faq' || isFAQ(cleanText)) && candidate.currentStep !== ConversationStep.DONE) {\n    if (currentVacancy) return replyWithVacancyContext(candidate, currentVacancy);\n    return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });\n  }",
+  "  if (\n    (resolvedIntent === 'faq' || isFAQ(cleanText))\n    && candidate.currentStep !== ConversationStep.DONE\n    && !isSchedulingConfirmationIntent(cleanText)\n    && !isSchedulingRescheduleIntent(cleanText)\n  ) {\n    if (currentVacancy) return replyWithVacancyContext(candidate, currentVacancy);\n    return reply(prisma, candidate.id, from, FAQ_RESPONSE, cleanText, { body: FAQ_RESPONSE, source: 'bot_vacancy_prompt' });\n  }"
 );
 
 patch(
@@ -74,6 +74,39 @@ patch(
   'test/conversation-replay/consentOrderReplay.js',
   "includesInOrder: ['gestionar tu postulación', 'Para continuar necesito saber si autorizas']",
   "includesInOrder: ['gestionar la postulación', 'Para continuar necesito saber si autorizas']"
+);
+
+patch(
+  'test/contextualResponseGate.test.js',
+  `test('vacante CV_ONLY completa continúa al motor si preguntan si falta algo', () => {
+  const result = evaluateContextualResponseGate({
+    candidate: completeCandidate({ currentStep: 'DONE' }),
+    vacancy: vacancy({ schedulingEnabled: false }),
+    activeInterviewBooking: null,
+    recentMessages: [],
+    semanticIntent: 'ASK_APPLICATION_STATUS'
+  });
+
+  assert.equal(result.shouldReply, true);
+  assert.equal(result.allowedAction, ContextualAllowedAction.CONTINUE_FLOW);
+  assert.equal(result.responsePurpose, 'FLOW');
+  assert.equal(result.metadata.postCompletionContext, true);
+});`,
+  `test('vacante CV_ONLY completa responde estado desde el proceso persistido sin reabrir el motor', () => {
+  const result = evaluateContextualResponseGate({
+    candidate: completeCandidate({ currentStep: 'DONE' }),
+    vacancy: vacancy({ schedulingEnabled: false }),
+    activeInterviewBooking: null,
+    recentMessages: [],
+    semanticIntent: 'ASK_APPLICATION_STATUS'
+  });
+
+  assert.equal(result.shouldReply, true);
+  assert.equal(result.allowedAction, ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT);
+  assert.equal(result.responsePurpose, 'LOGISTICS_ANSWER');
+  assert.equal(result.metadata.postCompletionContext, true);
+  assert.match(result.reply, /postulación continúa registrada|proceso sigue/i);
+});`
 );
 
 let fixture = fs.readFileSync('test/fixtures/conversationCases.js', 'utf8');
