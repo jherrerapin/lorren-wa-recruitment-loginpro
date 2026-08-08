@@ -15,7 +15,7 @@ export const VACANCY_CONSENT_ORDER_REPLAYS = Object.freeze([
     expected: {
       reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
       replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
-      includes: ['condiciones registradas', '¿Deseas postularte y continuar con este proceso?'],
+      includes: ['condiciones registradas', '(te interesa continuar|deseas postularte)'],
       excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida'],
       currentStep: 'GREETING_SENT',
       botResumeMode: 'awaiting_application_interest'
@@ -37,7 +37,7 @@ export const VACANCY_CONSENT_ORDER_REPLAYS = Object.freeze([
     expected: {
       reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
       replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
-      includes: ['requisitos registrados', '¿Deseas postularte y continuar con este proceso?'],
+      includes: ['requisitos registrados', '(te interesa continuar|deseas postularte)'],
       excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida'],
       currentStep: 'GREETING_SENT',
       botResumeMode: 'awaiting_application_interest'
@@ -59,7 +59,7 @@ export const VACANCY_CONSENT_ORDER_REPLAYS = Object.freeze([
     expected: {
       reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
       replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
-      includes: ['Encontré la vacante', '¿Deseas postularte y continuar con este proceso?'],
+      includes: ['(te comparto la información|encontré la vacante)', '(te interesa continuar|deseas postularte)'],
       excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida', 'Autorizo a LoginPro'],
       currentStep: 'GREETING_SENT',
       botResumeMode: 'awaiting_application_interest'

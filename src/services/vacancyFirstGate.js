@@ -3,6 +3,7 @@ import { analyzeConversationTurn } from './conversationIntent.js';
 import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
+import { cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -110,15 +111,16 @@ function buildVacancyOverview(vacancy = {}) {
   const location = city ? ` en ${city}` : '';
   const title = vacancyTitle(vacancy);
   const facts = [];
-  const roleDescription = String(vacancy?.roleDescription || '').trim();
-  const requirements = String(vacancy?.requirements || '').trim();
-  const conditions = String(vacancy?.conditions || '').trim();
-  const address = String(vacancy?.operationAddress || '').trim();
-  const documents = String(vacancy?.requiredDocuments || '').trim();
+  const roleDescription = cleanConfiguredFragment(vacancy?.roleDescription);
+  const requirements = cleanConfiguredFragment(vacancy?.requirements);
+  const conditions = cleanConfiguredFragment(vacancy?.conditions);
+  const address = cleanConfiguredFragment(vacancy?.operationAddress);
+  const documents = cleanConfiguredFragment(vacancy?.requiredDocuments);
 
   if (roleDescription) facts.push(`El cargo consiste en ${roleDescription}.`);
   if (address) facts.push(`La zona de operación registrada es ${address}.`);
   if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);
+  facts.push(...getConfiguredPublicRequirementSentences(vacancy, requirements));
   if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);
   if (documents) facts.push(`Los documentos registrados para el proceso son: ${documents}.`);
 
@@ -152,14 +154,13 @@ function buildNeedRoleForCityReply(city = null, roleHint = null, inboundText = '
     : '';
   const hasRoleHint = Boolean(String(roleHint || '').trim());
   if (hasRoleHint) {
-    const next = isBogotaCity(city)
-      ? 'Ya tengo la ciudad y el cargo de interés. ¿En qué localidad vives?'
-      : 'Ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?';
-    return [companyAnswer, next].filter(Boolean).join(' ');
+    return [companyAnswer, 'Ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?']
+      .filter(Boolean)
+      .join(' ');
   }
-  const localityPart = isBogotaCity(city) ? ' y en qué localidad estás' : '';
-  const next = `¿Para qué vacante o cargo estás interesado${localityPart}?`;
-  return [companyAnswer || 'Gracias por contarme desde dónde escribes.', next].join(' ');
+  return [companyAnswer || 'Gracias por contarme desde dónde escribes.', '¿Para qué vacante o cargo estás interesado?']
+    .filter(Boolean)
+    .join(' ');
 }
 
 function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
@@ -171,11 +172,11 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   const title = vacancyTitle(vacancy);
   const city = vacancyCity(vacancy);
   const location = city ? ` en ${city}` : '';
-  const roleDescription = String(vacancy?.roleDescription || '').trim();
-  const requirements = String(vacancy?.requirements || '').trim();
-  const conditions = String(vacancy?.conditions || '').trim();
-  const address = String(vacancy?.operationAddress || '').trim();
-  const documents = String(vacancy?.requiredDocuments || '').trim();
+  const roleDescription = cleanConfiguredFragment(vacancy?.roleDescription);
+  const requirements = cleanConfiguredFragment(vacancy?.requirements);
+  const conditions = cleanConfiguredFragment(vacancy?.conditions);
+  const address = cleanConfiguredFragment(vacancy?.operationAddress);
+  const documents = cleanConfiguredFragment(vacancy?.requiredDocuments);
 
   if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
     const operationName = String(vacancy?.operation?.name || '').trim();
@@ -189,11 +190,26 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
       : `Tengo identificado el cargo de ${title}${location}, pero no hay una descripción adicional registrada.`;
   }
 
-  if (/\b(requisito|requisitos|perfil|experiencia|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
-    return requirements
-      ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
-      : `No tengo requisitos adicionales registrados para ${title}${location}.`;
-  }
+  if (/\b(edad|rango de edad)\b/.test(normalized)) {
+  const ageRequirement = getConfiguredAgeRequirementText(vacancy);
+  return ageRequirement
+    ? `Para ${title}${location}, ${ageRequirement}.`
+    : `No hay un rango de edad configurado para ${title}${location}.`;
+}
+
+if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
+  const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
+  if (experienceRequirement) return `Para ${title}${location}, ${experienceRequirement}.`;
+  return requirements && /\bexperiencia\b/i.test(requirements)
+    ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
+    : `No hay un requisito específico de experiencia configurado para ${title}${location}.`;
+}
+
+if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+  return requirements
+    ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
+    : `No tengo requisitos adicionales registrados para ${title}${location}.`;
+}
 
   if (/\b(documento|documentos|papeles)\b/.test(normalized)) {
     return documents
@@ -216,6 +232,7 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   const facts = [];
   if (roleDescription) facts.push(`El cargo consiste en ${roleDescription}.`);
   if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);
+  facts.push(...getConfiguredPublicRequirementSentences(vacancy, requirements));
   if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);
   if (address) facts.push(`La zona de operación registrada es ${address}.`);
   if (documents) facts.push(`Los documentos registrados para el proceso son: ${documents}.`);

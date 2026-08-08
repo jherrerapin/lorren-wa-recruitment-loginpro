@@ -204,7 +204,7 @@ test('saludo inicial pide ciudad y vacante con tono natural', async () => {
   assertNoPublicityOrPhoto(decision.reply);
 });
 
-test('C: GREETING_SENT + Bogotá con vacantes activas pero cargo ambiguo pide localidad y cargo sin catálogo', async () => {
+test('C: GREETING_SENT + Bogotá con vacantes activas pide cargo sin recolectar residencia antes del consentimiento', async () => {
   const activeBogota = vacancy({
     id: 'vac-bog-active',
     title: 'Auxiliar de Bodega Bogota',
@@ -220,7 +220,7 @@ test('C: GREETING_SENT + Bogotá con vacantes activas pero cargo ambiguo pide lo
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS');
-  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);
   assert.match(decision.reply, /cargo|vacante/i);
   assertNoPersonalDataRequest(decision.reply);
   assertNoPublicityOrPhoto(decision.reply);
@@ -268,7 +268,7 @@ test('Bogotá auxiliar de bodega conserva cargo detectado y no vuelve a pedir ca
   assert.equal(decision.resolution.city, 'Bogota');
   assert.equal(decision.resolution.roleHint, 'auxiliar bodega');
   assert.match(decision.reply, /ya tengo la ciudad y el cargo/i);
-  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);
   assert.doesNotMatch(decision.reply, /qué cargo|que cargo|cargo o vacante buscas/i);
 });
 
@@ -308,7 +308,7 @@ test('Bogotá posterior no pierde el cargo ya dado en el turno anterior', async 
   assert.equal(decision.reason, 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS');
   assert.equal(decision.resolution.city, 'Bogota');
   assert.equal(decision.resolution.roleHint, 'auxiliar bodega');
-  assert.match(decision.reply, /localidad/i);
+  assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);
   assert.doesNotMatch(decision.reply, /qué cargo|que cargo|cargo o vacante buscas/i);
 });
 
