@@ -42,9 +42,12 @@ marker = """function requiresConsentBeforeCollection(candidate = {}) {
 insertion = marker + """
 function isLikelyCommercialInquiry(text = '') {
   const normalized = normalizeResolverText(text);
-  const hasBusinessIdentity = /\b(tengo una empresa|tenemos una empresa|somos una empresa|mi empresa|ofrecemos|prestamos servicios|proveedor|propuesta comercial|alianza comercial)\b/.test(normalized);
-  const hasServiceContext = /\b(ultima milla|servicios?|operamos|cobertura|distribucion|transporte|logistica|descargue|cargue)\b/.test(normalized);
-  const hasCandidateIntent = /\b(postular|postulacion|vacante|empleo|buscar trabajo|busco trabajo|cargo|hoja de vida|hv)\b/.test(normalized);
+  const businessPhrases = ['tengo una empresa', 'tenemos una empresa', 'somos una empresa', 'mi empresa', 'ofrecemos', 'prestamos servicios', 'proveedor', 'propuesta comercial', 'alianza comercial'];
+  const servicePhrases = ['ultima milla', 'servicio', 'operamos', 'cobertura', 'distribucion', 'transporte', 'logistica', 'descargue', 'cargue'];
+  const candidatePhrases = ['postular', 'postulacion', 'vacante', 'empleo', 'buscar trabajo', 'busco trabajo', 'hoja de vida', ' hv '];
+  const hasBusinessIdentity = businessPhrases.some((phrase) => normalized.includes(phrase));
+  const hasServiceContext = servicePhrases.some((phrase) => normalized.includes(phrase));
+  const hasCandidateIntent = candidatePhrases.some((phrase) => normalized.includes(phrase));
   return hasBusinessIdentity && hasServiceContext && !hasCandidateIntent;
 }
 """
