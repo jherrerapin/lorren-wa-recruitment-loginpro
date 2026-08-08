@@ -1,0 +1,448 @@
+name: tmp-root-fix-production-flow
+on:
+  push:
+    branches:
+      - fix/production-ad-flow-20260808
+permissions:
+  contents: write
+jobs:
+  fix-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/production-ad-flow-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Apply root fixes and align obsolete contracts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+          def one(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, got {count}')
+              return text.replace(old, new, 1)
+
+          # 1) Reply safety must validate against the vacancy that the gate just resolved.
+          p='src/routes/webhook.js'; t=read(p)
+          old="""      reason: vacancyFirstGateDecision.reason,
+      replyKind: vacancyFirstGateDecision.replyKind
+    });
+  }
+
+  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT) {"""
+          new="""      reason: vacancyFirstGateDecision.reason,
+      replyKind: vacancyFirstGateDecision.replyKind,
+      safetyVacancy: currentVacancy || vacancyFirstGateDecision.vacancy || null
+    });
+  }
+
+  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT) {"""
+          t=one(t,old,new,'vacancy gate reply safety context')
+          write(p,t)
+
+          # 2) Vacancy-first flow: explicit interest moves to consent, never to personal-data collection.
+          #    Alternative vacancy acceptance also resumes through consent.
+          p='src/services/vacancyFirstGate.js'; t=read(p)
+          old="""function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
+  const answer = buildVacancyInformationAnswer(vacancy, inboundText) || buildVacancyOverview(vacancy);
+  return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;
+}"""
+          new="""function buildActiveVacancyInformationReply(vacancy = {}, inboundText = '') {
+  return buildVacancyInformationAnswer(vacancy, inboundText) || buildVacancyOverview(vacancy);
+}
+
+function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
+  const answer = buildActiveVacancyInformationReply(vacancy, inboundText);
+  return `${answer} Si después de revisar esta información te interesa continuar, confírmame y seguimos con la postulación.`;
+}"""
+          t=one(t,old,new,'active vacancy information helper')
+
+          old="""  return {
+    action: VacancyFirstGateAction.REPLY,
+    reason: isVacancyChange
+      ? 'ASSIGNED_VACANCY_CHANGE_ACCEPTED'
+      : (alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_ACCEPTED' : 'ALTERNATIVE_VACANCY_ACCEPTED'),
+    replyKind: 'ACTIVE_VACANCY_DATA_PROMPT',
+    vacancyId: vacancy.id,
+    vacancy,
+    candidateUpdates: buildCollectingDataUpdates(vacancy.id),
+    reply: buildActiveDataPrompt(candidate, vacancy)
+  };
+}"""
+          new="""  if (requiresConsentBeforeCollection(candidate)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: isVacancyChange
+        ? 'ASSIGNED_VACANCY_CHANGE_ACCEPTED_AWAIT_CONSENT'
+        : (alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_ACCEPTED_AWAIT_CONSENT' : 'ALTERNATIVE_VACANCY_ACCEPTED_AWAIT_CONSENT'),
+      replyKind: 'DATA_CONSENT_PROMPT',
+      vacancyId: vacancy.id,
+      vacancy,
+      candidateUpdates: {
+        vacancyId: vacancy.id,
+        currentStep: GREETING_SENT,
+        botResumeMode: buildConsentPendingMode({ resumeMode: buildAlternativeMode(alternativeMode.kind, vacancy.id) }),
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      },
+      reply: buildDataConsentPromptReply()
+    };
+  }
+
+  return {
+    action: VacancyFirstGateAction.REPLY,
+    reason: isVacancyChange
+      ? 'ASSIGNED_VACANCY_CHANGE_ACCEPTED'
+      : (alternativeMode.kind === ALTERNATIVE_VACANCY_PREQUALIFICATION_MODE ? 'ALTERNATIVE_PREQUALIFICATION_ACCEPTED' : 'ALTERNATIVE_VACANCY_ACCEPTED'),
+    replyKind: 'ACTIVE_VACANCY_DATA_PROMPT',
+    vacancyId: vacancy.id,
+    vacancy,
+    candidateUpdates: buildCollectingDataUpdates(vacancy.id),
+    reply: buildActiveDataPrompt(candidate, vacancy)
+  };
+}"""
+          t=one(t,old,new,'alternative vacancy consent boundary')
+
+          old="""  if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
+    if (requiresConsentBeforeCollection(candidate)) {
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
+        replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
+        vacancyId: resolution.vacancy.id,
+        vacancy: resolution.vacancy,
+        candidateUpdates: buildAwaitingApplicationInterestUpdates(resolution.vacancy.id),
+        reply: buildActiveVacancyInterestReply(resolution.vacancy, inboundText),
+        resolution
+      };
+    }
+    return { action: VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE, reason: 'ACTIVE_VACANCY_RESOLVED', vacancyId: resolution.vacancy.id, vacancy: resolution.vacancy, resolution };
+  }"""
+          new="""  if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
+    if (requiresConsentBeforeCollection(candidate)) {
+      const resolvedTurn = analyzeConversationTurn(inboundText, { currentStep });
+      if (resolvedTurn.interest) {
+        return {
+          action: VacancyFirstGateAction.REPLY,
+          reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
+          replyKind: 'DATA_CONSENT_PROMPT',
+          vacancyId: resolution.vacancy.id,
+          vacancy: resolution.vacancy,
+          candidateUpdates: {
+            vacancyId: resolution.vacancy.id,
+            currentStep: GREETING_SENT,
+            botResumeMode: buildConsentPendingMode(),
+            reminderScheduledFor: null,
+            reminderState: 'SKIPPED'
+          },
+          reply: [
+            buildActiveVacancyInformationReply(resolution.vacancy, inboundText),
+            buildDataConsentPromptReply()
+          ].filter(Boolean).join('\n\n'),
+          resolution
+        };
+      }
+      return {
+        action: VacancyFirstGateAction.REPLY,
+        reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
+        replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
+        vacancyId: resolution.vacancy.id,
+        vacancy: resolution.vacancy,
+        candidateUpdates: buildAwaitingApplicationInterestUpdates(resolution.vacancy.id),
+        reply: buildActiveVacancyInterestReply(resolution.vacancy, inboundText),
+        resolution
+      };
+    }
+    return { action: VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE, reason: 'ACTIVE_VACANCY_RESOLVED', vacancyId: resolution.vacancy.id, vacancy: resolution.vacancy, resolution };
+  }"""
+          t=one(t,old,new,'resolved vacancy explicit interest consent')
+          write(p,t)
+
+          # 3) Contract tests: consent boundary is the desired behavior, not COLLECTING_DATA.
+          p='test/activeVacancyQuestionIntake.test.js'; t=read(p)
+          t=t.replace("test('interés explícito y pregunta responde primero y entra a recolección', async () => {", "test('interés explícito y pregunta responde primero y solicita consentimiento', async () => {")
+          old="""  assert.equal(result.candidate.currentStep, 'COLLECTING_DATA');
+  assert.match(result.reply, /condiciones registradas/i);
+  assert.match(result.reply, /comp[aá]rteme/i);
+  assert.doesNotMatch(result.reply, /Perfecto, por favor confirma/i);"""
+          new="""  assert.equal(result.candidate.currentStep, 'GREETING_SENT');
+  assert.match(String(result.candidate.botResumeMode || ''), /^awaiting_data_consent/);
+  assert.match(result.reply, /condiciones registradas/i);
+  assert.match(result.reply, /autorizaci[oó]n|tratamiento de datos/i);
+  assert.doesNotMatch(result.reply, /comp[aá]rteme/i);"""
+          t=one(t,old,new,'active vacancy interest test')
+          old="""  assert.equal(result.candidate.currentStep, 'GREETING_SENT');
+  assert.doesNotMatch(result.reply, /comp[aá]rteme/i);
+});
+
+test('solo ciudad no asigna vacante ni inicia recolección'"""
+          new="""  assert.equal(result.candidate.currentStep, 'GREETING_SENT');
+  assert.match(String(result.candidate.botResumeMode || ''), /^awaiting_data_consent/);
+  assert.match(result.reply, /autorizaci[oó]n|tratamiento de datos/i);
+  assert.doesNotMatch(result.reply, /comp[aá]rteme/i);
+});
+
+test('solo ciudad no asigna vacante ni inicia recolección'"""
+          t=one(t,old,new,'plain explicit interest test')
+          write(p,t)
+
+          p='test/fixtures/conversationCases.js'; t=read(p)
+          old="""    expect: {
+      candidate: { vacancyId: 'vac-sched', currentStep: 'COLLECTING_DATA' },
+      lastReplyIncludes: ['condiciones registradas', 'comparteme'],
+      lastReplyNotIncludes: ['Perfecto, por favor confirma']
+    }"""
+          new="""    expect: {
+      candidate: { vacancyId: 'vac-sched', currentStep: 'GREETING_SENT' },
+      lastReplyIncludes: ['condiciones registradas', 'autorizacion'],
+      lastReplyNotIncludes: ['comparteme', 'Perfecto, por favor confirma']
+    }"""
+          t=one(t,old,new,'conversation harness question before data')
+          old="""      candidate: {
+        vacancyId: 'vac-bodega-siberia',
+        currentStep: 'COLLECTING_DATA'
+      },
+      candidateNot: {
+        fullName: 'Funza Cundinamarca'
+      },
+      lastReplyIncludes: ['comparteme'],
+      lastReplyNotIncludes: ['Desde que ciudad nos escribes y para que vacante o cargo']"""
+          new="""      candidate: {
+        vacancyId: 'vac-bodega-siberia',
+        currentStep: 'GREETING_SENT'
+      },
+      candidateNot: {
+        fullName: 'Funza Cundinamarca'
+      },
+      lastReplyIncludes: ['autorizacion'],
+      lastReplyNotIncludes: ['comparteme', 'Desde que ciudad nos escribes y para que vacante o cargo']"""
+          t=one(t,old,new,'funza preconsent contract')
+          write(p,t)
+
+          p='test/webhookMultiline.test.js'; t=read(p)
+          t=t.replace("test('la ventana multilinea usa 90 segundos para consolidar antes de razonar', () => {", "test('la ventana multilinea usa una espera corta antes de razonar', () => {")
+          t=one(t,"""    assert.equal(earlyWindow, 90000);
+    assert.equal(resolvedWindow, 90000);""","""    assert.equal(earlyWindow, 8000);
+    assert.equal(resolvedWindow, 8000);""",'multiline default latency')
+          t=t.replace("test('la ventana de razonamiento se puede configurar y queda acotada a 90 segundos', () => {", "test('la ventana de razonamiento se puede configurar y queda acotada a 20 segundos', () => {")
+          t=one(t,"""    assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 90000);""","""    assert.equal(getMultilineWindowMs({ currentStep: 'ASK_CV', vacancyResolved: true }), 20000);""",'multiline max latency')
+          write(p,t)
+
+          p='test/leaderVacancyResolution.test.js'; t=read(p)
+          old="""  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
+  assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');"""
+          new="""  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
+  assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
+  assert.equal(decision.candidateUpdates.vacancyId, ibagueLeaderVacancy.id);
+  assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');"""
+          t=one(t,old,new,'leader gate basic')
+          old="""  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
+  assert.notEqual(decision.vacancyId, ibagueAuxVacancy.id);"""
+          new="""  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
+  assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
+  assert.equal(decision.candidateUpdates.vacancyId, ibagueLeaderVacancy.id);
+  assert.notEqual(decision.vacancyId, ibagueAuxVacancy.id);"""
+          t=one(t,old,new,'leader gate typo')
+          old="""  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
+  assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');
+  assert.notEqual(decision.replyKind, 'ALTERNATIVE_VACANCY_OFFER');"""
+          new="""  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
+  assert.equal(decision.vacancyId, ibagueLeaderVacancy.id);
+  assert.equal(decision.candidateUpdates.vacancyId, ibagueLeaderVacancy.id);
+  assert.notEqual(decision.replyKind, 'ASK_CITY_LOCALITY_AND_ROLE');
+  assert.notEqual(decision.replyKind, 'ALTERNATIVE_VACANCY_OFFER');"""
+          t=one(t,old,new,'leader gate recent city')
+
+          old="""test('aceptación posterior de vacante alternativa asigna vacante y pasa a captura de datos', async () => {
+  const decision = await decideAlternative({ text: 'Sí, esta es la vacante. Me interesa continuar' });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ALTERNATIVE_VACANCY_ACCEPTED');
+  assert.equal(decision.vacancyId, ibagueAuxVacancy.id);
+  assert.equal(decision.candidateUpdates.vacancyId, ibagueAuxVacancy.id);
+  assert.equal(decision.candidateUpdates.currentStep, 'COLLECTING_DATA');
+  assert.equal(decision.candidateUpdates.botResumeMode, null);
+  assert.match(decision.reply, /continuamos con esta vacante/i);
+  assert.doesNotMatch(decision.reply, /La vacante que tengo para ti|primero confirmamos/i);
+});"""
+          new="""test('aceptación posterior de vacante alternativa solicita consentimiento antes de capturar datos', async () => {
+  const decision = await decideAlternative({ text: 'Sí, esta es la vacante. Me interesa continuar' });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ALTERNATIVE_VACANCY_ACCEPTED_AWAIT_CONSENT');
+  assert.equal(decision.vacancyId, ibagueAuxVacancy.id);
+  assert.equal(decision.candidateUpdates.vacancyId, ibagueAuxVacancy.id);
+  assert.equal(decision.candidateUpdates.currentStep, 'GREETING_SENT');
+  assert.match(String(decision.candidateUpdates.botResumeMode || ''), /^awaiting_data_consent:/);
+  assert.match(decision.reply, /autorizaci[oó]n|tratamiento de datos/i);
+  assert.doesNotMatch(decision.reply, /nombre completo|n[uú]mero de documento|restricciones m[eé]dicas/i);
+});"""
+          t=one(t,old,new,'alternative acceptance consent test')
+          write(p,t)
+
+          p='test/vacancyCorrectionPriority.test.js'; t=read(p)
+          old="""  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED');
+  assert.equal(decision.vacancyId, medellinLeader.id);"""
+          new="""  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
+  assert.equal(decision.vacancyId, medellinLeader.id);
+  assert.equal(decision.candidateUpdates.vacancyId, medellinLeader.id);"""
+          t=one(t,old,new,'complete correction preconsent')
+          old="""  assert.equal(decision.action, VacancyFirstGateAction.ASSIGN_VACANCY_AND_CONTINUE);
+  assert.equal(decision.vacancyId, medellinLeader.id);
+});"""
+          new="""  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
+  assert.equal(decision.vacancyId, medellinLeader.id);
+  assert.equal(decision.candidateUpdates.vacancyId, medellinLeader.id);
+});"""
+          t=one(t,old,new,'continuity preconsent')
+          write(p,t)
+
+          p='test/conversation-replay/vacancyConsentOrderReplay.js'; t=read(p)
+          old="""    expected: {
+      reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
+      replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
+      includes: ['(te comparto la información|encontré la vacante)', '(te interesa continuar|deseas postularte)'],
+      excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida', 'Autorizo a LoginPro'],
+      currentStep: 'GREETING_SENT',
+      botResumeMode: 'awaiting_application_interest'
+    }"""
+          new="""    expected: {
+      reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
+      replyKind: 'DATA_CONSENT_PROMPT',
+      includes: ['(te comparto la información|encontré la vacante|Auxiliar de Bodega Neiva)', '(autorización|autorizas|tratamiento de datos)'],
+      excludes: ['nombre completo', 'número de documento', 'edad', 'transporte', 'compárteme'],
+      currentStep: 'GREETING_SENT',
+      botResumeMode: 'awaiting_data_consent'
+    }"""
+          t=one(t,old,new,'explicit interest replay')
+          write(p,t)
+
+          p='test/vacancyBeforeConsentReplay.test.js'; t=read(p)
+          t=t.replace("test('replays: una vacante activa se presenta y pregunta interés antes de datos o consentimiento', async () => {", "test('replays: una vacante activa respeta interés y consentimiento antes de datos', async () => {")
+          write(p,t)
+          PY
+
+      - name: Install and generate
+        run: |
+          npm ci
+          npm run prisma:generate
+
+      - name: Run focused root-contract tests
+        run: |
+          node --test \
+            test/activeVacancyQuestionIntake.test.js \
+            test/webhookMultiline.test.js \
+            test/leaderVacancyResolution.test.js \
+            test/vacancyCorrectionPriority.test.js \
+            test/vacancyBeforeConsentReplay.test.js \
+            test/conversation-harness.test.js \
+            test/productionConversationReplay.test.js \
+            test/webhookStatusAndBufferContract.test.js
+
+      - name: Capture current full suite
+        run: |
+          set +e
+          npm test > current.log 2>&1
+          echo $? > current.exit
+          set -e
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ed754a71254393ad9de57c4551a65b4fc731fbfd
+          path: .baseline
+          persist-credentials: false
+      - name: Capture base full suite
+        run: |
+          cd .baseline
+          npm ci
+          npm run prisma:generate
+          set +e
+          npm test > "$GITHUB_WORKSPACE/base.log" 2>&1
+          echo $? > "$GITHUB_WORKSPACE/base.exit"
+          set -e
+
+      - name: Require zero new full-suite failure identities
+        run: |
+          set -euo pipefail
+          extract() {
+            awk '
+              function emit_pending() {
+                if (pending != "" && !is_subtest_container) print pending
+                pending = ""; is_subtest_container = 0
+              }
+              /^[[:space:]]*not ok [0-9]+ - / {
+                emit_pending(); identity=$0
+                sub(/^[[:space:]]*not ok [0-9]+ - /, "", identity)
+                sub(/[[:space:]]+#.*$/, "", identity)
+                sub(/[[:space:]]+$/, "", identity)
+                pending=identity; next
+              }
+              pending != "" && /^[[:space:]]*failureType:[[:space:]].*subtestsFailed/ { is_subtest_container=1; next }
+              END { emit_pending() }
+            ' "$1" | LC_ALL=C sort -u > "$2"
+          }
+          extract base.log base.failures
+          extract current.log current.failures
+          LC_ALL=C comm -23 current.failures base.failures > unexpected.failures
+          LC_ALL=C comm -13 current.failures base.failures > resolved.failures
+          echo "=== CURRENT SUMMARY ==="
+          grep -E '^# (tests|pass|fail|cancelled|skipped) ' current.log | tail -n 5 || true
+          echo "=== BASE SUMMARY ==="
+          grep -E '^# (tests|pass|fail|cancelled|skipped) ' base.log | tail -n 5 || true
+          echo "=== UNEXPECTED IDENTITIES ==="
+          cat unexpected.failures || true
+          echo "=== RESOLVED BASE IDENTITIES ==="
+          cat resolved.failures || true
+          if [ -s unexpected.failures ]; then
+            while IFS= read -r id; do
+              [ -z "$id" ] && continue
+              echo "--- $id ---"
+              grep -F -B 8 -A 30 -- "$id" current.log | head -n 90 || true
+            done < unexpected.failures
+            exit 1
+          fi
+
+      - name: Commit validated root fix
+        run: |
+          git add src/routes/webhook.js src/services/vacancyFirstGate.js \
+            test/activeVacancyQuestionIntake.test.js test/fixtures/conversationCases.js \
+            test/webhookMultiline.test.js test/leaderVacancyResolution.test.js \
+            test/vacancyCorrectionPriority.test.js test/conversation-replay/vacancyConsentOrderReplay.js \
+            test/vacancyBeforeConsentReplay.test.js
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: cerrar consentimiento y seguridad del flujo de pauta"
+          git push origin HEAD:fix/production-ad-flow-20260808
