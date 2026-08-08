@@ -1,0 +1,171 @@
+name: tmp-fix-vacancy-public-info-contract-v3
+on:
+  push:
+    branches: [fix/production-ad-flow-20260808]
+permissions:
+  contents: write
+jobs:
+  patch-validate-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/production-ad-flow-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Apply runtime patch and align obsolete contracts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+
+          # Reuse the already syntax-validated runtime patch from v2.
+          source = Path('.github/workflows/tmp-fix-vacancy-public-info-contract-v2.yml').read_text(encoding='utf-8')
+          match = re.search(r"      - name: Patch exact runtime contract\n        run: \|\n(?P<body>.*?)\n      - run: npm ci", source, re.S)
+          if not match:
+              raise SystemExit('v2 patch block not found')
+          body = textwrap.dedent(match.group('body')).rstrip()
+          prefix = "python3 - <<'PY'\n"
+          if not body.startswith(prefix) or not body.endswith('\nPY'):
+              raise SystemExit('unexpected v2 patch wrapper')
+          exec(compile(body[len(prefix):-3], '<runtime-patch-v2>', 'exec'), {})
+
+          def update(path, transform):
+              p = Path(path)
+              original = p.read_text(encoding='utf-8')
+              changed = transform(original)
+              if changed == original:
+                  raise SystemExit(f'no changes applied to {path}')
+              p.write_text(changed, encoding='utf-8')
+
+          # Configured free-text values may already end in a period. Strip only repeated
+          # terminal periods before composing sentences so candidate messages never show '..'.
+          p = Path('src/services/vacancyPublicInfo.js')
+          text = p.read_text(encoding='utf-8')
+          insertion = """export function cleanConfiguredFragment(value = '') {
+            return String(value || '').trim().replace(/\\.+$/g, '');
+          }
+
+          """
+          if 'export function cleanConfiguredFragment' not in text:
+              text = insertion + text
+          p.write_text(text, encoding='utf-8')
+
+          def clean_vacancy_first_gate(text):
+              old_import = "import { getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';"
+              new_import = "import { cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';"
+              text = text.replace(old_import, new_import, 1)
+              replacements = {
+                "String(vacancy?.roleDescription || '').trim()": "cleanConfiguredFragment(vacancy?.roleDescription)",
+                "String(vacancy?.requirements || '').trim()": "cleanConfiguredFragment(vacancy?.requirements)",
+                "String(vacancy?.conditions || '').trim()": "cleanConfiguredFragment(vacancy?.conditions)",
+                "String(vacancy?.operationAddress || '').trim()": "cleanConfiguredFragment(vacancy?.operationAddress)",
+                "String(vacancy?.requiredDocuments || '').trim()": "cleanConfiguredFragment(vacancy?.requiredDocuments)"
+              }
+              applied = 0
+              for old, new in replacements.items():
+                  count = text.count(old)
+                  if count:
+                      text = text.replace(old, new)
+                      applied += count
+              if applied < 10:
+                  raise SystemExit(f'expected at least 10 configured-fragment replacements, got {applied}')
+              return text
+          update('src/services/vacancyFirstGate.js', clean_vacancy_first_gate)
+
+          def clean_data_consent(text):
+              old_import = "import { getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';"
+              new_import = "import { cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';"
+              text = text.replace(old_import, new_import, 1)
+
+              # Clean only the two candidate-facing vacancy builders.
+              start = text.index('function buildVacancyInfoReply(vacancy = {}) {')
+              end = text.index('\n\nexport function buildConsentAcceptedReply', start)
+              block = text[start:end]
+              block = block.replace("String(vacancy.requirements || '').trim()", "cleanConfiguredFragment(vacancy.requirements)")
+              block = block.replace('vacancy.roleDescription', 'cleanConfiguredFragment(vacancy.roleDescription)')
+              block = block.replace('vacancy.operationAddress', 'cleanConfiguredFragment(vacancy.operationAddress)')
+              block = block.replace('vacancy.conditions', 'cleanConfiguredFragment(vacancy.conditions)')
+              block = block.replace('vacancy.requiredDocuments', 'cleanConfiguredFragment(vacancy.requiredDocuments)')
+              # Avoid calling the cleaner twice in conditions/requirements expressions created above.
+              block = block.replace('cleanConfiguredFragment(cleanConfiguredFragment(', 'cleanConfiguredFragment(')
+              block = block.replace('))', '))')
+              text = text[:start] + block + text[end:]
+              return text
+          update('src/services/dataConsentGate.js', clean_data_consent)
+
+          # Old tests required residence/locality before consent. Align them with privacy boundary.
+          def align_vacancy_gate_tests(text):
+              text = text.replace(
+                "test('C: GREETING_SENT + Bogotá con vacantes activas pero cargo ambiguo pide localidad y cargo sin catálogo'",
+                "test('C: GREETING_SENT + Bogotá con vacantes activas pide cargo sin recolectar residencia antes del consentimiento'"
+              )
+              old = "assert.match(decision.reply, /localidad/i);"
+              count = text.count(old)
+              if count != 3:
+                  raise SystemExit(f'expected 3 legacy locality assertions, got {count}')
+              text = text.replace(old, "assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);")
+              return text
+          update('test/vacancyFirstGate.test.js', align_vacancy_gate_tests)
+
+          # Replay should assert the semantic interest prompt, not one historical sentence.
+          def align_replay(text):
+              old = "'¿Deseas postularte y continuar con este proceso?'"
+              count = text.count(old)
+              if count != 3:
+                  raise SystemExit(f'expected 3 literal legacy interest prompts, got {count}')
+              return text.replace(old, "'(te interesa continuar|deseas postularte)'")
+          update('test/conversation-replay/vacancyConsentOrderReplay.js', align_replay)
+          PY
+      - run: npm ci
+      - run: npm run prisma:generate
+      - name: Syntax checks
+        run: |
+          node --check src/services/vacancyPublicInfo.js
+          node --check src/services/vacancyFirstGate.js
+          node --check src/services/dataConsentGate.js
+          node --check src/services/conversationIntent.js
+          node --check test/vacancyConfiguredInformationContract.test.js
+          node --check test/vacancyFirstGate.test.js
+          node --check test/conversation-replay/vacancyConsentOrderReplay.js
+      - name: Focused regressions
+        run: |
+          node --test \
+            test/vacancyConfiguredInformationContract.test.js \
+            test/productionPaidAdFlowRegressions.test.js \
+            test/vacancyFirstGate.test.js \
+            test/vacancyBeforeConsentReplay.test.js \
+            test/dataConsentOrderReplay.test.js
+      - name: Validate no duplicate punctuation in representative vacancy reply
+        run: |
+          node --input-type=module - <<'NODE'
+          import { buildVacancyQuestionReply } from './src/services/dataConsentGate.js';
+          const reply = buildVacancyQuestionReply({ title: 'Auxiliar', conditions: 'Salario y horario.' }, '¿Cuál es el salario?');
+          if (reply.includes('..')) throw new Error(`duplicate punctuation: ${reply}`);
+          NODE
+      - name: Commit validated runtime and clean temporary workflows
+        run: |
+          rm -f .github/workflows/tmp-run-vacancy-public-info-contract.yml
+          rm -f .github/workflows/tmp-fix-vacancy-public-info-contract-v2.yml
+          rm -f .github/workflows/tmp-fix-vacancy-public-info-contract-v3.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: respetar configuración de vacante antes del consentimiento"
+          git push origin HEAD:fix/production-ad-flow-20260808
