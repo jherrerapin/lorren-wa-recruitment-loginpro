@@ -135,3 +135,69 @@ jobs:
           echo "ISOLATED_CONSENT_ORDER_REPLAY_EXIT=$consent_exit"
 
           exit 0
+
+      - name: Print high-impact conversation snapshots
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          process.env.NODE_ENV = 'test';
+          process.env.OPENAI_API_KEY = 'test-openai-key';
+          process.env.USE_CONVERSATION_ENGINE = 'true';
+          process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
+          process.env.META_ACCESS_TOKEN = 'meta-access-token';
+          process.env.LORREN_SEND_DELAY_MS = '0';
+
+          const { conversationCases } = await import('./test/fixtures/conversationCases.js');
+          const { runConversationCase } = await import('./test/helpers/conversationHarness.js');
+          const { processText } = await import('./src/routes/webhook.js');
+          const { createDebugTrace } = await import('./src/services/debugTrace.js');
+
+          const selected = new Set([
+            'ibague-flow-name-correction-and-transport-list',
+            'funza-bodega-city-does-not-become-name-and-resolves-vacancy',
+            'bodega-data-block-keeps-name-doc-and-transport',
+            'future-birthday-keeps-current-age-and-does-not-repeat-transport',
+            'ibague-greeting-interest-does-not-become-name-and-name-correction-advances',
+            'human-intervention-pauses-bot',
+            'female-pipeline-after-cv',
+            'scheduling-offer-reschedule-confirm',
+            'document-exception-pauses-for-manual-review',
+            'done-step-followup-about-previous-application-gets-status-ack',
+            'ask-cv-out-of-scope-question-pauses-for-dev-review',
+            'scheduled-arrival-problem-pauses-for-manual-review-without-reply',
+            'scheduled-question-uses-context-instead-of-repeating-flow'
+          ]);
+
+          for (const conversationCase of conversationCases.filter((item) => selected.has(item.id))) {
+            const result = await runConversationCase(conversationCase, {
+              processText,
+              createDebugTrace,
+              assertExpectations: false
+            });
+            const candidate = result.candidate || {};
+            const compactCandidate = {
+              status: candidate.status,
+              currentStep: candidate.currentStep,
+              vacancyId: candidate.vacancyId,
+              fullName: candidate.fullName,
+              documentType: candidate.documentType,
+              documentNumber: candidate.documentNumber,
+              age: candidate.age,
+              neighborhood: candidate.neighborhood,
+              locality: candidate.locality,
+              medicalRestrictions: candidate.medicalRestrictions,
+              transportMode: candidate.transportMode,
+              hasCv: Boolean(candidate.cvData || candidate.cvStorageKey),
+              botPaused: candidate.botPaused,
+              botPauseReason: candidate.botPauseReason,
+              botResumeMode: candidate.botResumeMode,
+              reminderState: candidate.reminderState
+            };
+            const outbound = (result.outbound || []).map((message) => ({
+              body: message.body,
+              source: message?.rawPayload?.source || null
+            }));
+            console.log(`AUDIT_CASE|${conversationCase.id}|${JSON.stringify({ steps: conversationCase.steps, candidate: compactCandidate, outbound })}`);
+          }
+          NODE
