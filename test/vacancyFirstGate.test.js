@@ -562,7 +562,7 @@ test('vacante activa asignada responde requisitos antes de entrar a recolección
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT');
-  assert.match(decision.reply, /requisitos registrados/i);
+  assert.match(decision.reply, /Los requisitos para .* son:/i);
   assert.match(decision.reply, /autorización|autorizas/i);
   assert.doesNotMatch(decision.reply, /para avanzar, compárteme/i);
   assert.ok(decision.reply.indexOf('requisitos registrados') < decision.reply.search(/autorización|autorizas/i));

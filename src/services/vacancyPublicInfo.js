@@ -16,11 +16,11 @@ export function getConfiguredAgeRequirementText(vacancy = {}) {
   const minAge = configuredInteger(vacancy?.minAge);
   const maxAge = configuredInteger(vacancy?.maxAge);
   if (minAge !== null && maxAge !== null) {
-    if (minAge === maxAge) return `la edad configurada es ${minAge} años`;
-    return `el rango de edad configurado es de ${minAge} a ${maxAge} años`;
+    if (minAge === maxAge) return `la edad requerida es ${minAge} años`;
+    return `el rango de edad es de ${minAge} a ${maxAge} años`;
   }
-  if (minAge !== null) return `la edad mínima configurada es ${minAge} años`;
-  if (maxAge !== null) return `la edad máxima configurada es ${maxAge} años`;
+  if (minAge !== null) return `la edad mínima es ${minAge} años`;
+  if (maxAge !== null) return `la edad máxima es ${maxAge} años`;
   return '';
 }
 
@@ -42,4 +42,76 @@ export function getConfiguredPublicRequirementSentences(vacancy = {}, requiremen
   if (age && !mentionsAge) facts.push(sentence(age));
   if (experience && !mentionsExperience) facts.push(sentence(experience));
   return facts;
+}
+
+
+function publicVacancyCity(vacancy = {}) {
+  return vacancy?.operation?.city?.name || vacancy?.city || '';
+}
+
+function publicVacancyTitle(vacancy = {}) {
+  return String(vacancy?.title || vacancy?.role || 'Vacante disponible').trim();
+}
+
+function professionalSentence(value = '') {
+  const clean = cleanConfiguredFragment(value);
+  return clean ? `${clean}.` : '';
+}
+
+function professionalAgeLine(vacancy = {}, requirements = '') {
+  if (/\bedad\b|\b\d{1,2}\s*(?:a|-)\s*\d{1,2}\s*a[nñ]os?\b/i.test(requirements)) return '';
+  const minAge = configuredInteger(vacancy?.minAge);
+  const maxAge = configuredInteger(vacancy?.maxAge);
+  if (minAge !== null && maxAge !== null) {
+    return minAge === maxAge ? `Edad: ${minAge} años.` : `Edad: ${minAge} a ${maxAge} años.`;
+  }
+  if (minAge !== null) return `Edad mínima: ${minAge} años.`;
+  if (maxAge !== null) return `Edad máxima: ${maxAge} años.`;
+  return '';
+}
+
+function professionalExperienceLine(vacancy = {}, requirements = '') {
+  if (/\bexperiencia\b/i.test(requirements)) return '';
+  const mode = String(vacancy?.experienceRequired || '').trim().toUpperCase();
+  const time = cleanConfiguredFragment(vacancy?.experienceTimeText);
+  if (mode === 'YES') {
+    return time ? `Experiencia: ${time.charAt(0).toUpperCase()}${time.slice(1)}.` : 'Experiencia: Requerida.';
+  }
+  if (mode === 'NO') return 'Experiencia: No requerida.';
+  return '';
+}
+
+export function buildProfessionalVacancyPresentation(vacancy = {}, { includeInterestPrompt = false } = {}) {
+  const title = publicVacancyTitle(vacancy);
+  const city = publicVacancyCity(vacancy);
+  const roleDescription = cleanConfiguredFragment(vacancy?.roleDescription);
+  const requirements = cleanConfiguredFragment(vacancy?.requirements);
+  const conditions = cleanConfiguredFragment(vacancy?.conditions);
+  const address = cleanConfiguredFragment(vacancy?.operationAddress);
+  const documents = cleanConfiguredFragment(vacancy?.requiredDocuments);
+  const sections = [
+    `*Vacante: ${title}*`,
+    city ? `Ciudad: ${city}` : null,
+    address ? `Zona de trabajo: ${address}` : null
+  ].filter(Boolean);
+
+  if (roleDescription) sections.push(`*Funciones*\n${professionalSentence(roleDescription)}`);
+
+  const requirementLines = [
+    requirements ? professionalSentence(requirements) : '',
+    professionalAgeLine(vacancy, requirements),
+    professionalExperienceLine(vacancy, requirements)
+  ].filter(Boolean);
+  if (requirementLines.length) sections.push(`*Requisitos*\n${requirementLines.join('\n')}`);
+  if (conditions) sections.push(`*Condiciones*\n${professionalSentence(conditions)}`);
+  if (documents) sections.push(`*Documentación para el proceso*\n${professionalSentence(documents)}`);
+
+  const hasDetails = Boolean(
+    roleDescription || requirements || conditions || documents
+    || Number.isInteger(vacancy?.minAge) || Number.isInteger(vacancy?.maxAge)
+    || ['YES', 'NO'].includes(String(vacancy?.experienceRequired || '').trim().toUpperCase())
+  );
+  if (!hasDetails) sections.push('La información disponible no incluye detalles adicionales para esta vacante.');
+  if (includeInterestPrompt) sections.push('¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.');
+  return sections.join('\n\n');
 }

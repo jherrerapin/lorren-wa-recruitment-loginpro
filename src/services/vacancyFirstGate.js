@@ -3,7 +3,7 @@ import { analyzeConversationTurn } from './conversationIntent.js';
 import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
-import { cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
+import { buildProfessionalVacancyPresentation, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -106,66 +106,8 @@ function buildAwaitingApplicationInterestUpdates(vacancyId) {
   };
 }
 
-function ensureProfessionalSentence(value = '') {
-  const clean = cleanConfiguredFragment(value);
-  return clean ? `${clean}.` : '';
-}
-
-function buildAgeOverviewLine(vacancy = {}, requirements = '') {
-  if (/\bedad\b|\b\d{1,2}\s*(?:a|-)\s*\d{1,2}\s*a[nñ]os?\b/i.test(requirements)) return '';
-  const minAge = Number.isInteger(vacancy?.minAge) ? vacancy.minAge : null;
-  const maxAge = Number.isInteger(vacancy?.maxAge) ? vacancy.maxAge : null;
-  if (minAge !== null && maxAge !== null) {
-    return minAge === maxAge ? `Edad: ${minAge} años.` : `Edad: ${minAge} a ${maxAge} años.`;
-  }
-  if (minAge !== null) return `Edad mínima: ${minAge} años.`;
-  if (maxAge !== null) return `Edad máxima: ${maxAge} años.`;
-  return '';
-}
-
-function buildExperienceOverviewLine(vacancy = {}, requirements = '') {
-  if (/\bexperiencia\b/i.test(requirements)) return '';
-  const mode = String(vacancy?.experienceRequired || '').trim().toUpperCase();
-  const time = cleanConfiguredFragment(vacancy?.experienceTimeText);
-  if (mode === 'YES') {
-    if (time) return `Experiencia: ${time.charAt(0).toUpperCase()}${time.slice(1)}.`;
-    return 'Experiencia: Requerida.';
-  }
-  if (mode === 'NO') return 'Experiencia: No requerida.';
-  return '';
-}
-
 function buildVacancyOverview(vacancy = {}) {
-  const city = vacancyCity(vacancy);
-  const title = vacancyTitle(vacancy);
-  const roleDescription = cleanConfiguredFragment(vacancy?.roleDescription);
-  const requirements = cleanConfiguredFragment(vacancy?.requirements);
-  const conditions = cleanConfiguredFragment(vacancy?.conditions);
-  const address = cleanConfiguredFragment(vacancy?.operationAddress);
-  const documents = cleanConfiguredFragment(vacancy?.requiredDocuments);
-  const sections = [
-    `*Vacante: ${title}*`,
-    city ? `Ciudad: ${city}` : null,
-    address ? `Zona de trabajo: ${address}` : null
-  ].filter(Boolean);
-
-  if (roleDescription) sections.push(`*Funciones*\n${ensureProfessionalSentence(roleDescription)}`);
-
-  const requirementLines = [
-    requirements ? ensureProfessionalSentence(requirements) : '',
-    buildAgeOverviewLine(vacancy, requirements),
-    buildExperienceOverviewLine(vacancy, requirements)
-  ].filter(Boolean);
-  if (requirementLines.length) sections.push(`*Requisitos*\n${requirementLines.join('\n')}`);
-  if (conditions) sections.push(`*Condiciones*\n${ensureProfessionalSentence(conditions)}`);
-  if (documents) sections.push(`*Documentación para el proceso*\n${ensureProfessionalSentence(documents)}`);
-
-  const hasDetails = Boolean(roleDescription || requirements || conditions || documents
-    || Number.isInteger(vacancy?.minAge) || Number.isInteger(vacancy?.maxAge)
-    || ['YES', 'NO'].includes(String(vacancy?.experienceRequired || '').trim().toUpperCase()));
-  if (!hasDetails) sections.push('No hay información adicional cargada para esta vacante.');
-
-  return sections.join('\n\n');
+  return buildProfessionalVacancyPresentation(vacancy);
 }
 
 function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
@@ -189,7 +131,7 @@ function buildNeedRoleForCityReply(city = null, roleHint = null, inboundText = '
   const normalized = normalizeResolverText(inboundText);
   const asksCompany = /\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized);
   const companyAnswer = asksCompany
-    ? 'El proceso de selección lo gestiona LoginPro Service. Para decirte la empresa u operación exacta registrada necesito identificar primero la vacante.'
+    ? 'El proceso de selección lo gestiona LoginPro Service. Para decirte la empresa u operación exacta necesito identificar primero la vacante.'
     : '';
   const hasRoleHint = Boolean(String(roleHint || '').trim());
   if (hasRoleHint) {
@@ -219,53 +161,53 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
 
   if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
     const operationName = String(vacancy?.operation?.name || '').trim();
-    const operationPart = operationName ? ` La operación registrada para esta vacante es ${operationName}.` : '';
+    const operationPart = operationName ? ` La operación asociada a esta vacante es ${operationName}.` : '';
     return `El proceso de selección lo gestiona LoginPro Service.${operationPart}`;
   }
 
   if (/\b(funcion|funciones|labor|labores|hace|hacer|haria|toca|consiste|responsabilidad|responsabilidades)\b/.test(normalized)) {
     return roleDescription
-      ? `La función registrada para ${title}${location} es ${roleDescription}.`
-      : `Tengo identificado el cargo de ${title}${location}, pero no hay una descripción adicional registrada.`;
+      ? `Las funciones del cargo para ${title}${location} son: ${roleDescription}.`
+      : `Tengo identificado el cargo de ${title}${location}, pero la información disponible no incluye una descripción adicional de funciones.`;
   }
 
   if (/\b(edad|rango de edad)\b/.test(normalized)) {
   const ageRequirement = getConfiguredAgeRequirementText(vacancy);
   return ageRequirement
     ? `Para ${title}${location}, ${ageRequirement}.`
-    : `No hay un rango de edad configurado para ${title}${location}.`;
+    : `La información disponible no especifica un rango de edad para ${title}${location}.`;
 }
 
 if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
   const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
   if (experienceRequirement) return `Para ${title}${location}, ${experienceRequirement}.`;
   return requirements && /\bexperiencia\b/i.test(requirements)
-    ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
-    : `No hay un requisito específico de experiencia configurado para ${title}${location}.`;
+    ? `Los requisitos para ${title}${location} son: ${requirements}.`
+    : `La información disponible no especifica un requisito adicional de experiencia para ${title}${location}.`;
 }
 
 if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
   return requirements
-    ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
-    : `No tengo requisitos adicionales registrados para ${title}${location}.`;
+    ? `Los requisitos para ${title}${location} son: ${requirements}.`
+    : `La información disponible no incluye requisitos adicionales para ${title}${location}.`;
 }
 
   if (/\b(documento|documentos|papeles)\b/.test(normalized)) {
     return documents
-      ? `Los documentos registrados para el proceso de ${title}${location} son: ${documents}.`
-      : `No tengo documentos adicionales registrados para ${title}${location}.`;
+      ? `Los documentos requeridos para el proceso de ${title}${location} son: ${documents}.`
+      : `La información disponible no especifica documentos adicionales para ${title}${location}.`;
   }
 
   if (/\b(salario|sueldo|pago|horario|turno|beneficio|beneficios|condiciones|contrato|prestaciones)\b/.test(normalized)) {
     return conditions
-      ? `Las condiciones registradas para ${title}${location} son: ${conditions}.`
-      : `Ese dato no está registrado para ${title}${location}.`;
+      ? `Las condiciones para ${title}${location} son: ${conditions}.`
+      : `La información disponible no especifica ese detalle para ${title}${location}.`;
   }
 
   if (/\b(ubicacion|direccion|zona|sector|donde|queda)\b/.test(normalized)) {
     return address
-      ? `La zona registrada para ${title}${location} es ${address}.`
-      : `No tengo una zona más detallada registrada para ${title}${location}.`;
+      ? `El lugar de trabajo para ${title}${location} es ${address}.`
+      : `La información disponible no incluye una ubicación más específica para ${title}${location}.`;
   }
 
   return buildVacancyOverview(vacancy);

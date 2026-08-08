@@ -47,7 +47,7 @@ test('pregunta de edad usa minAge/maxAge y no requisitos genéricos', () => {
 
 test('pregunta de edad sin rango no inventa información', () => {
   const reply = buildVacancyQuestionReply({ ...configuredVacancy, minAge: null, maxAge: null }, '¿Qué edad piden?');
-  assert.match(reply, /no hay un rango de edad configurado/i);
+  assert.match(reply, /no especifica un rango de edad/i);
   assert.doesNotMatch(reply, /23|45/);
 });
 
@@ -68,4 +68,20 @@ test('antes del consentimiento no se pide localidad o residencia para identifica
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.doesNotMatch(decision.reply, /localidad|barrio|d[oó]nde vives|residencia/i);
   assert.match(decision.reply, /vacante|cargo/i);
+});
+
+
+test('respuestas públicas de vacante no exponen jerga interna de configuración', () => {
+  const questions = [
+    '¿Para qué empresa u operación es?',
+    '¿Qué condiciones tiene la vacante?',
+    '¿Qué requisitos piden?',
+    '¿Qué edad piden?',
+    '¿Qué funciones tiene?',
+    '¿Dónde queda?'
+  ];
+  for (const question of questions) {
+    const reply = buildVacancyQuestionReply(configuredVacancy, question);
+    assert.doesNotMatch(reply, /registrad[oa]|configurad[oa]|cargad[oa]/i, question);
+  }
 });
