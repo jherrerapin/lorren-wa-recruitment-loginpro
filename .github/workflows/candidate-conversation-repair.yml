@@ -1,9 +1,6 @@
 name: Apply candidate conversation release repair
 
 on:
-  pull_request:
-    branches:
-      - main
   push:
     branches:
       - fix/candidate-conversation-release-gaps
@@ -13,7 +10,6 @@ permissions:
 
 jobs:
   repair:
-    if: github.event_name == 'push' || github.head_ref == 'fix/candidate-conversation-release-gaps'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -60,36 +56,30 @@ jobs:
                   raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:100]!r}')
               file.write_text(text.replace(old, new, 1), encoding='utf-8')
 
-          # CONFIRMING_DATA is a real pending action; never swallow an explicit confirmation as closure.
           replace_once(
               'src/services/contextualResponseGate.js',
               "    || (!resolvedReadiness.hasValidCv && candidate.currentStep === 'ASK_CV')\n    || candidate.currentStep === 'SCHEDULING'\n  );",
               "    || (!resolvedReadiness.hasValidCv && candidate.currentStep === 'ASK_CV')\n    || candidate.currentStep === 'CONFIRMING_DATA'\n    || candidate.currentStep === 'SCHEDULING'\n  );"
           )
 
-          # Arrival problems require human review without an invented candidate reply.
           marker = "    if (APPOINTMENT_MANUAL_REVIEW_INTENTS.has(semanticIntent)) {\n"
           insertion = marker + "      if (semanticIntent === 'REPORT_ARRIVAL_PROBLEM') {\n        return decision({\n          shouldReply: false,\n          allowedAction: ContextualAllowedAction.NO_REPLY,\n          reason: 'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',\n          responsePurpose: ContextualResponsePurpose.NONE,\n          requiresHumanReview: true\n        });\n      }\n\n"
           replace_once('src/services/contextualResponseGate.js', marker, insertion)
 
-          # SCHEDULED candidates may use deterministic vacancy logistics even if a legacy active booking row is absent.
           marker = "  if ((isCvOnlyComplete(candidate, vacancy, resolvedReadiness) || isMainFlowComplete(candidate, vacancy, resolvedReadiness)) && !realPendingAction) {\n"
           insertion = "  if (candidate.currentStep === 'SCHEDULED' && LOGISTIC_INTENTS.has(semanticIntent)) {\n    const logisticsReply = buildLogisticsReply({ semanticIntent, vacancy, activeInterviewBooking: activeBooking });\n    if (logisticsReply) {\n      return decision({\n        shouldReply: true,\n        allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,\n        reason: 'Candidate has a scheduled interview and the assigned vacancy contains the requested logistics information.',\n        responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,\n        reply: logisticsReply\n      });\n    }\n    return safeReviewDecision(\n      'Candidate has a scheduled interview but the requested logistics detail is not present in the assigned context.',\n      semanticIntent\n    );\n  }\n\n" + marker
           replace_once('src/services/contextualResponseGate.js', marker, insertion)
 
-          # Completed applications answer status from persisted process state.
           marker = "  if ((isCvOnlyComplete(candidate, vacancy, resolvedReadiness) || isMainFlowComplete(candidate, vacancy, resolvedReadiness)) && !realPendingAction) {\n    if (CLOSING_INTENTS.has(semanticIntent)) {\n"
           replacement = "  if ((isCvOnlyComplete(candidate, vacancy, resolvedReadiness) || isMainFlowComplete(candidate, vacancy, resolvedReadiness)) && !realPendingAction) {\n    if (semanticIntent === 'ASK_APPLICATION_STATUS') {\n      return decision({\n        shouldReply: true,\n        allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,\n        reason: 'Candidate asked for the status of an already completed application; answer from persisted process state.',\n        responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,\n        reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking })\n      });\n    }\n    if (CLOSING_INTENTS.has(semanticIntent)) {\n"
           replace_once('src/services/contextualResponseGate.js', marker, replacement)
 
-          # Never ask to confirm a summary while required data is still missing.
           replace_once(
               'src/routes/webhook.js',
               "  const missing = getMissingFieldLabels(candidate, vacancy);\n  const hasMainBlock = getRequiredCandidateFieldKeys(vacancy).every((field) => {",
               "  const missing = getMissingFieldLabels(candidate, vacancy);\n  if (missing.length > 0) return false;\n  const hasMainBlock = getRequiredCandidateFieldKeys(vacancy).every((field) => {"
           )
 
-          # Candidate-facing assertions must exclude supervisor notifications.
           replace_once(
               'test/helpers/conversationHarness.js',
               "  const candidate = prisma.state.candidates[0];\n  const lastReply = whatsappMock.sentMessages.at(-1)?.body || '';",
@@ -101,7 +91,6 @@ jobs:
               "    assert.equal(candidateOutboundMessages.length, conversationCase.expect.exactOutboundCount, `${conversationCase.id}: cantidad de salidas inesperada`);"
           )
 
-          # Align a stale wording assertion with the current valid consent-purpose reply.
           replace_once(
               'test/conversation-replay/consentOrderReplay.js',
               "includesInOrder: ['gestionar tu postulación', 'Para continuar necesito saber si autorizas']",
