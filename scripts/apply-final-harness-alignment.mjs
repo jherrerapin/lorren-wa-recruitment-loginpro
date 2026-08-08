@@ -52,7 +52,8 @@ fixture = updateCase(fixture, 'funza-bodega-city-does-not-become-name-and-resolv
   .replace("lastReplyIncludes: ['Auxiliar de Bodega Siberia', 'Siberia']", "lastReplyIncludes: ['comparteme']"));
 
 fixture = updateCase(fixture, 'bodega-data-block-keeps-name-doc-and-transport', (block) => block
-  .replace("currentStep: 'COLLECTING_DATA'\n      },", "currentStep: 'CONFIRMING_DATA'\n      },"));
+  .replace("currentStep: 'COLLECTING_DATA'\n      },", "currentStep: 'CONFIRMING_DATA'\n      },")
+  .replace("lastReplyIncludes: ['edad', 'barrio']", "lastReplyIncludes: ['edad', 'localidad']"));
 
 fixture = updateCase(fixture, 'future-birthday-keeps-current-age-and-does-not-repeat-transport', (block) => block
   .replace("currentStep: 'SCHEDULING'", "currentStep: 'CONFIRMING_DATA'")
@@ -67,6 +68,9 @@ fixture = updateCase(fixture, 'ibague-pdf-phrase-does-not-become-name-or-reopen-
 fixture = updateCase(fixture, 'human-intervention-pauses-bot', (block) => block
   .replace('exactOutboundCount: 0', 'exactOutboundCount: 1'));
 
+fixture = updateCase(fixture, 'female-contextual-interest-not-name-or-neighborhood', (block) => block
+  .replace("candidate: { gender: 'FEMALE' }", "candidate: { gender: 'UNKNOWN' }"));
+
 fixture = updateCase(fixture, 'no-multiple-templates-mixed', (block) => block
   .replace("lastReplyNotIncludes: ['Perfecto, por favor confirma', '\\n\\n']", "lastReplyNotIncludes: ['Perfecto, por favor confirma']"));
 
@@ -76,6 +80,9 @@ fixture = updateCase(fixture, 'female-pipeline-after-cv', (block) => block
 
 fixture = updateCase(fixture, 'done-step-followup-about-previous-application-gets-status-ack', (block) => block
   .replace("lastReplyIncludes: ['postulación ya está registrada', 'te contactaremos por este medio']", "lastReplyIncludes: ['postulación continúa registrada', 'te contactará por este medio']"));
+
+fixture = updateCase(fixture, 'scheduled-question-uses-context-instead-of-repeating-flow', (block) => block
+  .replace("lastReplyIncludes: ['direccion de entrevista', 'Calle 80 # 10-20']", "lastReplyIncludes: ['direccion registrada para tu entrevista', 'Calle 80 # 10-20']"));
 
 fs.writeFileSync('test/fixtures/conversationCases.js', fixture);
 
