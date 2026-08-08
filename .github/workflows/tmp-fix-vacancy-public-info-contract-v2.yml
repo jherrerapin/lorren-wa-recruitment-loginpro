@@ -1,0 +1,314 @@
+name: tmp-fix-vacancy-public-info-contract-v2
+on:
+  push:
+    branches: [fix/production-ad-flow-20260808]
+permissions:
+  contents: write
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/production-ad-flow-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Patch exact runtime contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path): return Path(path).read_text(encoding='utf-8')
+          def write(path, text): Path(path).write_text(text, encoding='utf-8')
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 occurrence, got {count}')
+              return text.replace(old, new, 1)
+          def replace_between(text, start_marker, end_marker, replacement, label):
+              start = text.find(start_marker)
+              if start < 0: raise SystemExit(f'{label}: start marker not found')
+              end = text.find(end_marker, start)
+              if end < 0: raise SystemExit(f'{label}: end marker not found')
+              return text[:start] + replacement + text[end:]
+
+          Path('src/services/vacancyPublicInfo.js').write_text(r'''function configuredInteger(value) {
+            return Number.isInteger(value) ? value : null;
+          }
+
+          function sentence(fragment = '') {
+            const value = String(fragment || '').trim();
+            if (!value) return '';
+            return `${value.charAt(0).toUpperCase()}${value.slice(1)}.`;
+          }
+
+          export function getConfiguredAgeRequirementText(vacancy = {}) {
+            const minAge = configuredInteger(vacancy?.minAge);
+            const maxAge = configuredInteger(vacancy?.maxAge);
+            if (minAge !== null && maxAge !== null) {
+              if (minAge === maxAge) return `la edad configurada es ${minAge} años`;
+              return `el rango de edad configurado es de ${minAge} a ${maxAge} años`;
+            }
+            if (minAge !== null) return `la edad mínima configurada es ${minAge} años`;
+            if (maxAge !== null) return `la edad máxima configurada es ${maxAge} años`;
+            return '';
+          }
+
+          export function getConfiguredExperienceRequirementText(vacancy = {}) {
+            const mode = String(vacancy?.experienceRequired || '').trim().toUpperCase();
+            const time = String(vacancy?.experienceTimeText || '').trim();
+            if (mode === 'YES') return time ? `la experiencia requerida es ${time}` : 'se requiere experiencia previa';
+            if (mode === 'NO') return 'no se requiere experiencia previa';
+            return '';
+          }
+
+          export function getConfiguredPublicRequirementSentences(vacancy = {}, requirementsText = '') {
+            const requirements = String(requirementsText || '').trim();
+            const age = getConfiguredAgeRequirementText(vacancy);
+            const experience = getConfiguredExperienceRequirementText(vacancy);
+            const facts = [];
+            const mentionsAge = /\bedad\b|\b\d{1,2}\s*(?:a|-)\s*\d{1,2}\s*a[nñ]os?\b/i.test(requirements);
+            const mentionsExperience = /\bexperiencia\b/i.test(requirements);
+            if (age && !mentionsAge) facts.push(sentence(age));
+            if (experience && !mentionsExperience) facts.push(sentence(experience));
+            return facts;
+          }
+          ''', encoding='utf-8')
+
+          # vacancyFirstGate.js
+          p = 'src/services/vacancyFirstGate.js'
+          t = read(p)
+          anchor = "import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';"
+          t = replace_once(t, anchor, anchor + "\nimport { getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';", 'vacancyFirstGate import')
+
+          pair = "  if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);\n  if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);"
+          pair_new = "  if (requirements) facts.push(`Los requisitos registrados son: ${requirements}.`);\n  facts.push(...getConfiguredPublicRequirementSentences(vacancy, requirements));\n  if (conditions) facts.push(`Las condiciones registradas son: ${conditions}.`);"
+          if t.count(pair) != 2: raise SystemExit(f'vacancy facts: expected 2, got {t.count(pair)}')
+          t = t.replace(pair, pair_new)
+
+          need_start = "function buildNeedRoleForCityReply(city = null, roleHint = null, inboundText = '') {"
+          need_end = "\n\nfunction buildVacancyInformationAnswer"
+          need_new = r'''function buildNeedRoleForCityReply(city = null, roleHint = null, inboundText = '') {
+            const normalized = normalizeResolverText(inboundText);
+            const asksCompany = /\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized);
+            const companyAnswer = asksCompany
+              ? 'El proceso de selección lo gestiona LoginPro Service. Para decirte la empresa u operación exacta registrada necesito identificar primero la vacante.'
+              : '';
+            const hasRoleHint = Boolean(String(roleHint || '').trim());
+            if (hasRoleHint) {
+              return [companyAnswer, 'Ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?']
+                .filter(Boolean)
+                .join(' ');
+            }
+            return [companyAnswer || 'Gracias por contarme desde dónde escribes.', '¿Para qué vacante o cargo estás interesado?']
+              .filter(Boolean)
+              .join(' ');
+          }'''
+          t = replace_between(t, need_start, need_end, need_new, 'pre-consent city role prompt')
+
+          req_start = "  if (/\\b(requisito|requisitos|perfil|experiencia|estudio|formacion|moto|carro|transporte|vehiculo)\\b/.test(normalized)) {"
+          req_end = "\n\n  if (/\\b(documento|documentos|papeles)\\b/.test(normalized)) {"
+          req_new = r'''  if (/\b(edad|rango de edad)\b/.test(normalized)) {
+            const ageRequirement = getConfiguredAgeRequirementText(vacancy);
+            return ageRequirement
+              ? `Para ${title}${location}, ${ageRequirement}.`
+              : `No hay un rango de edad configurado para ${title}${location}.`;
+          }
+
+          if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
+            const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
+            if (experienceRequirement) return `Para ${title}${location}, ${experienceRequirement}.`;
+            return requirements && /\bexperiencia\b/i.test(requirements)
+              ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
+              : `No hay un requisito específico de experiencia configurado para ${title}${location}.`;
+          }
+
+          if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+            return requirements
+              ? `Los requisitos registrados para ${title}${location} son: ${requirements}.`
+              : `No tengo requisitos adicionales registrados para ${title}${location}.`;
+          }'''
+          t = replace_between(t, req_start, req_end, req_new, 'vacancyFirstGate age/experience')
+          write(p, t)
+
+          # dataConsentGate.js campaign path
+          p = 'src/services/dataConsentGate.js'
+          t = read(p)
+          anchor = "import { cancelReminderOnInbound } from './reminder.js';"
+          t = replace_once(t, anchor, anchor + "\nimport { getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText, getConfiguredPublicRequirementSentences } from './vacancyPublicInfo.js';", 'dataConsentGate import')
+
+          info_start = 'function buildVacancyInfoReply(vacancy = {}) {'
+          info_end = '\n\nexport function buildVacancyQuestionReply'
+          info_new = r'''function buildVacancyInfoReply(vacancy = {}) {
+            const city = vacancyCity(vacancy);
+            const parts = [`Perfecto, te comparto la información registrada de ${vacancyTitle(vacancy)}${city ? ` en ${city}` : ''}.`];
+            const requirements = String(vacancy.requirements || '').trim();
+            if (vacancy.roleDescription) parts.push(`El cargo consiste en ${vacancy.roleDescription}.`);
+            if (vacancy.operationAddress) parts.push(`Zona de operación: ${vacancy.operationAddress}.`);
+            if (requirements) parts.push(`Requisitos: ${requirements}.`);
+            parts.push(...getConfiguredPublicRequirementSentences(vacancy, requirements));
+            if (vacancy.conditions) parts.push(`Condiciones: ${vacancy.conditions}.`);
+            if (vacancy.requiredDocuments) parts.push(`Documentos para el proceso: ${vacancy.requiredDocuments}.`);
+            parts.push('¿Te interesa continuar con esta postulación?');
+            return parts.join('\n\n');
+          }'''
+          t = replace_between(t, info_start, info_end, info_new, 'campaign vacancy overview')
+
+          lead_anchor = "  const lead = `Sobre la vacante de ${vacancyTitle(vacancy)}`;\n\n"
+          company = r'''  if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
+            const operationName = String(vacancy?.operation?.name || '').trim();
+            return operationName
+              ? `El proceso de selección lo gestiona LoginPro Service. La operación registrada para esta vacante es ${operationName}.`
+              : 'El proceso de selección lo gestiona LoginPro Service.';
+          }
+
+          '''
+          t = replace_once(t, lead_anchor, lead_anchor + company, 'campaign company question')
+
+          req_start = "  if (/\\b(requisito|perfil|edad|experiencia|estudio|formacion|documento|moto|carro|transporte|vehiculo)\\b/.test(normalized)) {"
+          req_end = "\n  if (/\\b(funcion|funciones|labor|hacer|cargo|rol|consiste|tarea|tareas|responsabilidad|responsabilidades)\\b/.test(normalized)) {"
+          req_new = r'''  if (/\b(edad|rango de edad)\b/.test(normalized)) {
+            const ageRequirement = getConfiguredAgeRequirementText(vacancy);
+            return ageRequirement
+              ? `${lead}, ${ageRequirement}.`
+              : 'No hay un rango de edad configurado para esta vacante.';
+          }
+          if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
+            const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
+            if (experienceRequirement) return `${lead}, ${experienceRequirement}.`;
+            return vacancy.requirements && /\bexperiencia\b/i.test(vacancy.requirements)
+              ? `${lead}, los requisitos registrados son: ${vacancy.requirements}.`
+              : 'No hay un requisito específico de experiencia configurado para esta vacante.';
+          }
+          if (/\b(requisito|perfil|estudio|formacion|documento|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+            const parts = [];
+            if (vacancy.requirements) parts.push(vacancy.requirements);
+            if (vacancy.requiredDocuments && /\bdocumento\b/.test(normalized)) parts.push(`Documentos: ${vacancy.requiredDocuments}`);
+            return parts.length
+              ? `${lead}, los requisitos registrados son: ${parts.join('. ')}.`
+              : 'No tengo ese requisito registrado para esta vacante.';
+          }
+          '''
+          t = replace_between(t, req_start, req_end, req_new, 'dataConsentGate age/experience')
+          write(p, t)
+
+          # conversationIntent.js: age is a vacancy-information topic.
+          p = 'src/services/conversationIntent.js'
+          t = read(p)
+          match = re.search(r"const VACANCY_INFORMATION_TOPICS = /(.*?)/;", t)
+          if not match: raise SystemExit('VACANCY_INFORMATION_TOPICS not found')
+          body = match.group(1)
+          if 'edad' not in body:
+              if '|empresa' in body: new_body = body.replace('|empresa', '|edad|empresa', 1)
+              else: new_body = body[:-3] + '|edad' + body[-3:]
+              t = t[:match.start(1)] + new_body + t[match.end(1):]
+          write(p, t)
+
+          Path('test/vacancyConfiguredInformationContract.test.js').write_text(r'''import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { resolveVacancyFirstGate, VacancyFirstGateAction } from '../src/services/vacancyFirstGate.js';
+          import { buildVacancyQuestionReply } from '../src/services/dataConsentGate.js';
+          import { analyzeConversationTurn } from '../src/services/conversationIntent.js';
+
+          const configuredVacancy = {
+            id: 'vac-configured-info', title: 'Líder de Operación', role: 'Líder de Operación', city: 'Neiva',
+            roleDescription: 'Liderar y administrar personal operativo', operationAddress: 'Sector Las Brisas',
+            requirements: 'Técnico o tecnólogo en logística', conditions: 'Turnos rotativos y prestaciones de ley',
+            requiredDocuments: null, minAge: 23, maxAge: 45, experienceRequired: 'YES',
+            experienceTimeText: 'mínimo 6 meses en operaciones logísticas', isActive: true, acceptingApplications: true,
+            operation: { name: 'Operación Neiva', city: { name: 'Neiva' } }
+          };
+          const candidate = () => ({ id: 'cand-config', currentStep: 'GREETING_SENT', status: 'NUEVO', vacancyId: null, dataConsentStatus: 'PENDING', botResumeMode: null });
+
+          test('vacante identificada presenta configuración y luego pregunta interés', async () => {
+            const decision = await resolveVacancyFirstGate({ prisma: null, candidate: candidate(), currentVacancy: null, inboundText: 'Líder de operación Neiva', currentStep: 'GREETING_SENT', recentMessages: [], vacancyHints: { allVacancies: [configuredVacancy], activeVacancies: [configuredVacancy] } });
+            assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+            assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
+            assert.match(decision.reply, /23 a 45 años/i);
+            assert.match(decision.reply, /mínimo 6 meses en operaciones logísticas/i);
+            assert.match(decision.reply, /te interesa continuar/i);
+            assert.doesNotMatch(decision.reply, /no especificado/i);
+          });
+
+          test('vacante sin edad configurada no menciona edad en presentación automática', async () => {
+            const vacancy = { ...configuredVacancy, id: 'vac-no-age', minAge: null, maxAge: null };
+            const decision = await resolveVacancyFirstGate({ prisma: null, candidate: candidate(), currentVacancy: null, inboundText: 'Líder de operación Neiva', currentStep: 'GREETING_SENT', recentMessages: [], vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] } });
+            assert.doesNotMatch(decision.reply, /rango de edad|edad mínima|edad máxima/i);
+          });
+
+          test('pregunta de edad usa minAge/maxAge y no requisitos genéricos', () => {
+            const reply = buildVacancyQuestionReply(configuredVacancy, '¿Qué edad piden para la vacante?');
+            assert.match(reply, /23 a 45 años/i);
+            assert.doesNotMatch(reply, /Técnico o tecnólogo/i);
+          });
+
+          test('pregunta de edad sin rango no inventa información', () => {
+            const reply = buildVacancyQuestionReply({ ...configuredVacancy, minAge: null, maxAge: null }, '¿Qué edad piden?');
+            assert.match(reply, /no hay un rango de edad configurado/i);
+            assert.doesNotMatch(reply, /23|45/);
+          });
+
+          test('pregunta de empresa responde con operación asociada', () => {
+            const reply = buildVacancyQuestionReply(configuredVacancy, '¿Para qué empresa u operación es?');
+            assert.match(reply, /LoginPro Service/i);
+            assert.match(reply, /Operación Neiva/i);
+          });
+
+          test('edad se reconoce como información de vacante', () => {
+            assert.equal(analyzeConversationTurn('¿Qué edad piden para esta vacante?').vacancyInformationRequest, true);
+          });
+
+          test('antes del consentimiento no se pide localidad o residencia para identificar vacante en Bogotá', async () => {
+            const v1 = { ...configuredVacancy, id: 'bog-1', title: 'Auxiliar de Bodega', role: 'Auxiliar de Bodega', city: 'Bogotá', operation: { name: 'Op 1', city: { name: 'Bogotá' } } };
+            const v2 = { ...configuredVacancy, id: 'bog-2', title: 'Líder de Operación', role: 'Líder de Operación', city: 'Bogotá', operation: { name: 'Op 2', city: { name: 'Bogotá' } } };
+            const decision = await resolveVacancyFirstGate({ prisma: null, candidate: candidate(), currentVacancy: null, inboundText: 'Bogotá', currentStep: 'GREETING_SENT', recentMessages: [], vacancyHints: { allVacancies: [v1, v2], activeVacancies: [v1, v2] } });
+            assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+            assert.doesNotMatch(decision.reply, /localidad|barrio|d[oó]nde vives|residencia/i);
+            assert.match(decision.reply, /vacante|cargo/i);
+          });
+          ''', encoding='utf-8')
+          PY
+      - run: npm ci
+      - run: npm run prisma:generate
+      - name: Syntax checks
+        run: |
+          node --check src/services/vacancyPublicInfo.js
+          node --check src/services/vacancyFirstGate.js
+          node --check src/services/dataConsentGate.js
+          node --check src/services/conversationIntent.js
+          node --check test/vacancyConfiguredInformationContract.test.js
+      - name: Focused regressions
+        run: |
+          node --test \
+            test/vacancyConfiguredInformationContract.test.js \
+            test/productionPaidAdFlowRegressions.test.js \
+            test/vacancyFirstGate.test.js \
+            test/vacancyBeforeConsentReplay.test.js \
+            test/dataConsentOrderReplay.test.js
+      - name: Commit validated change
+        run: |
+          rm -f .github/workflows/tmp-fix-vacancy-public-info-contract.yml
+          rm -f .github/workflows/tmp-run-vacancy-public-info-contract.yml
+          rm -f .github/workflows/tmp-fix-vacancy-public-info-contract-v2.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: respetar configuración de vacante antes del consentimiento"
+          git push origin HEAD:fix/production-ad-flow-20260808
