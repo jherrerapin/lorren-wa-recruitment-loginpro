@@ -109,10 +109,8 @@ export function buildProfessionalVacancyPresentation(vacancy = {}, { includeInte
     || ['YES', 'NO'].includes(String(vacancy?.experienceRequired || '').trim().toUpperCase())
   );
   if (!hasDetails) sections.push('La vacante está activa para recibir postulaciones.');
-
-  const parts = ['A continuación encontrarás la información de la vacante:', sections.join('\n\n')];
   if (includeInterestPrompt) {
-    parts.push('¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.');
+    sections.push('¿Te interesa continuar con esta vacante? Si es así, confírmame y seguimos con la postulación.');
   }
-  return parts.join('\n\n');
+  return sections.join('\n\n');
 }
