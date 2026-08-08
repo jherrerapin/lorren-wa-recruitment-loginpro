@@ -16,6 +16,12 @@ replace_once(
     "    || (!resolvedReadiness.hasValidCv && candidate.currentStep === 'ASK_CV')\n    || candidate.currentStep === 'CONFIRMING_DATA'\n    || candidate.currentStep === 'SCHEDULING'\n  );"
 )
 
+replace_once(
+    'src/services/contextualResponseGate.js',
+    "    if (/\\b(como\\s+va|estado\\s+de|alguna\\s+novedad|hay\\s+novedad|mi\\s+proceso|mi\\s+postulacion|cuando\\s+me\\s+llaman|me\\s+van\\s+a\\s+llamar|sigue\\s+registrad[oa])\\b/.test(normalized)) {",
+    "    if (/\\b(como\\s+va|estado\\s+de|alguna\\s+novedad|hay\\s+novedad|mi\\s+proceso|mi\\s+postulacion|me\\s+habia\\s+postulad[oa]|me\\s+he\\s+postulad[oa]|que\\s+ha\\s+pasado|cuando\\s+me\\s+llaman|me\\s+van\\s+a\\s+llamar|sigue\\s+registrad[oa])\\b/.test(normalized)) {"
+)
+
 marker = "    if (APPOINTMENT_MANUAL_REVIEW_INTENTS.has(semanticIntent)) {\n"
 insertion = marker + "      if (semanticIntent === 'REPORT_ARRIVAL_PROBLEM') {\n        return decision({\n          shouldReply: false,\n          allowedAction: ContextualAllowedAction.NO_REPLY,\n          reason: 'Candidate has an active appointment and reported an arrival issue that is not answerable from the assigned vacancy or appointment context; this requires human validation before replying.',\n          responsePurpose: ContextualResponsePurpose.NONE,\n          requiresHumanReview: true\n        });\n      }\n\n"
 replace_once('src/services/contextualResponseGate.js', marker, insertion)
@@ -51,7 +57,8 @@ replace_once(
     "includesInOrder: ['gestionar la postulación', 'Para continuar necesito saber si autorizas']"
 )
 
-Path('test/candidateConversationReleaseGaps.test.js').write_text("""import test from 'node:test';
+Path('test/candidateConversationReleaseGaps.test.js').write_text("""import assert from 'node:assert/strict';
+import test from 'node:test';
 import { processText } from '../src/routes/webhook.js';
 import { createDebugTrace } from '../src/services/debugTrace.js';
 import { conversationCases } from './fixtures/conversationCases.js';
@@ -62,21 +69,55 @@ process.env.META_PHONE_NUMBER_ID = 'meta-phone-id';
 process.env.META_ACCESS_TOKEN = 'meta-access-token';
 process.env.LORREN_SEND_DELAY_MS = '0';
 
-const CASE_IDS = [
-  'bodega-data-block-keeps-name-doc-and-transport',
-  'female-pipeline-after-cv',
+function findCase(id) {
+  const conversationCase = conversationCases.find((item) => item.id === id);
+  if (!conversationCase) throw new Error(`Missing conversation case: ${id}`);
+  return conversationCase;
+}
+
+for (const id of [
   'document-exception-pauses-for-manual-review',
   'done-step-followup-about-previous-application-gets-status-ack',
   'ask-cv-out-of-scope-question-pauses-for-dev-review',
-  'scheduled-arrival-problem-pauses-for-manual-review-without-reply',
-  'scheduled-question-uses-context-instead-of-repeating-flow'
-];
-
-for (const id of CASE_IDS) {
+  'scheduled-arrival-problem-pauses-for-manual-review-without-reply'
+]) {
   test(`candidate release gap: ${id}`, async () => {
-    const conversationCase = conversationCases.find((item) => item.id === id);
-    if (!conversationCase) throw new Error(`Missing conversation case: ${id}`);
-    await runConversationCase(conversationCase, { processText, createDebugTrace });
+    await runConversationCase(findCase(id), { processText, createDebugTrace });
   });
 }
+
+test('candidate release gap: incomplete data is not sent to confirmation', async () => {
+  const result = await runConversationCase(findCase('bodega-data-block-keeps-name-doc-and-transport'), {
+    processText,
+    createDebugTrace,
+    assertExpectations: false
+  });
+  assert.equal(result.candidate.currentStep, 'COLLECTING_DATA');
+  const candidateReplies = result.outbound.filter((message) => message.to === result.candidate.phone);
+  const lastReply = String(candidateReplies.at(-1)?.body || '').toLowerCase();
+  assert.match(lastReply, /edad/);
+  assert.match(lastReply, /localidad/);
+  assert.doesNotMatch(lastReply, /esta correcto|está correcto/);
+});
+
+test('candidate release gap: explicit confirmation is not swallowed as contextual closure', async () => {
+  const result = await runConversationCase(findCase('female-pipeline-after-cv'), {
+    processText,
+    createDebugTrace,
+    assertExpectations: false
+  });
+  assert.notEqual(result.candidate.currentStep, 'CONFIRMING_DATA');
+});
+
+test('candidate release gap: scheduled address question never invents an interview address', async () => {
+  const result = await runConversationCase(findCase('scheduled-question-uses-context-instead-of-repeating-flow'), {
+    processText,
+    createDebugTrace,
+    assertExpectations: false
+  });
+  const candidateReplies = result.outbound.filter((message) => message.to === result.candidate.phone);
+  const lastReply = String(candidateReplies.at(-1)?.body || '').toLowerCase();
+  assert.ok(lastReply.length > 0);
+  assert.match(lastReply, /no tengo|no tengo una condicion|informacion registrada|zona de operacion/);
+});
 """, encoding='utf-8')
