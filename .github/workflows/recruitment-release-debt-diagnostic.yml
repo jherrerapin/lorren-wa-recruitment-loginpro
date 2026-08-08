@@ -1,0 +1,94 @@
+name: Recruitment release debt diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Diagnose inherited recruitment debt
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+      DISPATCH_WWEB_AUTO_START: "false"
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Run full suite and expose leaf failure identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          npm test > full-test-output.log 2>&1
+          test_exit=$?
+          set -e
+
+          awk '
+            function emit_pending() {
+              if (pending != "" && !is_subtest_container) print pending
+              pending = ""
+              is_subtest_container = 0
+            }
+            /^[[:space:]]*not ok [0-9]+ - / {
+              emit_pending()
+              identity = $0
+              sub(/^[[:space:]]*not ok [0-9]+ - /, "", identity)
+              sub(/[[:space:]]+#.*$/, "", identity)
+              sub(/[[:space:]]+$/, "", identity)
+              pending = identity
+              next
+            }
+            pending != "" && /^[[:space:]]*failureType:[[:space:]].*subtestsFailed/ {
+              is_subtest_container = 1
+              next
+            }
+            END { emit_pending() }
+          ' full-test-output.log | LC_ALL=C sort -u > failure-identities.txt
+
+          count=$(wc -l < failure-identities.txt | tr -d ' ')
+          echo "Leaf failure identities: $count"
+          while IFS= read -r identity; do
+            [ -n "$identity" ] && echo "::warning title=Inherited test failure::$identity"
+          done < failure-identities.txt
+
+          {
+            echo "## Inherited full-suite leaf failure identities"
+            echo
+            echo "Count: $count"
+            echo
+            echo '```text'
+            cat failure-identities.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Original npm test exit: $test_exit"
+          exit 0
