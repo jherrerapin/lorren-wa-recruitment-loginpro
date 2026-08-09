@@ -53,7 +53,7 @@ test('la interfaz avisa el estado desactivado y mantiene acceso a los registros 
   assert.match(historyView, /registros históricos de asignación se conservan/);
   assert.match(historyView, /incluso cuando el auxiliar ya está desactivado/);
 
-  assert.match(personnelView, /status=\"DISABLED\"/);
+  assert.match(personnelView, /value="DISABLED"/);
   assert.match(personnelView, /\/personal\/<%= w\.id %>\/historial/);
   assert.match(personnelView, /isActive \? 'Activo' : 'Desactivado'/);
 
@@ -62,7 +62,7 @@ test('la interfaz avisa el estado desactivado y mantiene acceso a los registros 
   assert.match(assignmentView, /CANCELLED:'Cancelado'/);
 });
 
-test('el flujo ejecutado mantiene una sola ruta montada para personal operativo', () => {
+test('el flujo ejecutado mantiene dispatchOpsExtras como ruta montada de personal operativo', () => {
   const server = source('src/server.js');
   assert.match(server, /dispatchOpsExtrasRouter\(prisma\)/);
   assert.doesNotMatch(server, /dispatchWorkerToggleAnySource/);
