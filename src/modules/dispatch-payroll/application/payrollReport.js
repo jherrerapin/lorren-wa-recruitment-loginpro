@@ -283,9 +283,10 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
   const filteredSessions = sessions.filter((session) => sessionMatchesFilters(session, filters));
   const clientIds = [...new Set(filteredSessions.map((session) => session.assignment?.serviceRequest?.operationPoint?.clientId).filter(Boolean))];
   const workerIds = [...new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean))];
+  const compensationRange = { from: period.from, to: addDateKeyDays(period.to, 1) };
   const [policiesByClientId, compensationByWorkerDate] = await Promise.all([
     loadPayrollPolicies(prisma, clientIds),
-    loadPayrollCompensationMap(prisma, workerIds, period)
+    loadPayrollCompensationMap(prisma, workerIds, compensationRange)
   ]);
 
   const report = calculatePayrollConceptReport({
