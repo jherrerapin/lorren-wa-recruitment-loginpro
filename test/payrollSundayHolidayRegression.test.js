@@ -9,20 +9,7 @@ import {
   formatPayrollMinutes,
   normalizePayrollPolicy
 } from '../src/modules/dispatch-payroll/domain/payrollConceptEngine.js';
-import {
-  PAYROLL_COMPENSATION_ACTION,
-  PAYROLL_COMPENSATION_ENTITY_TYPE,
-  WORKER_REST_ACTION,
-  WORKER_REST_ENTITY_TYPE,
-  WORKER_REST_REASONS,
-  cancelWorkerRestAssignment,
-  loadPayrollCompensationMap,
-  loadPayrollReport,
-  loadWorkerRestAssignments,
-  savePayrollCompensation,
-  saveWorkerRestAssignment,
-  workerRestDayAdjustment
-} from '../src/modules/dispatch-payroll/application/payrollReport.js';
+import { savePayrollCompensation } from '../src/modules/dispatch-payroll/application/payrollReport.js';
 
 function payrollSession({
   id,
@@ -48,12 +35,9 @@ function payrollSession({
         fullName: 'Auxiliar de prueba',
         documentType: 'CC',
         documentNumber: 'TEST-DOC-1',
-        phone: 'TEST-PHONE-1',
-        contractType: 'DIRECTO',
-        isTestProfile: false
+        phone: 'TEST-PHONE-1'
       },
       serviceRequest: {
-        source: 'INTERNAL',
         clientName: 'Cliente de prueba',
         operationPointName: 'Operación de prueba',
         operationPoint: {
@@ -79,65 +63,6 @@ function calculate(sessions, {
     policiesByClientId: new Map([['TEST-CLIENT-1', policy]]),
     compensationByWorkerDate: compensation
   });
-}
-
-function makeRestPrisma({ contractType = 'DIRECTO', sessions = [], auditEvents = [] } = {}) {
-  const events = [...auditEvents];
-  let sequence = events.length;
-  const prisma = {
-    dispatchWorker: {
-      async findUnique({ where }) {
-        if (where.id !== 'TEST-WORKER-1') return null;
-        return { id: 'TEST-WORKER-1', fullName: 'Auxiliar de prueba', contractType };
-      },
-      async findMany() {
-        return [{ id: 'TEST-WORKER-1', fullName: 'Auxiliar de prueba', documentType: 'CC', documentNumber: 'TEST-DOC-1', phone: 'TEST-PHONE-1', contractType, isTestProfile: false }];
-      }
-    },
-    dispatchAttendanceSession: {
-      async findMany() { return sessions; }
-    },
-    dispatchClient: {
-      async findMany() { return []; }
-    },
-    devAuditEvent: {
-      async findMany({ where }) {
-        return events
-          .filter((event) => !where?.entityType || event.entityType === where.entityType)
-          .filter((event) => !where?.action || event.action === where.action)
-          .filter((event) => {
-            const ids = where?.entityId?.in;
-            return !Array.isArray(ids) || ids.includes(event.entityId);
-          })
-          .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
-      },
-      async create({ data }) {
-        sequence += 1;
-        const event = { ...data, id: `TEST-AUDIT-${sequence}`, createdAt: new Date(`2026-08-${String(10 + sequence).padStart(2, '0')}T12:00:00.000Z`) };
-        events.push(event);
-        return event;
-      }
-    }
-  };
-  prisma.$transaction = async (callback) => callback(prisma);
-  return { prisma, events };
-}
-
-function restAudit({ restDate, reason, status = 'ACTIVE', originSundayDate = null, createdAt = '2026-08-10T12:00:00.000Z' }) {
-  return {
-    entityType: WORKER_REST_ENTITY_TYPE,
-    entityId: `TEST-WORKER-1|${restDate}`,
-    action: WORKER_REST_ACTION,
-    createdAt: new Date(createdAt),
-    metadata: {
-      workerId: 'TEST-WORKER-1',
-      restDate,
-      reason,
-      status,
-      originSundayDate,
-      dayAdjustment: workerRestDayAdjustment(reason)
-    }
-  };
 }
 
 test('domingo de 18:00 a 22:00 separa recargo diurno y nocturno sin perder minutos', () => {
@@ -246,106 +171,7 @@ test('festivo conserva RDF y RNF como indicativo y nunca abre compensatorio', ()
   assert.equal(row.exportable, true);
 });
 
-test('suspensión y no remunerada descuentan un día; los demás motivos no', () => {
-  assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.SUSPENSION), -1);
-  assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.NO_REMUNERADA), -1);
-  assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.VACACIONES), 0);
-  assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.INCAPACIDAD_EPS), 0);
-  assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.INCAPACIDAD_ARL), 0);
-  assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.REMUNERADO), 0);
-});
-
-test('backend persiste descanso auditable solo para contrato Directo', async () => {
-  const direct = makeRestPrisma();
-  const saved = await saveWorkerRestAssignment(direct.prisma, {
-    workerId: 'TEST-WORKER-1',
-    restDate: '2026-08-11',
-    reason: WORKER_REST_REASONS.SUSPENSION,
-    actorUsername: 'TEST-ADMIN'
-  });
-  assert.equal(saved.dayAdjustment, -1);
-  const active = await loadWorkerRestAssignments(direct.prisma, { workerIds: ['TEST-WORKER-1'], from: '2026-08-11', to: '2026-08-11' });
-  assert.equal(active.length, 1);
-  assert.equal(active[0].reason, WORKER_REST_REASONS.SUSPENSION);
-  assert.equal(active[0].dayAdjustment, -1);
-  assert.ok(direct.events.some((event) => event.entityType === WORKER_REST_ENTITY_TYPE && event.action === WORKER_REST_ACTION && event.metadata?.dayAdjustment === -1));
-
-  const contractor = makeRestPrisma({ contractType: 'CONTRATISTA' });
-  await assert.rejects(
-    saveWorkerRestAssignment(contractor.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.VACACIONES
-    }),
-    /worker_rest_direct_contract_required/
-  );
-  assert.equal(contractor.events.length, 0);
-});
-
-test('descanso remunerado exige domingo anterior trabajado, no festivo y no reutilizado', async () => {
-  const sundaySession = payrollSession({
-    id: 'TEST-WORKED-SUNDAY',
-    arrivalAt: '2026-08-09T23:00:00.000Z',
-    departureAt: '2026-08-10T03:00:00.000Z',
-    workedMinutes: 240
-  });
-  const state = makeRestPrisma({ sessions: [sundaySession] });
-
-  await assert.rejects(
-    saveWorkerRestAssignment(state.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-08-12', reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-08'
-    }),
-    /worker_rest_origin_sunday_invalid/
-  );
-  await assert.rejects(
-    saveWorkerRestAssignment(state.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-08-20', reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-16'
-    }),
-    /worker_rest_origin_sunday_not_worked/
-  );
-
-  const saved = await saveWorkerRestAssignment(state.prisma, {
-    workerId: 'TEST-WORKER-1', restDate: '2026-08-12', reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-09'
-  });
-  assert.equal(saved.originSundayDate, '2026-08-09');
-
-  await assert.rejects(
-    saveWorkerRestAssignment(state.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-08-13', reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-09'
-    }),
-    /worker_rest_origin_sunday_used/
-  );
-});
-
-test('descanso remunerado es la autoridad del domingo: sin vínculo no compensa y al cancelar vuelve a no compensado', async () => {
-  const sundaySession = payrollSession({
-    id: 'TEST-WORKED-SUNDAY-AUTHORITY',
-    arrivalAt: '2026-08-09T23:00:00.000Z',
-    departureAt: '2026-08-10T03:00:00.000Z',
-    workedMinutes: 240
-  });
-  const historicalManualCompensation = {
-    entityType: PAYROLL_COMPENSATION_ENTITY_TYPE,
-    entityId: 'TEST-WORKER-1|2026-08-09',
-    action: PAYROLL_COMPENSATION_ACTION,
-    createdAt: new Date('2026-08-10T09:00:00.000Z'),
-    metadata: { workerId: 'TEST-WORKER-1', dateKey: '2026-08-09', status: PAYROLL_COMPENSATION_STATUS.COMPENSATED }
-  };
-  const state = makeRestPrisma({ sessions: [sundaySession], auditEvents: [historicalManualCompensation] });
-
-  let map = await loadPayrollCompensationMap(state.prisma, ['TEST-WORKER-1'], { from: '2026-08-09', to: '2026-08-09' });
-  assert.equal(map.get('TEST-WORKER-1|2026-08-09'), PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED);
-
-  await saveWorkerRestAssignment(state.prisma, {
-    workerId: 'TEST-WORKER-1', restDate: '2026-08-12', reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-09'
-  });
-  map = await loadPayrollCompensationMap(state.prisma, ['TEST-WORKER-1'], { from: '2026-08-09', to: '2026-08-09' });
-  assert.equal(map.get('TEST-WORKER-1|2026-08-09'), PAYROLL_COMPENSATION_STATUS.COMPENSATED);
-
-  await cancelWorkerRestAssignment(state.prisma, { workerId: 'TEST-WORKER-1', restDate: '2026-08-12' });
-  map = await loadPayrollCompensationMap(state.prisma, ['TEST-WORKER-1'], { from: '2026-08-09', to: '2026-08-09' });
-  assert.equal(map.get('TEST-WORKER-1|2026-08-09'), PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED);
-});
-
-test('el backend rechaza compensatorio manual tanto en festivo como en domingo', async () => {
+test('el backend rechaza guardar compensatorio en una fecha festiva', async () => {
   let workerLookupCalled = false;
   let auditCreateCalled = false;
   const prisma = {
@@ -356,70 +182,26 @@ test('el backend rechaza compensatorio manual tanto en festivo como en domingo',
       }
     },
     devAuditEvent: {
-      async create() { auditCreateCalled = true; }
+      async create() {
+        auditCreateCalled = true;
+      }
     }
   };
 
-  for (const dateKey of ['2026-08-17', '2026-08-09']) {
-    await assert.rejects(
-      savePayrollCompensation(prisma, {
-        workerId: 'TEST-WORKER-1', dateKey, status: PAYROLL_COMPENSATION_STATUS.COMPENSATED, actorUsername: 'TEST-ADMIN'
-      }),
-      /payroll_compensation_invalid/
-    );
-  }
+  await assert.rejects(
+    savePayrollCompensation(prisma, {
+      workerId: 'TEST-WORKER-1',
+      dateKey: '2026-08-17',
+      status: PAYROLL_COMPENSATION_STATUS.COMPENSATED,
+      actorUsername: 'TEST-ADMIN'
+    }),
+    /payroll_compensation_invalid/
+  );
   assert.equal(workerLookupCalled, false);
   assert.equal(auditCreateCalled, false);
 });
 
-test('reporte de nómina expone días trabajados, descontados y netos', async () => {
-  const mondaySession = payrollSession({
-    id: 'TEST-MONDAY-WORKDAY',
-    arrivalAt: '2026-08-03T13:00:00.000Z',
-    departureAt: '2026-08-03T20:00:00.000Z',
-    workedMinutes: 420
-  });
-  const state = makeRestPrisma({
-    sessions: [mondaySession],
-    auditEvents: [restAudit({ restDate: '2026-08-04', reason: WORKER_REST_REASONS.NO_REMUNERADA })]
-  });
-  const report = await loadPayrollReport(state.prisma, {
-    periodType: 'CUSTOM', from: '2026-08-03', to: '2026-08-04'
-  }, { now: new Date('2026-08-04T18:00:00.000Z') });
-  assert.equal(report.rows.length, 1);
-  assert.equal(report.rows[0].workedDays, 1);
-  assert.equal(report.rows[0].deductedDays, 1);
-  assert.equal(report.rows[0].netWorkedDays, 0);
-  assert.equal(report.rows[0].restAssignments[0].reason, WORKER_REST_REASONS.NO_REMUNERADA);
-  assert.equal(report.totals.workedDays, 1);
-  assert.equal(report.totals.deductedDays, 1);
-  assert.equal(report.totals.netWorkedDays, 0);
-});
-
-test('Asignaciones ofrece zona de descansos, motivos requeridos y control Directo en UI y backend', async () => {
-  const [route, view] = await Promise.all([
-    readFile('src/routes/dispatchOpsExtras.js', 'utf8'),
-    readFile('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8')
-  ]);
-  assert.match(route, /saveWorkerRestAssignment/);
-  assert.match(route, /cancelWorkerRestAssignment/);
-  assert.match(route, /router\.post\('\/asignaciones\/descansos'/);
-  assert.match(route, /router\.post\('\/asignaciones\/descansos\/cancelar'/);
-  assert.match(view, /id="restDropZone"/);
-  assert.match(view, /data-contract-type="<%= worker\.contractType %>"/);
-  assert.match(view, /card\.dataset\.contractType!=='DIRECTO'/);
-  assert.match(view, />Vacaciones</);
-  assert.match(view, />Incapacidad EPS</);
-  assert.match(view, />Suspensión</);
-  assert.match(view, />Incapacidad ARL</);
-  assert.match(view, />No remunerada</);
-  assert.match(view, />Remunerado</);
-  assert.match(view, /id="originSundayDateInput"/);
-  assert.match(view, /getUTCDay\(\)!==0/);
-  assert.match(view, /Descuenta 1 día/);
-});
-
-test('la interfaz de nómina conserva calendario lunes-domingo, festivo y domingo gobernado por descanso asignado', async () => {
+test('la interfaz usa calendario propio de lunes a domingo y muestra festivo sin formulario compensatorio', async () => {
   const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
   const emptyConcepts = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, 0]));
   const html = ejs.render(template, {
@@ -437,30 +219,32 @@ test('la interfaz de nómina conserva calendario lunes-domingo, festivo y doming
         documentNumber: 'TEST-DOC-1',
         exportable: true,
         status: 'CALCULADO',
-        workedDays: 2,
-        deductedDays: 1,
-        netWorkedDays: 1,
-        restAssignments: [{ restDate: '2026-08-20', reason: WORKER_REST_REASONS.SUSPENSION, dayAdjustment: -1, originSundayDate: null }],
-        totalHours: 6,
-        ordinaryHours: 6,
+        totalHours: 2,
+        ordinaryHours: 2,
         overtimeHours: 0,
         unrecognizedOvertimeHours: 0,
-        conceptHours: { ...emptyConcepts, RDF: 2, RDD: 1, RND: 3 },
+        conceptHours: { ...emptyConcepts, RDF: 2 },
         novelties: [],
         daily: [{
-          dateKey: '2026-08-17', totalHours: 2, ordinaryHours: 2, overtimeHours: 0, unrecognizedOvertimeHours: 0,
-          clientNames: ['Cliente de prueba'], operationNames: ['Operación de prueba'], civilDateKeys: ['2026-08-17'],
-          isHoliday: true, isRestDay: false, compensationStatus: null, compensationManagedByRestAssignment: false
-        }, {
-          dateKey: '2026-08-23', totalHours: 4, ordinaryHours: 4, overtimeHours: 0, unrecognizedOvertimeHours: 0,
-          clientNames: ['Cliente de prueba'], operationNames: ['Operación de prueba'], civilDateKeys: ['2026-08-23'],
-          isHoliday: false, isRestDay: true, compensationDateKey: '2026-08-23',
-          compensationStatus: PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED, compensationManagedByRestAssignment: true
+          dateKey: '2026-08-17',
+          totalHours: 2,
+          ordinaryHours: 2,
+          overtimeHours: 0,
+          unrecognizedOvertimeHours: 0,
+          clientNames: ['Cliente de prueba'],
+          operationNames: ['Operación de prueba'],
+          isHoliday: true,
+          isRestDay: false,
+          compensationStatus: PAYROLL_COMPENSATION_STATUS.COMPENSATED
         }]
       }],
       totals: {
-        workers: 1, workedDays: 2, deductedDays: 1, netWorkedDays: 1,
-        totalMinutes: 360, ordinaryHours: 6, overtimeHours: 0, unrecognizedOvertimeMinutes: 0, workersWithNovelties: 0
+        workers: 1,
+        totalMinutes: 120,
+        ordinaryHours: 2,
+        overtimeHours: 0,
+        unrecognizedOvertimeMinutes: 0,
+        workersWithNovelties: 0
       }
     },
     selectedPolicy: normalizePayrollPolicy({}),
@@ -477,10 +261,6 @@ test('la interfaz de nómina conserva calendario lunes-domingo, festivo y doming
   assert.doesNotMatch(html, /type="date"/);
   assert.match(html, /mondayOffset = \(firstOfMonth\.getUTCDay\(\) \+ 6\) % 7/);
   assert.match(html, />Festivo<\/span>/);
-  assert.match(html, /Días descontados/);
-  assert.match(html, /Suspensión/);
-  assert.match(html, /Descuenta 1 día laborado/);
-  assert.match(html, /No compensado · sin descanso remunerado asignado/);
   assert.doesNotMatch(html, /action="\/admin\/operaciones\/asistencia\/nomina\/compensation"/);
   assert.doesNotMatch(html, /RDFC|RNFC/);
 });
