@@ -162,8 +162,8 @@ test('festivo conserva RDF y RNF como indicativo y nunca abre compensatorio', ()
   const row = result.rows[0];
   assert.equal(row.conceptMinutes.RDF, 120);
   assert.equal(row.conceptMinutes.RNF, 120);
-  assert.equal(row.conceptMinutes.RDFC, 0);
-  assert.equal(row.conceptMinutes.RNFC, 0);
+  assert.equal('RDFC' in row.conceptMinutes, false);
+  assert.equal('RNFC' in row.conceptMinutes, false);
   assert.equal(row.daily[0].isHoliday, true);
   assert.equal(row.daily[0].isRestDay, false);
   assert.equal(row.daily[0].compensationStatus, null);
@@ -262,4 +262,5 @@ test('la interfaz usa calendario propio de lunes a domingo y muestra festivo sin
   assert.match(html, /mondayOffset = \(firstOfMonth\.getUTCDay\(\) \+ 6\) % 7/);
   assert.match(html, />Festivo<\/span>/);
   assert.doesNotMatch(html, /action="\/admin\/operaciones\/asistencia\/nomina\/compensation"/);
+  assert.doesNotMatch(html, /RDFC|RNFC/);
 });
