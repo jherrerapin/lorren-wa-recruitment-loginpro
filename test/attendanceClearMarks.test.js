@@ -115,7 +115,7 @@ function attendanceFixture() {
   return { prisma, assignment, session, state };
 }
 
-test('el coordinador elimina todas las marcaciones sin borrar la sesión ni la asignación y conserva auditoría', async () => {
+test('el coordinador elimina marcaciones sin borrar la sesión ni la asignación y conserva auditoría', async () => {
   const { prisma, session, state } = attendanceFixture();
   const result = await reviewAttendanceWorkdaySession(prisma, {
     sessionId: session.id,
