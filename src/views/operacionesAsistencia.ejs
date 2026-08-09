@@ -110,7 +110,8 @@
           const initialReviewReason = selectedReviewStatus === 'LATE' ? automaticLateReason(row.lateMinutes) : '';
           const pendingCorrectionMarkTypes = Array.isArray(row.pendingCorrectionMarkTypes) ? row.pendingCorrectionMarkTypes : [];
           const granularCorrectionActive = pendingCorrectionMarkTypes.length > 0;
-          const lunchSummary = granularCorrectionActive
+          const lunchCorrectionPending = pendingCorrectionMarkTypes.some((type) => ['BREAK_START', 'BREAK_END'].includes(type));
+          const lunchSummary = lunchCorrectionPending
             ? 'Corrección pendiente'
             : (row.breakPenaltyApplied
               ? '1 h 30 min · penalización'
