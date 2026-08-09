@@ -37,6 +37,7 @@ test('active assignment route sends same-day worker IDs to the rendered board', 
       ]
     },
     dispatchClient: { findMany: async () => [] },
+    devAuditEvent: { findMany: async () => [] },
     dispatchAssignment: {
       findMany: async (query) => {
         capturedAssignmentQueries.push(query);
