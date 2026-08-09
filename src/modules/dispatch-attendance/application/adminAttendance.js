@@ -43,6 +43,13 @@ function manualDateTime(value, label) {
   return candidate;
 }
 
+function optionalTimelineDate(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`${label}_invalid`);
+  return date;
+}
+
 function hasManualWorkdayInput(input = {}) {
   return input.arrivalReportedAt !== undefined || input.departureReportedAt !== undefined;
 }
@@ -159,6 +166,56 @@ function attendanceWindow(assignment) {
   };
 }
 
+export function validateAttendanceTimelineAgainstAssignment(serviceRequest, input = {}) {
+  const serviceDateKey = dispatchServiceDateKey(serviceRequest?.serviceDate);
+  if (!serviceDateKey) throw new Error('attendance_manual_service_date_invalid');
+  const expected = buildDispatchAttendanceExpectedWindow(serviceRequest);
+  const expectedEndDateKey = expected.expectedEndAt
+    ? dispatchServiceDateKey(expected.expectedEndAt)
+    : serviceDateKey;
+  const latestDateKey = expectedEndDateKey || serviceDateKey;
+  const allowedDateKeys = new Set([serviceDateKey, latestDateKey]);
+
+  const arrivalAt = optionalTimelineDate(input.arrivalAt, 'attendance_manual_arrival_reported_at');
+  const breakStartAt = optionalTimelineDate(input.breakStartAt, 'attendance_manual_break_start_at');
+  const breakEndAt = optionalTimelineDate(input.breakEndAt, 'attendance_manual_break_end_at');
+  const departureAt = optionalTimelineDate(input.departureAt, 'attendance_manual_departure_reported_at');
+
+  if (arrivalAt && dispatchServiceDateKey(arrivalAt) !== serviceDateKey) {
+    throw new Error('attendance_manual_arrival_date_mismatch');
+  }
+  for (const markAt of [breakStartAt, breakEndAt, departureAt]) {
+    if (markAt && !allowedDateKeys.has(dispatchServiceDateKey(markAt))) {
+      throw new Error('attendance_manual_mark_date_outside_assignment');
+    }
+  }
+  if (arrivalAt && departureAt && departureAt.getTime() < arrivalAt.getTime()) {
+    throw new Error('attendance_manual_departure_before_arrival');
+  }
+  if (arrivalAt && breakStartAt && breakStartAt.getTime() < arrivalAt.getTime()) {
+    throw new Error('attendance_manual_break_before_arrival');
+  }
+  if (arrivalAt && breakEndAt && breakEndAt.getTime() < arrivalAt.getTime()) {
+    throw new Error('attendance_manual_break_before_arrival');
+  }
+  if (breakStartAt && breakEndAt && breakEndAt.getTime() < breakStartAt.getTime()) {
+    throw new Error('attendance_manual_break_end_before_start');
+  }
+  if (departureAt && (
+    (breakStartAt && breakStartAt.getTime() > departureAt.getTime())
+    || (breakEndAt && breakEndAt.getTime() > departureAt.getTime())
+  )) {
+    throw new Error('attendance_manual_break_after_departure');
+  }
+
+  return {
+    expected,
+    serviceDateKey,
+    latestDateKey,
+    overnight: latestDateKey !== serviceDateKey
+  };
+}
+
 function boardStatus({ session, expectedStartAt, closesAt, now }) {
   if (session?.validationStatus === 'REVIEW_REQUIRED') return 'REVIEW_REQUIRED';
   if (session?.validationStatus === 'AUTO_VALIDATED') return 'AUTO_VALIDATED';
@@ -217,6 +274,9 @@ function buildBoardRow(assignment, now) {
   const markLatitude = numericCoordinate(mark?.latitude, -90, 90);
   const markLongitude = numericCoordinate(mark?.longitude, -180, 180);
   const serviceDateIso = dispatchServiceDateKey(request?.serviceDate);
+  const latestManualDateIso = expected.expectedEndAt
+    ? dispatchServiceDateKey(expected.expectedEndAt)
+    : serviceDateIso;
 
   return {
     assignmentId: assignment.id,
@@ -232,6 +292,7 @@ function buildBoardRow(assignment, now) {
     address: request?.address || point?.address || 'Dirección sin definir',
     serviceDateLabel: serviceDateIso ? formatDate(request.serviceDate) : 'Fecha sin definir',
     serviceDateIso,
+    latestManualDateIso: latestManualDateIso || serviceDateIso,
     scheduleLabel: expected.expectedStartAt
       ? `${formatTime(expected.expectedStartAt)}${expected.expectedEndAt ? ` – ${formatTime(expected.expectedEndAt)}` : ''}`
       : 'Horario pendiente',
@@ -520,7 +581,15 @@ export async function registerManualAttendance(prisma, input = {}) {
       throw new Error('attendance_manual_arrival_exists');
     }
 
-    const expected = buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
+    const timeline = manualWorkday
+      ? validateAttendanceTimelineAgainstAssignment(assignment.serviceRequest, {
+          arrivalAt,
+          departureAt,
+          breakStartAt,
+          breakEndAt
+        })
+      : { expected: buildDispatchAttendanceExpectedWindow(assignment.serviceRequest) };
+    const expected = timeline.expected;
     const punctualityStatus = manualWorkday
       ? (arrivalAt.getTime() > expected.expectedStartAt.getTime() ? 'LATE' : 'ON_TIME')
       : attendanceStatus;
