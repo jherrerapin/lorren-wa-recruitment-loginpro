@@ -44,6 +44,31 @@ function overnightSession({
   };
 }
 
+function canonicalJuly31Shift() {
+  return overnightSession({
+    id: 'TEST-SESSION-CANONICAL',
+    arrivalReportedAt: '2026-08-01T02:00:00.000Z',
+    departureReportedAt: '2026-08-01T10:00:00.000Z',
+    expectedStartAt: '2026-08-01T02:00:00.000Z',
+    expectedEndAt: '2026-08-01T10:00:00.000Z',
+    workedMinutes: 420,
+    marks: [
+      {
+        id: 'TEST-MARK-CANONICAL-BREAK-START',
+        markType: 'BREAK_START',
+        clientCapturedAt: new Date('2026-08-01T06:00:00.000Z'),
+        serverReceivedAt: new Date('2026-08-01T06:00:00.000Z')
+      },
+      {
+        id: 'TEST-MARK-CANONICAL-BREAK-END',
+        markType: 'BREAK_END',
+        clientCapturedAt: new Date('2026-08-01T07:00:00.000Z'),
+        serverReceivedAt: new Date('2026-08-01T07:00:00.000Z')
+      }
+    ]
+  });
+}
+
 function calculate(sessions, range) {
   return calculatePayrollConceptReport({
     sessions: Array.isArray(sessions) ? sessions : [sessions],
@@ -74,30 +99,7 @@ test('turno nocturno 21:00 a 05:00 se agrupa una sola vez por la fecha de entrad
 });
 
 test('turno 31 de julio 21:00 a 1 de agosto 05:00 con una hora de almuerzo suma siete horas en una sola jornada', () => {
-  const session = overnightSession({
-    id: 'TEST-SESSION-JUL31-AUG1',
-    arrivalReportedAt: '2026-08-01T02:00:00.000Z',
-    departureReportedAt: '2026-08-01T10:00:00.000Z',
-    expectedStartAt: '2026-08-01T02:00:00.000Z',
-    expectedEndAt: '2026-08-01T10:00:00.000Z',
-    workedMinutes: 420,
-    marks: [
-      {
-        id: 'TEST-MARK-BREAK-START',
-        markType: 'BREAK_START',
-        clientCapturedAt: new Date('2026-08-01T06:00:00.000Z'),
-        serverReceivedAt: new Date('2026-08-01T06:00:00.000Z')
-      },
-      {
-        id: 'TEST-MARK-BREAK-END',
-        markType: 'BREAK_END',
-        clientCapturedAt: new Date('2026-08-01T07:00:00.000Z'),
-        serverReceivedAt: new Date('2026-08-01T07:00:00.000Z')
-      }
-    ]
-  });
-
-  const report = calculate(session, { from: '2026-07-31', to: '2026-07-31' });
+  const report = calculate(canonicalJuly31Shift(), { from: '2026-07-31', to: '2026-07-31' });
   assert.equal(report.rows.length, 1);
   const row = report.rows[0];
   assert.equal(row.totalMinutes, 420);
@@ -112,28 +114,7 @@ test('turno 31 de julio 21:00 a 1 de agosto 05:00 con una hora de almuerzo suma 
 });
 
 test('una segunda sesión superpuesta desde medianoche no rellena el almuerzo ni suma otro turno', () => {
-  const canonical = overnightSession({
-    id: 'TEST-SESSION-CANONICAL',
-    arrivalReportedAt: '2026-08-01T02:00:00.000Z',
-    departureReportedAt: '2026-08-01T10:00:00.000Z',
-    expectedStartAt: '2026-08-01T02:00:00.000Z',
-    expectedEndAt: '2026-08-01T10:00:00.000Z',
-    workedMinutes: 420,
-    marks: [
-      {
-        id: 'TEST-MARK-CANONICAL-BREAK-START',
-        markType: 'BREAK_START',
-        clientCapturedAt: new Date('2026-08-01T06:00:00.000Z'),
-        serverReceivedAt: new Date('2026-08-01T06:00:00.000Z')
-      },
-      {
-        id: 'TEST-MARK-CANONICAL-BREAK-END',
-        markType: 'BREAK_END',
-        clientCapturedAt: new Date('2026-08-01T07:00:00.000Z'),
-        serverReceivedAt: new Date('2026-08-01T07:00:00.000Z')
-      }
-    ]
-  });
+  const canonical = canonicalJuly31Shift();
   const duplicateAfterMidnight = overnightSession({
     id: 'TEST-SESSION-DUPLICATE-AFTER-MIDNIGHT',
     arrivalReportedAt: '2026-08-01T05:00:00.000Z',
@@ -152,6 +133,31 @@ test('una segunda sesión superpuesta desde medianoche no rellena el almuerzo ni
   assert.equal(row.daily[0].dateKey, '2026-07-31');
   assert.equal(row.daily[0].totalMinutes, 420);
   assert.ok(row.novelties.some((item) => item.code === 'OVERLAPPING_ASSIGNMENTS'));
+  assert.equal(row.exportable, false);
+});
+
+test('una sesión superpuesta que comienza dentro del almuerzo tampoco puede rellenar ese hueco', () => {
+  const canonical = canonicalJuly31Shift();
+  const duplicateInsideBreak = overnightSession({
+    id: 'TEST-SESSION-DUPLICATE-IN-BREAK',
+    arrivalReportedAt: '2026-08-01T06:00:00.000Z',
+    departureReportedAt: '2026-08-01T10:00:00.000Z',
+    expectedStartAt: '2026-08-01T06:00:00.000Z',
+    expectedEndAt: '2026-08-01T10:00:00.000Z',
+    workedMinutes: 240,
+    marks: []
+  });
+
+  const report = calculate([canonical, duplicateInsideBreak], { from: '2026-07-31', to: '2026-07-31' });
+  assert.equal(report.rows.length, 1);
+  const row = report.rows[0];
+  assert.equal(row.totalMinutes, 420);
+  assert.equal(row.daily.length, 1);
+  assert.equal(row.daily[0].totalMinutes, 420);
+  assert.ok(row.novelties.some((item) => (
+    item.code === 'OVERLAPPING_ASSIGNMENTS'
+    && item.sessionId === 'TEST-SESSION-DUPLICATE-IN-BREAK'
+  )));
   assert.equal(row.exportable, false);
 });
 
