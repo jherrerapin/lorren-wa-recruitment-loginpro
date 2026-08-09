@@ -70,7 +70,7 @@ Conceptos producidos:
 - RDD, RND, RDF, RNF;
 - RDDC, RNDC.
 
-`RDFC` y `RNFC` se conservan en la lista histórica de columnas para no romper exportaciones o consumidores existentes, pero los cálculos nuevos no los generan: un festivo ordinario se reporta como `RDF` o `RNF` y se identifica además con el indicativo `Festivo`.
+`RDFC` y `RNFC` fueron retirados del contrato de conceptos: un festivo ordinario se reporta como `RDF` o `RNF` y se identifica además con el indicativo `Festivo`. No existen columnas ni generación nueva para conceptos festivos compensados.
 
 Una fracción se asigna a un único concepto. Por ejemplo, una hora extra nocturna en el día de descanso obligatorio se reporta como HEND y no se duplica en HENO, RNO o RND.
 
@@ -122,7 +122,7 @@ Se ofrecen:
 - CSV separado por punto y coma y codificado para Excel;
 - Excel `.xlsx` con encabezados, filtro y horas decimales.
 
-Cada fila incluye identificación, rango, horas ordinarias, total trabajado, horas extra, los quince códigos históricos de columnas, estado y novedades.
+Cada fila incluye identificación, rango, horas ordinarias, total trabajado, horas extra, los trece códigos canónicos de conceptos, estado y novedades.
 
 ## Alcance de esta entrega
 
