@@ -44,11 +44,11 @@ export function normalizePayrollPolicy(source = {}) {
     maxWeeklyOvertimeMinutes: finiteInteger(source.maxWeeklyOvertimeMinutes, DEFAULT_PAYROLL_POLICY.maxWeeklyOvertimeMinutes, { min: 0, max: 7 * 24 * 60 }),
     nightStartMinute: finiteInteger(source.nightStartMinute, DEFAULT_PAYROLL_POLICY.nightStartMinute, { min: 0, max: 1439 }),
     nightEndMinute: finiteInteger(source.nightEndMinute, DEFAULT_PAYROLL_POLICY.nightEndMinute, { min: 0, max: 1439 }),
-    weekStartsOn: finiteInteger(source.weekStartsOn, DEFAULT_PAYROLL_POLICY.weekStartsOn, { min: 0, max: 6 }),
+    weekStartsOn: DEFAULT_PAYROLL_POLICY.weekStartsOn,
     restDay: finiteInteger(source.restDay, DEFAULT_PAYROLL_POLICY.restDay, { min: 0, max: 6 }),
     recognizeEarlyArrival: source.recognizeEarlyArrival === true,
     incompleteBreakPenaltyMinutes: finiteInteger(source.incompleteBreakPenaltyMinutes, DEFAULT_PAYROLL_POLICY.incompleteBreakPenaltyMinutes, { min: 0, max: 8 * 60 }),
-    holidaySundayPriority: source.holidaySundayPriority === 'REST' ? 'REST' : 'HOLIDAY',
+    holidaySundayPriority: 'HOLIDAY',
     timezone: 'America/Bogota',
     version: typeof source.version === 'string' && source.version.trim() ? source.version.trim().slice(0, 80) : DEFAULT_PAYROLL_POLICY.version
   };
@@ -240,7 +240,7 @@ function conceptForMinute({ overtime, night, holiday, rest, compensated }) {
     if (rest) return night ? 'HEND' : 'HEDD';
     return night ? 'HENO' : 'HEDO';
   }
-  if (holiday) return compensated ? (night ? 'RNFC' : 'RDFC') : (night ? 'RNF' : 'RDF');
+  if (holiday) return night ? 'RNF' : 'RDF';
   if (rest) return compensated ? (night ? 'RNDC' : 'RDDC') : (night ? 'RND' : 'RDD');
   return night ? 'RNO' : null;
 }
@@ -313,6 +313,8 @@ function ensureDaily(summary, dateKey) {
       conceptMinutes: emptyConceptMinutes(),
       clientNames: new Set(),
       operationNames: new Set(),
+      isHoliday: false,
+      isRestDay: false,
       compensationStatus: null,
       novelties: []
     });
@@ -436,12 +438,12 @@ export function calculatePayrollConceptReport(input = {}) {
 
       const year = Number(parts.dateKey.slice(0, 4));
       if (!holidayCache.has(year)) holidayCache.set(year, colombianHolidayKeys(year));
-      const isHoliday = holidayCache.get(year).has(parts.dateKey);
-      const isRest = parts.weekday === record.policy.restDay;
-      const holiday = isHoliday && (record.policy.holidaySundayPriority === 'HOLIDAY' || !isRest);
-      const rest = isRest && !holiday;
-      const compensationStatus = compensationStatusFor(compensationByWorkerDate, workerId, parts.dateKey);
-      const compensated = compensationStatus === PAYROLL_COMPENSATION_STATUS.COMPENSATED;
+      const holiday = holidayCache.get(year).has(parts.dateKey);
+      const rest = parts.weekday === record.policy.restDay && !holiday;
+      const compensationStatus = rest
+        ? compensationStatusFor(compensationByWorkerDate, workerId, parts.dateKey)
+        : null;
+      const compensated = rest && compensationStatus === PAYROLL_COMPENSATION_STATUS.COMPENSATED;
       const night = isNightMinute(parts.hour * 60 + parts.minute, record.policy);
       const concept = unrecognizedOvertime
         ? null
@@ -461,10 +463,12 @@ export function calculatePayrollConceptReport(input = {}) {
       if (concept) daily.conceptMinutes[concept] += 1;
       daily.clientNames.add(record.client.clientName);
       daily.operationNames.add(record.client.operationPointName);
-      if (holiday || rest) {
+      daily.isHoliday = daily.isHoliday || holiday;
+      daily.isRestDay = daily.isRestDay || rest;
+      if (rest) {
         daily.compensationStatus = compensationStatus;
         if (compensationStatus === PAYROLL_COMPENSATION_STATUS.PENDING) {
-          pushNovelty(summary.novelties, 'COMPENSATION_PENDING', 'Define si el descanso obligatorio o festivo fue compensado.', {
+          pushNovelty(summary.novelties, 'COMPENSATION_PENDING', 'Define si el día de descanso obligatorio fue compensado.', {
             dateKey: parts.dateKey,
             sessionId: record.session.id,
             blocking: true
