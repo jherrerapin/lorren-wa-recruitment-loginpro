@@ -5,7 +5,10 @@ import {
   calculateDispatchWorkedTime,
   formatDispatchMinutes
 } from '../domain/attendanceWorkdayPolicy.js';
-import { reviewAttendanceSession } from './adminAttendance.js';
+import {
+  reviewAttendanceSession,
+  validateAttendanceTimelineAgainstAssignment
+} from './adminAttendance.js';
 
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 const VALID_WORKDAY_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN', 'CLEAR', 'DELETE_MARK', 'ADD_MARK']);
@@ -597,6 +600,12 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
       riskFlags: []
     };
     const nextMarks = [...previousMarks, correctionMark];
+    validateAttendanceTimelineAgainstAssignment(session.assignment?.serviceRequest, {
+      arrivalAt: markMoment(latestMark(nextMarks, 'ARRIVAL')),
+      breakStartAt: markMoment(latestMark(nextMarks, 'BREAK_START')),
+      breakEndAt: markMoment(latestMark(nextMarks, 'BREAK_END')),
+      departureAt: markMoment(latestMark(nextMarks, 'DEPARTURE'))
+    });
     const pendingCorrections = pendingCorrectionMarkTypes(session.reviews).filter((type) => type !== markType);
     const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival, pendingCorrections);
 
