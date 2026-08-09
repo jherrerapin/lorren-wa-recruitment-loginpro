@@ -76,9 +76,6 @@
     .novelty.info { color:var(--blue); }
     .policy-grid { display:grid; grid-template-columns:repeat(5,minmax(130px,1fr)); gap:10px; }
     .policy-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:12px; align-items:center; }
-    .policy-fixed { min-height:65px; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
-    .policy-fixed strong { color:var(--navy); }
-    .policy-fixed small { display:block; color:var(--muted); margin-top:3px; }
     .codes { display:grid; grid-template-columns:repeat(5,minmax(150px,1fr)); gap:7px; }
     .code { padding:8px 9px; background:var(--soft); border:1px solid var(--border); border-radius:8px; }
     .code strong { color:var(--navy); }
@@ -152,7 +149,6 @@
         <div class="field"><label for="search">Buscar</label><input id="search" name="search" value="<%= report.filters.search %>" placeholder="Nombre, documento o teléfono" /></div>
         <div class="field"><button class="btn btn-primary" type="submit">Calcular periodo</button></div>
       </form>
-      <p class="sub">La semana de Nómina se calcula siempre de lunes a domingo.</p>
     </section>
 
     <section class="metrics">
@@ -178,10 +174,8 @@
             <div class="field"><label>Máximo extra semanal</label><input name="maxWeeklyOvertimeHours" type="number" min="0" max="168" step="0.25" value="<%= selectedPolicy.maxWeeklyOvertimeMinutes / 60 %>" required /></div>
             <div class="field"><label>Inicio nocturno</label><select name="nightStartHour" required><% for (let hour = 0; hour < 24; hour += 1) { %><option value="<%= hour %>" <%= selectedPolicy.nightStartMinute === hour * 60 ? 'selected' : '' %>><%= String(hour).padStart(2, '0') %>:00</option><% } %></select></div>
             <div class="field"><label>Fin nocturno</label><select name="nightEndHour" required><% for (let hour = 0; hour < 24; hour += 1) { %><option value="<%= hour %>" <%= selectedPolicy.nightEndMinute === hour * 60 ? 'selected' : '' %>><%= String(hour).padStart(2, '0') %>:00</option><% } %></select></div>
-            <div class="field"><label>Semana de nómina</label><div class="policy-fixed"><strong>Lunes a domingo</strong><small>El acumulado semanal ya no es configurable desde domingo.</small></div></div>
             <div class="field"><label>Día de descanso</label><select name="restDay"><option value="0" <%= selectedPolicy.restDay === 0 ? 'selected' : '' %>>Domingo</option><option value="1" <%= selectedPolicy.restDay === 1 ? 'selected' : '' %>>Lunes</option><option value="2" <%= selectedPolicy.restDay === 2 ? 'selected' : '' %>>Martes</option><option value="3" <%= selectedPolicy.restDay === 3 ? 'selected' : '' %>>Miércoles</option><option value="4" <%= selectedPolicy.restDay === 4 ? 'selected' : '' %>>Jueves</option><option value="5" <%= selectedPolicy.restDay === 5 ? 'selected' : '' %>>Viernes</option><option value="6" <%= selectedPolicy.restDay === 6 ? 'selected' : '' %>>Sábado</option></select></div>
             <div class="field"><label>Descuento almuerzo abierto</label><input name="incompleteBreakPenaltyMinutes" type="number" min="0" max="480" step="1" value="<%= selectedPolicy.incompleteBreakPenaltyMinutes %>" required /></div>
-            <div class="field"><label>Festivos</label><div class="policy-fixed"><strong>Indicativo Festivo</strong><small>El festivo conserva su concepto y no abre compensatorio.</small></div></div>
             <div class="field"><label>Reconocer llegada anticipada</label><select name="recognizeEarlyArrival"><option value="false" <%= !selectedPolicy.recognizeEarlyArrival ? 'selected' : '' %>>No</option><option value="true" <%= selectedPolicy.recognizeEarlyArrival ? 'selected' : '' %>>Sí</option></select></div>
             <div class="field"><button type="submit" class="btn btn-primary">Guardar política</button></div>
           </div>
@@ -205,19 +199,19 @@
                     <details><summary>Ver días</summary><div class="daily">
                       <% for (const day of row.daily) { %>
                         <div class="daily-row">
-                          <div><strong><%= day.dateKey %></strong><div class="day-flags"><% if (day.isHoliday) { %><span class="badge badge-holiday">Festivo</span><% } else if (day.isRestDay) { %><span class="badge badge-rest">Descanso obligatorio</span><% } %></div></div>
+                          <div><strong><%= day.dateKey %></strong><div class="day-flags"><% if (day.isHoliday) { %><span class="badge badge-holiday">Festivo</span><% } %><% if (day.isRestDay) { %><span class="badge badge-rest">Descanso obligatorio</span><% } %></div></div>
                           <div><%= day.clientNames.join(', ') %><small><%= day.operationNames.join(', ') %></small></div>
                           <div><%= day.totalHours %> h</div>
                           <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small><small>Bajo umbral <%= day.unrecognizedOvertimeHours || 0 %></small></div>
                           <div>
-                            <% if (day.isRestDay && !day.isHoliday && day.compensationStatus) { %>
+                            <% if (day.isRestDay && day.compensationStatus) { %>
                               <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
-                                <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
+                                <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.compensationDateKey || day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
                                 <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
                                 <select name="status"><option value="PENDING" <%= day.compensationStatus === 'PENDING' ? 'selected' : '' %>>Compensatorio pendiente</option><option value="NOT_COMPENSATED" <%= day.compensationStatus === 'NOT_COMPENSATED' ? 'selected' : '' %>>No compensado</option><option value="COMPENSATED" <%= day.compensationStatus === 'COMPENSATED' ? 'selected' : '' %>>Compensado</option></select><button class="btn" type="submit">Guardar</button>
                               </form>
                             <% } %>
-                            <% const dayNovelty = row.novelties.filter((item) => item.dateKey === day.dateKey); %>
+                            <% const dayNovelty = row.novelties.filter((item) => item.dateKey === day.dateKey || (day.civilDateKeys || []).includes(item.dateKey)); %>
                             <% if (dayNovelty.length) { %><div class="novelty <%= dayNovelty.every((item) => item.blocking === false) ? 'info' : '' %>"><%= dayNovelty.map((item) => item.code === 'OVERTIME_BELOW_MINIMUM' ? item.message : item.code).join(' · ') %></div><% } %>
                           </div>
                         </div>
