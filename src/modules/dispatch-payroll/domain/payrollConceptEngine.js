@@ -286,6 +286,48 @@ function inRange(dateKey, range) {
   return dateKey >= range.from && dateKey <= range.to;
 }
 
+function findOverlappingSessionIds(rawRecords, novelties) {
+  const sessions = new Map();
+  for (const record of rawRecords) {
+    const sessionId = record?.session?.id;
+    if (!sessionId || sessions.has(sessionId)) continue;
+    const arrivalAt = validDate(record.session.arrivalReportedAt);
+    const departureAt = validDate(record.session.departureReportedAt);
+    if (!arrivalAt || !departureAt || departureAt <= arrivalAt) continue;
+    sessions.set(sessionId, {
+      sessionId,
+      arrivalAt,
+      departureAt,
+      workdayKey: record.workdayKey || bogotaDateKey(arrivalAt)
+    });
+  }
+
+  const ordered = [...sessions.values()].sort((left, right) => {
+    const arrivalDelta = left.arrivalAt.getTime() - right.arrivalAt.getTime();
+    if (arrivalDelta) return arrivalDelta;
+    return left.sessionId.localeCompare(right.sessionId);
+  });
+  const accepted = [];
+  const rejected = new Set();
+  for (const current of ordered) {
+    const overlapsAccepted = accepted.some((previous) => (
+      current.arrivalAt.getTime() < previous.departureAt.getTime()
+      && current.departureAt.getTime() > previous.arrivalAt.getTime()
+    ));
+    if (!overlapsAccepted) {
+      accepted.push(current);
+      continue;
+    }
+    rejected.add(current.sessionId);
+    pushNovelty(novelties, 'OVERLAPPING_ASSIGNMENTS', 'Existen jornadas superpuestas para el mismo auxiliar.', {
+      dateKey: current.workdayKey,
+      sessionId: current.sessionId,
+      blocking: true
+    });
+  }
+  return rejected;
+}
+
 function ensureWorkerSummary(map, identity) {
   if (!map.has(identity.workerId)) {
     map.set(identity.workerId, {
@@ -372,8 +414,6 @@ export function calculatePayrollConceptReport(input = {}) {
   const summaries = new Map();
   for (const [workerId, rawRecords] of recordsByWorker) {
     rawRecords.sort((left, right) => left.timestamp - right.timestamp);
-    const seenMinutes = new Map();
-    const overlappingSessionIds = new Set();
     const dailyOrdinary = new Map();
     const weeklyOrdinary = new Map();
     const rawDailyOvertime = new Map();
@@ -382,6 +422,8 @@ export function calculatePayrollConceptReport(input = {}) {
     const identity = rawRecords[0]?.worker || { workerId, fullName: 'Auxiliar sin nombre', documentType: '', documentNumber: '', phone: '' };
     const summary = ensureWorkerSummary(summaries, identity);
     summary.novelties.push(...workerNovelties);
+    const overlappingSessionIds = findOverlappingSessionIds(rawRecords, summary.novelties);
+    const seenMinutes = new Set();
 
     for (const record of rawRecords) {
       if (overlappingSessionIds.has(record.session.id)) continue;
@@ -389,17 +431,15 @@ export function calculatePayrollConceptReport(input = {}) {
       if (!parts) continue;
       const workdayKey = record.workdayKey || parts.dateKey;
       const minuteKey = localMinuteKey(parts);
-      const previousRecord = seenMinutes.get(minuteKey);
-      if (previousRecord) {
-        overlappingSessionIds.add(record.session.id);
+      if (seenMinutes.has(minuteKey)) {
         pushNovelty(summary.novelties, 'OVERLAPPING_ASSIGNMENTS', 'Existen jornadas superpuestas para el mismo auxiliar.', {
-          dateKey: previousRecord.workdayKey || workdayKey,
+          dateKey: workdayKey,
           sessionId: record.session.id,
           blocking: true
         });
         continue;
       }
-      seenMinutes.set(minuteKey, record);
+      seenMinutes.add(minuteKey);
 
       const weekKey = payrollWeekStartKey(workdayKey, record.policy.weekStartsOn);
       const dayOrdinary = dailyOrdinary.get(workdayKey) || 0;
