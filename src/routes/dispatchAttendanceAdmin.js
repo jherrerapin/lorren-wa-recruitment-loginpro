@@ -76,10 +76,8 @@ function redirectToBoard(res, source, {
   if (error) params.set('error', error);
   const markType = correctionMarkType(correctionMark);
   const sessionId = correctionSessionId(correctionSession);
-  if (markType && sessionId) {
-    params.set('correctionMarkType', markType);
-    params.set('correctionSessionId', sessionId);
-  }
+  if (sessionId) params.set('correctionSessionId', sessionId);
+  if (markType && sessionId) params.set('correctionMarkType', markType);
   const query = params.toString();
   return res.redirect(`/admin/operaciones/asistencia${query ? `?${query}` : ''}`);
 }
@@ -216,7 +214,8 @@ export function dispatchAttendanceAdminRouter(prisma) {
         role: req.session?.userRole || req.userRole,
         board,
         success: normalizeString(req.query?.success),
-        error: normalizeString(req.query?.error)
+        error: normalizeString(req.query?.error),
+        focusSessionId: correctionSessionId(req.query?.correctionSessionId)
       });
     } catch (error) {
       console.error('[ATTENDANCE_ADMIN_BOARD_FAILED]', error);
@@ -230,13 +229,15 @@ export function dispatchAttendanceAdminRouter(prisma) {
           metrics: { total: 0, pendingReview: 0, autoValidated: 0, manualValidated: 0, late: 0, rejected: 0, noShow: 0 }
         },
         success: null,
-        error: 'No fue posible cargar el panel de asistencia.'
+        error: 'No fue posible cargar el panel de asistencia.',
+        focusSessionId: null
       });
     }
   });
 
   router.post('/sessions/:sessionId/review', formParser, async (req, res) => {
     const action = normalizeString(req.body.action)?.toUpperCase();
+    const correctionAction = ['DELETE_MARK', 'ADD_MARK', 'CLEAR'].includes(action);
     try {
       const reason = await resolveAttendanceReviewReason(prisma, {
         sessionId: req.params.sessionId,
@@ -259,14 +260,14 @@ export function dispatchAttendanceAdminRouter(prisma) {
       return redirectToBoard(res, req.body, {
         success: reviewSuccessMessage(req.body.action),
         correctionMark: action === 'DELETE_MARK' ? req.body.markType : null,
-        correctionSession: action === 'DELETE_MARK' ? req.params.sessionId : null
+        correctionSession: correctionAction ? req.params.sessionId : null
       });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', { code: error?.message, sessionId: req.params.sessionId });
       return redirectToBoard(res, req.body, {
         error: publicErrorMessage(error),
         correctionMark: action === 'ADD_MARK' ? req.body.markType : null,
-        correctionSession: action === 'ADD_MARK' ? req.params.sessionId : null
+        correctionSession: correctionAction ? req.params.sessionId : null
       });
     }
   });
