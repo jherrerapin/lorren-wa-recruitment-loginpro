@@ -11,6 +11,7 @@ import { getSignedDownloadUrl } from '../services/storage.js';
 import { dispatchPayrollRouter } from './dispatchPayroll.js';
 
 const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
+const CORRECTION_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -55,10 +56,30 @@ function safeReturnParams(source = {}) {
   return params;
 }
 
-function redirectToBoard(res, source, { success = null, error = null } = {}) {
+function correctionMarkType(value) {
+  const markType = normalizeString(value)?.toUpperCase() || null;
+  return markType && CORRECTION_MARK_TYPES.has(markType) ? markType : null;
+}
+
+function correctionSessionId(value) {
+  return safeHtmlAttributeState(value) || null;
+}
+
+function redirectToBoard(res, source, {
+  success = null,
+  error = null,
+  correctionMark = null,
+  correctionSession = null
+} = {}) {
   const params = safeReturnParams(source);
   if (success) params.set('success', success);
   if (error) params.set('error', error);
+  const markType = correctionMarkType(correctionMark);
+  const sessionId = correctionSessionId(correctionSession);
+  if (markType && sessionId) {
+    params.set('correctionMarkType', markType);
+    params.set('correctionSessionId', sessionId);
+  }
   const query = params.toString();
   return res.redirect(`/admin/operaciones/asistencia${query ? `?${query}` : ''}`);
 }
@@ -79,6 +100,7 @@ function publicErrorMessage(error) {
     attendance_review_mark_id_required: 'No fue posible identificar la marcación que quieres eliminar.',
     attendance_review_mark_not_found: 'La marcación seleccionada ya no existe en esta jornada.',
     attendance_review_mark_exists: 'Esa marcación ya existe. Elimínala primero si necesitas corregir su hora.',
+    attendance_review_mark_not_pending_correction: 'Solo puedes registrar una nueva hora después de eliminar esa marcación desde esta jornada.',
     attendance_review_mark_reported_at_required: 'Ingresa la nueva fecha y hora de la marcación.',
     attendance_review_mark_reported_at_invalid: 'La nueva fecha u hora de la marcación no es válida.',
     attendance_manual_assignment_not_found: 'La asignación ya no existe.',
@@ -171,7 +193,7 @@ export async function resolveAttendanceReviewReason(prisma, input = {}) {
 
 function reviewSuccessMessage(action) {
   const normalized = normalizeString(action)?.toUpperCase();
-  if (normalized === 'DELETE_MARK') return 'La marcación seleccionada fue eliminada. Las demás se conservaron y la corrección quedó auditada.';
+  if (normalized === 'DELETE_MARK') return 'La marcación fue eliminada. Las demás se conservaron; ahora puedes registrar la hora corregida.';
   if (normalized === 'ADD_MARK') return 'La nueva hora quedó registrada en la misma jornada y la corrección quedó auditada.';
   if (normalized === 'CLEAR') return 'Las marcaciones de la jornada fueron eliminadas. La sesión y la auditoría se conservaron.';
   return 'La decisión y el tiempo trabajado quedaron guardados con auditoría.';
@@ -214,6 +236,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
   });
 
   router.post('/sessions/:sessionId/review', formParser, async (req, res) => {
+    const action = normalizeString(req.body.action)?.toUpperCase();
     try {
       const reason = await resolveAttendanceReviewReason(prisma, {
         sessionId: req.params.sessionId,
@@ -233,10 +256,18 @@ export function dispatchAttendanceAdminRouter(prisma) {
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, { success: reviewSuccessMessage(req.body.action) });
+      return redirectToBoard(res, req.body, {
+        success: reviewSuccessMessage(req.body.action),
+        correctionMark: action === 'DELETE_MARK' ? req.body.markType : null,
+        correctionSession: action === 'DELETE_MARK' ? req.params.sessionId : null
+      });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', { code: error?.message, sessionId: req.params.sessionId });
-      return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
+      return redirectToBoard(res, req.body, {
+        error: publicErrorMessage(error),
+        correctionMark: action === 'ADD_MARK' ? req.body.markType : null,
+        correctionSession: action === 'ADD_MARK' ? req.params.sessionId : null
+      });
     }
   });
 
