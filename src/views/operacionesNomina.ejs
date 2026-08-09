@@ -228,7 +228,7 @@
 
     <section class="panel">
       <h2 style="margin-bottom:10px;">Conceptos generados</h2>
-      <% const labels = { HEDO:'Extra diurna ordinaria', HENO:'Extra nocturna ordinaria', HEDD:'Extra diurna dominical', HEND:'Extra nocturna dominical', HEDF:'Extra diurna festiva', HENF:'Extra nocturna festiva', RNO:'Recargo nocturno ordinario', RDD:'Recargo diurno dominical no compensado', RND:'Recargo nocturno dominical no compensado', RDF:'Recargo diurno festivo', RNF:'Recargo nocturno festivo', RDDC:'Recargo diurno dominical compensado', RNDC:'Recargo nocturno dominical compensado', RDFC:'Código legado sin generación nueva', RNFC:'Código legado sin generación nueva' }; %>
+      <% const labels = { HEDO:'Extra diurna ordinaria', HENO:'Extra nocturna ordinaria', HEDD:'Extra diurna dominical', HEND:'Extra nocturna dominical', HEDF:'Extra diurna festiva', HENF:'Extra nocturna festiva', RNO:'Recargo nocturno ordinario', RDD:'Recargo diurno dominical no compensado', RND:'Recargo nocturno dominical no compensado', RDF:'Recargo diurno festivo', RNF:'Recargo nocturno festivo', RDDC:'Recargo diurno dominical compensado', RNDC:'Recargo nocturno dominical compensado' }; %>
       <div class="codes"><% for (const code of conceptCodes) { %><div class="code"><strong><%= code %></strong><small><%= labels[code] %></small></div><% } %></div>
     </section>
   </main>
