@@ -12,36 +12,19 @@
     const breakFields = form.querySelector('[data-manual-break-fields]');
     const startInput = form.querySelector('[data-manual-break-start]');
     const endInput = form.querySelector('[data-manual-break-end]');
-    const toggleLabel = checkbox?.closest('.manual-break-toggle');
-    const toggleCopy = toggleLabel?.querySelector('span');
+    const toggleCopy = checkbox?.closest('.manual-break-toggle')?.querySelector('span');
     if (!checkbox || !breakFields || !startInput || !endInput) return;
 
     form.dataset.manualWorkdayControls = 'true';
 
-    checkbox.style.width = '18px';
-    checkbox.style.height = '18px';
-    checkbox.style.minWidth = '18px';
-    checkbox.style.padding = '0';
-    checkbox.style.flex = '0 0 18px';
-    checkbox.style.accentColor = '#0d7a6b';
-    checkbox.style.cursor = 'pointer';
-    if (toggleLabel) toggleLabel.style.cursor = 'pointer';
-
     const sync = () => {
       const breakTaken = checkbox.checked;
       breakFields.hidden = !breakTaken;
-      breakFields.style.display = breakTaken ? 'grid' : 'none';
       startInput.required = breakTaken;
       endInput.required = breakTaken;
       startInput.disabled = !breakTaken;
       endInput.disabled = !breakTaken;
       checkbox.setAttribute('aria-expanded', String(breakTaken));
-
-      if (toggleLabel) {
-        toggleLabel.style.borderColor = breakTaken ? '#0d7a6b' : '#bfdbfe';
-        toggleLabel.style.background = breakTaken ? '#ecfdf5' : '#eff6ff';
-        toggleLabel.style.color = breakTaken ? '#065f46' : '#1e40af';
-      }
 
       if (toggleCopy) {
         toggleCopy.innerHTML = breakTaken
