@@ -228,6 +228,16 @@ function normalizeComparableValue(field, value) {
     .trim();
 }
 
+function isResidenceAliasedToName(field, value, parsedData = {}, candidate = {}) {
+  if (!['neighborhood', 'locality'].includes(field)) return false;
+  const residence = normalizeComparableValue(field, value);
+  if (!residence) return false;
+  return [parsedData.fullName, candidate.fullName]
+    .map((name) => normalizeComparableValue('fullName', name))
+    .filter(Boolean)
+    .some((name) => name === residence);
+}
+
 function isEquivalentFieldValue(field, currentValue, nextValue) {
   return normalizeComparableValue(field, currentValue) === normalizeComparableValue(field, nextValue);
 }
@@ -320,6 +330,10 @@ export function splitFieldDecisions(parsedData = {}, candidate = {}, options = {
       decisions.rejectedFields.push('fullName');
       decisions.suspiciousFullNameRejected = true;
       decisions.rejectedNameReason = fieldSource ? `suspicious_${fieldSource}` : 'suspicious_name_pattern';
+      continue;
+    }
+    if (isResidenceAliasedToName(field, value, parsedData, candidate)) {
+      decisions.rejectedFields.push(field);
       continue;
     }
 
