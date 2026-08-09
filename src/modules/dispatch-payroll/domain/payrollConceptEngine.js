@@ -1,6 +1,6 @@
 export const PAYROLL_CONCEPT_CODES = Object.freeze([
   'HEDO', 'HENO', 'HEDD', 'HEND', 'HEDF', 'HENF',
-  'RNO', 'RDD', 'RND', 'RDF', 'RNF', 'RDDC', 'RNDC', 'RDFC', 'RNFC'
+  'RNO', 'RDD', 'RND', 'RDF', 'RNF', 'RDDC', 'RNDC'
 ]);
 
 export const PAYROLL_COMPENSATION_STATUS = Object.freeze({
