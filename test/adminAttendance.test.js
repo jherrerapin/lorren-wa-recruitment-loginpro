@@ -116,6 +116,60 @@ test('clasifica una llegada riesgosa como pendiente de revisión y expone señal
   assert.equal(board.metrics.pendingReview, 1);
 });
 
+test('el filtro de fechas consulta de forma inclusiva todos los días elegidos', async () => {
+  const prisma = contract();
+  let receivedWhere = null;
+  prisma.dispatchAssignment.findMany = async ({ where }) => {
+    receivedWhere = where;
+    const candidates = [
+      assignment({
+        id: 'assignment-before',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-before', serviceDate: new Date('2026-08-07T05:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-from-legacy',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-from-legacy', serviceDate: new Date('2026-08-08T00:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-from-bogota',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-from-bogota', serviceDate: new Date('2026-08-08T05:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-middle',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-middle', serviceDate: new Date('2026-08-09T05:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-to-legacy',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-to-legacy', serviceDate: new Date('2026-08-10T00:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-to-bogota',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-to-bogota', serviceDate: new Date('2026-08-10T05:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-after',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-after', serviceDate: new Date('2026-08-11T00:00:00.000Z') }
+      })
+    ];
+    const { gte, lte } = where.serviceRequest.serviceDate;
+    return candidates.filter((item) => item.serviceRequest.serviceDate >= gte && item.serviceRequest.serviceDate <= lte);
+  };
+
+  const board = await loadAttendanceAdminBoard(prisma, {
+    from: '2026-08-08',
+    to: '2026-08-10',
+    now: new Date('2026-08-09T15:00:00.000Z')
+  });
+
+  assert.equal(receivedWhere.serviceRequest.serviceDate.gte.toISOString(), '2026-08-08T00:00:00.000Z');
+  assert.equal(receivedWhere.serviceRequest.serviceDate.lte.toISOString(), '2026-08-10T23:59:59.999Z');
+  assert.deepEqual(
+    board.rows.map((row) => row.assignmentId),
+    ['assignment-from-legacy', 'assignment-from-bogota', 'assignment-middle', 'assignment-to-legacy', 'assignment-to-bogota']
+  );
+  assert.deepEqual(board.range, { from: '2026-08-08', to: '2026-08-10' });
+});
+
 test('clasifica como no asistencia cuando vence la tolerancia sin llegada', async () => {
   const prisma = contract();
   prisma.dispatchAssignment.findMany = async () => [assignment()];

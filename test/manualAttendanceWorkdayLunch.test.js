@@ -128,12 +128,23 @@ test('la vista muestra el almuerzo manual y el runtime solo controla su interacc
   assert.match(manualForm, /Inicio de almuerzo/);
   assert.match(manualForm, /name="breakEndAt"/);
   assert.match(manualForm, /Fin de almuerzo/);
+  assert.match(manualForm, /data-manual-break-fields hidden/);
   assert.doesNotMatch(manualForm, /name="reason"/);
 
   assert.match(runtime, /form\.querySelector\('\[data-manual-break-toggle\]'\)/);
-  assert.match(runtime, /breakFields\.hidden = !checkbox\.checked/);
-  assert.match(runtime, /startInput\.required = checkbox\.checked/);
-  assert.match(runtime, /endInput\.required = checkbox\.checked/);
+  assert.match(runtime, /const breakTaken = checkbox\.checked/);
+  assert.match(runtime, /breakFields\.hidden = !breakTaken/);
+  assert.match(runtime, /breakFields\.style\.display = breakTaken \? 'grid' : 'none'/);
+  assert.match(runtime, /startInput\.required = breakTaken/);
+  assert.match(runtime, /endInput\.required = breakTaken/);
+  assert.match(runtime, /startInput\.disabled = !breakTaken/);
+  assert.match(runtime, /endInput\.disabled = !breakTaken/);
+  assert.match(runtime, /startInput\.value = ''/);
+  assert.match(runtime, /endInput\.value = ''/);
+  assert.match(runtime, /checkbox\.style\.accentColor = '#0d7a6b'/);
+  assert.match(runtime, /Tomó almuerzo: sí/);
+  assert.match(runtime, /Tomó almuerzo: no/);
+  assert.match(runtime, /aria-expanded/);
   assert.doesNotMatch(runtime, /createDateTimeField/);
   assert.doesNotMatch(runtime, /document\.createElement/);
 
@@ -148,8 +159,13 @@ test('la tarjeta comprimida muestra solo identificación operativa esencial', ()
     new URL('../src/views/operacionesAsistencia.ejs', import.meta.url),
     'utf8'
   );
+  const compactRuntime = fs.readFileSync(
+    new URL('../src/public/attendance-admin-compact.js', import.meta.url),
+    'utf8'
+  );
   const summary = view.match(/<summary class="attendance-summary">[\s\S]*?<\/summary>/)?.[0] || '';
 
+  assert.match(summary, /row\.serviceDateLabel/);
   assert.match(summary, /row\.workerName/);
   assert.match(summary, /Ciudad/);
   assert.match(summary, /row\.cityName/);
@@ -158,16 +174,25 @@ test('la tarjeta comprimida muestra solo identificación operativa esencial', ()
   assert.match(summary, /Documento/);
   assert.match(summary, /row\.documentType/);
   assert.match(summary, /row\.documentNumber/);
+  assert.doesNotMatch(summary, /Fecha de asignación/i);
 
   assert.doesNotMatch(summary, /row\.phone/);
   assert.doesNotMatch(summary, /row\.address/);
-  assert.doesNotMatch(summary, /row\.serviceDateLabel/);
   assert.doesNotMatch(summary, /row\.scheduleLabel/);
   assert.doesNotMatch(summary, /row\.statusLabel/);
   assert.doesNotMatch(summary, /row\.arrivalReportedLabel/);
   assert.doesNotMatch(summary, /row\.departureReportedLabel/);
   assert.doesNotMatch(summary, /row\.overtimeLabel/);
   assert.doesNotMatch(summary, /row\.riskScore/);
+
+  assert.match(compactRuntime, /installSummaryLayouts\(\)/);
+  assert.match(compactRuntime, /width < 360/);
+  assert.match(compactRuntime, /width < 560/);
+  assert.match(compactRuntime, /repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(compactRuntime, /minmax\(0, 1\.35fr\) repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(compactRuntime, /item\.style\.overflowWrap = 'anywhere'/);
+  assert.doesNotMatch(compactRuntime, /label\.includes\('inicio de almuerzo'\)/);
+  assert.doesNotMatch(compactRuntime, /label\.includes\('fin de almuerzo'\)/);
 
   assert.doesNotMatch(view, /row\.phone/);
   assert.doesNotMatch(view, /row\.address/);

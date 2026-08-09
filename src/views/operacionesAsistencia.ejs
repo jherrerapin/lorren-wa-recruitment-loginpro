@@ -115,7 +115,7 @@
           <details class="attendance-card status-card-<%= row.status %>" data-attendance-card>
             <summary class="attendance-summary">
               <span class="summary-main">
-                <span class="summary-name"><%= row.workerName %></span>
+                <span style="min-width:0"><span class="eyebrow"><%= row.serviceDateLabel %></span><span class="summary-name"><%= row.workerName %></span></span>
                 <span class="summary-identity"><span>Ciudad</span><strong><%= row.cityName %></strong></span>
                 <span class="summary-identity"><span>Operación</span><strong><%= row.operationPointName %></strong></span>
                 <span class="summary-identity"><span>Documento</span><strong><%= [row.documentType, row.documentNumber].filter(Boolean).join(' ') || 'Sin documento' %></strong></span>
