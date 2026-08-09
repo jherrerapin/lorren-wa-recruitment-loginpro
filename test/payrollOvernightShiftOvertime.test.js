@@ -44,9 +44,9 @@ function overnightSession({
   };
 }
 
-function calculate(session, range) {
+function calculate(sessions, range) {
   return calculatePayrollConceptReport({
-    sessions: [session],
+    sessions: Array.isArray(sessions) ? sessions : [sessions],
     policiesByClientId: new Map(),
     compensationByWorkerDate: new Map(),
     range
@@ -109,6 +109,50 @@ test('turno 31 de julio 21:00 a 1 de agosto 05:00 con una hora de almuerzo suma 
   assert.equal(row.daily[0].dateKey, '2026-07-31');
   assert.equal(row.daily[0].totalMinutes, 420);
   assert.deepEqual(row.daily[0].civilDateKeys, ['2026-07-31', '2026-08-01']);
+});
+
+test('una segunda sesión superpuesta desde medianoche no rellena el almuerzo ni suma otro turno', () => {
+  const canonical = overnightSession({
+    id: 'TEST-SESSION-CANONICAL',
+    arrivalReportedAt: '2026-08-01T02:00:00.000Z',
+    departureReportedAt: '2026-08-01T10:00:00.000Z',
+    expectedStartAt: '2026-08-01T02:00:00.000Z',
+    expectedEndAt: '2026-08-01T10:00:00.000Z',
+    workedMinutes: 420,
+    marks: [
+      {
+        id: 'TEST-MARK-CANONICAL-BREAK-START',
+        markType: 'BREAK_START',
+        clientCapturedAt: new Date('2026-08-01T06:00:00.000Z'),
+        serverReceivedAt: new Date('2026-08-01T06:00:00.000Z')
+      },
+      {
+        id: 'TEST-MARK-CANONICAL-BREAK-END',
+        markType: 'BREAK_END',
+        clientCapturedAt: new Date('2026-08-01T07:00:00.000Z'),
+        serverReceivedAt: new Date('2026-08-01T07:00:00.000Z')
+      }
+    ]
+  });
+  const duplicateAfterMidnight = overnightSession({
+    id: 'TEST-SESSION-DUPLICATE-AFTER-MIDNIGHT',
+    arrivalReportedAt: '2026-08-01T05:00:00.000Z',
+    departureReportedAt: '2026-08-01T10:00:00.000Z',
+    expectedStartAt: '2026-08-01T05:00:00.000Z',
+    expectedEndAt: '2026-08-01T10:00:00.000Z',
+    workedMinutes: 300,
+    marks: []
+  });
+
+  const report = calculate([canonical, duplicateAfterMidnight], { from: '2026-07-31', to: '2026-07-31' });
+  assert.equal(report.rows.length, 1);
+  const row = report.rows[0];
+  assert.equal(row.totalMinutes, 420);
+  assert.equal(row.daily.length, 1);
+  assert.equal(row.daily[0].dateKey, '2026-07-31');
+  assert.equal(row.daily[0].totalMinutes, 420);
+  assert.ok(row.novelties.some((item) => item.code === 'OVERLAPPING_ASSIGNMENTS'));
+  assert.equal(row.exportable, false);
 });
 
 test('la política de nómina no muestra bloques explicativos de semana ni de festivo', async () => {
