@@ -26,7 +26,17 @@ test('las decisiones administrativas recalculan jornada y exigen motivo auditabl
   assert.match(adminViewSource, /name="reason" minlength="5"/);
   assert.match(adminViewSource, /Rechazar marcación/);
   assert.match(adminViewSource, /Reabrir revisión/);
-  assert.match(adminViewSource, /Marcación manual auditada/);
+  assert.match(adminViewSource, /Jornada manual auditada/);
+});
+
+test('la jornada manual del coordinador captura entrada y salida sin una autoridad paralela', () => {
+  assert.match(adminViewSource, /type="datetime-local" name="arrivalReportedAt" required/);
+  assert.match(adminViewSource, /type="datetime-local" name="departureReportedAt" required/);
+  assert.match(adminViewSource, /Registrar jornada manual/);
+  assert.match(adminViewSource, /La puntualidad se calcula contra el horario programado/);
+  assert.match(adminRouteSource, /arrivalReportedAt: req\.body\.arrivalReportedAt/);
+  assert.match(adminRouteSource, /departureReportedAt: req\.body\.departureReportedAt/);
+  assert.doesNotMatch(adminViewSource, /<h3>Jornada manual auditada<\/h3><select name="attendanceStatus"/);
 });
 
 test('la evidencia se entrega mediante URL firmada y ruta protegida', () => {
