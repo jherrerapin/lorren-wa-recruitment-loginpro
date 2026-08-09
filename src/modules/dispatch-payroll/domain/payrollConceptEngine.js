@@ -313,8 +313,12 @@ function ensureDaily(summary, dateKey) {
       conceptMinutes: emptyConceptMinutes(),
       clientNames: new Set(),
       operationNames: new Set(),
+      civilDateKeys: new Set(),
+      holidayDateKeys: new Set(),
+      restDateKeys: new Set(),
       isHoliday: false,
       isRestDay: false,
+      compensationDateKey: null,
       compensationStatus: null,
       novelties: []
     });
@@ -393,7 +397,7 @@ export function calculatePayrollConceptReport(input = {}) {
       seenMinutes.add(minuteKey);
 
       const workdayKey = record.workdayKey || parts.dateKey;
-      const weekKey = payrollWeekStartKey(parts.dateKey, record.policy.weekStartsOn);
+      const weekKey = payrollWeekStartKey(workdayKey, record.policy.weekStartsOn);
       const dayOrdinary = dailyOrdinary.get(workdayKey) || 0;
       const weekOrdinary = weeklyOrdinary.get(weekKey) || 0;
       const rawOvertime = dayOrdinary >= record.policy.dailyOrdinaryMinutes
@@ -434,7 +438,7 @@ export function calculatePayrollConceptReport(input = {}) {
         recognizedWeeklyOvertime.set(weekKey, (recognizedWeeklyOvertime.get(weekKey) || 0) + 1);
       }
 
-      if (!inRange(parts.dateKey, range)) continue;
+      if (!inRange(workdayKey, range)) continue;
 
       const year = Number(parts.dateKey.slice(0, 4));
       if (!holidayCache.has(year)) holidayCache.set(year, colombianHolidayKeys(year));
@@ -455,7 +459,7 @@ export function calculatePayrollConceptReport(input = {}) {
       else summary.ordinaryMinutes += 1;
       if (concept) summary.conceptMinutes[concept] += 1;
 
-      const daily = ensureDaily(summary, parts.dateKey);
+      const daily = ensureDaily(summary, workdayKey);
       daily.totalMinutes += 1;
       if (overtime) daily.overtimeMinutes += 1;
       else if (unrecognizedOvertime) daily.unrecognizedOvertimeMinutes += 1;
@@ -463,9 +467,13 @@ export function calculatePayrollConceptReport(input = {}) {
       if (concept) daily.conceptMinutes[concept] += 1;
       daily.clientNames.add(record.client.clientName);
       daily.operationNames.add(record.client.operationPointName);
+      daily.civilDateKeys.add(parts.dateKey);
+      if (holiday) daily.holidayDateKeys.add(parts.dateKey);
+      if (rest) daily.restDateKeys.add(parts.dateKey);
       daily.isHoliday = daily.isHoliday || holiday;
       daily.isRestDay = daily.isRestDay || rest;
       if (rest) {
+        daily.compensationDateKey = daily.compensationDateKey || parts.dateKey;
         daily.compensationStatus = compensationStatus;
         if (compensationStatus === PAYROLL_COMPENSATION_STATUS.PENDING) {
           pushNovelty(summary.novelties, 'COMPENSATION_PENDING', 'Define si el día de descanso obligatorio fue compensado.', {
@@ -488,7 +496,7 @@ export function calculatePayrollConceptReport(input = {}) {
       }
     }
     for (const [weekKey, minutes] of recognizedWeeklyOvertime) {
-      const policy = rawRecords.find((record) => payrollWeekStartKey(bogotaDateKey(record.timestamp), record.policy.weekStartsOn) === weekKey)?.policy || DEFAULT_PAYROLL_POLICY;
+      const policy = rawRecords.find((record) => payrollWeekStartKey(record.workdayKey || bogotaDateKey(record.timestamp), record.policy.weekStartsOn) === weekKey)?.policy || DEFAULT_PAYROLL_POLICY;
       if (minutes > policy.maxWeeklyOvertimeMinutes) {
         pushNovelty(summary.novelties, 'WEEKLY_OVERTIME_LIMIT_EXCEEDED', 'Las horas extra de la semana superan el límite configurado.', {
           dateKey: weekKey,
@@ -513,6 +521,9 @@ export function calculatePayrollConceptReport(input = {}) {
           ...daily,
           clientNames: [...daily.clientNames],
           operationNames: [...daily.operationNames],
+          civilDateKeys: [...daily.civilDateKeys],
+          holidayDateKeys: [...daily.holidayDateKeys],
+          restDateKeys: [...daily.restDateKeys],
           conceptHours: Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(daily.conceptMinutes[code])])),
           totalHours: minutesToDecimalHours(daily.totalMinutes),
           ordinaryHours: minutesToDecimalHours(daily.ordinaryMinutes),
