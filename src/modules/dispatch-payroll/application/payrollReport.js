@@ -5,6 +5,7 @@ import {
   addDateKeyDays,
   bogotaDayStart,
   calculatePayrollConceptReport,
+  colombianHolidayKeys,
   normalizePayrollPolicy,
   payrollWeekStartKey
 } from '../domain/payrollConceptEngine.js';
@@ -28,6 +29,12 @@ function validDateKey(value) {
   if (!text || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
   const date = new Date(`${text}T00:00:00.000Z`);
   return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text ? null : text;
+}
+
+function holidayDateKey(dateKey) {
+  const validKey = validDateKey(dateKey);
+  if (!validKey) return false;
+  return colombianHolidayKeys(Number(validKey.slice(0, 4))).has(validKey);
 }
 
 function todayBogotaKey(now = new Date()) {
@@ -125,11 +132,9 @@ export async function savePayrollPolicy(prisma, input = {}) {
     maxWeeklyOvertimeMinutes: Number(input.maxWeeklyOvertimeHours) * 60,
     nightStartMinute: Number(input.nightStartHour) * 60,
     nightEndMinute: Number(input.nightEndHour) * 60,
-    weekStartsOn: Number(input.weekStartsOn),
     restDay: Number(input.restDay),
     recognizeEarlyArrival: input.recognizeEarlyArrival === true,
     incompleteBreakPenaltyMinutes: Number(input.incompleteBreakPenaltyMinutes),
-    holidaySundayPriority: input.holidaySundayPriority,
     version: 'CO-2026-07'
   });
 
@@ -166,6 +171,7 @@ export async function loadPayrollCompensationMap(prisma, workerIds = [], range =
     const dateKey = validDateKey(event?.metadata?.dateKey);
     const status = normalizeString(event?.metadata?.status, 40)?.toUpperCase();
     if (!workerId || !workerSet.has(workerId) || !dateKey || dateKey < range.from || dateKey > range.to) continue;
+    if (holidayDateKey(dateKey)) continue;
     if (!Object.values(PAYROLL_COMPENSATION_STATUS).includes(status)) continue;
     const key = `${workerId}|${dateKey}`;
     if (!map.has(key)) map.set(key, status);
@@ -177,7 +183,7 @@ export async function savePayrollCompensation(prisma, input = {}) {
   const workerId = normalizeString(input.workerId, 120);
   const dateKey = validDateKey(input.dateKey);
   const status = normalizeString(input.status, 40)?.toUpperCase();
-  if (!workerId || !dateKey || !Object.values(PAYROLL_COMPENSATION_STATUS).includes(status)) {
+  if (!workerId || !dateKey || !Object.values(PAYROLL_COMPENSATION_STATUS).includes(status) || holidayDateKey(dateKey)) {
     throw new Error('payroll_compensation_invalid');
   }
   const worker = await prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true, fullName: true } });

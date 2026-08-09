@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-CO">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -28,9 +28,23 @@
     .alert-error { color:var(--red); background:var(--red2); border:1px solid #fca5a5; }
     .test-mode { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; padding:12px 14px; border:1px solid #c4b5fd; border-radius:10px; background:#f5f3ff; color:#5b21b6; font-weight:750; }
     .filters { display:grid; grid-template-columns:repeat(6,minmax(140px,1fr)); gap:12px; align-items:end; }
-    .field { display:flex; flex-direction:column; gap:5px; }
+    .field { display:flex; flex-direction:column; gap:5px; min-width:0; }
     .field label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
     input,select { width:100%; border:1px solid var(--border); border-radius:8px; padding:9px 10px; background:#fff; font-size:13px; }
+    .date-picker { position:relative; }
+    .date-picker-trigger { width:100%; min-height:37px; border:1px solid var(--border); border-radius:8px; padding:9px 34px 9px 10px; background:#fff; color:var(--text); text-align:left; font-size:13px; cursor:pointer; position:relative; }
+    .date-picker-trigger::after { content:'▾'; position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--muted); }
+    .date-popover { display:none; position:absolute; z-index:40; top:calc(100% + 6px); left:0; width:min(320px,calc(100vw - 36px)); padding:10px; border:1px solid var(--border); border-radius:10px; background:#fff; box-shadow:0 10px 28px rgba(15,23,42,.16); }
+    .date-picker.open .date-popover { display:block; }
+    .date-calendar-head { display:grid; grid-template-columns:38px 1fr 38px; gap:6px; align-items:center; margin-bottom:8px; }
+    .date-calendar-head strong { text-align:center; color:var(--navy); text-transform:capitalize; }
+    .date-nav { border:1px solid var(--border); border-radius:7px; min-height:34px; background:#fff; cursor:pointer; font-weight:850; color:var(--navy); }
+    .date-weekdays,.date-days { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:3px; }
+    .date-weekday { padding:5px 0; text-align:center; color:var(--muted); font-size:10px; font-weight:850; text-transform:uppercase; }
+    .date-day { min-width:0; min-height:34px; border:0; border-radius:7px; background:#fff; color:var(--text); cursor:pointer; font-size:12px; }
+    .date-day:hover { background:var(--teal2); }
+    .date-day.outside { color:#a8b0ba; }
+    .date-day.selected { background:var(--teal); color:#fff; font-weight:850; }
     .metrics { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; }
     .metric { padding:15px; border:1px solid var(--border); border-radius:10px; background:#fff; }
     .metric small { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
@@ -49,23 +63,29 @@
     .badge { display:inline-flex; padding:3px 8px; border-radius:999px; font-size:10px; font-weight:850; }
     .badge-ok { color:var(--green); background:var(--green2); }
     .badge-warn { color:var(--amber); background:var(--amber2); }
+    .badge-holiday { color:var(--red); background:var(--red2); }
+    .badge-rest { color:var(--blue); background:var(--blue2); }
+    .day-flags { display:flex; gap:5px; margin-top:5px; flex-wrap:wrap; }
     details { margin-top:8px; }
     summary { cursor:pointer; color:var(--blue); font-weight:750; }
     .daily { margin-top:8px; display:grid; gap:7px; min-width:720px; }
-    .daily-row { display:grid; grid-template-columns:100px minmax(180px,1fr) 110px 150px minmax(220px,1fr); gap:10px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
+    .daily-row { display:grid; grid-template-columns:120px minmax(180px,1fr) 110px 150px minmax(220px,1fr); gap:10px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
     .daily-row form { display:flex; gap:5px; align-items:center; }
     .daily-row select { min-width:150px; }
     .novelty { color:var(--red); font-size:11px; white-space:normal; }
     .novelty.info { color:var(--blue); }
     .policy-grid { display:grid; grid-template-columns:repeat(5,minmax(130px,1fr)); gap:10px; }
     .policy-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:12px; align-items:center; }
+    .policy-fixed { min-height:65px; padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
+    .policy-fixed strong { color:var(--navy); }
+    .policy-fixed small { display:block; color:var(--muted); margin-top:3px; }
     .codes { display:grid; grid-template-columns:repeat(5,minmax(150px,1fr)); gap:7px; }
     .code { padding:8px 9px; background:var(--soft); border:1px solid var(--border); border-radius:8px; }
     .code strong { color:var(--navy); }
     .code small { display:block; color:var(--muted); margin-top:2px; }
     .empty { padding:30px; text-align:center; color:var(--muted); }
     @media(max-width:1050px){.filters{grid-template-columns:repeat(3,minmax(150px,1fr))}.metrics{grid-template-columns:repeat(2,1fr)}.policy-grid{grid-template-columns:repeat(2,1fr)}.codes{grid-template-columns:repeat(2,1fr)}}
-    @media(max-width:620px){.navbar{height:auto;padding:10px 14px}.page{padding:18px 10px 42px}.filters,.metrics,.policy-grid,.codes{grid-template-columns:1fr}.actions{width:100%}.actions .btn{flex:1}.panel{padding:12px}}
+    @media(max-width:620px){.navbar{height:auto;padding:10px 14px}.page{padding:18px 10px 42px}.filters,.metrics,.policy-grid,.codes{grid-template-columns:1fr}.actions{width:100%}.actions .btn{flex:1}.panel{padding:12px}.date-popover{position:fixed;left:10px;right:10px;top:18%;width:auto}}
   </style>
 </head>
 <body>
@@ -99,15 +119,40 @@
       <form method="get" action="/admin/operaciones/asistencia/nomina" class="filters" id="payroll-filters">
         <% if (role === 'dev' && report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
         <div class="field"><label for="periodType">Tipo de corte</label><select id="periodType" name="periodType"><option value="WEEKLY" <%= report.period.periodType === 'WEEKLY' ? 'selected' : '' %>>Semanal</option><option value="BIWEEKLY" <%= report.period.periodType === 'BIWEEKLY' ? 'selected' : '' %>>Quincenal</option><option value="CUSTOM" <%= report.period.periodType === 'CUSTOM' ? 'selected' : '' %>>Personalizado</option></select></div>
-        <div class="field"><label for="anchor">Fecha de referencia</label><input id="anchor" name="anchor" type="date" value="<%= report.period.anchor || report.period.from %>" /></div>
-        <div class="field custom-date"><label for="from">Desde</label><input id="from" name="from" type="date" value="<%= report.period.from %>" /></div>
-        <div class="field custom-date"><label for="to">Hasta</label><input id="to" name="to" type="date" value="<%= report.period.to %>" /></div>
+        <div class="field date-picker" data-payroll-date-picker>
+          <label>Fecha de referencia</label><input id="anchor" name="anchor" type="hidden" value="<%= report.period.anchor || report.period.from %>" data-date-value />
+          <button class="date-picker-trigger" type="button" data-date-trigger aria-haspopup="dialog" aria-expanded="false"></button>
+          <div class="date-popover" data-date-popover role="dialog" aria-label="Seleccionar fecha de referencia">
+            <div class="date-calendar-head"><button class="date-nav" type="button" data-date-prev aria-label="Mes anterior">‹</button><strong data-date-title></strong><button class="date-nav" type="button" data-date-next aria-label="Mes siguiente">›</button></div>
+            <div class="date-weekdays" aria-hidden="true"><span class="date-weekday">Lun</span><span class="date-weekday">Mar</span><span class="date-weekday">Mié</span><span class="date-weekday">Jue</span><span class="date-weekday">Vie</span><span class="date-weekday">Sáb</span><span class="date-weekday">Dom</span></div>
+            <div class="date-days" data-date-days></div>
+          </div>
+        </div>
+        <div class="field custom-date date-picker" data-payroll-date-picker>
+          <label>Desde</label><input id="from" name="from" type="hidden" value="<%= report.period.from %>" data-date-value />
+          <button class="date-picker-trigger" type="button" data-date-trigger aria-haspopup="dialog" aria-expanded="false"></button>
+          <div class="date-popover" data-date-popover role="dialog" aria-label="Seleccionar fecha inicial">
+            <div class="date-calendar-head"><button class="date-nav" type="button" data-date-prev aria-label="Mes anterior">‹</button><strong data-date-title></strong><button class="date-nav" type="button" data-date-next aria-label="Mes siguiente">›</button></div>
+            <div class="date-weekdays" aria-hidden="true"><span class="date-weekday">Lun</span><span class="date-weekday">Mar</span><span class="date-weekday">Mié</span><span class="date-weekday">Jue</span><span class="date-weekday">Vie</span><span class="date-weekday">Sáb</span><span class="date-weekday">Dom</span></div>
+            <div class="date-days" data-date-days></div>
+          </div>
+        </div>
+        <div class="field custom-date date-picker" data-payroll-date-picker>
+          <label>Hasta</label><input id="to" name="to" type="hidden" value="<%= report.period.to %>" data-date-value />
+          <button class="date-picker-trigger" type="button" data-date-trigger aria-haspopup="dialog" aria-expanded="false"></button>
+          <div class="date-popover" data-date-popover role="dialog" aria-label="Seleccionar fecha final">
+            <div class="date-calendar-head"><button class="date-nav" type="button" data-date-prev aria-label="Mes anterior">‹</button><strong data-date-title></strong><button class="date-nav" type="button" data-date-next aria-label="Mes siguiente">›</button></div>
+            <div class="date-weekdays" aria-hidden="true"><span class="date-weekday">Lun</span><span class="date-weekday">Mar</span><span class="date-weekday">Mié</span><span class="date-weekday">Jue</span><span class="date-weekday">Vie</span><span class="date-weekday">Sáb</span><span class="date-weekday">Dom</span></div>
+            <div class="date-days" data-date-days></div>
+          </div>
+        </div>
         <div class="field"><label for="clientId">Cliente</label><select id="clientId" name="clientId"><option value="">Todos</option><% for (const client of report.clients) { %><option value="<%= client.id %>" <%= report.filters.clientId === client.id ? 'selected' : '' %>><%= client.name %></option><% } %></select></div>
         <div class="field"><label for="operationPointId">Operación</label><select id="operationPointId" name="operationPointId"><option value="">Todas</option><% for (const client of report.clients) { for (const point of client.operationPoints || []) { %><option data-client="<%= client.id %>" value="<%= point.id %>" <%= report.filters.operationPointId === point.id ? 'selected' : '' %>><%= client.name %> · <%= point.name %></option><% }} %></select></div>
         <div class="field"><label for="workerId">Auxiliar</label><select id="workerId" name="workerId"><option value="">Todos</option><% for (const worker of report.workers) { %><option value="<%= worker.id %>" <%= report.filters.workerId === worker.id ? 'selected' : '' %>><%= worker.fullName %><%= worker.documentNumber ? ` · ${worker.documentNumber}` : '' %></option><% } %></select></div>
         <div class="field"><label for="search">Buscar</label><input id="search" name="search" value="<%= report.filters.search %>" placeholder="Nombre, documento o teléfono" /></div>
         <div class="field"><button class="btn btn-primary" type="submit">Calcular periodo</button></div>
       </form>
+      <p class="sub">La semana de Nómina se calcula siempre de lunes a domingo.</p>
     </section>
 
     <section class="metrics">
@@ -133,10 +178,10 @@
             <div class="field"><label>Máximo extra semanal</label><input name="maxWeeklyOvertimeHours" type="number" min="0" max="168" step="0.25" value="<%= selectedPolicy.maxWeeklyOvertimeMinutes / 60 %>" required /></div>
             <div class="field"><label>Inicio nocturno</label><select name="nightStartHour" required><% for (let hour = 0; hour < 24; hour += 1) { %><option value="<%= hour %>" <%= selectedPolicy.nightStartMinute === hour * 60 ? 'selected' : '' %>><%= String(hour).padStart(2, '0') %>:00</option><% } %></select></div>
             <div class="field"><label>Fin nocturno</label><select name="nightEndHour" required><% for (let hour = 0; hour < 24; hour += 1) { %><option value="<%= hour %>" <%= selectedPolicy.nightEndMinute === hour * 60 ? 'selected' : '' %>><%= String(hour).padStart(2, '0') %>:00</option><% } %></select></div>
-            <div class="field"><label>Día inicial de semana</label><select name="weekStartsOn"><option value="1" <%= selectedPolicy.weekStartsOn === 1 ? 'selected' : '' %>>Lunes</option><option value="0" <%= selectedPolicy.weekStartsOn === 0 ? 'selected' : '' %>>Domingo</option></select></div>
+            <div class="field"><label>Semana de nómina</label><div class="policy-fixed"><strong>Lunes a domingo</strong><small>El acumulado semanal ya no es configurable desde domingo.</small></div></div>
             <div class="field"><label>Día de descanso</label><select name="restDay"><option value="0" <%= selectedPolicy.restDay === 0 ? 'selected' : '' %>>Domingo</option><option value="1" <%= selectedPolicy.restDay === 1 ? 'selected' : '' %>>Lunes</option><option value="2" <%= selectedPolicy.restDay === 2 ? 'selected' : '' %>>Martes</option><option value="3" <%= selectedPolicy.restDay === 3 ? 'selected' : '' %>>Miércoles</option><option value="4" <%= selectedPolicy.restDay === 4 ? 'selected' : '' %>>Jueves</option><option value="5" <%= selectedPolicy.restDay === 5 ? 'selected' : '' %>>Viernes</option><option value="6" <%= selectedPolicy.restDay === 6 ? 'selected' : '' %>>Sábado</option></select></div>
             <div class="field"><label>Descuento almuerzo abierto</label><input name="incompleteBreakPenaltyMinutes" type="number" min="0" max="480" step="1" value="<%= selectedPolicy.incompleteBreakPenaltyMinutes %>" required /></div>
-            <div class="field"><label>Domingo que también es festivo</label><select name="holidaySundayPriority"><option value="HOLIDAY" <%= selectedPolicy.holidaySundayPriority === 'HOLIDAY' ? 'selected' : '' %>>Reportar como festivo</option><option value="REST" <%= selectedPolicy.holidaySundayPriority === 'REST' ? 'selected' : '' %>>Reportar como descanso</option></select></div>
+            <div class="field"><label>Festivos</label><div class="policy-fixed"><strong>Indicativo Festivo</strong><small>El festivo conserva su concepto y no abre compensatorio.</small></div></div>
             <div class="field"><label>Reconocer llegada anticipada</label><select name="recognizeEarlyArrival"><option value="false" <%= !selectedPolicy.recognizeEarlyArrival ? 'selected' : '' %>>No</option><option value="true" <%= selectedPolicy.recognizeEarlyArrival ? 'selected' : '' %>>Sí</option></select></div>
             <div class="field"><button type="submit" class="btn btn-primary">Guardar política</button></div>
           </div>
@@ -160,12 +205,12 @@
                     <details><summary>Ver días</summary><div class="daily">
                       <% for (const day of row.daily) { %>
                         <div class="daily-row">
-                          <strong><%= day.dateKey %></strong>
+                          <div><strong><%= day.dateKey %></strong><div class="day-flags"><% if (day.isHoliday) { %><span class="badge badge-holiday">Festivo</span><% } else if (day.isRestDay) { %><span class="badge badge-rest">Descanso obligatorio</span><% } %></div></div>
                           <div><%= day.clientNames.join(', ') %><small><%= day.operationNames.join(', ') %></small></div>
                           <div><%= day.totalHours %> h</div>
                           <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small><small>Bajo umbral <%= day.unrecognizedOvertimeHours || 0 %></small></div>
                           <div>
-                            <% if (day.compensationStatus) { %>
+                            <% if (day.isRestDay && !day.isHoliday && day.compensationStatus) { %>
                               <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
                                 <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
                                 <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
@@ -189,7 +234,7 @@
 
     <section class="panel">
       <h2 style="margin-bottom:10px;">Conceptos generados</h2>
-      <% const labels = { HEDO:'Extra diurna ordinaria', HENO:'Extra nocturna ordinaria', HEDD:'Extra diurna dominical', HEND:'Extra nocturna dominical', HEDF:'Extra diurna festiva', HENF:'Extra nocturna festiva', RNO:'Recargo nocturno ordinario', RDD:'Recargo diurno dominical no compensado', RND:'Recargo nocturno dominical no compensado', RDF:'Recargo diurno festivo no compensado', RNF:'Recargo nocturno festivo no compensado', RDDC:'Recargo diurno dominical compensado', RNDC:'Recargo nocturno dominical compensado', RDFC:'Recargo diurno festivo compensado', RNFC:'Recargo nocturno festivo compensado' }; %>
+      <% const labels = { HEDO:'Extra diurna ordinaria', HENO:'Extra nocturna ordinaria', HEDD:'Extra diurna dominical', HEND:'Extra nocturna dominical', HEDF:'Extra diurna festiva', HENF:'Extra nocturna festiva', RNO:'Recargo nocturno ordinario', RDD:'Recargo diurno dominical no compensado', RND:'Recargo nocturno dominical no compensado', RDF:'Recargo diurno festivo', RNF:'Recargo nocturno festivo', RDDC:'Recargo diurno dominical compensado', RNDC:'Recargo nocturno dominical compensado', RDFC:'Código legado sin generación nueva', RNFC:'Código legado sin generación nueva' }; %>
       <div class="codes"><% for (const code of conceptCodes) { %><div class="code"><strong><%= code %></strong><small><%= labels[code] %></small></div><% } %></div>
     </section>
   </main>
@@ -199,6 +244,88 @@
     const customDates = document.querySelectorAll('.custom-date');
     function syncPeriodFields() { const custom = periodType.value === 'CUSTOM'; customDates.forEach((field) => { field.style.display = custom ? 'flex' : 'none'; }); }
     periodType.addEventListener('change', syncPeriodFields); syncPeriodFields();
+
+    const monthFormatter = new Intl.DateTimeFormat('es-CO', { month:'long', year:'numeric', timeZone:'UTC' });
+    const dateFormatter = new Intl.DateTimeFormat('es-CO', { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'UTC' });
+    const parseDateKey = (value) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return null;
+      const parsed = new Date(`${value}T12:00:00.000Z`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+    const dateKey = (date) => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+    const closeDatePicker = (picker) => {
+      picker.classList.remove('open');
+      const trigger = picker.querySelector('[data-date-trigger]');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    };
+
+    document.querySelectorAll('[data-payroll-date-picker]').forEach((picker) => {
+      const input = picker.querySelector('[data-date-value]');
+      const trigger = picker.querySelector('[data-date-trigger]');
+      const title = picker.querySelector('[data-date-title]');
+      const days = picker.querySelector('[data-date-days]');
+      const selectedAtStart = parseDateKey(input.value) || new Date();
+      let cursor = new Date(Date.UTC(selectedAtStart.getUTCFullYear(), selectedAtStart.getUTCMonth(), 1, 12));
+
+      const updateTrigger = () => {
+        const selected = parseDateKey(input.value);
+        trigger.textContent = selected ? dateFormatter.format(selected) : 'Seleccionar fecha';
+      };
+
+      const renderCalendar = () => {
+        title.textContent = monthFormatter.format(cursor);
+        days.innerHTML = '';
+        const firstOfMonth = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1, 12));
+        const mondayOffset = (firstOfMonth.getUTCDay() + 6) % 7;
+        const firstVisible = new Date(firstOfMonth.getTime());
+        firstVisible.setUTCDate(firstVisible.getUTCDate() - mondayOffset);
+        for (let index = 0; index < 42; index += 1) {
+          const current = new Date(firstVisible.getTime());
+          current.setUTCDate(firstVisible.getUTCDate() + index);
+          const key = dateKey(current);
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'date-day';
+          button.textContent = String(current.getUTCDate());
+          button.setAttribute('aria-label', dateFormatter.format(current));
+          if (current.getUTCMonth() !== cursor.getUTCMonth()) button.classList.add('outside');
+          if (key === input.value) button.classList.add('selected');
+          button.addEventListener('click', () => {
+            input.value = key;
+            cursor = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1, 12));
+            updateTrigger();
+            closeDatePicker(picker);
+          });
+          days.appendChild(button);
+        }
+      };
+
+      trigger.addEventListener('click', () => {
+        const opening = !picker.classList.contains('open');
+        document.querySelectorAll('[data-payroll-date-picker].open').forEach((other) => closeDatePicker(other));
+        if (opening) {
+          const selected = parseDateKey(input.value);
+          if (selected) cursor = new Date(Date.UTC(selected.getUTCFullYear(), selected.getUTCMonth(), 1, 12));
+          renderCalendar();
+          picker.classList.add('open');
+          trigger.setAttribute('aria-expanded', 'true');
+        }
+      });
+      picker.querySelector('[data-date-prev]').addEventListener('click', () => { cursor.setUTCMonth(cursor.getUTCMonth() - 1); renderCalendar(); });
+      picker.querySelector('[data-date-next]').addEventListener('click', () => { cursor.setUTCMonth(cursor.getUTCMonth() + 1); renderCalendar(); });
+      updateTrigger();
+      renderCalendar();
+    });
+
+    document.addEventListener('click', (event) => {
+      document.querySelectorAll('[data-payroll-date-picker].open').forEach((picker) => {
+        if (!picker.contains(event.target)) closeDatePicker(picker);
+      });
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      document.querySelectorAll('[data-payroll-date-picker].open').forEach((picker) => closeDatePicker(picker));
+    });
 
     const clientSelect = document.getElementById('clientId');
     const operationSelect = document.getElementById('operationPointId');
