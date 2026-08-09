@@ -24,7 +24,7 @@ Todos los cálculos internos usan minutos enteros:
 450 / 60 = 7.5 horas
 ```
 
-No se redondea cada jornada antes de consolidar. Primero se suman los minutos del periodo y luego se generan las horas decimales con hasta cuatro decimales.
+No se redondea cada jornada antes de consolidar. Primero se suman los minutos del periodo y luego se generan las horas decimales.
 
 ## Periodos
 
@@ -33,6 +33,8 @@ El portal permite:
 - semanal: lunes a domingo;
 - quincenal: días 1 a 15 o 16 al último día del mes;
 - personalizado: máximo 62 días.
+
+La semana de Nómina es una regla fija de lunes a domingo. Las políticas históricas que hayan guardado domingo como inicio se normalizan a lunes al leerse, sin migración de datos.
 
 Para calcular correctamente un corte quincenal o personalizado, la consulta incorpora hasta seis días anteriores al inicio visible. Esos minutos no se exportan, pero sí se utilizan para saber cuánto llevaba trabajado el auxiliar en la semana que cruza el límite del corte.
 
@@ -44,13 +46,11 @@ DEV puede configurar por cliente:
 - horas ordinarias diarias;
 - máximo de horas extra diarias y semanales;
 - inicio y final de jornada nocturna;
-- primer día de la semana;
 - día de descanso obligatorio;
 - reconocimiento de llegada anticipada;
-- descuento por almuerzo iniciado sin regreso;
-- prioridad cuando un domingo también es festivo.
+- descuento por almuerzo iniciado sin regreso.
 
-La política se conserva mediante eventos auditados `DISPATCH_PAYROLL_POLICY`. La política inicial queda versionada como `CO-2026-07`.
+No son configurables el inicio de semana ni la prioridad entre festivo y descanso: la semana siempre inicia el lunes y un día reconocido por el calendario colombiano se presenta como festivo. La política se conserva mediante eventos auditados `DISPATCH_PAYROLL_POLICY`. La política inicial queda versionada como `CO-2026-07`.
 
 ## Clasificación
 
@@ -59,16 +59,20 @@ El motor recorre cada minuto efectivo de las jornadas y mantiene acumulados diar
 - ordinario o extra;
 - diurno o nocturno;
 - ordinario, descanso obligatorio o festivo;
-- compensado o no compensado.
+- compensado o no compensado únicamente cuando el minuto corresponde al día de descanso obligatorio.
+
+La franja nocturna del motor es 19:00–06:00. La clasificación de descanso/festivo se hace sobre la fecha y hora civil de cada minuto en `America/Bogota`; por eso un turno que cruza medianoche puede cambiar de concepto al comenzar el día siguiente.
 
 Conceptos producidos:
 
 - HEDO, HENO, HEDD, HEND, HEDF, HENF;
 - RNO;
 - RDD, RND, RDF, RNF;
-- RDDC, RNDC, RDFC, RNFC.
+- RDDC, RNDC.
 
-Una fracción se asigna a un único concepto. Por ejemplo, una hora extra nocturna dominical se reporta como HEND y no se duplica en HENO, RNO o RND.
+`RDFC` y `RNFC` se conservan en la lista histórica de columnas para no romper exportaciones o consumidores existentes, pero los cálculos nuevos no los generan: un festivo ordinario se reporta como `RDF` o `RNF` y se identifica además con el indicativo `Festivo`.
+
+Una fracción se asigna a un único concepto. Por ejemplo, una hora extra nocturna en el día de descanso obligatorio se reporta como HEND y no se duplica en HENO, RNO o RND.
 
 ## Almuerzo
 
@@ -87,19 +91,29 @@ El módulo identifica, entre otras:
 - jornadas superpuestas;
 - exceso del límite extra diario;
 - exceso del límite extra semanal;
-- compensatorio pendiente.
+- compensatorio pendiente exclusivamente para el día de descanso obligatorio.
 
-La tabla y los archivos muestran el estado y las novedades. En esta primera etapa se permite descargar el archivo para pruebas, pero cada fila conserva `Estado` y `Novedades` para impedir que se confunda un cálculo provisional con uno listo para pago.
+Un festivo no genera `COMPENSATION_PENDING`. La tabla y los archivos muestran el estado y las novedades. En esta primera etapa se permite descargar el archivo para pruebas, pero cada fila conserva `Estado` y `Novedades` para impedir que se confunda un cálculo provisional con uno listo para pago.
 
 ## Compensatorios
 
-El portal permite marcar por auxiliar y fecha:
+El compensatorio se administra únicamente para el día de descanso obligatorio. El portal permite marcar por auxiliar y fecha:
 
 - pendiente;
 - no compensado;
 - compensado.
 
-La decisión queda auditada en `DISPATCH_PAYROLL_COMPENSATION`. Mientras esté pendiente, la fila se considera con novedades.
+La decisión queda auditada en `DISPATCH_PAYROLL_COMPENSATION`. Mientras un día de descanso obligatorio esté pendiente, la fila se considera con novedades.
+
+Los festivos no usan este flujo: se muestran con el indicativo `Festivo`, sus minutos se clasifican como festivos y el backend rechaza nuevos intentos de guardar un estado de compensatorio para esa fecha. Eventos históricos de compensatorio asociados a un festivo no gobiernan el cálculo actual.
+
+## Calendario
+
+Los selectores de fecha del módulo usan un calendario propio sin dependencias externas. La cabecera siempre se ordena:
+
+`Lun · Mar · Mié · Jue · Vie · Sáb · Dom`
+
+Esto evita depender del primer día de semana que el navegador o el sistema operativo elijan para un `<input type="date">` nativo.
 
 ## Exportaciones
 
@@ -108,7 +122,7 @@ Se ofrecen:
 - CSV separado por punto y coma y codificado para Excel;
 - Excel `.xlsx` con encabezados, filtro y horas decimales.
 
-Cada fila incluye identificación, rango, horas ordinarias, total trabajado, horas extra, los quince códigos, estado y novedades.
+Cada fila incluye identificación, rango, horas ordinarias, total trabajado, horas extra, los quince códigos históricos de columnas, estado y novedades.
 
 ## Alcance de esta entrega
 
