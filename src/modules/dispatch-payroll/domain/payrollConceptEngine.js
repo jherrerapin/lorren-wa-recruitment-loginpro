@@ -372,7 +372,8 @@ export function calculatePayrollConceptReport(input = {}) {
   const summaries = new Map();
   for (const [workerId, rawRecords] of recordsByWorker) {
     rawRecords.sort((left, right) => left.timestamp - right.timestamp);
-    const seenMinutes = new Set();
+    const seenMinutes = new Map();
+    const overlappingSessionIds = new Set();
     const dailyOrdinary = new Map();
     const weeklyOrdinary = new Map();
     const rawDailyOvertime = new Map();
@@ -383,20 +384,23 @@ export function calculatePayrollConceptReport(input = {}) {
     summary.novelties.push(...workerNovelties);
 
     for (const record of rawRecords) {
+      if (overlappingSessionIds.has(record.session.id)) continue;
       const parts = bogotaClockParts(record.timestamp);
       if (!parts) continue;
+      const workdayKey = record.workdayKey || parts.dateKey;
       const minuteKey = localMinuteKey(parts);
-      if (seenMinutes.has(minuteKey)) {
+      const previousRecord = seenMinutes.get(minuteKey);
+      if (previousRecord) {
+        overlappingSessionIds.add(record.session.id);
         pushNovelty(summary.novelties, 'OVERLAPPING_ASSIGNMENTS', 'Existen jornadas superpuestas para el mismo auxiliar.', {
-          dateKey: parts.dateKey,
+          dateKey: previousRecord.workdayKey || workdayKey,
           sessionId: record.session.id,
           blocking: true
         });
         continue;
       }
-      seenMinutes.add(minuteKey);
+      seenMinutes.set(minuteKey, record);
 
-      const workdayKey = record.workdayKey || parts.dateKey;
       const weekKey = payrollWeekStartKey(workdayKey, record.policy.weekStartsOn);
       const dayOrdinary = dailyOrdinary.get(workdayKey) || 0;
       const weekOrdinary = weeklyOrdinary.get(weekKey) || 0;
