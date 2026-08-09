@@ -51,6 +51,17 @@
     return mark && sessionId ? { mark, sessionId } : null;
   }
 
+  function pendingCorrectionTypes(reviewContent, sessionId, requested) {
+    const pending = new Set(
+      String(reviewContent.dataset.pendingCorrectionMarkTypes || '')
+        .split(',')
+        .map((value) => value.trim().toUpperCase())
+        .filter((value) => MARKS.some((mark) => mark.markType === value))
+    );
+    if (requested && requested.sessionId === sessionId) pending.add(requested.mark.markType);
+    return pending;
+  }
+
   function deleteMarkForm(mark, markId, reviewAction) {
     const form = correctionForm('DELETE_MARK', mark.markType, reviewAction);
     form.dataset.attendanceDeleteMark = mark.markType;
@@ -140,7 +151,7 @@
   }
 
   function install() {
-    const correction = requestedCorrection();
+    const requested = requestedCorrection();
 
     document.querySelectorAll('.review-content[data-attendance-review-action]').forEach((reviewContent) => {
       if (reviewContent.querySelector('[data-attendance-correction-controls="true"]')) return;
@@ -152,12 +163,11 @@
         ...mark,
         markId: reviewContent.dataset[mark.datasetKey] || ''
       }));
+      const pendingTypes = pendingCorrectionTypes(reviewContent, sessionId, requested);
       const existingMarks = markState.filter((mark) => Boolean(mark.markId));
-      const replacementMark = correction && correction.sessionId === sessionId
-        ? markState.find((mark) => mark.markType === correction.mark.markType && !mark.markId) || null
-        : null;
+      const replacementMarks = markState.filter((mark) => !mark.markId && pendingTypes.has(mark.markType));
 
-      if (!existingMarks.length && !replacementMark) return;
+      if (!existingMarks.length && !replacementMarks.length) return;
 
       if (existingMarks.length) {
         const section = document.createElement('section');
@@ -179,16 +189,15 @@
         section.appendChild(actions);
         reviewContent.prepend(section);
 
-        const clearAll = clearAllDetails(reviewAction);
-        reviewContent.appendChild(clearAll);
+        reviewContent.appendChild(clearAllDetails(reviewAction));
       }
 
-      if (replacementMark) {
-        const replacementForm = addMarkForm(replacementMark, reviewAction);
+      replacementMarks.slice().reverse().forEach((mark) => {
+        const replacementForm = addMarkForm(mark, reviewAction);
         const firstControl = reviewContent.querySelector('[data-attendance-correction-controls="true"]');
         if (firstControl) firstControl.insertAdjacentElement('afterend', replacementForm);
         else reviewContent.prepend(replacementForm);
-      }
+      });
     });
   }
 
