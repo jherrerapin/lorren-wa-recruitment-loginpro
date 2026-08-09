@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { dispatchServiceDateKey } from '../../../services/dispatchDate.js';
 import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
 import { buildDispatchAttendanceExpectedWindow } from './registerArrival.js';
 
@@ -95,13 +96,15 @@ function numericCoordinate(value, min, max) {
 }
 
 function formatDate(value) {
+  const dateKey = dispatchServiceDateKey(value);
+  if (!dateKey) return 'Fecha sin definir';
   return new Intl.DateTimeFormat('es-CO', {
-    timeZone: BOGOTA_TIME_ZONE,
+    timeZone: 'UTC',
     weekday: 'short',
     day: '2-digit',
     month: 'short',
     year: 'numeric'
-  }).format(value);
+  }).format(new Date(`${dateKey}T12:00:00.000Z`));
 }
 
 function formatDateTime(value) {
@@ -213,6 +216,7 @@ function buildBoardRow(assignment, now) {
   const pointLongitude = numericCoordinate(point?.attendanceLongitude, -180, 180);
   const markLatitude = numericCoordinate(mark?.latitude, -90, 90);
   const markLongitude = numericCoordinate(mark?.longitude, -180, 180);
+  const serviceDateIso = dispatchServiceDateKey(request?.serviceDate);
 
   return {
     assignmentId: assignment.id,
@@ -226,8 +230,8 @@ function buildBoardRow(assignment, now) {
     operationPointName: request?.operationPointName || point?.name || 'Punto sin nombre',
     cityName: request?.cityName || point?.cityName || 'Ciudad sin definir',
     address: request?.address || point?.address || 'Dirección sin definir',
-    serviceDateLabel: request?.serviceDate ? formatDate(request.serviceDate) : 'Fecha sin definir',
-    serviceDateIso: request?.serviceDate ? request.serviceDate.toISOString().slice(0, 10) : null,
+    serviceDateLabel: serviceDateIso ? formatDate(request.serviceDate) : 'Fecha sin definir',
+    serviceDateIso,
     scheduleLabel: expected.expectedStartAt
       ? `${formatTime(expected.expectedStartAt)}${expected.expectedEndAt ? ` – ${formatTime(expected.expectedEndAt)}` : ''}`
       : 'Horario pendiente',
@@ -329,7 +333,12 @@ export async function loadAttendanceAdminBoard(prisma, input = {}) {
     }
   });
 
-  const allRows = assignments
+  const assignmentsInRange = assignments.filter((assignment) => {
+    const serviceDateIso = dispatchServiceDateKey(assignment.serviceRequest?.serviceDate);
+    return serviceDateIso && serviceDateIso >= range.from && serviceDateIso <= range.to;
+  });
+
+  const allRows = assignmentsInRange
     .map((assignment) => buildBoardRow(assignment, now))
     .sort((left, right) => {
       const leftTime = new Date(left.expectedStartAt || `${left.serviceDateIso}T23:59:59.999Z`).getTime();
