@@ -74,6 +74,13 @@ function publicErrorMessage(error) {
     attendance_review_status_invalid: 'Selecciona si la llegada fue a tiempo o tarde.',
     attendance_review_reason_required: 'Escribe el motivo de la decisión.',
     attendance_review_reason_too_short: 'El motivo debe tener al menos 5 caracteres.',
+    attendance_review_mark_type_required: 'Selecciona la marcación que quieres corregir.',
+    attendance_review_mark_type_invalid: 'La marcación seleccionada no es válida.',
+    attendance_review_mark_id_required: 'No fue posible identificar la marcación que quieres eliminar.',
+    attendance_review_mark_not_found: 'La marcación seleccionada ya no existe en esta jornada.',
+    attendance_review_mark_exists: 'Esa marcación ya existe. Elimínala primero si necesitas corregir su hora.',
+    attendance_review_mark_reported_at_required: 'Ingresa la nueva fecha y hora de la marcación.',
+    attendance_review_mark_reported_at_invalid: 'La nueva fecha u hora de la marcación no es válida.',
     attendance_manual_assignment_not_found: 'La asignación ya no existe.',
     attendance_manual_assignment_inactive: 'La asignación ya no está activa.',
     attendance_manual_not_allowed: 'Este punto no permite registrar asistencia manual.',
@@ -89,6 +96,7 @@ function publicErrorMessage(error) {
     attendance_manual_break_end_at_invalid: 'La hora de fin de almuerzo no es válida.',
     attendance_manual_reason_required: 'Escribe el motivo de la marcación manual.',
     attendance_manual_reason_too_short: 'El motivo debe tener al menos 5 caracteres.',
+    attendance_work_break_start_required: 'Para registrar el fin del almuerzo primero debe existir su hora de inicio.',
     attendance_work_break_end_before_start: 'El fin del almuerzo no puede ser anterior a su inicio.',
     attendance_work_departure_before_arrival: 'La salida no puede ser anterior a la entrada.',
     service_start_time_required: 'La solicitud no tiene una hora de inicio válida.',
@@ -161,6 +169,14 @@ export async function resolveAttendanceReviewReason(prisma, input = {}) {
   return automaticReason;
 }
 
+function reviewSuccessMessage(action) {
+  const normalized = normalizeString(action)?.toUpperCase();
+  if (normalized === 'DELETE_MARK') return 'La marcación seleccionada fue eliminada. Las demás se conservaron y la corrección quedó auditada.';
+  if (normalized === 'ADD_MARK') return 'La nueva hora quedó registrada en la misma jornada y la corrección quedó auditada.';
+  if (normalized === 'CLEAR') return 'Las marcaciones de la jornada fueron eliminadas. La sesión y la auditoría se conservaron.';
+  return 'La decisión y el tiempo trabajado quedaron guardados con auditoría.';
+}
+
 export function dispatchAttendanceAdminRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: false, limit: '16kb' });
@@ -210,11 +226,14 @@ export function dispatchAttendanceAdminRouter(prisma) {
         action: req.body.action,
         attendanceStatus: req.body.attendanceStatus,
         recognizeEarlyArrival: req.body.recognizeEarlyArrival === 'true',
+        markId: req.body.markId,
+        markType: req.body.markType,
+        reportedAt: req.body.reportedAt,
         reason,
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, { success: 'La decisión y el tiempo trabajado quedaron guardados con auditoría.' });
+      return redirectToBoard(res, req.body, { success: reviewSuccessMessage(req.body.action) });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', { code: error?.message, sessionId: req.params.sessionId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
