@@ -11,7 +11,7 @@ function operationPoint(overrides = {}) {
     id: 'point-1',
     name: 'Bodega principal',
     cityName: 'Bogotá',
-    address: 'Calle 25 Sur #51F-35',
+    address: 'Dirección de prueba',
     attendanceEnabled: true,
     attendanceLatitude: 4.5951,
     attendanceLongitude: -74.1324,
@@ -32,8 +32,8 @@ function assignment(overrides = {}) {
       id: 'worker-1',
       fullName: 'Auxiliar Prueba',
       documentType: 'CC',
-      documentNumber: '10000001',
-      phone: '3000000000'
+      documentNumber: 'TEST-0001',
+      phone: 'TEST-PHONE'
     },
     serviceRequest: {
       id: 'request-1',
@@ -43,7 +43,7 @@ function assignment(overrides = {}) {
       clientName: 'Cliente Prueba',
       operationPointName: 'Bodega principal',
       cityName: 'Bogotá',
-      address: 'Calle 25 Sur #51F-35',
+      address: 'Dirección de prueba',
       operationPoint: operationPoint()
     },
     attendanceSession: null,
@@ -212,6 +212,85 @@ test('registra asistencia manual solo cuando el punto lo permite y crea marca y 
   assert.equal(createdMarks[0].decision, 'MANUAL_VALIDATED');
   assert.match(createdMarks[0].idempotencyKey, /^manual-/);
   assert.equal(createdReviews[0].action, 'MANUAL_MARK');
+});
+
+test('registra una jornada manual completa con entrada, salida, puntualidad y auditoría', async () => {
+  const createdMarks = [];
+  const createdReviews = [];
+  const prisma = contract();
+  prisma.dispatchAssignment.findUnique = async () => assignment();
+  prisma.dispatchAttendanceSession.create = async ({ data }) => ({ id: 'session-workday-manual', ...data });
+  prisma.dispatchAttendanceMark.create = async ({ data }) => {
+    createdMarks.push(data);
+    return { id: `mark-${createdMarks.length}`, ...data };
+  };
+  prisma.dispatchAttendanceReview.create = async ({ data }) => {
+    createdReviews.push(data);
+    return { id: 'review-workday-manual', ...data };
+  };
+
+  const session = await registerManualAttendance(prisma, {
+    assignmentId: 'assignment-1',
+    arrivalReportedAt: '2026-07-23T08:15',
+    departureReportedAt: '2026-07-23T16:15',
+    reason: 'Registro manual de jornada verificado por coordinación.',
+    actorUsername: 'operaciones-prueba',
+    actorRole: 'admin',
+    now: new Date('2026-07-23T22:00:00.000Z')
+  });
+
+  assert.equal(session.attendanceStatus, 'COMPLETED');
+  assert.equal(session.validationStatus, 'MANUAL_VALIDATED');
+  assert.equal(session.punctualityStatus, 'LATE');
+  assert.equal(session.arrivalReportedAt.toISOString(), '2026-07-23T13:15:00.000Z');
+  assert.equal(session.departureReportedAt.toISOString(), '2026-07-23T21:15:00.000Z');
+  assert.equal(session.workedMinutes, 480);
+  assert.deepEqual(createdMarks.map((mark) => mark.markType), ['ARRIVAL', 'DEPARTURE']);
+  assert.equal(createdMarks[0].clientCapturedAt.toISOString(), session.arrivalReportedAt.toISOString());
+  assert.equal(createdMarks[1].clientCapturedAt.toISOString(), session.departureReportedAt.toISOString());
+  assert.equal(createdReviews[0].action, 'MANUAL_WORKDAY');
+  assert.equal(createdReviews[0].metadata.workedMinutes, 480);
+  assert.equal(createdReviews[0].metadata.punctualityStatus, 'LATE');
+});
+
+test('rechaza una jornada manual cuya salida sea anterior a la entrada', async () => {
+  const prisma = contract();
+  prisma.dispatchAssignment.findUnique = async () => assignment();
+
+  await assert.rejects(
+    registerManualAttendance(prisma, {
+      assignmentId: 'assignment-1',
+      arrivalReportedAt: '2026-07-23T16:00',
+      departureReportedAt: '2026-07-23T08:00',
+      reason: 'Corrección manual de jornada solicitada por coordinación.',
+      actorUsername: 'operaciones-prueba'
+    }),
+    /attendance_work_departure_before_arrival/
+  );
+});
+
+test('acepta una jornada manual que cruza medianoche cuando la salida usa el día siguiente', async () => {
+  const prisma = contract();
+  prisma.dispatchAssignment.findUnique = async () => assignment({
+    serviceRequest: {
+      ...assignment().serviceRequest,
+      startTime: '22:00',
+      endTime: '06:00'
+    }
+  });
+  prisma.dispatchAttendanceSession.create = async ({ data }) => ({ id: 'session-overnight-manual', ...data });
+
+  const session = await registerManualAttendance(prisma, {
+    assignmentId: 'assignment-1',
+    arrivalReportedAt: '2026-07-23T22:00',
+    departureReportedAt: '2026-07-24T06:00',
+    reason: 'Jornada nocturna registrada manualmente por coordinación.',
+    actorUsername: 'operaciones-prueba',
+    now: new Date('2026-07-24T12:00:00.000Z')
+  });
+
+  assert.equal(session.punctualityStatus, 'ON_TIME');
+  assert.equal(session.workedMinutes, 480);
 });
 
 test('bloquea marcación manual cuando la política del punto la deshabilita', async () => {

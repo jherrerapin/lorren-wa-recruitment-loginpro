@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
 import { buildDispatchAttendanceExpectedWindow } from './registerArrival.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = Object.freeze([
@@ -23,6 +24,26 @@ function requireString(value, label, { minLength = 1, maxLength = 500 } = {}) {
   if (normalized.length < minLength) throw new Error(`${label}_too_short`);
   if (normalized.length > maxLength) throw new Error(`${label}_too_long`);
   return normalized;
+}
+
+function manualDateTime(value, label) {
+  if (value instanceof Date) {
+    const date = new Date(value.getTime());
+    if (Number.isNaN(date.getTime())) throw new Error(`${label}_invalid`);
+    return date;
+  }
+  const normalized = normalizeString(value);
+  if (!normalized) throw new Error(`${label}_required`);
+  const localDateTime = normalized.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  const candidate = localDateTime
+    ? new Date(`${localDateTime[1]}T${localDateTime[2]}:${localDateTime[3]}:${localDateTime[4] || '00'}-05:00`)
+    : new Date(normalized);
+  if (Number.isNaN(candidate.getTime())) throw new Error(`${label}_invalid`);
+  return candidate;
+}
+
+function hasManualWorkdayInput(input = {}) {
+  return input.arrivalReportedAt !== undefined || input.departureReportedAt !== undefined;
 }
 
 function normalizeDateInput(value, fallback) {
@@ -433,14 +454,26 @@ export async function reviewAttendanceSession(prisma, input = {}) {
 export async function registerManualAttendance(prisma, input = {}) {
   requireAdminPrisma(prisma);
   const assignmentId = requireString(input.assignmentId, 'attendance_manual_assignment_id', { maxLength: 120 });
-  const attendanceStatus = requireString(input.attendanceStatus, 'attendance_manual_status', { maxLength: 40 }).toUpperCase();
-  if (!VALID_MANUAL_STATUSES.has(attendanceStatus)) throw new Error('attendance_manual_status_invalid');
+  const manualWorkday = hasManualWorkdayInput(input);
+  const attendanceStatus = manualWorkday
+    ? null
+    : requireString(input.attendanceStatus, 'attendance_manual_status', { maxLength: 40 }).toUpperCase();
+  if (!manualWorkday && !VALID_MANUAL_STATUSES.has(attendanceStatus)) {
+    throw new Error('attendance_manual_status_invalid');
+  }
   const reason = requireString(input.reason, 'attendance_manual_reason', { minLength: 5, maxLength: 500 });
   const notes = normalizeString(input.notes)?.slice(0, 1000) || null;
   const actorUsername = requireString(input.actorUsername, 'attendance_manual_actor', { maxLength: 120 });
   const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
-  const now = input.reportedAt ? new Date(input.reportedAt) : (input.now instanceof Date ? input.now : new Date());
-  if (Number.isNaN(now.getTime())) throw new Error('attendance_manual_reported_at_invalid');
+  const arrivalAt = manualWorkday
+    ? manualDateTime(input.arrivalReportedAt, 'attendance_manual_arrival_reported_at')
+    : (input.reportedAt ? new Date(input.reportedAt) : (input.now instanceof Date ? input.now : new Date()));
+  if (Number.isNaN(arrivalAt.getTime())) throw new Error('attendance_manual_reported_at_invalid');
+  const departureAt = manualWorkday
+    ? manualDateTime(input.departureReportedAt, 'attendance_manual_departure_reported_at')
+    : null;
+  const validationAt = input.now instanceof Date ? new Date(input.now.getTime()) : new Date();
+  if (Number.isNaN(validationAt.getTime())) throw new Error('attendance_manual_now_invalid');
 
   return prisma.$transaction(async (tx) => {
     const assignment = await tx.dispatchAssignment.findUnique({
@@ -459,37 +492,50 @@ export async function registerManualAttendance(prisma, input = {}) {
     if (point?.manualAttendanceAllowed !== true) {
       throw new Error('attendance_manual_not_allowed');
     }
-    if (assignment.attendanceSession?.arrivalReportedAt) {
+    if (assignment.attendanceSession?.arrivalReportedAt || assignment.attendanceSession?.departureReportedAt) {
       throw new Error('attendance_manual_arrival_exists');
     }
+
     const expected = buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
+    const punctualityStatus = manualWorkday
+      ? (arrivalAt.getTime() > expected.expectedStartAt.getTime() ? 'LATE' : 'ON_TIME')
+      : attendanceStatus;
+    const work = manualWorkday
+      ? calculateDispatchWorkedTime({
+          arrivalAt,
+          departureAt,
+          expectedStartAt: expected.expectedStartAt,
+          expectedEndAt: expected.expectedEndAt,
+          recognizeEarlyArrival: false
+        })
+      : null;
+    const nextAttendanceStatus = manualWorkday ? 'COMPLETED' : attendanceStatus;
+    const sessionData = {
+      attendanceStatus: nextAttendanceStatus,
+      validationStatus: 'MANUAL_VALIDATED',
+      punctualityStatus,
+      arrivalReportedAt: arrivalAt,
+      arrivalValidatedAt: manualWorkday ? validationAt : arrivalAt,
+      source: 'MANUAL',
+      riskScore: 0,
+      riskFlags: [],
+      ...(manualWorkday ? {
+        departureReportedAt: departureAt,
+        departureValidatedAt: validationAt,
+        workedMinutes: work.workedMinutes
+      } : {})
+    };
     const session = assignment.attendanceSession
       ? await tx.dispatchAttendanceSession.update({
           where: { id: assignment.attendanceSession.id },
-          data: {
-            attendanceStatus,
-            validationStatus: 'MANUAL_VALIDATED',
-            punctualityStatus: attendanceStatus,
-            arrivalReportedAt: now,
-            arrivalValidatedAt: now,
-            source: 'MANUAL',
-            riskScore: 0,
-            riskFlags: []
-          }
+          data: sessionData
         })
       : await tx.dispatchAttendanceSession.create({
           data: {
             assignmentId: assignment.id,
             expectedStartAt: expected.expectedStartAt,
             expectedEndAt: expected.expectedEndAt,
-            attendanceStatus,
-            validationStatus: 'MANUAL_VALIDATED',
-            punctualityStatus: attendanceStatus,
-            arrivalReportedAt: now,
-            arrivalValidatedAt: now,
-            source: 'MANUAL',
-            riskScore: 0,
-            riskFlags: []
+            ...sessionData
           }
         });
 
@@ -498,19 +544,33 @@ export async function registerManualAttendance(prisma, input = {}) {
         attendanceSessionId: session.id,
         markType: 'ARRIVAL',
         idempotencyKey: `manual-${randomUUID()}`,
-        serverReceivedAt: now,
-        clientCapturedAt: now,
+        serverReceivedAt: manualWorkday ? validationAt : arrivalAt,
+        clientCapturedAt: arrivalAt,
         decision: 'MANUAL_VALIDATED',
         riskScore: 0,
         riskFlags: []
       }
     });
+    if (manualWorkday) {
+      await tx.dispatchAttendanceMark.create({
+        data: {
+          attendanceSessionId: session.id,
+          markType: 'DEPARTURE',
+          idempotencyKey: `manual-${randomUUID()}`,
+          serverReceivedAt: validationAt,
+          clientCapturedAt: departureAt,
+          decision: 'MANUAL_VALIDATED',
+          riskScore: 0,
+          riskFlags: []
+        }
+      });
+    }
     await tx.dispatchAttendanceReview.create({
       data: {
         attendanceSessionId: session.id,
-        action: 'MANUAL_MARK',
+        action: manualWorkday ? 'MANUAL_WORKDAY' : 'MANUAL_MARK',
         previousAttendanceStatus: assignment.attendanceSession?.attendanceStatus || null,
-        newAttendanceStatus: attendanceStatus,
+        newAttendanceStatus: nextAttendanceStatus,
         previousValidationStatus: assignment.attendanceSession?.validationStatus || null,
         newValidationStatus: 'MANUAL_VALIDATED',
         reason,
@@ -522,7 +582,14 @@ export async function registerManualAttendance(prisma, input = {}) {
           workerName: assignment.worker?.fullName || null,
           serviceRequestId: assignment.serviceRequestId,
           assignmentId: assignment.id,
-          manualReportedAt: now.toISOString()
+          ...(manualWorkday ? {
+            manualArrivalReportedAt: arrivalAt.toISOString(),
+            manualDepartureReportedAt: departureAt.toISOString(),
+            workedMinutes: work.workedMinutes,
+            punctualityStatus
+          } : {
+            manualReportedAt: arrivalAt.toISOString()
+          })
         }
       }
     });

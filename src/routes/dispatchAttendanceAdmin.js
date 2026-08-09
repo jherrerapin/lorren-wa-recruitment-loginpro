@@ -77,8 +77,12 @@ function publicErrorMessage(error) {
     attendance_manual_assignment_not_found: 'La asignación ya no existe.',
     attendance_manual_assignment_inactive: 'La asignación ya no está activa.',
     attendance_manual_not_allowed: 'Este punto no permite registrar asistencia manual.',
-    attendance_manual_arrival_exists: 'Esta asignación ya tiene una llegada registrada.',
+    attendance_manual_arrival_exists: 'Esta asignación ya tiene una marcación de asistencia registrada.',
     attendance_manual_status_invalid: 'Selecciona si la llegada fue a tiempo o tarde.',
+    attendance_manual_arrival_reported_at_required: 'Ingresa la fecha y hora de entrada.',
+    attendance_manual_arrival_reported_at_invalid: 'La fecha u hora de entrada no es válida.',
+    attendance_manual_departure_reported_at_required: 'Ingresa la fecha y hora de salida.',
+    attendance_manual_departure_reported_at_invalid: 'La fecha u hora de salida no es válida.',
     attendance_manual_reason_required: 'Escribe el motivo de la marcación manual.',
     attendance_manual_reason_too_short: 'El motivo debe tener al menos 5 caracteres.',
     attendance_work_break_end_before_start: 'El fin del almuerzo no puede ser anterior a su inicio.',
@@ -219,11 +223,13 @@ export function dispatchAttendanceAdminRouter(prisma) {
         assignmentId: req.params.assignmentId,
         attendanceStatus: req.body.attendanceStatus,
         reportedAt: req.body.reportedAt,
+        arrivalReportedAt: req.body.arrivalReportedAt,
+        departureReportedAt: req.body.departureReportedAt,
         reason: req.body.reason,
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, { success: 'La asistencia manual quedó registrada con auditoría.' });
+      return redirectToBoard(res, req.body, { success: 'La jornada manual quedó registrada con entrada, salida y auditoría.' });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_MANUAL_FAILED]', { code: error?.message, assignmentId: req.params.assignmentId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
