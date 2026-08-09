@@ -165,6 +165,7 @@ test('la tarjeta comprimida muestra solo identificación operativa esencial', ()
   );
   const summary = view.match(/<summary class="attendance-summary">[\s\S]*?<\/summary>/)?.[0] || '';
 
+  assert.match(summary, /row\.serviceDateLabel/);
   assert.match(summary, /row\.workerName/);
   assert.match(summary, /Ciudad/);
   assert.match(summary, /row\.cityName/);
@@ -173,10 +174,10 @@ test('la tarjeta comprimida muestra solo identificación operativa esencial', ()
   assert.match(summary, /Documento/);
   assert.match(summary, /row\.documentType/);
   assert.match(summary, /row\.documentNumber/);
+  assert.doesNotMatch(summary, /Fecha de asignación/i);
 
   assert.doesNotMatch(summary, /row\.phone/);
   assert.doesNotMatch(summary, /row\.address/);
-  assert.doesNotMatch(summary, /row\.serviceDateLabel/);
   assert.doesNotMatch(summary, /row\.scheduleLabel/);
   assert.doesNotMatch(summary, /row\.statusLabel/);
   assert.doesNotMatch(summary, /row\.arrivalReportedLabel/);
