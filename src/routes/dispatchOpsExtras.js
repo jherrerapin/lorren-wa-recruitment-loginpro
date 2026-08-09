@@ -7,6 +7,12 @@ import { normalizeTransportMode } from '../services/transportMode.js';
 import { recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 import {
+  WORKER_REST_REASONS,
+  cancelWorkerRestAssignment,
+  loadWorkerRestAssignments,
+  saveWorkerRestAssignment
+} from '../modules/dispatch-payroll/application/payrollReport.js';
+import {
   DISPATCH_WORKER_EXCEL_COLUMNS,
   applyDispatchWorkerImportBatch,
   buildDispatchWorkerImportReview,
@@ -77,7 +83,21 @@ function isOpsUser(req) { const username = normalizeString(req.session?.username
 function canUseOps(req) { const role = req.session?.userRole || req.userRole; const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch); return role === 'dev' || canAccessDispatch || isOpsUser(req); }
 function requireOps(req, res, next) { setNoStore(res); const role = req.session?.userRole || req.userRole; if (!role) return res.redirect('/login'); if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario'); return next(); }
 function requireDev(req, res, next) { const role = req.session?.userRole || req.userRole; if (role !== 'dev') return res.status(403).send('Solo DEV'); return next(); }
-function redirectToAssignment(serviceRequestId, message) { const params = new URLSearchParams(); if (serviceRequestId) params.set('serviceRequestId', serviceRequestId); if (message) params.set('message', message); return `/admin/operaciones/asignaciones?${params.toString()}`; }
+function redirectToAssignment(serviceRequestId, message, dateKey = null) { const params = new URLSearchParams(); if (serviceRequestId) params.set('serviceRequestId', serviceRequestId); if (dateKey) params.set('fecha', dateKey); if (message) params.set('message', message); return `/admin/operaciones/asignaciones?${params.toString()}`; }
+function assignmentActor(req) { return { actorUsername: normalizeString(req.session?.username || req.username), actorRole: normalizeString(req.session?.userRole || req.userRole), ipAddress: normalizeString(req.ip), userAgent: normalizeString(req.get?.('user-agent')) }; }
+function workerRestErrorMessage(error) {
+  const messages = {
+    worker_rest_invalid: 'Selecciona auxiliar, fecha y motivo de descanso válidos.',
+    worker_rest_worker_not_found: 'El auxiliar ya no existe.',
+    worker_rest_direct_contract_required: 'Los descansos solo se pueden asignar a auxiliares con contrato Directo.',
+    worker_rest_date_already_assigned: 'El auxiliar ya tiene un descanso activo en esa fecha.',
+    worker_rest_origin_sunday_invalid: 'El descanso remunerado debe vincularse a un domingo trabajado anterior y no festivo.',
+    worker_rest_origin_sunday_used: 'Ese domingo ya está vinculado a otro descanso remunerado.',
+    worker_rest_origin_sunday_not_worked: 'No se encontró trabajo validado del auxiliar en el domingo seleccionado.',
+    worker_rest_not_found: 'El descanso activo ya no existe.'
+  };
+  return messages[error?.message] || 'No fue posible guardar el descanso.';
+}
 function todayIsoDate() { return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota' })).toISOString().slice(0, 10); }
 function normalizeDateParam(value) { const rawValue = normalizeString(value); if (!rawValue) return todayIsoDate(); if (!/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) return todayIsoDate(); return rawValue; }
 function buildUtcDayRangeFromDateValue(value) { const start = new Date(value); start.setUTCHours(0, 0, 0, 0); const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1); return { start, end }; }
@@ -262,7 +282,7 @@ export function dispatchOpsExtrasRouter(prisma) {
   const router = express.Router();
 
   router.get('/asignaciones', requireOps, async (req, res) => {
-    const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const transportMode = normalizeString(req.query.transportMode); const locality = normalizeString(req.query.locality); const serviceRequestId = normalizeString(req.query.serviceRequestId);
+    const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const transportMode = normalizeString(req.query.transportMode); const locality = normalizeString(req.query.locality); const serviceRequestId = normalizeString(req.query.serviceRequestId); const restDate = normalizeDateParam(req.query.fecha || req.query.date || req.query.restDate);
     const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds(prisma, operationalCityId); const operationalCityFilter = buildOperationalCityFilter(compatibleOperationalCityIds);
     const baseWorkerWhere = { operationalStatus: 'CONTRATADO', ...(q ? { OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] } : {}), ...operationalCityFilter };
     const workerWhere = { ...baseWorkerWhere, ...(transportMode ? { transportMode } : {}), ...(locality ? { residenceLocality: locality } : {}) };
@@ -270,7 +290,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     const transportModeWhere = { ...baseWorkerWhere, ...(locality ? { residenceLocality: locality } : {}) };
     const requestsLookbackDate = new Date();
     requestsLookbackDate.setDate(requestsLookbackDate.getDate() - ASSIGNMENT_REQUESTS_LOOKBACK_DAYS);
-    const [workers, cities, transportModeRows, localityRows, serviceRequests, clients] = await Promise.all([
+    const [workers, cities, transportModeRows, localityRows, serviceRequests, clients, restAssignments] = await Promise.all([
       prisma.dispatchWorker.findMany({ where: workerWhere, include: { cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } }),
       loadDispatchCities(prisma),
       prisma.dispatchWorker.findMany({ where: transportModeWhere, select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }),
@@ -280,7 +300,8 @@ export function dispatchOpsExtrasRouter(prisma) {
         include: { service: true, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } },
         orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }]
       }),
-      loadActiveClientsForServiceRequestForm(prisma)
+      loadActiveClientsForServiceRequestForm(prisma),
+      loadWorkerRestAssignments(prisma, { from: restDate, to: restDate })
     ]);
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
     const blockedWorkerIds = new Set(selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []);
@@ -288,7 +309,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     const selectedDateRange = selectedServiceRequest ? buildUtcDayRangeFromDateValue(selectedServiceRequest.serviceDate) : null;
     const sameDayAssignments = selectedServiceRequest ? await prisma.dispatchAssignment.findMany({ where: { serviceRequestId: { not: selectedServiceRequest.id }, status: { in: ACTIVE_ASSIGNMENT_STATUSES }, serviceRequest: { serviceDate: { gte: selectedDateRange.start, lt: selectedDateRange.end } } }, select: { workerId: true } }) : [];
     const assignedWorkerIdsOnSelectedDate = new Set(sameDayAssignments.map((assignment) => assignment.workerId));
-    return res.render('operacionesAsignacionesConfirmacion', { activeStatuses: ACTIVE_ASSIGNMENT_STATUSES, workers, availableWorkers, assignedWorkerIdsOnSelectedDate, cities, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', transportMode: transportMode || '', locality: locality || '' }, transportModes: cleanDistinctStrings(transportModeRows, 'transportMode'), localities: cleanDistinctStrings(localityRows, 'residenceLocality'), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
+    return res.render('operacionesAsignacionesConfirmacion', { activeStatuses: ACTIVE_ASSIGNMENT_STATUSES, workers, availableWorkers, assignedWorkerIdsOnSelectedDate, cities, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, restDate, restAssignments, restReasons: Object.values(WORKER_REST_REASONS), message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', transportMode: transportMode || '', locality: locality || '' }, transportModes: cleanDistinctStrings(transportModeRows, 'transportMode'), localities: cleanDistinctStrings(localityRows, 'residenceLocality'), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
   });
 
   router.get('/solicitudes', requireOps, async (req, res) => {
@@ -332,6 +353,26 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
 
   router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }); if (activeCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmacion de los auxiliares.')); } const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (existing) { if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya esta asignado a esta solicitud.')); await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } }); } else { await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } }); } await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmacion.')); });
+  router.post('/asignaciones/descansos', requireOps, async (req, res) => {
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    const restDate = normalizeString(req.body.restDate);
+    try {
+      await saveWorkerRestAssignment(prisma, { workerId: req.body.workerId, restDate, reason: req.body.reason, originSundayDate: req.body.originSundayDate, ...assignmentActor(req) });
+      return res.redirect(redirectToAssignment(serviceRequestId, 'Descanso asignado.', restDate));
+    } catch (error) {
+      return res.redirect(redirectToAssignment(serviceRequestId, workerRestErrorMessage(error), restDate));
+    }
+  });
+  router.post('/asignaciones/descansos/cancelar', requireOps, async (req, res) => {
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    const restDate = normalizeString(req.body.restDate);
+    try {
+      await cancelWorkerRestAssignment(prisma, { workerId: req.body.workerId, restDate, ...assignmentActor(req) });
+      return res.redirect(redirectToAssignment(serviceRequestId, 'Descanso retirado.', restDate));
+    } catch (error) {
+      return res.redirect(redirectToAssignment(serviceRequestId, workerRestErrorMessage(error), restDate));
+    }
+  });
   router.post('/asignaciones/confirmar', requireOps, async (req, res) => {
     const assignmentId = normalizeString(req.body.assignmentId);
     const serviceRequestId = normalizeString(req.body.serviceRequestId);

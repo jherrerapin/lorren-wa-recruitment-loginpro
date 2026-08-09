@@ -6,7 +6,7 @@
   <title><%= pageTitle %> — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing:border-box; margin:0; padding:0; }
     :root { --bg:#f4f5f7; --surface:#fff; --border:#e1e4e8; --soft:#f8fafc; --text:#18212b; --muted:#64748b; --navy:#1e2d3d; --teal:#0d7a6b; --teal2:#e6f4f1; --red:#b91c1c; --red2:#fee2e2; --amber:#92400e; --amber2:#fef3c7; --green:#166534; --green2:#dcfce7; --blue:#1d4ed8; --blue2:#dbeafe; --radius:10px; --shadow:0 1px 3px rgba(0,0,0,.08); }
     body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); font-size:14px; }
     .navbar { height:52px; padding:0 24px; display:flex; align-items:center; gap:18px; background:var(--navy); overflow-x:auto; }
@@ -45,12 +45,13 @@
     .date-day:hover { background:var(--teal2); }
     .date-day.outside { color:#a8b0ba; }
     .date-day.selected { background:var(--teal); color:#fff; font-weight:850; }
-    .metrics { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; }
+    .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
     .metric { padding:15px; border:1px solid var(--border); border-radius:10px; background:#fff; }
     .metric small { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
     .metric strong { display:block; color:var(--navy); font-size:24px; margin-top:6px; }
     .metric.warn { border-color:#fcd34d; background:#fffbeb; }
     .metric.threshold { border-color:#bfdbfe; background:#eff6ff; }
+    .metric.deduction { border-color:#fecaca; background:#fff7f7; }
     .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:10px; }
     table { width:max-content; min-width:100%; border-collapse:collapse; background:#fff; }
     th,td { padding:10px 9px; border-bottom:1px solid #edf0f2; text-align:right; white-space:nowrap; }
@@ -68,10 +69,12 @@
     .day-flags { display:flex; gap:5px; margin-top:5px; flex-wrap:wrap; }
     details { margin-top:8px; }
     summary { cursor:pointer; color:var(--blue); font-weight:750; }
-    .daily { margin-top:8px; display:grid; gap:7px; min-width:720px; }
+    .daily { margin-top:8px; display:grid; gap:7px; min-width:760px; }
     .daily-row { display:grid; grid-template-columns:120px minmax(180px,1fr) 110px 150px minmax(220px,1fr); gap:10px; align-items:center; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--soft); }
     .daily-row form { display:flex; gap:5px; align-items:center; }
     .daily-row select { min-width:150px; }
+    .rest-summary { display:grid; gap:6px; margin-bottom:8px; }
+    .rest-summary-row { padding:8px 10px; border:1px solid #ddd6fe; border-radius:8px; background:#faf5ff; color:#5b21b6; white-space:normal; }
     .novelty { color:var(--red); font-size:11px; white-space:normal; }
     .novelty.info { color:var(--blue); }
     .policy-grid { display:grid; grid-template-columns:repeat(5,minmax(130px,1fr)); gap:10px; }
@@ -81,7 +84,7 @@
     .code strong { color:var(--navy); }
     .code small { display:block; color:var(--muted); margin-top:2px; }
     .empty { padding:30px; text-align:center; color:var(--muted); }
-    @media(max-width:1050px){.filters{grid-template-columns:repeat(3,minmax(150px,1fr))}.metrics{grid-template-columns:repeat(2,1fr)}.policy-grid{grid-template-columns:repeat(2,1fr)}.codes{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:1050px){.filters{grid-template-columns:repeat(3,minmax(150px,1fr))}.policy-grid{grid-template-columns:repeat(2,1fr)}.codes{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:620px){.navbar{height:auto;padding:10px 14px}.page{padding:18px 10px 42px}.filters,.metrics,.policy-grid,.codes{grid-template-columns:1fr}.actions{width:100%}.actions .btn{flex:1}.panel{padding:12px}.date-popover{position:fixed;left:10px;right:10px;top:18%;width:auto}}
   </style>
 </head>
@@ -153,6 +156,9 @@
 
     <section class="metrics">
       <article class="metric"><small>Auxiliares</small><strong><%= report.totals.workers %></strong></article>
+      <article class="metric"><small>Días trabajados</small><strong><%= report.totals.workedDays || 0 %></strong></article>
+      <article class="metric deduction"><small>Días descontados</small><strong><%= report.totals.deductedDays || 0 %></strong></article>
+      <article class="metric"><small>Días laborados netos</small><strong><%= report.totals.netWorkedDays || 0 %></strong></article>
       <article class="metric"><small>Total trabajado</small><strong><%= formatPayrollMinutes(report.totals.totalMinutes) %></strong></article>
       <article class="metric"><small>Horas ordinarias</small><strong><%= report.totals.ordinaryHours || 0 %></strong></article>
       <article class="metric"><small>Horas extra</small><strong><%= report.totals.overtimeHours || 0 %></strong></article>
@@ -184,19 +190,22 @@
     <% } %>
 
     <section class="panel">
+      <% const restLabels = { VACACIONES:'Vacaciones', INCAPACIDAD_EPS:'Incapacidad EPS', SUSPENSION:'Suspensión', INCAPACIDAD_ARL:'Incapacidad ARL', NO_REMUNERADA:'No remunerada', REMUNERADO:'Remunerado' }; %>
       <div class="table-wrap">
-        <% if (!report.rows.length) { %><div class="empty">No hay jornadas con entrada y salida para el periodo seleccionado.</div><% } else { %>
+        <% if (!report.rows.length) { %><div class="empty">No hay jornadas ni descansos para el periodo seleccionado.</div><% } else { %>
           <table>
-            <thead><tr><th>Auxiliar</th><th>Estado</th><th>Total</th><th>Ordinarias</th><th>Extra</th><th>Bajo umbral</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
+            <thead><tr><th>Auxiliar</th><th>Estado</th><th>Días trabajados</th><th>Días descontados</th><th>Días netos</th><th>Total</th><th>Ordinarias</th><th>Extra</th><th>Bajo umbral</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
             <tbody>
               <% for (const row of report.rows) { %>
                 <tr>
                   <td><strong><%= row.fullName %></strong><small><%= row.documentType %> <%= row.documentNumber || 'Sin documento' %></small></td>
                   <td><span class="badge <%= row.exportable ? 'badge-ok' : 'badge-warn' %>"><%= row.status %></span></td>
+                  <td><%= row.workedDays || 0 %></td><td><%= row.deductedDays || 0 %></td><td><%= Number(row.netWorkedDays || 0) %></td>
                   <td><%= row.totalHours %></td><td><%= row.ordinaryHours %></td><td><%= row.overtimeHours %></td><td><%= row.unrecognizedOvertimeHours || 0 %></td>
                   <% for (const code of conceptCodes) { %><td><%= row.conceptHours[code] || 0 %></td><% } %>
                   <td>
-                    <details><summary>Ver días</summary><div class="daily">
+                    <details><summary>Ver días y descansos</summary><div class="daily">
+                      <% if ((row.restAssignments || []).length) { %><div class="rest-summary"><% for (const rest of row.restAssignments) { %><div class="rest-summary-row"><strong><%= rest.restDate %> · <%= restLabels[rest.reason] || rest.reason %></strong><% if (rest.dayAdjustment === -1) { %> · Descuenta 1 día laborado<% } %><% if (rest.originSundayDate) { %><small>Domingo que lo generó: <%= rest.originSundayDate %></small><% } %></div><% } %></div><% } %>
                       <% for (const day of row.daily) { %>
                         <div class="daily-row">
                           <div><strong><%= day.dateKey %></strong><div class="day-flags"><% if (day.isHoliday) { %><span class="badge badge-holiday">Festivo</span><% } %><% if (day.isRestDay) { %><span class="badge badge-rest">Descanso obligatorio</span><% } %></div></div>
@@ -205,11 +214,15 @@
                           <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small><small>Bajo umbral <%= day.unrecognizedOvertimeHours || 0 %></small></div>
                           <div>
                             <% if (day.isRestDay && day.compensationStatus) { %>
-                              <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
-                                <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.compensationDateKey || day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
-                                <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
-                                <select name="status"><option value="PENDING" <%= day.compensationStatus === 'PENDING' ? 'selected' : '' %>>Compensatorio pendiente</option><option value="NOT_COMPENSATED" <%= day.compensationStatus === 'NOT_COMPENSATED' ? 'selected' : '' %>>No compensado</option><option value="COMPENSATED" <%= day.compensationStatus === 'COMPENSATED' ? 'selected' : '' %>>Compensado</option></select><button class="btn" type="submit">Guardar</button>
-                              </form>
+                              <% if (day.compensationManagedByRestAssignment) { %>
+                                <span class="badge <%= day.compensationStatus === 'COMPENSATED' ? 'badge-ok' : 'badge-warn' %>"><%= day.compensationStatus === 'COMPENSATED' ? 'Compensado · descanso remunerado asignado' : 'No compensado · sin descanso remunerado asignado' %></span>
+                              <% } else { %>
+                                <form method="post" action="/admin/operaciones/asistencia/nomina/compensation">
+                                  <input type="hidden" name="workerId" value="<%= row.workerId %>" /><input type="hidden" name="dateKey" value="<%= day.compensationDateKey || day.dateKey %>" /><input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" /><input type="hidden" name="clientId" value="<%= report.filters.clientId %>" /><input type="hidden" name="operationPointId" value="<%= report.filters.operationPointId %>" /><input type="hidden" name="search" value="<%= report.filters.search %>" />
+                                  <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
+                                  <select name="status"><option value="PENDING" <%= day.compensationStatus === 'PENDING' ? 'selected' : '' %>>Compensatorio pendiente</option><option value="NOT_COMPENSATED" <%= day.compensationStatus === 'NOT_COMPENSATED' ? 'selected' : '' %>>No compensado</option><option value="COMPENSATED" <%= day.compensationStatus === 'COMPENSATED' ? 'selected' : '' %>>Compensado</option></select><button class="btn" type="submit">Guardar</button>
+                                </form>
+                              <% } %>
                             <% } %>
                             <% const dayNovelty = row.novelties.filter((item) => item.dateKey === day.dateKey || (day.civilDateKeys || []).includes(item.dateKey)); %>
                             <% if (dayNovelty.length) { %><div class="novelty <%= dayNovelty.every((item) => item.blocking === false) ? 'info' : '' %>"><%= dayNovelty.map((item) => item.code === 'OVERTIME_BELOW_MINIMUM' ? item.message : item.code).join(' · ') %></div><% } %>
