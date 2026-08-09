@@ -170,6 +170,56 @@ test('el filtro de fechas consulta de forma inclusiva todos los días elegidos',
   assert.deepEqual(board.range, { from: '2026-08-08', to: '2026-08-10' });
 });
 
+test('el filtro de un solo día usa la fecha operativa y no desplaza registros legacy al día anterior', async () => {
+  const prisma = contract();
+  let receivedWhere = null;
+  prisma.dispatchAssignment.findMany = async ({ where }) => {
+    receivedWhere = where;
+    return [
+      assignment({
+        id: 'assignment-previous-legacy',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-previous-legacy', serviceDate: new Date('2026-07-29T00:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-shifted-previous',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-shifted-previous', serviceDate: new Date('2026-07-30T02:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-target-legacy',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-target-legacy', serviceDate: new Date('2026-07-30T00:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-target-bogota',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-target-bogota', serviceDate: new Date('2026-07-30T05:00:00.000Z') }
+      }),
+      assignment({
+        id: 'assignment-next-legacy',
+        serviceRequest: { ...assignment().serviceRequest, id: 'request-next-legacy', serviceDate: new Date('2026-07-31T00:00:00.000Z') }
+      })
+    ];
+  };
+
+  const board = await loadAttendanceAdminBoard(prisma, {
+    from: '2026-07-30',
+    to: '2026-07-30',
+    now: new Date('2026-07-30T17:00:00.000Z')
+  });
+
+  assert.equal(receivedWhere.serviceRequest.serviceDate.gte.toISOString(), '2026-07-30T00:00:00.000Z');
+  assert.equal(receivedWhere.serviceRequest.serviceDate.lte.toISOString(), '2026-07-30T23:59:59.999Z');
+  assert.deepEqual(
+    board.rows.map((row) => row.assignmentId).sort(),
+    ['assignment-target-bogota', 'assignment-target-legacy']
+  );
+  assert.deepEqual(board.rows.map((row) => row.serviceDateIso), ['2026-07-30', '2026-07-30']);
+  board.rows.forEach((row) => {
+    assert.match(row.serviceDateLabel, /30.*jul.*2026/i);
+    assert.doesNotMatch(row.serviceDateLabel, /29/);
+  });
+  assert.equal(board.metrics.total, 2);
+  assert.deepEqual(board.range, { from: '2026-07-30', to: '2026-07-30' });
+});
+
 test('clasifica como no asistencia cuando vence la tolerancia sin llegada', async () => {
   const prisma = contract();
   prisma.dispatchAssignment.findMany = async () => [assignment()];
