@@ -61,12 +61,25 @@ function correctionMarkType(value) {
   return markType && CORRECTION_MARK_TYPES.has(markType) ? markType : null;
 }
 
-function redirectToBoard(res, source, { success = null, error = null, correctionMark = null } = {}) {
+function correctionSessionId(value) {
+  return safeHtmlAttributeState(value) || null;
+}
+
+function redirectToBoard(res, source, {
+  success = null,
+  error = null,
+  correctionMark = null,
+  correctionSession = null
+} = {}) {
   const params = safeReturnParams(source);
   if (success) params.set('success', success);
   if (error) params.set('error', error);
   const markType = correctionMarkType(correctionMark);
-  if (markType) params.set('correctionMarkType', markType);
+  const sessionId = correctionSessionId(correctionSession);
+  if (markType && sessionId) {
+    params.set('correctionMarkType', markType);
+    params.set('correctionSessionId', sessionId);
+  }
   const query = params.toString();
   return res.redirect(`/admin/operaciones/asistencia${query ? `?${query}` : ''}`);
 }
@@ -245,13 +258,15 @@ export function dispatchAttendanceAdminRouter(prisma) {
       });
       return redirectToBoard(res, req.body, {
         success: reviewSuccessMessage(req.body.action),
-        correctionMark: action === 'DELETE_MARK' ? req.body.markType : null
+        correctionMark: action === 'DELETE_MARK' ? req.body.markType : null,
+        correctionSession: action === 'DELETE_MARK' ? req.params.sessionId : null
       });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', { code: error?.message, sessionId: req.params.sessionId });
       return redirectToBoard(res, req.body, {
         error: publicErrorMessage(error),
-        correctionMark: action === 'ADD_MARK' ? req.body.markType : null
+        correctionMark: action === 'ADD_MARK' ? req.body.markType : null,
+        correctionSession: action === 'ADD_MARK' ? req.params.sessionId : null
       });
     }
   });
